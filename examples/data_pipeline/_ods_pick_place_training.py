@@ -44,6 +44,7 @@ from embodichain.data_pipeline.engine.data import (
     OnlineDataEngineState,
 )
 from examples.data_pipeline._ods_pick_place_benchmark import (
+    _content_manifest,
     EfficiencyTracker,
     export_corpus,
     load_corpus,
@@ -480,6 +481,12 @@ def run(args: argparse.Namespace) -> None:
             "Exact batch-manifest replay currently supports MLP frames; recurrent offline-full/frozen sampling is supported"
         )
     args.output.mkdir(parents=True, exist_ok=True)
+    if getattr(args, "offline_storage", "pt") == "lerobot" or (
+        args.offline_data is not None and args.offline_data.is_dir()
+    ):
+        # Set before the first SDK/datasets import in this fresh CLI process.
+        # Keep generated Arrow caches within the measured run footprint.
+        os.environ["HF_DATASETS_CACHE"] = str((args.output / "dataset_cache").resolve())
     auto_report = getattr(args, "auto_configuration", None)
     auto_plan = None if auto_report is None else auto_report["configuration"]
     if auto_report is not None:
@@ -587,6 +594,7 @@ def run(args: argparse.Namespace) -> None:
         "examples/data_pipeline/_ods_pick_place_policy.py",
         "examples/data_pipeline/_ods_pick_place_usage.py",
         "examples/data_pipeline/_ods_pick_place_configuration.py",
+        "examples/data_pipeline/_ods_pick_place_collection.py",
         "examples/data_pipeline/_ods_pick_place_flow.py",
         "embodichain/data_pipeline/configuration.py",
         "embodichain/data_pipeline/engine/data.py",
@@ -603,6 +611,7 @@ def run(args: argparse.Namespace) -> None:
     metadata["working_tree_dirty"] = bool(
         subprocess.check_output(["git", "status", "--porcelain"], text=True).strip()
     )
+    metadata["hf_datasets_cache"] = os.environ.get("HF_DATASETS_CACHE")
     (args.output / "environment.json").write_text(json.dumps(metadata, indent=2))
     context = mp.get_context("spawn")
     requests, results = context.Queue(), context.Queue()
@@ -668,6 +677,7 @@ def run(args: argparse.Namespace) -> None:
         }
 
     engine = None
+    corpus = None
     writer = None
     tensorboard = None
     stats = None
@@ -850,6 +860,15 @@ def run(args: argparse.Namespace) -> None:
                 else None
             )
             source_run = 0
+            initial_data_content_id = _content_manifest(
+                {
+                    "observations": corpus.observations[: args.buffer_size],
+                    "actions": corpus.actions[: args.buffer_size],
+                    "valid": corpus.valid[: args.buffer_size],
+                    "frame_ids": corpus.frame_ids[: args.buffer_size],
+                },
+                schema,
+            )["content_id"]
         else:
             engine = _engine(config, args)
             if auto_report is not None:
@@ -857,6 +876,7 @@ def run(args: argparse.Namespace) -> None:
                     json.dumps(auto_report, indent=2)
                 )
             engine.cfg.initialization_timeout = _timeout(args, tracker)
+            initial_fill_started = tracker.elapsed_seconds()
             try:
                 engine.start()
             except TimeoutError:
@@ -866,6 +886,9 @@ def run(args: argparse.Namespace) -> None:
                 ):
                     raise _BudgetExpired from None
                 raise
+            tracker.record_interval(
+                "initial_fill", initial_fill_started, tracker.elapsed_seconds()
+            )
             resource_sampler.capture("producer_ready")
             events = drain_usage()
             if args.usage_schedule == "anchor_budget":
@@ -882,6 +905,13 @@ def run(args: argparse.Namespace) -> None:
                 for event in events:
                     pacing.publish(event)
             initial = _snapshot(engine)
+            initial_data_content_id = _content_manifest(
+                {
+                    key: initial[key]
+                    for key in ("observations", "actions", "valid", "frame_ids")
+                },
+                schema,
+            )["content_id"]
             initial_values = initial["observations"][initial["valid"]]
             initial_actions = initial["actions"][initial["valid"]]
             initial_positions = initial["initial_positions"].tolist()
@@ -892,37 +922,102 @@ def run(args: argparse.Namespace) -> None:
             ):
                 snapshots.append(initial)
             if args.mode in {"offline-full", "offline-32"}:
-                for _ in range(1, 1 if args.mode == "offline-32" else args.rounds):
-                    generation = request_refill()
-                    _wait(engine, generation, args, tracker)
-                    drain_usage()
-                    snapshots.append(_snapshot(engine))
-                path = args.export_data or args.output / "corpus.pt"
-                export_corpus(
-                    path,
-                    **{
-                        key: torch.cat([s[key] for s in snapshots])
-                        for key in (
-                            "observations",
-                            "actions",
-                            "valid",
-                            "frame_ids",
-                            "generations",
-                        )
-                    },
-                    schema=schema,
-                    provenance={
-                        "seed": args.seed,
-                        "producer_stats": engine.get_stats(),
-                    },
+                offline_episodes = getattr(args, "offline_episodes", None) or (
+                    args.buffer_size * (1 if args.mode == "offline-32" else args.rounds)
                 )
+                if getattr(args, "offline_storage", "pt") == "lerobot":
+                    from examples.data_pipeline._ods_pick_place_collection import (
+                        collect_lerobot,
+                    )
+                    from examples.data_pipeline._ods_pick_place_lerobot import (
+                        load_lerobot_corpus,
+                    )
+
+                    def collection_progress() -> None:
+                        drain_usage()
+                        _timeout(args, tracker)
+                        # Also checks process liveness when a hard exit has not
+                        # yet been reflected in the shared lifecycle state.
+                        engine.wait_for_generation(1, timeout=0.1)
+
+                    path = args.output / "lerobot_dataset"
+                    collection_report = collect_lerobot(
+                        engine,
+                        initial,
+                        path,
+                        schema=schema,
+                        episodes=offline_episodes,
+                        snapshot=_snapshot,
+                        request_refill=request_refill,
+                        progress=collection_progress,
+                        clock=tracker.elapsed_seconds,
+                        record_interval=tracker.record_interval,
+                    )
+                    (args.output / "offline_collection.json").write_text(
+                        json.dumps(collection_report, indent=2)
+                    )
+                else:
+                    for _ in range(1, offline_episodes // args.buffer_size):
+                        generation = request_refill()
+                        _wait(engine, generation, args, tracker)
+                        drain_usage()
+                        snapshots.append(_snapshot(engine))
+                    path = args.export_data or args.output / "corpus.pt"
+                    export_corpus(
+                        path,
+                        **{
+                            key: torch.cat([item[key] for item in snapshots])
+                            for key in (
+                                "observations",
+                                "actions",
+                                "valid",
+                                "frame_ids",
+                                "generations",
+                            )
+                        },
+                        schema=schema,
+                        provenance={
+                            "seed": args.seed,
+                            "producer_stats": engine.get_stats(),
+                        },
+                    )
                 stats = engine.get_stats()
                 resource_sampler.capture("before_offline_producer_shutdown")
                 engine.stop()
+                drain_usage()
                 engine = None
                 resource_sampler.capture("after_offline_producer_shutdown")
                 snapshots.clear()
-                corpus = load_corpus(path, expected_schema=schema)
+                before = tracker.elapsed_seconds()
+                corpus = (
+                    load_lerobot_corpus(path, expected_schema=schema)
+                    if getattr(args, "offline_storage", "pt") == "lerobot"
+                    else load_corpus(path, expected_schema=schema)
+                )
+                tracker.record_interval(
+                    "offline_load", before, tracker.elapsed_seconds()
+                )
+                if usage is not None:
+                    (args.output / "producer_lifecycle.json").write_text(
+                        json.dumps(
+                            {
+                                "events": usage.events,
+                                "scope": "production cache, not resident offline corpus eviction",
+                            },
+                            indent=2,
+                        )
+                    )
+                    usage = UsageTracker()
+                    tracker.unique_frames = CompactFrameSet(
+                        usage.targets, accumulate=False
+                    )
+        if (
+            corpus is not None
+            and getattr(args, "offline_sample_budget", None) is not None
+        ):
+            corpus.configure_sampling_budget(
+                args.offline_sample_budget, args.offline_sample_hard_limit
+            )
         if corpus is not None and usage is not None and not usage.episodes:
             for row in range(len(corpus.valid)):
                 frames = torch.where(corpus.valid[row])[0]
@@ -1059,6 +1154,7 @@ def run(args: argparse.Namespace) -> None:
                     "initial_model_sha256": _state_digest(initial_parameters),
                     "normalization_sha256": _state_digest(_normalization_values(model)),
                     "normalization_fields": sorted(_normalization_values(model)),
+                    "initial_data_content_id": initial_data_content_id,
                     "run_id": source_run,
                     "source": "data-ready" if args.offline_data else "cold",
                     "offline_manifest": corpus.manifest if corpus else None,
@@ -1194,7 +1290,14 @@ def run(args: argparse.Namespace) -> None:
                     break
                 update_started = tracker.elapsed_seconds()
                 drain_usage()
-                if args.defer_evaluation and engine is not None:
+                if (
+                    args.defer_evaluation
+                    and engine is not None
+                    and getattr(
+                        args, "deferred_evaluation_schedule", "updates_and_generations"
+                    )
+                    == "updates_and_generations"
+                ):
                     completed_generation = engine.get_stats()["completed_generation"]
                     if completed_generation > last_saved_generation:
                         if pending_ids:
@@ -1360,35 +1463,34 @@ def run(args: argparse.Namespace) -> None:
                 ):
                     end_reason = "wall_time_budget"
                     break
+                if (
+                    corpus is not None
+                    and getattr(args, "offline_sample_budget", None) is not None
+                ):
+                    if (
+                        corpus.get_sampling_budget_snapshot()["remaining_chunks"]
+                        < args.batch_size
+                    ):
+                        end_reason = "usage_budget"
+                        break
                 service_started = tracker.elapsed_seconds()
-                with sampling_rng.scope():
-                    if corpus is not None:
-                        before = tracker.elapsed_seconds()
-                        if chunked:
-                            batch = corpus.sample_context(
-                                args.batch_size,
-                                2,
-                                args.prediction_horizon,
-                                generations=(
-                                    [1]
-                                    if args.mode in {"frozen", "offline-32"}
-                                    else None
-                                ),
-                            )
-                        elif recurrent:
-                            batch = corpus.sample_histories(
-                                args.batch_size,
-                                generations=(
-                                    [1]
-                                    if args.mode in {"frozen", "offline-32"}
-                                    else None
-                                ),
-                            )
-                        else:
-                            batch = (
-                                corpus.sample_frame_ids(manifest[train_steps])
-                                if args.mode == "offline-matched"
-                                else corpus.sample_frames(
+                try:
+                    with sampling_rng.scope():
+                        if corpus is not None:
+                            before = tracker.elapsed_seconds()
+                            if chunked:
+                                batch = corpus.sample_context(
+                                    args.batch_size,
+                                    2,
+                                    args.prediction_horizon,
+                                    generations=(
+                                        [1]
+                                        if args.mode in {"frozen", "offline-32"}
+                                        else None
+                                    ),
+                                )
+                            elif recurrent:
+                                batch = corpus.sample_histories(
                                     args.batch_size,
                                     generations=(
                                         [1]
@@ -1396,19 +1498,38 @@ def run(args: argparse.Namespace) -> None:
                                         else None
                                     ),
                                 )
+                            else:
+                                batch = (
+                                    corpus.sample_frame_ids(manifest[train_steps])
+                                    if args.mode == "offline-matched"
+                                    else corpus.sample_frames(
+                                        args.batch_size,
+                                        generations=(
+                                            [1]
+                                            if args.mode in {"frozen", "offline-32"}
+                                            else None
+                                        ),
+                                    )
+                                )
+                            # Resident tensor indexing/copy is batch service, as in ODS.
+                            # Actual storage loading is timed separately above.
+                            now = tracker.elapsed_seconds()
+                            tracker.record_interval("data_wait", now, now)
+                        else:
+                            batch = _sample(
+                                engine,
+                                args.batch_size,
+                                tracker,
+                                history=recurrent,
+                                chunk_horizon=(
+                                    args.prediction_horizon if chunked else None
+                                ),
                             )
-                        # Resident tensor indexing/copy is batch service, as in ODS.
-                        # Actual storage loading is timed separately above.
-                        now = tracker.elapsed_seconds()
-                        tracker.record_interval("data_wait", now, now)
-                    else:
-                        batch = _sample(
-                            engine,
-                            args.batch_size,
-                            tracker,
-                            history=recurrent,
-                            chunk_horizon=args.prediction_horizon if chunked else None,
-                        )
+                except OnlineDataBudgetExhaustedError:
+                    if corpus is None:
+                        raise
+                    end_reason = "usage_budget"
+                    break
                 if usage is not None:
                     usage.sample(batch)
                 obs = batch["observations"].to(args.train_device)
@@ -1646,6 +1767,10 @@ def run(args: argparse.Namespace) -> None:
                 (args.output / "sampling_budget.json").write_text(
                     json.dumps(engine.get_sampling_budget_snapshot(), indent=2)
                 )
+        if corpus is not None:
+            (args.output / "sampling_budget.json").write_text(
+                json.dumps(corpus.get_sampling_budget_snapshot(), indent=2)
+            )
         drain_usage()
         if usage is not None:
             usage_report = usage.summary()
@@ -1672,6 +1797,11 @@ def run(args: argparse.Namespace) -> None:
                 json.dumps(
                     {
                         **usage_report,
+                        "availability_scope": (
+                            "resident_corpus_load"
+                            if corpus is not None
+                            else "live_publication"
+                        ),
                         "schedule": None if pacing is None else pacing.summary(),
                     },
                     indent=2,
@@ -1722,7 +1852,16 @@ def run(args: argparse.Namespace) -> None:
                             "fresh_process_per_panel": True,
                             "stats_valid_frames_snapshot": "immediately_before_producer_shutdown",
                             "panels": panel_manifest,
-                            "generation_panels_retained": 3,
+                            "generation_panels_retained": (
+                                3
+                                if getattr(
+                                    args,
+                                    "deferred_evaluation_schedule",
+                                    "updates_and_generations",
+                                )
+                                == "updates_and_generations"
+                                else 0
+                            ),
                             "saved_but_not_evaluated": [
                                 str(path)
                                 for path, _ in all_deferred_checkpoints
@@ -1758,13 +1897,29 @@ def run(args: argparse.Namespace) -> None:
             tracker.horizon_seconds = max(elapsed, 1e-6)
         efficiency = tracker.finish(elapsed, end_reason)
         efficiency["resource_sampling"] = resource_sampler.report()
+        if args.defer_evaluation:
+            efficiency["training_finished_seconds"] = training_finished_seconds
         efficiency["horizon_prespecified"] = args.wall_time_budget is not None
         efficiency["data_ready"] = args.offline_data is not None
         data_paths = [
             path
-            for path in (args.offline_data, args.export_data, args.output / "corpus.pt")
+            for path in (
+                args.offline_data,
+                args.export_data,
+                args.output / "corpus.pt",
+                args.output / "lerobot_dataset",
+                args.output / "dataset_cache",
+            )
             if path is not None and path.exists()
         ]
+        if corpus is not None:
+            data_paths.extend(
+                Path(path)
+                for path in (
+                    corpus.manifest.get("storage", {}).get("sdk_cache_files") or []
+                )
+                if Path(path).exists()
+            )
         data_files = {
             child.resolve()
             for path in data_paths
@@ -1776,8 +1931,17 @@ def run(args: argparse.Namespace) -> None:
             for path in list(data_files)
             if Path(str(path) + ".manifest.json").exists()
         }
-        efficiency["cost/data_disk_peak_bytes"] = sum(
+        efficiency["cost/data_disk_final_bytes"] = sum(
             path.stat().st_size for path in data_files
+        )
+        efficiency["cost/data_disk_peak_bytes"] = (
+            None
+            if getattr(args, "offline_storage", "pt") == "lerobot"
+            or (args.offline_data is not None and args.offline_data.is_dir())
+            else efficiency["cost/data_disk_final_bytes"]
+        )
+        efficiency["cost/data_disk_scope"] = (
+            "Final explicit dataset and run-local SDK cache files; temporary write peak is unmeasured; model/evaluation logs excluded"
         )
         efficiency["data/accepted_frames"] = (
             stats["generated_frames"]
@@ -1977,6 +2141,11 @@ def run(args: argparse.Namespace) -> None:
                 json.dumps(
                     {
                         **usage.summary(),
+                        "availability_scope": (
+                            "resident_corpus_load"
+                            if corpus is not None
+                            else "live_publication"
+                        ),
                         "schedule": None if pacing is None else pacing.summary(),
                     },
                     indent=2,

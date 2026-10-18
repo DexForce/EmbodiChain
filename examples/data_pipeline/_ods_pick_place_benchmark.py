@@ -27,6 +27,7 @@ import hashlib
 import json
 import math
 import os
+import threading
 import time
 from collections.abc import Iterable
 from pathlib import Path
@@ -228,7 +229,13 @@ def load_corpus(
 
 
 class FrozenCorpus:
-    """Read-only-by-convention corpus with independent sampled tensor copies."""
+    """Read-only-by-convention corpus with independent sampled tensor copies.
+
+    Optional quotas count each sampled row once, regardless of context length.
+    They apply to all sampling entry points and cannot be replenished. Configure
+    them before sampling; the stateful sampler then requires its creating
+    process and thread. Tensor metadata must remain unchanged after assignment.
+    """
 
     def __init__(
         self, tensors: dict[str, torch.Tensor], manifest: dict[str, Any]
@@ -244,6 +251,174 @@ class FrozenCorpus:
             int(row): self.valid[row].nonzero().flatten() for row in self._rows
         }
         self._id_lookup: dict[tuple[int, ...], tuple[int, int]] | None = None
+        self._sampling_owner = (os.getpid(), threading.get_ident())
+        self._sampling_started = False
+        self._quota: dict[str, Any] | None = None
+
+    def configure_sampling_budget(self, budget: int, hard_limit: int) -> None:
+        """Assign a permanent per-source chunk allowance before first sampling.
+
+        The stateful sampler belongs to its creating process and thread. Copying
+        it into DataLoader workers cannot duplicate allowances. Valid rows must
+        each identify one distinct immutable ``(run, episode)`` source. Empty
+        padded rows receive no allowance. There is no reset or refill operation.
+        """
+        self._require_sampling_owner()
+        if self._quota is not None or self._sampling_started:
+            raise RuntimeError("Configure the sampling budget once, before sampling")
+        if (
+            any(
+                type(n) is not int or not 0 < n <= (1 << 63) - 1
+                for n in (budget, hard_limit)
+            )
+            or budget > hard_limit
+        ):
+            raise ValueError("Require positive int64 budget <= hard_limit")
+        if any(
+            t.device.type != "cpu"
+            for t in (self.observations, self.actions, self.valid, self.frame_ids)
+        ):
+            raise ValueError("Offline sampling budgets require CPU corpus tensors")
+        identities = torch.full(
+            (len(self.valid), 2), -1, dtype=torch.int64, device="cpu"
+        )
+        seen = set()
+        generations = {}
+        for row in self._rows.tolist():
+            ids = self.frame_ids[row, self.valid[row]]
+            identity = tuple(ids[0, :2].tolist())
+            if (ids[:, :2] < 0).any() or not (ids[:, :2] == ids[0, :2]).all():
+                raise ValueError(
+                    "Each valid row must contain one immutable source identity"
+                )
+            if identity in seen:
+                raise ValueError("Duplicate source identity across corpus rows")
+            seen.add(identity)
+            identities[row] = ids[0, :2]
+            values = (
+                self.generations[row, self.valid[row]].unique()
+                if self.generations is not None
+                else None
+            )
+            generations[row] = (
+                int(values[0]) if values is not None and len(values) == 1 else None
+            )
+        self._quota = {
+            "budget": budget,
+            "hard_limit": hard_limit,
+            "identities": identities,
+            "generations": generations,
+            "delivered": torch.zeros(len(self.valid), dtype=torch.int64, device="cpu"),
+            "clock_origin_monotonic_ns": time.monotonic_ns(),
+        }
+
+    def _require_sampling_owner(self) -> None:
+        if self._sampling_owner != (os.getpid(), threading.get_ident()):
+            raise RuntimeError(
+                "Budgeted FrozenCorpus sampling is owner-process/thread only"
+            )
+
+    def get_sampling_budget_snapshot(self) -> dict[str, Any]:
+        """Return detached per-source delivery counts; sampling is one row/chunk."""
+        quota = self._quota
+        if quota is None:
+            return {
+                "enabled": False,
+                "rows": [],
+                "remaining_chunks": None,
+                "unlocked_remaining_chunks": None,
+                "total_delivered_chunks": None,
+                "clock_origin_monotonic_ns": None,
+            }
+        self._require_sampling_owner()
+        rows = []
+        for row in self._rows.tolist():
+            run_id, episode_id = quota["identities"][row].tolist()
+            delivered = int(quota["delivered"][row])
+            rows.append(
+                {
+                    "slot": row,
+                    "run_id": run_id,
+                    "episode_id": episode_id,
+                    "generation": quota["generations"][row],
+                    "assigned": quota["budget"],
+                    "delivered": delivered,
+                    "remaining": quota["budget"] - delivered,
+                    "locked": False,
+                }
+            )
+        remaining = sum(row["remaining"] for row in rows)
+        return {
+            "enabled": True,
+            "rows": rows,
+            "remaining_chunks": remaining,
+            "unlocked_remaining_chunks": remaining,
+            "total_delivered_chunks": sum(row["delivered"] for row in rows),
+            "episode_sample_budget": quota["budget"],
+            "episode_sample_hard_limit": quota["hard_limit"],
+            "clock_origin_monotonic_ns": quota["clock_origin_monotonic_ns"],
+        }
+
+    @staticmethod
+    def _budget_exhausted() -> None:
+        from embodichain.data_pipeline.engine.data import OnlineDataBudgetExhaustedError
+
+        raise OnlineDataBudgetExhaustedError(
+            "Insufficient offline source quota for a full batch"
+        )
+
+    def _draw_rows(
+        self, eligible: torch.Tensor, batch_size: int, generator: torch.Generator | None
+    ) -> torch.Tensor:
+        if self._quota is None:
+            return eligible[
+                torch.randint(
+                    len(eligible), (batch_size,), generator=generator, device="cpu"
+                )
+            ]
+        self._require_sampling_owner()
+        remaining = self._quota["budget"] - self._quota["delivered"][eligible]
+        if sum(remaining.tolist()) < batch_size:
+            self._budget_exhausted()
+        # O(batch + rows) memory: do not expand every available quota credit.
+        available = remaining.tolist()
+        active = [i for i, n in enumerate(available) if n > 0]
+        selected = []
+        while len(selected) < batch_size:
+            proposals = torch.randint(
+                len(active),
+                (batch_size - len(selected),),
+                generator=generator,
+                device="cpu",
+            )
+            indices = torch.tensor(active, dtype=torch.int64, device="cpu")[proposals]
+            counts = torch.bincount(indices, minlength=len(available))
+            if not selected and bool((counts <= remaining).all()):
+                return eligible[indices]
+            for index in indices.tolist():
+                if available[index] > 0:
+                    selected.append(index)
+                    available[index] -= 1
+            active = [i for i, n in enumerate(available) if n > 0]
+        return eligible[torch.tensor(selected, dtype=torch.int64, device="cpu")]
+
+    def _check_quota_rows(self, rows: torch.Tensor) -> torch.Tensor | None:
+        if self._quota is None:
+            return None
+        self._require_sampling_owner()
+        counts = torch.bincount(rows.reshape(-1), minlength=len(self.valid))
+        if bool((counts > self._quota["budget"] - self._quota["delivered"]).any()):
+            self._budget_exhausted()
+        return counts
+
+    def _finish_sample(
+        self, rows: torch.Tensor, result: dict[str, torch.Tensor]
+    ) -> dict[str, torch.Tensor]:
+        counts = self._check_quota_rows(rows)
+        if counts is not None:
+            self._quota["delivered"] += counts
+        self._sampling_started = True
+        return result
 
     def sample_frames(
         self,
@@ -265,19 +440,20 @@ class FrozenCorpus:
             frames = {int(row): mask[row].nonzero().flatten() for row in eligible}
         if not len(eligible):
             raise ValueError("No valid frames in the requested corpus subset")
-        rows = eligible[
-            torch.randint(len(eligible), (batch_size,), generator=generator)
-        ]
-        times = torch.empty(batch_size, dtype=torch.int64)
+        rows = self._draw_rows(eligible, batch_size, generator)
+        times = torch.empty(batch_size, dtype=torch.int64, device="cpu")
         for row in rows.unique():
             chosen = rows == row
             candidates = frames[int(row)]
             times[chosen] = candidates[
                 torch.randint(
-                    len(candidates), (int(chosen.sum()),), generator=generator
+                    len(candidates),
+                    (int(chosen.sum()),),
+                    generator=generator,
+                    device="cpu",
                 )
             ]
-        return self._select(rows, times)
+        return self._finish_sample(rows, self._select(rows, times))
 
     def _filtered_valid(
         self, episode_subset: Iterable[int] | None, generations: Iterable[int] | None
@@ -289,14 +465,15 @@ class FrozenCorpus:
             subset = list(episode_subset)
             if any(type(row) is not int or not 0 <= row < len(mask) for row in subset):
                 raise ValueError("episode_subset must name existing episode rows")
-            allowed = torch.zeros(len(mask), dtype=torch.bool)
+            allowed = torch.zeros(len(mask), dtype=torch.bool, device="cpu")
             allowed[subset] = True
             mask &= allowed[:, None]
         if generations is not None:
             if self.generations is None:
                 raise ValueError("Corpus has no generation metadata")
             mask &= torch.isin(
-                self.generations, torch.tensor(list(generations), dtype=torch.int64)
+                self.generations,
+                torch.tensor(list(generations), dtype=torch.int64, device="cpu"),
             )
         return mask
 
@@ -341,22 +518,21 @@ class FrozenCorpus:
         eligible = windows.any(1).nonzero().flatten()
         if not len(eligible):
             raise RuntimeError("No valid offline history window")
-        rows = eligible[
-            torch.randint(len(eligible), (batch_size,), generator=generator)
-        ]
+        rows = self._draw_rows(eligible, batch_size, generator)
         starts = torch.multinomial(
             windows[rows].float(), 1, replacement=True, generator=generator
         ).flatten()
         use_start = (
-            torch.rand(batch_size, generator=generator) < start_probability
+            torch.rand(batch_size, generator=generator, device="cpu")
+            < start_probability
         ) & windows[rows, 0]
         starts[use_start] = 0
-        steps = torch.arange(self.valid.shape[1])
+        steps = torch.arange(self.valid.shape[1], device="cpu")
         invalid_prefix = (~eligible_valid[rows]) & (steps[None] < starts[:, None])
         prefix_starts = torch.where(invalid_prefix, steps[None] + 1, 0).amax(-1)
         prefix_lengths = starts - prefix_starts
         lengths = prefix_lengths + supervised_steps
-        offsets = torch.arange(int(lengths.max()))
+        offsets = torch.arange(int(lengths.max()), device="cpu")
         times = (prefix_starts[:, None] + offsets[None]).clamp_max(
             self.valid.shape[1] - 1
         )
@@ -369,7 +545,7 @@ class FrozenCorpus:
             result["generations"][~valid] = -1
         result["valid"] = valid
         result["loss_mask"] = valid & (offsets[None] >= prefix_lengths[:, None])
-        return result
+        return self._finish_sample(rows, result)
 
     def sample_context(
         self,
@@ -378,6 +554,7 @@ class FrozenCorpus:
         prediction_horizon: int,
         *,
         generations: Iterable[int] | None = None,
+        generator: torch.Generator | None = None,
     ) -> dict[str, torch.Tensor]:
         """Sample episode-uniform anchors with masked causal/future context.
 
@@ -393,9 +570,11 @@ class FrozenCorpus:
         eligible = valid.any(1).nonzero().flatten()
         if not len(eligible):
             raise RuntimeError("No valid offline context anchor")
-        rows = eligible[torch.randint(len(eligible), (batch_size,))]
-        anchors = torch.multinomial(valid[rows].float(), 1, replacement=True).flatten()
-        steps = torch.arange(valid.shape[1])
+        rows = self._draw_rows(eligible, batch_size, generator)
+        anchors = torch.multinomial(
+            valid[rows].float(), 1, replacement=True, generator=generator
+        ).flatten()
+        steps = torch.arange(valid.shape[1], device="cpu")
         lower = torch.where(
             (~valid[rows]) & (steps[None] < anchors[:, None]), steps[None] + 1, 0
         ).amax(-1)
@@ -404,7 +583,7 @@ class FrozenCorpus:
             steps[None] - 1,
             valid.shape[1] - 1,
         ).amin(-1)
-        offsets = torch.arange(1 - history_length, prediction_horizon)
+        offsets = torch.arange(1 - history_length, prediction_horizon, device="cpu")
         times = anchors[:, None] + offsets[None]
         mask = (times >= lower[:, None]) & (times <= upper[:, None])
         result = self._select(rows[:, None], times.clamp(0, valid.shape[1] - 1))
@@ -415,11 +594,13 @@ class FrozenCorpus:
             result["generations"][~mask] = -1
         result["valid"] = mask
         result["loss_mask"] = mask & (offsets[None] >= 0)
-        return result
+        return self._finish_sample(rows, result)
 
     def _select(
         self, rows: torch.Tensor, times: torch.Tensor
     ) -> dict[str, torch.Tensor]:
+        if self._quota is not None:
+            self._require_sampling_owner()
         result = {
             "observations": self.observations[rows, times],
             "actions": self.actions[rows, times],
@@ -428,6 +609,14 @@ class FrozenCorpus:
         }
         if self.generations is not None:
             result["generations"] = self.generations[rows, times]
+        if self._quota is not None:
+            expected = self._quota["identities"][rows]
+            if not torch.all(
+                (result["frame_ids"][..., :2] == expected).all(-1) | ~result["valid"]
+            ):
+                raise RuntimeError(
+                    "Corpus source identity changed after quota assignment"
+                )
         return result
 
     def sample_frame_ids(self, frame_ids: torch.Tensor) -> dict[str, torch.Tensor]:
@@ -446,13 +635,16 @@ class FrozenCorpus:
             }
         try:
             indices = torch.tensor(
-                [self._id_lookup[tuple(value)] for value in frame_ids.cpu().tolist()]
+                [self._id_lookup[tuple(value)] for value in frame_ids.cpu().tolist()],
+                device="cpu",
             )
         except KeyError as error:
             raise ValueError(
                 f"Unknown or invalid corpus frame identity: {error}"
             ) from error
-        return self._select(indices[:, 0], indices[:, 1])
+        rows = indices[:, 0]
+        self._check_quota_rows(rows)
+        return self._finish_sample(rows, self._select(rows, indices[:, 1]))
 
 
 def _union(intervals: Iterable[tuple[float, float]]) -> list[tuple[float, float]]:

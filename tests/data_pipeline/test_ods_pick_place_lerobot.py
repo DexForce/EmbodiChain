@@ -119,3 +119,113 @@ def test_lerobot_reader_rejects_schema_and_content_hash_changes(tmp_path: Path) 
     sidecar_path.write_text(json.dumps(sidecar))
     with pytest.raises(ValueError, match="content/hash mismatch"):
         load_lerobot_corpus(destination, expected_schema=_SCHEMA)
+
+
+@pytest.mark.parametrize("read_batch_size", [1, 2, 3, 1024])
+def test_bulk_read_boundaries_preserve_holes_and_hashes(
+    tmp_path: Path, read_batch_size: int
+) -> None:
+    source, destination = tmp_path / "source.pt", tmp_path / "lerobot"
+    _make_corpus(source)
+    export_lerobot_corpus(source, destination)
+    expected = load_corpus(source, expected_schema=_SCHEMA)
+    actual = load_lerobot_corpus(
+        destination, expected_schema=_SCHEMA, read_batch_size=read_batch_size
+    )
+    assert actual.manifest["content_id"] == expected.manifest["content_id"]
+    assert actual.manifest["tensors"] == expected.manifest["tensors"]
+    assert actual.manifest["storage"]["numeric_read_mode"] == "sdk_hf_dataset_batch"
+    for field in ("observations", "actions", "valid", "frame_ids", "generations"):
+        assert torch.equal(getattr(actual, field), getattr(expected, field))
+
+
+def test_bulk_read_owns_cpu_device_even_with_non_cpu_default(tmp_path: Path) -> None:
+    source, destination = tmp_path / "source.pt", tmp_path / "lerobot"
+    _make_corpus(source)
+    export_lerobot_corpus(source, destination)
+    with torch.device("meta"):
+        actual = load_lerobot_corpus(destination, expected_schema=_SCHEMA)
+    expected = load_corpus(source, expected_schema=_SCHEMA)
+    assert actual.manifest["tensors"] == expected.manifest["tensors"]
+    for field in ("observations", "actions", "valid", "frame_ids", "generations"):
+        assert getattr(actual, field).device.type == "cpu"
+        assert torch.equal(getattr(actual, field), getattr(expected, field))
+
+
+def test_scalar_fallback_only_for_absent_backing_api(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, destination = tmp_path / "source.pt", tmp_path / "lerobot"
+    _make_corpus(source)
+    export_lerobot_corpus(source, destination)
+    sdk_class = lerobot_module.LeRobotDataset
+
+    class ScalarOnly:
+        def __init__(self, *args, **kwargs):
+            self.inner = sdk_class(*args, **kwargs)
+            self.hf_dataset = None
+
+        def __getattr__(self, name):
+            return getattr(self.inner, name)
+
+        def __len__(self):
+            return len(self.inner)
+
+        def __getitem__(self, index):
+            return self.inner[index]
+
+    monkeypatch.setattr(lerobot_module, "LeRobotDataset", ScalarOnly)
+    actual = load_lerobot_corpus(destination, expected_schema=_SCHEMA)
+    assert (
+        actual.manifest["tensors"]
+        == load_corpus(source, expected_schema=_SCHEMA).manifest["tensors"]
+    )
+    assert actual.manifest["storage"]["numeric_read_mode"] == "sdk_scalar_fallback"
+    assert actual.manifest["storage"]["scalar_fallback_reason"]
+
+
+@pytest.mark.parametrize("corruption", ["episode", "frame", "dtype", "failure"])
+def test_bulk_integrity_errors_do_not_fall_back_to_scalar(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, corruption: str
+) -> None:
+    source, destination = tmp_path / "source.pt", tmp_path / "lerobot"
+    _make_corpus(source)
+    export_lerobot_corpus(source, destination)
+    sdk_class = lerobot_module.LeRobotDataset
+
+    class CorruptBacking:
+        def __init__(self, original):
+            self.original = original
+
+        def __len__(self):
+            return len(self.original)
+
+        def __getitem__(self, index):
+            if corruption == "failure":
+                raise OSError("batch read failed")
+            result = self.original[index]
+            if corruption == "episode":
+                result["episode_index"][0] += 1
+            elif corruption == "frame":
+                result["frame_index"][0] += 1
+            else:
+                result["action"] = [item.double() for item in result["action"]]
+            return result
+
+    class CorruptSDK:
+        def __init__(self, *args, **kwargs):
+            self.inner = sdk_class(*args, **kwargs)
+            self.hf_dataset = CorruptBacking(self.inner.hf_dataset)
+
+        def __getattr__(self, name):
+            return getattr(self.inner, name)
+
+        def __len__(self):
+            return len(self.inner)
+
+        def __getitem__(self, index):
+            raise AssertionError("Integrity failures must not silently fall back")
+
+    monkeypatch.setattr(lerobot_module, "LeRobotDataset", CorruptSDK)
+    with pytest.raises((ValueError, OSError)):
+        load_lerobot_corpus(destination, expected_schema=_SCHEMA)

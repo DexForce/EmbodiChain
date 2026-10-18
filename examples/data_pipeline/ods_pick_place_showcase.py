@@ -854,6 +854,10 @@ def _parse_args() -> argparse.Namespace:
         help="Numeric .pt corpus or a showcase-exported LeRobot dataset directory",
     )
     p.add_argument("--export-data", type=Path)
+    p.add_argument("--offline-storage", choices=("pt", "lerobot"), default="pt")
+    p.add_argument("--offline-episodes", type=int, default=None)
+    p.add_argument("--offline-sample-budget", type=int, default=None)
+    p.add_argument("--offline-sample-hard-limit", type=int, default=None)
     p.add_argument("--record-batches", action="store_true")
     p.add_argument("--batch-manifest", type=Path)
     p.add_argument("--eval-every", type=int, default=5000)
@@ -904,6 +908,11 @@ def _parse_args() -> argparse.Namespace:
         "--defer-evaluation",
         action="store_true",
         help="Save checkpoints while training; evaluate only after producer shutdown",
+    )
+    p.add_argument(
+        "--deferred-evaluation-schedule",
+        choices=("updates", "updates_and_generations"),
+        default="updates_and_generations",
     )
 
     p.add_argument("--resume", type=Path)
@@ -973,6 +982,46 @@ def _parse_args() -> argparse.Namespace:
         args.test_seed_base = 90000 if args.smoke else 50000
     if args.producer_envs < 1 or args.buffer_size % args.producer_envs:
         p.error("Producer environments must divide the positive cache capacity")
+    cold_offline = (
+        args.mode in {"offline-full", "offline-32"} and args.offline_data is None
+    )
+    if args.offline_episodes is not None:
+        if (
+            not cold_offline
+            or args.offline_episodes < args.buffer_size
+            or args.offline_episodes % args.buffer_size
+        ):
+            p.error(
+                "Offline collection count must be a cache multiple in a cold offline mode"
+            )
+        if args.mode == "offline-32" and args.offline_episodes != args.buffer_size:
+            p.error("offline-32 collects exactly the initial cache")
+        if args.max_generated_episodes not in {None, args.offline_episodes}:
+            p.error("Offline collection count conflicts with max-generated-episodes")
+        args.max_generated_episodes = args.offline_episodes
+    if args.offline_storage == "lerobot":
+        if not cold_offline or args.export_data or args.policy == "gru":
+            p.error(
+                "Direct LeRobot collection requires a nonlegacy cold offline mode without --export-data"
+            )
+    if (
+        args.offline_sample_budget is not None
+        or args.offline_sample_hard_limit is not None
+    ):
+        if args.resume is not None:
+            p.error(
+                "Protected offline resume requires saved quota state and is not supported"
+            )
+        if (
+            args.offline_sample_budget is None
+            or args.offline_sample_hard_limit is None
+            or not 0 < args.offline_sample_budget <= args.offline_sample_hard_limit
+            or args.policy == "gru"
+            or not (cold_offline or args.offline_data is not None)
+        ):
+            p.error(
+                "Offline quotas require positive budget <= hard limit and a resident offline corpus"
+            )
     if args.max_generated_episodes is not None and (
         args.max_generated_episodes < args.buffer_size
         or args.max_generated_episodes % args.buffer_size

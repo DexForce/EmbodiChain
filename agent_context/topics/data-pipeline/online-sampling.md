@@ -160,6 +160,25 @@ observation/action schema and tensor content; content identity is independent
 of engine run IDs. Learner resume restores model/optimizer/RNG state, with a
 fresh ODS source for live runs rather than a restored replay cache.
 
+Cold offline runs can select `--offline-storage lerobot` and an explicit
+`--offline-episodes` count independently of training rounds. The private
+`_ods_pick_place_collection.py` overlaps the next accepted generation with
+bounded, single-writer SDK persistence; it does not stage an intermediate `.pt`
+corpus. One audited SDK load then creates resident CPU tensors. The numeric
+loader uses bounded backing-dataset slices when available and records scalar
+fallback explicitly. Run-local SDK caches are included in final disk footprint;
+temporary write peaks remain unmeasured. Writer/producer failures and deadlines
+propagate before an incomplete dataset can be published.
+
+`FrozenCorpus.configure_sampling_budget()` optionally protects all resident
+sampling entry points with one nonrefillable per-source allowance. It is
+creator-process/thread only, rejects duplicate source identities and cannot be
+enabled after sampling. Protected offline resume is rejected until allowance
+restoration exists. Conventional offline baselines retain unrestricted reuse.
+`--deferred-evaluation-schedule updates` aligns checkpoint panels across online
+and offline modes; it does not claim online time-to-certification. G1 content,
+model initialization and all normalization hashes are reported separately.
+
 Small-data gates, expert physical qualification and student learning assessment
 are separate. Smoke success and low training loss do not establish physical
 student success or an efficiency advantage. See the task-owned
