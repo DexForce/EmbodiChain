@@ -3,7 +3,7 @@
   "kind": "static-architecture",
   "coverage": "curated-sample",
   "repository": "DexForce/EmbodiChain",
-  "revision": "63cecb8b6c2f8ff34f383feb5e3be92e88b130f1",
+  "revision": "81b80948779f25f3aa2ea7f5ce9479a1ee2b1c37",
   "source_ref": "HEAD",
   "package_version": "0.3.1",
   "topic_index": "agent_context/MAP.yaml",
@@ -29,16 +29,16 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/learning/models/actor_critic.py",
+          "path": "embodichain/learning/rl/models/actor_critic.py",
           "symbol": "ActorCritic",
-          "start_line": 34,
-          "end_line": 34,
+          "start_line": 33,
+          "end_line": 33,
           "excerpt": "class ActorCritic(Policy):"
         }
       ],
       "documentation": [
         {
-          "docname": "api_reference/embodichain/embodichain.learning.models",
+          "docname": "api_reference/embodichain/embodichain.learning.rl.models",
           "label": "ActorCritic documentation",
           "source_extension": ".rst"
         }
@@ -58,7 +58,7 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/learning/models/actor_only.py",
+          "path": "embodichain/learning/rl/models/actor_only.py",
           "symbol": "ActorOnly",
           "start_line": 31,
           "end_line": 31,
@@ -67,7 +67,7 @@
       ],
       "documentation": [
         {
-          "docname": "api_reference/embodichain/embodichain.learning.models",
+          "docname": "api_reference/embodichain/embodichain.learning.rl.models",
           "label": "ActorOnly documentation",
           "source_extension": ".rst"
         }
@@ -1928,7 +1928,7 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/learning/models/policy.py",
+          "path": "embodichain/learning/rl/models/policy.py",
           "symbol": "Policy",
           "start_line": 35,
           "end_line": 35,
@@ -3442,10 +3442,10 @@
       "scope": "Direct Python inheritance; not an algorithm-to-model compatibility matrix.",
       "evidence": [
         {
-          "path": "embodichain/learning/models/actor_critic.py",
+          "path": "embodichain/learning/rl/models/actor_critic.py",
           "symbol": "ActorCritic",
-          "start_line": 34,
-          "end_line": 34,
+          "start_line": 33,
+          "end_line": 33,
           "excerpt": "class ActorCritic(Policy):"
         }
       ]
@@ -3460,7 +3460,7 @@
       "scope": "Direct Python inheritance; not an algorithm-to-model compatibility matrix.",
       "evidence": [
         {
-          "path": "embodichain/learning/models/actor_only.py",
+          "path": "embodichain/learning/rl/models/actor_only.py",
           "symbol": "ActorOnly",
           "start_line": 31,
           "end_line": 31,
