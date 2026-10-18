@@ -1,5 +1,5 @@
 embodichain.learning.rl.models
-=============================
+==============================
 
 .. currentmodule:: embodichain.learning.rl.models
 

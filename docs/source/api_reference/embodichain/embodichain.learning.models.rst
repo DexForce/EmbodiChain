@@ -1,10 +1,10 @@
 embodichain.learning.models
-==========================
+===========================
 
 .. currentmodule:: embodichain.learning.models
 
 General neural networks and feature normalization
-------------------------------------------------
+-------------------------------------------------
 
 These components support supervised learning and RL without importing RL,
 TensorDict or simulation. ``build_mlp_from_cfg`` constructs an MLP from a network
