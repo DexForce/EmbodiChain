@@ -177,3 +177,12 @@ parent's measured position while its offset and orientation stay in world axes.
 This distinction matters for left/right sorting after reference-object rotation.
 World-axis targets fingerprint both their frame and declared pose; static
 manifests and live registries retain the same identity.
+
+
+## Asset role requirements
+
+An integration may declare optional `asset_requirements`; decoding validates its
+closed role/relation contract without contacting providers. Offline asset
+materialization owns selection and emits a new bound deployment before ordinary
+compilation. See [asset generalization](../asset-generalization/asset-generalization.md)
+for supported adaptations, provenance and integrity boundaries.

@@ -171,3 +171,30 @@ Bounded deterministic selection applies hard role constraints and upright geomet
    :members:
 
 .. autofunction:: embodichain.lab.task_program.semantics.asset_matching.resolve_asset_set
+
+embodichain.lab.task_program.integrations.asset_materialization additions
+-------------------------------------------------------------------------
+
+Materialize standalone configurations and semantic bindings without modifying templates. Recompute supported placement frames and reject unsupported fixed calibrations. Validate packaged content before loading.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.asset_materialization
+
+.. autosummary::
+
+   AssetAdaptationCfg
+   MaterializedAssetDeployment
+   load_asset_requirements_from_deployment
+   materialize_asset_deployment
+   validate_materialized_deployment
+
+.. autoclass:: embodichain.lab.task_program.integrations.asset_materialization.AssetAdaptationCfg
+   :members:
+
+.. autoclass:: embodichain.lab.task_program.integrations.asset_materialization.MaterializedAssetDeployment
+   :members:
+
+.. autofunction:: embodichain.lab.task_program.integrations.asset_materialization.load_asset_requirements_from_deployment
+
+.. autofunction:: embodichain.lab.task_program.integrations.asset_materialization.materialize_asset_deployment
+
+.. autofunction:: embodichain.lab.task_program.integrations.asset_materialization.validate_materialized_deployment

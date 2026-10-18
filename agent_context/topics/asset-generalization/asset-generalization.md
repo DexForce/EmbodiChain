@@ -44,3 +44,26 @@ exhaustion produces structured rejection evidence rather than a relaxed match.
 `ResolvedAssetSet` freezes selected content and requirement identity with a seed.
 Absolute cache paths are excluded from its identity. Same asset selection does
 not establish reachable grasps, settled state or measured task success.
+
+## Deployment materialization
+
+`integrations/asset_materialization.py` reads integration-owned
+`asset_requirements`, verifies prepared content and emits standalone deployment
+artifacts. It preserves logical entity IDs and derives new Gym/integration
+identities. Explicit `./` or `../` resource paths resolve from the component
+that declares them; bare paths retain dataset registry semantics.
+
+Physical scene and physics-backend ownership are unchanged. Upright normalized
+mesh replacement supports one visual/collision resource and explicit relative
+support/container placement. Both placement objects require declared roles and
+relations. Absolute placement targets, calibrated grasps/axes, local-pose
+overrides, non-unit scale and geometry-specific expansion profiles require
+additional adaptation and are rejected. Independent objectives are preserved,
+not rewritten to make a candidate pass. Container collision must preserve its
+annotated cavity; a default convex hull does not qualify.
+
+The materialized manifest binds assets and configuration bytes. Validate it
+before constructing environments. Packaged robot/data IDs still require the
+installed SDK and its normal asset cache; local selected asset files are bundled.
+Focused tests use the production loader in
+`tests/gym/envs/task_program/test_asset_materialization.py`.
