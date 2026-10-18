@@ -40,6 +40,8 @@ class KinematicsLayer(nn.Module):
     Note:
         Geometry is configured, not trained. Checkpoints store TCP and limits
         and verify the identity of the model supplied at reconstruction time.
+        ``load_state_dict(assign=True)`` adopts checkpoint device and precision
+        for both tensor buffers and fixed geometry, including nested loads.
         ``train()`` and ``eval()`` do not disable input gradients.
     """
 
@@ -92,6 +94,7 @@ class KinematicsLayer(nn.Module):
         self.register_buffer("tcp", tcp_tensor)
         self.register_buffer("lower", lo)
         self.register_buffer("upper", hi)
+        self.register_load_state_dict_post_hook(self._sync_model_after_load)
 
     @property
     def dof(self) -> int:
@@ -106,6 +109,19 @@ class KinematicsLayer(nn.Module):
         super()._apply(fn, recurse=recurse)
         self.model = self.model.to(self.tcp.device, self.tcp.dtype)
         return self
+
+    def _sync_model_after_load(
+        self, _module: nn.Module, _incompatible_keys: Any
+    ) -> None:
+        # assign=True replaces buffers without calling _apply, also when a parent
+        # network loads this layer recursively. PK geometry is not a buffer.
+        if self.tcp.dtype not in (torch.float32, torch.float64):
+            raise ValueError("KinematicsLayer supports float32 and float64")
+        if (
+            self.model.chain.device != self.tcp.device
+            or self.model.chain.dtype != self.tcp.dtype
+        ):
+            self.model = self.model.to(self.tcp.device, self.tcp.dtype)
 
     def get_extra_state(self) -> dict[str, str]:
         """Record fixed geometry identity alongside tensor buffers."""

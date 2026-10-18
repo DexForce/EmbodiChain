@@ -35,6 +35,8 @@ Only first-order input gradients are part of the public contract.
 Layers own fixed TCP/limit buffers, copy geometry, and explicitly migrate PK
 internals during `.to()`. Checkpoints verify fixed-model identity and restore
 numerical settings and buffers; construct the same geometry before loading.
+`load_state_dict(assign=True)` also migrates fixed PK geometry to the loaded
+buffers' device/precision, including loads through an enclosing network.
 They contain no optimizer or recurrent seed. `.eval()` preserves gradients.
 Training code owns state, reset and detach boundaries. No call may overwrite
 another outstanding graph's intermediates.

@@ -160,6 +160,92 @@ def test_checkpoint_dtype_and_eval_lifecycle():
         rebuilt.kinematics.set_extra_state({"model_fingerprint": "wrong"})
 
 
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("wrapper", ["fk", "ik", "network"])
+def test_assign_checkpoint_migrates_fixed_geometry(dtype, wrapper):
+    source = make_layer(dtype=dtype, iterations=3)
+    initial_dtype = torch.float64 if dtype == torch.float32 else torch.float32
+    rebuilt = make_layer(dtype=initial_dtype, iterations=1)
+    # Non-default buffers must follow the checkpoint as well as its precision.
+    source.kinematics.tcp[:3, 3] = source.kinematics.tcp.new_tensor([0.2, -0.1, 0.05])
+    source.kinematics.lower.fill_(-1.2)
+    source.kinematics.upper.fill_(1.6)
+    if wrapper == "fk":
+        saved, restored = source.kinematics, rebuilt.kinematics
+    elif wrapper == "ik":
+        saved, restored = source, rebuilt
+    else:
+        saved = torch.nn.ModuleDict({"solver": source})
+        restored = torch.nn.ModuleDict({"solver": rebuilt})
+    restored.load_state_dict(deepcopy(saved.state_dict()), assign=True)
+    _check_assigned_checkpoint_outputs_and_gradients(source, rebuilt, dtype)
+    if wrapper != "fk":
+        assert rebuilt.cfg.max_iterations == source.cfg.max_iterations
+        q = torch.full((2, 7), 0.1, dtype=dtype)
+        target = source.kinematics(q + 0.02)
+        expected = source.solve(target, q)
+        actual = rebuilt.solve(target, q)
+        torch.testing.assert_close(actual.qpos, expected.qpos)
+        torch.testing.assert_close(actual.position_error, expected.position_error)
+        torch.testing.assert_close(actual.rotation_error, expected.rotation_error)
+
+
+def _check_assigned_checkpoint_outputs_and_gradients(
+    source, rebuilt, dtype, device="cpu"
+):
+    q = torch.full((2, 7), 0.1, dtype=dtype, device=device, requires_grad=True)
+    expected_pose, expected_jacobian = source.kinematics.evaluate(q)
+    actual_pose, actual_jacobian = rebuilt.kinematics.evaluate(q)
+    torch.testing.assert_close(actual_pose, expected_pose)
+    torch.testing.assert_close(actual_jacobian, expected_jacobian)
+    expected_grad = torch.autograd.grad(
+        expected_pose.square().sum() + expected_jacobian.square().sum(), q
+    )[0]
+    actual_grad = torch.autograd.grad(
+        actual_pose.square().sum() + actual_jacobian.square().sum(), q
+    )[0]
+    assert torch.isfinite(actual_grad).all() and actual_grad.norm() > 0
+    torch.testing.assert_close(actual_grad, expected_grad)
+    torch.testing.assert_close(rebuilt.kinematics.lower, source.kinematics.lower)
+    torch.testing.assert_close(rebuilt.kinematics.upper, source.kinematics.upper)
+
+
+def test_assign_checkpoint_rejects_unsupported_precision():
+    layer = make_layer()
+    state = deepcopy(layer.state_dict())
+    state["kinematics.tcp"] = state["kinematics.tcp"].half()
+    with pytest.raises(ValueError, match="float32 and float64"):
+        layer.load_state_dict(state, assign=True)
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize(
+    "source_device,initial_device", [("cpu", "cuda"), ("cuda", "cpu")]
+)
+def test_assign_checkpoint_migrates_device_and_precision(source_device, initial_device):
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA unavailable")
+    source = make_layer(dtype=torch.float64, device=source_device, iterations=3)
+    rebuilt = make_layer(dtype=torch.float32, device=initial_device, iterations=1)
+    # Loading an enclosing network must run the child's checkpoint migration.
+    saved = torch.nn.ModuleDict({"solver": source})
+    restored = torch.nn.ModuleDict({"solver": rebuilt})
+    restored.load_state_dict(deepcopy(saved.state_dict()), assign=True)
+    assert rebuilt.kinematics.tcp.device == source.kinematics.tcp.device
+    _check_assigned_checkpoint_outputs_and_gradients(
+        source, rebuilt, torch.float64, source_device
+    )
+    q = torch.full(
+        (1, 7), 0.1, dtype=torch.float64, device=source_device, requires_grad=True
+    )
+    target = source.kinematics(q.detach() + 0.02).requires_grad_()
+    expected = source(target, q)
+    actual = rebuilt(target, q)
+    torch.testing.assert_close(actual, expected)
+    gradients = torch.autograd.grad(actual.sum(), (q, target))
+    assert all(torch.isfinite(value).all() and value.norm() > 0 for value in gradients)
+
+
 @pytest.mark.gpu
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
 def test_cuda_parity_and_no_device_synchronization(dtype):
