@@ -506,7 +506,9 @@ class EfficiencyTracker:
         self._start_wall = time.time() - self.elapsed_seconds()
         self.allocated_gpu_ids = sorted({str(value) for value in allocated_gpu_ids})
         self.targets = 0
-        self.unique_frames: set[tuple[int, ...]] = set()
+        from examples.data_pipeline._ods_pick_place_usage import CompactFrameSet
+
+        self.unique_frames = CompactFrameSet()
         self.timeline: list[dict[str, Any]] = []
         self.intervals: dict[str, list[tuple[float, float]]] = {}
         self._checkpoints: dict[str, tuple[int, int]] = {}
@@ -548,7 +550,7 @@ class EfficiencyTracker:
             raise ValueError("An update must contain nonnegative valid target IDs")
         self._event("update", elapsed, targets=len(selected))
         self.targets += len(selected)
-        self.unique_frames.update(tuple(row) for row in selected.cpu().tolist())
+        self.unique_frames.add_tensor(selected)
         if self._first_update is None:
             self._first_update = elapsed
 

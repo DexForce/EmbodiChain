@@ -12,6 +12,9 @@ Engineering smoke and training-reset qualification are separate from the final
 The [LeRobot offline experiment](LEROBOT_OFFLINE.md) records actual dataset
 round-trip checks, offline learning results and the frozen-data comparison.
 
+The [production/reuse tuning study](TUNING.md) describes the optional usage-budget
+scheduler, throughput diagnostics and stability validation before formal comparison.
+
 ## Run the working recipe
 
 ```bash

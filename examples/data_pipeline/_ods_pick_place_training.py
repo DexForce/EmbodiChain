@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import multiprocessing as mp
@@ -58,6 +59,13 @@ from examples.data_pipeline.ods_pick_place_showcase import (
     save_checkpoint,
 )
 from examples.data_pipeline._ods_pick_place_policy import ChunkBC, pose_targets
+from examples.data_pipeline._ods_pick_place_usage import (
+    AnchorBudget,
+    CompactFrameSet,
+    SamplingRNG,
+    UsageTracker,
+    retained_deferred_checkpoints,
+)
 
 
 class _BudgetExpired(Exception):
@@ -192,6 +200,9 @@ def _snapshot(engine: OnlineDataEngine) -> dict[str, torch.Tensor]:
 
 def _engine(config: dict[str, Any], args: argparse.Namespace) -> OnlineDataEngine:
     pose = args.policy.endswith("pose")
+    config = copy.deepcopy(config)
+    config["num_envs"] = args.producer_envs
+    config["seed"] = args.producer_seed
     return OnlineDataEngine(
         OnlineDataEngineCfg(
             gym_config=config,
@@ -206,6 +217,9 @@ def _engine(config: dict[str, Any], args: argparse.Namespace) -> OnlineDataEngin
             buffer_device="cpu",
             refill_policy="manual",
             include_provenance=True,
+            lifecycle_event_capacity=(
+                2 * args.buffer_size if args.usage_statistics else 0
+            ),
             initialization_timeout=1800,
             shutdown_timeout=30.0,
         )
@@ -361,14 +375,17 @@ def run(args: argparse.Namespace) -> None:
         json.dumps(
             {
                 "training_seed": args.seed,
+                "producer_seed": args.producer_seed,
                 "qualification_seeds": list(
                     range(10000, 10000 + args.qualification_scenes)
                 ),
-                "development_seeds": list(range(20000, 20000 + args.dev_scenes)),
+                "development_seeds": list(
+                    range(args.dev_seed_base, args.dev_seed_base + args.dev_scenes)
+                ),
                 "test_seeds": list(
                     range(
-                        90000 if args.smoke else 50000,
-                        (90000 if args.smoke else 50000) + args.final_test_scenes,
+                        args.test_seed_base,
+                        args.test_seed_base + args.final_test_scenes,
                     )
                 ),
                 "test_role": "engineering_only" if args.smoke else "reserved_final",
@@ -426,6 +443,7 @@ def run(args: argparse.Namespace) -> None:
         "examples/data_pipeline/_ods_pick_place_benchmark.py",
         "examples/data_pipeline/_ods_pick_place_lerobot.py",
         "examples/data_pipeline/_ods_pick_place_policy.py",
+        "examples/data_pipeline/_ods_pick_place_usage.py",
         "embodichain/data_pipeline/engine/data.py",
         "embodichain/lab/gym/envs/embodied_env.py",
         "embodichain/lab/gym/envs/base_env.py",
@@ -455,10 +473,91 @@ def run(args: argparse.Namespace) -> None:
             not args.no_video,
         ),
     )
+    closed_evaluators: list[dict[str, int | None]] = []
+
+    def restart_evaluator() -> dict[str, Any]:
+        """Start each deferred panel from an independent simulator process."""
+        nonlocal evaluator, requests, results
+        previous = evaluator
+        requests.put(None)
+        previous.join(30)
+        if previous.is_alive():
+            previous.terminate()
+            previous.join(10)
+        if previous.is_alive():
+            previous.kill()
+            previous.join(10)
+        if previous.is_alive() or previous.exitcode != 0:
+            raise RuntimeError("Deferred evaluator did not close cleanly")
+        closed_evaluators.append({"pid": previous.pid, "exitcode": previous.exitcode})
+        previous_requests, previous_results = requests, results
+        requests, results = context.Queue(), context.Queue()
+        evaluator = context.Process(
+            target=_evaluate_worker,
+            args=(
+                config,
+                requests,
+                results,
+                str(args.output),
+                not args.no_viewer,
+                args.viser_port,
+                not args.no_video,
+            ),
+        )
+        previous_requests.close()
+        previous_results.close()
+        previous_requests.join_thread()
+        previous_results.join_thread()
+        previous.close()
+        before = tracker.elapsed_seconds()
+        evaluator.start()
+        panel_ready = _result(evaluator, results, args, tracker)
+        tracker.record_interval("evaluation_startup", before, tracker.elapsed_seconds())
+        if panel_ready != ready:
+            raise ValueError("Fresh evaluator schema differs from the qualified task")
+        return {
+            "pid": evaluator.pid,
+            "startup_seconds": tracker.elapsed_seconds() - before,
+        }
+
     engine = None
     writer = None
     tensorboard = None
     stats = None
+    usage = UsageTracker() if args.usage_statistics else None
+    if usage is not None:
+        tracker.unique_frames = CompactFrameSet(usage.targets, accumulate=False)
+    pacing = None
+    sampling_rng = SamplingRNG(args.sampling_seed)
+
+    def save_training_checkpoint(
+        path: Path,
+        model: torch.nn.Module,
+        optimizer: torch.optim.Optimizer,
+        step: int,
+        config_args: argparse.Namespace,
+        run_id: int,
+    ) -> None:
+        save_checkpoint(
+            path,
+            model,
+            optimizer,
+            step,
+            config_args,
+            run_id,
+            sampling_rng_state=sampling_rng.state,
+        )
+
+    def drain_usage() -> list[dict[str, Any]]:
+        if engine is None or usage is None:
+            return []
+        events = engine.drain_lifecycle_events()
+        usage.lifecycle(events)
+        if pacing is not None:
+            for event in events:
+                pacing.publish(event)
+        return events
+
     snapshots = []
     batch_ids = []
     end_reason = "update_budget"
@@ -568,6 +667,20 @@ def run(args: argparse.Namespace) -> None:
                 ):
                     raise _BudgetExpired from None
                 raise
+            events = drain_usage()
+            if args.usage_schedule == "anchor_budget":
+                pacing = AnchorBudget(
+                    args.anchor_reuse,
+                    args.batch_size,
+                    sum(
+                        event["eligible_anchors"]
+                        for event in events
+                        if event["kind"] == "published"
+                    ),
+                    prior_seconds=args.refill_prior_seconds,
+                )
+                for event in events:
+                    pacing.publish(event)
             initial = _snapshot(engine)
             initial_values = initial["observations"][initial["valid"]]
             initial_actions = initial["actions"][initial["valid"]]
@@ -582,6 +695,7 @@ def run(args: argparse.Namespace) -> None:
                 for _ in range(1, 1 if args.mode == "offline-32" else args.rounds):
                     generation = engine.request_refill()
                     _wait(engine, generation, args, tracker)
+                    drain_usage()
                     snapshots.append(_snapshot(engine))
                 path = args.export_data or args.output / "corpus.pt"
                 export_corpus(
@@ -607,6 +721,37 @@ def run(args: argparse.Namespace) -> None:
                 engine = None
                 snapshots.clear()
                 corpus = load_corpus(path, expected_schema=schema)
+        if corpus is not None and usage is not None and not usage.episodes:
+            for row in range(len(corpus.valid)):
+                frames = torch.where(corpus.valid[row])[0]
+                if not len(frames):
+                    continue
+                identity = corpus.frame_ids[row, frames[0]]
+                usage.lifecycle(
+                    [
+                        {
+                            "kind": "published",
+                            "sequence": row,
+                            "run_id": int(identity[0]),
+                            "episode_id": int(identity[1]),
+                            "generation": (
+                                int(corpus.generations[row, frames[0]])
+                                if corpus.generations is not None
+                                else 1
+                            ),
+                            "slot": row,
+                            "monotonic_ns": time.monotonic_ns(),
+                            "valid_frames": len(frames),
+                            "eligible_anchors": len(frames),
+                            "valid_frame_indices": corpus.frame_ids[
+                                row, frames, 2
+                            ].tolist(),
+                            "eligible_anchor_indices": corpus.frame_ids[
+                                row, frames, 2
+                            ].tolist(),
+                        }
+                    ]
+                )
         if initial_values.numel() == 0:
             raise RuntimeError("Initial data has no valid training observations")
         mean, std = _geometry_statistics(initial_values)
@@ -678,6 +823,14 @@ def run(args: argparse.Namespace) -> None:
             optimizer.load_state_dict(state["optimizer"])
             step = state["step"]
             torch.set_rng_state(state["torch_rng"])
+            if state.get("config", {}).get("sampling_seed") != args.sampling_seed:
+                raise ValueError("Resume sampling RNG configuration differs")
+            if args.sampling_seed is not None:
+                if state.get("sampling_rng") is None:
+                    raise ValueError(
+                        "Resume checkpoint lacks its independent sampler RNG"
+                    )
+                sampling_rng.state = state["sampling_rng"].cpu()
             random.setstate(state["python_rng"])
             np.random.set_state(state["numpy_rng"])
             if state["cuda_rng"] is not None and args.train_device.startswith("cuda:"):
@@ -729,7 +882,11 @@ def run(args: argparse.Namespace) -> None:
             raise ValueError(
                 "Batch replay manifest must match update and batch budgets"
             )
-        dev_request = {"seeds": list(range(20000, 20000 + args.dev_scenes))}
+        dev_request = {
+            "seeds": list(
+                range(args.dev_seed_base, args.dev_seed_base + args.dev_scenes)
+            )
+        }
         if args.stage != "showcase":
             if initial_positions is None:
                 raise ValueError("Small-data gates require initial reset observations")
@@ -784,9 +941,19 @@ def run(args: argparse.Namespace) -> None:
             return report
 
         baseline = args.output / f"initial_step_{step}.pt"
-        save_checkpoint(baseline, model, optimizer, step, args, source_run)
+        save_training_checkpoint(baseline, model, optimizer, step, args, source_run)
         tracker.record_checkpoint(str(baseline))
-        initial_report = evaluate(baseline, "initial_dev")
+        deferred_checkpoints: list[tuple[Path, str]] = []
+        generation_checkpoint_paths: list[Path] = []
+        if args.defer_evaluation:
+            deferred_checkpoints.append((baseline, "initial_dev"))
+            initial_report = {
+                "success_rate": 0.0,
+                "lift_rate": 0.0,
+                "goal_error": float("inf"),
+            }
+        else:
+            initial_report = evaluate(baseline, "initial_dev")
         best_report, best_path = initial_report, baseline
         initial_published = tracker.elapsed_seconds()
         if args.wall_time_budget and initial_published > args.wall_time_budget:
@@ -794,12 +961,23 @@ def run(args: argparse.Namespace) -> None:
         train_steps = 0
         pending_ids: list[torch.Tensor] = []
         recent_target_counts: deque[int] = deque(maxlen=50)
+        last_saved_generation = 1
         loop_started = tracker.elapsed_seconds()
         for round_index in range(args.rounds):
             model.train()
             generation = 1
             barrier = None
-            if round_index and engine is not None and args.mode in {"online", "serial"}:
+            if (
+                round_index
+                and engine is not None
+                and args.mode in {"online", "serial"}
+                and pacing is None
+                and (
+                    args.max_generated_episodes is None
+                    or engine.get_stats()["successful_episodes"]
+                    < args.max_generated_episodes
+                )
+            ):
                 generation = engine.request_refill()
                 barrier = args.updates_per_round // 4 if args.mode == "online" else 0
             for update_index in range(args.updates_per_round):
@@ -810,10 +988,97 @@ def run(args: argparse.Namespace) -> None:
                     end_reason = "wall_time_budget"
                     break
                 update_started = tracker.elapsed_seconds()
+                drain_usage()
+                if args.defer_evaluation and engine is not None:
+                    completed_generation = engine.get_stats()["completed_generation"]
+                    if completed_generation > last_saved_generation:
+                        if pending_ids:
+                            if args.train_device.startswith("cuda:"):
+                                torch.cuda.synchronize(args.train_device)
+                            for ids in pending_ids:
+                                tracker.record_update(tracker.elapsed_seconds(), ids)
+                            pending_ids.clear()
+                        last_saved_generation = completed_generation
+                        generation_path = (
+                            args.output
+                            / f"generation_{completed_generation}_step_{step}.pt"
+                        )
+                        save_training_checkpoint(
+                            generation_path, model, optimizer, step, args, source_run
+                        )
+                        tracker.record_checkpoint(str(generation_path))
+                        generation_checkpoint_paths.append(generation_path)
+                        deferred_checkpoints.append(
+                            (
+                                generation_path,
+                                f"generation_{completed_generation}_publication_dev",
+                            )
+                        )
+                if pacing is not None:
+                    blocked_started = None
+                    while True:
+                        drain_usage()
+                        publication = engine.get_stats()
+                        pending = (
+                            publication["requested_generation"]
+                            > publication["completed_generation"]
+                        )
+                        room = (
+                            publication["successful_episodes"]
+                            < args.max_generated_episodes
+                        )
+                        if not pending and room and pacing.should_refill():
+                            requested_at = time.monotonic()
+                            pacing.request(engine.request_refill(), requested_at)
+                            pending = True
+                        if pacing.can_update:
+                            break
+                        if not pending and not room:
+                            # Generation completion is published after its final
+                            # events. Drain again after observing terminal state
+                            # so a concurrent final publication cannot lose credits.
+                            drain_usage()
+                            if pacing.can_update:
+                                break
+                            end_reason = "usage_budget"
+                            break
+                        if (
+                            args.wall_time_budget
+                            and tracker.elapsed_seconds() >= args.wall_time_budget
+                        ):
+                            end_reason = "wall_time_budget"
+                            break
+                        if engine.state is not OnlineDataEngineState.READY:
+                            # Surface the original worker failure immediately.
+                            engine.sample_batch_with_context(
+                                1, 2, args.prediction_horizon
+                            )
+                        if blocked_started is None:
+                            blocked_started = tracker.elapsed_seconds()
+                        time.sleep(0.02)
+                    throttle_ended = tracker.elapsed_seconds()
+                    tracker.record_interval(
+                        "usage_throttle",
+                        throttle_ended if blocked_started is None else blocked_started,
+                        throttle_ended,
+                    )
+                    if end_reason in {"usage_budget", "wall_time_budget"}:
+                        break
                 if barrier is not None and update_index == barrier:
                     before = tracker.elapsed_seconds()
                     try:
-                        _wait(engine, generation, args, tracker)
+                        if usage is None:
+                            _wait(engine, generation, args, tracker)
+                        else:
+                            while (
+                                engine.get_stats()["completed_generation"] < generation
+                            ):
+                                drain_usage()
+                                _timeout(args, tracker)
+                                if engine.state is not OnlineDataEngineState.READY:
+                                    engine.wait_for_generation(generation, timeout=0.1)
+                                time.sleep(0.02)
+                            drain_usage()
                     finally:
                         tracker.record_interval(
                             "data_wait", before, tracker.elapsed_seconds()
@@ -827,29 +1092,22 @@ def run(args: argparse.Namespace) -> None:
                     end_reason = "wall_time_budget"
                     break
                 service_started = tracker.elapsed_seconds()
-                if corpus is not None:
-                    before = tracker.elapsed_seconds()
-                    if chunked:
-                        batch = corpus.sample_context(
-                            args.batch_size,
-                            2,
-                            args.prediction_horizon,
-                            generations=(
-                                [1] if args.mode in {"frozen", "offline-32"} else None
-                            ),
-                        )
-                    elif recurrent:
-                        batch = corpus.sample_histories(
-                            args.batch_size,
-                            generations=(
-                                [1] if args.mode in {"frozen", "offline-32"} else None
-                            ),
-                        )
-                    else:
-                        batch = (
-                            corpus.sample_frame_ids(manifest[train_steps])
-                            if args.mode == "offline-matched"
-                            else corpus.sample_frames(
+                with sampling_rng.scope():
+                    if corpus is not None:
+                        before = tracker.elapsed_seconds()
+                        if chunked:
+                            batch = corpus.sample_context(
+                                args.batch_size,
+                                2,
+                                args.prediction_horizon,
+                                generations=(
+                                    [1]
+                                    if args.mode in {"frozen", "offline-32"}
+                                    else None
+                                ),
+                            )
+                        elif recurrent:
+                            batch = corpus.sample_histories(
                                 args.batch_size,
                                 generations=(
                                     [1]
@@ -857,19 +1115,33 @@ def run(args: argparse.Namespace) -> None:
                                     else None
                                 ),
                             )
+                        else:
+                            batch = (
+                                corpus.sample_frame_ids(manifest[train_steps])
+                                if args.mode == "offline-matched"
+                                else corpus.sample_frames(
+                                    args.batch_size,
+                                    generations=(
+                                        [1]
+                                        if args.mode in {"frozen", "offline-32"}
+                                        else None
+                                    ),
+                                )
+                            )
+                        # Resident tensor indexing/copy is batch service, as in ODS.
+                        # Actual storage loading is timed separately above.
+                        now = tracker.elapsed_seconds()
+                        tracker.record_interval("data_wait", now, now)
+                    else:
+                        batch = _sample(
+                            engine,
+                            args.batch_size,
+                            tracker,
+                            history=recurrent,
+                            chunk_horizon=args.prediction_horizon if chunked else None,
                         )
-                    # Resident tensor indexing/copy is batch service, as in ODS.
-                    # Actual storage loading is timed separately above.
-                    now = tracker.elapsed_seconds()
-                    tracker.record_interval("data_wait", now, now)
-                else:
-                    batch = _sample(
-                        engine,
-                        args.batch_size,
-                        tracker,
-                        history=recurrent,
-                        chunk_horizon=args.prediction_horizon if chunked else None,
-                    )
+                if usage is not None:
+                    usage.sample(batch)
                 obs = batch["observations"].to(args.train_device)
                 actions = batch["actions"].to(args.train_device)
                 tracker.record_interval(
@@ -898,15 +1170,31 @@ def run(args: argparse.Namespace) -> None:
                     model.parameters(), 1, error_if_nonfinite=True
                 )
                 optimizer.step()
+                if usage is not None:
+                    # Publication may happen concurrently; only count finished GPU work.
+                    if args.train_device.startswith("cuda:"):
+                        torch.cuda.synchronize(args.train_device)
+                    completed_target_ids = usage.complete(batch)
+                    if pacing is not None:
+                        pacing.complete(args.batch_size, 0.0)
                 step += 1
                 train_steps += 1
                 target_mask = batch.get("loss_mask", None)
                 supervised_ids = (
-                    batch["frame_ids"]
-                    if target_mask is None
-                    else batch["frame_ids"][target_mask]
+                    completed_target_ids
+                    if usage is not None
+                    else (
+                        batch["frame_ids"]
+                        if target_mask is None
+                        else batch["frame_ids"][target_mask]
+                    )
                 )
-                pending_ids.append(supervised_ids)
+                if usage is None:
+                    pending_ids.append(supervised_ids)
+                else:
+                    # Usage runs synchronize above, so timestamp actual completion
+                    # instead of delaying the first update until a 50-step flush.
+                    tracker.record_update(tracker.elapsed_seconds(), supervised_ids)
                 recent_target_counts.append(len(supervised_ids))
                 if (
                     train_steps % 50 == 0
@@ -962,13 +1250,24 @@ def run(args: argparse.Namespace) -> None:
                             / max(producer_stats["production_seconds"], 1e-9),
                             step,
                         )
+                if pacing is not None:
+                    data_wait = tracker.intervals.get("data_wait", [])[-1:]
+                    wait_seconds = sum(end - begin for begin, end in data_wait)
+                    pacing.observe_rate(
+                        args.batch_size,
+                        tracker.elapsed_seconds() - service_started - wait_seconds,
+                    )
                 if train_steps % args.eval_every == 0 or train_steps == total_updates:
                     checkpoint = args.output / f"step_{step}.pt"
-                    save_checkpoint(
+                    save_training_checkpoint(
                         checkpoint, model, optimizer, step, args, source_run
                     )
                     tracker.record_checkpoint(str(checkpoint))
-                    report = evaluate(checkpoint, f"step_{step}_dev")
+                    if args.defer_evaluation:
+                        deferred_checkpoints.append((checkpoint, f"step_{step}_dev"))
+                        report = initial_report
+                    else:
+                        report = evaluate(checkpoint, f"step_{step}_dev")
                     in_budget = (
                         not args.wall_time_budget
                         or tracker.elapsed_seconds() <= args.wall_time_budget
@@ -992,11 +1291,36 @@ def run(args: argparse.Namespace) -> None:
                         )
                     )
                     print(
-                        f"step={step} success={report['success_rate']:.1%} lift={report['lift_rate']:.1%} elapsed={tracker.elapsed_seconds():.1f}s",
+                        (
+                            f"step={step} evaluation=deferred elapsed={tracker.elapsed_seconds():.1f}s"
+                            if args.defer_evaluation
+                            else f"step={step} success={report['success_rate']:.1%} lift={report['lift_rate']:.1%} elapsed={tracker.elapsed_seconds():.1f}s"
+                        ),
                         flush=True,
                     )
-            if end_reason == "wall_time_budget":
+            if end_reason in {"wall_time_budget", "usage_budget"}:
                 break
+        if args.defer_evaluation:
+            if pending_ids:
+                if args.train_device.startswith("cuda:"):
+                    torch.cuda.synchronize(args.train_device)
+                for ids in pending_ids:
+                    tracker.record_update(tracker.elapsed_seconds(), ids)
+                pending_ids.clear()
+            latest_path = args.output / f"step_{step}.pt"
+            if latest_path != baseline and not latest_path.exists():
+                save_training_checkpoint(
+                    latest_path, model, optimizer, step, args, source_run
+                )
+                tracker.record_checkpoint(str(latest_path))
+                deferred_checkpoints.append((latest_path, f"step_{step}_dev"))
+            if latest_path != baseline:
+                deferred_checkpoints = [
+                    (path, name)
+                    for path, name in deferred_checkpoints
+                    if path != latest_path
+                ]
+                deferred_checkpoints.append((latest_path, f"step_{step}_dev"))
         # Cover loop bookkeeping, logging and checkpoint I/O too. Interval union
         # avoids counting per-update measurements twice; evaluation is removed
         # by EfficiencyTracker rather than omitted from the wall-clock window.
@@ -1057,6 +1381,77 @@ def run(args: argparse.Namespace) -> None:
             )
         if engine is not None:
             stats = engine.get_stats()
+        drain_usage()
+        if usage is not None:
+            (args.output / "usage.json").write_text(
+                json.dumps(
+                    {
+                        **usage.summary(),
+                        "schedule": None if pacing is None else pacing.summary(),
+                    },
+                    indent=2,
+                )
+            )
+        if args.defer_evaluation:
+            if engine is not None:
+                # Snapshot live availability before env.close clears its final
+                # rollout slice. Keep final producer counters after shutdown.
+                live_valid_frames = engine.get_stats()["valid_frames"]
+                engine.stop()
+                drain_usage()
+                stats = engine.get_stats()
+                stats["valid_frames"] = live_valid_frames
+                engine = None
+            training_finished_seconds = tracker.elapsed_seconds()
+            original_budget = args.wall_time_budget
+            args.wall_time_budget = None
+            all_deferred_checkpoints = deferred_checkpoints
+            deferred_checkpoints = retained_deferred_checkpoints(
+                deferred_checkpoints, generation_checkpoint_paths
+            )
+            panel_manifest: list[dict[str, Any]] = []
+            try:
+                for path, name in deferred_checkpoints:
+                    panel_process = restart_evaluator()
+                    report = evaluate(path, name, scheduled=False)
+                    panel_manifest.append(
+                        {
+                            "checkpoint": str(path),
+                            "name": name,
+                            "seeds": dev_request["seeds"],
+                            **panel_process,
+                        }
+                    )
+                    if path == baseline:
+                        initial_report = report
+                        best_report, best_path = report, path
+                    elif _selection(report) > _selection(best_report):
+                        best_report, best_path = report, path
+                (args.output / "deferred_evaluation.json").write_text(
+                    json.dumps(
+                        {
+                            "training_finished_seconds": training_finished_seconds,
+                            "selection_is_posthoc": True,
+                            "fresh_process_per_panel": True,
+                            "stats_valid_frames_snapshot": "immediately_before_producer_shutdown",
+                            "panels": panel_manifest,
+                            "generation_panels_retained": 3,
+                            "saved_but_not_evaluated": [
+                                str(path)
+                                for path, _ in all_deferred_checkpoints
+                                if path not in {p for p, _ in deferred_checkpoints}
+                            ],
+                            "checkpoints": [
+                                str(path) for path, _ in deferred_checkpoints
+                            ],
+                            "last_checkpoint": str(deferred_checkpoints[-1][0]),
+                            "last_report": report,
+                        },
+                        indent=2,
+                    )
+                )
+            finally:
+                args.wall_time_budget = original_budget
         small_data_report = None
         if args.stage != "showcase" and best_path is not None:
             repeats = 10 if args.stage == "overfit-one" else 5
@@ -1104,8 +1499,18 @@ def run(args: argparse.Namespace) -> None:
             len(tracker.unique_frames) / accepted if accepted else None
         )
         efficiency["data/evicted_unused_fraction"] = None
+        if usage is not None:
+            efficiency["data/evicted_unused_at_run_end_fraction"] = usage.summary()[
+                "evicted_unused_at_run_end_fraction"
+            ]
+        if args.defer_evaluation:
+            efficiency["evaluation_is_posthoc"] = True
+            efficiency["training_finished_seconds"] = training_finished_seconds
         efficiency["data/generation_targets"] = generation_counts
         efficiency["data/age_seconds_p50_p95"] = None
+        efficiency["pipeline/usage_throttle_seconds"] = sum(
+            end - begin for begin, end in tracker.intervals.get("usage_throttle", [])
+        )
         efficiency["cost/data_write_read_bytes"] = None
         efficiency["cost/data_memory_peak_bytes"] = None
         for key, value in efficiency.items():
@@ -1123,7 +1528,7 @@ def run(args: argparse.Namespace) -> None:
         initial_test_rate = None
         test_started = time.monotonic()
         if args.final_test_scenes and best_path is not None:
-            test_base = 90000 if args.smoke else 50000
+            test_base = args.test_seed_base
             test_seeds = list(range(test_base, test_base + args.final_test_scenes))
             paths = [("initial_test", baseline), ("final_test", best_path)]
             target_path = efficiency["efficiency/t80_dev_checkpoint"]
@@ -1256,6 +1661,17 @@ def run(args: argparse.Namespace) -> None:
                 engine.stop()
             except BaseException as error:
                 cleanup_error = error
+        if usage is not None:
+            drain_usage()
+            (args.output / "usage.json").write_text(
+                json.dumps(
+                    {
+                        **usage.summary(),
+                        "schedule": None if pacing is None else pacing.summary(),
+                    },
+                    indent=2,
+                )
+            )
         if writer is not None:
             writer.close()
         if evaluator.pid is not None:
@@ -1282,7 +1698,9 @@ def run(args: argparse.Namespace) -> None:
             json.dumps(
                 {
                     "seconds": time.monotonic() - cleanup_started,
-                    "owned_worker_pids": [evaluator.pid],
+                    "owned_worker_pids": [entry["pid"] for entry in closed_evaluators]
+                    + [evaluator.pid],
+                    "closed_evaluators": closed_evaluators,
                     "evaluator_exitcode": evaluator.exitcode,
                     "engine_cleanup_error": (
                         None if cleanup_error is None else str(cleanup_error)

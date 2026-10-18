@@ -55,6 +55,18 @@
    so DataLoader can collate; batch mode re-samples a dynamic chunk per yield. Multi-worker
    readers sample shared memory independently.
 
+## Optional publication accounting
+
+`OnlineDataEngineCfg.lifecycle_event_capacity` enables a bounded shared log;
+zero preserves the default. The owner calls `drain_lifecycle_events()` for
+ordered publication/eviction identities, eligible anchors and host-monotonic
+timestamps. Capacity must accommodate initial filling before `start()` returns.
+Consumers must drain during active refill and explicit waits: a full event log
+backpressures the producer outside the trajectory-copy lock, and
+`wait_for_generation()` does not drain it. Stop interrupts that backpressure;
+remaining records can be drained after stop/failure. Events are accounting
+metadata, not saved trajectory payloads or replay recovery.
+
 ## Recorded actions and provenance
 
 `action_dim` separates stored action width from robot-state `state_dim`; omitting
@@ -125,7 +137,13 @@ student success or an efficiency advantage. See the task-owned
 [experiment protocol](../../../extensions/embodichain_tasks/configs/tasks/manipulation/pick_place/BENCHMARK.md)
 for comparable acquisition-inclusive/data-ready budgets and
 [task guidance](../../../extensions/embodichain_tasks/configs/tasks/manipulation/pick_place/README.md)
-for commands and measured results.
+for commands and measured results. Optional anchor-budget pacing and compact
+source-use accounting live in `_ods_pick_place_usage.py`; defaults retain fixed
+round scheduling. Deferred evaluation closes the producer before evaluating
+saved policies, so its model-selection results are post hoc and cannot certify
+online time-to-target. See the task-owned
+[tuning protocol](../../../extensions/embodichain_tasks/configs/tasks/manipulation/pick_place/TUNING.md)
+for rate units, protected scene splits and measurement limits.
 
 ## Sampling failure boundary
 

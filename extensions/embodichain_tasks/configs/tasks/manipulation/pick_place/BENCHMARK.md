@@ -5,6 +5,11 @@ UTC. The machine-readable design is [BENCHMARK_PROTOCOL.json](BENCHMARK_PROTOCOL
 which is not a runnable CLI configuration. This replaces the earlier frame-BC
 protocol. It does not claim that the complete experiment has already run.
 
+The [production/reuse tuning study](TUNING.md) is a prerequisite to formal
+execution. Freeze its selected recipe and update all shared learner settings
+consistently across arms before starting this protocol. Tuning results are
+development evidence, not formal comparison results.
+
 The reference implementation is `10a7718e`: the selected online checkpoint
 achieved 99/100, while the checkpoint after refresh achieved 65/100. The task is
 learnable; refresh is not automatically beneficial. The [working evidence](WORKING_SHOWCASE.md)

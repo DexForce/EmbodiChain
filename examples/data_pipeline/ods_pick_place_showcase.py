@@ -446,6 +446,8 @@ def save_checkpoint(
     step: int,
     args: argparse.Namespace,
     run_id: int,
+    *,
+    sampling_rng_state: torch.Tensor | None = None,
 ) -> None:
     if path.exists():
         raise FileExistsError(f"Refusing to overwrite checkpoint {path}")
@@ -479,6 +481,7 @@ def save_checkpoint(
         "config": vars(args),
         "run_id": run_id,
         "torch_rng": torch.get_rng_state(),
+        "sampling_rng": sampling_rng_state,
         "numpy_rng": np.random.get_state(),
         "python_rng": random.getstate(),
         "cuda_rng": (
@@ -875,6 +878,29 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--buffer-size", type=int, default=32)
     p.add_argument("--batch-size", type=int, default=None)
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--producer-seed", type=int, default=None)
+    p.add_argument(
+        "--sampling-seed",
+        type=int,
+        default=None,
+        help="Optional independent CPU sampling RNG; omitted preserves legacy global stream",
+    )
+    p.add_argument("--producer-envs", type=int, default=1)
+    p.add_argument("--dev-seed-base", "--dev-seed-start", type=int, default=20000)
+    p.add_argument("--test-seed-base", type=int, default=None)
+    p.add_argument(
+        "--usage-schedule", choices=("fixed", "anchor_budget"), default="fixed"
+    )
+    p.add_argument("--anchor-reuse", type=float, default=32.0)
+    p.add_argument("--refill-prior-seconds", type=float, default=30.0)
+    p.add_argument("--max-generated-episodes", type=int, default=None)
+    p.add_argument("--usage-statistics", action="store_true")
+    p.add_argument(
+        "--defer-evaluation",
+        action="store_true",
+        help="Save checkpoints while training; evaluate only after producer shutdown",
+    )
+
     p.add_argument("--resume", type=Path)
     p.add_argument("--viser-port", type=int, default=8080)
     p.add_argument("--tensorboard-port", type=int, default=6006)
@@ -923,6 +949,57 @@ def _parse_args() -> argparse.Namespace:
         p.error("Observation noise must be finite and nonnegative")
     if min(args.rounds, args.updates_per_round, args.buffer_size, args.batch_size) < 1:
         p.error("Training counts must be positive")
+    if args.producer_seed is None:
+        args.producer_seed = args.seed
+    if args.test_seed_base is None:
+        args.test_seed_base = 90000 if args.smoke else 50000
+    if args.producer_envs < 1 or args.buffer_size % args.producer_envs:
+        p.error("Producer environments must divide the positive cache capacity")
+    if args.max_generated_episodes is not None and (
+        args.max_generated_episodes < args.buffer_size
+        or args.max_generated_episodes % args.buffer_size
+    ):
+        p.error("Accepted episode budget must be a positive multiple of cache capacity")
+    if not np.isfinite(args.anchor_reuse) or args.anchor_reuse <= 0:
+        p.error("Anchor reuse must be finite and positive")
+    if not np.isfinite(args.refill_prior_seconds) or args.refill_prior_seconds <= 0:
+        p.error("Refill lead-time prior must be finite and positive")
+    if args.usage_schedule == "anchor_budget":
+        args.usage_statistics = True
+        if args.mode != "online" or args.policy != "chunk-pose" or args.offline_data:
+            p.error(
+                "Anchor-budget scheduling currently requires live online chunk-pose"
+            )
+        if args.max_generated_episodes is None:
+            p.error("Anchor-budget runs require --max-generated-episodes")
+        if args.buffer_size < 2 * args.producer_envs:
+            p.error("Anchor-budget cache must hold at least two producer batches")
+        if args.export_data:
+            p.error(
+                "Anchor-budget archival export is not supported; use lifecycle/usage records"
+            )
+    if args.usage_statistics and args.policy not in {
+        "chunk-pose",
+        "mlp-pose",
+        "mlp-joint",
+    }:
+        p.error("Usage accounting supports chunk or frame policies")
+    if args.policy == "gru" and (
+        args.producer_envs != 1
+        or args.sampling_seed is not None
+        or args.producer_seed != args.seed
+        or args.dev_seed_base != 20000
+        or args.test_seed_base != (90000 if args.smoke else 50000)
+        or args.defer_evaluation
+        or args.max_generated_episodes is not None
+    ):
+        p.error("New experiment controls require the nonlegacy training runner")
+    if args.defer_evaluation and args.stage != "showcase":
+        p.error("Deferred evaluation is only supported for the showcase stage")
+    dev = set(range(args.dev_seed_base, args.dev_seed_base + args.dev_scenes))
+    test = set(range(args.test_seed_base, args.test_seed_base + args.final_test_scenes))
+    if dev & test:
+        p.error("Development and final-test seeds must be disjoint")
     return args
 
 

@@ -462,6 +462,7 @@ def test_provenance_stamps_only_valid_frames_and_keeps_episode_frame_indices() -
                     "ods_generation",
                     "ods_frame_index",
                     "ods_accepted_at_ns",
+                    "ods_published_at_monotonic_ns",
                 )
             },
         },
@@ -473,6 +474,7 @@ def test_provenance_stamps_only_valid_frames_and_keeps_episode_frame_indices() -
         generation=2,
         episode_start=5,
         accepted_at_ns=123456789,
+        published_monotonic_ns=987654321,
     )
     valid = buffer["valid"]
     for key in buffer.keys():
@@ -481,6 +483,7 @@ def test_provenance_stamps_only_valid_frames_and_keeps_episode_frame_indices() -
     assert buffer["ods_frame_index"].tolist() == [[0, 1, -1, -1], [0, 1, 2, -1]]
     assert buffer["ods_episode_id"].tolist() == [[5, 5, -1, -1], [6, 6, 6, -1]]
     assert (buffer["ods_accepted_at_ns"][valid] == 123456789).all()
+    assert (buffer["ods_published_at_monotonic_ns"][valid] == 987654321).all()
     assert (buffer["ods_run_id"][valid] == 17).all()
     assert (buffer["ods_generation"][valid] == 2).all()
 
@@ -785,6 +788,7 @@ class TestOnlineDataEngine:
         ):
             buffer[key] = torch.full(buffer.batch_size, -1, dtype=torch.int64)
         lock = context.Array("i", [0, 1])
+        lifecycle_events = engine_module._LifecycleEvents(context, 2, 3)
         original_populate = engine_module._populate_provenance
 
         def stamp_while_locked(*args: object, **kwargs: object) -> None:
@@ -802,6 +806,11 @@ class TestOnlineDataEngine:
         def publish_ready() -> None:
             assert list(lock[:]) == [-1, -1]
             published.append(registry.resolve(buffer["subtask_index"], kind="subtask"))
+            events = lifecycle_events.drain()
+            assert len(events) == 1
+            assert events[0]["kind"] == "published"
+            assert events[0]["eligible_anchors"] == 3
+            assert events[0]["episode_id"] == 0
             close.set()
             fill.set()
 
@@ -830,6 +839,7 @@ class TestOnlineDataEngine:
             ),
             [False],
             registry,
+            lifecycle_events=lifecycle_events,
         )
         assert published == [[["Pick", "Place", "Place"]]]
         assert registry.resolve(buffer["task_index"]) == [["Overall"] * 3]
@@ -1929,3 +1939,220 @@ class TestOnlineDatasetDynamicChunk(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _event_test_record(
+    episode_id: int, *, kind: str = "published"
+) -> dict[str, object]:
+    return {
+        "kind": kind,
+        "run_id": 42,
+        "episode_id": episode_id,
+        "generation": 1 + episode_id // 2,
+        "slot": episode_id % 2,
+        "monotonic_ns": 1234 + episode_id,
+        "valid_frame_indices": [0, 1, 3],
+        "eligible_anchor_indices": [0, 3],
+    }
+
+
+def _publish_lifecycle_in_subprocess(events, close, blocked, finished) -> None:
+    """Exercise real shared memory and interruptible backpressure without a GPU."""
+    for episode in range(4):
+        if not events.wait_for_space(1, close):
+            return
+        events.append(_event_test_record(episode))
+    blocked.set()
+    if events.wait_for_space(1, close):
+        events.append(_event_test_record(4))
+    finished.set()
+
+
+@pytest.mark.parametrize("release_with_close", [False, True])
+def test_lifecycle_ring_subprocess_backpressure_and_shutdown(
+    release_with_close,
+) -> None:
+    context = mp.get_context("forkserver")
+    events = engine_module._LifecycleEvents(context, capacity=4, max_steps=5)
+    close, blocked, finished = (context.Event() for _ in range(3))
+    process = context.Process(
+        target=_publish_lifecycle_in_subprocess,
+        args=(events, close, blocked, finished),
+    )
+    process.start()
+    try:
+        assert blocked.wait(20), "producer did not fill the ring"
+        assert not finished.wait(0.1), "full ring must backpressure, not drop records"
+        if release_with_close:
+            close.set()
+            assert finished.wait(5)
+        initial = events.drain()
+        assert [item["sequence"] for item in initial] == list(range(4))
+        assert [item["episode_id"] for item in initial] == list(range(4))
+        assert all(item["eligible_anchors"] == 2 for item in initial)
+        assert all(item["valid_frame_indices"] == [0, 1, 3] for item in initial)
+        if not release_with_close:
+            assert finished.wait(5)
+            assert events.drain()[0]["sequence"] == 4
+        else:
+            assert events.drain() == []
+        process.join(5)
+        assert process.exitcode == 0
+        assert initial[0]["episode_id"] == 0  # Detached after ring slot reuse.
+    finally:
+        close.set()
+        process.join(5)
+        if process.is_alive():
+            process.terminate()
+            process.join(5)
+
+
+def test_lifecycle_events_owner_only_and_drain_after_stop() -> None:
+    engine = _make_fake_engine()
+    assert engine.drain_lifecycle_events() == []
+    engine._lifecycle_events = engine_module._LifecycleEvents(
+        engine._mp_ctx, capacity=4, max_steps=5
+    )
+    engine._lifecycle_events.append(_event_test_record(1))
+    engine._set_state(OnlineDataEngineState.STOPPED)
+    assert engine.drain_lifecycle_events()[0]["episode_id"] == 1
+    engine._owner_pid = -1
+    with pytest.raises(RuntimeError, match="owner"):
+        engine.drain_lifecycle_events()
+    engine._owner_pid = os.getpid()
+
+
+@pytest.mark.parametrize("capacity", [-1, 1, 3, True, 1.5])
+def test_lifecycle_capacity_rejects_inadequate_initial_fill_storage(capacity) -> None:
+    with pytest.raises(ValueError, match="lifecycle_event_capacity"):
+        OnlineDataEngine(
+            OnlineDataEngineCfg(buffer_size=2, lifecycle_event_capacity=capacity)
+        )
+
+
+def test_publication_event_distinguishes_valid_frames_from_eligible_anchors() -> None:
+    row = TensorDict(
+        {
+            "valid": torch.tensor([True, False, True, True]),
+            "continuity_id": torch.tensor([0, -1, -1, 2]),
+        },
+        batch_size=[4],
+    )
+    event = engine_module._publication_event(
+        row, run_id=1, episode_id=2, generation=3, slot=4, monotonic_ns=5
+    )
+    assert event["valid_frame_indices"] == [0, 2, 3]
+    assert event["eligible_anchor_indices"] == [0, 3]
+
+
+def test_worker_lifecycle_publication_and_eviction_use_distinct_episode_ids(
+    monkeypatch,
+) -> None:
+    """Run the real producer loop with a CPU-only environment adapter."""
+    context = mp.get_context("forkserver")
+    buffer = TensorDict(
+        {
+            "valid": torch.ones(1, 4, dtype=torch.bool),
+            "continuity_id": torch.zeros(1, 4, dtype=torch.int64),
+        },
+        batch_size=[1, 4],
+    )
+    lock = context.Array("i", [0, 1])
+    fill, close = context.Event(), context.Event()
+    fill.set()
+    events = engine_module._LifecycleEvents(context, capacity=2, max_steps=4)
+    initialized = MagicMock()
+    initialized.is_set.side_effect = [False, True]
+    collected = []
+
+    def initialize() -> None:
+        collected.extend(events.drain())
+        fill.set()
+
+    initialized.set.side_effect = initialize
+    env = MagicMock()
+    config = SimpleNamespace(
+        num_envs=1,
+        sim_cfg=SimpleNamespace(
+            headless=True,
+            render_cfg=SimpleNamespace(renderer=None),
+            gpu_id=0,
+            device=None,
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules, "gymnasium", SimpleNamespace(make=lambda **kwargs: env)
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "embodichain.lab.gym.utils.gym_utils",
+        SimpleNamespace(
+            config_to_cfg=lambda *args, **kwargs: config, get_manager_modules=lambda: []
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "embodichain.lab.gym.utils.registration",
+        SimpleNamespace(discover_task_packages=lambda: []),
+    )
+    calls = 0
+
+    def execute(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            # Successful shorter replacement must report only its valid frames.
+            buffer["valid"][0, 2:] = False
+            close.set()
+            fill.set()
+        return SimpleNamespace(completed=True, all_success=True)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "embodichain.lab.gym.envs.demo",
+        SimpleNamespace(execute_demo_episode=execute),
+    )
+    monkeypatch.delenv("EMBODICHAIN_SIM_EXIT_PROCESS", raising=False)
+    engine_module._run_sim_worker(
+        OnlineDataEngineCfg(gym_config={"id": "Fake-v1", "num_envs": 1}),
+        buffer,
+        lock,
+        fill,
+        initialized,
+        close,
+        context.Array("B", engine_module._ERROR_BUFFER_SIZE),
+        context.Value("i", 0),
+        context.Event(),
+        context.Value("i", 0),
+        [False],
+        progress=engine_module._ProducerProgress(context),
+        run_id=42,
+        lifecycle_events=events,
+    )
+    collected.extend(events.drain())
+    assert [event["kind"] for event in collected] == [
+        "published",
+        "evicted",
+        "published",
+    ]
+    assert [event["episode_id"] for event in collected] == [0, 0, 1]
+    assert [event["generation"] for event in collected] == [1, 1, 2]
+    assert [event["valid_frames"] for event in collected] == [4, 4, 2]
+    assert [event["sequence"] for event in collected] == [0, 1, 2]
+    assert (
+        collected[0]["monotonic_ns"]
+        <= collected[1]["monotonic_ns"]
+        <= collected[2]["monotonic_ns"]
+    )
+    assert list(lock[:]) == [-1, -1]
+    env.close.assert_called_once()
+
+
+def test_lifecycle_capacity_accounts_for_initial_overlapping_write_window() -> None:
+    # C=5, P=4 publishes 8 episodes and evicts 3 even before start returns.
+    with pytest.raises(ValueError, match="initial-fill"):
+        OnlineDataEngine(
+            OnlineDataEngineCfg(
+                buffer_size=5, gym_config={"num_envs": 4}, lifecycle_event_capacity=10
+            )
+        )

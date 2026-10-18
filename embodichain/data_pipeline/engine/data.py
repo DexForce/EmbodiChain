@@ -257,8 +257,17 @@ class OnlineDataEngineCfg:
 
     include_provenance: bool = False
     """Include numeric run/episode/generation IDs, episode frame indices, and
-    successful-publication Unix timestamps in nanoseconds. Invalid frames use
+    successful-publication Unix and host-monotonic timestamps in nanoseconds. Invalid frames use
     ``-1`` for every provenance field."""
+
+    lifecycle_event_capacity: int = 0
+    """Optional bounded publication/eviction log; zero disables logging.
+
+    When enabled, capacity must fit twice ``buffer_size`` and all initial-fill
+    records (including overlapping final-batch evictions). The owner
+    must drain events while refilling; a full log backpressures the producer
+    outside the trajectory-copy lock. Stop interrupts this wait.
+    """
 
     action_semantics: Literal["expert_controller_command", "policy_request"] = (
         "expert_controller_command"
@@ -312,6 +321,117 @@ class _ProducerProgress:
     def add(self, index: int, value: float) -> None:
         with self.values.get_lock():
             self.values[index] += value
+
+
+class _LifecycleEvents:
+    """Single-producer bounded shared log without multiprocessing feeder threads.
+
+    Storage is O(capacity * max_episode_steps), with two byte masks per event.
+    Condition ownership protects both the ring cursors and the complete record;
+    the consumer never acquires the trajectory-copy lock.
+    """
+
+    _FIELDS = (
+        "sequence",
+        "kind_code",
+        "run_id",
+        "episode_id",
+        "generation",
+        "slot",
+        "monotonic_ns",
+    )
+
+    def __init__(self, context: object, capacity: int, max_steps: int) -> None:
+        self.capacity = capacity
+        self.max_steps = max_steps
+        self.condition = context.Condition()
+        self.cursors = context.Array("q", [0, 0], lock=False)
+        self.records = context.Array("q", capacity * len(self._FIELDS), lock=False)
+        self.masks = context.Array("B", capacity * max_steps * 2, lock=False)
+
+    def wait_for_space(self, count: int, close_signal: MpEvent) -> bool:
+        """Wait outside the copy lock, returning False on cooperative shutdown."""
+        with self.condition:
+            while self.cursors[1] - self.cursors[0] + count > self.capacity:
+                if close_signal.is_set():
+                    return False
+                self.condition.wait(timeout=0.05)
+            return not close_signal.is_set()
+
+    def append(self, event: dict[str, object]) -> None:
+        """Publish one already-reserved event, failing rather than dropping it."""
+        with self.condition:
+            head, tail = self.cursors[:]
+            if tail - head >= self.capacity:
+                raise RuntimeError("ODS lifecycle event capacity exhausted")
+            slot = tail % self.capacity
+            record = [tail, int(event["kind"] == "published")]
+            record.extend(int(event[key]) for key in self._FIELDS[2:])
+            offset = slot * len(self._FIELDS)
+            self.records[offset : offset + len(record)] = record
+            offset = slot * self.max_steps * 2
+            masks = bytearray(self.max_steps * 2)
+            for index in event["valid_frame_indices"]:
+                masks[index] = 1
+            for index in event["eligible_anchor_indices"]:
+                masks[self.max_steps + index] = 1
+            self.masks[offset : offset + len(masks)] = masks
+            self.cursors[1] = tail + 1
+            self.condition.notify_all()
+
+    def drain(self) -> list[dict[str, object]]:
+        """Copy pending records and release their bounded slots atomically."""
+        result = []
+        with self.condition:
+            head, tail = self.cursors[:]
+            for sequence in range(head, tail):
+                slot = sequence % self.capacity
+                offset = slot * len(self._FIELDS)
+                event = dict(
+                    zip(self._FIELDS, self.records[offset : offset + len(self._FIELDS)])
+                )
+                event["kind"] = "published" if event.pop("kind_code") else "evicted"
+                offset = slot * self.max_steps * 2
+                masks = self.masks[offset : offset + self.max_steps * 2]
+                event["valid_frame_indices"] = [
+                    i for i, value in enumerate(masks[: self.max_steps]) if value
+                ]
+                event["eligible_anchor_indices"] = [
+                    i for i, value in enumerate(masks[self.max_steps :]) if value
+                ]
+                event["valid_frames"] = len(event["valid_frame_indices"])
+                event["eligible_anchors"] = len(event["eligible_anchor_indices"])
+                result.append(event)
+            self.cursors[0] = tail
+            self.condition.notify_all()
+        return result
+
+
+def _publication_event(
+    row: TensorDict,
+    *,
+    run_id: int,
+    episode_id: int,
+    generation: int,
+    slot: int,
+    monotonic_ns: int,
+) -> dict[str, object]:
+    """Describe every valid frame and every chunk-context eligible anchor."""
+    valid = row["valid"].bool()
+    continuity = row.get("continuity_id", torch.zeros_like(valid, dtype=torch.int64))
+    return {
+        "kind": "published",
+        "run_id": run_id,
+        "episode_id": episode_id,
+        "generation": generation,
+        "slot": slot,
+        "monotonic_ns": monotonic_ns,
+        "valid_frame_indices": valid.nonzero().flatten().tolist(),
+        "eligible_anchor_indices": (valid & (continuity >= 0))
+        .nonzero()
+        .flatten()
+        .tolist(),
+    }
 
 
 def _validate_worker_dimensions(env: object, cfg: OnlineDataEngineCfg) -> None:
@@ -435,6 +555,7 @@ def _populate_provenance(
     generation: int,
     episode_start: int,
     accepted_at_ns: int,
+    published_monotonic_ns: int | None = None,
 ) -> None:
     """Stamp accepted rows while the producer still owns the publication lock."""
     valid = buffer["valid"].bool()
@@ -452,6 +573,14 @@ def _populate_provenance(
     ):
         buffer[key].fill_(-1)
         buffer[key][valid] = value[valid] if isinstance(value, torch.Tensor) else value
+
+    if "ods_published_at_monotonic_ns" in buffer.keys():
+        buffer["ods_published_at_monotonic_ns"].fill_(-1)
+        buffer["ods_published_at_monotonic_ns"][valid] = (
+            time.monotonic_ns()
+            if published_monotonic_ns is None
+            else published_monotonic_ns
+        )
 
 
 def _apply_worker_simulation_overrides(
@@ -498,6 +627,7 @@ def _run_sim_worker(
     language_registry: SharedLanguageRegistry | None = None,
     progress: _ProducerProgress | None = None,
     run_id: int = 0,
+    lifecycle_events: _LifecycleEvents | None = None,
 ) -> None:
     """Simulation subprocess entry point.
 
@@ -571,6 +701,7 @@ def _run_sim_worker(
 
     # --- Main loop: wait for fill signal, then fill the entire buffer -------
     accepted_episodes = 0
+    slot_events: dict[int, dict[str, object]] = {}
     try:
         while True:
             fill_signal.wait()
@@ -607,6 +738,29 @@ def _run_sim_worker(
                 with lock_index.get_lock():
                     write_start = lock_index[0]
                     write_end = lock_index[1]
+                if lifecycle_events is not None:
+                    # Reserve for old-row eviction plus successful publication.
+                    # Only this worker produces events, so space cannot shrink.
+                    required = (
+                        write_end
+                        - write_start
+                        + sum(
+                            slot in slot_events
+                            for slot in range(write_start, write_end)
+                        )
+                    )
+                    if not lifecycle_events.wait_for_space(required, close_signal):
+                        return
+                    for slot in range(write_start, write_end):
+                        old_event = slot_events.pop(slot, None)
+                        if old_event is not None:
+                            lifecycle_events.append(
+                                {
+                                    **old_event,
+                                    "kind": "evicted",
+                                    "monotonic_ns": time.monotonic_ns(),
+                                }
+                            )
                 tmp_buffer = shared_buffer[write_start:write_end, :]
                 result = None
                 for attempt in range(1, cfg.max_generation_attempts + 1):
@@ -680,6 +834,7 @@ def _run_sim_worker(
                 # been copied. Publishing the next write window therefore
                 # cannot race a sample that selected rows under the old mask.
                 with lock_index.get_lock():
+                    published_monotonic_ns = time.monotonic_ns()
                     if cfg.include_provenance:
                         _populate_provenance(
                             tmp_buffer,
@@ -687,7 +842,20 @@ def _run_sim_worker(
                             generation=generation,
                             episode_start=episode_start,
                             accepted_at_ns=time.time_ns(),
+                            published_monotonic_ns=published_monotonic_ns,
                         )
+                    if lifecycle_events is not None:
+                        for row_index in range(len(tmp_buffer)):
+                            event = _publication_event(
+                                tmp_buffer[row_index],
+                                run_id=run_id,
+                                episode_id=episode_start + row_index,
+                                generation=generation,
+                                slot=write_start + row_index,
+                                monotonic_ns=published_monotonic_ns,
+                            )
+                            lifecycle_events.append(event)
+                            slot_events[write_start + row_index] = event
                     lock_index[0] = next_start
                     lock_index[1] = next_end
 
@@ -740,6 +908,7 @@ def _sim_worker_fn(
     language_registry: SharedLanguageRegistry | None = None,
     progress: _ProducerProgress | None = None,
     run_id: int = 0,
+    lifecycle_events: _LifecycleEvents | None = None,
 ) -> None:
     """Run the simulation worker and publish a stable exception envelope.
 
@@ -763,7 +932,11 @@ def _sim_worker_fn(
             state_value,
             error_reported,
         )
-        if progress is not None:
+        if lifecycle_events is not None:
+            _run_sim_worker(
+                *worker_args, language_registry, progress, run_id, lifecycle_events
+            )
+        elif progress is not None:
             _run_sim_worker(*worker_args, language_registry, progress, run_id)
         elif language_registry is None:
             _run_sim_worker(*worker_args)
@@ -850,6 +1023,24 @@ class OnlineDataEngine:
             type(cfg.action_dim) is not int or cfg.action_dim < 1
         ):
             raise ValueError("action_dim must be a positive integer or None")
+        if type(cfg.lifecycle_event_capacity) is not int or (
+            cfg.lifecycle_event_capacity != 0
+            and cfg.lifecycle_event_capacity < 2 * cfg.buffer_size
+        ):
+            raise ValueError(
+                "lifecycle_event_capacity must be zero or at least 2 * buffer_size"
+            )
+        if cfg.lifecycle_event_capacity:
+            parallel = cfg.gym_config.get("num_envs", 1)
+            # A non-divisible final write window overlaps earlier rows. Its
+            # otherwise invisible initial evictions must fit before start returns.
+            initial_records = (
+                2 * math.ceil(cfg.buffer_size / parallel) * parallel - cfg.buffer_size
+            )
+            if cfg.lifecycle_event_capacity < initial_records:
+                raise ValueError(
+                    "lifecycle_event_capacity cannot hold initial-fill events"
+                )
         self.run_id = uuid.uuid4().int & ((1 << 63) - 1)
 
         if cfg.max_generation_attempts < 1:
@@ -895,6 +1086,15 @@ class OnlineDataEngine:
         # Use a spawn context to avoid forking unsafe runtime state.
         self._mp_ctx = mp.get_context("forkserver")
         self._progress = _ProducerProgress(self._mp_ctx)
+        self._lifecycle_events = (
+            _LifecycleEvents(
+                self._mp_ctx,
+                cfg.lifecycle_event_capacity,
+                self.shared_buffer.batch_size[1],
+            )
+            if cfg.lifecycle_event_capacity
+            else None
+        )
         self._language_registry = SharedLanguageRegistry(
             cfg.language_buffer_bytes, context=self._mp_ctx
         )
@@ -965,6 +1165,7 @@ class OnlineDataEngine:
                         getattr(self, "_language_registry", None),
                         getattr(self, "_progress", None),
                         getattr(self, "run_id", 0),
+                        getattr(self, "_lifecycle_events", None),
                     ),
                     # Some planners create their own process pool. A daemonic
                     # producer would make those nested workers illegal.
@@ -1227,6 +1428,7 @@ class OnlineDataEngine:
                 "ods_generation",
                 "ods_frame_index",
                 "ods_accepted_at_ns",
+                "ods_published_at_monotonic_ns",
             ):
                 shared_td[key] = torch.full(
                     shared_td.batch_size, -1, dtype=torch.int64, device=shared_td.device
@@ -1671,6 +1873,32 @@ class OnlineDataEngine:
                     f"ODS generation {generation} was not published in {timeout}s"
                 )
             self._close_signal.wait(min(0.05, max(0.0, deadline - time.monotonic())))
+
+    def drain_lifecycle_events(self) -> list[dict[str, object]]:
+        """Return and remove pending publication/eviction records in order.
+
+        Owner-only, including after stop or failure, so diagnostics are not lost.
+        Disabled logging returns an empty list. Each record contains ``kind``,
+        ``sequence``, ``run_id``, ``episode_id``, ``generation``, ``slot``,
+        ``monotonic_ns``, ``valid_frame_indices``, ``eligible_anchor_indices``,
+        ``valid_frames`` and ``eligible_anchors``. Eligible anchors refer to
+        episode-mode context sampling (valid frames with nonnegative continuity).
+        This is a host-local monotonic clock, not a wall-clock timestamp.
+
+        Drain regularly while producing, including during owner-side waits.
+        ``wait_for_generation`` does not consume these records and may time out
+        if an enabled log is full. Records are detached from later row reuse.
+
+        Returns:
+            Detached lifecycle records in publication order, or an empty list
+            when logging is disabled or no records are pending.
+
+        Raises:
+            RuntimeError: If called outside the engine's owner process.
+        """
+        self._require_owner_process("drain_lifecycle_events")
+        events = getattr(self, "_lifecycle_events", None)
+        return [] if events is None else events.drain()
 
     def get_stats(self) -> dict[str, int | float]:
         """Return a detached snapshot of production, consumption and valid rows.
