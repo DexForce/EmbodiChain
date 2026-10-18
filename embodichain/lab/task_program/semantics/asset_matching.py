@@ -285,12 +285,19 @@ def resolve_asset_set(
         raise ValueError("Candidate roles must exactly match requirement roles.")
 
     rejected: list[AssetRejection] = []
+    detail_count = 0
     truncated = False
 
     def record(rejection: AssetRejection) -> None:
-        # Diagnostics are bounded independently of candidate pool/search size.
-        if len(rejected) < 100:
-            rejected.append(rejection)
+        nonlocal detail_count
+        # Bound candidate details separately from per-role and budget summaries.
+        # Summaries have no asset ID and occur at most twice per role plus once
+        # for a stopped search, so they cannot grow with rejected combinations.
+        if rejection.asset_id is not None:
+            if detail_count >= 100:
+                return
+            detail_count += 1
+        rejected.append(rejection)
 
     pools: dict[str, list[PreparedAsset]] = {}
     for role, requirement in sorted(requirements.roles.items()):

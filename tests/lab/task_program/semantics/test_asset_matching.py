@@ -334,3 +334,43 @@ def test_duplicate_content_with_different_preparation_provenance_is_stable():
     first = resolve_asset_set(_requirements(), {"source": [asset, other_source]})
     second = resolve_asset_set(_requirements(), {"source": [other_source, asset]})
     assert first.to_dict() == second.to_dict()
+
+
+def test_rejection_detail_limit_preserves_empty_role_summary():
+    requirements = AssetRequirements(
+        {
+            "a": AssetRoleRequirement("source_a", AssetQuery("cup")),
+            "z": AssetRoleRequirement("source_z", AssetQuery("cup")),
+        }
+    )
+    candidates = {
+        "a": [
+            *[_asset(f"wrong-{i}", category="bottle") for i in range(100)],
+            _asset("valid"),
+        ],
+        "z": [],
+    }
+    with pytest.raises(AssetResolutionError) as caught:
+        resolve_asset_set(requirements, candidates, max_candidates_per_role=101)
+    errors = caught.value.rejections
+    assert sum(item.code == "category_mismatch" for item in errors) == 100
+    assert any(item.role == "z" and item.code == "no_candidates" for item in errors)
+
+
+def test_rejection_detail_limit_preserves_search_budget_summary():
+    candidates = {
+        "source": [_asset(f"source-{i}", size=0.2) for i in range(20)],
+        "target": [
+            _asset(
+                f"target-{i}",
+                category="tray",
+                container=Bounds3D((0, 0, 0), (0.05, 0.05, 0.05)),
+            )
+            for i in range(10)
+        ],
+    }
+    with pytest.raises(AssetResolutionError) as caught:
+        resolve_asset_set(_pair_requirements(), candidates, max_search_nodes=150)
+    assert caught.value.budget_exhausted
+    assert len([item for item in caught.value.rejections if item.asset_id]) <= 100
+    assert any(item.code == "search_budget" for item in caught.value.rejections)
