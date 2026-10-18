@@ -73,7 +73,90 @@ def _arrays(frame_ids: torch.Tensor) -> Iterable[tuple[tuple[int, int], np.ndarr
                 yield (int(run), int(episode)), values
 
 
+class _FrameCountBlock:
+    """Compact rows for at most 256 nearby source IDs, independent of ID magnitude."""
+
+    def __init__(self) -> None:
+        self.slots = np.full(256, -1, dtype=np.int64)
+        self.offsets: list[int] = []
+        self.values = np.zeros((0, 0), dtype=np.int64)
+
+    def add(
+        self,
+        run: int,
+        block: int,
+        rows: np.ndarray,
+        storage: dict[tuple[int, int], np.ndarray],
+    ) -> None:
+        offsets = rows[:, 1] % 256
+        slots = self.slots[offsets]
+        missing = slots < 0
+        if missing.any():
+            for offset in np.unique(offsets[missing]).tolist():
+                self.slots[offset] = len(self.offsets)
+                self.offsets.append(offset)
+            slots = self.slots[offsets]
+        width = int(rows[:, 2].max()) + 1
+        if len(self.offsets) > len(self.values) or width > self.values.shape[1]:
+            # Geometric row capacity and 64-frame width increments bound spare
+            # memory. Sparse billion-scale IDs receive only their touched block.
+            capacity = 1 << (len(self.offsets) - 1).bit_length()
+            width = max(self.values.shape[1], ((width + 63) // 64) * 64)
+            values = np.zeros((capacity, width), dtype=np.int64)
+            values[: len(self.values), : self.values.shape[1]] = self.values
+            self.values = values
+            for slot, offset in enumerate(self.offsets):
+                storage[(run, block * 256 + offset)] = values[slot]
+        elif missing.any():
+            for offset in np.unique(offsets[missing]).tolist():
+                storage[(run, block * 256 + offset)] = self.values[self.slots[offset]]
+        width = self.values.shape[1]
+        # Duplicate-aware integer scatter touches only sampled cells. Unlike a
+        # dense bincount it does not zero a full block for sparse anchor/history
+        # updates, and does not allocate a second block-sized temporary.
+        np.add.at(self.values.reshape(-1), slots * width + rows[:, 2], 1)
+
+
+class _BlockedFrameCounts(dict[tuple[int, int], np.ndarray]):
+    """Exact dictionary-compatible counters with batched integer block updates.
+
+    Public values remain source-frame arrays. Updating an established block
+    avoids one Python loop and dictionary lookup per source. Allocations depend
+    on observed sources and frame extents, never the largest run/episode ID.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._blocks: dict[tuple[int, int], _FrameCountBlock] = {}
+
+    def add_tensor(self, ids: torch.Tensor) -> None:
+        if ids.dtype != torch.int64 or ids.shape[-1:] != (3,):
+            raise ValueError("Expected int64 frame identities [..., 3]")
+        rows = ids.detach().reshape(-1, 3).cpu().numpy()
+        if not len(rows):
+            return
+        if np.any(rows < 0):
+            raise ValueError("Padding must be masked before accounting")
+        runs = (
+            [rows[0, 0]] if np.all(rows[:, 0] == rows[0, 0]) else np.unique(rows[:, 0])
+        )
+        for run in runs:
+            run_rows = rows if len(runs) == 1 else rows[rows[:, 0] == run]
+            blocks = run_rows[:, 1] // 256
+            unique = [blocks[0]] if np.all(blocks == blocks[0]) else np.unique(blocks)
+            for block in unique:
+                selected = run_rows if len(unique) == 1 else run_rows[blocks == block]
+                key = (int(run), int(block))
+                counter = self._blocks.get(key)
+                if counter is None:
+                    counter = self._blocks[key] = _FrameCountBlock()
+                counter.add(*key, selected, self)
+
+
 def _add(storage: dict[tuple[int, int], np.ndarray], ids: torch.Tensor) -> None:
+    if isinstance(storage, _BlockedFrameCounts):
+        storage.add_tensor(ids)
+        return
     for key, values in _arrays(ids):
         previous = storage.get(key)
         if previous is None:
@@ -266,16 +349,36 @@ class UsageTracker:
     not claim to reconstruct instantaneous optimizer counts at eviction time.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, episode_capacity_hint: int | None = None) -> None:
+        """Select one exact backend from the concurrently eligible source capacity.
+
+        The default and small-capacity path retain the original dictionary
+        counters. A hint of at least 64 enables blocked counters, based on the
+        measured CPU benefit for large resident corpora. The hint changes only
+        storage/update cost, never counts or sampling. It is not a hard limit;
+        this tracker does not migrate backends as publications accumulate.
+        """
+        if episode_capacity_hint is not None and (
+            type(episode_capacity_hint) is not int or episode_capacity_hint < 1
+        ):
+            raise ValueError("episode_capacity_hint must be a positive integer or None")
+        blocked = episode_capacity_hint is not None and episode_capacity_hint >= 64
+        self._counter_backend = "blocked" if blocked else "dict"
+        counter = _BlockedFrameCounts if blocked else dict
         self.events: list[dict[str, Any]] = []
         self.episodes: dict[tuple[int, int], dict[str, Any]] = {}
-        self.sampled: dict[tuple[int, int], np.ndarray] = {}
-        self.anchors: dict[tuple[int, int], np.ndarray] = {}
-        self.targets: dict[tuple[int, int], np.ndarray] = {}
-        self.history: dict[tuple[int, int], np.ndarray] = {}
+        self.sampled: dict[tuple[int, int], np.ndarray] = counter()
+        self.anchors: dict[tuple[int, int], np.ndarray] = counter()
+        self.targets: dict[tuple[int, int], np.ndarray] = counter()
+        self.history: dict[tuple[int, int], np.ndarray] = counter()
         self.first_sample_ns: dict[tuple[int, int], int] = {}
         self.age_histogram: dict[int, int] = {}
         self._pending_ages: list[tuple[tuple[int, int], int, int]] = []
+
+    @property
+    def counter_backend(self) -> str:
+        """Return the fixed exact-accounting backend selected at construction."""
+        return self._counter_backend
 
     def lifecycle(self, events: list[dict[str, Any]]) -> None:
         for event in events:

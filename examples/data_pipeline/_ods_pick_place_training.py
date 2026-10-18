@@ -681,7 +681,11 @@ def run(args: argparse.Namespace) -> None:
     writer = None
     tensorboard = None
     stats = None
-    usage = UsageTracker() if args.usage_statistics else None
+    usage = (
+        UsageTracker(episode_capacity_hint=args.buffer_size)
+        if args.usage_statistics
+        else None
+    )
     if usage is not None:
         tracker.unique_frames = CompactFrameSet(usage.targets, accumulate=False)
     pacing = None
@@ -1019,6 +1023,13 @@ def run(args: argparse.Namespace) -> None:
                 args.offline_sample_budget, args.offline_sample_hard_limit
             )
         if corpus is not None and usage is not None and not usage.episodes:
+            eligible = corpus.valid
+            if args.mode in {"frozen", "offline-32"} and corpus.generations is not None:
+                eligible = eligible & (corpus.generations == 1)
+            usage = UsageTracker(
+                episode_capacity_hint=max(1, int(eligible.any(dim=1).sum()))
+            )
+            tracker.unique_frames = CompactFrameSet(usage.targets, accumulate=False)
             for row in range(len(corpus.valid)):
                 frames = torch.where(corpus.valid[row])[0]
                 if not len(frames):
@@ -1797,6 +1808,7 @@ def run(args: argparse.Namespace) -> None:
                 json.dumps(
                     {
                         **usage_report,
+                        "counter_backend": usage.counter_backend,
                         "availability_scope": (
                             "resident_corpus_load"
                             if corpus is not None
@@ -2141,6 +2153,7 @@ def run(args: argparse.Namespace) -> None:
                 json.dumps(
                     {
                         **usage.summary(),
+                        "counter_backend": usage.counter_backend,
                         "availability_scope": (
                             "resident_corpus_load"
                             if corpus is not None

@@ -40,7 +40,11 @@ def collect_lerobot(
     record_interval: Callable[[str, float, float], None],
     generation_timeout: float = 1800.0,
 ) -> dict[str, Any]:
-    """Overlap the next generation with a bounded writer; retain only one snapshot.
+    """Overlap generations with a bounded writer using cache-sized snapshots.
+
+    The caller may retain the initial snapshot for normalization while this
+    collector holds the current one. Numeric staging scales with cache capacity
+    and the bounded writer queue, rather than total collected episodes.
 
     The caller owns engine shutdown and the common launch clock. Initial fill is
     already complete. No learner samples or intermediate numeric file are used.

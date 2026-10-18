@@ -1,0 +1,101 @@
+{
+  "status": "correctness_passed_strict_performance_gate_incomplete",
+  "comparison": [
+    {
+      "variant": "Original",
+      "resident_episodes": 32,
+      "p50_overhead": -0.005685686267195678,
+      "p95_overhead": -0.009856949375238844,
+      "mean_overhead": 0.0028462291787532124,
+      "five_percent_p50_p95_gate": true
+    },
+    {
+      "variant": "Original",
+      "resident_episodes": 256,
+      "p50_overhead": 0.12993077428383892,
+      "p95_overhead": 0.13553713858076533,
+      "mean_overhead": 0.12732361168481465,
+      "five_percent_p50_p95_gate": false
+    },
+    {
+      "variant": "Candidate 1: dense block accumulation",
+      "resident_episodes": 32,
+      "p50_overhead": 0.044008157574440876,
+      "p95_overhead": 0.02295022743759878,
+      "mean_overhead": 0.042504921860472056,
+      "five_percent_p50_p95_gate": true
+    },
+    {
+      "variant": "Candidate 1: dense block accumulation",
+      "resident_episodes": 256,
+      "p50_overhead": 0.06545749050992544,
+      "p95_overhead": 0.0888573540171047,
+      "mean_overhead": 0.06579187579362245,
+      "five_percent_p50_p95_gate": false
+    },
+    {
+      "variant": "Candidate 2: duplicate-aware integer scatter",
+      "resident_episodes": 32,
+      "p50_overhead": 0.0416077025249908,
+      "p95_overhead": 0.06428151357785783,
+      "mean_overhead": 0.04021437860550292,
+      "five_percent_p50_p95_gate": false
+    },
+    {
+      "variant": "Candidate 2: duplicate-aware integer scatter",
+      "resident_episodes": 256,
+      "p50_overhead": 0.033201833471979914,
+      "p95_overhead": 0.015910481334003634,
+      "mean_overhead": 0.03215234770536246,
+      "five_percent_p50_p95_gate": true
+    },
+    {
+      "variant": "Fixed capacity hint: dict below64, blocked otherwise",
+      "resident_episodes": 32,
+      "selected_backend": "dict",
+      "p50_overhead": 0.051272263926348094,
+      "p95_overhead": 0.04685347208027091,
+      "mean_overhead": 0.050746220674389164,
+      "five_percent_p50_p95_gate": false
+    },
+    {
+      "variant": "Fixed capacity hint: dict below64, blocked otherwise",
+      "resident_episodes": 256,
+      "selected_backend": "blocked",
+      "p50_overhead": 0.0357727660916507,
+      "p95_overhead": 0.03923594332575986,
+      "mean_overhead": 0.035385595386278945,
+      "five_percent_p50_p95_gate": true
+    }
+  ],
+  "cross_revision_parity": {
+    "32": {
+      "input_sha256": true,
+      "target_ids_sha256": true,
+      "final_model_sha256": true,
+      "final_optimizer_sha256": true,
+      "final_rng_sha256": true
+    },
+    "256": {
+      "input_sha256": true,
+      "target_ids_sha256": true,
+      "final_model_sha256": true,
+      "final_optimizer_sha256": true,
+      "final_rng_sha256": true
+    }
+  },
+  "focused_tests_passed": 84,
+  "randomized_reference_comparisons": 960,
+  "source_unchanged_during_profiles": true,
+  "sdk_unchanged_during_profiles": true,
+  "resource_sampler_included": false,
+  "no_further_retries_planned": true,
+  "final_source_unchanged_during_profile": true,
+  "final_sdk_unchanged_during_profile": true,
+  "backend_api": "UsageTracker(*, episode_capacity_hint: int | None = None); counter_backend read-only property; default/<64 dict, >=64 blocked; chosen once; no dynamic migration",
+  "capacity_cutoff_evidence": "CPU 16/32/64/128/256 p50 block/dict ratios0.880/0.875/0.687/0.534/0.418; cutoff64 conservatively preserves original small-capacity path and selects first measured size with >25% CPU gain",
+  "final_profile": "/tmp/ods-offline-accounting-audit/consumer-selected-backends/results.json",
+  "integration_focused_tests_passed": 133,
+  "pilot_source_revision": "3cd6379a092f8106f08ea6073f13bec9a4bd6f63",
+  "integration_review": "independent_read_only_no_actionable_findings"
+}
