@@ -260,10 +260,9 @@ topics:
   - embodichain/learning/__init__.py
   - embodichain/learning/layers/
   - embodichain/learning/models/
-  - examples/learning/differentiable_ik/train.py
   watch_paths: [embodichain/compute/kinematics/, embodichain/learning/layers/,
     embodichain/learning/models/, embodichain/learning/__init__.py,
-    tests/compute/kinematics/, tests/learning/layers/, examples/learning/differentiable_ik/]
+    tests/compute/kinematics/, tests/learning/layers/]
   related_topics: [ik-solvers, rl-learning]
   status: active
 - id: rl-learning
@@ -284,8 +283,9 @@ topics:
   - embodichain/learning/rl/normalization.py
   - embodichain/learning/rl/utils/config.py
   - embodichain/learning/rl/algo/
+  - embodichain/learning/models/
   - extensions/embodichain_tasks/configs/tasks/
-  watch_paths: [embodichain/learning/rl/, extensions/embodichain_tasks/configs/tasks/, tests/learning/]
+  watch_paths: [embodichain/learning/rl/, embodichain/learning/models/, extensions/embodichain_tasks/configs/tasks/, tests/learning/]
   related_topics: [simulation-system, env-framework, manager-functor, configclass-pattern]
   status: active
 - id: differentiable-env

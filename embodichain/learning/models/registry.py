@@ -29,7 +29,6 @@ from .actor_critic import ActorCritic
 from .actor_only import ActorOnly
 from .policy import Policy
 from .mlp import MLP
-from .normalizer import EmpiricalNormalizer
 
 # In-module policy registry
 _POLICY_REGISTRY: Dict[str, Type[Policy]] = {}
@@ -224,15 +223,10 @@ register_policy("actor_critic", ActorCritic)
 register_policy("actor_only", ActorOnly)
 
 __all__ = [
-    "ActorCritic",
-    "ActorOnly",
     "register_policy",
     "get_registered_policy_names",
     "build_policy",
     "build_mlp_from_cfg",
     "get_policy_class",
     "resolve_policy_obs_groups",
-    "Policy",
-    "MLP",
-    "EmpiricalNormalizer",
 ]

@@ -8,10 +8,11 @@ These modules do not import learning or simulation. `SerialChainKinematics`
 returns TCP poses and geometric Jacobians from one FK pass, retaining dJ/dq.
 
 `learning/layers/` owns `KinematicsLayer` and `DifferentiableIKLayer` Torch
-module interfaces. `learning/models/` owns the shared MLP; historical
-`learning.rl.models` imports preserve class identity. Policy interfaces and
-registries remain in `learning/rl/models`. Learning roots load exports on demand
-so standalone layers and lightweight APG do not load simulation.
+module interfaces. `learning/models/` owns MLP, policy interfaces, actor-critic
+models, normalization, and policy registration/builders. The registry is
+`learning/models/registry.py`; callers import models from `embodichain.learning.models`.
+Model exports load on demand so standalone MLP/layers do not load RL, TensorDict
+or simulation. RL algorithms and trainers consume these models.
 
 Training, task-parameter optimization and the differentiable benchmark call
 `DifferentiableIKLayer` directly. Use `torch.no_grad()` for forward-only inference.
@@ -39,12 +40,9 @@ another outstanding graph's intermediates.
 
 ## Training and validation
 
-`examples/learning/differentiable_ik/train.py` is an unregistered Franka research
-example. It fits synthetic tracking transitions, freezes model parameters and
-uses the existing complete-rollout APG trainer. The model is not physical dynamics.
-Frozen parameters must not imply a no-grad forward: gradients still propagate
-through model inputs. Formal task deployments belong to the task extension.
-See [RL learning](../rl-learning/rl-learning.md) for trainer/collector lifecycle.
+Model and layer callers own task losses and optimization. Formal task deployments
+belong to the task extension. See [RL learning](../rl-learning/rl-learning.md)
+for trainer/collector lifecycle.
 
 Tests live under `tests/compute/kinematics/` and `tests/learning/layers/`.
 Validate FK, dJ/dq, full IK and recurrent-state gradients separately; include

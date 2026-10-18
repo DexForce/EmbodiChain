@@ -74,20 +74,11 @@ Only first-order input gradients are supported as a public contract. DLS is a
 local solver, not a guarantee of global reachability. Failed solves return the last
 iterate and differentiable residuals rather than substituting the seed.
 
-## Training and measurement
+## Measurement
 
 ```bash
-python -m examples.learning.differentiable_ik.train --device cuda
-python -m examples.learning.differentiable_ik.train --device cpu --batch-size 8 --horizon 3 --ik-iterations 4 --updates 20
 python -m scripts.benchmark.robotics.kinematic_solver.run_benchmark -s differentiable
 ```
-
-The example first fits a small MLP to synthetic joint-tracking transitions, then
-freezes its parameters and trains an actor using the existing complete-rollout APG
-trainer. It is not a physical Franka dynamics model. Frozen model forward calls
-remain in grad mode so policy gradients propagate through its inputs. State becomes
-the next IK seed without detaching inside the rollout. Outputs include held-out
-metrics, trainer checkpoint, state-model weights and IK settings.
 
 The benchmark measures forward, forward+backward, FK/Jacobian and DLS components on
 identical local and distant Franka targets. FEP and PytorchSolver are forward-only

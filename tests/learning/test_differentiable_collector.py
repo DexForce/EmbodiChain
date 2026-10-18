@@ -27,7 +27,7 @@ from gymnasium.spaces import Box
 from tensordict import TensorDict
 
 from embodichain.learning.rl.collector import DifferentiableCollector
-from embodichain.learning.rl.models import ActorOnly
+from embodichain.learning.models import ActorOnly
 
 
 class _LinearDifferentiableEnv:

@@ -116,11 +116,8 @@ Collectors
 Policy Models
 -------------
 
-.. automodule:: embodichain.learning.rl.models
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :no-index:
+Policy implementations and registration live in
+:doc:`embodichain.learning.models`.
 
 Runtime Reconstruction
 ----------------------

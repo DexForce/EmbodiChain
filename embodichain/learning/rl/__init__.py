@@ -16,7 +16,7 @@
 
 """On-policy reinforcement learning pipeline.
 
-Algorithms (PPO/GRPO), rollout buffers, collectors, policy/model builders, and the training entry point; rollout data flows as ``TensorDict`` objects.
+Algorithms (PPO/GRPO), rollout buffers, collectors, and the training entry point; rollout data flows as ``TensorDict`` objects.
 """
 
 from __future__ import annotations
@@ -28,7 +28,6 @@ from typing import Any
 _LAZY_EXPORTS = {
     "algo": ("algo", None),
     "buffer": ("buffer", None),
-    "models": ("models", None),
     "utils": ("utils", None),
     "DifferentiableTrainer": ("differentiable_trainer", "DifferentiableTrainer"),
     "DifferentiableTrainerCfg": ("differentiable_trainer", "DifferentiableTrainerCfg"),
@@ -78,6 +77,5 @@ __all__ = [
     "stratified_rollout_value",
     "algo",
     "buffer",
-    "models",
     "utils",
 ]

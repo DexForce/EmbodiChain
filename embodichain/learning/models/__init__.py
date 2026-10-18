@@ -14,10 +14,45 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Trainable neural components shared by learning algorithms."""
+"""Learning models and policy construction, loaded on demand."""
 
 from __future__ import annotations
 
-from .mlp import MLP
+from importlib import import_module
+from typing import Any
 
-__all__ = ["MLP"]
+__all__ = [
+    "ActorCritic",
+    "ActorOnly",
+    "register_policy",
+    "get_registered_policy_names",
+    "build_policy",
+    "build_mlp_from_cfg",
+    "get_policy_class",
+    "resolve_policy_obs_groups",
+    "Policy",
+    "MLP",
+    "EmpiricalNormalizer",
+]
+
+_EXPORT_MODULES = {
+    "ActorCritic": "actor_critic",
+    "ActorOnly": "actor_only",
+    "Policy": "policy",
+    "MLP": "mlp",
+    "EmpiricalNormalizer": "normalizer",
+    "register_policy": "registry",
+    "get_registered_policy_names": "registry",
+    "build_policy": "registry",
+    "build_mlp_from_cfg": "registry",
+    "get_policy_class": "registry",
+    "resolve_policy_obs_groups": "registry",
+}
+
+
+def __getattr__(name: str) -> Any:
+    if name not in _EXPORT_MODULES:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(f"{__name__}.{_EXPORT_MODULES[name]}"), name)
+    globals()[name] = value
+    return value

@@ -186,7 +186,7 @@ def test_cuda_parity_and_no_device_synchronization(dtype):
         torch.testing.assert_close(a, b.cpu(), atol=2e-5, rtol=2e-4)
 
 
-def test_apg_import_boundary_and_mlp_compatibility():
+def test_apg_import_boundary_and_model_registry():
     script = """
 import importlib.abc, sys
 class Block(importlib.abc.MetaPathFinder):
@@ -196,10 +196,11 @@ class Block(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, Block())
 from embodichain.learning.rl import DifferentiableTrainer, DifferentiableTrainerCfg
 from embodichain.learning.rl.algo import APG
-from embodichain.learning.models import MLP
-from embodichain.learning.rl.models import MLP as Legacy
-from embodichain.learning.rl.models.mlp import MLP as LegacyModule
-assert MLP is Legacy is LegacyModule
+from embodichain.learning.models import ActorOnly, ActorCritic, MLP, get_policy_class
+from embodichain.learning.models.registry import get_policy_class as registry_lookup
+assert get_policy_class is registry_lookup
+assert get_policy_class("actor_only") is ActorOnly
+assert get_policy_class("actor_critic") is ActorCritic
 """
     result = subprocess.run(
         [sys.executable, "-c", script], capture_output=True, text=True

@@ -25,7 +25,7 @@ from tensordict import TensorDict
 from embodichain.learning.rl.algo import PPO, PPOCfg, compute_gae
 from embodichain.learning.rl.buffer import RolloutBuffer
 from embodichain.learning.rl.collector import SyncCollector
-from embodichain.learning.rl.models import (
+from embodichain.learning.models import (
     ActorCritic,
     EmpiricalNormalizer,
     build_policy,

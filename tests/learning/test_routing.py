@@ -21,7 +21,7 @@ import torch.nn as nn
 
 from embodichain.learning.rl.algo import APG, APGCfg, PPO, PPOCfg, RolloutKind
 from embodichain.learning.rl.differentiable_trainer import DifferentiableTrainer
-from embodichain.learning.rl.models import ActorCritic, ActorOnly
+from embodichain.learning.models import ActorCritic, ActorOnly
 from embodichain.learning.rl.routing import get_trainer_class
 from embodichain.learning.rl.utils.trainer import Trainer
 

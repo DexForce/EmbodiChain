@@ -29,7 +29,7 @@ import torch
 import wandb
 from torch.utils.tensorboard import SummaryWriter
 
-from embodichain.learning.rl.models import get_registered_policy_names
+from embodichain.learning.models import get_registered_policy_names
 from embodichain.learning.rl.policy_evaluation.manifest import (
     write_run_manifest,
 )

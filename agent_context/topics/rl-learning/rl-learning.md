@@ -9,7 +9,7 @@
 | Standalone evaluation | `embodichain/learning/rl/policy_evaluation/cli.py`; local RUN/checkpoint, pretrained bundle or external Profile |
 | Programmatic training | `embodichain/learning/rl/train.py` → `train_from_config()` |
 | Algorithm registry | `embodichain/learning/rl/algo/__init__.py` |
-| Policy registry | `embodichain/learning/rl/models/__init__.py` |
+| Policy registry | `embodichain/learning/models/__init__.py` |
 | Lightweight env registry | `embodichain/learning/rl/env.py` |
 | Standard trainer | `embodichain/learning/rl/utils/trainer.py` → `Trainer` |
 | Differentiable trainer | `embodichain/learning/rl/differentiable_trainer.py` |
@@ -168,10 +168,10 @@ the complete-rollout safety and normalization contracts.
 | PPO, GRPO, APG implementations | `algo/ppo.py`, `algo/grpo.py`, `algo/apg.py` |
 | Standard rollout storage and views | `buffer/` |
 | Standard and differentiable collection | `collector/` |
-| Policy interface, actor-critic, actor-only, MLP builder | `models/`; shared MLP implementation in `learning/models/` |
+| Policy interface, actor-critic, actor-only, MLP builder | `learning/models/` |
 | Running observation statistics | `normalization.py` |
 | Batched action-adjoint stabilization | `gradients.py` |
-| Actor and critic observation statistics | `models/normalizer.py` |
+| Actor and critic observation statistics | `learning/models/normalizer.py` |
 | Standard collect/update loop | `utils/trainer.py` |
 | Differentiable TBPTT/update loop | `differentiable_trainer.py` |
 | Shared completed-episode evaluation | `evaluation.py` |
@@ -222,8 +222,9 @@ Validate changes with `tests/learning/rl/policy_evaluation/test_viewer.py` and
 an actual native Viewer run. User controls and recording are described in the
 [policy evaluation guide](../../../docs/source/guides/policy_evaluation.md).
 
-Cross-algorithm Torch layers and trainable components live beside `rl` under
-`learning/layers` and `learning/models`. See [learning layers](../learning-layers/learning-layers.md)
+Torch layers and models live beside `rl` under `learning/layers` and
+`learning/models`. Policy interfaces, actor networks and their registry are
+owned by `learning/models`; RL runtime/configuration imports them directly. See [learning layers](../learning-layers/learning-layers.md)
 for differentiable IK ownership. Root exports load on demand; importing a
 lightweight APG component must not eagerly load the simulator-backed Trainer.
 

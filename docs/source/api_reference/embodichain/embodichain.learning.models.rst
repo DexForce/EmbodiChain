@@ -1,7 +1,7 @@
-embodichain.learning.rl.models
+embodichain.learning.models
 ==============================
 
-.. automodule:: embodichain.learning.rl.models
+.. automodule:: embodichain.learning.models
 
 Overview
 --------
@@ -9,9 +9,9 @@ Overview
 Policy-network registration and model construction APIs for RL agents. Policies
 implement the :class:`Policy` ABC; the built-in actor-critic variants are
 :class:`ActorCritic` and :class:`ActorOnly`, both built on the :class:`MLP`
-backbone. :func:`build_policy` constructs a policy from a config block, with
-:class:`~embodichain.learning.rl.utils.config.AlgorithmCfg`-style registration
-through :func:`register_policy` / :func:`get_policy_class`.
+backbone. :func:`build_policy` constructs a policy from a config block.
+:func:`register_policy` and :func:`get_policy_class` access the shared policy
+registry.
 
    .. rubric:: Classes
 
@@ -34,7 +34,7 @@ through :func:`register_policy` / :func:`get_policy_class`.
       register_policy
       resolve_policy_obs_groups
 
-.. automodule:: embodichain.learning.rl.models
+.. automodule:: embodichain.learning.models
    :members:
    :undoc-members:
    :show-inheritance:
@@ -44,7 +44,7 @@ Observation normalization
 ``ActorCritic`` can maintain independent actor and critic observation moments.
 The statistics are stored in policy buffers and restored with its checkpoint.
 
-.. currentmodule:: embodichain.learning.rl.models.normalizer
+.. currentmodule:: embodichain.learning.models.normalizer
 
 .. autosummary::
 
@@ -52,3 +52,15 @@ The statistics are stored in policy buffers and restored with its checkpoint.
 
 .. autoclass:: EmpiricalNormalizer
    :no-index:
+
+Registry and builders
+---------------------
+
+.. automodule:: embodichain.learning.models.registry
+   :members:
+
+MLP backbone
+------------
+
+.. automodule:: embodichain.learning.models.mlp
+   :members:

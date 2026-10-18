@@ -43,7 +43,7 @@ from embodichain.learning.rl.collector import (
     DifferentiableRollout,
     DifferentiableTransition,
 )
-from embodichain.learning.rl.models import ActorOnly
+from embodichain.learning.models import ActorOnly
 from embodichain.learning.rl.utils import LRSchedulerCfg, OptimizerCfg
 
 

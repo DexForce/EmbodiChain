@@ -25,7 +25,6 @@ Reinforcement Learning
       algo
       buffer
       collector
-      models
       train
       utils
 
@@ -56,23 +55,12 @@ state, optimizers, and detach boundaries.
 Shared trainable models
 -----------------------
 
-The generic MLP is shared with RL; existing ``learning.rl.models.MLP`` and
-``learning.rl.models.mlp.MLP`` imports refer to the same class. Policy interfaces,
-actor-critic models and policy registration remain owned by ``learning.rl.models``.
-Root learning packages load on demand, so using standalone layers does not load
-RL trainers, simulation, TensorDict, or logging backends.
+``learning.models`` owns MLP, policy interfaces, actor-critic networks,
+observation normalization and the policy registry/builders. Import these APIs
+from ``embodichain.learning.models``. Exports load on demand: using MLP or the
+standalone IK layers does not import RL trainers, simulation or TensorDict.
 
-.. currentmodule:: embodichain.learning.models
+.. toctree::
+   :maxdepth: 1
 
-.. autosummary::
-
-   MLP
-
-.. automodule:: embodichain.learning.models.mlp
-   :members:
-
-.. currentmodule:: embodichain.learning.rl.models.mlp
-
-.. autosummary::
-
-   MLP
+   embodichain.learning.models

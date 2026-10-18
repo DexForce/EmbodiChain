@@ -1,6 +1,8 @@
 # Policy Models
 
-This module contains RL policy networks and related model implementations, supporting various architectures and distributional extensions.
+Policy networks, MLP, normalization and policy registration live under
+`embodichain.learning.models`. RL algorithms and trainers import them from this
+shared learning package.
 
 ## Main Classes and Structure
 
@@ -35,6 +37,8 @@ This module contains RL policy networks and related model implementations, suppo
 
 ## Usage Example
 ```python
+from embodichain.learning.models import build_mlp_from_cfg, build_policy
+
 actor = build_mlp_from_cfg(actor_cfg, obs_dim, action_dim)
 critic = build_mlp_from_cfg(critic_cfg, obs_dim, 1)
 policy = build_policy(

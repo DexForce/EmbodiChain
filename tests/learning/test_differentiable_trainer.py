@@ -33,7 +33,7 @@ from embodichain.learning.rl import (
     stratified_rollout_value,
 )
 from embodichain.learning.rl.algo import APG, APGCfg
-from embodichain.learning.rl.models import ActorOnly
+from embodichain.learning.models import ActorOnly
 from embodichain.learning.rl.utils import LRSchedulerCfg, OptimizerCfg
 
 

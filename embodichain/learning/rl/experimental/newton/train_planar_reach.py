@@ -33,7 +33,7 @@ from embodichain.learning.rl.differentiable_trainer import (
     DifferentiableTrainer,
     DifferentiableTrainerCfg,
 )
-from embodichain.learning.rl.models import ActorOnly, MLP
+from embodichain.learning.models import ActorOnly, MLP
 from embodichain.learning.rl.utils import OptimizerCfg
 from embodichain.utils import configclass
 
