@@ -875,7 +875,7 @@ def _parse_args() -> argparse.Namespace:
     )
     p.add_argument("--rounds", type=int, default=2)
     p.add_argument("--updates-per-round", type=int, default=5000)
-    p.add_argument("--buffer-size", type=int, default=32)
+    p.add_argument("--buffer-size", type=int, default=None)
     p.add_argument("--batch-size", type=int, default=None)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--producer-seed", type=int, default=None)
@@ -885,7 +885,7 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help="Optional independent CPU sampling RNG; omitted preserves legacy global stream",
     )
-    p.add_argument("--producer-envs", type=int, default=1)
+    p.add_argument("--producer-envs", type=int, default=None)
     p.add_argument("--dev-seed-base", "--dev-seed-start", type=int, default=20000)
     p.add_argument("--test-seed-base", type=int, default=None)
     p.add_argument(
@@ -895,6 +895,11 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--refill-prior-seconds", type=float, default=30.0)
     p.add_argument("--max-generated-episodes", type=int, default=None)
     p.add_argument("--usage-statistics", action="store_true")
+    p.add_argument(
+        "--auto-config-input",
+        type=Path,
+        help="Two measured throughputs, reuse profile and runtime/binding metadata JSON",
+    )
     p.add_argument(
         "--defer-evaluation",
         action="store_true",
@@ -909,8 +914,21 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--smoke", action="store_true")
     p.add_argument("--qualification-only", action="store_true")
     args = p.parse_args()
+    if args.auto_config_input is not None:
+        from examples.data_pipeline._ods_pick_place_configuration import (
+            apply_configuration,
+        )
+
+        try:
+            apply_configuration(args)
+        except (TypeError, ValueError, OSError) as error:
+            p.error(str(error))
     if args.batch_size is None:
         args.batch_size = 64 if args.policy.startswith("gru") else 256
+    if args.buffer_size is None:
+        args.buffer_size = 32
+    if args.producer_envs is None:
+        args.producer_envs = 1
     if args.smoke:
         args.rounds, args.updates_per_round, args.buffer_size, args.batch_size = (
             2,

@@ -38,6 +38,7 @@ import psutil
 import torch
 
 from embodichain.data_pipeline.engine.data import (
+    OnlineDataBudgetExhaustedError,
     OnlineDataEngine,
     OnlineDataEngineCfg,
     OnlineDataEngineState,
@@ -319,7 +320,8 @@ def _engine(config: dict[str, Any], args: argparse.Namespace) -> OnlineDataEngin
     config = copy.deepcopy(config)
     config["num_envs"] = args.producer_envs
     config["seed"] = args.producer_seed
-    return OnlineDataEngine(
+    auto_plan = getattr(args, "auto_configuration", {}).get("configuration", {})
+    engine = OnlineDataEngine(
         OnlineDataEngineCfg(
             gym_config=config,
             state_dim=9,
@@ -333,6 +335,8 @@ def _engine(config: dict[str, Any], args: argparse.Namespace) -> OnlineDataEngin
             buffer_device="cpu",
             refill_policy="manual",
             include_provenance=True,
+            episode_sample_budget=auto_plan.get("episode_sample_budget"),
+            episode_sample_hard_limit=auto_plan.get("episode_sample_hard_limit"),
             lifecycle_event_capacity=(
                 2 * args.buffer_size if args.usage_statistics else 0
             ),
@@ -340,6 +344,22 @@ def _engine(config: dict[str, Any], args: argparse.Namespace) -> OnlineDataEngin
             shutdown_timeout=30.0,
         )
     )
+    if auto_plan:
+        actual_bytes = sum(
+            value.numel() * value.element_size()
+            for value in engine.shared_buffer.values(
+                include_nested=True, leaves_only=True
+            )
+        )
+        runtime = args.auto_configuration["input"]["runtime"]
+        memory = runtime.get("cache_memory_bytes")
+        if memory is not None and actual_bytes > memory:
+            engine.stop()
+            raise ValueError(
+                f"Measured ODS payload {actual_bytes} bytes exceeds cache allowance {memory}; recalibrate bytes_per_episode"
+            )
+        args.auto_configuration["measured_buffer_payload_bytes"] = actual_bytes
+    return engine
 
 
 def _schema(ready: dict[str, Any], pose: bool) -> dict[str, Any]:
@@ -410,9 +430,9 @@ def _sample(
             )
             break
         except RuntimeError as error:
-            if (
-                engine.state is not OnlineDataEngineState.READY
-                or "No unlocked valid chunk" not in str(error)
+            if engine.state is not OnlineDataEngineState.READY or (
+                "No unlocked valid chunk" not in str(error)
+                and not isinstance(error, OnlineDataBudgetExhaustedError)
             ):
                 raise
             if blocked is None:
@@ -460,6 +480,12 @@ def run(args: argparse.Namespace) -> None:
             "Exact batch-manifest replay currently supports MLP frames; recurrent offline-full/frozen sampling is supported"
         )
     args.output.mkdir(parents=True, exist_ok=True)
+    auto_report = getattr(args, "auto_configuration", None)
+    auto_plan = None if auto_report is None else auto_report["configuration"]
+    if auto_report is not None:
+        (args.output / "auto_configuration.json").write_text(
+            json.dumps(auto_report, indent=2)
+        )
     for seed_fn in (random.seed, np.random.seed, torch.manual_seed):
         seed_fn(args.seed)
     visible = os.environ.get("CUDA_VISIBLE_DEVICES")
@@ -560,6 +586,9 @@ def run(args: argparse.Namespace) -> None:
         "examples/data_pipeline/_ods_pick_place_lerobot.py",
         "examples/data_pipeline/_ods_pick_place_policy.py",
         "examples/data_pipeline/_ods_pick_place_usage.py",
+        "examples/data_pipeline/_ods_pick_place_configuration.py",
+        "examples/data_pipeline/_ods_pick_place_flow.py",
+        "embodichain/data_pipeline/configuration.py",
         "embodichain/data_pipeline/engine/data.py",
         "embodichain/lab/gym/envs/embodied_env.py",
         "embodichain/lab/gym/envs/base_env.py",
@@ -675,6 +704,16 @@ def run(args: argparse.Namespace) -> None:
             for event in events:
                 pacing.publish(event)
         return events
+
+    recorded_refills: set[int] = set()
+
+    def request_refill() -> int:
+        before = tracker.elapsed_seconds()
+        generation = engine.request_refill()
+        if generation not in recorded_refills:
+            tracker._event("refill_requested", before, generation=generation)
+            recorded_refills.add(generation)
+        return generation
 
     snapshots = []
     batch_ids = []
@@ -813,6 +852,10 @@ def run(args: argparse.Namespace) -> None:
             source_run = 0
         else:
             engine = _engine(config, args)
+            if auto_report is not None:
+                (args.output / "auto_configuration.json").write_text(
+                    json.dumps(auto_report, indent=2)
+                )
             engine.cfg.initialization_timeout = _timeout(args, tracker)
             try:
                 engine.start()
@@ -850,7 +893,7 @@ def run(args: argparse.Namespace) -> None:
                 snapshots.append(initial)
             if args.mode in {"offline-full", "offline-32"}:
                 for _ in range(1, 1 if args.mode == "offline-32" else args.rounds):
-                    generation = engine.request_refill()
+                    generation = request_refill()
                     _wait(engine, generation, args, tracker)
                     drain_usage()
                     snapshots.append(_snapshot(engine))
@@ -1123,6 +1166,7 @@ def run(args: argparse.Namespace) -> None:
         last_saved_generation = 1
         resource_sampler.capture("training_start")
         loop_started = tracker.elapsed_seconds()
+        next_quota_update = time.monotonic()
         for round_index in range(args.rounds):
             model.train()
             generation = 1
@@ -1132,13 +1176,14 @@ def run(args: argparse.Namespace) -> None:
                 and engine is not None
                 and args.mode in {"online", "serial"}
                 and pacing is None
+                and auto_plan is None
                 and (
                     args.max_generated_episodes is None
                     or engine.get_stats()["successful_episodes"]
                     < args.max_generated_episodes
                 )
             ):
-                generation = engine.request_refill()
+                generation = request_refill()
                 barrier = args.updates_per_round // 4 if args.mode == "online" else 0
             for update_index in range(args.updates_per_round):
                 if (
@@ -1191,7 +1236,7 @@ def run(args: argparse.Namespace) -> None:
                         )
                         if not pending and room and pacing.should_refill():
                             requested_at = time.monotonic()
-                            pacing.request(engine.request_refill(), requested_at)
+                            pacing.request(request_refill(), requested_at)
                             pending = True
                         if pacing.can_update:
                             break
@@ -1226,6 +1271,68 @@ def run(args: argparse.Namespace) -> None:
                     )
                     if end_reason in {"usage_budget", "wall_time_budget"}:
                         break
+                if auto_plan is not None:
+                    quota_wait_started = None
+                    while True:
+                        drain_usage()
+                        publication = engine.get_stats()
+                        quota = engine.get_sampling_budget_snapshot()
+                        pending = (
+                            publication["requested_generation"]
+                            > publication["completed_generation"]
+                        )
+                        room = (
+                            publication["successful_episodes"]
+                            < args.max_generated_episodes
+                        )
+                        if (
+                            not pending
+                            and room
+                            and quota["unlocked_remaining_chunks"]
+                            <= auto_plan["refill_remaining_chunks"]
+                        ):
+                            request_refill()
+                            pending = True
+                        if quota["unlocked_remaining_chunks"] >= args.batch_size:
+                            break
+                        if not pending and not room:
+                            end_reason = "usage_budget"
+                            break
+                        if quota_wait_started is None:
+                            quota_wait_started = tracker.elapsed_seconds()
+                        if tracker.elapsed_seconds() - quota_wait_started >= 30:
+                            raise TimeoutError(
+                                "No unlocked trajectory quota for 30 seconds"
+                            )
+                        _timeout(args, tracker)
+                        time.sleep(0.02)
+                    quota_wait_ended = tracker.elapsed_seconds()
+                    tracker.record_interval(
+                        "quota_wait",
+                        (
+                            quota_wait_ended
+                            if quota_wait_started is None
+                            else quota_wait_started
+                        ),
+                        quota_wait_ended,
+                    )
+                    if end_reason == "usage_budget":
+                        break
+                    before_pacing = tracker.elapsed_seconds()
+                    while time.monotonic() < next_quota_update:
+                        drain_usage()
+                        _timeout(args, tracker)
+                        engine.get_sampling_budget_snapshot()
+                        time.sleep(
+                            min(0.02, max(0.0, next_quota_update - time.monotonic()))
+                        )
+                    tracker.record_interval(
+                        "usage_throttle", before_pacing, tracker.elapsed_seconds()
+                    )
+                    next_quota_update = time.monotonic() + args.batch_size / min(
+                        auto_plan["training_chunks_per_second_target"],
+                        auto_plan["active_chunks_per_second_cap"],
+                    )
                 if barrier is not None and update_index == barrier:
                     before = tracker.elapsed_seconds()
                     try:
@@ -1339,6 +1446,10 @@ def run(args: argparse.Namespace) -> None:
                     completed_target_ids = usage.complete(batch)
                     if pacing is not None:
                         pacing.complete(args.batch_size, 0.0)
+                if usage is not None:
+                    tracker.record_interval(
+                        "training_service", service_started, tracker.elapsed_seconds()
+                    )
                 step += 1
                 train_steps += 1
                 target_mask = batch.get("loss_mask", None)
@@ -1531,12 +1642,36 @@ def run(args: argparse.Namespace) -> None:
             )
         if engine is not None:
             stats = engine.get_stats()
+            if auto_plan is not None:
+                (args.output / "sampling_budget.json").write_text(
+                    json.dumps(engine.get_sampling_budget_snapshot(), indent=2)
+                )
         drain_usage()
         if usage is not None:
+            usage_report = usage.summary()
+            if auto_plan is not None:
+                from examples.data_pipeline._ods_pick_place_flow import summarize_flow
+
+                flow = summarize_flow(
+                    monotonic_origin_seconds=tracker.start_monotonic,
+                    intervals=tracker.intervals,
+                    refill_requests=[
+                        e for e in tracker.timeline if e["kind"] == "refill_requested"
+                    ],
+                    episode_records=usage_report["episodes"],
+                    batch_size=args.batch_size,
+                    updates=train_steps,
+                    loop_start=loop_started,
+                    loop_end=tracker.elapsed_seconds(),
+                    buffer_size=args.buffer_size,
+                )
+                (args.output / "flow_measurements.json").write_text(
+                    json.dumps(flow, indent=2)
+                )
             (args.output / "usage.json").write_text(
                 json.dumps(
                     {
-                        **usage.summary(),
+                        **usage_report,
                         "schedule": None if pacing is None else pacing.summary(),
                     },
                     indent=2,
@@ -1675,7 +1810,12 @@ def run(args: argparse.Namespace) -> None:
         (args.output / "efficiency.json").write_text(json.dumps(efficiency, indent=2))
         (args.output / "timeline.json").write_text(
             json.dumps(
-                {"events": tracker.timeline, "intervals": tracker.intervals}, indent=2
+                {
+                    "monotonic_origin_seconds": tracker.start_monotonic,
+                    "events": tracker.timeline,
+                    "intervals": tracker.intervals,
+                },
+                indent=2,
             )
         )
         test_report = None
@@ -1772,7 +1912,12 @@ def run(args: argparse.Namespace) -> None:
         (args.output / "efficiency.json").write_text(json.dumps(efficiency, indent=2))
         (args.output / "timeline.json").write_text(
             json.dumps(
-                {"events": tracker.timeline, "intervals": tracker.intervals}, indent=2
+                {
+                    "monotonic_origin_seconds": tracker.start_monotonic,
+                    "events": tracker.timeline,
+                    "intervals": tracker.intervals,
+                },
+                indent=2,
             )
         )
         (args.output / "summary.json").write_text(

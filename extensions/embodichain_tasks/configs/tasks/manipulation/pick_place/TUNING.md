@@ -5,6 +5,16 @@ Status: implementation and staged experiments in progress, 2026-10-18
 It does not establish a universal optimal configuration or an ODS speed advantage.
 See [initial findings and limitations](TUNING_FINDINGS.md) for measured evidence.
 
+Deliverable clarification: produce a reusable method for configuring ODS from
+measured concurrent production and learning throughput. See the working
+[configuration guide](ODS_CONFIGURATION_GUIDE.md). Existing sweeps provide
+diagnostic evidence; selecting a best tuple is no longer the study's objective.
+The configurator takes generation and learner throughput as its two explicit
+inputs, reads runtime metadata automatically, and derives pipeline settings.
+Per-trajectory chunk selections have a profile-recommended range and a protected
+hard cap. Implement sampler-side quotas before claiming that cap is enforced;
+the current global anchor credits do not provide it.
+
 ## What is controlled
 
 Keep the measured Franka task, revised expert, DLS controller, ChunkBC, 64-step
@@ -67,14 +77,14 @@ Whether this is excessive must be established by physical evaluation.
 3. Live screen C=16/32/64 and r=8/32/128, B256, one screen seed13001, C>=2P.
    Each cell caps production at256 accepted episodes and training at50,000
    updates or90minutes. Include C32 fixed-5,000-update refresh as reference.
-4. Confirm the top two plus reference with new seeds14001/14002/14003. The
-   latest checkpoint must reach80% on100 development scenes in every seed,
-   lose at most5points relative to its development-selected best, and consume
-   at least four generations. Test B64/1024 as secondary sensitivities; an
-   alternative needs the same three-seed confirmation before recommendation.
+4. Validate the configuration method against representative supply-limited,
+   learner-limited and variable-latency conditions, using existing evidence
+   first. Compare predicted and actual rates, waits and exposure. The previously
+   planned top-two/reference three-seed tournament is deferred; it is not a
+   prerequisite for a configuration manual. Task-quality gates remain necessary
+   before making a deployment or formal offline-comparison performance claim.
 
-Before selecting confirmation candidates, run the secondary batch sensitivity
-on the exploratory C32/r8/P8 candidate: B256 control, B64, then B1024, each with
+Run the secondary batch sensitivity at C32/r8/P8: B256 control, B64, then B1024, each with
 256 accepted episodes and screen seed13001. Freeze one source revision and use
 the same GPU with local NUMA CPU affinity for all three. This repeats the B256
 control because the original grid used an earlier reporting revision and its
@@ -158,14 +168,16 @@ This is evidence that a sampling cap also changes optimization opportunity;
 it does not prove high reuse always hurts or that batch32 is optimal. The new
 study records both total supervision and update count and tests live overlap.
 
-## Final deliverable and recommendation gate
+## Final deliverable and validation gate
 
-The final guide must supply measured P/C/B/r ranges, first-fill cost, refill lead
-time, achieved reuse distributions, quality/retention, hardware and source hashes.
-Choose among configurations passing stability first; compare wall time/resource
-cost second. Differences under5% prefer fewer production environments, then a
-smaller cache. If none pass, state that tuning within full replacement has not
-yet produced a stable recommendation; do not relax the task or hide late failure.
+The final guide must explain how to measure concurrent supply and training
+capacity, select a provisional learning-safe reuse range, derive pacing and
+startup budgets, size the cache, and diagnose deviations. Include first-fill
+cost, refill lead time, actual exposure distributions, quality/retention and
+hardware/source identities. Throughput alone cannot determine optimal reuse.
+Validate the rules across operating regimes rather than rank configurations.
+If a method fails to predict behavior or preserve quality, retain that evidence
+and state its applicability limits; do not relax the task or hide late failure.
 
 Publish raw records, failed runs and independent-seed results, not only a winning
 configuration. Formal comparison is re-frozen after tuning. Shared learner

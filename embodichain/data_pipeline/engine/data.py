@@ -45,6 +45,7 @@ __all__ = [
     "OnlineDataEngineCfg",
     "OnlineDataEngineState",
     "OnlineDataWorkerError",
+    "OnlineDataBudgetExhaustedError",
 ]
 
 if TYPE_CHECKING:
@@ -70,6 +71,10 @@ _CODE_TO_STATE = {code: state for state, code in _STATE_TO_CODE.items()}
 
 class OnlineDataWorkerError(RuntimeError):
     """Fallback error for a worker exception that cannot be reconstructed."""
+
+
+class OnlineDataBudgetExhaustedError(RuntimeError):
+    """A complete batch cannot fit eligible unlocked source delivery quotas."""
 
 
 def _add_exception_note(error: BaseException, note: str) -> None:
@@ -260,6 +265,24 @@ class OnlineDataEngineCfg:
     successful-publication Unix and host-monotonic timestamps in nanoseconds. Invalid frames use
     ``-1`` for every provenance field."""
 
+    episode_sample_budget: int | None = None
+    """Maximum delivered chunks assigned to each fresh source episode.
+
+    Each returned batch row costs one, regardless of context length or repeated
+    selection of the same episode. Requires ``episode_sample_hard_limit`` and a
+    CPU shared buffer. None disables per-source quotas without changing sampling.
+    Exhaustion does not itself request a refill; choose manual replenishment or
+    an automatic threshold that can be reached within the assigned quotas.
+    """
+
+    episode_sample_hard_limit: int | None = None
+    """Positive signed-int64 ceiling for ``episode_sample_budget``.
+
+    Both quota fields must be supplied together and budget must not exceed this
+    ceiling. The assigned budget is fixed at engine construction; no source may
+    borrow another source's unused quota or receive more on generation changes.
+    """
+
     lifecycle_event_capacity: int = 0
     """Optional bounded publication/eviction log; zero disables logging.
 
@@ -321,6 +344,122 @@ class _ProducerProgress:
     def add(self, index: int, value: float) -> None:
         with self.values.get_lock():
             self.values[index] += value
+
+
+def _validate_sampling_budget(cfg: OnlineDataEngineCfg) -> None:
+    budget, hard_limit = cfg.episode_sample_budget, cfg.episode_sample_hard_limit
+    if budget is None and hard_limit is None:
+        return
+    if any(
+        type(value) is not int or not 0 < value <= (1 << 63) - 1
+        for value in (budget, hard_limit)
+    ):
+        raise ValueError(
+            "episode_sample_budget and episode_sample_hard_limit must both be positive signed-int64 integers"
+        )
+    if budget > hard_limit:
+        raise ValueError(
+            "episode_sample_budget must not exceed episode_sample_hard_limit"
+        )
+    if torch.device(cfg.buffer_device).type != "cpu":
+        raise ValueError("Per-episode sampling quotas require buffer_device='cpu'")
+
+
+class _EpisodeSamplingBudget:
+    """O(cache rows) shared quota state, guarded by the trajectory-copy lock.
+
+    Source IDs are issued monotonically by this engine's producer. A high-water
+    mark rejects identity reuse even after its previous slot was retired, without
+    retaining an unbounded identity registry. The lifetime delivery counter is
+    independent of row replacement.
+    """
+
+    def __init__(
+        self, context: object, rows: int, budget: int, hard_limit: int, run_id: int
+    ) -> None:
+        self.budget = budget
+        self.hard_limit = hard_limit
+        self.run_id = run_id
+        self.clock_origin_monotonic_ns = time.monotonic_ns()
+        # Per row: immutable episode ID, publication generation, assigned, delivered.
+        self.rows = context.Array("q", [-1, -1, 0, 0] * rows, lock=False)
+        # Largest published episode ID, lifetime delivered chunks.
+        self.meta = context.Array("q", [-1, 0], lock=False)
+
+    def publish(
+        self, slot: int, count: int, episode_start: int, generation: int
+    ) -> None:
+        """Assign fresh identities atomically while the caller holds the copy lock."""
+        if (
+            count < 1
+            or slot < 0
+            or slot + count > len(self.rows) // 4
+            or episode_start <= self.meta[0]
+            or episode_start + count - 1 > (1 << 63) - 1
+            or generation < 1
+        ):
+            raise ValueError(
+                "Sampling quota publication requires fresh monotonic episode identities"
+            )
+        for offset in range(count):
+            index = (slot + offset) * 4
+            self.rows[index : index + 4] = [
+                episode_start + offset,
+                generation,
+                self.budget,
+                0,
+            ]
+        self.meta[0] = episode_start + count - 1
+
+    def remaining(self, row_indices: torch.Tensor) -> torch.Tensor:
+        values = torch.tensor(self.rows[:], dtype=torch.int64).reshape(-1, 4)
+        return (values[:, 2] - values[:, 3])[row_indices]
+
+    def debit(self, row_indices: torch.Tensor) -> None:
+        """Charge all returned batch rows, including duplicate episode selections."""
+        if len(row_indices) > (1 << 63) - 1 - self.meta[1]:
+            raise OverflowError(
+                "Lifetime sampling delivery counter would overflow int64"
+            )
+        counts = torch.bincount(row_indices, minlength=len(self.rows) // 4).tolist()
+        for row, count in enumerate(counts):
+            index = row * 4
+            if self.rows[index + 3] + count > min(
+                self.rows[index + 2], self.hard_limit
+            ):
+                raise RuntimeError(
+                    "Sampling quota reservation exceeded its source budget"
+                )
+        for row, count in enumerate(counts):
+            self.rows[row * 4 + 3] += count
+        self.meta[1] += len(row_indices)
+
+
+def _draw_budgeted_rows(
+    candidate_rows: torch.Tensor, remaining: torch.Tensor, batch_size: int
+) -> torch.Tensor:
+    """Draw episode-uniform rows with depletion, using O(batch + cache) memory.
+
+    Vector proposals retain the normal uniform distribution; exhausted proposals
+    are rejected locally. Quotas are never expanded into one entry per credit.
+    The usual nondepleting batch uses one randint and bincount without a row loop.
+    """
+    available = remaining.tolist()
+    active = [index for index, count in enumerate(available) if count > 0]
+    selected: list[int] = []
+    while len(selected) < batch_size:
+        proposals = torch.randint(len(active), (batch_size - len(selected),))
+        active_tensor = torch.tensor(active, dtype=torch.long)
+        indices = active_tensor[proposals]
+        counts = torch.bincount(indices, minlength=len(available))
+        if not selected and bool((counts <= remaining).all()):
+            return candidate_rows[indices]
+        for index in indices.tolist():
+            if available[index] > 0:
+                selected.append(index)
+                available[index] -= 1
+        active = [index for index, count in enumerate(available) if count > 0]
+    return candidate_rows[torch.tensor(selected, dtype=torch.long)]
 
 
 class _LifecycleEvents:
@@ -628,6 +767,7 @@ def _run_sim_worker(
     progress: _ProducerProgress | None = None,
     run_id: int = 0,
     lifecycle_events: _LifecycleEvents | None = None,
+    sampling_budget: _EpisodeSamplingBudget | None = None,
 ) -> None:
     """Simulation subprocess entry point.
 
@@ -844,6 +984,10 @@ def _run_sim_worker(
                             accepted_at_ns=time.time_ns(),
                             published_monotonic_ns=published_monotonic_ns,
                         )
+                    if sampling_budget is not None:
+                        sampling_budget.publish(
+                            write_start, len(tmp_buffer), episode_start, generation
+                        )
                     if lifecycle_events is not None:
                         for row_index in range(len(tmp_buffer)):
                             event = _publication_event(
@@ -909,6 +1053,7 @@ def _sim_worker_fn(
     progress: _ProducerProgress | None = None,
     run_id: int = 0,
     lifecycle_events: _LifecycleEvents | None = None,
+    sampling_budget: _EpisodeSamplingBudget | None = None,
 ) -> None:
     """Run the simulation worker and publish a stable exception envelope.
 
@@ -932,7 +1077,16 @@ def _sim_worker_fn(
             state_value,
             error_reported,
         )
-        if lifecycle_events is not None:
+        if sampling_budget is not None:
+            _run_sim_worker(
+                *worker_args,
+                language_registry,
+                progress,
+                run_id,
+                lifecycle_events,
+                sampling_budget,
+            )
+        elif lifecycle_events is not None:
             _run_sim_worker(
                 *worker_args, language_registry, progress, run_id, lifecycle_events
             )
@@ -1017,6 +1171,7 @@ class OnlineDataEngine:
         self._forced_shutdown_attempted = False
         self.cfg = cfg
         _validate_recording_config(cfg)
+        _validate_sampling_budget(cfg)
         if cfg.refill_policy not in {"sample_threshold", "manual"}:
             raise ValueError("refill_policy must be 'sample_threshold' or 'manual'")
         if cfg.action_dim is not None and (
@@ -1086,6 +1241,17 @@ class OnlineDataEngine:
         # Use a spawn context to avoid forking unsafe runtime state.
         self._mp_ctx = mp.get_context("forkserver")
         self._progress = _ProducerProgress(self._mp_ctx)
+        self._sampling_budget = (
+            _EpisodeSamplingBudget(
+                self._mp_ctx,
+                self.buffer_size,
+                cfg.episode_sample_budget,
+                cfg.episode_sample_hard_limit,
+                self.run_id,
+            )
+            if cfg.episode_sample_budget is not None
+            else None
+        )
         self._lifecycle_events = (
             _LifecycleEvents(
                 self._mp_ctx,
@@ -1166,6 +1332,7 @@ class OnlineDataEngine:
                         getattr(self, "_progress", None),
                         getattr(self, "run_id", 0),
                         getattr(self, "_lifecycle_events", None),
+                        getattr(self, "_sampling_budget", None),
                     ),
                     # Some planners create their own process pool. A daemonic
                     # producer would make those nested workers illegal.
@@ -1492,6 +1659,8 @@ class OnlineDataEngine:
         Raises:
             ValueError: If an argument is invalid.
             RuntimeError: If no unlocked valid window satisfies the policy.
+            OnlineDataBudgetExhaustedError: If eligible source quotas cannot
+                supply the complete batch. No partial batch is charged.
         """
         return self._sample_batch(batch_size, chunk_size, sampling_mode)
 
@@ -1525,6 +1694,8 @@ class OnlineDataEngine:
         Raises:
             ValueError: If counts or start_probability are invalid.
             RuntimeError: If the engine fails or no eligible window exists.
+            OnlineDataBudgetExhaustedError: If eligible source quotas cannot
+                supply the complete batch. Each returned row costs one chunk.
         """
         if not 0.0 <= start_probability <= 1.0:
             raise ValueError("start_probability must be between zero and one")
@@ -1564,6 +1735,8 @@ class OnlineDataEngine:
         Raises:
             ValueError: If context lengths are not positive integers.
             RuntimeError: If the worker fails or no unlocked valid anchor exists.
+            OnlineDataBudgetExhaustedError: If eligible source quotas cannot
+                supply the complete batch. Each context costs one chunk.
         """
         if any(
             type(n) is not int or n < 1 for n in (history_length, prediction_horizon)
@@ -1680,13 +1853,29 @@ class OnlineDataEngine:
 
             # Preserve the historical episode-uniform sampling distribution:
             # choose an eligible row uniformly, then a valid offset within it.
-            sampled_row_ids = torch.randint(
-                0,
-                candidate_rows.shape[0],
-                (batch_size,),
-                device=candidate_rows.device,
-            )
-            row_indices = candidate_rows[sampled_row_ids]
+            sampling_budget = getattr(self, "_sampling_budget", None)
+            if sampling_budget is None:
+                sampled_row_ids = torch.randint(
+                    0,
+                    candidate_rows.shape[0],
+                    (batch_size,),
+                    device=candidate_rows.device,
+                )
+                row_indices = candidate_rows[sampled_row_ids]
+            else:
+                remaining = sampling_budget.remaining(candidate_rows)
+                if sum(remaining.tolist()) < batch_size:
+                    # A worker error published while waiting on the copy lock
+                    # still takes precedence over ordinary budget exhaustion.
+                    error = self._receive_worker_error()
+                    if error is not None:
+                        raise error
+                    self._ensure_worker_alive()
+                    raise OnlineDataBudgetExhaustedError(
+                        "Eligible unlocked episode quotas cannot supply a complete "
+                        f"batch of {batch_size} chunks; remaining={sum(remaining.tolist())}."
+                    )
+                row_indices = _draw_budgeted_rows(candidate_rows, remaining, batch_size)
             start_indices = torch.multinomial(
                 valid_windows[row_indices].to(dtype=torch.float32),
                 num_samples=1,
@@ -1775,6 +1964,14 @@ class OnlineDataEngine:
                 time_offsets = torch.arange(chunk_size, device=start_indices.device)
                 time_indices = start_indices[:, None] + time_offsets[None, :]
                 result = self.shared_buffer[row_indices[:, None], time_indices].clone()
+
+            if sampling_budget is not None:
+                # Clone and padding must succeed before any quota is spent.
+                # A later optimizer/consumer failure does not refund delivery.
+                error = self._receive_worker_error()
+                if error is not None:
+                    raise error
+                sampling_budget.debit(row_indices)
 
         # Update sample count and conditionally trigger a refill.
         self._trigger_refill_if_needed(batch_size)
@@ -1899,6 +2096,88 @@ class OnlineDataEngine:
         self._require_owner_process("drain_lifecycle_events")
         events = getattr(self, "_lifecycle_events", None)
         return [] if events is None else events.drain()
+
+    def _check_sampling_budget_health(self) -> None:
+        """Surface terminal production errors while retaining stopped audits."""
+        if self.state is OnlineDataEngineState.STOPPED:
+            return
+        error = self._receive_worker_error()
+        if error is not None:
+            raise error
+        if self.state is OnlineDataEngineState.FAILED:
+            if self._worker_error is not None:
+                raise self._worker_error
+            raise OnlineDataWorkerError(
+                "OnlineDataEngine is FAILED without an error envelope"
+            )
+        if self.state is OnlineDataEngineState.READY:
+            self._ensure_worker_alive()
+
+    def get_sampling_budget_snapshot(self) -> dict[str, object]:
+        """Return a detached quota audit under the producer/sampling copy lock.
+
+        ``rows`` describes currently retained source identities and includes
+        ``run_id``, ``episode_id``, ``generation``, ``slot``, ``assigned``,
+        ``delivered``, ``remaining`` and ``locked``. Lifetime
+        ``total_delivered_chunks`` includes retired sources. The unlocked sum
+        covers sources with at least one valid continuity-qualified anchor;
+        a requested chunk length or sampling mode may further restrict eligibility.
+        Known worker failures are propagated; clean STOPPED engines remain
+        auditable. Disabled quotas return empty rows and unavailable counters.
+        """
+        self._check_sampling_budget_health()
+        quota = getattr(self, "_sampling_budget", None)
+        if quota is None:
+            return {
+                "enabled": False,
+                "rows": [],
+                "unlocked_remaining_chunks": None,
+                "total_delivered_chunks": None,
+                "clock_origin_monotonic_ns": None,
+            }
+        with self._lock_index.get_lock():
+            self._check_sampling_budget_health()
+            start, end = self._lock_index[:]
+            valid = self.shared_buffer["valid"].bool()
+            continuity = self.shared_buffer.get("continuity_id", None)
+            eligible = (
+                (valid if continuity is None else valid & (continuity >= 0))
+                .any(-1)
+                .tolist()
+            )
+            rows = []
+            unlocked = 0
+            for slot in range(self.buffer_size):
+                episode_id, generation, assigned, delivered = quota.rows[
+                    slot * 4 : slot * 4 + 4
+                ]
+                if episode_id < 0:
+                    continue
+                locked = start <= slot < end
+                remaining = assigned - delivered
+                rows.append(
+                    {
+                        "run_id": quota.run_id,
+                        "episode_id": episode_id,
+                        "generation": generation,
+                        "slot": slot,
+                        "assigned": assigned,
+                        "delivered": delivered,
+                        "remaining": remaining,
+                        "locked": locked,
+                    }
+                )
+                if not locked and eligible[slot]:
+                    unlocked += remaining
+            return {
+                "enabled": True,
+                "rows": rows,
+                "unlocked_remaining_chunks": unlocked,
+                "total_delivered_chunks": quota.meta[1],
+                "episode_sample_budget": quota.budget,
+                "episode_sample_hard_limit": quota.hard_limit,
+                "clock_origin_monotonic_ns": quota.clock_origin_monotonic_ns,
+            }
 
     def get_stats(self) -> dict[str, int | float]:
         """Return a detached snapshot of production, consumption and valid rows.

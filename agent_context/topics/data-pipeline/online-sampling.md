@@ -67,6 +67,35 @@ backpressures the producer outside the trajectory-copy lock, and
 remaining records can be drained after stop/failure. Events are accounting
 metadata, not saved trajectory payloads or replay recovery.
 
+## Optional per-trajectory sampling budgets
+
+Set both `episode_sample_budget` and `episode_sample_hard_limit` to positive
+integers with budget <= hard limit. Omitting both retains historical sampling.
+Quota mode uses a CPU shared ledger with O(cache rows) storage. The producer
+assigns fresh monotonic episode identities at publication; replacing a slot or
+changing generation cannot refill an old identity's budget. Under the existing
+copy lock, selection excludes exhausted sources and accounts for repeated rows
+inside a batch. Only a successful copied batch debits its full count. Delivered
+chunks remain charged if downstream optimization fails.
+
+`OnlineDataBudgetExhaustedError` distinguishes insufficient unlocked eligible
+quota from no valid windows and terminal worker failure. It is immediate and
+does not partially spend a batch. `get_sampling_budget_snapshot()` returns
+retained identities, budgets, delivered/remaining counts and lifetime delivery;
+clean stopped engines remain auditable. The owner decides when to refill, wait
+with a bound, or stop. The fixed publication budget is not an adaptive replay
+retention policy and does not restore old sources after process restart.
+
+`configuration.py` derives bounded budgets, cache/refill settings and pacing
+targets from measured accepted episodes/s and training chunks/s. It reads an
+explicit qualified/provisional reuse profile and runtime metadata; it does not
+infer scientific bounds or change the measured batch size/concurrency. Memory
+constraints can reduce active consumption rather than raise quotas. Measurement
+helpers preserve units and common monotonic windows. See the task's
+[configuration guide](../../../extensions/embodichain_tasks/configs/tasks/manipulation/pick_place/ODS_CONFIGURATION_GUIDE.md)
+for CLI binding and current limitations. Global anchor-budget pacing remains a
+separate mode and does not provide per-source protection.
+
 ## Recorded actions and provenance
 
 `action_dim` separates stored action width from robot-state `state_dim`; omitting

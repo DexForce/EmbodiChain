@@ -10,6 +10,7 @@ belongs to [data-assets](../data-assets/data-assets.md).
 | Request | Owner |
 |---|---|
 | Online worker and sample selection | `embodichain/data_pipeline/engine/data.py`: `OnlineDataEngine` |
+| Throughput-derived settings and protected reuse profiles | `embodichain/data_pipeline/configuration.py`: `configure_ods`; sampler enforcement in `engine/data.py` |
 | Infinite PyTorch dataset | `embodichain/data_pipeline/datasets/online_data.py`: `OnlineDataset` |
 | PickPlace BC and offline comparisons | `examples/data_pipeline/ods_pick_place_showcase.py`; private training/benchmark helpers alongside it; task-owned physical evidence in `embodichain_tasks.manipulation.pick_place` |
 | Commit/discard/finalization dispatch | `embodichain/lab/gym/envs/managers/dataset_manager.py` |

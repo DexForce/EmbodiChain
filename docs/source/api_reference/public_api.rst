@@ -72,6 +72,59 @@ embodichain.data.assets.solver_assets
 
    download_neural_ik_checkpoint
 
+embodichain.data_pipeline
+------------------------
+
+The configuration submodule derives bounded pipeline settings without starting
+an online worker. Importing the data-pipeline package remains lazy.
+
+.. currentmodule:: embodichain.data_pipeline
+
+.. autosummary::
+
+   configuration
+
+embodichain.data_pipeline.configuration
+--------------------------------------
+
+Configure ODS from measured generation and training capacities. A versioned
+profile bounds selections per trajectory; the planner never promotes provisional
+bounds to qualified ones. Runtime metadata constrains cache storage, refill
+latency and short-window consumption. The online engine and consumer must enforce
+the returned quota and pacing targets. Measurement helpers preserve the units,
+common monotonic window and difference between active and wall-clock rates.
+
+.. currentmodule:: embodichain.data_pipeline.configuration
+
+.. autosummary::
+
+   ODSReuseProfileCfg
+   ODSRuntimeCfg
+   ODSConfiguration
+   configure_ods
+   ODSRateMeasurementCfg
+   ODSThroughputMeasurement
+   measure_ods_throughput
+
+.. autoclass:: ODSReuseProfileCfg
+   :members:
+
+.. autoclass:: ODSRuntimeCfg
+   :members:
+
+.. autoclass:: ODSConfiguration
+   :members:
+
+.. autofunction:: configure_ods
+
+.. autoclass:: ODSRateMeasurementCfg
+   :members:
+
+.. autoclass:: ODSThroughputMeasurement
+   :members:
+
+.. autofunction:: measure_ods_throughput
+
 embodichain.data_pipeline.depth_video
 -------------------------------------
 
