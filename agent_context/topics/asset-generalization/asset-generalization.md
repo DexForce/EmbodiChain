@@ -58,7 +58,7 @@ mesh replacement supports one visual/collision resource and explicit relative
 support/container placement. Both placement objects require declared roles and
 relations. Absolute placement targets, calibrated grasps/axes, local-pose
 overrides, non-unit scale and geometry-specific expansion profiles require
-additional adaptation and are rejected. Independent objectives are preserved,
+explicit supported adaptation; otherwise they are rejected. Independent objectives are preserved,
 not rewritten to make a candidate pass. Container collision must preserve its
 annotated cavity; a default convex hull does not qualify.
 
@@ -98,7 +98,34 @@ acceptance, returned reset requests and close finalization; none substitutes
 for a per-episode persistence receipt. Normal configuration loading does not
 select providers or enable generation.
 
-Example: `examples/gym/asset_generalization/run.py` prepares local cube variants
-and optionally executes native UR5 Pick/Place with independent measured checks.
+Examples: `examples/gym/asset_generalization/run.py` uses direct Cube primitives
+for the UR5 Pick/Place baseline, without asset catalogs.
+`examples/gym/asset_generalization/pour_water.py` exercises actual bottle/cup
+asset replacement and calibrated CobotMagic pouring-motion acceptance.
 Host tests live in `tests/gym/envs/test_asset_generalization.py`; existing scene
 expansion tests remain authoritative for canonical execution and reject gates.
+
+
+## Calibrated bottle/cup pouring
+
+The `pours_into` role relation checks explicit mouth-radius and aperture evidence
+in the descriptor's hashed `provenance.pouring` record. The bottle needs
+`pour_source` and `antipodal_grasp`, the cup needs `container`; matching never
+interprets a whole bottle as an object that must fit inside the cup.
+
+`AssetPourAdaptationCfg`, exported by the materializer, enables one deliberately
+bounded four-segment Pick/Move/Pour/Place adaptation. It requires per-asset mouth
+geometry, a proper object-to-TCP grasp transform tied to the exact embodiment
+profile, and an explicit object-local tilt axis. The adapter recomputes the
+cup-relative staging pose for the existing origin-centered Pour primitive,
+creates the semantic return support, and conservatively updates validators.
+Generic calibration rejection remains in effect outside this declared adapter.
+
+`integrations/simulation/asset_pouring.py` owns `PouringAcceptanceMonitor`.
+Hosts sample real object poses after steps and identify the pour segment. Tilt,
+whole-mouth projection inside the cup aperture, and positive mouth height must
+hold on the same samples. Cup excursions and final bottle return/uprightness
+remain separate checks. Missing evidence rejects; rigid-body geometry does not
+measure liquid transfer. Default example models are explicitly labelled size
+derivatives of existing PourWater assets; external catalogs need their own
+calibration and retain the same matching/materialization/acceptance path.

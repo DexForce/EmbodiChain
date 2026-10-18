@@ -226,3 +226,23 @@ Prepare bounded asset batches, build fresh single-environment task runtimes, exe
 .. autofunction:: embodichain.lab.gym.envs.asset_generalization.prepare_asset_batches
 
 .. autofunction:: embodichain.lab.gym.envs.asset_generalization.collect_asset_batches
+
+
+Calibrated pouring and measured acceptance
+-----------------------------------------
+
+The explicit four-segment pouring adapter reads selected-asset mouth geometry,
+robot-profile-bound grasp calibration and tilt axes. It recomputes staging and
+return targets without relaxing unrelated calibration guards. The measured
+monitor requires simultaneous pose evidence and never certifies fluid transfer.
+
+.. autosummary::
+
+   embodichain.lab.task_program.integrations.asset_materialization.AssetPourAdaptationCfg
+   embodichain.lab.task_program.integrations.simulation.asset_pouring.PouringAcceptanceMonitor
+
+.. autoclass:: embodichain.lab.task_program.integrations.asset_materialization.AssetPourAdaptationCfg
+   :members:
+
+.. autoclass:: embodichain.lab.task_program.integrations.simulation.asset_pouring.PouringAcceptanceMonitor
+   :members:
