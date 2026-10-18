@@ -229,7 +229,7 @@ Prepare bounded asset batches, build fresh single-environment task runtimes, exe
 
 
 Calibrated pouring and measured acceptance
------------------------------------------
+------------------------------------------
 
 The explicit four-segment pouring adapter reads selected-asset mouth geometry,
 robot-profile-bound grasp calibration and tilt axes. It recomputes staging and
