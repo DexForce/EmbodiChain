@@ -57,7 +57,7 @@ Shared trainable models
 
 ``learning.models`` owns general MLPs, feature normalization and MLP configuration
 builders. RL-specific ``Policy``, ``ActorCritic``, ``ActorOnly`` and policy
-registration/builders remain in ``learning.rl.models``. Shared components and
+registration/builders remain in ``learning.rl.policies``. Shared components and
 standalone IK layers do not import RL, simulation or TensorDict.
 
 .. toctree::

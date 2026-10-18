@@ -206,12 +206,18 @@ from embodichain.learning.rl.policies.registry import get_policy_class as regist
 assert get_policy_class is registry_lookup
 assert get_policy_class("actor_only") is ActorOnly
 assert get_policy_class("actor_critic") is ActorCritic
-import importlib.util
 import embodichain.learning.rl as rl
 assert "policies" in rl.__all__ and "models" not in rl.__all__
 assert rl.policies.Policy.__module__ == "embodichain.learning.rl.policies.policy"
 assert ActorCritic.__module__ == "embodichain.learning.rl.policies.actor_critic"
-assert importlib.util.find_spec("embodichain.learning.rl.models") is None
+# Old bytecode directories can remain as empty namespace packages after a
+# checkout; the unsupported public API must still be unavailable.
+try:
+    from embodichain.learning.rl.models import Policy as LegacyPolicy
+except ImportError:
+    pass
+else:
+    raise AssertionError("The removed RL model package must not expose Policy")
 """
     result = subprocess.run(
         [sys.executable, "-c", script], capture_output=True, text=True
