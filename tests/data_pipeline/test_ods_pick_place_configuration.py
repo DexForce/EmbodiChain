@@ -86,6 +86,10 @@ def test_cli_applies_rate_plan_before_cache_and_production_validation(
     assert plan["episode_sample_budget"] == 600
     assert plan["episode_sample_hard_limit"] == 1000
     assert plan["profile_qualified"] is False
+    assert args.auto_configuration["training_budget"]["quota_update_ceiling"] == 75
+    assert (
+        args.auto_configuration["training_budget"]["maximum_additional_updates"] == 75
+    )
 
 
 @pytest.mark.parametrize(

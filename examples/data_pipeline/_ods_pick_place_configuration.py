@@ -101,3 +101,18 @@ def apply_configuration(args: argparse.Namespace) -> None:
     args.auto_configuration = report
     if args.max_generated_episodes is None:
         args.max_generated_episodes = args.buffer_size * args.rounds
+    # This is a finite-data ceiling, not a convergence recommendation. Source
+    # retirement and incomplete final batches can reduce actual updates.
+    quota_updates = (
+        args.max_generated_episodes * plan["episode_sample_budget"] // args.batch_size
+    )
+    requested_updates = args.rounds * args.updates_per_round
+    report["training_budget"] = {
+        "accepted_episode_cap": args.max_generated_episodes,
+        "assigned_chunk_ceiling": args.max_generated_episodes
+        * plan["episode_sample_budget"],
+        "quota_update_ceiling": quota_updates,
+        "requested_update_cap": requested_updates,
+        "maximum_additional_updates": min(quota_updates, requested_updates),
+        "scope": "New-run upper bound; retirement and partial batches reduce it; no learning-quality guarantee",
+    }

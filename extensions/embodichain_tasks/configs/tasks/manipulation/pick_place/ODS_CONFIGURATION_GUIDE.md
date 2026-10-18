@@ -294,3 +294,19 @@ and termination, not learning success. CPU sampler measurements at C32 and B64/
 lock and clone, but are not end-to-end training overhead claims. Full Sphinx
 validation remains blocked by the environment's missing `open3d.cpu` dependency.
 Detailed evidence and limitations: [validation record](ODS_CONFIGURATION_VALIDATION.json).
+
+## 9. Subsequent regime and learning tests
+
+See [the protected-quota test report](ODS_QUOTA_TESTS.md) for the deterministic
+regime matrix, two-seed learning screen and same-seed replication. Rate matching
+and strict caps are engineering properties; sufficient learning remains a
+separate profile qualification. In particular, `floor(N*K/B)` is an upper bound
+on updates from N trajectories, and retirement reduces it. The two throughput
+inputs cannot determine the total work required for convergence.
+
+The learning screen fixes256 accepted trajectories and a generous update cap.
+The generic CLI defaults to cache-size times rounds for production; it is not
+a validated learning budget for every profile. Set the task's explicit production
+budget (divisible by derived cache size), then inspect actual delivered chunks
+and optimizer updates. Never raise source caps merely to compensate for a
+shortfall discovered after data generation stops.
