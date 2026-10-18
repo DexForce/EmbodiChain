@@ -1,7 +1,7 @@
 embodichain.learning.models
 ==============================
 
-.. automodule:: embodichain.learning.models
+.. currentmodule:: embodichain.learning.models
 
 Overview
 --------
@@ -38,6 +38,7 @@ registry.
    :members:
    :undoc-members:
    :show-inheritance:
+
 Observation normalization
 -------------------------
 

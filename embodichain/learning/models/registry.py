@@ -191,14 +191,17 @@ def build_policy(
 
 
 def build_mlp_from_cfg(module_cfg: Dict, in_dim: int, out_dim: int) -> MLP:
-    """Construct an MLP module from a minimal json-like config.
+    """Construct an MLP from a model configuration.
 
-    Expected schema:
-      module_cfg = {
-        "type": "mlp",
-        "hidden_sizes": [256, 256],
-        "activation": "relu",
-      }
+    Args:
+        module_cfg: Mapping with ``type="mlp"`` and ``network_cfg`` containing
+            ``hidden_sizes`` plus optional activation, normalization, dropout
+            and orthogonal-initialization settings.
+        in_dim: Number of input features.
+        out_dim: Number of output features.
+
+    Returns:
+        Configured MLP module.
     """
     if module_cfg.get("type", "").lower() != "mlp":
         raise ValueError("Only 'mlp' type is supported for actor/critic in this setup.")
