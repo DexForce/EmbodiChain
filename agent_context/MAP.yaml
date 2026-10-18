@@ -468,13 +468,14 @@ topics:
 - id: asset-generalization
   title: Asset Generalization
   aliases: [asset generalization, asset provider, 资产泛化, 资产语义匹配]
-  keywords: [AssetDescriptor, PreparedAsset, AssetProvider, AssetRequirements, AssetRoleRequirement, ResolvedAssetSet, resolve_asset_set, materialize_asset_deployment, asset_requirements]
+  keywords: [AssetDescriptor, PreparedAsset, AssetProvider, AssetRequirements, AssetRoleRequirement, ResolvedAssetSet, resolve_asset_set, materialize_asset_deployment, asset_requirements, AssetGeneralizationCfg, prepare_asset_batches, collect_asset_batches]
   paths: [topics/asset-generalization/asset-generalization.md]
   source_of_truth:
   - embodichain/data/asset_catalog/
   - embodichain/lab/task_program/semantics/asset_requirements.py
   - embodichain/lab/task_program/semantics/asset_matching.py
   - embodichain/lab/task_program/integrations/asset_materialization.py
-  watch_paths: [embodichain/data/asset_catalog/, tests/data/asset_catalog/, embodichain/lab/task_program/semantics/asset_requirements.py, tests/lab/task_program/semantics/test_asset_requirements.py, embodichain/lab/task_program/semantics/asset_matching.py, tests/lab/task_program/semantics/test_asset_matching.py, embodichain/lab/task_program/integrations/asset_materialization.py, tests/gym/envs/task_program/test_asset_materialization.py]
+  - embodichain/lab/gym/envs/asset_generalization.py
+  watch_paths: [embodichain/data/asset_catalog/, tests/data/asset_catalog/, embodichain/lab/task_program/semantics/asset_requirements.py, tests/lab/task_program/semantics/test_asset_requirements.py, embodichain/lab/task_program/semantics/asset_matching.py, tests/lab/task_program/semantics/test_asset_matching.py, embodichain/lab/task_program/integrations/asset_materialization.py, tests/gym/envs/task_program/test_asset_materialization.py, embodichain/lab/gym/envs/asset_generalization.py, tests/gym/envs/test_asset_generalization.py, examples/gym/asset_generalization/]
   related_topics: [data-assets, task-programs, gen-sim, scene-services]
   status: active

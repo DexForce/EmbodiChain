@@ -198,3 +198,31 @@ Materialize standalone configurations and semantic bindings without modifying te
 .. autofunction:: embodichain.lab.task_program.integrations.asset_materialization.materialize_asset_deployment
 
 .. autofunction:: embodichain.lab.task_program.integrations.asset_materialization.validate_materialized_deployment
+
+embodichain.lab.gym.envs.asset_generalization additions
+-------------------------------------------------------
+
+Prepare bounded asset batches, build fresh single-environment task runtimes, execute through the canonical scene acceptance path, and preserve reset/close recording boundaries. Initial and measured validation callbacks are required; submitted resets are not persistence receipts.
+
+.. currentmodule:: embodichain.lab.gym.envs.asset_generalization
+
+.. autosummary::
+
+   AssetGeneralizationCfg
+   AssetEpisodeOutcome
+   AssetBatchOutcome
+   prepare_asset_batches
+   collect_asset_batches
+
+.. autoclass:: embodichain.lab.gym.envs.asset_generalization.AssetGeneralizationCfg
+   :members:
+
+.. autoclass:: embodichain.lab.gym.envs.asset_generalization.AssetEpisodeOutcome
+   :members:
+
+.. autoclass:: embodichain.lab.gym.envs.asset_generalization.AssetBatchOutcome
+   :members:
+
+.. autofunction:: embodichain.lab.gym.envs.asset_generalization.prepare_asset_batches
+
+.. autofunction:: embodichain.lab.gym.envs.asset_generalization.collect_asset_batches

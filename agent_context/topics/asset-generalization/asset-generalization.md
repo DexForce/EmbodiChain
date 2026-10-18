@@ -72,3 +72,33 @@ Packaged robot/data IDs still require the installed SDK and its normal asset
 cache; local selected asset files are bundled.
 Focused tests use the production loader in
 `tests/gym/envs/task_program/test_asset_materialization.py`.
+
+## Batch host and recording
+
+`lab/gym/envs/asset_generalization.py` owns `AssetGeneralizationCfg`, bounded
+provider preparation and sequential collection. `prepare_asset_batches` freezes
+one candidate snapshot per role, retains preparation failures in a report and
+materializes seeded combinations. `collect_asset_batches` verifies each artifact
+before construction and uses the canonical scene-variant executor plus
+`SimulationSceneExpansionHost` with no pose changes. Assets are fixed inside a
+batch; a new B=1 environment is created for every next deployment.
+
+Both initial and final measured validators are mandatory. Empty/unavailable
+checks and incomplete programs cannot save data. Asset provenance is attached
+before the ordinary commit/discard reset. Close finalizes recorders and discards
+uncommitted buffers; cleanup drains only after successful host frames unwind.
+Construction/execution errors preserve their original exception and require
+caller-owned deferred cleanup after traceback release.
+
+`record_trajectory=True` explicitly enables accepted-episode trajectory files
+in the default collection factory. Each invocation scopes dataset, camera and
+trajectory recorder directories beneath a fresh deployment-local run directory.
+Custom environment factories own equivalent isolation. Reports distinguish
+acceptance, returned reset requests and close finalization; none substitutes
+for a per-episode persistence receipt. Normal configuration loading does not
+select providers or enable generation.
+
+Example: `examples/gym/asset_generalization/run.py` prepares local cube variants
+and optionally executes native UR5 Pick/Place with independent measured checks.
+Host tests live in `tests/gym/envs/test_asset_generalization.py`; existing scene
+expansion tests remain authoritative for canonical execution and reject gates.
