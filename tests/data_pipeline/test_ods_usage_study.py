@@ -125,7 +125,13 @@ def test_partial_and_failed_cleanup_cannot_be_resumed(tmp_path) -> None:
         json.dumps({"engine_cleanup_error": None, "evaluator_exitcode": 0})
     )
     (tmp_path / "summary.json").write_text(
-        json.dumps({"final_success_rate": None, "training_step": 12})
+        json.dumps(
+            {
+                "final_success_rate": None,
+                "training_step": 12,
+                "efficiency": {"end_reason": "usage_budget"},
+            }
+        )
     )
     (tmp_path / "deferred_evaluation.json").write_text(
         json.dumps(
@@ -134,6 +140,7 @@ def test_partial_and_failed_cleanup_cannot_be_resumed(tmp_path) -> None:
     )
     result = study._completed(job, status)
     assert result["latest_development_success"] == 0.5
+    assert result["end_reason"] == "usage_budget"
     (tmp_path / "failure.json").write_text("{}")
     with pytest.raises(RuntimeError, match="failure evidence"):
         study._completed(job, status)
@@ -334,3 +341,155 @@ def test_policy_identity_changes_with_executable_state(tmp_path, change) -> None
         task["physics"] = "newton"
     torch.save(saved, checkpoint)
     assert study._policy_identity(checkpoint, task) != before
+
+
+def _history_artifacts(
+    root: Path, arrival: list[tuple[str, int, float]], events: list[dict]
+) -> tuple[dict, dict]:
+    panels = []
+    for name, step, success in arrival:
+        checkpoint = str(root / (name + ".pt"))
+        panels.append({"name": name, "checkpoint": checkpoint})
+        (root / (name + ".json")).write_text(
+            json.dumps(
+                {
+                    "checkpoint": checkpoint,
+                    "policy_step": str(step),
+                    "success_rate": success,
+                }
+            )
+        )
+    (root / "timeline.json").write_text(json.dumps({"events": events}))
+    return {"training_step": max(step for _, step, _ in arrival)}, {"panels": panels}
+
+
+def test_history_drawdown_uses_model_creation_order_not_arrival(tmp_path) -> None:
+    summary, deferred = _history_artifacts(
+        tmp_path,
+        [
+            ("initial_dev", 0, 0),
+            ("last_dev", 3, 0.9),
+            ("first_dev", 1, 1),
+            ("middle_dev", 2, 0.6),
+        ],
+        [{"kind": "update", "seconds": value} for value in (10, 20, 30)],
+    )
+    result = study._development_history(tmp_path, summary, deferred)
+    assert result["observed_max_drawdown_percentage_points"] == pytest.approx(40)
+    assert [
+        row["policy_step"] for row in result["development_history_by_model_step"]
+    ] == [0, 1, 2, 3]
+    assert result["retrospective_first_good_development_step"] == 1
+    assert result["retrospective_first_good_observed_update_seconds"] == 10
+    assert result["retrospective_first_good_checkpoint_saved_seconds"] is None
+    assert result["retrospective_time_is_certification"] is False
+
+
+def test_history_save_events_and_update_times_have_distinct_meaning(tmp_path) -> None:
+    checkpoint = str(tmp_path / "good_dev.pt")
+    summary, deferred = _history_artifacts(
+        tmp_path,
+        [("initial_dev", 7, 0), ("good_dev", 8, 0.8)],
+        [
+            {"kind": "update", "seconds": 10},
+            {
+                "kind": "checkpoint_saved",
+                "checkpoint": checkpoint,
+                "policy_step": 8,
+                "seconds": 12,
+            },
+        ],
+    )
+    result = study._development_history(tmp_path, summary, deferred)
+    assert result["retrospective_first_good_observed_update_seconds"] == 10
+    assert result["retrospective_first_good_checkpoint_saved_seconds"] == 12
+    # A missing update may not be shifted into a false resume starting step.
+    (tmp_path / "timeline.json").write_text(json.dumps({"events": []}))
+    result = study._development_history(tmp_path, summary, deferred)
+    assert result["retrospective_first_good_observed_update_seconds"] is None
+    assert result["retrospective_first_good_checkpoint_saved_seconds"] is None
+
+
+def test_history_missing_or_same_step_disagreement_is_not_false_regression(
+    tmp_path,
+) -> None:
+    summary, deferred = _history_artifacts(
+        tmp_path, [("initial_dev", 0, 0), ("good_dev", 1, 1), ("alias_dev", 1, 0.8)], []
+    )
+    result = study._development_history(tmp_path, summary, deferred)
+    assert result["observed_max_drawdown_percentage_points"] is None
+    assert result["history_ambiguous_same_step_scores"] == [1]
+    (tmp_path / "alias_dev.json").unlink()
+    result = study._development_history(tmp_path, summary, deferred)
+    assert result["observed_max_drawdown_percentage_points"] is None
+    assert len(result["history_missing_reports"]) == 1
+
+
+def test_memory_availability_never_turns_missing_peaks_into_zero() -> None:
+    missing = study._memory_availability({})
+    assert missing["host_pss_sampled_peak_bytes"] is None
+    assert missing["host_memory_availability"] == "unavailable"
+    assert missing["native_gpu_peak_bytes"] is None
+    measured = study._memory_availability(
+        {
+            "cost/host_pss_sampled_peak_bytes": 123,
+            "cost/torch_cuda_this_process_max_reserved_bytes_by_device": {"0": 456},
+        }
+    )
+    assert measured["host_memory_availability"] == "sampled_process_tree_pss"
+    assert measured["torch_memory_availability"] == "main_process_torch_allocator_only"
+    assert measured["native_gpu_memory_availability"] == "unavailable"
+
+
+@pytest.mark.parametrize("batch_size", [64, 256, 1024])
+def test_batch_sensitivity_commands_and_ids_are_explicit(tmp_path, batch_size) -> None:
+    manifest = study.build_manifest(
+        _args(tmp_path, cells=["c32-r8"], batch_size=batch_size)
+    )
+    job = manifest["jobs"][0]
+    assert manifest["batch_size"] == batch_size
+    assert job["batch_size"] == batch_size
+    assert _flag(job["argv"], "--batch-size") == str(batch_size)
+    assert job["id"] == "c32-r8-s13001" + (
+        f"-b{batch_size}" if batch_size != 256 else ""
+    )
+    assert Path(job["output"]).name == job["id"]
+
+
+@pytest.mark.parametrize("batch_size", [0, -1, True, 1.5])
+def test_batch_sensitivity_rejects_invalid_sizes(tmp_path, batch_size) -> None:
+    with pytest.raises(ValueError, match="Batch size"):
+        study.build_manifest(_args(tmp_path, batch_size=batch_size))
+
+
+def test_completed_rejects_resource_sampler_cleanup_failure(tmp_path) -> None:
+    job = {"id": "bad-sampler", "output": str(tmp_path)}
+    (tmp_path / "cleanup.json").write_text(
+        json.dumps(
+            {
+                "engine_cleanup_error": None,
+                "evaluator_exitcode": 0,
+                "resource_sampler_cleanup_error": "sampler thread did not stop",
+            }
+        )
+    )
+    with pytest.raises(RuntimeError, match="cleanup"):
+        study._completed(job, {"status": "completed", "returncode": 0})
+
+
+def test_live_results_mark_cell_running_before_subprocess(
+    tmp_path, monkeypatch
+) -> None:
+    args = _args(tmp_path, cells=["c32-r8"], execute=True)
+    manifest = study.build_manifest(args)
+    monkeypatch.setattr(study, "build_manifest", lambda args: manifest)
+    monkeypatch.setattr(study, "_gpu_preflight", lambda manifest: [])
+
+    def launch(*args, **kwargs):
+        rows = json.loads((tmp_path / "results.json").read_text())["runs"]
+        assert rows == [{"id": "c32-r8-s13001", "status": "running"}]
+        raise RuntimeError("mock launch stopped intentionally")
+
+    monkeypatch.setattr(study.subprocess, "Popen", launch)
+    with pytest.raises(RuntimeError, match="mock launch"):
+        study.run_study(args)

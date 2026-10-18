@@ -1418,5 +1418,504 @@
     "cleanup_seconds": 3.1195079900790006,
     "observed_seconds": 85.69883938506246
   },
-  "formal_test_used": false
+  "formal_test_used": false,
+  "stage_a_final": {
+    "scope": "Three local-NUMA repeats for each P=1/2/4/8 x no load/synthetic resident load; 64 accepted episodes per repeat",
+    "results": [
+      {
+        "local_numa_gpu_uuids": [
+          "GPU-3b85e500-27ff-35d9-eb8d-d54f9ff0898d",
+          "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5"
+        ],
+        "local_summary": {
+          "cold_seconds": 269.50850816435803,
+          "first_refill_s": 7.936202706,
+          "frames_s": 41.44742200599209,
+          "gpu_mib": 3000,
+          "pss_mib": 3894.2177734375
+        },
+        "local_numa_completed": 3,
+        "local_numa_steady_traj_s": 0.1249358669867099,
+        "P": 1,
+        "load": "none",
+        "gpu_uuids": [
+          "GPU-3b85e500-27ff-35d9-eb8d-d54f9ff0898d",
+          "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5"
+        ],
+        "completed": 3,
+        "failed": 0,
+        "qualification_successes": 40,
+        "steady_traj_s": 0.1249358669867099,
+        "frames_s": 41.44742200599209,
+        "first_refill_s": 7.936202706,
+        "sampled_peak_gpu_mib": 3000,
+        "sampled_peak_pss_mib": 3894.2177734375,
+        "accepted": 192,
+        "discarded_batch_rows": 0,
+        "cold_seconds": 269.50850816435803
+      },
+      {
+        "local_numa_gpu_uuids": [
+          "GPU-3b85e500-27ff-35d9-eb8d-d54f9ff0898d",
+          "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5"
+        ],
+        "local_summary": {
+          "cold_seconds": 778.2503103696896,
+          "first_refill_s": 23.99904327466667,
+          "frames_s": 14.157219635958477,
+          "gpu_mib": 3458,
+          "pss_mib": 5343.974609375
+        },
+        "local_numa_completed": 3,
+        "local_numa_steady_traj_s": 0.043417853900494296,
+        "P": 1,
+        "load": "resident",
+        "gpu_uuids": [
+          "GPU-3b85e500-27ff-35d9-eb8d-d54f9ff0898d",
+          "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5"
+        ],
+        "completed": 3,
+        "failed": 0,
+        "qualification_successes": 40,
+        "steady_traj_s": 0.043417853900494296,
+        "frames_s": 14.157219635958477,
+        "first_refill_s": 23.99904327466667,
+        "sampled_peak_gpu_mib": 3458,
+        "sampled_peak_pss_mib": 5343.974609375,
+        "accepted": 192,
+        "discarded_batch_rows": 0,
+        "cold_seconds": 778.2503103696896
+      },
+      {
+        "local_numa_gpu_uuids": [
+          "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5"
+        ],
+        "local_summary": {
+          "cold_seconds": 147.94233088606657,
+          "first_refill_s": 8.253504485666666,
+          "frames_s": 79.8017152145366,
+          "gpu_mib": 2964,
+          "pss_mib": 3934.345703125
+        },
+        "local_numa_completed": 3,
+        "local_numa_steady_traj_s": 0.24033781175687827,
+        "P": 2,
+        "load": "none",
+        "gpu_uuids": [
+          "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5"
+        ],
+        "completed": 3,
+        "failed": 0,
+        "qualification_successes": 40,
+        "steady_traj_s": 0.24033781175687827,
+        "frames_s": 79.8017152145366,
+        "first_refill_s": 8.253504485666666,
+        "sampled_peak_gpu_mib": 2964,
+        "sampled_peak_pss_mib": 3934.345703125,
+        "accepted": 192,
+        "discarded_batch_rows": 0,
+        "cold_seconds": 147.94233088606657
+      },
+      {
+        "local_numa_gpu_uuids": [
+          "GPU-3b85e500-27ff-35d9-eb8d-d54f9ff0898d",
+          "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5"
+        ],
+        "local_summary": {
+          "cold_seconds": 384.2716589320141,
+          "first_refill_s": 22.40035333333333,
+          "frames_s": 28.795132458533466,
+          "gpu_mib": 3390,
+          "pss_mib": 5307.478515625
+        },
+        "local_numa_completed": 3,
+        "local_numa_steady_traj_s": 0.08663609263424638,
+        "P": 2,
+        "load": "resident",
+        "gpu_uuids": [
+          "GPU-3b85e500-27ff-35d9-eb8d-d54f9ff0898d",
+          "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5"
+        ],
+        "completed": 3,
+        "failed": 0,
+        "qualification_successes": 40,
+        "steady_traj_s": 0.08663609263424638,
+        "frames_s": 28.795132458533466,
+        "first_refill_s": 22.40035333333333,
+        "sampled_peak_gpu_mib": 3390,
+        "sampled_peak_pss_mib": 5307.478515625,
+        "accepted": 192,
+        "discarded_batch_rows": 0,
+        "cold_seconds": 384.2716589320141
+      },
+      {
+        "local_numa_gpu_uuids": [
+          "GPU-3b85e500-27ff-35d9-eb8d-d54f9ff0898d",
+          "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5"
+        ],
+        "local_summary": {
+          "cold_seconds": 84.88216817736004,
+          "first_refill_s": 8.233052495666666,
+          "frames_s": 159.91812534255922,
+          "gpu_mib": 2932,
+          "pss_mib": 3756.3701171875
+        },
+        "local_numa_completed": 3,
+        "local_numa_steady_traj_s": 0.48214699296340097,
+        "P": 4,
+        "load": "none",
+        "gpu_uuids": [
+          "GPU-3b85e500-27ff-35d9-eb8d-d54f9ff0898d",
+          "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5"
+        ],
+        "completed": 3,
+        "failed": 0,
+        "qualification_successes": 40,
+        "steady_traj_s": 0.48214699296340097,
+        "frames_s": 159.91812534255922,
+        "first_refill_s": 8.233052495666666,
+        "sampled_peak_gpu_mib": 2932,
+        "sampled_peak_pss_mib": 3756.3701171875,
+        "accepted": 192,
+        "discarded_batch_rows": 0,
+        "cold_seconds": 84.88216817736004
+      },
+      {
+        "local_numa_gpu_uuids": [
+          "GPU-3b85e500-27ff-35d9-eb8d-d54f9ff0898d",
+          "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5"
+        ],
+        "local_summary": {
+          "cold_seconds": 206.36306353309192,
+          "first_refill_s": 22.916984168666666,
+          "frames_s": 56.417320097522435,
+          "gpu_mib": 3422,
+          "pss_mib": 5208.763671875
+        },
+        "local_numa_completed": 3,
+        "local_numa_steady_traj_s": 0.16929762793745803,
+        "P": 4,
+        "load": "resident",
+        "gpu_uuids": [
+          "GPU-3b85e500-27ff-35d9-eb8d-d54f9ff0898d",
+          "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5"
+        ],
+        "completed": 3,
+        "failed": 0,
+        "qualification_successes": 40,
+        "steady_traj_s": 0.16929762793745803,
+        "frames_s": 56.417320097522435,
+        "first_refill_s": 22.916984168666666,
+        "sampled_peak_gpu_mib": 3422,
+        "sampled_peak_pss_mib": 5208.763671875,
+        "accepted": 192,
+        "discarded_batch_rows": 0,
+        "cold_seconds": 206.36306353309192
+      },
+      {
+        "local_numa_gpu_uuids": [
+          "GPU-3b85e500-27ff-35d9-eb8d-d54f9ff0898d"
+        ],
+        "local_summary": {
+          "cold_seconds": 60.19800958363339,
+          "first_refill_s": 8.299688249666666,
+          "frames_s": 316.08151994033693,
+          "gpu_mib": 2968,
+          "pss_mib": 3833.2197265625
+        },
+        "local_numa_completed": 3,
+        "local_numa_steady_traj_s": 0.9637284412063394,
+        "P": 8,
+        "load": "none",
+        "gpu_uuids": [
+          "GPU-3b85e500-27ff-35d9-eb8d-d54f9ff0898d"
+        ],
+        "completed": 3,
+        "failed": 0,
+        "qualification_successes": 40,
+        "steady_traj_s": 0.9637284412063394,
+        "frames_s": 316.08151994033693,
+        "first_refill_s": 8.299688249666666,
+        "sampled_peak_gpu_mib": 2968,
+        "sampled_peak_pss_mib": 3833.2197265625,
+        "accepted": 192,
+        "discarded_batch_rows": 0,
+        "cold_seconds": 60.19800958363339
+      },
+      {
+        "local_numa_gpu_uuids": [
+          "GPU-3b85e500-27ff-35d9-eb8d-d54f9ff0898d",
+          "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5"
+        ],
+        "local_summary": {
+          "cold_seconds": 119.32646797628452,
+          "first_refill_s": 22.03500366833333,
+          "frames_s": 115.47988525971839,
+          "gpu_mib": 3394,
+          "pss_mib": 4852.525390625
+        },
+        "local_numa_completed": 3,
+        "local_numa_steady_traj_s": 0.34976366107334295,
+        "P": 8,
+        "load": "resident",
+        "gpu_uuids": [
+          "GPU-3b85e500-27ff-35d9-eb8d-d54f9ff0898d",
+          "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5"
+        ],
+        "completed": 3,
+        "failed": 0,
+        "qualification_successes": 40,
+        "steady_traj_s": 0.34976366107334295,
+        "frames_s": 115.47988525971839,
+        "first_refill_s": 22.03500366833333,
+        "sampled_peak_gpu_mib": 3394,
+        "sampled_peak_pss_mib": 4852.525390625,
+        "accepted": 192,
+        "discarded_batch_rows": 0,
+        "cold_seconds": 119.32646797628452
+      }
+    ],
+    "cost_lower_bound_gpu_job_wall_hours": 3.8886687764299697,
+    "cleanup": {
+      "checked_unix_seconds": 1792322695.0937994,
+      "observed_pids_checked": 118,
+      "live_observed_pids": [],
+      "live_coordinator_pids": [],
+      "gpu1_gpu3_released_to_root": true,
+      "note": "New unrelated root-owned experiments may now use these GPUs; this audit checks only our observed process identities."
+    },
+    "source_hash_difference": {
+      "old_sha256": "9b1ace3a6a517abec574ffb43d428e790922bdc1f7ad468a8cc497b79120b160",
+      "new_sha256": "03e71615abce60b782a7882c858b76858acc688a3e08a8aca08c3c427268d7ff",
+      "sole_difference": "\n        Returns:\n            Detached lifecycle records in publication order, or an empty list\n            when logging is disabled or no records are pending.\n\n        Raises:\n            RuntimeError: If called outside the engine's owner process.\n",
+      "difference_kind": "drain_lifecycle_events docstring Returns/Raises paragraph only",
+      "executable_producer_change": false
+    },
+    "limitations": [
+      "Resident synthetic workload omits real sampling and target conversion; it is a stress test, not the real learner rate.",
+      "Per-P qualifications follow independent seeded vector streams, not identical physical states.",
+      "Remote-NUMA and externally contended diagnostic attempts remain in the attempt ledger but are excluded from local timing means.",
+      "Costs include recorded qualification, smoke, interruption and diagnostic attempts and remain a lower bound."
+    ],
+    "raw_artifacts": {
+      "stage_a_summary.json": {
+        "path": "/tmp/ods-usage-study/stage_a_summary.json",
+        "sha256": "8162fd2e73999b951a53c5144fce197af5c37c5329e25919bff4458e3c88db06"
+      },
+      "stage_a_attempt_ledger.json": {
+        "path": "/tmp/ods-usage-study/stage_a_attempt_ledger.json",
+        "sha256": "427f46d97e003dca3fb7c806f73f92056dfbe4da068ffdac9695e6d4a9048653"
+      },
+      "stage_a_costs.json": {
+        "path": "/tmp/ods-usage-study/stage_a_costs.json",
+        "sha256": "37cf62265d708d2911f2b9aca8b2aedc919831cada3086c37fe1addaee9b800a"
+      },
+      "production_invariants.json": {
+        "path": "/tmp/ods-usage-study/production_invariants.json",
+        "sha256": "7c8f1d2f1754dd5054eddde67b958049fe04d5b462196cbd8f97b44c74bcc636"
+      },
+      "cleanup_audit.json": {
+        "path": "/tmp/ods-usage-study/cleanup_audit.json",
+        "sha256": "79300448047951bd716cfc41c1d6fc163a4115828b30a92b85817200ed6ef8d1"
+      },
+      "engine_source_variance.json": {
+        "path": "/tmp/ods-usage-study/engine_source_variance.json",
+        "sha256": "c5f05227b5fa5e603705c34d6307cfc378aa3c4ea1611496173315c4feee0da1"
+      }
+    }
+  },
+  "combined_telemetry_profile": {
+    "workload": "real shared-memory ODS consumer: locked context sampling, clone, raw geometry conversion, H2D, pose targets, ChunkBC/AdamW and exact statistics; producer filled once then remains idle; no active writer contention",
+    "comparison": "Compact EfficiencyTracker baseline versus full UsageTracker plus5second ResourceSampler; OFF/ON/ON/OFF, identical CUDA completion boundary and separately reported startup/end snapshot costs.",
+    "order": "ABBA",
+    "warmup": 20,
+    "measured_updates_per_block": 1200,
+    "batch": 256,
+    "history": 2,
+    "prediction_horizon": 64,
+    "producer_envs": 8,
+    "cache_episodes": 32,
+    "cuda_visible_devices": "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5",
+    "cpu_affinity": [
+      32,
+      33,
+      34,
+      35,
+      36,
+      37,
+      38,
+      39,
+      40,
+      41,
+      42,
+      43,
+      44,
+      45,
+      46,
+      47
+    ],
+    "torch_num_threads": 1,
+    "torch": "2.7.0+cu128",
+    "preflight": [
+      {
+        "time": 1792325282.436553,
+        "uuid": "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5",
+        "utilization": 0,
+        "used_mib": 3,
+        "free_mib": 72828
+      },
+      {
+        "time": 1792325287.5926466,
+        "uuid": "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5",
+        "utilization": 0,
+        "used_mib": 0,
+        "free_mib": 72831
+      },
+      {
+        "time": 1792325292.7533095,
+        "uuid": "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5",
+        "utilization": 0,
+        "used_mib": 0,
+        "free_mib": 72831
+      }
+    ],
+    "source_sha256": {
+      "examples/data_pipeline/_ods_pick_place_usage.py": "bddad2918af0de71cbdd2cb818d005b260ab1dd5ad592c3b68abda9f3624b67e",
+      "examples/data_pipeline/_ods_pick_place_training.py": "c78924fe707d3f949fe9dee00cd237f9c43beafebda33f71e0871ad2e464f1d3",
+      "examples/data_pipeline/_ods_pick_place_benchmark.py": "e09cd854d4cad5edfea45f9290b1bef1aa8e70e1d5fd6b34050ea5ddb0fa64aa",
+      "examples/data_pipeline/_ods_pick_place_policy.py": "e818d620853d25013c4c0d94426001b4dd9752fffa42a2d55cb6106541d0d5f1",
+      "embodichain/data_pipeline/engine/data.py": "03e71615abce60b782a7882c858b76858acc688a3e08a8aca08c3c427268d7ff"
+    },
+    "rows": [
+      {
+        "full_telemetry": false,
+        "block_seconds": 19.276191951008514,
+        "startup_snapshot_seconds": 0.0,
+        "end_snapshot_and_join_seconds": 0.0,
+        "resource_sampling": null,
+        "p50_ms": 13.0584715,
+        "p95_ms": 13.48745975,
+        "mean_ms": 13.071130114166666,
+        "supervised_targets": 18089178,
+        "unique_target_frames": 10643,
+        "supervised_id_sha256": "a98faac52110126ddf1d73078ee1409ee469fb6d81763aafe4f2d82974426573",
+        "input_sha256": "9ee58b218cf793adc7ef8923b98d2cfc9f438200f1e6b70ab09df085673d53c3"
+      },
+      {
+        "full_telemetry": true,
+        "block_seconds": 19.74997066007927,
+        "startup_snapshot_seconds": 0.07084084302186966,
+        "end_snapshot_and_join_seconds": 0.07101208600215614,
+        "resource_sampling": {
+          "started": true,
+          "stopped": true,
+          "interval_seconds": 5.0,
+          "samples": 5,
+          "collection_wall_seconds": 0.3660611887462437,
+          "errors": [],
+          "missing_pid_observations": 0,
+          "scope": "sampled process-tree PSS and observed CPU counters; Torch allocator counters belong to the learner only",
+          "limitations": [
+            "Memory values are sampled peaks, not exact peaks",
+            "CPU counters omit work after a process's last observation and may miss short-lived descendants",
+            "Missing processes or collection errors remain unknown, not zero",
+            "Collection wall time sums sample service durations, including any overlapping forced/periodic captures; it is not end-to-end overhead",
+            "End-to-end overhead and scheduling perturbation need workload-specific measurement"
+          ]
+        },
+        "p50_ms": 13.634308,
+        "p95_ms": 14.306158100000001,
+        "mean_ms": 13.68942204666667,
+        "supervised_targets": 18089178,
+        "unique_target_frames": 10643,
+        "supervised_id_sha256": "a98faac52110126ddf1d73078ee1409ee469fb6d81763aafe4f2d82974426573",
+        "input_sha256": "9ee58b218cf793adc7ef8923b98d2cfc9f438200f1e6b70ab09df085673d53c3"
+      },
+      {
+        "full_telemetry": true,
+        "block_seconds": 19.44078197912313,
+        "startup_snapshot_seconds": 0.07053892104886472,
+        "end_snapshot_and_join_seconds": 0.07114852406084538,
+        "resource_sampling": {
+          "started": true,
+          "stopped": true,
+          "interval_seconds": 5.0,
+          "samples": 5,
+          "collection_wall_seconds": 0.363029578467831,
+          "errors": [],
+          "missing_pid_observations": 0,
+          "scope": "sampled process-tree PSS and observed CPU counters; Torch allocator counters belong to the learner only",
+          "limitations": [
+            "Memory values are sampled peaks, not exact peaks",
+            "CPU counters omit work after a process's last observation and may miss short-lived descendants",
+            "Missing processes or collection errors remain unknown, not zero",
+            "Collection wall time sums sample service durations, including any overlapping forced/periodic captures; it is not end-to-end overhead",
+            "End-to-end overhead and scheduling perturbation need workload-specific measurement"
+          ]
+        },
+        "p50_ms": 13.3762385,
+        "p95_ms": 13.9240898,
+        "mean_ms": 13.479671479166667,
+        "supervised_targets": 18089178,
+        "unique_target_frames": 10643,
+        "supervised_id_sha256": "a98faac52110126ddf1d73078ee1409ee469fb6d81763aafe4f2d82974426573",
+        "input_sha256": "9ee58b218cf793adc7ef8923b98d2cfc9f438200f1e6b70ab09df085673d53c3"
+      },
+      {
+        "full_telemetry": false,
+        "block_seconds": 18.829061140073463,
+        "startup_snapshot_seconds": 0.0,
+        "end_snapshot_and_join_seconds": 0.0,
+        "resource_sampling": null,
+        "p50_ms": 12.902322,
+        "p95_ms": 13.475218949999999,
+        "mean_ms": 12.961259578333333,
+        "supervised_targets": 18089178,
+        "unique_target_frames": 10643,
+        "supervised_id_sha256": "a98faac52110126ddf1d73078ee1409ee469fb6d81763aafe4f2d82974426573",
+        "input_sha256": "9ee58b218cf793adc7ef8923b98d2cfc9f438200f1e6b70ab09df085673d53c3"
+      }
+    ],
+    "initial_fill_and_engine_start_seconds": 64.56211863388307,
+    "initial_stats": {
+      "requested_generation": 1,
+      "completed_generation": 1,
+      "successful_episodes": 32,
+      "failed_episodes": 0,
+      "generated_frames": 10643,
+      "production_seconds": 33.70553520298563,
+      "sampled_chunks": 0,
+      "run_id": 451712141767626229,
+      "valid_frames": 10643
+    },
+    "identical_final_parameters": true,
+    "identical_supervised_ids": true,
+    "identical_inputs": true,
+    "final_stats_before_shutdown": {
+      "requested_generation": 1,
+      "completed_generation": 1,
+      "successful_episodes": 32,
+      "failed_episodes": 0,
+      "generated_frames": 10643,
+      "production_seconds": 33.70553520298563,
+      "sampled_chunks": 1249280,
+      "run_id": 451712141767626229,
+      "valid_frames": 10643
+    },
+    "owned_native_gpu_uuids": [
+      "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5"
+    ],
+    "p50_ms_overhead_fraction": 0.04043609067650422,
+    "p95_ms_overhead_fraction": 0.047011990689189265,
+    "mean_ms_overhead_fraction": 0.04366498223022641,
+    "measured_five_percent_gate_passed": true,
+    "status": "completed",
+    "cleanup_error": null,
+    "cleanup_seconds": 2.742159710964188,
+    "observed_seconds": 148.0488567019347,
+    "raw_artifact": {
+      "path": "/tmp/ods-usage-study/combined_telemetry_profile.json",
+      "sha256": "e56b1a699230b82f77bad2df70a7046827f22b77fa64ff988ad4596c6558a3dc"
+    }
+  }
 }

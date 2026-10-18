@@ -73,11 +73,25 @@ Whether this is excessive must be established by physical evaluation.
    at least four generations. Test B64/1024 as secondary sensitivities; an
    alternative needs the same three-seed confirmation before recommendation.
 
+Before selecting confirmation candidates, run the secondary batch sensitivity
+on the exploratory C32/r8/P8 candidate: B256 control, B64, then B1024, each with
+256 accepted episodes and screen seed13001. Freeze one source revision and use
+the same GPU with local NUMA CPU affinity for all three. This repeats the B256
+control because the original grid used an earlier reporting revision and its
+GPU5 queue used remote NUMA affinity. Fixed r holds the chunk budget nearly
+constant, not the optimizer-update count; report both. This exploratory choice
+does not establish C32/r8 as the confirmed winner.
+
 Primary deployment is shared single-GPU production/training. Separate GPUs are
 only a diagnostic for contention. Pin GPU UUID through CUDA_VISIBLE_DEVICES
 before spawning and verify native allocation. Concurrent independent runs use
 disjoint CPU affinities; record host interference and do not claim uncontended
 measurements without supporting evidence.
+
+Record GPU-to-NUMA topology and distinguish logical CPUs from physical cores.
+Do not change affinity or executable source midway through a frozen queue.
+Timing from remote-NUMA or externally contended runs remains diagnostic and
+must not silently be pooled with local-NUMA confirmation measurements.
 
 Development selection uses810000-810019; configuration confirmation uses
 820000-820099. Formal comparison panels210000,310000,610000 remain untouched.
@@ -111,6 +125,22 @@ optimizer/RNG states at each fork, and evaluates each immutable checkpoint in a
 fresh simulator. Training time excludes acquisition and post-training evaluation.
 It retains every failure. Report tables include all evaluated policies; missing
 memory measurements are explicitly unmeasured.
+
+The reporting revision records checkpoint-save completion separately from
+optimizer completion and evaluation completion. A policy later found to pass
+80% is a retrospective result, not an online time-to-certification. Older runs
+without save events retain unknown save times. TensorBoard uses the evaluated
+checkpoint's policy step even when evaluations happen after training. Report
+the evaluated steps alongside maximum observed drawdown: unequal panel counts
+do not provide equally sensitive regression detection.
+
+Resource sampling runs every five seconds and at explicit lifecycle boundaries,
+including before worker startup. It records service time and missing processes.
+Process-tree PSS is a sampled peak; CPU counters omit work after the last sample;
+Torch allocator counters belong only to the learner and exclude native simulator
+allocations. Unavailable memory is null, never zero. Forced sampling and periodic
+sampling overhead are measured separately; component overhead checks do not
+establish the combined instrumentation cost.
 
 ## Evidence already available, not a tuning conclusion
 

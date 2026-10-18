@@ -29,6 +29,7 @@ import argparse
 import fcntl
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -81,6 +82,9 @@ def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
         r"GPU-[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", args.gpu_uuid
     ):
         raise ValueError("Use a full physical GPU UUID, not an index or UUID prefix")
+    batch_size = getattr(args, "batch_size", 256)
+    if type(batch_size) is not int or batch_size < 1:
+        raise ValueError("Batch size must be a positive integer")
     if args.producer_envs not in (1, 2, 4, 8):
         raise ValueError("Choose an explicitly qualified P from 1, 2, 4, 8")
     if args.stage == "confirmation" and not args.cells:
@@ -122,7 +126,9 @@ def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
         if capacity < 2 * args.producer_envs:
             raise ValueError("Each cache must hold at least two producer batches")
         for seed in seeds:
-            identity = f"{cell}-s{seed}"
+            identity = f"{cell}-s{seed}" + (
+                f"-b{batch_size}" if batch_size != 256 else ""
+            )
             output = args.output.resolve() / "runs" / identity
             command = [
                 "taskset",
@@ -146,7 +152,7 @@ def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
                 "--buffer-size",
                 str(capacity),
                 "--batch-size",
-                "256",
+                str(batch_size),
                 "--producer-envs",
                 str(args.producer_envs),
                 "--seed",
@@ -193,6 +199,7 @@ def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
                     "id": identity,
                     "cell": cell,
                     "seed": seed,
+                    "batch_size": batch_size,
                     "output": str(output),
                     "argv": command,
                     "confirmation": args.stage == "confirmation",
@@ -232,6 +239,7 @@ def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
             ["git", "rev-parse", "HEAD"], cwd=_REPO, text=True
         ).strip(),
         "stage": args.stage,
+        "batch_size": batch_size,
         "cwd": str(_REPO),
         "gpu_uuid": args.gpu_uuid,
         "cpus": cpus,
@@ -274,6 +282,182 @@ def _atomic_json(path: Path, value: dict[str, Any]) -> None:
     temporary.replace(path)
 
 
+def _finite_seconds(value: Any) -> float | None:
+    """Accept only measured finite nonnegative timestamps."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value) if math.isfinite(value) and value >= 0 else None
+    return None
+
+
+def _policy_step(value: Any) -> int | None:
+    """Read the evaluator's true model step without guessing from file names."""
+    if type(value) is int and value >= 0:
+        return value
+    if isinstance(value, str) and value.isdecimal():
+        return int(value)
+    return None
+
+
+def _development_history(
+    output: Path, summary: dict[str, Any], deferred: dict[str, Any]
+) -> dict[str, Any]:
+    """Describe observed model degradation in creation order, not arrival order.
+
+    Retrospective threshold times describe already-created weights later found
+    good on development scenes. They are not online certification times. Older
+    runs have update-completion events but no checkpoint-save events, which
+    remain explicitly unavailable rather than being inferred from file mtimes.
+    """
+    timeline_path = output / "timeline.json"
+    timeline = json.loads(timeline_path.read_text()) if timeline_path.exists() else {}
+    events = timeline.get("events", [])
+    updates = [event for event in events if event.get("kind") == "update"]
+    saves = {
+        event["checkpoint"]: _finite_seconds(event.get("seconds"))
+        for event in events
+        if event.get("kind") in {"checkpoint_saved", "checkpoint"}
+        and isinstance(event.get("checkpoint"), str)
+    }
+    history = []
+    missing = []
+    for panel in deferred.get("panels", []):
+        name = panel.get("name")
+        if not isinstance(name, str):
+            missing.append(str(panel.get("checkpoint")))
+            continue
+        path = output / (name + ".json")
+        if not path.exists():
+            missing.append(str(path))
+            continue
+        report = json.loads(path.read_text())
+        checkpoint = report.get("checkpoint")
+        step = _policy_step(report.get("policy_step"))
+        score = report.get("success_rate")
+        if (
+            not isinstance(score, (int, float))
+            or isinstance(score, bool)
+            or not math.isfinite(score)
+            or not 0 <= score <= 1
+        ):
+            score = None
+        history.append(
+            {
+                "checkpoint": checkpoint,
+                "policy_step": step,
+                "success_rate": score,
+                "panel": name,
+                "checkpoint_saved_seconds": saves.get(checkpoint),
+                "observed_update_completion_seconds": None,
+            }
+        )
+    # Require actual initial/final model steps and a complete update event
+    # stream, including resumed runs. No filename or arrival-time guess.
+    last_step = _policy_step(summary.get("training_step"))
+    initial_steps = [
+        row["policy_step"]
+        for row in history
+        if row["panel"] == "initial_dev" and row["policy_step"] is not None
+    ]
+    initial_step = initial_steps[0] if len(initial_steps) == 1 else None
+    update_times = [_finite_seconds(event.get("seconds")) for event in updates]
+    timing_valid = (
+        bool(updates)
+        and initial_step is not None
+        and last_step is not None
+        and last_step - initial_step == len(updates)
+    )
+    timing_valid = timing_valid and all(value is not None for value in update_times)
+    timing_valid = timing_valid and update_times == sorted(update_times)
+    for row in history:
+        step = row["policy_step"]
+        if timing_valid and step is not None and initial_step < step <= last_step:
+            row["observed_update_completion_seconds"] = update_times[
+                step - initial_step - 1
+            ]
+    history.sort(key=lambda row: (row["policy_step"] is None, row["policy_step"] or 0))
+    by_step: dict[int, list[float]] = {}
+    complete = not missing and bool(history)
+    for row in history:
+        if row["policy_step"] is None or row["success_rate"] is None:
+            complete = False
+            continue
+        by_step.setdefault(row["policy_step"], []).append(row["success_rate"])
+    ambiguous = [step for step, scores in by_step.items() if len(set(scores)) > 1]
+    drawdown = None
+    if complete and not ambiguous:
+        best = 0.0
+        drawdown = 0.0
+        for step in sorted(by_step):
+            score = by_step[step][0]
+            drawdown = max(drawdown, best - score)
+            best = max(best, score)
+        drawdown = round(drawdown * 100, 10)
+    good = next(
+        (
+            row
+            for row in history
+            if row["policy_step"] is not None
+            and row["success_rate"] is not None
+            and row["success_rate"] >= 0.8
+        ),
+        None,
+    )
+    return {
+        "development_history_by_model_step": history,
+        "observed_max_drawdown_percentage_points": drawdown,
+        "drawdown_scope": "evaluated checkpoints only, ordered by model update step; unevaluated checkpoints unknown",
+        "history_missing_reports": missing,
+        "history_ambiguous_same_step_scores": ambiguous,
+        "retrospective_first_good_development_checkpoint": (
+            None if good is None else good["checkpoint"]
+        ),
+        "retrospective_first_good_development_step": (
+            None if good is None else good["policy_step"]
+        ),
+        "retrospective_first_good_observed_update_seconds": (
+            None if good is None else good["observed_update_completion_seconds"]
+        ),
+        "retrospective_first_good_checkpoint_saved_seconds": (
+            None if good is None else good["checkpoint_saved_seconds"]
+        ),
+        "retrospective_time_is_certification": False,
+        "retrospective_time_scope": "first observed threshold-crossing among evaluated checkpoints; unevaluated policies unknown",
+        "retrospective_threshold_success_rate": 0.8,
+        "checkpoint_save_timing_available": bool(saves),
+        "update_timing_source": (
+            "timeline update-completion events" if timing_valid else None
+        ),
+    }
+
+
+def _memory_availability(efficiency: dict[str, Any]) -> dict[str, Any]:
+    """Distinguish sampled process memory from missing native/whole-job peaks."""
+    pss = efficiency.get("cost/host_pss_sampled_peak_bytes")
+    torch_memory = efficiency.get(
+        "cost/torch_cuda_this_process_max_reserved_bytes_by_device"
+    )
+    native = efficiency.get("cost/gpu_peak_bytes")
+    return {
+        "host_pss_sampled_peak_bytes": pss,
+        "host_memory_availability": (
+            "sampled_process_tree_pss" if pss is not None else "unavailable"
+        ),
+        "torch_cuda_main_process_max_reserved_bytes_by_device": torch_memory,
+        "torch_memory_availability": (
+            "main_process_torch_allocator_only" if torch_memory else "unavailable"
+        ),
+        "native_gpu_peak_bytes": native,
+        "native_gpu_memory_availability": (
+            "reported_native_peak" if native is not None else "unavailable"
+        ),
+        "memory": (
+            "PSS sampled; Torch allocator main-process only; native GPU peak unavailable"
+            if pss is not None or torch_memory
+            else "unavailable in run summary; external monitor samples are separate evidence"
+        ),
+    }
+
+
 def _completed(job: dict[str, Any], status: dict[str, Any]) -> dict[str, Any]:
     """Validate finished status and cleanup, never silently resume a partial run."""
     output = Path(job["output"])
@@ -282,6 +466,7 @@ def _completed(job: dict[str, Any], status: dict[str, Any]) -> dict[str, Any]:
     cleanup = json.loads((output / "cleanup.json").read_text())
     if (
         cleanup.get("engine_cleanup_error") is not None
+        or cleanup.get("resource_sampler_cleanup_error") is not None
         or cleanup.get("evaluator_exitcode") != 0
     ):
         raise RuntimeError(f"Cell cleanup was not successful: {job['id']}")
@@ -295,14 +480,17 @@ def _completed(job: dict[str, Any], status: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": job["id"],
         "status": "completed",
-        "end_reason": summary.get("end_reason"),
+        "end_reason": summary.get("efficiency", {}).get(
+            "end_reason", summary.get("end_reason")
+        ),
         "training_step": summary.get("training_step"),
         "training_finished_seconds": deferred["training_finished_seconds"],
         "best_development_success": summary.get("best_dev_success"),
         "latest_development_success": deferred["last_report"]["success_rate"],
         "supervised_generations": summary.get("supervised_generations"),
         "process_seconds": status["process_seconds"],
-        "memory": "see run efficiency resource snapshots; not aggregated",
+        **_memory_availability(summary.get("efficiency", {})),
+        **_development_history(output, summary, deferred),
     }
 
 
@@ -628,12 +816,12 @@ def _report(root: Path, rows: list[dict[str, Any]]) -> None:
         "",
         "## Success & Other Metrics",
         "",
-        "| Cell | Status | Latest dev20 | Best dev20 | Latest confirm100 | Best confirm100 | Updates |",
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: |",
+        "| Cell | Status | Latest dev20 | Best dev20 | Latest confirm100 | Best confirm100 | Observed max drawdown pp | Updates |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in rows:
         lines.append(
-            f"| {row['id']} | {row['status']} | {row.get('latest_development_success')} | {row.get('best_development_success')} | {row.get('confirmation_latest_success')} | {row.get('confirmation_best_success')} | {row.get('training_step')} |"
+            f"| {row['id']} | {row['status']} | {row.get('latest_development_success')} | {row.get('best_development_success')} | {row.get('confirmation_latest_success')} | {row.get('confirmation_best_success')} | {row.get('observed_max_drawdown_percentage_points')} | {row.get('training_step')} |"
         )
     lines += [
         "",
@@ -698,6 +886,8 @@ def run_study(args: argparse.Namespace) -> None:
             environment.pop("PYTHONHOME", None)
             status = {"status": "running", "gpu_preflight": readings}
             _atomic_json(status_path, status)
+            rows[index] = {"id": job["id"], "status": "running"}
+            _report(root, rows)
             begin = time.perf_counter()
             with (root / (job["id"] + ".log")).open("x") as stream:
                 process = subprocess.Popen(
@@ -758,6 +948,7 @@ def main() -> None:
     parser.add_argument("--stage", choices=("screen", "confirmation"), default="screen")
     parser.add_argument("--cells", nargs="+", choices=list(_CELLS))
     parser.add_argument("--producer-envs", type=int, required=True)
+    parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--gpu-uuid", required=True)
     parser.add_argument("--cpus", required=True)
     parser.add_argument("--python", default=sys.executable)

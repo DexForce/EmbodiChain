@@ -472,12 +472,25 @@ def _duration(intervals: Iterable[tuple[float, float]]) -> float:
 def _intersection(
     a: Iterable[tuple[float, float]], b: Iterable[tuple[float, float]]
 ) -> list[tuple[float, float]]:
-    return [
-        (max(start_a, start_b), min(end_a, end_b))
-        for start_a, end_a in _union(a)
-        for start_b, end_b in _union(b)
-        if min(end_a, end_b) > max(start_a, start_b)
-    ]
+    """Intersect normalized intervals in linear time after the two sorts.
+
+    Normalize each iterable once, including single-pass generators. Empty
+    intervals contribute no duration and are omitted from the intersection.
+    """
+    left, right = _union(a), _union(b)
+    result: list[tuple[float, float]] = []
+    i = j = 0
+    while i < len(left) and j < len(right):
+        start_a, end_a = left[i]
+        start_b, end_b = right[j]
+        start, end = max(start_a, start_b), min(end_a, end_b)
+        if end > start:
+            result.append((start, end))
+        if end_a <= end_b:
+            i += 1
+        if end_b <= end_a:
+            j += 1
+    return result
 
 
 class EfficiencyTracker:
@@ -554,12 +567,38 @@ class EfficiencyTracker:
         if self._first_update is None:
             self._first_update = elapsed
 
-    def record_checkpoint(self, checkpoint: str) -> None:
-        """Freeze supervision counters for weights saved under this identity."""
+    def record_checkpoint(
+        self,
+        checkpoint: str,
+        *,
+        policy_step: int | None = None,
+        elapsed: float | None = None,
+    ) -> None:
+        """Freeze supervision counters after saving immutable model weights.
+
+        Args:
+            checkpoint: Unique identity of the already-saved checkpoint.
+            policy_step: Completed optimizer step represented by the model.
+                Supplying this also records its save-completion event.
+            elapsed: Optional elapsed save-completion timestamp. With a policy
+                step, defaults to the current launch clock. Legacy calls that
+                omit the step retain counter-only accounting.
+        """
         if checkpoint in self._checkpoints or self._ended:
             raise ValueError(
                 "Checkpoint identities must be unique and recorded before finish"
             )
+        if policy_step is not None:
+            if type(policy_step) is not int or policy_step < 0:
+                raise ValueError("Checkpoint policy step must be a nonnegative integer")
+            self._event(
+                "checkpoint_saved",
+                self.elapsed_seconds() if elapsed is None else elapsed,
+                checkpoint=checkpoint,
+                policy_step=policy_step,
+            )
+        elif elapsed is not None:
+            raise ValueError("A checkpoint timestamp requires its policy step")
         self._checkpoints[checkpoint] = (self.targets, len(self.unique_frames))
 
     def record_evaluation(

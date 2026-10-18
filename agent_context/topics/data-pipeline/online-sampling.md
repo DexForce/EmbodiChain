@@ -141,7 +141,13 @@ for commands and measured results. Optional anchor-budget pacing and compact
 source-use accounting live in `_ods_pick_place_usage.py`; defaults retain fixed
 round scheduling. Deferred evaluation closes the producer before evaluating
 saved policies, so its model-selection results are post hoc and cannot certify
-online time-to-target. See the task-owned
+online time-to-target. Evaluation scalars use each checkpoint's actual policy
+step; save-completion events separately timestamp when its weights became
+available. The study runner preserves missing save times in older runs and
+reports drawdown only over evaluated policies. Background resource sampling
+covers startup and waits independently of update counts; process-tree PSS is a
+sampled peak and learner Torch counters exclude native simulator allocations.
+See the task-owned
 [tuning protocol](../../../extensions/embodichain_tasks/configs/tasks/manipulation/pick_place/TUNING.md)
 for rate units, protected scene splits and measurement limits.
 

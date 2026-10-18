@@ -530,3 +530,58 @@ def test_resource_counters_subtract_existing_cpu_baseline_and_keep_child_work() 
         metrics["cost/cpu_core_seconds_observed"] == 9
     )  # Parent delta 5 plus child total 4.
     assert metrics["cost/host_pss_sampled_peak_bytes"] == 500
+
+
+@pytest.mark.parametrize(
+    "left,right,expected",
+    [
+        ([], [(0, 1)], []),
+        ([(0, 0), (2, 2)], [(0, 3)], []),
+        ([(0, 10), (2, 3)], [(4, 5), (5, 7)], [(4, 7)]),
+        ([(6, 8), (0, 2)], [(1, 7)], [(1, 2), (6, 7)]),
+        ([(0, 1)], [(1, 2)], []),
+        ([(0.25, 1.5), (3.0, 4.0)], [(1.0, 3.5)], [(1.0, 1.5), (3.0, 3.5)]),
+    ],
+)
+def test_interval_intersection_handles_single_pass_iterables(left, right, expected):
+    from examples.data_pipeline._ods_pick_place_benchmark import _intersection
+
+    assert _intersection(iter(left), iter(right)) == expected
+
+
+def test_interval_intersection_matches_discrete_coverage_oracle():
+    import random
+    from examples.data_pipeline._ods_pick_place_benchmark import _intersection
+
+    rng = random.Random(27)
+    for _ in range(100):
+        left = [tuple(sorted(rng.choices(range(30), k=2))) for _ in range(12)]
+        right = [tuple(sorted(rng.choices(range(30), k=2))) for _ in range(8)]
+        covered_left = {i for start, end in left for i in range(start, end)}
+        covered_right = {i for start, end in right for i in range(start, end)}
+        actual = _intersection(left, right)
+        assert {
+            i for start, end in actual for i in range(start, end)
+        } == covered_left & covered_right
+        assert all(start < end for start, end in actual)
+        assert all(first[1] <= second[0] for first, second in zip(actual, actual[1:]))
+
+
+def test_checkpoint_save_events_identify_weights_and_clock():
+    tracker = EfficiencyTracker(100)
+    ids = torch.tensor([[1, 2, 3]], dtype=torch.int64)
+    tracker.record_update(2.0, ids)
+    tracker.record_checkpoint("frozen.pt", policy_step=1, elapsed=2.5)
+    event = tracker.timeline[-1]
+    assert event == {
+        "kind": "checkpoint_saved",
+        "seconds": 2.5,
+        "checkpoint": "frozen.pt",
+        "policy_step": 1,
+    }
+    assert tracker._checkpoints["frozen.pt"] == (1, 1)
+    with pytest.raises(ValueError, match="nondecreasing"):
+        tracker.record_checkpoint("old-clock.pt", policy_step=1, elapsed=1.0)
+    assert "old-clock.pt" not in tracker._checkpoints
+    with pytest.raises(ValueError, match="requires"):
+        tracker.record_checkpoint("unknown-step.pt", elapsed=3.0)

@@ -27,6 +27,7 @@ import os
 import random
 import subprocess
 import sys
+import threading
 import time
 from collections import deque
 from pathlib import Path
@@ -66,6 +67,121 @@ from examples.data_pipeline._ods_pick_place_usage import (
     UsageTracker,
     retained_deferred_checkpoints,
 )
+
+
+class _ResourceSampler:
+    """Best-effort wall-clock resource samples, never an exact peak or CPU total.
+
+    A background thread covers owner-side waits and short runs independently of
+    evaluation frequency. Collection cost is measured; this instrumentation
+    requires its own performance validation before use in a timed comparison.
+    """
+
+    def __init__(
+        self, cuda_devices: tuple[int, ...], interval_seconds: float = 5.0
+    ) -> None:
+        if not np.isfinite(interval_seconds) or interval_seconds <= 0:
+            raise ValueError("Resource sampling interval must be finite and positive")
+        self.cuda_devices = cuda_devices
+        self.interval_seconds = interval_seconds
+        self._stop = threading.Event()
+        self._lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+        self._records: list[dict[str, Any]] = []
+        self._errors: list[dict[str, Any]] = []
+        self._collection_seconds = 0.0
+        self._closed = False
+
+    def start(self) -> None:
+        if self._thread is not None or self._closed:
+            raise RuntimeError("Resource sampler cannot be restarted")
+        self.capture("before_worker_startup")
+        self._thread = threading.Thread(
+            target=self._run, name="ods-resource-sampler", daemon=True
+        )
+        self._thread.start()
+
+    def _run(self) -> None:
+        while not self._stop.wait(self.interval_seconds):
+            self.capture("periodic")
+
+    def capture(self, boundary: str) -> None:
+        with self._lock:
+            if self._closed:
+                return
+        started = time.monotonic()
+        snapshot = None
+        error_record = None
+        try:
+            process = psutil.Process()
+            pids = [process.pid] + [
+                child.pid for child in process.children(recursive=True)
+            ]
+            # resource_snapshot checks is_initialized before reading CUDA
+            # allocator counters; it never creates a CUDA context itself.
+            snapshot = resource_snapshot(pids, cuda_devices=self.cuda_devices)
+            snapshot["boundary"] = boundary
+            snapshot["collection_started_monotonic_seconds"] = started
+            snapshot["process_tree_scope"] = "best_effort_current_descendants"
+        except Exception as error:
+            error_record = {
+                "boundary": boundary,
+                "monotonic_seconds": started,
+                "error": f"{type(error).__name__}: {error}",
+            }
+        elapsed = time.monotonic() - started
+        with self._lock:
+            self._collection_seconds += elapsed
+            if snapshot is not None:
+                snapshot["collection_seconds"] = elapsed
+                self._records.append(snapshot)
+            if error_record is not None:
+                error_record["collection_seconds"] = elapsed
+                self._errors.append(error_record)
+
+    def stop(self) -> list[dict[str, Any]]:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=10.0)
+            if self._thread.is_alive():
+                with self._lock:
+                    self._closed = True
+                raise RuntimeError("Resource sampler did not stop within 10 seconds")
+        with self._lock:
+            self._closed = True
+            return list(self._records)
+
+    def report(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "started": self._thread is not None,
+                "stopped": self._closed
+                and (self._thread is None or not self._thread.is_alive()),
+                "interval_seconds": self.interval_seconds,
+                "samples": len(self._records),
+                "collection_wall_seconds": self._collection_seconds,
+                "errors": list(self._errors),
+                "missing_pid_observations": sum(
+                    len(row.get("missing_pids", [])) for row in self._records
+                ),
+                "scope": "sampled process-tree PSS and observed CPU counters; Torch allocator counters belong to the learner only",
+                "limitations": [
+                    "Memory values are sampled peaks, not exact peaks",
+                    "CPU counters omit work after a process's last observation and may miss short-lived descendants",
+                    "Missing processes or collection errors remain unknown, not zero",
+                    "Collection wall time sums sample service durations, including any overlapping forced/periodic captures; it is not end-to-end overhead",
+                    "End-to-end overhead and scheduling perturbation need workload-specific measurement",
+                ],
+            }
+
+
+def _write_evaluation_scalars(writer: Any, report: dict[str, Any]) -> None:
+    """Index posthoc evaluation by the evaluated policy, not the live learner."""
+    policy_step = int(report["policy_step"])
+    if policy_step < 0:
+        raise ValueError("Evaluation policy_step must be nonnegative")
+    for key in ("success_rate", "lift_rate", "goal_error", "episode_length"):
+        writer.add_scalar(f"eval/{key}", report[key], policy_step)
 
 
 class _BudgetExpired(Exception):
@@ -479,6 +595,7 @@ def run(args: argparse.Namespace) -> None:
         """Start each deferred panel from an independent simulator process."""
         nonlocal evaluator, requests, results
         previous = evaluator
+        resource_sampler.capture("before_evaluator_shutdown")
         requests.put(None)
         previous.join(30)
         if previous.is_alive():
@@ -512,6 +629,7 @@ def run(args: argparse.Namespace) -> None:
         before = tracker.elapsed_seconds()
         evaluator.start()
         panel_ready = _result(evaluator, results, args, tracker)
+        resource_sampler.capture("fresh_evaluator_ready")
         tracker.record_interval("evaluation_startup", before, tracker.elapsed_seconds())
         if panel_ready != ready:
             raise ValueError("Fresh evaluator schema differs from the qualified task")
@@ -562,10 +680,48 @@ def run(args: argparse.Namespace) -> None:
     batch_ids = []
     end_reason = "update_budget"
     generation_counts: dict[int, int] = {}
+    resource_sampler = _ResourceSampler(
+        (int(args.train_device.split(":")[-1]),)
+        if args.train_device.startswith("cuda:")
+        else ()
+    )
+    resources_finalized = False
+
+    def finish_resource_sampling() -> None:
+        nonlocal resources_finalized
+        if resources_finalized:
+            return
+        samples = resource_sampler.stop()
+        for snapshot in samples:
+            snapshot["elapsed_seconds"] = (
+                snapshot["monotonic_seconds"] - tracker.start_monotonic
+            )
+            snapshot["collection_started_elapsed_seconds"] = (
+                snapshot["collection_started_monotonic_seconds"]
+                - tracker.start_monotonic
+            )
+            tracker.record_resources(snapshot)
+        resources_finalized = True
+        (args.output / "resources.json").write_text(
+            json.dumps(
+                {
+                    "sampling": resource_sampler.report(),
+                    "snapshots": samples,
+                    "excluded_phases": [
+                        "post-report final verification",
+                        "final cleanup",
+                    ],
+                },
+                indent=2,
+            )
+        )
+
     try:
         _timeout(args, tracker)
+        resource_sampler.start()
         evaluator.start()
         ready = _result(evaluator, results, args, tracker)
+        resource_sampler.capture("initial_evaluator_ready")
         if args.qualification_report:
             qualification = _reuse_qualification(
                 args.qualification_report, config, metadata["source_sha256"]
@@ -667,6 +823,7 @@ def run(args: argparse.Namespace) -> None:
                 ):
                     raise _BudgetExpired from None
                 raise
+            resource_sampler.capture("producer_ready")
             events = drain_usage()
             if args.usage_schedule == "anchor_budget":
                 pacing = AnchorBudget(
@@ -717,8 +874,10 @@ def run(args: argparse.Namespace) -> None:
                     },
                 )
                 stats = engine.get_stats()
+                resource_sampler.capture("before_offline_producer_shutdown")
                 engine.stop()
                 engine = None
+                resource_sampler.capture("after_offline_producer_shutdown")
                 snapshots.clear()
                 corpus = load_corpus(path, expected_schema=schema)
         if corpus is not None and usage is not None and not usage.episodes:
@@ -936,13 +1095,13 @@ def run(args: argparse.Namespace) -> None:
                     success_rate=report["success_rate"],
                     panel=args.stage,
                 )
-            for key in ("success_rate", "lift_rate", "goal_error", "episode_length"):
-                writer.add_scalar(f"eval/{key}", report[key], step)
+            _write_evaluation_scalars(writer, report)
+            resource_sampler.capture("evaluation_completed")
             return report
 
         baseline = args.output / f"initial_step_{step}.pt"
         save_training_checkpoint(baseline, model, optimizer, step, args, source_run)
-        tracker.record_checkpoint(str(baseline))
+        tracker.record_checkpoint(str(baseline), policy_step=step)
         deferred_checkpoints: list[tuple[Path, str]] = []
         generation_checkpoint_paths: list[Path] = []
         if args.defer_evaluation:
@@ -962,6 +1121,7 @@ def run(args: argparse.Namespace) -> None:
         pending_ids: list[torch.Tensor] = []
         recent_target_counts: deque[int] = deque(maxlen=50)
         last_saved_generation = 1
+        resource_sampler.capture("training_start")
         loop_started = tracker.elapsed_seconds()
         for round_index in range(args.rounds):
             model.train()
@@ -1006,7 +1166,9 @@ def run(args: argparse.Namespace) -> None:
                         save_training_checkpoint(
                             generation_path, model, optimizer, step, args, source_run
                         )
-                        tracker.record_checkpoint(str(generation_path))
+                        tracker.record_checkpoint(
+                            str(generation_path), policy_step=step
+                        )
                         generation_checkpoint_paths.append(generation_path)
                         deferred_checkpoints.append(
                             (
@@ -1262,7 +1424,7 @@ def run(args: argparse.Namespace) -> None:
                     save_training_checkpoint(
                         checkpoint, model, optimizer, step, args, source_run
                     )
-                    tracker.record_checkpoint(str(checkpoint))
+                    tracker.record_checkpoint(str(checkpoint), policy_step=step)
                     if args.defer_evaluation:
                         deferred_checkpoints.append((checkpoint, f"step_{step}_dev"))
                         report = initial_report
@@ -1277,19 +1439,6 @@ def run(args: argparse.Namespace) -> None:
                         or _selection(report) > _selection(best_report)
                     ):
                         best_report, best_path = report, checkpoint
-                    pids = [os.getpid()] + [
-                        p.pid for p in psutil.Process().children(recursive=True)
-                    ]
-                    tracker.record_resources(
-                        resource_snapshot(
-                            pids,
-                            cuda_devices=(
-                                [int(args.train_device.split(":")[-1])]
-                                if args.train_device.startswith("cuda:")
-                                else []
-                            ),
-                        )
-                    )
                     print(
                         (
                             f"step={step} evaluation=deferred elapsed={tracker.elapsed_seconds():.1f}s"
@@ -1312,7 +1461,7 @@ def run(args: argparse.Namespace) -> None:
                 save_training_checkpoint(
                     latest_path, model, optimizer, step, args, source_run
                 )
-                tracker.record_checkpoint(str(latest_path))
+                tracker.record_checkpoint(str(latest_path), policy_step=step)
                 deferred_checkpoints.append((latest_path, f"step_{step}_dev"))
             if latest_path != baseline:
                 deferred_checkpoints = [
@@ -1321,6 +1470,7 @@ def run(args: argparse.Namespace) -> None:
                     if path != latest_path
                 ]
                 deferred_checkpoints.append((latest_path, f"step_{step}_dev"))
+        resource_sampler.capture("training_end")
         # Cover loop bookkeeping, logging and checkpoint I/O too. Interval union
         # avoids counting per-update measurements twice; evaluation is removed
         # by EfficiencyTracker rather than omitted from the wall-clock window.
@@ -1397,11 +1547,13 @@ def run(args: argparse.Namespace) -> None:
                 # Snapshot live availability before env.close clears its final
                 # rollout slice. Keep final producer counters after shutdown.
                 live_valid_frames = engine.get_stats()["valid_frames"]
+                resource_sampler.capture("before_producer_shutdown")
                 engine.stop()
                 drain_usage()
                 stats = engine.get_stats()
                 stats["valid_frames"] = live_valid_frames
                 engine = None
+                resource_sampler.capture("after_producer_shutdown")
             training_finished_seconds = tracker.elapsed_seconds()
             original_budget = args.wall_time_budget
             args.wall_time_budget = None
@@ -1464,10 +1616,13 @@ def run(args: argparse.Namespace) -> None:
             small_data_report = evaluate(
                 best_path, "small_data_verification", scheduled=False
             )
+        resource_sampler.capture("before_report_finalize")
+        finish_resource_sampling()
         elapsed = tracker.elapsed_seconds()
         if args.wall_time_budget is None:
             tracker.horizon_seconds = max(elapsed, 1e-6)
         efficiency = tracker.finish(elapsed, end_reason)
+        efficiency["resource_sampling"] = resource_sampler.report()
         efficiency["horizon_prespecified"] = args.wall_time_budget is not None
         efficiency["data_ready"] = args.offline_data is not None
         data_paths = [
@@ -1605,10 +1760,13 @@ def run(args: argparse.Namespace) -> None:
     except _BudgetExpired:
         # No post-deadline result can choose a checkpoint or become equal-budget
         # quality. Cleanup is still required and is reported outside this cap.
+        resource_sampler.capture("budget_expired")
+        finish_resource_sampling()
         elapsed = tracker.elapsed_seconds()
         if "loop_started" in locals():
             tracker.record_interval("training_loop", loop_started, elapsed)
         efficiency = tracker.finish(elapsed, "wall_time_budget")
+        efficiency["resource_sampling"] = resource_sampler.report()
         efficiency["horizon_prespecified"] = True
         efficiency["data_ready"] = args.offline_data is not None
         (args.output / "efficiency.json").write_text(json.dumps(efficiency, indent=2))
@@ -1656,6 +1814,13 @@ def run(args: argparse.Namespace) -> None:
     finally:
         cleanup_started = time.monotonic()
         cleanup_error = None
+        resource_cleanup_error = None
+        if not resources_finalized:
+            try:
+                resource_sampler.capture("before_failure_or_early_return_cleanup")
+                finish_resource_sampling()
+            except BaseException as error:
+                resource_cleanup_error = error
         if engine is not None:
             try:
                 engine.stop()
@@ -1705,9 +1870,17 @@ def run(args: argparse.Namespace) -> None:
                     "engine_cleanup_error": (
                         None if cleanup_error is None else str(cleanup_error)
                     ),
+                    "resource_sampler_cleanup_error": (
+                        None
+                        if resource_cleanup_error is None
+                        else str(resource_cleanup_error)
+                    ),
                 },
                 indent=2,
             )
         )
-        if cleanup_error is not None and sys.exc_info()[0] is None:
-            raise cleanup_error
+        if sys.exc_info()[0] is None:
+            if cleanup_error is not None:
+                raise cleanup_error
+            if resource_cleanup_error is not None:
+                raise resource_cleanup_error

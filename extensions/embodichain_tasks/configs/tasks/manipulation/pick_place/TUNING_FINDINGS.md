@@ -53,9 +53,34 @@ chunk count creates more optimizer updates. If the winner lies on a search
 boundary, describe it as best within the tested range rather than a global
 optimum. Full three-seed stability confirmation remains required.
 
+## Completed production repetitions
+
+Each P/load combination now has three local-NUMA repetitions, each generating
+64 accepted episodes without discarded vector batches. Rates are mean steady
+accepted trajectories/s; startup is measured separately.
+
+| Producer environments | No learner load | Synthetic resident load |
+| ---: | ---: | ---: |
+| 1 | 0.125 | 0.043 |
+| 2 | 0.240 | 0.087 |
+| 4 | 0.482 | 0.169 |
+| 8 | 0.964 | 0.350 |
+
+The synthetic workload excludes real sampling, observation conversion and target
+construction. It demonstrates contention sensitivity, not the rate to substitute
+into deployment formulas; the actual P8 learner pilot above measured about
+0.81 trajectories/s. All 24 intended cells completed. An interrupted attempt,
+an externally contended retry and a remote-NUMA measurement remain in the raw
+ledger; replacement local-NUMA runs supply the timing means. Recorded Stage A
+cost is at least 3.889 single-GPU job wall-hours, including diagnostic work.
+The final audit found no remaining owned processes among 118 observed PIDs.
+Summary values, exclusions and raw-artifact hashes are in
+[TUNING_SYSTEM_RESULTS.json](TUNING_SYSTEM_RESULTS.json).
+
 ## Readiness and remaining gates
 
 - P1/P2/P4/P8 each passed40/40 physical expert qualification. Production throughput repetitions and actual-learner pilots are recorded separately.
 - GPU accounting before selected-ID reuse exceeded the5% instrumentation gate. The landed implementation passes a real shared-memory consumer ABBA check: mean block medians13.024→13.495ms (+3.62%), mean block p95 values13.699→14.256ms (+4.07%). Inputs, supervised identities and final weights match bitwise. This includes lock/copy, raw observation conversion, H2D and training; the producer is idle after filling, and both arms synchronize every update. It does not measure active-writer contention or changing the legacy50-update synchronization cadence.
+- The reporting revision also checks full usage accounting plus five-second resource sampling against the compact baseline in one combined ABBA experiment: mean block medians12.980→13.505ms (+4.04%), mean block p95 values13.481→14.115ms (+4.70%). All four blocks match inputs, target identities and final weights exactly. Each measured block has1,200 updates; each enabled block includes three periodic snapshots. Forced start/end snapshots cost about70ms each, outside update timing. This passes the scoped5% check on its first run; it still does not establish overhead under an active writer or for the entire experiment.
 - Timing pilots use one development scene and a reused evaluator; they establish plumbing/throughput only. Their post-shutdown valid-row metric and throttle bookkeeping limitations are explicitly retained in the pilot report.
 - Full parameter screening and independent three-seed stability confirmation remain required before publishing a recommended P/C/B/r recipe.
