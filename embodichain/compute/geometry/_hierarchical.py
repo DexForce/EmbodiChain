@@ -211,6 +211,7 @@ def _sample_hierarchy(
     group_margin: float,
     support_gap: float,
     movable_roots: tuple[int, ...] | None = None,
+    root_offset_bounds: dict[int, torch.Tensor] | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """One proposal per ordinal, with no per-member retry loops."""
     local = [matrix.expand(count, 4, 4).clone() for matrix in relative]
@@ -345,6 +346,15 @@ def _sample_hierarchy(
             )
             half = (box[:, 1] - box[:, 0]) / 2
             center_region = torch.stack((table[0] + half, table[1] - half), dim=1)
+            if root_offset_bounds and root in root_offset_bounds:
+                offset = root_offset_bounds[root]
+                center_region = torch.stack(
+                    (
+                        torch.maximum(center_region[:, 0], box.mean(1) + offset[0]),
+                        torch.minimum(center_region[:, 1], box.mean(1) + offset[1]),
+                    ),
+                    dim=1,
+                )
             obstacles = (
                 torch.stack(root_boxes, dim=1)
                 if root_boxes
@@ -353,6 +363,19 @@ def _sample_hierarchy(
             center, placed = _sample_free_aabb_region(
                 center_region, half, obstacles, unit, group_margin
             )
+            if root_offset_bounds and root in root_offset_bounds:
+                degenerate = (center_region[:, 0] == center_region[:, 1]).any(-1)
+                direct = center_region[:, 0] + unit[:, :2] * (
+                    center_region[:, 1] - center_region[:, 0]
+                )
+                direct_valid = (center_region[:, 1] >= center_region[:, 0]).all(-1)
+                for other in root_boxes:
+                    gap = torch.maximum(
+                        direct - half - other[:, 1], other[:, 0] - direct - half
+                    ).amax(-1)
+                    direct_valid &= gap >= group_margin - 1e-10
+                center = torch.where(degenerate[:, None], direct, center)
+                placed = torch.where(degenerate, direct_valid, placed)
             valid &= placed
             delta = center - box.mean(dim=1)
         else:

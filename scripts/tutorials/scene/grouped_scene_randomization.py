@@ -14,11 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Generate, reload, verify and preview grouped layouts from an existing export.
+"""Download demo assets, generate, reload and preview scene layouts.
 
 Run from the repository root with ``python -m
-scripts.tutorials.scene.grouped_scene_randomization --source <workspace>
---render --preview``. See the adjacent README for requirements and outputs.
+scripts.tutorials.scene.grouped_scene_randomization --render --preview``.
+Use ``--source`` for another portable export. See the adjacent README.
 """
 
 from __future__ import annotations
@@ -33,8 +33,18 @@ import subprocess
 from typing import Any
 
 import numpy as np
+import yaml
+
+from embodichain.data import get_data_path
+from embodichain.gen_sim.scene_engine.randomization.adapter import (
+    randomize_scene_export,
+)
+from embodichain.gen_sim.scene_engine.randomization.baseline import (
+    prepare_scene_baseline,
+)
 
 from embodichain.gen_sim.scene_engine.randomization.cfg import (
+    SceneRandomizationCfg,
     load_randomization_config,
 )
 from embodichain.gen_sim.scene_engine.randomization.generation import randomize_scene
@@ -131,6 +141,7 @@ def _render(loaded: LoadedLayouts, baseline: dict[str, Any], output: Path) -> No
     )
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
     from embodichain.lab.sim.scene import SceneChangeSet, SceneView, apply_changes
+    from embodichain.lab.sim.scene.expansion import apply_scene_variants
     from embodichain.lab.sim.sensors import CameraCfg
     from embodichain.lab.visualization import VisualizationCfg
 
@@ -143,7 +154,7 @@ def _render(loaded: LoadedLayouts, baseline: dict[str, Any], output: Path) -> No
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=True,
-            sim_device="cpu",
+            device="cpu",
             width=width,
             height=height,
             visualization=VisualizationCfg(backend="none"),
@@ -172,7 +183,18 @@ def _render(loaded: LoadedLayouts, baseline: dict[str, Any], output: Path) -> No
             for variant in loaded.variants
         ]
         for index, poses in enumerate(all_poses):
-            apply_changes(view, SceneChangeSet(poses, tuple(poses)))
+            if index == 0:
+                apply_changes(view, SceneChangeSet(poses, tuple(poses)))
+            else:
+                variant = loaded.variants[index - 1]
+                apply_scene_variants(
+                    sim,
+                    [variant],
+                    env_ids=[0],
+                    movable_entity_ids=tuple(
+                        change.entity_uid for change in variant.pose_changes
+                    ),
+                )
             # Refresh the native camera after the pose publication; never step physics.
             with sim.render_frame(capture_camera_images=False):
                 for _ in range(4):
@@ -248,14 +270,18 @@ def _render(loaded: LoadedLayouts, baseline: dict[str, Any], output: Path) -> No
 def main() -> None:
     """Copy an export, generate a saved run, and optionally render or play it."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument(
+        "--source",
+        default="TabletopFourBases/scene_export",
+        help="Registered asset reference, scene_export directory or its parent workspace.",
+    )
     parser.add_argument(
         "--output-root", type=Path, default=Path("outputs/tabletop_four_bases_demo")
     )
     parser.add_argument(
         "--config",
         type=Path,
-        default=Path(__file__).with_name("grouped_randomization.yaml"),
+        default=Path(__file__).with_name("shared_scene_randomization.yaml"),
     )
     parser.add_argument(
         "--render", action="store_true", help="Save native PNG/MP4/GIF previews."
@@ -264,16 +290,27 @@ def main() -> None:
         "--preview", action="store_true", help="Play layouts in Viser until Ctrl-C."
     )
     parser.add_argument("--port", type=int, default=8080)
-    parser.add_argument("--layout-format", choices=("json", "packed"), default="json")
+    parser.add_argument("--layout-format", choices=("json", "packed"), default=None)
     args = parser.parse_args()
-    source, workspace = (
-        args.source.expanduser().resolve(),
-        args.output_root.expanduser().resolve(),
-    )
+    source = Path(args.source).expanduser()
+    registered = not source.exists() and not source.is_absolute()
+    if registered:
+        source = Path(get_data_path(args.source))
+    source = source.resolve()
+    workspace = args.output_root.expanduser().resolve()
     if source == workspace or source in workspace.parents:
         parser.error("Choose an output workspace outside the source asset directory.")
-    if not (source / "scene_export/scene_config.json").is_file():
-        parser.error("--source must contain scene_export/scene_config.json.")
+    if registered:
+        cache_root = source.parent if source.name == "scene_export" else source
+        if workspace == cache_root or cache_root in workspace.parents:
+            parser.error(
+                "Choose an output workspace outside the downloaded asset cache."
+            )
+    export = (
+        source if (source / "scene_config.json").is_file() else source / "scene_export"
+    )
+    if not (export / "scene_config.json").is_file():
+        parser.error("--source must select a scene_export directory or its parent.")
     if workspace.exists():
         if any(workspace.iterdir()):
             parser.error(
@@ -281,24 +318,53 @@ def main() -> None:
             )
     workspace.mkdir(parents=True, exist_ok=True)
     shutil.copytree(
-        source / "scene_export",
+        export,
         workspace / "scene_export",
         ignore=shutil.ignore_patterns(
             "scene_randomization_base.yaml", "scene_randomization_geometry"
         ),
     )
-    cfg = load_randomization_config(args.config, output_root=workspace)
-    result = randomize_scene(cfg)
-    run = save_layouts(result, output_root=workspace, layout_format=args.layout_format)
-    if not result.candidates:
-        raise RuntimeError(f"No layouts generated: {result.status}; inspect {run}.")
+    raw = yaml.safe_load(args.config.read_text())
+    if not isinstance(raw, dict):
+        parser.error("--config must contain a policy mapping.")
+    if raw.get("schema_version") == 4:
+        if args.layout_format is not None:
+            raw["layout_storage"] = args.layout_format
+        run = randomize_scene_export(
+            workspace, args.config if args.layout_format is None else raw
+        )
+        manifest = json.loads((run / "run_result.json").read_text())
+        policy = json.loads((run / "policy.json").read_text())
+        targets = tuple(policy["intra_group"]["targets"])
+        margin = policy["collision_margin_m"]
+        baseline = prepare_scene_baseline(
+            SceneRandomizationCfg(
+                scene_path=workspace / "scene_export",
+                base_data_path=workspace / "scene_export/scene_randomization_base.yaml",
+            )
+        ).data
+    else:
+        cfg = load_randomization_config(args.config, output_root=workspace)
+        result = randomize_scene(cfg)
+        run = save_layouts(
+            result, output_root=workspace, layout_format=args.layout_format or "json"
+        )
+        manifest = {
+            "seed": cfg.seed,
+            "status": result.status,
+            "attempts": result.attempts,
+        }
+        targets = tuple(cfg.intra_group.targets) if cfg.intra_group else ()
+        margin = cfg.collision_margin_m
+        baseline = result.baseline.data
     loaded = load_layouts(run / "layouts")
-    baseline = result.baseline.data
-    report = _verify(
-        loaded, baseline, tuple(cfg.intra_group.targets) if cfg.intra_group else ()
-    )
-    report.update(seed=cfg.seed, status=result.status, attempts=result.attempts)
-    if report["min_group_aabb_axis_clearance_m"] < cfg.collision_margin_m - 1e-9:
+    if not len(loaded.variants):
+        raise RuntimeError(
+            f"No layouts generated: {manifest['status']}; inspect {run}."
+        )
+    report = _verify(loaded, baseline, targets)
+    report.update(**{key: manifest[key] for key in ("seed", "status", "attempts")})
+    if report["min_group_aabb_axis_clearance_m"] < margin - 1e-9:
         raise RuntimeError("Saved layouts violate the configured group clearance.")
     (run / "demo_verification.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2), flush=True)

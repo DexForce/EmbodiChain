@@ -188,6 +188,47 @@ def test_group_only_and_intra_only() -> None:
             )
 
 
+@pytest.mark.parametrize(
+    "bounds",
+    [
+        [[-0.04, -0.03], [0.04, 0.03]],
+        [[0.0, -0.03], [0.0, 0.03]],
+        [[0.0, 0.0], [0.0, 0.0]],
+    ],
+)
+def test_root_offset_bounds_preserve_batch_prefix_and_saved_poses(
+    bounds: list[list[float]], tmp_path
+) -> None:
+    source = make_source()
+    results = [
+        generate_scene_variants(
+            prepare_scene_randomization(
+                source,
+                make_policy(batch_size=size, group_xy_offset_bounds_m={"tray": bounds}),
+            ),
+            seed=17,
+            candidate_count=5,
+            max_attempts=100,
+        )
+        for size in (1, 37)
+    ]
+    assert all(result.status == "completed" for result in results)
+    assert results[0].attempts == results[1].attempts
+    assert tuple(results[0].variants) == tuple(results[1].variants)
+    for variant in results[0].variants:
+        poses = {
+            change.entity_uid: change.arena_pose for change in variant.pose_changes
+        }
+        delta = (
+            np.asarray(poses.get("tray", source.poses["tray"]))[:2, 3]
+            - np.asarray(source.poses["tray"])[:2, 3]
+        )
+        assert np.all(delta >= np.asarray(bounds)[0] - 1e-10)
+        assert np.all(delta <= np.asarray(bounds)[1] + 1e-10)
+    run = save_scene_variants(results[0], tmp_path / "run")
+    assert tuple(load_scene_variants(run).variants) == tuple(results[0].variants)
+
+
 def test_fixed_descendant_permission_is_not_implicitly_relaxed() -> None:
     source = replace(make_source(), movable_entity_ids=("tray",))
     with pytest.raises(ValueError, match="fixed"):
@@ -262,18 +303,47 @@ def test_runtime_source_uses_complete_scaled_geometry() -> None:
     assert extracted.fingerprint == source.fingerprint
 
 
-@pytest.mark.gpu
-def test_cuda_matches_cpu_geometry_and_prefix() -> None:
+def test_prepared_cache_skips_all_support_detection(tmp_path, monkeypatch) -> None:
+    from embodichain.lab.sim.scene.expansion import layout
+
     source = make_source()
+    prepared = prepare_scene_randomization(source, make_policy(), cache_dir=tmp_path)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("A support cache hit must not extract or rasterize geometry.")
+
+    monkeypatch.setattr(layout, "detect_support_region", forbidden)
+    monkeypatch.setattr(layout, "_prepare_support", forbidden)
+    cached = prepare_scene_randomization(source, make_policy(), cache_dir=tmp_path)
+    assert cached.geometry_sha256 == prepared.geometry_sha256
+    assert cached._table == prepared._table
+    assert tuple(
+        generate_scene_variants(cached, seed=7, candidate_count=3).variants
+    ) == tuple(generate_scene_variants(prepared, seed=7, candidate_count=3).variants)
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize(
+    "bounds", [None, [[-0.04, -0.03], [0.04, 0.03]], [[0.0, -0.03], [0.0, 0.03]]]
+)
+def test_cuda_matches_cpu_geometry_and_prefix(bounds, tmp_path) -> None:
+    source = make_source()
+    ranges = {} if bounds is None else {"group_xy_offset_bounds_m": {"tray": bounds}}
     cpu = generate_scene_variants(
-        prepare_scene_randomization(source, make_policy()), seed=12, candidate_count=8
+        prepare_scene_randomization(source, make_policy(**ranges)),
+        seed=12,
+        candidate_count=8,
     )
     gpu = generate_scene_variants(
-        prepare_scene_randomization(source, make_policy(device="cuda:0", batch_size=1)),
+        prepare_scene_randomization(
+            source, make_policy(device="cuda:0", batch_size=1, **ranges)
+        ),
         seed=12,
         candidate_count=8,
     )
     assert cpu.attempts == gpu.attempts
+    save_scene_variants(gpu, tmp_path / "run")
+    assert tuple(load_scene_variants(tmp_path / "run").variants) == tuple(gpu.variants)
     for left, right in zip(cpu.variants, gpu.variants):
         for first, second in zip(left.pose_changes, right.pose_changes):
             np.testing.assert_allclose(

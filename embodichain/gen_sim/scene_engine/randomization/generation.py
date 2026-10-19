@@ -282,9 +282,14 @@ def _runtime_entities(
         runtime["shape"]["fpath"] = str(
             (export_root / entry["shape"]["fpath"]).resolve()
         )
-        runtime["shape"]["collision"] = _mesh_collision_cfg(
-            entry.get("max_convex_hull_num", 32)
-        ).to_dict()
+        if runtime["shape"].get("collision") is None:
+            collision = _mesh_collision_cfg(entry.get("max_convex_hull_num", 32))
+            # Legacy randomization exports used VHACD when only a hull budget
+            # was authored. Preserve that API independently of new exporters'
+            # native preview defaults, and retain explicit collision policies.
+            if collision.approximation == "convex_decomposition":
+                collision.acd_method = "vhacd"
+            runtime["shape"]["collision"] = collision.to_dict()
         entity = RigidObjectCfg.from_dict(runtime)
         # from_dict infers extrinsic xyz. Portable exports and SceneFragment
         # use intrinsic XYZ, so supply the authoritative rigid matrix explicitly.

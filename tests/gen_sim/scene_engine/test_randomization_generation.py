@@ -110,6 +110,32 @@ def test_generated_fragments_preserve_exported_collision_configuration(
             assert collision.acd_method == "vhacd"
 
 
+@pytest.mark.parametrize(
+    "collision",
+    [
+        {"approximation": "convex_hull"},
+        {
+            "approximation": "convex_decomposition",
+            "max_hulls": 4,
+            "acd_method": "coacd",
+        },
+    ],
+)
+def test_explicit_collision_policy_survives_legacy_layout_materialization(
+    grouped_export, collision
+) -> None:
+    root, cfg, _ = grouped_export
+    path = root / "scene_config.json"
+    data = json.loads(path.read_text())
+    for entry in data["background"] + data["rigid_object"]:
+        entry["shape"]["collision"] = collision
+    path.write_text(json.dumps(data))
+    candidate = generation.randomize_scene(cfg, candidate_count=1).candidates[0]
+    for entity in candidate.fragment.entities:
+        for key, value in collision.items():
+            assert getattr(entity.shape.collision, key) == value
+
+
 def test_generated_groups_move_all_members_and_satisfy_measured_aabbs(
     grouped_export: tuple[Path, SceneRandomizationCfg, dict],
 ) -> None:

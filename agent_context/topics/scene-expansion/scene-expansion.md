@@ -1,6 +1,6 @@
 # Scene expansion
 
-Scene expansion proposes changes before a new Task Program execution. The core
+Scene expansion proposes layouts before host execution or environment reset. The core
 is independent of Task Program, GenSim and Gym; injected host callbacks own the
 actual scene preparation and measured task evidence. General composition,
 layout and physical state services are owned by

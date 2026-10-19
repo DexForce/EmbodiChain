@@ -302,6 +302,7 @@ class SceneRandomizationPolicyCfg:
         collision_margin_m: Minimum group AABB separation in metres.
         randomize_groups: Sample permitted group-root XY translations.
         group_targets: Root UIDs to move; None selects all permitted roots.
+        group_xy_offset_bounds_m: Optional per-root arena XY displacement bounds.
         intra_group: Selected non-root XY/yaw changes and support settings.
     """
 
@@ -311,6 +312,7 @@ class SceneRandomizationPolicyCfg:
     collision_margin_m: float = 0.02
     randomize_groups: bool = True
     group_targets: tuple[str, ...] | None = None
+    group_xy_offset_bounds_m: dict[str, list[list[float]]] = {}
     intra_group: IntraGroupRandomizationCfg | None = None
 
 

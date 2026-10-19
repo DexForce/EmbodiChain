@@ -21,7 +21,7 @@ import os
 import re
 import shutil
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -133,6 +133,39 @@ def test_run_task_dispatches_to_task_launcher(
 
     assert loaded_targets == ["embodichain.lab.scripts.run_task:cli"]
     assert received == ["--gym_config", "task.yaml", "--headless"]
+
+
+@pytest.mark.parametrize("layout_format", ["json", "packed"])
+def test_scene_randomization_dispatch_preserves_generation_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+    layout_format: str,
+) -> None:
+    """The scene layout command forwards its workspace, policy and storage options."""
+    loaded_targets: list[str] = []
+    received: list[str] = []
+    arguments = [
+        "--output_root",
+        "outputs/tabletop scene",
+        "--config",
+        "configs/layout policy.yaml",
+        "--layout-format",
+        layout_format,
+        "--rebuild",
+    ]
+
+    def fake_handler(argv: Sequence[str] | None = None) -> None:
+        received.extend(argv or [])
+
+    def load_handler(target: str) -> Callable[[Sequence[str] | None], None]:
+        loaded_targets.append(target)
+        return fake_handler
+
+    monkeypatch.setattr(cli, "_load_handler", load_handler)
+
+    cli.main(["scene-randomization", *arguments])
+
+    assert loaded_targets == ["embodichain.gen_sim.scene_engine.cli.randomization:main"]
+    assert received == arguments
 
 
 def test_run_env_is_rejected_without_loading_a_handler(
