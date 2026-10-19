@@ -10,6 +10,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
 
 import torch
 import inspect
@@ -19,6 +20,15 @@ from copy import deepcopy
 from dataclasses import MISSING, Field, dataclass, field, replace
 from typing import Any, ClassVar
 from .string import callable_to_string, string_to_callable
+
+__all__ = [
+    "is_configclass",
+    "configclass",
+    "combined_function",
+    "custom_post_init",
+    "class_to_dict",
+    "update_class_from_dict",
+]
 
 _CONFIGCLASS_METHODS = ["to_dict", "replace", "copy", "validate"]
 """List of class methods added at runtime to dataclass."""
@@ -410,9 +420,9 @@ def _validate(obj: object, prefix: str = "") -> list[str]:
 
     for key, value in obj_dict.items():
         # disregard builtin attributes
-        if key.startswith("__"):
+        if isinstance(key, str) and key.startswith("__"):
             continue
-        current_path = f"{prefix}.{key}" if prefix else key
+        current_path = f"{prefix}.{key}" if prefix else str(key)
         missing_fields.extend(_validate(value, prefix=current_path))
 
     # raise an error only once at the top-level call

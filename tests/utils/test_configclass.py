@@ -18,8 +18,12 @@
 
 from __future__ import annotations
 
-from dataclasses import fields
+from dataclasses import MISSING, fields
+from enum import Enum
+import re
 from typing import ClassVar
+
+import pytest
 
 from embodichain.utils import configclass
 
@@ -39,3 +43,28 @@ def test_deferred_classvar_is_not_converted_to_a_dataclass_field() -> None:
     assert first.to_dict() == {"values": [1]}
     assert second.values == []
     assert _DeferredClassVarCfg.label == "shared"
+
+
+class _ArmKey(Enum):
+    LEFT = "left"
+
+
+@configclass
+class _MappingCfg:
+    entries: dict[object, object] = {}
+
+
+@pytest.mark.parametrize("key", [_ArmKey.LEFT, 0, ("arm", 0), "left"])
+def test_validate_preserves_non_string_mapping_keys(key: object) -> None:
+    cfg = _MappingCfg(entries={key: {"values": [1, 2]}})
+
+    assert cfg.validate() == []
+    assert list(cfg.entries) == [key]
+
+
+@pytest.mark.parametrize("key", [_ArmKey.LEFT, 0, ("arm", 0), "left"])
+def test_validate_reports_missing_values_under_mapping_keys(key: object) -> None:
+    cfg = _MappingCfg(entries={key: {"required": MISSING}})
+
+    with pytest.raises(TypeError, match=re.escape(f"entries.{key}.required")):
+        cfg.validate()
