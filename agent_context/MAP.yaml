@@ -386,7 +386,7 @@ topics:
   status: active
 - id: gen-sim
   title: Gen Sim
-  aliases: [gen sim, Scene Engine, SimReady, scene generation, scene editing, scene-randomization,
+  aliases: [gen sim, Scene Engine, SimReady, Asset Engine, scene generation, scene editing, scene-randomization,
     grouped scene randomization, GPU场景扩增, 批量场景扩增, 组内扩增, 组内场景扩增, intra-group augmentation, 分组场景随机化, 场景生成, 场景编辑, 生成式仿真]
   keywords: [generate_scene_from_image, edit_scene, SceneExporter, scene-export/v1, SceneRandomizationCfg,
     randomize_scene, prepare_scene_baseline, scene-randomization, load_layouts, preview_layouts, ingest_one_asset,
@@ -399,11 +399,41 @@ topics:
   - embodichain/gen_sim/scene_engine/pipeline/utils/scene_exporter.py
   - embodichain/gen_sim/scene_engine/pipeline/utils/scene_importer.py
   - embodichain/gen_sim/scene_engine/randomization/
-  - embodichain/gen_sim/simready_pipeline/pipeline/ingest.py
+  - embodichain/gen_sim/scene_engine/pipeline/api.py
+  - embodichain/gen_sim/asset_engine/pipeline/ingest.py
+  - embodichain/gen_sim/asset_engine/pipeline/articulation.py
+  - embodichain/gen_sim/asset_engine/clients/
   - embodichain/gen_sim/gradio_ui/app_processes.py
   - embodichain/gen_sim/gradio_ui/app_env.py
   watch_paths: [embodichain/gen_sim/, embodichain/cli/main.py, tests/gen_sim/]
   related_topics: [simulation-system, data-assets, env-framework]
+  status: active
+- id: task-spec
+  title: TaskSpec Protocol
+  aliases: [TaskSpec, task spec, task specification, 任务规范, 任务规格]
+  keywords: [TaskSpecCache, task_spec/v0.1, milestones, semantic_hash, SceneLayoutRequirement,
+    scene_layout_requirement, consumer expansion, 角色扩增约束]
+  paths: [topics/gen-sim/gen-sim.md]
+  source_of_truth:
+  - embodichain/gen_sim/task_spec/
+  - embodichain/gen_sim/task_engine/task_spec.py
+  watch_paths: [embodichain/gen_sim/task_spec/, embodichain/gen_sim/task_engine/task_spec.py,
+    tests/gen_sim/task_spec/]
+  related_topics: [gen-sim, task-engine, scene-expansion, task-programs]
+  status: active
+- id: task-engine
+  title: Task Engine
+  aliases: [Task Engine, task engine, task-engine, 任务引擎]
+  keywords: [TaskEngineWorkflow, TaskEngineCoordinator, SceneExpansionExecutionCfg, E1 scene expansion,
+    compile_scene_layout_requirement, task_spec_role_bindings]
+  paths: [topics/gen-sim/gen-sim.md]
+  source_of_truth:
+  - embodichain/gen_sim/task_engine/workflow.py
+  - embodichain/gen_sim/task_engine/scene_expansion.py
+  - embodichain/gen_sim/task_engine/orchestration/coordinator.py
+  - embodichain/gen_sim/task_engine/_bundle_runner.py
+  watch_paths: [embodichain/gen_sim/task_engine/, tests/gen_sim/task_engine/]
+  related_topics: [task-spec, gen-sim, scene-expansion, task-programs]
   status: active
 - id: data-assets
   title: Data Assets

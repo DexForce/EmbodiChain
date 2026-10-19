@@ -279,10 +279,71 @@ or YAML policy. The combined CLI triggers it once after its final export:
 ```bash
 embodichain scene-engine --image input.png --output_root /tmp/scene \
   --edit_prompt "move the mug" \
-  --scene-randomization-config scripts/tutorials/scene/grouped_randomization_intra.yaml
+  --scene-randomization-config scripts/tutorials/scene/shared_scene_randomization.yaml
 ```
 
 New pipeline jobs produce v4 packages. Existing `scene-randomization` policies
 and v1/v2/v3 runs retain their original behavior. Convert a validated old run
 without sampling or changing its IDs through
 `embodichain.gen_sim.scene_engine.randomization.adapter.convert_layouts`.
+
+### Task Engine and TaskSpec
+
+Task Engine reads scene variation permissions from the normative TaskSpec:
+
+```json
+{
+  "consumer": "expansion",
+  "key": "scene_layout",
+  "value": {
+    "movable_roles": ["role_001"],
+    "fixed_roles": ["role_002"],
+    "xy_offset_bounds_m": {"role_001": [[-0.015, -0.015], [0.015, 0.015]]}
+  }
+}
+```
+
+Add this requirement to the TaskSpec generated from the selected candidate;
+use that candidate set with `TaskEngineWorkflow.run(task_spec=spec,
+candidate_set=candidates, scene_expansion_execution=...)`. The first integration
+qualifies E1 and rejects candidates that change the specified task meaning.
+Additional initial conditions, invariants and temporal checks remain required.
+Missing measurement evidence yields `unverified` and blocks successful data.
+
+`SceneExpansionExecutionCfg` owns `device`, `batch_size`, `candidate_count`,
+`max_attempts`, `layout_storage` and optional `layout_dir`. The workflow's
+`base_seed` selects the run seed. These execution settings do not change
+`TaskSpec.semantic_hash`. Fixed roles remain fixed in arena coordinates; a
+fixed parent may host independently movable children. Root XY bounds use
+arena axes; member XY/yaw bounds use their parent support frame. Group-root yaw
+and moving a subtree containing a fixed role are unsupported.
+
+The CLI accepts a complete TaskSpec JSON file and keeps role policy out of
+the Workflow configuration:
+
+```bash
+embodichain task-engine run-all --help
+# Supply --task-spec task_spec.json and the ordinary task/scene inputs.
+# --scene-layout-count 3 --scene-layout-device cuda:0
+# --scene-layout-dir /absolute/v4/run replays saved layouts without sampling.
+```
+
+Every layout produces an independent SceneRevision and bundle under
+`variants/variant_NNNNNN/task_run`. Bundle execution verifies saved poses and
+role bindings before creating Sim. Existing same-bundle parallel execution
+and measured segment validators remain authoritative. Only TaskSpec-accepted
+environment rows are committed; a geometrically valid failure remains a
+rejected task attempt with diagnostic artifacts.
+
+Supported initial measurements are existence, distance between actor origins
+(`axes: xy|xyz`) and mesh-supported `relation/on`. The on check uses the
+declared support edge and upward planar mesh coverage within 4 mm above or
+1 mm below the object's bottom. It does not measure physical stability or
+contact force. Other initial predicates remain unverified.
+
+Measure the complete shared path, including four-environment native application:
+
+```bash
+python -m scripts.benchmark.scene.shared_layout \
+  --workspace /absolute/scene-output --policy /absolute/v4-run/policy.json
+```

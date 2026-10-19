@@ -178,7 +178,7 @@ class GravitySettler:
             SimulationManagerCfg(
                 headless=True,
                 physics_dt=self.config.physics_dt,
-                sim_device=self.config.sim_device,
+                device=self.config.sim_device,
             )
         )
         try:
@@ -328,7 +328,7 @@ class GravitySettler:
         return MeshCollisionCfg(
             approximation="convex_decomposition",
             max_hulls=physics.max_convex_hull_num,
-            acd_method="coacd",
+            acd_method="visacd",
         )
 
     @staticmethod

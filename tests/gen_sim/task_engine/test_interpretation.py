@@ -1,0 +1,209 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+from __future__ import annotations
+
+from pathlib import Path
+from unittest.mock import Mock
+
+import pytest
+
+from embodichain.gen_sim.task_engine import interpretation as interpretation_module
+
+
+def test_prompt_preserves_explicit_handover_orientation() -> None:
+    prompt = interpretation_module._instruction_prompt(
+        "Keep the received bottle upright."
+    )
+    assert "requires orientation_goal=upright" in prompt
+    assert "terminal_behavior=hold" in prompt
+    assert "If placement is a separate E1 step" in prompt
+    assert "Never emit terminal_behavior=place with an empty E4 target" in prompt
+    assert "For an E4 arm not named in the instruction" in prompt
+    assert "Keep the received bottle upright." in prompt
+
+
+def test_prompt_and_repair_guidance_use_mechanism_semantics() -> None:
+    prompt = interpretation_module._instruction_prompt("Open and close the drawer.")
+    assert "also E6 with target_state=closed" in prompt
+    assert "revolute door is E7" in prompt
+    assert "Closing or pushing in a drawer is E7" not in prompt
+    catalog = interpretation_module._intent_capability_catalog()
+    assert "prismatic" in catalog["E6"]["semantics"]
+    assert "revolute" in catalog["E7"]["semantics"]
+    guidance = interpretation_module._instruction_repair_guidance(
+        interpretation_module._MissingRequiredObjectError("missing object")
+    )
+    assert "For E6 the drawer or sliding tray" in guidance
+    assert "for E7 the hinged door" in guidance
+
+
+def test_counted_set_repair_preserves_explicit_number() -> None:
+    rules = interpretation_module._instruction_selector_rules()
+    guidance = interpretation_module._instruction_repair_guidance(
+        ValueError("InstructionIntent.steps[0].object quantifier=all requires count=0.")
+    )
+
+    assert "quantifier='count'" in rules
+    assert "quantifier='all'" in rules
+    assert "explicit number" in guidance
+    assert "quantifier=count" in guidance
+    assert "count=0" in guidance
+
+
+def test_prompt_preserves_each_member_of_compound_noun() -> None:
+    prompt = interpretation_module._instruction_prompt(
+        "Put the knife and fork on the placemat."
+    )
+    assert "knife and fork" in prompt
+    assert "quantifier=count" in prompt
+    assert "two distinct objects" in prompt
+
+
+def test_handover_arm_repair_uses_auto_without_guessing() -> None:
+    guidance = interpretation_module._instruction_repair_guidance(
+        ValueError("InstructionIntent.steps[0] E4 requires named arms or auto.")
+    )
+    assert "use auto" in guidance
+    assert "preserve any explicitly named arm" in guidance
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"model": "mimo-v2-flash", "base_url": "https://api.xiaomimimo.com/v1"},
+        {"model": "compatible-model", "base_url": "https://provider.example/v1"},
+    ],
+    ids=["mimo", "other-openai-compatible"],
+)
+def test_structured_output_uses_json_mode(settings: dict[str, str]) -> None:
+    client = Mock()
+    schema = {"type": "object", "properties": {"task": {"type": "string"}}}
+
+    result = interpretation_module._structured_output_runnable(
+        client, schema, settings=settings
+    )
+
+    client.with_structured_output.assert_called_once_with(schema, method="json_mode")
+    assert result is client.with_structured_output.return_value
+
+
+def _write_dotenv(path: Path) -> None:
+    path.write_text(
+        "\n".join(
+            (
+                "OPENAI_API_KEY=dotenv-key",
+                "OPENAI_BASE_URL=https://dotenv.example/v1",
+                "OPENAI_MODEL=dotenv-model",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+
+def _clear_process_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+        "OPENAI_API_BASE",
+        "LLM_URL",
+        "TASK_ENGINE_LLM_MODEL",
+        "ACTION_ENGINE_LLM_MODEL",
+        "OPENAI_MODEL",
+        "LLM_MODEL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_partial_process_transport_does_not_mix_with_dotenv(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env_path = tmp_path / ".env"
+    _write_dotenv(env_path)
+    monkeypatch.setattr(interpretation_module, "_GEN_SIM_ENV_PATH", env_path)
+    monkeypatch.setattr(
+        interpretation_module,
+        "_GEN_CONFIG_PATH",
+        tmp_path / "missing.json",
+    )
+    _clear_process_provider(monkeypatch)
+    monkeypatch.setenv("OPENAI_API_KEY", "unrelated-process-key")
+
+    settings = interpretation_module._load_llm_settings(model=None)
+
+    assert settings["api_key"] == "dotenv-key"
+    assert settings["base_url"] == "https://dotenv.example/v1"
+    assert settings["model"] == "dotenv-model"
+
+
+def test_complete_process_transport_overrides_dotenv(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env_path = tmp_path / ".env"
+    _write_dotenv(env_path)
+    monkeypatch.setattr(interpretation_module, "_GEN_SIM_ENV_PATH", env_path)
+    monkeypatch.setattr(
+        interpretation_module,
+        "_GEN_CONFIG_PATH",
+        tmp_path / "missing.json",
+    )
+    _clear_process_provider(monkeypatch)
+    monkeypatch.setenv("OPENAI_API_KEY", "process-key")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://process.example/v1/")
+    monkeypatch.setenv("TASK_ENGINE_LLM_MODEL", "process-model")
+
+    settings = interpretation_module._load_llm_settings(model=None)
+
+    assert settings["api_key"] == "process-key"
+    assert settings["base_url"] == "https://process.example/v1"
+    assert settings["model"] == "process-model"
+
+
+@pytest.mark.parametrize("source", ["json", "LLM_MODEL"])
+def test_default_interpreter_uses_the_transport_model_configuration(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+) -> None:
+    import json
+
+    for name in (
+        "TASK_ENGINE_LLM_MODEL",
+        "ACTION_ENGINE_LLM_MODEL",
+        "OPENAI_MODEL",
+        "LLM_MODEL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    config = tmp_path / "gen_config.json"
+    config.write_text(
+        json.dumps({"llm": {"openai_compatible": {"model": "configured-model"}}})
+    )
+    monkeypatch.setattr(interpretation_module, "_GEN_CONFIG_PATH", config)
+    monkeypatch.setattr(interpretation_module, "_load_local_env", lambda: {})
+    if source == "LLM_MODEL":
+        monkeypatch.setenv("LLM_MODEL", "configured-model")
+    selected = []
+
+    def caller(**kwargs):
+        selected.append(kwargs["model"])
+        return interpretation_module._instruction_shape_example()
+
+    monkeypatch.setattr(interpretation_module, "_default_instruction_caller", caller)
+    result = interpretation_module.interpret_instruction_draft("Move the cup.")
+    assert result.model == "configured-model"
+    assert selected == ["configured-model"]

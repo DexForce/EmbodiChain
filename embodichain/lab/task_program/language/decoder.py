@@ -33,6 +33,7 @@ from .schema import (
     TaskProgramIntegrationCfg,
     HandOverCfg,
     InvokeCfg,
+    ObjectNearRelativeTargetValidatorCfg,
     ObjectNearTargetValidatorCfg,
     ObjectLiftedValidatorCfg,
     ObjectRelativePositionValidatorCfg,
@@ -655,6 +656,7 @@ def _decode_validator(
         supported=(
             "object_near_target",
             "articulation_joint_position",
+            "object_near_relative_target",
             "object_lifted",
             "object_relative_position",
             "object_upright",
@@ -719,6 +721,58 @@ def _decode_validator(
             joint=_expect_identifier(mapping["joint"], path=(*path, "joint")),
             minimum_position=minimum,
             maximum_position=maximum,
+        )  # type: ignore[return-value]
+
+    if kind == "object_near_relative_target":
+        _validate_fields(
+            mapping,
+            allowed=frozenset(
+                {
+                    "kind",
+                    "object",
+                    "reference",
+                    "displacement",
+                    "position_tolerance",
+                }
+            ),
+            required=frozenset({"kind", "object", "reference", "displacement"}),
+            path=path,
+        )
+        displacement = _expect_list(
+            mapping["displacement"],
+            path=(*path, "displacement"),
+        )
+        if len(displacement) != 3:
+            raise _error(
+                "invalid_vector_shape",
+                (*path, "displacement"),
+                "displacement must contain exactly three numbers.",
+            )
+        for index, number in enumerate(displacement):
+            if type(number) not in (int, float):
+                raise _error(
+                    "invalid_number",
+                    (*path, "displacement", index),
+                    "Displacement components must be finite numbers, not bool values.",
+                )
+        tolerance = mapping.get("position_tolerance", 0.03)
+        if type(tolerance) not in (int, float):
+            raise _error(
+                "invalid_number",
+                (*path, "position_tolerance"),
+                "position_tolerance must be a finite number, not bool.",
+            )
+        return _construct(
+            ObjectNearRelativeTargetValidatorCfg,
+            path=path,
+            kind=kind,
+            object=_expect_identifier(mapping["object"], path=(*path, "object")),
+            reference=_expect_identifier(
+                mapping["reference"],
+                path=(*path, "reference"),
+            ),
+            displacement=tuple(displacement),
+            position_tolerance=tolerance,
         )  # type: ignore[return-value]
 
     _validate_fields(
@@ -1099,6 +1153,19 @@ def validate_task_program(
                             role="object",
                             path=(*validator_path, "reference"),
                         )
+                elif type(validator) is ObjectNearRelativeTargetValidatorCfg:
+                    _call_context(
+                        context.validate_scene_reference,
+                        validator.object,
+                        role="object",
+                        path=(*validator_path, "object"),
+                    )
+                    _call_context(
+                        context.validate_scene_reference,
+                        validator.reference,
+                        role="object",
+                        path=(*validator_path, "reference"),
+                    )
                 elif type(validator) is ArticulationJointPositionValidatorCfg:
                     _call_context(
                         context.validate_scene_reference,

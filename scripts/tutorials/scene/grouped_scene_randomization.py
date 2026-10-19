@@ -131,6 +131,7 @@ def _render(loaded: LoadedLayouts, baseline: dict[str, Any], output: Path) -> No
     )
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
     from embodichain.lab.sim.scene import SceneChangeSet, SceneView, apply_changes
+    from embodichain.lab.sim.scene.expansion import apply_scene_variants
     from embodichain.lab.sim.sensors import CameraCfg
     from embodichain.lab.visualization import VisualizationCfg
 
@@ -143,7 +144,7 @@ def _render(loaded: LoadedLayouts, baseline: dict[str, Any], output: Path) -> No
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=True,
-            sim_device="cpu",
+            device="cpu",
             width=width,
             height=height,
             visualization=VisualizationCfg(backend="none"),
@@ -172,7 +173,18 @@ def _render(loaded: LoadedLayouts, baseline: dict[str, Any], output: Path) -> No
             for variant in loaded.variants
         ]
         for index, poses in enumerate(all_poses):
-            apply_changes(view, SceneChangeSet(poses, tuple(poses)))
+            if index == 0:
+                apply_changes(view, SceneChangeSet(poses, tuple(poses)))
+            else:
+                variant = loaded.variants[index - 1]
+                apply_scene_variants(
+                    sim,
+                    [variant],
+                    env_ids=[0],
+                    movable_entity_ids=tuple(
+                        change.entity_uid for change in variant.pose_changes
+                    ),
+                )
             # Refresh the native camera after the pose publication; never step physics.
             with sim.render_frame(capture_camera_images=False):
                 for _ in range(4):

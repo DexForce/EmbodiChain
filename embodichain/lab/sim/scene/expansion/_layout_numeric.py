@@ -133,6 +133,13 @@ def _numeric_geometry(
         raise ValueError("Invalid hierarchical root translations or member poses.")
     if not policy["randomize_groups"] and np.any(deltas != 0):
         raise ValueError("Intra-only layouts must keep group roots fixed.")
+    for column, root in enumerate(roots):
+        bounds = policy.get("group_xy_offset_bounds_m", {}).get(nodes[root]["uid"])
+        if bounds is not None and (
+            np.any(deltas[:, column] < np.asarray(bounds)[0] - 1e-9)
+            or np.any(deltas[:, column] > np.asarray(bounds)[1] + 1e-9)
+        ):
+            raise ValueError("Group root violates explicit XY offset bounds.")
     relative = np.broadcast_to(
         np.array([n["relative_pose"] for n in nodes]), (count, len(nodes), 4, 4)
     ).copy()

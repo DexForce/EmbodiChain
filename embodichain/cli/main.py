@@ -44,7 +44,7 @@ COMMANDS = (
     ),
     Command(
         name="simready",
-        target="embodichain.gen_sim.simready_pipeline.cli.start:main",
+        target="embodichain.gen_sim.asset_engine.cli.start:main",
         help="Convert a raw asset directory into a SimReady asset.",
     ),
     Command(
@@ -56,6 +56,11 @@ COMMANDS = (
         name="scene-randomization",
         target="embodichain.gen_sim.scene_engine.cli.randomization:main",
         help="Generate and save grouped scene layouts from an existing output root.",
+    ),
+    Command(
+        name="task-engine",
+        target="embodichain.gen_sim.task_engine.cli:main",
+        help="Prepare or execute GenSim tasks, including TaskSpec scene layouts.",
     ),
     Command(
         name="preview-scene",

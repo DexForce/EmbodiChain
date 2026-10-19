@@ -39,6 +39,7 @@ from embodichain.lab.task_program.integrations import (
     SimulationTaskProgramRegistration,
     SimulationRigidObjectBinding,
     SimulationSceneBinding,
+    ContainerAffordanceBinding,
     SupportSurfaceAffordanceBinding,
 )
 from embodichain.lab.task_program.integrations._configured_composition import (
@@ -917,6 +918,35 @@ def test_catalog_accepts_linked_place_relation_with_exact_grounder_key() -> None
     compiled = catalog.preflight(program)
 
     assert tuple(compiled.iter_segments())[0].calls[0].call.semantic_id == "place"
+
+
+def test_registration_replace_does_not_duplicate_scene_grounders() -> None:
+    """Replacing immutable registration metadata keeps derived grounders unique."""
+    base = create_cube_scene_binding()
+    scene = replace(
+        base,
+        registry_id="container_relation_scene",
+        containers=(
+            ContainerAffordanceBinding(
+                entity_id="cube_inside",
+                parent_id="cube",
+                native_name="inside_target",
+                is_default=True,
+            ),
+        ),
+    )
+    registration = SimulationTaskProgramRegistration(
+        scene_binding=scene,
+        robot_profile_binding=create_cube_robot_profile_binding(),
+    )
+
+    replaced = replace(registration, settle_presets=registration.settle_presets)
+
+    assert len(registration.relation_grounders) == 1
+    assert len(replaced.relation_grounders) == 1
+    assert type(replaced.relation_grounders[0]).__name__ == (
+        "ContainerRelationTargetGrounder"
+    )
 
 
 def test_standard_support_binding_installs_grounder_without_task_code() -> None:

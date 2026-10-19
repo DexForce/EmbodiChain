@@ -37,6 +37,9 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.objects import Articulation
 from embodichain.lab.visualization import VisualizationCfg
+from embodichain.gen_sim.asset_engine.utils.articulated_usdc_utils import (
+    _read_revolute_qpos_limits,
+)
 from embodichain.gen_sim.scene_engine.pipeline.utils.usd_scene import (
     USD_SCENE_SCHEMA,
     UsdSceneBinding,
@@ -95,7 +98,7 @@ def _mesh_collision_cfg(max_convex_hull_num: object) -> MeshCollisionCfg:
     return MeshCollisionCfg(
         approximation="convex_decomposition",
         max_hulls=hull_count,
-        acd_method="vhacd",
+        acd_method="visacd",
     )
 
 
@@ -660,6 +663,7 @@ def _add_articulations(
                     ),
                     root_props=ArticulationRootPropertiesCfg(fixed_base=True),
                     build_pk_chain=False,
+                    qpos_limits=_read_revolute_qpos_limits(usdc_path) or None,
                 )
             )
         )

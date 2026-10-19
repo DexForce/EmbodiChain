@@ -18,9 +18,10 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 import math
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import torch
 
@@ -80,9 +81,22 @@ class HeldObjectPoseGoal:
     pass the motion generator's normal checks. This is not an exhaustive search.
     """
 
+    world_yaw_free_path: bool = False
+    """Apply one selected free yaw to every waypoint after the initial waypoint.
+
+    Staged transports use this to select the yaw at the clearance waypoint and
+    reuse it for the final descent.
+    """
+
     def __post_init__(self) -> None:
         if type(self.world_yaw_free) is not bool:
             raise TypeError("world_yaw_free must be a boolean.")
+        if type(self.world_yaw_free_path) is not bool:
+            raise TypeError("world_yaw_free_path must be a boolean.")
+        if self.world_yaw_free_path and not self.world_yaw_free:
+            raise ValueError(
+                "world_yaw_free_path requires world_yaw_free to be enabled."
+            )
         validate_pose_goal(
             self.object_target_pose,
             "object_target_pose",
@@ -186,35 +200,26 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
             interpolation_dt=context.control_dt,
         )
 
-        def plan_target(poses: torch.Tensor) -> PlanResult:
-            return self.motion_generator.generate(
-                build_pose_plan_states(torch.matmul(poses, object_to_eef)),
-                options=motion_options,
+        if (
+            target.world_yaw_free_path
+            and target.world_yaw_free
+            and object_target_pose.ndim == 4
+            and object_target_pose.shape[1] == 3
+        ):
+            result, selected_yaws, attempts = self._plan_staged_yaw_free_path(
+                object_target_pose,
+                object_to_eef,
+                motion_options,
+                eligible,
             )
-
-        result = plan_target(object_target_pose)
-        assert isinstance(result.success, torch.Tensor)
-        selected_yaws = start_arm_qpos.new_zeros(self.num_envs)
-        attempts = 1
-        if target.world_yaw_free:
-            for fraction in (0.25, -0.25, 0.5, -0.5, 0.75, -0.75, 1.0):
-                missing = eligible & ~result.success
-                if not missing.any():
-                    break
-                angle = math.pi * fraction
-                cosine, sine = math.cos(angle), math.sin(angle)
-                yaw = object_target_pose.new_tensor(
-                    [[cosine, -sine, 0.0], [sine, cosine, 0.0], [0.0, 0.0, 1.0]]
-                )
-                poses = object_target_pose.clone()
-                final_pose = poses[:, -1] if poses.ndim == 4 else poses
-                final_pose[:, :3, :3] = yaw @ final_pose[:, :3, :3]
-                candidate = plan_target(poses)
-                attempts += 1
-                accepted = missing & candidate.success
-                if accepted.any():
-                    result = _merge_yaw_paths(result, candidate, accepted)
-                    selected_yaws[accepted] = angle
+        else:
+            result, selected_yaws, attempts = self._plan_single_yaw_free_path(
+                object_target_pose,
+                object_to_eef,
+                motion_options,
+                eligible,
+                target.world_yaw_free,
+            )
         if result.positions is None:
             return self.failed_plan(
                 request, context, message="No feasible held-object transport path."
@@ -248,6 +253,183 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
                 else None
             ),
             segment_lengths={"transport": timed.waypoint_count},
+        )
+
+    def _plan_single_yaw_free_path(
+        self,
+        object_target_pose: torch.Tensor,
+        object_to_eef: torch.Tensor,
+        motion_options: Any,
+        eligible: torch.Tensor,
+        world_yaw_free: bool,
+    ) -> tuple[PlanResult, torch.Tensor, int]:
+        """Plan one held-object path with optional final-yaw search."""
+
+        def plan_target(poses: torch.Tensor) -> PlanResult:
+            return self.motion_generator.generate(
+                build_pose_plan_states(torch.matmul(poses, object_to_eef)),
+                options=motion_options,
+            )
+
+        result = plan_target(object_target_pose)
+        assert isinstance(result.success, torch.Tensor)
+        selected_yaws = motion_options.start_qpos.new_zeros(
+            motion_options.start_qpos.shape[0]
+        )
+        attempts = 1
+        if world_yaw_free:
+            for fraction in (0.25, -0.25, 0.5, -0.5, 0.75, -0.75, 1.0):
+                missing = eligible & ~result.success
+                if not missing.any():
+                    break
+                angle = math.pi * fraction
+                cosine, sine = math.cos(angle), math.sin(angle)
+                yaw = object_target_pose.new_tensor(
+                    [[cosine, -sine, 0.0], [sine, cosine, 0.0], [0.0, 0.0, 1.0]]
+                )
+                poses = object_target_pose.clone()
+                final_pose = poses[:, -1] if poses.ndim == 4 else poses
+                final_pose[:, :3, :3] = yaw @ final_pose[:, :3, :3]
+                candidate = plan_target(poses)
+                attempts += 1
+                accepted = missing & candidate.success
+                if accepted.any():
+                    result = _merge_yaw_paths(result, candidate, accepted)
+                    selected_yaws[accepted] = angle
+        return result, selected_yaws, attempts
+
+    def _plan_staged_yaw_free_path(
+        self,
+        object_target_poses: torch.Tensor,
+        object_to_eef: torch.Tensor,
+        motion_options: Any,
+        eligible: torch.Tensor,
+    ) -> tuple[PlanResult, torch.Tensor, int]:
+        """Reuse one yaw choice across clearance rotation and final descent."""
+        first_poses = object_target_poses[:, :2]
+
+        def plan_first(poses: torch.Tensor, options: Any) -> PlanResult:
+            return self.motion_generator.generate(
+                build_pose_plan_states(torch.matmul(poses, object_to_eef)),
+                options=options,
+            )
+
+        first = plan_first(first_poses, motion_options)
+        assert isinstance(first.success, torch.Tensor)
+        start_qpos = motion_options.start_qpos
+        assert start_qpos is not None
+        selected_yaws = start_qpos.new_zeros(start_qpos.shape[0])
+        attempts = 1
+        for fraction in (0.25, -0.25, 0.5, -0.5, 0.75, -0.75, 1.0):
+            missing = eligible & ~first.success
+            if not missing.any():
+                break
+            angle = math.pi * fraction
+            cosine, sine = math.cos(angle), math.sin(angle)
+            yaw = first_poses.new_tensor(
+                [[cosine, -sine, 0.0], [sine, cosine, 0.0], [0.0, 0.0, 1.0]]
+            )
+            candidate_poses = first_poses.clone()
+            candidate_poses[:, 1, :3, :3] = yaw @ candidate_poses[:, 1, :3, :3]
+            candidate = plan_first(candidate_poses, motion_options)
+            attempts += 1
+            accepted = missing & candidate.success
+            if accepted.any():
+                first = _merge_yaw_paths(first, candidate, accepted)
+                selected_yaws[accepted] = angle
+
+        if first.positions is None:
+            return first, selected_yaws, attempts
+
+        final_poses = object_target_poses[:, 2].clone()
+        cosine = torch.cos(selected_yaws)
+        sine = torch.sin(selected_yaws)
+        yaw = torch.zeros(
+            (selected_yaws.shape[0], 3, 3),
+            dtype=final_poses.dtype,
+            device=final_poses.device,
+        )
+        yaw[:, 0, 0] = cosine
+        yaw[:, 0, 1] = -sine
+        yaw[:, 1, 0] = sine
+        yaw[:, 1, 1] = cosine
+        yaw[:, 2, 2] = 1.0
+        final_poses[:, :3, :3] = yaw @ final_poses[:, :3, :3]
+
+        second_options = deepcopy(motion_options)
+        second_options.start_qpos = first.positions[:, -1].clone()
+        second_object_to_eef = object_to_eef[:, 0]
+        second = self.motion_generator.generate(
+            build_pose_plan_states(torch.matmul(final_poses, second_object_to_eef)),
+            options=second_options,
+        )
+        assert isinstance(second.success, torch.Tensor)
+        missing_second = eligible & first.success & ~second.success
+        if (
+            missing_second.any()
+            and second.positions is not None
+            and second.dt is not None
+        ):
+            # A new heading needs a fresh clearance path as well as its descent.
+            for fraction in (0.0, 0.25, -0.25, 0.5, -0.5, 0.75, -0.75, 1.0):
+                if not missing_second.any():
+                    break
+                angle = math.pi * fraction
+                rows = missing_second & ~torch.isclose(
+                    selected_yaws, selected_yaws.new_full(selected_yaws.shape, angle)
+                )
+                if not rows.any():
+                    continue
+                cosine, sine = math.cos(angle), math.sin(angle)
+                candidate_yaw = first_poses.new_tensor(
+                    [[cosine, -sine, 0.0], [sine, cosine, 0.0], [0.0, 0.0, 1.0]]
+                )
+                candidate_poses = first_poses.clone()
+                candidate_poses[:, 1, :3, :3] = (
+                    candidate_yaw @ candidate_poses[:, 1, :3, :3]
+                )
+                candidate_first = plan_first(candidate_poses, motion_options)
+                attempts += 1
+                if (
+                    candidate_first.positions is None
+                    or candidate_first.dt is None
+                    or not (rows & candidate_first.success).any()
+                ):
+                    continue
+                candidate_final = object_target_poses[:, 2].clone()
+                candidate_final[:, :3, :3] = candidate_yaw @ candidate_final[:, :3, :3]
+                candidate_options = deepcopy(motion_options)
+                candidate_options.start_qpos = candidate_first.positions[:, -1].clone()
+                candidate_second = self.motion_generator.generate(
+                    build_pose_plan_states(candidate_final @ second_object_to_eef),
+                    options=candidate_options,
+                )
+                accepted = rows & candidate_first.success & candidate_second.success
+                if (
+                    accepted.any()
+                    and candidate_second.positions is not None
+                    and candidate_second.dt is not None
+                ):
+                    first = _merge_yaw_paths(first, candidate_first, accepted)
+                    second = _merge_yaw_paths(second, candidate_second, accepted)
+                    selected_yaws[accepted] = angle
+                    missing_second &= ~accepted
+        success = first.success & second.success
+        if second.positions is None or second.dt is None:
+            return (
+                PlanResult(success=success, positions=first.positions, dt=first.dt),
+                selected_yaws,
+                attempts,
+            )
+        assert first.dt is not None
+        return (
+            PlanResult(
+                success=success,
+                positions=torch.cat((first.positions, second.positions), dim=1),
+                dt=torch.cat((first.dt, second.dt), dim=1),
+            ),
+            selected_yaws,
+            attempts,
         )
 
 

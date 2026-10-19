@@ -1,6 +1,6 @@
 # Scene expansion
 
-Scene expansion proposes changes before a new Task Program execution. The core
+Scene expansion proposes layouts before host execution or environment reset. The core
 is independent of Task Program, GenSim and Gym; injected host callbacks own the
 actual scene preparation and measured task evidence. General composition,
 layout and physical state services are owned by
@@ -28,6 +28,10 @@ rather than being reinterpreted by the hierarchical sampler.
 | Shared proposal contracts and fixed source | `embodichain/lab/sim/scene/expansion/` |
 | Candidate limits and movable entity permissions | `cfg.py` in that package |
 | Arena poses and proposal identity | `contracts.py` in that package |
+| Source-independent input, preparation, generation and batched application | `layout.py` in that package |
+| Source-independent v4 files and eager integrity checks | `persistence.py` in that package |
+| Handwritten reset event | `embodichain/lab/gym/envs/managers/randomization/_scene_layout.py` |
+| TaskSpec role projection and independent E1 bundles | `embodichain/gen_sim/task_engine/scene_expansion.py` |
 | One Task Program attempt and result metadata | `embodichain/lab/task_program/integrations/scene_expansion.py` |
 | Physical preparation and owned state restore | `embodichain/lab/task_program/integrations/simulation/scene_expansion.py` |
 | Reusable object/workspace proposals and pose IK | `embodichain/lab/sim/scene/workspace.py` |
@@ -35,7 +39,7 @@ rather than being reinterpreted by the hierarchical sampler.
 | Reset-time persistence eligibility | `embodichain/lab/gym/envs/embodied_env.py` |
 | Action consumption and recording lifecycle | `embodichain/lab/gym/envs/demo.py` |
 
-## Resolution and ownership
+## Legacy Task Program host and ownership
 
 ```text
 SceneExpansionCfg + authored pose changes

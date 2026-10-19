@@ -276,6 +276,22 @@ def _policy_data(cfg: SceneRandomizationPolicyCfg | Mapping) -> dict:
     if intra is None:
         intra = IntraGroupRandomizationCfg()
     _validate_intra(intra)
+    if not isinstance(cfg.group_xy_offset_bounds_m, dict):
+        raise ValueError("group_xy_offset_bounds_m must map root UIDs to XY bounds.")
+    for uid, bounds in cfg.group_xy_offset_bounds_m.items():
+        if bounds is None:
+            raise ValueError(
+                "Root XY bounds must be explicit lower/upper corners; omit unbounded roots."
+            )
+        _decode_intra(
+            {
+                "targets": {
+                    uid: {"xy_offset_bounds_m": bounds, "yaw_delta_range_deg": [0, 0]}
+                }
+            }
+        )
+    if cfg.group_xy_offset_bounds_m and not cfg.randomize_groups:
+        raise ValueError("Root XY bounds require randomize_groups=True.")
     if cfg.group_targets is not None and (
         isinstance(cfg.group_targets, str)
         or len(set(cfg.group_targets)) != len(cfg.group_targets)
@@ -288,6 +304,7 @@ def _policy_data(cfg: SceneRandomizationPolicyCfg | Mapping) -> dict:
         "collision_margin_m": float(cfg.collision_margin_m),
         "randomize_groups": cfg.randomize_groups,
         "group_targets": None if cfg.group_targets is None else list(cfg.group_targets),
+        "group_xy_offset_bounds_m": deepcopy(cfg.group_xy_offset_bounds_m),
         "intra_group": _intra_payload(intra),
     }
 
@@ -356,6 +373,8 @@ def prepare_scene_randomization(
     )
     if selected_roots - set(roots):
         raise ValueError("group_targets must name group roots.")
+    if set(policy["group_xy_offset_bounds_m"]) - selected_roots:
+        raise ValueError("Group offset bounds must reference selected group roots.")
     if policy["group_targets"] is None:
         selected_roots = {uid for uid in roots if subtree(uid) <= permitted}
     elif any(not subtree(uid) <= permitted for uid in selected_roots):
@@ -399,21 +418,30 @@ def prepare_scene_randomization(
     key = _digest(
         {
             "source": source.fingerprint,
-            "extractor": "scene-layout-support/v1",
+            "extractor": "scene-layout-support/v2",
             "intra": policy["intra_group"],
         }
     )
     geometry = None
+    table = None
     path = None if cache_dir is None else Path(cache_dir) / (key + ".json")
     if path is not None and path.exists():
         from .persistence import _read_json
 
         cached = _read_json(path)
         if cached.get("key") != key or cached.get("sha256") != _digest(
-            cached.get("geometry")
+            {"geometry": cached.get("geometry"), "table": cached.get("table")}
         ):
             raise ValueError("Prepared support cache contents changed.")
         geometry = cached["geometry"]
+        bounds = np.asarray(cached["table"], dtype=np.float64)
+        if (
+            bounds.shape != (2, 2)
+            or not np.isfinite(bounds).all()
+            or np.any(bounds[0] >= bounds[1])
+        ):
+            raise ValueError("Prepared main support bounds are invalid.")
+        table = tuple(tuple(float(value) for value in row) for row in bounds)
     if geometry is None:
         supports = {}
         for parent in sorted(active):
@@ -446,32 +474,33 @@ def prepare_scene_randomization(
                 )
             supports[parent] = support
         geometry = {"nodes": nodes, "supports": supports}
+    if table is None:
+        transform = np.asarray(source.poses[source.support_uid])
+        points = (
+            source.vertices[source.support_uid] @ transform[:3, :3].T + transform[:3, 3]
+        )
+        region = detect_support_region(
+            source.support_uid, points, source.faces[source.support_uid]
+        )
+        rectangle = region.optimization_rectangle
+        if rectangle is None:
+            raise ValueError(
+                "Main support has no conservative rectangular sampling region."
+            )
+        lo_x, lo_y, hi_x, hi_y = rectangle.bounds
+        table = ((lo_x, lo_y), (hi_x, hi_y))
         if path is not None:
             from .persistence import _write_atomic
 
-            _write_atomic(
-                path, {"key": key, "sha256": _digest(geometry), "geometry": geometry}
-            )
-    transform = np.asarray(source.poses[source.support_uid])
-    points = (
-        source.vertices[source.support_uid] @ transform[:3, :3].T + transform[:3, 3]
-    )
-    region = detect_support_region(
-        source.support_uid, points, source.faces[source.support_uid]
-    )
-    rectangle = region.optimization_rectangle
-    if rectangle is None:
-        raise ValueError(
-            "Main support has no conservative rectangular sampling region."
-        )
-    lo_x, lo_y, hi_x, hi_y = rectangle.bounds
+            payload = {"geometry": geometry, "table": table}
+            _write_atomic(path, {"key": key, "sha256": _digest(payload), **payload})
     return PreparedSceneRandomization(
         source,
         deepcopy(policy),
         _digest(geometry),
         tuple(sorted(moving)),
         geometry,
-        ((lo_x, lo_y), (hi_x, hi_y)),
+        table,
         tuple(ordered.index(uid) for uid in roots if uid in selected_roots),
     )
 
@@ -584,6 +613,15 @@ def generate_scene_variants(
             group_margin=policy["collision_margin_m"],
             support_gap=policy["intra_group"]["support_gap_m"],
             movable_roots=prepared._movable_roots,
+            root_offset_bounds={
+                i: torch.tensor(
+                    policy["group_xy_offset_bounds_m"][node["uid"]],
+                    dtype=torch.float64,
+                    device=device,
+                )
+                for i, node in enumerate(prepared._geometry["nodes"])
+                if node["uid"] in policy["group_xy_offset_bounds_m"]
+            },
         )
         selected = torch.nonzero(valid, as_tuple=False).flatten()[
             : candidate_count - accepted

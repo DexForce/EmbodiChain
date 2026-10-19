@@ -47,6 +47,10 @@ def _write_atomic(path: Path, data: dict | list) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.is_symlink():
         raise ValueError("Scene package destination must not be a symlink.")
+    # The C encoder avoids Python iteration over millions of source-geometry
+    # scalars. Bound the additional text allocation to one package file at a
+    # time; canonical bytes and atomic fsync/replace semantics stay identical.
+    payload = json.dumps(data, sort_keys=True, separators=(",", ":"), allow_nan=False)
     temporary = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -57,9 +61,7 @@ def _write_atomic(path: Path, data: dict | list) -> None:
             delete=False,
         ) as stream:
             temporary = Path(stream.name)
-            json.dump(
-                data, stream, sort_keys=True, separators=(",", ":"), allow_nan=False
-            )
+            stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)

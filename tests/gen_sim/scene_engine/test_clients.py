@@ -23,7 +23,7 @@ from typing import Any
 
 import pytest
 
-from embodichain.gen_sim.scene_engine.clients import articulated_generation
+from embodichain.gen_sim.asset_engine.clients import articulated_generation
 from embodichain.gen_sim.scene_engine.clients import geometry_generation
 from embodichain.gen_sim.scene_engine.clients import image_generation
 from embodichain.gen_sim.scene_engine.clients import image_segmentation
@@ -99,11 +99,11 @@ def test_clients_load_their_required_dotenv_values(
         "SCENE_ENGINE_IMAGE_GENERATION_BY_PROMPT_PATH": "/generate_image_by_prompt",
     }
     articulated_generation_values = {
-        "SCENE_ENGINE_ARTICULATED_GENERATION_BASE_URL": "http://articulation/",
-        "SCENE_ENGINE_ARTICULATED_GENERATION_TIMEOUT_S": "7200",
-        "SCENE_ENGINE_ARTICULATED_GENERATION_MAX_ATTEMPTS": "2",
-        "SCENE_ENGINE_ARTICULATED_GENERATION_HEALTH_PATH": "/health",
-        "SCENE_ENGINE_ARTICULATED_GENERATION_GENERATE_PATH": "/generate_articulation",
+        "ASSET_ENGINE_ARTICULATED_GENERATION_BASE_URL": "http://articulation/",
+        "ASSET_ENGINE_ARTICULATED_GENERATION_TIMEOUT_S": "7200",
+        "ASSET_ENGINE_ARTICULATED_GENERATION_MAX_ATTEMPTS": "2",
+        "ASSET_ENGINE_ARTICULATED_GENERATION_HEALTH_PATH": "/health",
+        "ASSET_ENGINE_ARTICULATED_GENERATION_GENERATE_PATH": "/generate_articulation",
     }
     llm_values = {
         "OPENAI_API_KEY": "test-key",
@@ -127,7 +127,7 @@ def test_clients_load_their_required_dotenv_values(
     )
     monkeypatch.setattr(
         articulated_generation,
-        "read_scene_engine_env_values",
+        "read_asset_engine_env_values",
         lambda *_: articulated_generation_values,
     )
     monkeypatch.setattr(
@@ -259,6 +259,90 @@ def test_articulated_generation_client_posts_image_and_returns_server_json(
     assert session.post_call is not None
     assert session.post_call["url"] == "http://articulation/generate_articulation"
     assert session.post_call["data"] == {"prompt": "a cabinet with one opening door"}
+
+
+@pytest.mark.parametrize("defect", ["empty", "root", "joint", "body", "limits"])
+def test_articulated_usdc_rejects_invalid_physics(tmp_path: Path, defect: str) -> None:
+    from pxr import Usd, UsdGeom, UsdPhysics
+
+    path = tmp_path / "asset.usdc"
+    if defect == "empty":
+        path.touch()
+    else:
+        stage = Usd.Stage.CreateNew(str(path))
+        root = UsdGeom.Xform.Define(stage, "/Asset").GetPrim()
+        if defect != "root":
+            UsdPhysics.ArticulationRootAPI.Apply(root)
+        for name in ("base", "lever"):
+            prim = UsdGeom.Cube.Define(stage, f"/Asset/{name}").GetPrim()
+            UsdPhysics.RigidBodyAPI.Apply(prim)
+        if defect != "joint":
+            joint = UsdPhysics.RevoluteJoint.Define(stage, "/Asset/hinge")
+            joint.CreateBody0Rel().SetTargets(["/Asset/base"])
+            joint.CreateBody1Rel().SetTargets(
+                ["/missing" if defect == "body" else "/Asset/lever"]
+            )
+            joint.CreateAxisAttr("X")
+            joint.CreateLowerLimitAttr(10 if defect == "limits" else -10)
+            joint.CreateUpperLimitAttr(10)
+        stage.GetRootLayer().Save()
+    with pytest.raises(RuntimeError, match="Invalid articulation USDC"):
+        articulated_generation._validate_articulated_usdc(path)
+
+
+@pytest.mark.parametrize("closed", [None, 0.05, float("nan"), True])
+def test_articulated_usdc_requires_explicit_prismatic_closed_endpoint(
+    tmp_path: Path, closed: object
+) -> None:
+    from pxr import Sdf, Usd, UsdGeom, UsdPhysics
+
+    path = tmp_path / "drawer.usdc"
+    stage = Usd.Stage.CreateNew(str(path))
+    root = UsdGeom.Xform.Define(stage, "/Asset").GetPrim()
+    UsdPhysics.ArticulationRootAPI.Apply(root)
+    for name in ("base", "drawer"):
+        UsdPhysics.RigidBodyAPI.Apply(
+            UsdGeom.Cube.Define(stage, f"/Asset/{name}").GetPrim()
+        )
+    joint = UsdPhysics.PrismaticJoint.Define(stage, "/Asset/slide")
+    joint.CreateBody0Rel().SetTargets(["/Asset/base"])
+    joint.CreateBody1Rel().SetTargets(["/Asset/drawer"])
+    joint.CreateAxisAttr("Y")
+    joint.CreateLowerLimitAttr(0.0)
+    joint.CreateUpperLimitAttr(0.1)
+    if closed is not None:
+        joint.GetPrim().CreateAttribute(
+            "gen_sim:closedPosition", Sdf.ValueTypeNames.Double
+        ).Set(closed)
+    stage.GetRootLayer().Save()
+    with pytest.raises(RuntimeError, match="closed endpoint"):
+        articulated_generation._validate_articulated_usdc(path)
+
+
+def test_articulated_usdc_accepts_declared_prismatic_closed_endpoint(
+    tmp_path: Path,
+) -> None:
+    from pxr import Sdf, Usd, UsdGeom, UsdPhysics
+
+    path = tmp_path / "drawer.usdc"
+    stage = Usd.Stage.CreateNew(str(path))
+    root = UsdGeom.Xform.Define(stage, "/Asset").GetPrim()
+    UsdPhysics.ArticulationRootAPI.Apply(root)
+    for name in ("base", "drawer"):
+        UsdPhysics.RigidBodyAPI.Apply(
+            UsdGeom.Cube.Define(stage, f"/Asset/{name}").GetPrim()
+        )
+    joint = UsdPhysics.PrismaticJoint.Define(stage, "/Asset/slide")
+    joint.CreateBody0Rel().SetTargets(["/Asset/base"])
+    joint.CreateBody1Rel().SetTargets(["/Asset/drawer"])
+    joint.CreateAxisAttr("Y")
+    joint.CreateLowerLimitAttr(0.0)
+    joint.CreateUpperLimitAttr(0.1)
+    joint.GetPrim().CreateAttribute(
+        "gen_sim:closedPosition", Sdf.ValueTypeNames.Double
+    ).Set(0.1)
+    stage.GetRootLayer().Save()
+    articulated_generation._validate_articulated_usdc(path)
 
 
 def test_image_generation_client_posts_prompt_and_writes_png(
@@ -441,3 +525,74 @@ def test_geometry_client_posts_masks_and_downloads_glbs(tmp_path: Path) -> None:
     assert session.post_call is not None
     assert session.post_call["url"] == "http://geometry/objects"
     assert (tmp_path / "output/cup.glb").read_bytes() == b"glTF-mesh"
+
+
+def test_articulated_upload_hashes_the_same_expanded_image_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import hashlib
+    import os
+
+    pytest.importorskip("pxr")
+    from pxr import Sdf, Usd, UsdGeom, UsdPhysics
+
+    image = tmp_path / "reference.png"
+    image.write_bytes(b"reference-image")
+    asset = tmp_path / "fixture.usdc"
+    stage = Usd.Stage.CreateNew(str(asset))
+    root = UsdGeom.Xform.Define(stage, "/asset").GetPrim()
+    stage.SetDefaultPrim(root)
+    UsdPhysics.ArticulationRootAPI.Apply(root)
+    for name in ("base", "drawer"):
+        UsdPhysics.RigidBodyAPI.Apply(
+            UsdGeom.Cube.Define(stage, f"/asset/{name}").GetPrim()
+        )
+    joint = UsdPhysics.PrismaticJoint.Define(stage, "/asset/slide")
+    joint.CreateBody0Rel().SetTargets(["/asset/base"])
+    joint.CreateBody1Rel().SetTargets(["/asset/drawer"])
+    joint.CreateLowerLimitAttr(0.0)
+    joint.CreateUpperLimitAttr(0.1)
+    joint.GetPrim().CreateAttribute(
+        "gen_sim:closedPosition", Sdf.ValueTypeNames.Double
+    ).Set(0.0)
+    stage.GetRootLayer().Save()
+    content = asset.read_bytes()
+
+    class Session(_Session):
+        def __init__(self):
+            super().__init__(get_payload={})
+
+        def post(self, url, **kwargs):
+            self.post_call = kwargs
+            return _Response({"request_id": "test"})
+
+        def get(self, url, **kwargs):
+            self.get_calls.append((url, kwargs.get("timeout")))
+            if url.endswith("/tasks/test"):
+                return _Response(
+                    {
+                        "status": "succeeded",
+                        "result": {"artifacts": {"usdc": "fixture.usdc"}},
+                    }
+                )
+            return _Response({}, content=content)
+
+    session = Session()
+    client = articulated_generation.ArticulatedGenerationClient(
+        base_url="http://mock",
+        timeout_s=30,
+        max_attempts=1,
+        health_path="/health",
+        generate_path="/generate",
+        session=session,
+    )
+    output = client.generate_articulated_usdc(
+        prompt="drawer",
+        image_path="~/" + os.path.relpath(image, Path.home()),
+        output_path=tmp_path / "output.usdc",
+    )
+    assert output.read_bytes() == content
+    evidence = json.loads(output.with_suffix(".request.json").read_text())
+    assert evidence["image_sha256"] == hashlib.sha256(image.read_bytes()).hexdigest()
+    assert len(session.get_calls) == 2

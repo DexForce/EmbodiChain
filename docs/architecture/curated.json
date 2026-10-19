@@ -1972,7 +1972,7 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/gen_sim/simready_pipeline/pipeline/ingest.py",
+          "path": "embodichain/gen_sim/asset_engine/pipeline/ingest.py",
           "symbol": "<module>",
           "start_line": 17,
           "end_line": 17,
@@ -1981,7 +1981,7 @@
       ],
       "documentation": [
         {
-          "docname": "features/generative_sim/simready_pipeline",
+          "docname": "features/generative_sim/asset_engine",
           "label": "SimReady pipeline documentation"
         }
       ]
@@ -2754,7 +2754,7 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/gen_sim/simready_pipeline/parser/base.py",
+          "path": "embodichain/gen_sim/asset_engine/parser/base.py",
           "symbol": "ParserManager",
           "start_line": 46,
           "end_line": 46,
@@ -2763,7 +2763,7 @@
       ],
       "documentation": [
         {
-          "docname": "features/generative_sim/simready_pipeline",
+          "docname": "features/generative_sim/asset_engine",
           "label": "SimReady pipeline documentation"
         }
       ]
@@ -3287,9 +3287,9 @@
       "details": "Scene services are shared by procedural recipes and GenSim adapters. They compose existing entity configurations, solve fixed-orientation XY layouts, query or change supported B=1 physical state, and collect measured validation. Compute owns reusable tensor geometry kernels; scene services retain CPU support, polygon-placement, packing and SLSQP strategies. Spawn and SimulationManager retain native resource and topology ownership; callers retain stepping, task lifecycle and persistence.",
       "boundaries": [
         "Arena-local Z-up geometry in metres; AABB layout is not exact mesh collision or task-success evidence.",
-        "Runtime state operations currently require B=1; snapshots are owner-bound physical state, not complete backend checkpoints.",
+        "Legacy snapshots/state operations require B=1; source-independent layout application supports selected batch rows; snapshots are owner-bound physical state, not complete backend checkpoints.",
         "GenSim retains model calls, assets, editing semantics, temporary simulation lifetime and export formats.",
-        "Tensor geometry supports independent leading batches and CPU/CUDA devices; current physical state services remain B=1 and CPU strategies do not become GPU solvers."
+        "Tensor geometry supports independent leading batches and CPU/CUDA devices; legacy snapshot/state services remain B=1 and CPU strategies do not become GPU solvers."
       ],
       "evidence": [
         {
@@ -3308,6 +3308,70 @@
         {
           "docname": "api_reference/embodichain/embodichain.compute.scene_geometry",
           "label": "Shared numerical geometry and layout"
+        }
+      ]
+    },
+    {
+      "id": "task-spec",
+      "label": "TaskSpec",
+      "kind": "module",
+      "topic_ids": [
+        "task-spec"
+      ],
+      "summary": "Simulator-independent normative task contract with milestones, requirements, semantic identity, and cache support.",
+      "boundaries": [
+        "TaskSpec defines task semantics; scene bindings, execution evidence, and trajectory expansion remain owned by their existing integrations."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/task_spec/__init__.py",
+          "symbol": "<module>",
+          "start_line": 17,
+          "end_line": 22,
+          "excerpt": "\"\"\"GenSim-owned, simulator-independent TaskSpec protocol and cache.\n\nThe core object is :class:`TaskSpec`. Legacy artifact exports are resolved\nfrom :mod:`.compat` only when requested; normal generation and cache access\ndo not load them. Runtime evidence belongs to the execution integrations.\n\"\"\""
+        },
+        {
+          "path": "embodichain/task_spec/__init__.py",
+          "symbol": "<module>",
+          "start_line": 17,
+          "end_line": 21,
+          "excerpt": "\"\"\"Compatibility imports for the GenSim-owned TaskSpec protocol.\n\nNew code should import from :mod:`embodichain.gen_sim.task_spec`.  This module\nremains a thin forwarding surface for callers that used the earlier path.\n\"\"\""
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/public_api",
+          "label": "TaskSpec API"
+        }
+      ],
+      "details": "Task Engine emits one reusable TaskSpec for Asset Engine, Scene Engine, Task Program, runtime evaluation, and expansion lineage. Its semantic hash is content addressed and excludes execution-specific identities."
+    },
+    {
+      "id": "task-engine",
+      "label": "Task Engine",
+      "kind": "class",
+      "topic_ids": [
+        "task-engine",
+        "task-spec"
+      ],
+      "summary": "Prepare and execute TaskSpec-constrained E1 scene variants through independent frozen bundles.",
+      "boundaries": [
+        "Role variation policy belongs to TaskSpec; runtime seed, device, budget and saved-layout selection belong to runner settings.",
+        "Each scene variant has its own revision and bundle; measured runtime validators and TaskSpec evaluation gate successful recording."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/task_engine/workflow.py",
+          "symbol": "TaskEngineWorkflow",
+          "start_line": 287,
+          "end_line": 287,
+          "excerpt": "class TaskEngineWorkflow:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.gen_sim.task_engine",
+          "label": "Task Engine and TaskSpec scene expansion"
         }
       ]
     }
@@ -4224,7 +4288,7 @@
           "symbol": "<module>",
           "start_line": 48,
           "end_line": 48,
-          "excerpt": "        target=\"embodichain.gen_sim.simready_pipeline.cli.start:main\","
+          "excerpt": "        target=\"embodichain.gen_sim.asset_engine.cli.start:main\","
         }
       ]
     },
@@ -5091,7 +5155,7 @@
       "scope": "Caller supplies the ParserManager instance.",
       "evidence": [
         {
-          "path": "embodichain/gen_sim/simready_pipeline/pipeline/ingest.py",
+          "path": "embodichain/gen_sim/asset_engine/pipeline/ingest.py",
           "symbol": "ingest_one_asset",
           "start_line": 178,
           "end_line": 178,
@@ -5708,7 +5772,9 @@
         "grasp-tools",
         "urdf-assembly",
         "convex-decomposition",
-        "scene-services"
+        "scene-services",
+        "task-spec",
+        "task-engine"
       ],
       "edge_ids": [
         "adapter-calls-compiler",
@@ -5971,7 +6037,8 @@
         "step-clock",
         "embodied-env",
         "base-env",
-        "simulation-manager"
+        "simulation-manager",
+        "task-spec"
       ],
       "edge_ids": [
         "compiler-reads-config",
@@ -6388,7 +6455,9 @@
         "workspace-analyzer",
         "scene-services",
         "compute",
-        "scene-expansion"
+        "scene-expansion",
+        "task-spec",
+        "task-engine"
       ],
       "edge_ids": [
         "simulation-constructs-robot",
