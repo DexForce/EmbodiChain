@@ -31,6 +31,11 @@ from typing import Any
 import pytest
 import torch
 from tensordict import TensorDict
+from embodichain.data_pipeline.datasets import (
+    TensorDataSource,
+    OnlineDataSource,
+    SequenceSpecCfg,
+)
 
 from embodichain.data_pipeline.engine.data import (
     OnlineDataBudgetExhaustedError,
@@ -41,7 +46,6 @@ from embodichain.data_pipeline.engine.data import (
 )
 from examples.data_pipeline._ods_pick_place_benchmark import (
     EfficiencyTracker,
-    FrozenCorpus,
 )
 from examples.data_pipeline._ods_pick_place_lerobot import (
     DirectLeRobotWriter,
@@ -49,7 +53,10 @@ from examples.data_pipeline._ods_pick_place_lerobot import (
 )
 from examples.data_pipeline._ods_pick_place_policy import ChunkBC, pose_targets
 from examples.data_pipeline._ods_pick_place_training import _sample, _schema, _snapshot
-from examples.data_pipeline.ods_pick_place_showcase import _geometry_statistics
+from examples.data_pipeline.ods_pick_place_showcase import (
+    _geometry_statistics,
+    policy_observations,
+)
 
 _ROWS, _STEPS, _HORIZON = 3, 7, 4
 
@@ -149,7 +156,7 @@ def source(
         engine.stop()
 
 
-def _roundtrip(engine: OnlineDataEngine, destination: Path) -> FrozenCorpus:
+def _roundtrip(engine: OnlineDataEngine, destination: Path) -> TensorDataSource:
     pytest.importorskip("lerobot.datasets.lerobot_dataset")
     schema = _schema({"action_terms": []})
     snapshot = _snapshot(engine)
@@ -175,18 +182,30 @@ def _roundtrip(engine: OnlineDataEngine, destination: Path) -> FrozenCorpus:
 
 def _paired_batch(
     engine: OnlineDataEngine,
-    corpus: FrozenCorpus,
+    corpus: TensorDataSource,
     batch_size: int,
     horizon: int = _HORIZON,
 ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
     before = torch.get_rng_state()
-    online = _sample(engine, batch_size, EfficiencyTracker(20), horizon)
+    online = _sample(
+        OnlineDataSource(
+            engine,
+            schema=_schema({"action_terms": []}),
+            observation_transform=policy_observations,
+        ),
+        batch_size,
+        EfficiencyTracker(20),
+        SequenceSpecCfg(2, horizon),
+    )
+    online = online.select(
+        "obs", "actions", "valid", "loss_mask", "frame_ids", "generations"
+    )
     after = torch.get_rng_state()
     torch.set_rng_state(before)
-    offline = corpus.sample_context(batch_size, 2, horizon)
+    offline = corpus.sample_context(batch_size, SequenceSpecCfg(2, horizon))
     assert torch.equal(torch.get_rng_state(), after)
     assert online.keys() == offline.keys()
-    for field in online:
+    for field in online.keys():
         assert torch.equal(online[field], offline[field]), field
     return online, offline
 
@@ -204,8 +223,8 @@ def test_sdk_roundtrip_and_context_batches_are_exactly_equal(
         for _ in range(4):
             online, _ = _paired_batch(source, corpus, batch_size, horizon)
             mask = online["valid"]
-            assert torch.isfinite(online["observations"]).all()
-            assert (online["observations"][~mask] == 0).all()
+            assert torch.isfinite(online["obs"]).all()
+            assert (online["obs"][~mask] == 0).all()
             assert (online["actions"][~mask] == 0).all()
             assert (online["frame_ids"][~mask] == -1).all()
             assert not online["loss_mask"][:, 0].any()
@@ -228,7 +247,7 @@ def test_sdk_roundtrip_and_context_batches_are_exactly_equal(
         )
         for sample in (
             lambda count: source.sample_batch_with_context(count, 2, _HORIZON),
-            lambda count: corpus.sample_context(count, 2, _HORIZON),
+            lambda count: corpus.sample_context(count, SequenceSpecCfg(2, _HORIZON)),
         ):
             with pytest.raises(OnlineDataBudgetExhaustedError):
                 sample(3)  # Only two of the original eighteen credits remain.
@@ -241,9 +260,9 @@ def test_identical_sdk_batches_produce_identical_optimizer_updates(
     source: OnlineDataEngine, tmp_path: Path
 ) -> None:
     corpus = _roundtrip(source, tmp_path / "dataset")
-    observations = corpus.observations[corpus.valid]
+    observations = corpus.data["obs"][corpus.data["valid"]]
     mean, std = _geometry_statistics(observations)
-    targets = pose_targets(observations, corpus.actions[corpus.valid])
+    targets = pose_targets(observations, corpus.data["actions"][corpus.data["valid"]])
     target_mean = targets.mean(0)
     target_std = targets.std(0, correction=0).clamp_min(0.05)
     target_mean[3:], target_std[3:] = 0, 1
@@ -264,7 +283,7 @@ def test_identical_sdk_batches_produce_identical_optimizer_updates(
             ):
                 torch.set_rng_state(noise_state)
                 arm, hand = model.loss(
-                    batch["observations"],
+                    batch["obs"],
                     batch["actions"],
                     loss_mask=batch["loss_mask"],
                     valid_mask=batch["valid"],

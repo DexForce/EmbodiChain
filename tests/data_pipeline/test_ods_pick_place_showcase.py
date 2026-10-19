@@ -25,6 +25,8 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+from tensordict import TensorDict
+from embodichain.data_pipeline.datasets import SequenceSpecCfg
 
 from examples.data_pipeline.ods_pick_place_showcase import (
     _geometry_statistics,
@@ -70,7 +72,12 @@ def test_failed_producer_is_not_retried_as_an_empty_sampling_window() -> None:
         sample_batch_with_context=fail,
     )
     with pytest.raises(RuntimeError) as caught:
-        _sample(source, 2, SimpleNamespace(elapsed_seconds=lambda: 0), 32)
+        _sample(
+            SimpleNamespace(engine=source, sample_context=fail),
+            2,
+            SimpleNamespace(elapsed_seconds=lambda: 0),
+            SequenceSpecCfg(2, 32),
+        )
     assert caught.value is error
 
 
@@ -173,10 +180,15 @@ def test_offline_reset_diagnostic_uses_original_causal_frame_zero() -> None:
     names = [f"feature_{i}" for i in range(51)]
     names[27:30] = ["cube_0", "cube_1", "cube_2"]
     corpus = SimpleNamespace(
-        observations=observations,
-        valid=torch.ones(4, 3, dtype=torch.bool),
-        frame_ids=torch.zeros(4, 3, 3, dtype=torch.int64),
-        manifest={
+        data=TensorDict(
+            {
+                "obs": observations,
+                "valid": torch.ones(4, 3, dtype=torch.bool),
+                "frame_ids": torch.zeros(4, 3, 3, dtype=torch.int64),
+            },
+            batch_size=[4, 3],
+        ),
+        metadata={
             "schema": {
                 "observation": {"version": "pick_place.geometry@2", "names": names}
             }
@@ -185,10 +197,10 @@ def test_offline_reset_diagnostic_uses_original_causal_frame_zero() -> None:
     assert _offline_reset_positions(corpus, 4) == observations[:, 0, 27:30].tolist()
     with pytest.raises(ValueError, match="exactly the requested episodes"):
         _offline_reset_positions(corpus, 1)
-    corpus.valid[2, 0] = False
+    corpus.data["valid"][2, 0] = False
     with pytest.raises(ValueError, match="frame zero"):
         _offline_reset_positions(corpus, 4)
-    corpus.valid[2, 0] = True
-    corpus.frame_ids[1, 0, 2] = 1
+    corpus.data["valid"][2, 0] = True
+    corpus.data["frame_ids"][1, 0, 2] = 1
     with pytest.raises(ValueError, match="frame zero"):
         _offline_reset_positions(corpus, 4)

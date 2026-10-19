@@ -483,6 +483,7 @@ def _parse_args() -> argparse.Namespace:
         help="Showcase LeRobot dataset directory",
     )
     p.add_argument("--offline-storage", choices=("lerobot",), default="lerobot")
+    p.add_argument("--offline-memory-limit-mib", type=int, default=512)
     p.add_argument("--offline-episodes", type=int, default=None)
     p.add_argument("--offline-sample-budget", type=int, default=None)
     p.add_argument("--offline-sample-hard-limit", type=int, default=None)
@@ -538,6 +539,8 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--smoke", action="store_true")
     p.add_argument("--qualification-only", action="store_true")
     args = p.parse_args()
+    if args.offline_memory_limit_mib < 1:
+        p.error("--offline-memory-limit-mib must be positive")
     if args.auto_config_input is not None:
         from examples.data_pipeline._ods_pick_place_configuration import (
             apply_configuration,

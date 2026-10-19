@@ -34,7 +34,7 @@ from examples.data_pipeline._ods_pick_place_lerobot import (
 
 _SCHEMA = {
     "observation": {"names": ["a", "b"]},
-    "action": {"names": ["a", "b"], "step_dt": 1 / 30},
+    "action": {"semantics": "test_request", "names": ["a", "b"], "step_dt": 1 / 30},
 }
 
 
@@ -274,10 +274,10 @@ def test_official_sdk_direct_roundtrip(tmp_path):
         writer.submit(_row(1))
         sidecar = writer.finalize()
     loaded = load_lerobot_corpus(tmp_path / "dataset", expected_schema=_SCHEMA)
-    assert loaded.manifest["content_id"] == sidecar["source_manifest"]["content_id"]
-    assert torch.equal(loaded.valid, torch.stack([_row()["valid"]] * 2))
-    assert loaded.observations[0, 1].count_nonzero() == 0
-    assert torch.equal(loaded.observations[1, 2], _row(1)["observations"][2])
+    assert loaded.metadata["content_id"] == sidecar["source_manifest"]["content_id"]
+    assert torch.equal(loaded.data["valid"], torch.stack([_row()["valid"]] * 2))
+    assert loaded.data["obs"][0, 1].count_nonzero() == 0
+    assert torch.equal(loaded.data["obs"][1, 2], _row(1)["observations"][2])
 
 
 def test_finalize_progress_failure_never_publishes(tmp_path, fake_sdk):

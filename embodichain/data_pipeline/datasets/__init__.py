@@ -24,19 +24,41 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from .online_data import OnlineDataset
     from .sampler import ChunkSizeSampler, GMMChunkSampler, UniformChunkSampler
+    from .sequence import BatchSource, DataBudgetExhaustedError, SequenceSpecCfg
+    from .sources import OnlineDataSource, TensorDataSource
+    from .lerobot import LeRobotDataSource, LeRobotFieldMappingCfg
+    from .offline_data import OfflineDataset
 
 __all__ = [
     "ChunkSizeSampler",
     "GMMChunkSampler",
     "OnlineDataset",
     "UniformChunkSampler",
+    "BatchSource",
+    "DataBudgetExhaustedError",
+    "SequenceSpecCfg",
+    "OnlineDataSource",
+    "TensorDataSource",
+    "LeRobotDataSource",
+    "LeRobotFieldMappingCfg",
+    "OfflineDataset",
 ]
 
 
 def __getattr__(name: str) -> Any:
     if name not in __all__:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    module_name = "online_data" if name == "OnlineDataset" else "sampler"
+    module_name = {
+        "OnlineDataset": "online_data",
+        "OfflineDataset": "offline_data",
+        "BatchSource": "sequence",
+        "DataBudgetExhaustedError": "sequence",
+        "SequenceSpecCfg": "sequence",
+        "OnlineDataSource": "sources",
+        "TensorDataSource": "sources",
+        "LeRobotDataSource": "lerobot",
+        "LeRobotFieldMappingCfg": "lerobot",
+    }.get(name, "sampler")
     value = getattr(import_module(f"{__name__}.{module_name}"), name)
     globals()[name] = value
     return value

@@ -14,13 +14,66 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Private selection shared by live and resident source-budget samplers."""
+"""Pure selection, temporal windows and padding shared by data sources."""
 
 from __future__ import annotations
 
 import torch
+from tensordict import TensorDict
 
 __all__: list[str] = []
+
+
+def _context_indices(
+    valid: torch.Tensor,
+    continuity: torch.Tensor | None,
+    rows: torch.Tensor,
+    anchors: torch.Tensor,
+    history: int,
+    future: int,
+    segments: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    steps = torch.arange(valid.shape[1], device=valid.device)
+    compatible = valid[rows]
+    if continuity is not None:
+        compatible &= continuity[rows] == continuity[rows, anchors, None]
+    if segments is not None:
+        compatible &= segments[rows] == segments[rows, anchors, None]
+    lower = torch.where(
+        (~compatible) & (steps[None] < anchors[:, None]), steps[None] + 1, 0
+    ).amax(-1)
+    upper = torch.where(
+        (~compatible) & (steps[None] > anchors[:, None]),
+        steps[None] - 1,
+        valid.shape[1] - 1,
+    ).amin(-1)
+    offsets = torch.arange(1 - history, future, device=valid.device)
+    indices = anchors[:, None] + offsets[None]
+    mask = (indices >= lower[:, None]) & (indices <= upper[:, None])
+    return indices.clamp(0, valid.shape[1] - 1), mask, mask & (offsets[None] >= 0)
+
+
+def _pad_context(
+    batch: TensorDict, valid: torch.Tensor, loss_mask: torch.Tensor
+) -> TensorDict:
+    for key, value in batch.items(include_nested=True, leaves_only=True):
+        mask = valid.reshape(*valid.shape, *((1,) * (value.ndim - valid.ndim)))
+        identifier = isinstance(key, str) and (
+            key.startswith("ods_")
+            or key
+            in {
+                "frame_ids",
+                "generations",
+                "task_index",
+                "subtask_index",
+                "accepted_at_ns",
+                "published_at_monotonic_ns",
+            }
+        )
+        value.masked_fill_(~mask, -1 if identifier else 0)
+    batch["valid"] = valid
+    batch["loss_mask"] = loss_mask
+    return batch
 
 
 def _draw_budgeted_rows(

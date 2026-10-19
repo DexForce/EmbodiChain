@@ -478,7 +478,7 @@ def test_lifetime_counter_overflow_fails_without_partial_quota_spend() -> None:
 
 
 def test_shared_quota_draw_preserves_explicit_generator_and_global_rng() -> None:
-    from embodichain.data_pipeline.engine._sampling import _draw_budgeted_rows
+    from embodichain.data_pipeline.datasets._sampling import _draw_budgeted_rows
 
     rows = torch.tensor([4, 8])
     remaining = torch.tensor([2, 3])

@@ -23,10 +23,14 @@ from pathlib import Path
 
 import pytest
 import torch
+from tensordict import TensorDict
+from embodichain.data_pipeline.datasets import (
+    TensorDataSource,
+    SequenceSpecCfg,
+)
 
 from examples.data_pipeline._ods_pick_place_benchmark import (
     EfficiencyTracker,
-    FrozenCorpus,
     _content_manifest,
     _validate_tensors,
     resource_snapshot,
@@ -38,7 +42,7 @@ _SCHEMA = {
 }
 
 
-def _corpus() -> FrozenCorpus:
+def _corpus() -> TensorDataSource:
     valid = torch.tensor([[True, False, False], [True, True, True], [False] * 3])
     ids = torch.stack(
         (
@@ -55,42 +59,51 @@ def _corpus() -> FrozenCorpus:
         "frame_ids": ids,
         "generations": torch.arange(1, 4)[:, None].expand(3, 3),
     }
-    return FrozenCorpus(
-        tensors, {"schema": _SCHEMA, **_content_manifest(tensors, _SCHEMA)}
+    return TensorDataSource(
+        TensorDict(
+            {
+                ("obs" if key == "observations" else key): value
+                for key, value in tensors.items()
+            },
+            batch_size=tensors["valid"].shape,
+        ),
+        schema=_SCHEMA,
+        source_id="test-corpus",
+        metadata={"schema": _SCHEMA, **_content_manifest(tensors, _SCHEMA)},
     )
 
 
 def test_context_preserves_source_boundaries_and_masks_padding() -> None:
     corpus = _corpus()
     batch = corpus.sample_context(
-        256, 2, 5, generator=torch.Generator().manual_seed(18)
+        256, SequenceSpecCfg(2, 5), generator=torch.Generator().manual_seed(18)
     )
-    assert batch["observations"].shape == (256, 6, 2)
+    assert batch["obs"].shape == (256, 6, 2)
     assert batch["valid"][:, 1].all()
     assert not batch["loss_mask"][:, 0].any()
     assert (batch["frame_ids"][~batch["valid"]] == -1).all()
-    assert (batch["observations"][~batch["valid"]] == 0).all()
+    assert (batch["obs"][~batch["valid"]] == 0).all()
     for ids, valid in zip(batch["frame_ids"], batch["valid"]):
         assert len(ids[valid, :2].unique(dim=0)) == 1
         assert (ids[valid, 2].diff() == 1).all()
-    batch["observations"].zero_()
-    assert corpus.observations.count_nonzero() > 0
+    batch["obs"].zero_()
+    assert corpus.data["obs"].count_nonzero() > 0
 
 
 def test_context_generation_filter_never_crosses_a_validity_gap() -> None:
     corpus = _corpus()
-    corpus.valid[1] = torch.tensor([True, False, True])
-    batch = corpus.sample_context(64, 2, 5, generations=iter([2]))
+    corpus.data["valid"][1] = torch.tensor([True, False, True])
+    batch = corpus.sample_context(64, SequenceSpecCfg(2, 5, generations=(2,)))
     assert batch["valid"].sum().item() == 64
     assert (batch["generations"][batch["valid"]] == 2).all()
     with pytest.raises(RuntimeError, match="No valid"):
-        corpus.sample_context(1, 2, 5, generations=[9])
+        corpus.sample_context(1, SequenceSpecCfg(2, 5, generations=(9,)))
 
 
 def test_corpus_schema_validation_rejects_misaligned_or_nonfinite_supervision() -> None:
     corpus = _corpus()
     values = {
-        key: getattr(corpus, key).clone()
+        key: corpus.data["obs" if key == "observations" else key].clone()
         for key in ("observations", "actions", "valid", "frame_ids", "generations")
     }
     _validate_tensors(values, _SCHEMA)
@@ -106,7 +119,7 @@ def test_corpus_schema_validation_rejects_misaligned_or_nonfinite_supervision() 
 def test_content_identity_is_independent_of_engine_run_id() -> None:
     corpus = _corpus()
     tensors = {
-        key: getattr(corpus, key).clone()
+        key: corpus.data["obs" if key == "observations" else key].clone()
         for key in ("observations", "actions", "valid", "frame_ids", "generations")
     }
     first = _content_manifest(tensors, _SCHEMA)

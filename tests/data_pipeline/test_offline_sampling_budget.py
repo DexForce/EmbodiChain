@@ -20,33 +20,41 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 import torch
+from tensordict import TensorDict
+from embodichain.data_pipeline.datasets import (
+    TensorDataSource,
+    SequenceSpecCfg,
+)
 
 from embodichain.data_pipeline.engine.data import OnlineDataBudgetExhaustedError
-from examples.data_pipeline._ods_pick_place_benchmark import FrozenCorpus
 
 
-def _corpus() -> FrozenCorpus:
+def _corpus() -> TensorDataSource:
     valid = torch.tensor([[True] * 4, [True, True, False, False], [False] * 4])
     ids = torch.zeros(3, 4, 3, dtype=torch.int64)
     ids[..., 0] = 12
     ids[..., 1] = torch.arange(3)[:, None]
     ids[..., 2] = torch.arange(4)
-    return FrozenCorpus(
-        {
-            "observations": torch.arange(24, dtype=torch.float32).reshape(3, 4, 2),
-            "actions": torch.arange(12, dtype=torch.float32).reshape(3, 4, 1),
-            "valid": valid,
-            "frame_ids": ids,
-            "generations": torch.tensor([[1] * 4, [2] * 4, [3] * 4]),
-        },
-        {},
+    return TensorDataSource(
+        TensorDict(
+            {
+                "obs": torch.arange(24, dtype=torch.float32).reshape(3, 4, 2),
+                "actions": torch.arange(12, dtype=torch.float32).reshape(3, 4, 1),
+                "valid": valid,
+                "frame_ids": ids,
+                "generations": torch.tensor([[1] * 4, [2] * 4, [3] * 4]),
+            },
+            batch_size=valid.shape,
+        ),
+        schema={},
+        source_id="quota-test",
     )
 
 
 def _sample(
-    corpus: FrozenCorpus, count: int, generator: torch.Generator | None = None
+    corpus: TensorDataSource, count: int, generator: torch.Generator | None = None
 ) -> dict[str, torch.Tensor]:
-    return corpus.sample_context(count, 2, 3, generator=generator)
+    return corpus.sample_context(count, SequenceSpecCfg(2, 3), generator=generator)
 
 
 def test_context_draws_spend_each_source_allowance_once() -> None:
@@ -96,11 +104,11 @@ def test_post_copy_failure_does_not_debit(monkeypatch: pytest.MonkeyPatch) -> No
         rows: torch.Tensor, times: torch.Tensor
     ) -> dict[str, torch.Tensor]:
         result = select(rows, times)
-        result["observations"] = torch.empty(0)
+        result["obs"] = torch.empty(0)
         return result
 
     monkeypatch.setattr(corpus, "_select", invalid_shape)
-    with pytest.raises(IndexError):
+    with pytest.raises(RuntimeError, match="batch dimension mismatch"):
         _sample(corpus, 2)
     assert corpus.get_sampling_budget_snapshot()["total_delivered_chunks"] == 0
 
@@ -112,10 +120,10 @@ def test_generous_budget_preserves_unlimited_rng_and_copied_results() -> None:
     for _ in range(3):
         first, second = _sample(baseline, 7, rng_a), _sample(bounded, 7, rng_b)
         assert first.keys() == second.keys()
-        assert all(torch.equal(first[key], second[key]) for key in first)
+        assert all(torch.equal(first[key], second[key]) for key in first.keys())
         assert torch.equal(rng_a.get_state(), rng_b.get_state())
-        second["observations"].fill_(-100)
-        assert not (bounded.observations == -100).any()
+        second["obs"].fill_(-100)
+        assert not (bounded.data["obs"] == -100).any()
 
 
 @pytest.mark.parametrize(
@@ -146,9 +154,9 @@ def test_budget_cannot_be_reset_or_enabled_after_unlimited_sampling() -> None:
 def test_identity_validation_prevents_budget_multiplication(duplicate: bool) -> None:
     corpus = _corpus()
     if duplicate:
-        corpus.frame_ids[1, :, 1] = 0
+        corpus.data["frame_ids"][1, :, 1] = 0
     else:
-        corpus.frame_ids[0, 1, 1] = 7
+        corpus.data["frame_ids"][0, 1, 1] = 7
     with pytest.raises(ValueError, match="identity"):
         corpus.configure_sampling_budget(2, 2)
     assert corpus.get_sampling_budget_snapshot()["enabled"] is False
@@ -157,18 +165,18 @@ def test_identity_validation_prevents_budget_multiplication(duplicate: bool) -> 
 def test_identity_mutation_after_assignment_rejected() -> None:
     corpus = _corpus()
     corpus.configure_sampling_budget(2, 2)
-    corpus.frame_ids[0, :, 1] = 8
+    corpus.data["frame_ids"][0, :, 1] = 8
     with pytest.raises(RuntimeError, match="identity changed"):
-        corpus.sample_context(1, 2, 3, generations=[1])
+        corpus.sample_context(1, SequenceSpecCfg(2, 3, generations=(1,)))
     assert corpus.get_sampling_budget_snapshot()["total_delivered_chunks"] == 0
 
 
 def test_generation_filter_does_not_borrow_other_source_budget() -> None:
     corpus = _corpus()
     corpus.configure_sampling_budget(2, 2)
-    corpus.sample_context(2, 2, 3, generations=iter([1]))
+    corpus.sample_context(2, SequenceSpecCfg(2, 3, generations=(1,)))
     with pytest.raises(OnlineDataBudgetExhaustedError):
-        corpus.sample_context(1, 2, 3, generations=iter([1]))
+        corpus.sample_context(1, SequenceSpecCfg(2, 3, generations=(1,)))
     assert corpus.get_sampling_budget_snapshot()["remaining_chunks"] == 2
 
 
@@ -182,7 +190,7 @@ def test_budgeted_sampler_rejects_other_thread_and_process(
         with pytest.raises(RuntimeError, match="owner-process/thread"):
             future.result()
     monkeypatch.setattr(
-        "examples.data_pipeline._ods_pick_place_benchmark.os.getpid", lambda: -1
+        "embodichain.data_pipeline.datasets.sources.os.getpid", lambda: -1
     )
     with pytest.raises(RuntimeError, match="owner-process/thread"):
         _sample(corpus, 1)

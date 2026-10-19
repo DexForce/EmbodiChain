@@ -111,6 +111,11 @@ cache-size multiple. The output contains `lerobot_dataset/`, the run-local SDK
 cache, checkpoints and reports. Subsequent minibatches use resident context
 sampling; this does not measure LeRobot per-minibatch disk I/O.
 
+`--offline-memory-limit-mib` bounds resident numeric dataset tensors (default
+512 MiB). The public loader checks this before allocating the padded corpus;
+SDK caches and bounded staging are additional costs. Feature/action schema and
+fixed-rate timestamps are validated rather than inferred from vector width.
+
 - `--mode offline-32 --offline-episodes 32`: collect the initial cache, close
   the producer and train on that fixed corpus for the same update budget.
 - `--mode frozen`: retain the initial live ODS cache without refill.
@@ -153,9 +158,20 @@ producer check: two generations/four accepted episodes, 1,330 valid frames,
 sampling RNG, loss, gradient and model/optimizer tensor matched exactly on CPU;
 all eight observed processes exited. No held-out final tests were opened.
 
-The proposed [public loading design](../../../../../../docs/architecture/dataset-loading-design.md)
-specifies shared contracts and staged extraction. Those public interfaces are
-not yet implemented; the current offline reader remains showcase-owned.
+The [public loading design](../../../../../../docs/architecture/dataset-loading-design.md)
+is implemented for numeric data: `SequenceSpecCfg`, `BatchSource`,
+`OnlineDataSource`, `TensorDataSource`, `LeRobotDataSource` and `OfflineDataset`
+are exported from `embodichain.data_pipeline.datasets`. `OnlineDataset` keeps
+its chunk API and adds opt-in context iteration. The showcase consumes the
+common source interface; its private code retains writing and sidecar/hash
+auditing, with the duplicate resident sampler and SDK loading loop removed.
+Standard LeRobot numeric datasets can use the public reader without this
+showcase's sidecar, through an explicit schema and field mapping.
+
+[Public loading validation](DATASET_LOADING_VALIDATION.json) records the API
+regressions, pre-extraction golden outputs, bounded loading, two real-process
+integrations and scoped sampler overhead. It does not qualify the unresolved
+full-path telemetry gate or establish an ODS learning/throughput advantage.
 
 ## Artifacts and recovery
 

@@ -36,6 +36,13 @@ from typing import Any
 import numpy as np
 import psutil
 import torch
+from tensordict import TensorDict
+
+from embodichain.data_pipeline.datasets import (
+    BatchSource,
+    OnlineDataSource,
+    SequenceSpecCfg,
+)
 
 from embodichain.data_pipeline.engine.data import (
     OnlineDataBudgetExhaustedError,
@@ -386,35 +393,41 @@ def _schema(ready: dict[str, Any]) -> dict[str, Any]:
 
 def _offline_reset_positions(corpus: Any, count: int) -> list[list[float]]:
     """Recover training-reset positions from causal frame-zero observations."""
-    observation = corpus.manifest["schema"]["observation"]
+    observation = corpus.metadata["schema"]["observation"]
     if (
         observation.get("version") != "pick_place.geometry@2"
         or observation["names"][27:30] != ["cube_0", "cube_1", "cube_2"]
-        or count != len(corpus.valid)
-        or not corpus.valid[:count, 0].all()
-        or not (corpus.frame_ids[:count, 0, 2] == 0).all()
+        or count != len(corpus.data["valid"])
+        or not corpus.data["valid"][:count, 0].all()
+        or not (corpus.data["frame_ids"][:count, 0, 2] == 0).all()
     ):
         raise ValueError(
             "Offline reset diagnostics require exactly the requested episodes and geometry frame zero"
         )
-    return corpus.observations[:count, 0, 27:30].tolist()
+    return corpus.data["obs"][:count, 0, 27:30].tolist()
 
 
 def _sample(
-    engine: OnlineDataEngine,
+    source: BatchSource,
     count: int,
     tracker: EfficiencyTracker,
-    prediction_horizon: int,
-) -> dict[str, torch.Tensor]:
+    sequence: SequenceSpecCfg,
+) -> TensorDict:
+    """Bound live-data waits while propagating offline quota/read failures."""
     blocked = None
+    engine = getattr(source, "engine", None)
     while True:
         try:
-            batch = engine.sample_batch_with_context(count, 2, prediction_horizon)
+            batch = source.sample_context(count, sequence)
             break
         except RuntimeError as error:
-            if engine.state is not OnlineDataEngineState.READY or (
-                "No unlocked valid chunk" not in str(error)
-                and not isinstance(error, OnlineDataBudgetExhaustedError)
+            if (
+                engine is None
+                or engine.state is not OnlineDataEngineState.READY
+                or (
+                    "No unlocked valid chunk" not in str(error)
+                    and not isinstance(error, OnlineDataBudgetExhaustedError)
+                )
             ):
                 raise
             if blocked is None:
@@ -424,17 +437,7 @@ def _sample(
             time.sleep(0.02)
     ended = tracker.elapsed_seconds()
     tracker.record_interval("data_wait", ended if blocked is None else blocked, ended)
-    return {
-        "observations": policy_observations(batch["obs"], valid_mask=batch["valid"]),
-        "actions": batch["actions"],
-        "frame_ids": torch.stack(
-            (batch["ods_run_id"], batch["ods_episode_id"], batch["ods_frame_index"]),
-            dim=-1,
-        ),
-        "generations": batch["ods_generation"],
-        "valid": batch["valid"],
-        "loss_mask": batch["loss_mask"],
-    }
+    return batch
 
 
 def run(args: argparse.Namespace) -> None:
@@ -810,15 +813,19 @@ def run(args: argparse.Namespace) -> None:
                 load_lerobot_corpus,
             )
 
-            corpus = load_lerobot_corpus(args.offline_data, expected_schema=schema)
+            corpus = load_lerobot_corpus(
+                args.offline_data,
+                expected_schema=schema,
+                memory_limit_bytes=args.offline_memory_limit_mib * 1024 * 1024,
+            )
             tracker.record_interval(
                 "offline_load", load_started, tracker.elapsed_seconds()
             )
-            initial_values = corpus.observations[: args.buffer_size][
-                corpus.valid[: args.buffer_size]
+            initial_values = corpus.data["obs"][: args.buffer_size][
+                corpus.data["valid"][: args.buffer_size]
             ]
-            initial_actions = corpus.actions[: args.buffer_size][
-                corpus.valid[: args.buffer_size]
+            initial_actions = corpus.data["actions"][: args.buffer_size][
+                corpus.data["valid"][: args.buffer_size]
             ]
             initial_positions = (
                 _offline_reset_positions(corpus, args.buffer_size)
@@ -828,10 +835,10 @@ def run(args: argparse.Namespace) -> None:
             source_run = 0
             initial_data_content_id = _content_manifest(
                 {
-                    "observations": corpus.observations[: args.buffer_size],
-                    "actions": corpus.actions[: args.buffer_size],
-                    "valid": corpus.valid[: args.buffer_size],
-                    "frame_ids": corpus.frame_ids[: args.buffer_size],
+                    "observations": corpus.data["obs"][: args.buffer_size],
+                    "actions": corpus.data["actions"][: args.buffer_size],
+                    "valid": corpus.data["valid"][: args.buffer_size],
+                    "frame_ids": corpus.data["frame_ids"][: args.buffer_size],
                 },
                 schema,
             )["content_id"]
@@ -910,7 +917,11 @@ def run(args: argparse.Namespace) -> None:
                 engine = None
                 resource_sampler.capture("after_offline_producer_shutdown")
                 before = tracker.elapsed_seconds()
-                corpus = load_lerobot_corpus(path, expected_schema=schema)
+                corpus = load_lerobot_corpus(
+                    path,
+                    expected_schema=schema,
+                    memory_limit_bytes=args.offline_memory_limit_mib * 1024 * 1024,
+                )
                 tracker.record_interval(
                     "offline_load", before, tracker.elapsed_seconds()
                 )
@@ -936,18 +947,21 @@ def run(args: argparse.Namespace) -> None:
                 args.offline_sample_budget, args.offline_sample_hard_limit
             )
         if corpus is not None and usage is not None and not usage.episodes:
-            eligible = corpus.valid
-            if args.mode in {"frozen", "offline-32"} and corpus.generations is not None:
-                eligible = eligible & (corpus.generations == 1)
+            eligible = corpus.data["valid"]
+            if (
+                args.mode in {"frozen", "offline-32"}
+                and corpus.data.get("generations") is not None
+            ):
+                eligible = eligible & (corpus.data.get("generations") == 1)
             usage = UsageTracker(
                 episode_capacity_hint=max(1, int(eligible.any(dim=1).sum()))
             )
             tracker.unique_frames = CompactFrameSet(usage.targets, accumulate=False)
-            for row in range(len(corpus.valid)):
-                frames = torch.where(corpus.valid[row])[0]
+            for row in range(len(corpus.data["valid"])):
+                frames = torch.where(corpus.data["valid"][row])[0]
                 if not len(frames):
                     continue
-                identity = corpus.frame_ids[row, frames[0]]
+                identity = corpus.data["frame_ids"][row, frames[0]]
                 usage.lifecycle(
                     [
                         {
@@ -956,18 +970,18 @@ def run(args: argparse.Namespace) -> None:
                             "run_id": int(identity[0]),
                             "episode_id": int(identity[1]),
                             "generation": (
-                                int(corpus.generations[row, frames[0]])
-                                if corpus.generations is not None
+                                int(corpus.data.get("generations")[row, frames[0]])
+                                if corpus.data.get("generations") is not None
                                 else 1
                             ),
                             "slot": row,
                             "monotonic_ns": time.monotonic_ns(),
                             "valid_frames": len(frames),
                             "eligible_anchors": len(frames),
-                            "valid_frame_indices": corpus.frame_ids[
+                            "valid_frame_indices": corpus.data["frame_ids"][
                                 row, frames, 2
                             ].tolist(),
-                            "eligible_anchor_indices": corpus.frame_ids[
+                            "eligible_anchor_indices": corpus.data["frame_ids"][
                                 row, frames, 2
                             ].tolist(),
                         }
@@ -1056,7 +1070,7 @@ def run(args: argparse.Namespace) -> None:
                     "initial_data_content_id": initial_data_content_id,
                     "run_id": source_run,
                     "source": "data-ready" if args.offline_data else "cold",
-                    "offline_manifest": corpus.manifest if corpus else None,
+                    "offline_manifest": corpus.metadata if corpus else None,
                     "resume_data": (
                         "fresh ODS cache; source run ID changed"
                         if args.resume
@@ -1148,6 +1162,22 @@ def run(args: argparse.Namespace) -> None:
         recent_target_counts: deque[int] = deque(maxlen=50)
         last_saved_generation = 1
         resource_sampler.capture("training_start")
+        source = (
+            corpus
+            if corpus is not None
+            else OnlineDataSource(
+                engine, schema=schema, observation_transform=policy_observations
+            )
+        )
+        sequence = SequenceSpecCfg(
+            history_length=2,
+            prediction_horizon=args.prediction_horizon,
+            generations=(
+                (1,)
+                if corpus is not None and args.mode in {"frozen", "offline-32"}
+                else None
+            ),
+        )
         loop_started = tracker.elapsed_seconds()
         next_quota_update = time.monotonic()
         for round_index in range(args.rounds):
@@ -1300,29 +1330,7 @@ def run(args: argparse.Namespace) -> None:
                 service_started = tracker.elapsed_seconds()
                 try:
                     with sampling_rng.scope():
-                        if corpus is not None:
-                            before = tracker.elapsed_seconds()
-                            batch = corpus.sample_context(
-                                args.batch_size,
-                                2,
-                                args.prediction_horizon,
-                                generations=(
-                                    [1]
-                                    if args.mode in {"frozen", "offline-32"}
-                                    else None
-                                ),
-                            )
-                            # Resident tensor indexing/copy is batch service, as in ODS.
-                            # Actual storage loading is timed separately above.
-                            now = tracker.elapsed_seconds()
-                            tracker.record_interval("data_wait", now, now)
-                        else:
-                            batch = _sample(
-                                engine,
-                                args.batch_size,
-                                tracker,
-                                prediction_horizon=(args.prediction_horizon),
-                            )
+                        batch = _sample(source, args.batch_size, tracker, sequence)
                 except OnlineDataBudgetExhaustedError:
                     if corpus is None:
                         raise
@@ -1330,7 +1338,7 @@ def run(args: argparse.Namespace) -> None:
                     break
                 if usage is not None:
                     usage.sample(batch)
-                obs = batch["observations"].to(args.train_device)
+                obs = batch["obs"].to(args.train_device)
                 actions = batch["actions"].to(args.train_device)
                 tracker.record_interval(
                     "batch_service", service_started, tracker.elapsed_seconds()
@@ -1631,7 +1639,7 @@ def run(args: argparse.Namespace) -> None:
             data_paths.extend(
                 Path(path)
                 for path in (
-                    corpus.manifest.get("storage", {}).get("sdk_cache_files") or []
+                    corpus.metadata.get("storage", {}).get("sdk_cache_files") or []
                 )
                 if Path(path).exists()
             )
@@ -1651,7 +1659,7 @@ def run(args: argparse.Namespace) -> None:
         efficiency["data/accepted_frames"] = (
             stats["generated_frames"]
             if stats
-            else (int(corpus.valid.sum()) if corpus else None)
+            else (int(corpus.data["valid"].sum()) if corpus else None)
         )
         accepted = efficiency["data/accepted_frames"]
         efficiency["data/consumed_unique_fraction"] = (

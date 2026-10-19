@@ -21,9 +21,12 @@ from pathlib import Path
 
 import pytest
 import torch
+from tensordict import TensorDict
+from embodichain.data_pipeline.datasets import (
+    TensorDataSource,
+)
 
 from examples.data_pipeline._ods_pick_place_benchmark import (
-    FrozenCorpus,
     _content_manifest,
 )
 from examples.data_pipeline._ods_pick_place_lerobot import (
@@ -35,12 +38,16 @@ lerobot_module = pytest.importorskip("lerobot.datasets.lerobot_dataset")
 
 _SCHEMA = {
     "observation": {"names": ["measured_joint", "cube_height"]},
-    "action": {"names": ["arm_request", "gripper_request"], "step_dt": 1.0 / 30},
+    "action": {
+        "semantics": "test_request",
+        "names": ["arm_request", "gripper_request"],
+        "step_dt": 1.0 / 30,
+    },
     "version": 1,
 }
 
 
-def _make_corpus(destination: Path) -> FrozenCorpus:
+def _make_corpus(destination: Path) -> TensorDataSource:
     valid = torch.tensor([[True, True, False], [True, False, True]])
     ids = torch.stack(
         (
@@ -65,8 +72,17 @@ def _make_corpus(destination: Path) -> FrozenCorpus:
         for row in range(2):
             writer.submit({key: value[row] for key, value in tensors.items()})
         writer.finalize()
-    return FrozenCorpus(
-        tensors, {"schema": _SCHEMA, **_content_manifest(tensors, _SCHEMA)}
+    return TensorDataSource(
+        TensorDict(
+            {
+                ("obs" if key == "observations" else key): value
+                for key, value in tensors.items()
+            },
+            batch_size=tensors["valid"].shape,
+        ),
+        schema=_SCHEMA,
+        source_id="test-corpus",
+        metadata={"schema": _SCHEMA, **_content_manifest(tensors, _SCHEMA)},
     )
 
 
@@ -77,11 +93,14 @@ def test_official_lerobot_roundtrip_preserves_padded_numeric_corpus(
     original = _make_corpus(destination)
     restored = load_lerobot_corpus(destination, expected_schema=_SCHEMA)
     for field in ("observations", "actions", "valid", "frame_ids"):
-        assert torch.equal(getattr(original, field), getattr(restored, field))
-    assert torch.equal(original.generations, restored.generations)
-    assert restored.manifest["content_id"] == original.manifest["content_id"]
-    assert restored.manifest["storage"]["per_minibatch_lerobot_io"] is False
-    assert restored.manifest["storage"]["format"] == "lerobot"
+        assert torch.equal(
+            original.data["obs" if field == "observations" else field],
+            restored.data["obs" if field == "observations" else field],
+        )
+    assert torch.equal(original.data["generations"], restored.data["generations"])
+    assert restored.metadata["content_id"] == original.metadata["content_id"]
+    assert restored.metadata["storage"]["per_minibatch_lerobot_io"] is False
+    assert restored.metadata["storage"]["format"] == "lerobot"
     direct = lerobot_module.LeRobotDataset(
         "local/ods-pick-place", root=destination, download_videos=False
     )
@@ -119,11 +138,14 @@ def test_bulk_read_boundaries_preserve_holes_and_hashes(
     actual = load_lerobot_corpus(
         destination, expected_schema=_SCHEMA, read_batch_size=read_batch_size
     )
-    assert actual.manifest["content_id"] == expected.manifest["content_id"]
-    assert actual.manifest["tensors"] == expected.manifest["tensors"]
-    assert actual.manifest["storage"]["numeric_read_mode"] == "sdk_hf_dataset_batch"
+    assert actual.metadata["content_id"] == expected.metadata["content_id"]
+    assert actual.metadata["tensors"] == expected.metadata["tensors"]
+    assert actual.metadata["storage"]["numeric_read_mode"] == "sdk_hf_dataset_batch"
     for field in ("observations", "actions", "valid", "frame_ids", "generations"):
-        assert torch.equal(getattr(actual, field), getattr(expected, field))
+        assert torch.equal(
+            actual.data["obs" if field == "observations" else field],
+            expected.data["obs" if field == "observations" else field],
+        )
 
 
 def test_bulk_read_owns_cpu_device_even_with_non_cpu_default(tmp_path: Path) -> None:
@@ -132,10 +154,16 @@ def test_bulk_read_owns_cpu_device_even_with_non_cpu_default(tmp_path: Path) -> 
     with torch.device("meta"):
         actual = load_lerobot_corpus(destination, expected_schema=_SCHEMA)
     expected = original
-    assert actual.manifest["tensors"] == expected.manifest["tensors"]
+    assert actual.metadata["tensors"] == expected.metadata["tensors"]
     for field in ("observations", "actions", "valid", "frame_ids", "generations"):
-        assert getattr(actual, field).device.type == "cpu"
-        assert torch.equal(getattr(actual, field), getattr(expected, field))
+        assert (
+            actual.data["obs" if field == "observations" else field].device.type
+            == "cpu"
+        )
+        assert torch.equal(
+            actual.data["obs" if field == "observations" else field],
+            expected.data["obs" if field == "observations" else field],
+        )
 
 
 def test_scalar_fallback_only_for_absent_backing_api(
@@ -161,9 +189,9 @@ def test_scalar_fallback_only_for_absent_backing_api(
 
     monkeypatch.setattr(lerobot_module, "LeRobotDataset", ScalarOnly)
     actual = load_lerobot_corpus(destination, expected_schema=_SCHEMA)
-    assert actual.manifest["tensors"] == original.manifest["tensors"]
-    assert actual.manifest["storage"]["numeric_read_mode"] == "sdk_scalar_fallback"
-    assert actual.manifest["storage"]["scalar_fallback_reason"]
+    assert actual.metadata["tensors"] == original.metadata["tensors"]
+    assert actual.metadata["storage"]["numeric_read_mode"] == "sdk_scalar_fallback"
+    assert actual.metadata["storage"]["scalar_fallback_reason"]
 
 
 @pytest.mark.parametrize("corruption", ["episode", "frame", "dtype", "failure"])

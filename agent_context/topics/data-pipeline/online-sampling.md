@@ -28,7 +28,9 @@
    ends, with a fixed causal-history/future extent. The current frame is at
    `history_length - 1`; invalid/continuity boundaries pad both sides with
    zero payloads and `-1` language/provenance IDs. Consumers use `valid` for
-   history padding and `loss_mask` for real current/future supervision.
+   history padding and `loss_mask` for real current/future supervision. Optional
+   context segment mode restricts spans to accepted segments; explicit generation
+   filters require provenance. An optional generator isolates sampling RNG.
 6. The default sample-threshold refill is requested after sample count reaches `refill_threshold * buffer_size`. Duplicate
    requests are suppressed only while `fill_signal` remains set; the worker clears it when it
    starts a fill, so sampling that reaches another threshold during an active fill may queue
@@ -87,8 +89,7 @@ infer scientific bounds or change the measured batch size/concurrency. Memory
 constraints can reduce active consumption rather than raise quotas. Measurement
 helpers preserve units and common monotonic windows. See the task's
 [configuration guide](../../../extensions/embodichain_tasks/configs/tasks/manipulation/pick_place/ODS_CONFIGURATION_GUIDE.md)
-for CLI binding and current limitations. Global anchor-budget pacing remains a
-separate mode and does not provide per-source protection.
+for CLI binding and current limitations.
 
 ## Recorded actions and provenance
 
@@ -127,8 +128,8 @@ recovery or portable offline content identity.
 models, measured-state features and separate student evaluator. The private
 `_ods_pick_place_training.py` orchestrates geometry policies;
 `_ods_pick_place_policy.py` owns the short-history absolute-target chunk learner;
-`_ods_pick_place_benchmark.py` owns validated resident context sampling and
-efficiency accounting. The geometry feature contract uses measured
+`_ods_pick_place_benchmark.py` owns task corpus hashes and efficiency accounting.
+Public `datasets/sources.py` owns resident context sampling and source quotas. The geometry feature contract uses measured
 proprioception, TCP/cube transforms, goal-relative positions and cube velocity.
 Normalization is frozen from initial training data. Policies do not consume
 expert segment annotations during inference.
@@ -140,9 +141,9 @@ relative-pose controller, replans periodically, and clears history/queue at
 reset. Input and target statistics are frozen from initial training data and
 included in comparison fingerprints.
 
-The runner supports live online supply, a frozen initial cache, and resident
-LeRobot offline data. A shared pure quota-selection helper in
-`engine/_sampling.py` preserves the draw algorithm across online and offline
+The runner consumes the public `BatchSource` contract for live online supply,
+a frozen initial cache, and resident LeRobot offline data. A shared pure quota-selection helper in
+`datasets/_sampling.py` preserves the draw algorithm across online and offline
 sources; their ledgers retain their distinct process/lock ownership. Corpus
 manifests validate schema and numeric content independently of engine run IDs.
 Resume restores ChunkBC/optimizer/RNG state, creating a fresh ODS cache for live
@@ -152,13 +153,13 @@ Cold offline runs write LeRobot data with an explicit `--offline-episodes`
 count independently of training rounds. The private
 `_ods_pick_place_collection.py` overlaps the next accepted generation with
 bounded, single-writer SDK persistence; it does not stage an intermediate `.pt`
-corpus. One audited SDK load then creates resident CPU tensors. The numeric
-loader uses bounded backing-dataset slices when available and records scalar
-fallback explicitly. Run-local SDK caches are included in final disk footprint;
+corpus. The public `LeRobotDataSource` loads numeric tensors under an explicit resident
+memory allowance. The example additionally verifies its own schema/content
+hashes. SDK backing reads are bounded and scalar fallback is explicit. Run-local SDK caches are included in final disk footprint;
 temporary write peaks remain unmeasured. Writer/producer failures and deadlines
 propagate before an incomplete dataset can be published.
 
-`FrozenCorpus.configure_sampling_budget()` optionally protects all resident
+`TensorDataSource.configure_sampling_budget()` optionally protects all resident
 context sampling with one nonrefillable per-source allowance. It is
 creator-process/thread only, rejects duplicate source identities and cannot be
 enabled after sampling. Protected offline resume is rejected until allowance

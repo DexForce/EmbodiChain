@@ -1,36 +1,40 @@
 # Reusable online and offline training-data loading
 
-Status: proposed public interfaces; the current change implements PickPlace
-alignment checks and fixes, not the public loader API. Updated 2026-10-19.
+Status: the initial numeric source/loader API and showcase migration are implemented.
+Updated 2026-10-19. Image/video sequence loading and out-of-core storage remain outside this implementation.
 
 ## Problem and acceptance criterion
 
-Public `OnlineDataset` wraps `OnlineDataEngine.sample_batch()`. PickPlace calls
-`sample_batch_with_context()` directly and implements resident offline context
-sampling in its private `FrozenCorpus`. The LeRobot reader is also example-owned
-and requires the PickPlace sidecar. Public offline inspection and depth readers
-already exist, but neither provides a general training-sequence contract.
+`OnlineDataset` preserves its original chunk API and adds opt-in context
+sampling. `OnlineDataSource`, `TensorDataSource` and `LeRobotDataSource` implement
+the public `BatchSource` contract; `OfflineDataset` supplies PyTorch iteration.
+PickPlace now consumes these sources and retains its own feature transformation,
+writer, sidecar/content auditing and experimental accounting. The public numeric
+reader also accepts standard LeRobot datasets without the PickPlace sidecar
+through explicit schema and column mapping. Inspection/depth tools retain their
+separate ownership.
 
 The required invariant is: the same source frames, schema, window and transform
 produce the same training tensors, regardless of live or persisted storage.
 This does not require a refreshing online experiment and a fixed offline corpus
 to draw the same batches, or imply identical learning curves.
 
-## Ownership and proposed interfaces
+## Ownership and public interfaces
 
 All shared loading components belong to `embodichain/data_pipeline/datasets/`.
-Names below are proposed, not currently exported.
+The components below are exported from that package.
 
 | Component | Responsibility |
 | --- | --- |
 | `SequenceSpecCfg` | Validated history length, prediction horizon, sampling mode and padding policy; use `@configclass`. |
 | `BatchSource` protocol | Expose schema and `sample_context(batch_size, spec, generator=...)`; return an independently owned TensorDict. |
-| ODS source adapter | Delegate publication, locks, provenance, errors and quotas to the existing engine. |
-| LeRobot source adapter | Read through the official SDK, validate or explicitly map metadata, and provide bounded resident numeric storage. |
-| Dataset wrappers | Share batch iteration/collation; preserve `OnlineDataset` compatibility and add an offline wrapper. |
+| `OnlineDataSource` | Delegate publication, locks, provenance, errors and quotas to the existing engine. |
+| `LeRobotDataSource` | Read through the official SDK, validate or explicitly map metadata, and provide bounded resident numeric storage. |
+| `TensorDataSource` | Resident CPU TensorDict storage, temporal metadata and optional per-source quotas. |
+| Dataset wrappers | Shared context iteration/collation; compatible `OnlineDataset` and new `OfflineDataset`. |
 
-Share pure window/mask calculations and canonical padding between source
-adapters. Keep source ownership, synchronization and lifecycle separate. The
+Pure window/mask calculations and canonical padding are shared between source
+adapters. Source ownership, synchronization and lifecycle remain separate. The
 public contract must not depend on Franka, a 51-feature layout or ChunkBC.
 Task features, absolute TCP-target construction, normalization fitting, noise,
 training and efficiency reporting remain with their existing owners.
@@ -117,11 +121,10 @@ It covers dirty tails, starts/ends, single-frame spans, invalid gaps, horizon
 equality and three optimizer updates with identical augmentation randomness.
 Unsupported continuity is rejected before offline collection.
 
-Before declaring the public adapters interchangeable, extend this gate to:
+Public source and SDK tests additionally cover the following boundaries:
 
-1. Preserve the small real-producer check described below as an integration
-   gate when extracting the public interfaces; freeze each source snapshot
-   during its paired comparison.
+1. Keep source snapshots frozen during paired comparisons; record exact
+   implementation hashes and distinguish historical validation from new runs.
 2. Schema/order/dtype/action-contract mismatches, explicit external mappings,
    timestamp gaps, language resolution and supported continuity/segment modes.
 3. Source replacement and copy ownership, worker/read errors, quota depletion,
@@ -145,24 +148,62 @@ showcase path, not the proposed public API or every batch of the previous pilot.
 The record retains an earlier harness filename failure and the native shutdown
 warning; neither is silently removed from the evidence.
 
-## Implementation sequence and performance gate
+## Delivery and performance gate
 
-1. Land canonical padding, continuity rejection and the paired tests. Retain
+1. Canonical padding, continuity rejection and paired tests are in place. Retain
    previous experimental records with their original source revisions.
-2. Extract schema/window contracts and private pure sampling helpers; preserve
-   existing engine behavior and add an explicit generator without new defaults.
-3. Add the bounded LeRobot numeric adapter and offline Dataset wrapper. Extend
-   `OnlineDataset` with opt-in context sampling; keep old chunk APIs working.
-4. Migrate the showcase and remove its duplicate loader/sampler implementation.
-   Avoid a new registry, training framework or generic backend plugin system.
+2. Public contracts and shared pure sampling helpers are extracted. Existing
+   engine defaults are preserved, with explicit context RNG/filter options.
+3. The bounded LeRobot numeric adapter, offline Dataset wrapper and opt-in
+   OnlineDataset context mode are implemented. Old chunk APIs remain available.
+4. The showcase uses public sources; its duplicate resident sampler and SDK
+   loading loop are removed. It retains task hashes, writing and experiments.
 5. Qualify end-to-end overhead before repeating timed comparisons. Include B=1
    and B=256, F=1/64, C=32/256, loading/peak memory, lock-held sampling time and
    concurrent refill. Use equal payloads, instrumentation and workload settings;
    report per-batch and wall-clock costs separately. Disclose feature conversion
    placement and acquisition/persistence costs; numerical parity alone does not
-   make differently staged pipelines a pure storage comparison. The existing 5% telemetry
-   overhead gate remains unresolved and cannot be waived by parity tests.
+   make differently staged pipelines a pure storage comparison. The existing
+   5% telemetry overhead gate remains unresolved and cannot be waived by parity tests.
 
 Public API documentation and focused tests accompany each implementation step.
 Image/video loading, mixed online/offline replay, distributed worker ledgers,
 DAgger, RLInf integration and exact cache recovery are outside the first scope.
+
+
+## Consumption example
+
+`schema` below must explicitly describe the recorded observations/actions,
+including action semantics and step duration. It is not inferred from a task
+name or vector width. For datasets with known recorded names, their order is
+verified; unannotated external data requires a truthful caller mapping.
+
+```python
+from torch.utils.data import DataLoader
+from embodichain.data_pipeline.datasets import (
+    LeRobotDataSource, OfflineDataset, OnlineDataset, SequenceSpecCfg,
+)
+
+sequence = SequenceSpecCfg(history_length=2, prediction_horizon=64)
+source = LeRobotDataSource(
+    "/path/to/lerobot", schema=schema, source_id="my-dataset-v1",
+    memory_limit_bytes=512 * 1024 * 1024,
+)
+dataset = OfflineDataset(source, sequence, batch_size=64, max_batches=1000)
+loader = DataLoader(dataset, batch_size=None, num_workers=0)
+# batch contains obs/actions/valid/loss_mask and source frame_ids.
+for batch in loader:
+    train_step(batch)
+
+# engine is already started and remains caller-owned.
+online = OnlineDataset(
+    engine, sequence=sequence, schema=schema, batch_size=64,
+    observation_transform=feature_fn,
+)
+```
+
+A learner that explicitly schedules refill/waits can call the source's
+`sample_context()` directly, as the showcase does. Delivery quotas are local to
+one source/ledger, not a distributed global allowance across independent runs.
+The first offline wrapper reports source/quota errors immediately; max_batches
+is an explicit iteration bound rather than an inferred epoch size.

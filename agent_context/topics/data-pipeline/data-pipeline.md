@@ -11,7 +11,9 @@ belongs to [data-assets](../data-assets/data-assets.md).
 |---|---|
 | Online worker and sample selection | `embodichain/data_pipeline/engine/data.py`: `OnlineDataEngine` |
 | Throughput-derived settings and protected reuse profiles | `embodichain/data_pipeline/configuration.py`: `configure_ods`; sampler enforcement in `engine/data.py` |
-| Infinite PyTorch dataset | `embodichain/data_pipeline/datasets/online_data.py`: `OnlineDataset` |
+| PyTorch chunk/context wrappers | `embodichain/data_pipeline/datasets/{online_data,offline_data}.py`: `OnlineDataset`, `OfflineDataset` |
+| Shared sequence contract and sources | `embodichain/data_pipeline/datasets/sequence.py`, `sources.py`, `_sampling.py` |
+| Bounded numeric LeRobot loading | `embodichain/data_pipeline/datasets/lerobot.py`: `LeRobotDataSource`, explicit field mapping |
 | PickPlace BC and offline comparisons | `examples/data_pipeline/ods_pick_place_showcase.py`; private training/benchmark helpers alongside it; task-owned physical evidence in `embodichain_tasks.manipulation.pick_place` |
 | Commit/discard/finalization dispatch | `embodichain/lab/gym/envs/managers/dataset_manager.py` |
 | Synchronous LeRobot persistence | `embodichain/lab/gym/envs/managers/datasets.py`: `LeRobotRecorder` |
@@ -29,11 +31,18 @@ for fragment transactions, async ownership, depth output and shutdown. Read
 [offline dataset tools](offline-datasets.md) for lineage, quality filtering,
 validation, and conversion across Python/LeRobot versions.
 
-The PickPlace example additionally accepts its own schema-validated LeRobot
-export directories through `_ods_pick_place_lerobot.py`. The SDK reads numeric
-rows once; subsequent causal sampling uses resident CPU tensors. This private
-learning comparison does not replace the general recording/export tools or
-measure LeRobot per-minibatch loading throughput.
+`BatchSource.sample_context()` returns owned TensorDicts under a shared
+`SequenceSpecCfg`. ODS and resident sources reuse window/mask and quota-draw
+helpers while retaining distinct lifecycle/lock ownership. `LeRobotDataSource`
+requires explicit action semantics, step duration, field mapping and a resident
+memory limit; imports do not initialize simulation or import the SDK until load.
+The first backend samples resident numeric tensors after bounded SDK reads.
+
+The PickPlace example uses these public sources. Its `_ods_pick_place_lerobot.py`
+retains only task-owned writing and sidecar/hash auditing around the public
+reader. This does not measure per-minibatch disk reads or replace the recording
+and offline-inspection tools. See the [loading design](../../../docs/architecture/dataset-loading-design.md)
+for boundaries and usage links.
 
 ## Online worker contract
 
@@ -125,6 +134,7 @@ time are available through the recorder's async stats.
 
 | Change | Tests |
 |---|---|
+| Public schemas, sources, context wrappers and SDK reads | `tests/data_pipeline/test_sources.py`, `test_lerobot_source.py` |
 | Worker states, valid sampling, continuity, DataLoader | `tests/data_pipeline/test_online_data.py` |
 | Sync commit, FPS, fragments and depth routing | `tests/gym/envs/managers/test_dataset_functors.py` |
 | Legacy/action-contract schemas and official task mapping | `tests/gym/envs/managers/test_dataset_functors.py` |

@@ -39,7 +39,14 @@ from tqdm import tqdm
 from embodichain.utils.logger import log_info, log_error
 from embodichain.utils import configclass
 from .language import SharedLanguageRegistry
-from ._sampling import _draw_budgeted_rows
+from embodichain.data_pipeline.datasets._sampling import (
+    _draw_budgeted_rows,
+    _context_indices,
+    _pad_context,
+)
+from embodichain.data_pipeline.datasets.sequence import (
+    DataBudgetExhaustedError as OnlineDataBudgetExhaustedError,
+)
 
 __all__ = [
     "OnlineDataEngine",
@@ -72,10 +79,6 @@ _CODE_TO_STATE = {code: state for state, code in _STATE_TO_CODE.items()}
 
 class OnlineDataWorkerError(RuntimeError):
     """Fallback error for a worker exception that cannot be reconstructed."""
-
-
-class OnlineDataBudgetExhaustedError(RuntimeError):
-    """A complete batch cannot fit eligible unlocked source delivery quotas."""
 
 
 def _add_exception_note(error: BaseException, note: str) -> None:
@@ -1645,6 +1648,10 @@ class OnlineDataEngine:
         batch_size: int,
         history_length: int,
         prediction_horizon: int,
+        *,
+        generator: torch.Generator | None = None,
+        sampling_mode: Literal["episode", "segment"] = "episode",
+        generations: tuple[int, ...] | None = None,
     ) -> TensorDict:
         """Sample causal observations and future supervision around valid anchors.
 
@@ -1659,6 +1666,9 @@ class OnlineDataEngine:
             batch_size: Number of contexts, with replacement.
             history_length: Number of causal observation frames including now.
             prediction_horizon: Number of target frames including now.
+            generator: Optional RNG isolated from augmentation/model randomness.
+            sampling_mode: Episode context or one accepted segment.
+            generations: Optional positive generation IDs; requires provenance.
 
         Returns:
             TensorDict of shape ``[batch_size, history_length +
@@ -1675,8 +1685,23 @@ class OnlineDataEngine:
             type(n) is not int or n < 1 for n in (history_length, prediction_horizon)
         ):
             raise ValueError("Context lengths must be positive integers")
+        if sampling_mode not in {"episode", "segment"}:
+            raise ValueError("Context sampling_mode must be episode or segment")
+        if generations is not None and (
+            not isinstance(generations, tuple)
+            or not generations
+            or any(type(value) is not int or value < 1 for value in generations)
+        ):
+            raise ValueError(
+                "generations must be a nonempty tuple of positive integers"
+            )
         return self._sample_batch(
-            batch_size, 1, "episode", context=(history_length, prediction_horizon)
+            batch_size,
+            1,
+            sampling_mode,
+            context=(history_length, prediction_horizon),
+            generator=generator,
+            generations=generations,
         )
 
     def _sample_batch(
@@ -1686,6 +1711,8 @@ class OnlineDataEngine:
         sampling_mode: Literal["episode", "segment", "boundary"],
         *,
         context: tuple[int, int] | None = None,
+        generator: torch.Generator | None = None,
+        generations: tuple[int, ...] | None = None,
     ) -> TensorDict:
         with self._lifecycle_condition:
             worker_error = self._receive_worker_error()
@@ -1730,6 +1757,21 @@ class OnlineDataEngine:
                     dtype=torch.bool,
                     device=self.shared_buffer.device,
                 )
+
+            if generations is not None:
+                if "ods_generation" not in self.shared_buffer.keys():
+                    raise ValueError("Source has no generation metadata")
+                valid = valid & torch.isin(
+                    self.shared_buffer["ods_generation"],
+                    torch.tensor(generations, dtype=torch.int64, device=valid.device),
+                )
+            if (
+                context is not None
+                and sampling_mode == "segment"
+                and not {"segment_id", "segment_accepted"}
+                <= set(self.shared_buffer.keys())
+            ):
+                raise ValueError("Segment context requires segment metadata")
 
             all_rows = torch.arange(self.buffer_size, device=valid.device)
             is_locked = (all_rows >= lock_start) & (all_rows < lock_end)
@@ -1791,6 +1833,7 @@ class OnlineDataEngine:
                     candidate_rows.shape[0],
                     (batch_size,),
                     device=candidate_rows.device,
+                    generator=generator,
                 )
                 row_indices = candidate_rows[sampled_row_ids]
             else:
@@ -1806,50 +1849,31 @@ class OnlineDataEngine:
                         "Eligible unlocked episode quotas cannot supply a complete "
                         f"batch of {batch_size} chunks; remaining={sum(remaining.tolist())}."
                     )
-                row_indices = _draw_budgeted_rows(candidate_rows, remaining, batch_size)
+                row_indices = _draw_budgeted_rows(
+                    candidate_rows, remaining, batch_size, generator=generator
+                )
             start_indices = torch.multinomial(
                 valid_windows[row_indices].to(dtype=torch.float32),
                 num_samples=1,
                 replacement=True,
+                generator=generator,
             ).squeeze(-1)
             if context is not None:
                 history, future = context
-                steps = torch.arange(max_steps, device=start_indices.device)
-                compatible = valid[row_indices] & (
-                    continuity_ids[row_indices]
-                    == continuity_ids[row_indices, start_indices, None]
+                context_valid = valid
+                if sampling_mode == "segment":
+                    context_valid = valid & self.shared_buffer["segment_accepted"]
+                indices, mask, loss_mask = _context_indices(
+                    context_valid,
+                    continuity_ids,
+                    row_indices,
+                    start_indices,
+                    history,
+                    future,
+                    segment_ids if sampling_mode == "segment" else None,
                 )
-                lower = torch.where(
-                    (~compatible) & (steps[None] < start_indices[:, None]),
-                    steps[None] + 1,
-                    0,
-                ).amax(-1)
-                upper = torch.where(
-                    (~compatible) & (steps[None] > start_indices[:, None]),
-                    steps[None] - 1,
-                    max_steps - 1,
-                ).amin(-1)
-                offsets = torch.arange(1 - history, future, device=steps.device)
-                indices = start_indices[:, None] + offsets[None]
-                context_valid = (indices >= lower[:, None]) & (
-                    indices <= upper[:, None]
-                )
-                result = self.shared_buffer[
-                    row_indices[:, None], indices.clamp(0, max_steps - 1)
-                ].clone()
-                for key, value in result.items(include_nested=True, leaves_only=True):
-                    mask = context_valid.reshape(
-                        *context_valid.shape, *((1,) * (value.ndim - 2))
-                    )
-                    invalid_value = (
-                        -1
-                        if key in {"task_index", "subtask_index"}
-                        or (isinstance(key, str) and key.startswith("ods_"))
-                        else 0
-                    )
-                    value.masked_fill_(~mask, invalid_value)
-                result["valid"] = context_valid
-                result["loss_mask"] = context_valid & (offsets[None] >= 0)
+                result = self.shared_buffer[row_indices[:, None], indices].clone()
+                _pad_context(result, mask, loss_mask)
             else:
                 time_offsets = torch.arange(chunk_size, device=start_indices.device)
                 time_indices = start_indices[:, None] + time_offsets[None, :]

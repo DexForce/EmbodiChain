@@ -27,7 +27,7 @@ from __future__ import annotations
 import copy
 import ctypes
 import hashlib
-import importlib.metadata
+from importlib.metadata import version
 import json
 import math
 import os
@@ -45,8 +45,9 @@ import torch
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from embodichain.data_pipeline.datasets import LeRobotDataSource, LeRobotFieldMappingCfg
+
 from examples.data_pipeline._ods_pick_place_benchmark import (
-    FrozenCorpus,
     _content_manifest,
     _json_bytes,
     _validate_tensors,
@@ -406,7 +407,7 @@ class DirectLeRobotWriter:
                 "format": _FORMAT,
                 "repo_id": self.repo_id,
                 "fps": self.fps,
-                "lerobot_version": importlib.metadata.version("lerobot"),
+                "lerobot_version": version("lerobot"),
                 "source_manifest": source_manifest,
                 "sampling": "resident_cpu_after_official_lerobot_row_load",
                 "per_minibatch_lerobot_io": False,
@@ -534,32 +535,17 @@ class DirectLeRobotWriter:
 
 
 def load_lerobot_corpus(
-    path: Path | str, *, expected_schema: dict[str, Any], read_batch_size: int = 1024
-) -> FrozenCorpus:
-    """Load and hash-audit numeric SDK data in bounded CPU batches.
+    path: Path | str,
+    *,
+    expected_schema: dict[str, Any],
+    read_batch_size: int = 1024,
+    memory_limit_bytes: int = 512 * 1024 * 1024,
+) -> LeRobotDataSource:
+    """Audit showcase hashes around the reusable bounded numeric loader.
 
-    Uses the SDK-owned Hugging Face dataset and its installed torch transform.
-    No sequence/image/video transforms are requested. Only an absent backing
-    dataset API selects scalar SDK fallback, recorded in storage metadata.
+    The example owns its sidecar/content hashes; SDK loading, temporal metadata,
+    resident storage and context sampling belong to the public data source.
     """
-    if type(read_batch_size) is not int or read_batch_size < 1:
-        raise ValueError("read_batch_size must be a positive integer")
-    # The official SDK transform calls torch.tensor without a device argument.
-    with torch.device("cpu"):
-        return _load_lerobot_corpus_cpu(path, expected_schema, read_batch_size)
-
-
-def _load_lerobot_corpus_cpu(
-    path: Path | str, expected_schema: dict[str, Any], read_batch_size: int
-) -> FrozenCorpus:
-    """Read every valid SDK row once and validate its original numeric hashes.
-
-    This intentionally requires the showcase sidecar. Unrelated LeRobot
-    demonstrations cannot silently acquire the task's observation/action
-    semantics. Subsequent sequence sampling uses resident CPU tensors.
-    """
-    from lerobot.datasets.lerobot_dataset import LeRobotDataset
-
     path = Path(path)
     sidecar = json.loads((path / _SIDECAR).read_text())
     if sidecar.get("format") != _FORMAT:
@@ -568,127 +554,38 @@ def _load_lerobot_corpus_cpu(
     if manifest.get("schema") != expected_schema:
         raise ValueError("LeRobot observation/action schema mismatch")
     _validate_fps(expected_schema, sidecar["fps"])
-    tensor_specs = manifest["tensors"]
-    dtypes = {
-        "observations": torch.float32,
-        "actions": torch.float32,
-        "valid": torch.bool,
-        "frame_ids": torch.int64,
-        "generations": torch.int64,
-    }
-    if set(tensor_specs) - set(dtypes):
+    specs = manifest["tensors"]
+    if set(specs) - {"observations", "actions", "valid", "frame_ids", "generations"}:
         raise ValueError("Unexpected numeric field in LeRobot sidecar")
+    rows, steps = specs["valid"]["shape"]
+    source = LeRobotDataSource(
+        path,
+        schema=expected_schema,
+        memory_limit_bytes=memory_limit_bytes,
+        source_id=str(
+            manifest.get("provenance", {}).get("source_run_id", manifest["content_id"])
+        ),
+        mapping=LeRobotFieldMappingCfg(provenance_key="ods.provenance"),
+        repo_id=sidecar["repo_id"],
+        max_episode_steps=steps,
+        episode_frames=[episode["valid_steps"] for episode in manifest["episodes"]],
+        read_batch_size=read_batch_size,
+    )
+    if source.data.batch_size != (rows, steps):
+        raise ValueError("LeRobot numeric corpus shape differs from source manifest")
+    if "generations" not in specs:
+        if (source.data["generations"][source.data["valid"]] != 0).any():
+            raise ValueError("Unexpected generation in LeRobot provenance")
+        del source.data["generations"]
     tensors = {
-        key: torch.zeros(spec["shape"], dtype=dtypes[key])
-        for key, spec in tensor_specs.items()
+        ("observations" if key == "obs" else key): value
+        for key, value in source.data.items()
     }
-    dataset = LeRobotDataset(sidecar["repo_id"], root=path, download_videos=False)
-    if dataset.fps != sidecar["fps"]:
-        raise ValueError("LeRobot SDK fps differs from the source sidecar")
-    expected_frames = sum(
-        len(episode["valid_steps"]) for episode in manifest["episodes"]
-    )
-    if len(dataset) != expected_frames:
-        raise ValueError("LeRobot frame count differs from the source manifest")
-    if any(
-        feature.get("dtype") in {"image", "video"}
-        for feature in dataset.features.values()
-    ):
-        raise ValueError(
-            "PickPlace numeric loader does not accept image/video features"
-        )
-    backing = getattr(dataset, "hf_dataset", None)
-    bulk = backing is not None and callable(getattr(backing, "__getitem__", None))
-    if bulk and len(backing) != expected_frames:
-        raise ValueError("LeRobot backing frame count differs from source manifest")
-    cursor = 0
-    sdk_episode = 0
-    keys = (
-        "observation.state",
-        "action",
-        "ods.provenance",
-        "episode_index",
-        "frame_index",
-    )
-    for row, episode in enumerate(manifest["episodes"]):
-        steps = episode["valid_steps"]
-        if not steps:
-            continue
-        for offset in range(0, len(steps), read_batch_size):
-            chosen = steps[offset : offset + read_batch_size]
-            count = len(chosen)
-            if bulk:
-                payload = backing[cursor : cursor + count]
-            else:
-                items = [dataset[index] for index in range(cursor, cursor + count)]
-                payload = {key: [item[key] for item in items] for key in keys}
-            batch = {}
-            for key, shape, dtype in (
-                (
-                    "observation.state",
-                    (count, tensors["observations"].shape[-1]),
-                    torch.float32,
-                ),
-                ("action", (count, tensors["actions"].shape[-1]), torch.float32),
-                ("ods.provenance", (count, 4), torch.int64),
-                ("episode_index", (count,), torch.int64),
-                ("frame_index", (count,), torch.int64),
-            ):
-                value = payload[key]
-                if isinstance(value, (list, tuple)):
-                    if not value or not all(
-                        isinstance(item, torch.Tensor) for item in value
-                    ):
-                        raise ValueError(f"LeRobot batch {key} must contain tensors")
-                    value = torch.stack(value)
-                if (
-                    not isinstance(value, torch.Tensor)
-                    or value.shape != shape
-                    or value.dtype != dtype
-                    or value.device.type != "cpu"
-                ):
-                    raise ValueError(f"LeRobot batch {key} dtype/shape/device mismatch")
-                batch[key] = value
-            if not (batch["episode_index"] == sdk_episode).all() or not torch.equal(
-                batch["frame_index"], torch.arange(offset, offset + count)
-            ):
-                raise ValueError("LeRobot episode/frame order changed")
-            if (
-                "generations" not in tensors
-                and (batch["ods.provenance"][:, 3] != 0).any()
-            ):
-                raise ValueError("Unexpected generation in the LeRobot provenance")
-            selected = torch.tensor(chosen, dtype=torch.int64)
-            tensors["observations"][row, selected] = batch["observation.state"]
-            tensors["actions"][row, selected] = batch["action"]
-            tensors["frame_ids"][row, selected] = batch["ods.provenance"][:, :3]
-            tensors["valid"][row, selected] = True
-            if "generations" in tensors:
-                tensors["generations"][row, selected] = batch["ods.provenance"][:, 3]
-            cursor += count
-        sdk_episode += 1
     _validate_tensors(tensors, expected_schema)
     actual = _content_manifest(tensors, expected_schema)
     if any(manifest.get(key) != value for key, value in actual.items()):
         raise ValueError("LeRobot numeric content/hash mismatch")
-    loaded_manifest = copy.deepcopy(manifest)
-    loaded_manifest["storage"] = {
-        "format": "lerobot",
-        "loader": "lerobot.datasets.lerobot_dataset.LeRobotDataset",
-        "lerobot_version": importlib.metadata.version("lerobot"),
-        "sampling": sidecar["sampling"],
-        "per_minibatch_lerobot_io": False,
-        "root": str(path.resolve()),
-        "numeric_read_mode": "sdk_hf_dataset_batch" if bulk else "sdk_scalar_fallback",
-        "numeric_read_batch_size": read_batch_size,
-        "scalar_fallback_reason": None if bulk else "SDK backing dataset API absent",
-        "sdk_cache_files": (
-            [
-                str(Path(item["filename"]).resolve())
-                for item in dataset.hf_dataset.cache_files
-            ]
-            if hasattr(getattr(dataset, "hf_dataset", None), "cache_files")
-            else None
-        ),
-    }
-    return FrozenCorpus(tensors, loaded_manifest)
+    storage = source.metadata["storage"]
+    storage["sampling"] = sidecar["sampling"]
+    source.metadata = {**copy.deepcopy(manifest), "storage": storage}
+    return source
