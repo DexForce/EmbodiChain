@@ -303,6 +303,150 @@ def test_runtime_source_uses_complete_scaled_geometry() -> None:
     assert extracted.fingerprint == source.fingerprint
 
 
+@pytest.mark.parametrize(
+    "device", ["cpu", pytest.param("cuda:0", marks=pytest.mark.gpu)]
+)
+def test_main_support_rectangle_excludes_mesh_openings(tmp_path, device) -> None:
+    from shapely.geometry import MultiPoint, box
+
+    original = make_source()
+    uids = ("workbench", "tray", "mug")
+    vertices = {uid: original.vertices[uid] for uid in uids}
+    faces = {uid: original.faces[uid] for uid in uids}
+    vertices["workbench"] = np.array(
+        [
+            [-0.75, -0.6, 0.05],
+            [0.75, -0.6, 0.05],
+            [0.75, 0.6, 0.05],
+            [-0.75, 0.6, 0.05],
+            [-0.15, -0.15, 0.05],
+            [0.15, -0.15, 0.05],
+            [0.15, 0.15, 0.05],
+            [-0.15, 0.15, 0.05],
+        ]
+    )
+    faces["workbench"] = np.array(
+        [
+            [0, 1, 5],
+            [0, 5, 4],
+            [1, 2, 6],
+            [1, 6, 5],
+            [2, 3, 7],
+            [2, 7, 6],
+            [3, 0, 4],
+            [3, 4, 7],
+        ]
+    )
+    source = SceneLayoutInput(
+        "table-with-opening",
+        "workbench",
+        {uid: original.poses[uid] for uid in uids},
+        vertices,
+        faces,
+        {"tray": "workbench", "mug": "tray"},
+    )
+    evidence = box(-0.75, -0.6, 0.75, 0.6).difference(box(-0.15, -0.15, 0.15, 0.15))
+    policy = make_policy(device=device)
+    prepared = prepare_scene_randomization(source, policy, cache_dir=tmp_path)
+    assert evidence.covers(box(*np.asarray(prepared._table).ravel()))
+    # An older cache can contain the filled outer contour. It must neither be
+    # reused nor overwritten by the corrected extractor.
+    from embodichain.lab.sim.scene.expansion.layout import _digest
+
+    legacy_key = _digest(
+        {
+            "source": source.fingerprint,
+            "extractor": "scene-layout-support/v2",
+            "intra": prepared.policy["intra_group"],
+        }
+    )
+    legacy_payload = {
+        "geometry": prepared._geometry,
+        "table": [[-0.75, -0.6], [0.75, 0.6]],
+    }
+    for path in tmp_path.glob("*.json"):
+        path.unlink()
+    legacy_path = tmp_path / (legacy_key + ".json")
+    legacy_path.write_text(
+        json.dumps(
+            {
+                "key": legacy_key,
+                "sha256": _digest(legacy_payload),
+                **legacy_payload,
+            }
+        )
+    )
+    legacy_bytes = legacy_path.read_bytes()
+    cached = prepare_scene_randomization(source, policy, cache_dir=tmp_path)
+    assert cached._table == prepared._table
+    assert legacy_path.read_bytes() == legacy_bytes
+    result = generate_scene_variants(cached, seed=7, candidate_count=20)
+    assert result.status == "completed"
+    for variant in result.variants:
+        poses = {
+            change.entity_uid: np.asarray(change.arena_pose)
+            for change in variant.pose_changes
+        }
+        cloud = np.concatenate(
+            [
+                source.vertices[uid] @ poses[uid][:3, :3].T + poses[uid][:3, 3]
+                for uid in ("tray", "mug")
+            ]
+        )
+        assert evidence.covers(MultiPoint(cloud[:, :2]).convex_hull)
+
+
+@pytest.mark.parametrize("storage", ["json", "packed"])
+@pytest.mark.parametrize("parent_yaw", [0.0, 30.0])
+@pytest.mark.parametrize(
+    "device", ["cpu", pytest.param("cuda:0", marks=pytest.mark.gpu)]
+)
+def test_float32_native_rotations_generate_and_replay(
+    storage, parent_yaw, tmp_path, device
+) -> None:
+    from scipy.spatial.transform import Rotation
+
+    source = make_source()
+    sim = SimPort(source)
+    sim.entities["tray"].poses[:, :3, :3] = torch.tensor(
+        Rotation.from_euler("z", parent_yaw, degrees=True).as_matrix()
+    )
+    sim.entities["mug"].poses[:, :3, :3] = torch.tensor(
+        Rotation.from_euler("XYZ", [5, -3, 30], degrees=True).as_matrix()
+    )
+    for entity in sim.entities.values():
+        entity.poses = entity.poses.to(torch.float32)
+    native = scene_layout_input_from_sim(
+        sim,
+        support_uid=source.support_uid,
+        parent_by_uid=source.parent_by_uid,
+    )
+    result = generate_scene_variants(
+        prepare_scene_randomization(native, make_policy(device=device)),
+        seed=7,
+        candidate_count=5,
+    )
+    assert result.status == "completed"
+    run = save_scene_variants(result, tmp_path / "run", storage=storage)
+    assert tuple(load_scene_variants(run).variants) == tuple(result.variants)
+
+    # Source roundoff must not permit an actual change to the authored tilt.
+    first = result.variants[0]
+    changes = []
+    for change in first.pose_changes:
+        pose = np.array(change.arena_pose)
+        if change.entity_uid == "mug":
+            pose[:3, :3] = pose[:3, :3] @ Rotation.from_rotvec([1e-4, 0, 0]).as_matrix()
+        changes.append(ScenePoseChange(change.entity_uid, pose))
+    invalid = replace(first, pose_changes=tuple(changes))
+    with pytest.raises(ValueError, match="yaw/tilt"):
+        save_scene_variants(
+            replace(result, variants=(invalid, *result.variants[1:])),
+            tmp_path / "invalid",
+            storage=storage,
+        )
+
+
 def test_prepared_cache_skips_all_support_detection(tmp_path, monkeypatch) -> None:
     from embodichain.lab.sim.scene.expansion import layout
 

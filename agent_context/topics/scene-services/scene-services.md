@@ -87,7 +87,9 @@ explicit support transforms, child-contact-guided near-planar layers, unions wit
 holes/islands, evidence-checked overrides, conservative layer height bounds and
 whole-cell rasterization. The hierarchical sampler partitions free AABB center
 rectangles and samples by area without placement retries.
-The existing table detector retains its original selection/contour behavior.
+The table detector retains its default outer-contour behavior. Shared scene
+expansion enables `SupportSurfaceConfig.preserve_holes` and caches a rectangle
+covered by the selected mesh component, excluding openings during preparation.
 
 ## Frames and runtime invariants
 
@@ -95,8 +97,8 @@ The existing table detector retains its original selection/contour behavior.
   use proper 4x4 transforms or position plus `xyzw`; replication offsets do not
   enter proposals. [GenSim](../gen-sim/gen-sim.md) owns its Y-up conversion and
   editable scene model.
-- Mesh support detection currently selects the largest outer contour at one
-  main horizontal level. Explicit polygon support inputs retain holes and
+- Mesh support detection selects the largest contour at one main horizontal
+  level; `preserve_holes` retains its mesh openings. Explicit polygon inputs retain holes and
   disconnected regions. Group translation and height alignment preserve
   relative poses; independent AABB separation uses a separate strategy.
 - `SceneView` wraps existing rigid objects, robots and articulations. The current

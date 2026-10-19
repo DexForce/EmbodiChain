@@ -19,7 +19,8 @@ Loading checks every candidate before exposing a lazy sequence and does not
 repeat mesh extraction or support rasterization. GenSim keeps legacy v1-v3
 readers and migration, while shared loading never imports GenSim. Imported
 fixed-orientation group certificates preserve their original conservative proxy
-rather than being reinterpreted by the hierarchical sampler.
+rather than being reinterpreted by the hierarchical sampler. V3 migration retains
+the validated legacy support grids and height rules without re-extraction.
 
 ## Entry points
 

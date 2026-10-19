@@ -56,6 +56,7 @@ def _native_layout_probe(backend: str) -> None:
                 uid="holder",
                 shape=CubeCfg(size=(0.2, 0.2, 0.02)),
                 init_pos=(-0.2, 0.0, 0.061),
+                init_rot=(0.0, 0.0, 30.0),
             )
         )
         sim.add_rigid_object(
@@ -63,6 +64,7 @@ def _native_layout_probe(backend: str) -> None:
                 uid="part",
                 shape=CubeCfg(size=(0.05, 0.05, 0.05)),
                 init_pos=(-0.2, 0.0, 0.096),
+                init_rot=(0.0, 0.0, 30.0),
             )
         )
         sim.prepare()
@@ -116,7 +118,9 @@ def _native_layout_probe(backend: str) -> None:
         assert env._scene_randomization_metadata[0] is None
         assert env._scene_randomization_metadata[2] is None
         assert all(
-            env._demo_episode_metadata[row]["scene_randomization"]["geometry_status"]
+            env._demo_episode_metadata[row]["scene_randomization"]["events"]["layout"][
+                "geometry_status"
+            ]
             == "passed"
             for row in (1, 3)
         )
@@ -197,7 +201,9 @@ def _native_gym_probe(backend: str) -> None:
             obs["probe_pose"], env.sim.get_rigid_object("cube").get_local_pose()
         )
         before = obs["probe_pose"].clone()
-        previous = [m["variant_id"] for m in info["scene_randomization"]]
+        previous = [
+            m["events"]["layout"]["variant_id"] for m in info["scene_randomization"]
+        ]
         obs, info = env.reset(options={"save_data": False, "reset_ids": [3, 1]})
         torch.testing.assert_close(
             obs["probe_pose"][[0, 2]], before[[0, 2]], atol=0, rtol=0
@@ -205,11 +211,14 @@ def _native_gym_probe(backend: str) -> None:
         torch.testing.assert_close(
             obs["probe_pose"], env.sim.get_rigid_object("cube").get_local_pose()
         )
-        assert [info["scene_randomization"][i]["variant_id"] for i in (0, 2)] == [
-            previous[i] for i in (0, 2)
-        ]
+        assert [
+            info["scene_randomization"][i]["events"]["layout"]["variant_id"]
+            for i in (0, 2)
+        ] == [previous[i] for i in (0, 2)]
         assert all(
-            info["scene_randomization"][i]["variant_id"] != previous[i] for i in (1, 3)
+            info["scene_randomization"][i]["events"]["layout"]["variant_id"]
+            != previous[i]
+            for i in (1, 3)
         )
     finally:
         if env is not None:

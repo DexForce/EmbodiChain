@@ -164,7 +164,10 @@ def test_event_handles_partial_reset_without_task_program() -> None:
     env = make_env()
     metadata = apply(env)
     assert metadata[0] is None and metadata[2] is None
-    assert metadata[1]["variant_id"] != metadata[3]["variant_id"]
+    assert (
+        metadata[1]["events"]["layout"]["variant_id"]
+        != metadata[3]["events"]["layout"]["variant_id"]
+    )
     assert env._demo_episode_metadata[1]["scene_randomization"] == metadata[1]
     assert not env._scene_randomization_invalid_rows.any()
     assert env.sim.time == 0
@@ -177,7 +180,10 @@ def test_repeated_seed_rewinds_candidates_without_reextracting_geometry() -> Non
     functor = env.event_manager.get_functor_cfg("layout").func
     geometry = functor._prepared
     second = apply(env)
-    assert first[1]["variant_id"] != second[1]["variant_id"]
+    assert (
+        first[1]["events"]["layout"]["variant_id"]
+        != second[1]["events"]["layout"]["variant_id"]
+    )
     revision = env.event_manager.seed_revision
     env.event_manager.set_seed(17)
     assert env.event_manager.seed_revision == revision + 1
@@ -190,6 +196,69 @@ def test_unrelated_event_does_not_consume_layout_random_stream() -> None:
     left, right = make_env(), make_env(extra=True)
     for _ in range(3):
         assert apply(left) == apply(right)
+
+
+def make_disjoint_layout_env() -> SimpleNamespace:
+    env = make_env()
+    first = deepcopy(env.event_manager.get_functor_cfg("layout").params)
+    first["parent_by_uid"].pop("z_target")
+    first["entity_cfgs"] = [SceneEntityCfg(uid=uid) for uid in first["parent_by_uid"]]
+    second = {
+        **deepcopy(first),
+        "entity_cfgs": [SceneEntityCfg(uid="z_target")],
+        "parent_by_uid": {"z_target": "workbench"},
+        "policy": {"group_targets": ["z_target"]},
+    }
+    env.event_manager = EventManager(
+        {
+            "tableware": EventCfg(
+                func=RandomizeSceneLayout, mode="reset", params=first
+            ),
+            "target": EventCfg(func=RandomizeSceneLayout, mode="reset", params=second),
+        },
+        env,
+    )
+    return env
+
+
+def test_disjoint_layout_events_retain_each_named_provenance() -> None:
+    env = make_disjoint_layout_env()
+    metadata = apply(env)
+    assert metadata[0] is None and metadata[2] is None
+    for row in (1, 3):
+        assert set(metadata[row]["events"]) == {"tableware", "target"}
+        for name in ("tableware", "target"):
+            event = metadata[row]["events"][name]
+            assert event["variant_id"] and event["source_sha256"]
+            assert event["geometry_status"] == "passed"
+        assert env._demo_episode_metadata[row]["scene_randomization"] == metadata[row]
+    env.event_manager.get_functor_cfg("tableware").func.reset([1])
+    assert set(env._scene_randomization_metadata[1]["events"]) == {"target"}
+    assert (
+        env._demo_episode_metadata[1]["scene_randomization"]
+        == env._scene_randomization_metadata[1]
+    )
+    assert env._scene_randomization_metadata[3] == metadata[3]
+    env.event_manager.set_seed(17)
+    assert apply(env) == metadata
+
+
+def test_one_layout_success_cannot_clear_another_layout_failure() -> None:
+    env = make_disjoint_layout_env()
+    apply(env)
+    target = env.event_manager.get_functor_cfg("target").func
+    target._pools.clear()
+    target._available = 0
+    target._candidate_count = target._max_attempts = 1
+    target.reset([1, 3])
+    with pytest.raises(ValueError, match="max_attempts"):
+        target(env, [1, 3])
+    tableware = env.event_manager.get_functor_cfg("tableware").func
+    tableware.reset([1, 3])
+    tableware(env, [1, 3])
+    assert env._scene_randomization_invalid_rows.tolist() == [False, True, False, True]
+    for row in (1, 3):
+        assert set(env._scene_randomization_metadata[row]["events"]) == {"tableware"}
 
 
 def test_saved_source_cycles_without_sampling(tmp_path, monkeypatch) -> None:
@@ -208,7 +277,7 @@ def test_saved_source_cycles_without_sampling(tmp_path, monkeypatch) -> None:
     first = apply(env)
     second = apply(env)
     assert first == second
-    assert first[1]["variant_id"] == result.variants[0].variant_id
+    assert first[1]["events"]["layout"]["variant_id"] == result.variants[0].variant_id
 
 
 def test_budget_failure_blocks_selected_recordings() -> None:

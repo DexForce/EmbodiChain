@@ -34,7 +34,7 @@ import torch
 from embodichain.compute.geometry._hierarchical import _sample_hierarchy
 from .._support_grid import _prepare_support
 from .._validation import _identifier, _rigid_pose
-from ..geometry import detect_support_region
+from ..geometry import SupportSurfaceConfig, detect_support_region
 from ..query import _backend_tensor
 from .contracts import ScenePoseChange, SceneVariant
 from ._layout_numeric import (
@@ -418,7 +418,7 @@ def prepare_scene_randomization(
     key = _digest(
         {
             "source": source.fingerprint,
-            "extractor": "scene-layout-support/v2",
+            "extractor": "scene-layout-support/v3",
             "intra": policy["intra_group"],
         }
     )
@@ -480,7 +480,10 @@ def prepare_scene_randomization(
             source.vertices[source.support_uid] @ transform[:3, :3].T + transform[:3, 3]
         )
         region = detect_support_region(
-            source.support_uid, points, source.faces[source.support_uid]
+            source.support_uid,
+            points,
+            source.faces[source.support_uid],
+            config=SupportSurfaceConfig(preserve_holes=True),
         )
         rectangle = region.optimization_rectangle
         if rectangle is None:
