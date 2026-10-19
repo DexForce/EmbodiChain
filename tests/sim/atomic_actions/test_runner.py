@@ -1169,19 +1169,22 @@ def test_blocking_runner_resumes_a_stored_effect_verification_boundary() -> None
     assert completed.tick.task_state.get_held_object("arm") is not None
 
 
-def test_runner_collects_evidence_for_an_effect_aware_verifier() -> None:
+@pytest.mark.parametrize("resume_boundary", [False, True])
+def test_runner_collects_evidence_for_an_effect_aware_verifier(
+    resume_boundary: bool,
+) -> None:
     evidence_provider = FakePhysicalEvidenceProvider()
     runner, _, _, _, _ = _make_runner(
         with_effect=True,
         physical_evidence_provider=evidence_provider,
     )
 
-    blocked = runner.run_until_blocked()
-
-    assert blocked.status is RunnerStatus.RUNNING
-    assert blocked.evidence is not None
-    assert blocked.evidence.get("arm_qpos").values.shape == (1, 1)
-    assert evidence_provider.requests
+    if resume_boundary:
+        blocked = runner.run_until_blocked()
+        assert blocked.status is RunnerStatus.RUNNING
+        assert blocked.evidence is not None
+        assert blocked.evidence.get("arm_qpos").values.shape == (1, 1)
+        assert evidence_provider.requests
 
     seen: list[PhysicalEvidenceFrame] = []
 
@@ -1235,6 +1238,58 @@ def test_runner_rejects_evidence_from_a_different_observation(
         CommandOperation.HOLD,
     ]
     assert sink.cancel_count == 1
+
+
+def test_blocking_runner_polls_an_evidence_aware_phase_gate_until_ready() -> None:
+    runner, _, _, _, _ = _make_runner(
+        with_phase_gate=True,
+        physical_evidence_provider=FakePhysicalEvidenceProvider(),
+    )
+    seen: list[PhysicalEvidenceFrame] = []
+
+    def verify(
+        context: PlanningContext,
+        frame: PhysicalEvidenceFrame,
+        request: PhaseEffectGateRequest,
+    ) -> PhaseEffectGateResult:
+        assert frame.timestamp == context.robot.timestamp
+        seen.append(frame.snapshot())
+        return _phase_gate_result(
+            request, success=len(seen) == 2, batch_size=context.batch_size
+        )
+
+    completed = runner.run_until_blocked(physical_phase_effect_gate_verifier=verify)
+
+    assert completed.status is RunnerStatus.COMPLETED
+    assert len(seen) == 2
+    assert seen[0].observation_revision < seen[1].observation_revision
+
+
+def test_blocking_runner_checks_physical_hold_evidence_before_each_command() -> None:
+    runner, _, _, sink, _ = _make_runner(
+        physical_evidence_provider=FakePhysicalEvidenceProvider(),
+    )
+    seen: list[tuple[int, PhysicalEvidenceFrame]] = []
+
+    def verify(
+        context: PlanningContext,
+        frame: PhysicalEvidenceFrame,
+        request: HeldObjectGuardRequest,
+    ) -> None:
+        assert frame.timestamp == context.robot.timestamp
+        seen.append((len(sink.sent), frame.snapshot()))
+
+    completed = runner.run_until_blocked(physical_held_object_guard_verifier=verify)
+
+    assert completed.status is RunnerStatus.COMPLETED
+    assert len(sink.sent) == 3
+    # The final feedback cycle may check retention again without sending.
+    assert {count for count, _ in seen if count < len(sink.sent)} == set(
+        range(len(sink.sent))
+    )
+    assert [frame.observation_revision for _, frame in seen] == sorted(
+        {frame.observation_revision for _, frame in seen}
+    )
 
 
 def test_runner_holds_while_effect_verification_is_pending_by_default() -> None:

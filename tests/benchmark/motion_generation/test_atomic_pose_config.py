@@ -31,9 +31,14 @@ from scripts.benchmark.motion_generation.config import (
 )
 from scripts.benchmark.motion_generation.scenarios.atomic_task import (
     AtomicTaskScenario,
+    _apply_target_rotation_randomization,
     _randomization_parameters,
     _randomized_vector_batch,
+    atomic_skill_provider_names,
     create_atomic_skill_provider,
+)
+from scripts.benchmark.motion_generation.scenarios.atomic_dual_arm_providers import (
+    _support_randomization_config,
 )
 
 
@@ -105,6 +110,204 @@ def test_pose_batch_suite_declares_translation_only_batched_trials() -> None:
     }
 
 
+def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> None:
+    """Every Franka task skill gets only its meaningful spatial domains."""
+    suite = load_suite("atomic_franka_pgi_spatial_generalization")
+    expected = {
+        "spatial-rigid-object": (
+            {"pick_up", "pour", "axis_align"},
+            {"nominal", "object_xy", "object_yaw"},
+        ),
+        "spatial-rigid-object-held-pose-target": (
+            {"move_held_object"},
+            {
+                "nominal",
+                "object_xy",
+                "object_yaw",
+                "target_relative_pose",
+                "target_yaw",
+                "target_z",
+                "target_roll_pitch",
+            },
+        ),
+        "spatial-rigid-object-place-target": (
+            {"place"},
+            {
+                "nominal",
+                "object_xy",
+                "object_yaw",
+                "target_relative_pose",
+                "target_yaw",
+            },
+        ),
+        "spatial-rigid-object-position-target": (
+            {"push_object"},
+            {"nominal", "object_xy", "object_yaw", "target_relative_pose"},
+        ),
+        "spatial-microwave-controls": (
+            {"press", "twist"},
+            {
+                "nominal",
+                "object_xy",
+                "object_yaw",
+                "object_z",
+                "object_roll_pitch",
+            },
+        ),
+        "spatial-drawer": (
+            {"slide"},
+            {
+                "nominal",
+                "object_xy",
+                "object_yaw",
+                "object_z",
+                "object_roll_pitch",
+            },
+        ),
+        "spatial-door": (
+            {"open_door"},
+            {
+                "nominal",
+                "object_xy",
+                "object_yaw",
+                "object_z",
+                "object_roll_pitch",
+            },
+        ),
+    }
+
+    assert suite.suite_version == "atomic_franka_pgi_spatial_generalization_v5"
+    assert len(suite.evaluation_tracks()) == 34
+    assert set(expected) == {track.id for track in suite.tracks}
+    for track in suite.tracks:
+        skills, domain_ids = expected[track.id]
+        assert {entry["id"] for entry in track.config["skills"]} == skills
+        assert {domain.id for domain in track.domains} == domain_ids
+        assert all(set(domain.applicability) == skills for domain in track.domains)
+
+
+@pytest.mark.parametrize(
+    ("suite_name", "skill_id", "domain_ids"),
+    [
+        (
+            "atomic_dual_ur5_pgi_hand_over_spatial_generalization",
+            "hand_over",
+            {"nominal", "object_xy", "object_yaw", "target_relative_pose"},
+        ),
+        (
+            "atomic_dual_ur5_pgi_coordinated_pickment_spatial_generalization",
+            "coordinated_pickment",
+            {
+                "nominal",
+                "object_xy",
+                "object_yaw",
+                "target_relative_pose",
+                "target_yaw",
+                "target_z",
+                "target_roll_pitch",
+            },
+        ),
+        (
+            "atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization",
+            "coordinated_placement",
+            {
+                "nominal",
+                "object_xy",
+                "object_yaw",
+                "target_relative_pose",
+                "target_yaw",
+                "target_z",
+                "support_object_xy",
+                "support_object_yaw",
+                "task_frame_xy",
+                "task_frame_yaw",
+            },
+        ),
+    ],
+)
+def test_dual_arm_spatial_suites_cover_meaningful_domains(
+    suite_name: str, skill_id: str, domain_ids: set[str]
+) -> None:
+    """Each dual-arm task receives its applicable isolated spatial shifts."""
+    suite = load_suite(suite_name)
+    tracks = suite.evaluation_tracks()
+
+    assert {track.domain.id for track in tracks} == domain_ids
+    assert all(track.domain.applicability == [skill_id] for track in tracks)
+    assert all(
+        [entry["id"] for entry in track.config["skills"]] == [skill_id]
+        for track in tracks
+    )
+
+
+def test_spatial_suites_cover_every_non_motion_atomic_skill() -> None:
+    """Only pure joint and end-effector moves are outside spatial evaluation."""
+    suite_names = (
+        "atomic_franka_pgi_spatial_generalization",
+        "atomic_dual_ur5_pgi_hand_over_spatial_generalization",
+        "atomic_dual_ur5_pgi_coordinated_pickment_spatial_generalization",
+        "atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization",
+    )
+    configured = {
+        skill["id"]
+        for suite_name in suite_names
+        for track in load_suite(suite_name).tracks
+        for skill in track.config["skills"]
+    }
+
+    expected = set(atomic_skill_provider_names()) - {
+        "move_end_effector",
+        "move_joints",
+    }
+    assert configured == expected
+
+
+def test_every_spatial_domain_matches_its_runtime_randomization() -> None:
+    """Declared domain provenance and executable overrides cannot drift."""
+    suite_names = (
+        "atomic_franka_pgi_spatial_generalization",
+        "atomic_dual_ur5_pgi_hand_over_spatial_generalization",
+        "atomic_dual_ur5_pgi_coordinated_pickment_spatial_generalization",
+        "atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization",
+    )
+    perturbation_fields = {
+        "object_translation_jitter_m": "object_translation_jitter_m",
+        "object_yaw_jitter_rad": "object_yaw_jitter_rad",
+        "object_roll_pitch_jitter_rad": "object_roll_pitch_jitter_rad",
+        "target_translation_jitter_m": "target_translation_jitter_m",
+        "target_yaw_jitter_rad": "target_yaw_jitter_rad",
+        "target_roll_pitch_jitter_rad": "target_roll_pitch_jitter_rad",
+        "support_object_translation_jitter_m": ("support_object_translation_jitter_m"),
+        "support_object_yaw_jitter_rad": "support_object_yaw_jitter_rad",
+        "support_object_roll_pitch_jitter_rad": (
+            "support_object_roll_pitch_jitter_rad"
+        ),
+        "task_frame_translation_jitter_m": "task_frame_translation_jitter_m",
+        "task_frame_yaw_jitter_rad": "task_frame_yaw_jitter_rad",
+        "task_frame_roll_pitch_jitter_rad": "task_frame_roll_pitch_jitter_rad",
+    }
+    for suite_name in suite_names:
+        for track in load_suite(suite_name).evaluation_tracks():
+            settings = resolve_atomic_pose_randomization(track)
+            perturbations = track.domain.perturbations
+            assert track.config["seeds"] == [11, 23, 47]
+            if track.domain.kind == "nominal":
+                assert settings.enabled is False
+                assert resolve_atomic_batch_sizes(track) == [1]
+                continue
+            assert settings.enabled is True
+            assert resolve_atomic_batch_sizes(track) == [8]
+            for field, attribute in perturbation_fields.items():
+                if field not in perturbations:
+                    continue
+                expected = perturbations[field]
+                actual = getattr(settings, attribute)
+                if isinstance(expected, list):
+                    assert actual == tuple(expected)
+                else:
+                    assert actual == pytest.approx(expected)
+
+
 def test_pose_batch_aliases_are_normalized() -> None:
     """Readable aliases work without changing the canonical manifest."""
     track = TrackCfg(
@@ -128,6 +331,141 @@ def test_pose_batch_aliases_are_normalized() -> None:
     assert resolve_atomic_batch_sizes(track) == [4]
 
 
+def test_planar_pose_mode_injects_all_strict_spatial_controls() -> None:
+    """The planar-pose mode injects all normalized planar dimensions."""
+    track = TrackCfg(
+        id="atomic-task",
+        scenario="atomic_task",
+        config={
+            "randomization": {
+                "mode": "planar_pose",
+                "pose_batch_size": 4,
+                "object_yaw_jitter_rad": 0.5,
+                "target_yaw_jitter_rad": 0.4,
+                "support_object_translation_jitter_m": [0.03, 0.02, 0.0],
+                "support_object_yaw_jitter_rad": 0.3,
+                "task_frame_translation_jitter_m": [0.01, 0.02, 0.0],
+                "task_frame_yaw_jitter_rad": 0.2,
+            }
+        },
+    )
+
+    settings = resolve_atomic_pose_randomization(track)
+    prepared = AtomicTaskScenario._prepare_pose_batch_config({}, track, batch_size=4)
+
+    assert settings.enabled is True
+    assert settings.object_yaw_jitter_rad == pytest.approx(0.5)
+    assert settings.target_yaw_jitter_rad == pytest.approx(0.4)
+    assert settings.support_object_translation_jitter_m == (0.03, 0.02, 0.0)
+    assert settings.support_object_yaw_jitter_rad == pytest.approx(0.3)
+    assert settings.task_frame_translation_jitter_m == (0.01, 0.02, 0.0)
+    assert settings.task_frame_yaw_jitter_rad == pytest.approx(0.2)
+    assert prepared["_pose_batch_object_yaw_jitter_rad"] == pytest.approx(0.5)
+    assert prepared["_pose_batch_target_yaw_jitter_rad"] == pytest.approx(0.4)
+    assert prepared["_pose_batch_support_object_translation_jitter_m"] == [
+        0.03,
+        0.02,
+        0.0,
+    ]
+    assert prepared["_pose_batch_support_object_yaw_jitter_rad"] == pytest.approx(0.3)
+    assert prepared["_pose_batch_task_frame_translation_jitter_m"] == [
+        0.01,
+        0.02,
+        0.0,
+    ]
+    assert prepared["_pose_batch_task_frame_yaw_jitter_rad"] == pytest.approx(0.2)
+    assert prepared["_pose_batch_object_translation_jitter_m"] == [0.0, 0.0, 0.0]
+    assert prepared["_pose_batch_translation_jitter_m"] == [0.0, 0.0, 0.0]
+
+
+def test_spatial_pose_mode_injects_all_roll_pitch_controls() -> None:
+    """The spatial-pose mode exposes 3D orientation for every pose role."""
+    track = TrackCfg(
+        id="atomic-task",
+        scenario="atomic_task",
+        config={
+            "randomization": {
+                "mode": "spatial_pose",
+                "pose_batch_size": 4,
+                "object_roll_pitch_jitter_rad": [0.1, 0.2],
+                "target_roll_pitch_jitter_rad": [0.2, 0.3],
+                "support_object_roll_pitch_jitter_rad": [0.3, 0.4],
+                "task_frame_roll_pitch_jitter_rad": [0.4, 0.5],
+            }
+        },
+    )
+
+    settings = resolve_atomic_pose_randomization(track)
+    prepared = AtomicTaskScenario._prepare_pose_batch_config({}, track, batch_size=4)
+
+    assert settings.object_roll_pitch_jitter_rad == (0.1, 0.2)
+    assert settings.target_roll_pitch_jitter_rad == (0.2, 0.3)
+    assert settings.support_object_roll_pitch_jitter_rad == (0.3, 0.4)
+    assert settings.task_frame_roll_pitch_jitter_rad == (0.4, 0.5)
+    assert prepared["_pose_batch_object_roll_pitch_jitter_rad"] == [0.1, 0.2]
+    assert prepared["_pose_batch_target_roll_pitch_jitter_rad"] == [0.2, 0.3]
+    assert prepared["_pose_batch_support_object_roll_pitch_jitter_rad"] == [
+        0.3,
+        0.4,
+    ]
+    assert prepared["_pose_batch_task_frame_roll_pitch_jitter_rad"] == [0.4, 0.5]
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "object_yaw_jitter_rad",
+        "target_yaw_jitter_rad",
+        "support_object_yaw_jitter_rad",
+        "task_frame_yaw_jitter_rad",
+    ],
+)
+def test_translation_mode_rejects_yaw_fields(field: str) -> None:
+    """A translation-only domain rejects every orientation control."""
+    track = TrackCfg(
+        id="atomic-task",
+        scenario="atomic_task",
+        config={
+            "randomization": {
+                "enabled": True,
+                "mode": "translation",
+                field: 0.5,
+            }
+        },
+    )
+
+    with pytest.raises(ValueError, match="mode='translation'"):
+        resolve_atomic_pose_randomization(track)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "object_roll_pitch_jitter_rad",
+        "target_roll_pitch_jitter_rad",
+        "support_object_roll_pitch_jitter_rad",
+        "task_frame_roll_pitch_jitter_rad",
+    ],
+)
+@pytest.mark.parametrize("mode", ["translation", "planar_pose"])
+def test_non_spatial_modes_reject_roll_pitch_fields(field: str, mode: str) -> None:
+    """Roll/pitch controls require the explicit spatial-pose mode."""
+    track = TrackCfg(
+        id="atomic-task",
+        scenario="atomic_task",
+        config={
+            "randomization": {
+                "enabled": True,
+                "mode": mode,
+                field: [0.1, 0.2],
+            }
+        },
+    )
+
+    with pytest.raises(ValueError, match=f"mode='{mode}'"):
+        resolve_atomic_pose_randomization(track)
+
+
 def test_atomic_pose_config_rejects_null_track_mapping() -> None:
     """Report malformed YAML track entries with a useful type error."""
     track = TrackCfg(id="atomic-task", scenario="atomic_task", config=None)
@@ -141,7 +479,33 @@ def test_atomic_pose_config_rejects_null_track_mapping() -> None:
         ("pose_batch_size", 0, "pose_batch_size"),
         ("pose_batch_size", -2, "pose_batch_size"),
         ("object_translation_jitter_m", [0.01, -0.01, 0.0], "object_translation"),
+        ("object_yaw_jitter_rad", -0.1, "object_yaw"),
+        ("object_roll_pitch_jitter_rad", [0.1, -0.1], "object_roll_pitch"),
         ("target_translation_jitter_m", [0.01, 0.0], "target_translation"),
+        ("target_yaw_jitter_rad", -0.1, "target_yaw"),
+        ("target_roll_pitch_jitter_rad", [0.1], "target_roll_pitch"),
+        (
+            "support_object_translation_jitter_m",
+            [0.01, -0.01, 0.0],
+            "support_object_translation",
+        ),
+        ("support_object_yaw_jitter_rad", -0.1, "support_object_yaw"),
+        (
+            "support_object_roll_pitch_jitter_rad",
+            [0.1, float("inf")],
+            "support_object_roll_pitch",
+        ),
+        (
+            "task_frame_translation_jitter_m",
+            [0.01, 0.0],
+            "task_frame_translation",
+        ),
+        ("task_frame_yaw_jitter_rad", -0.1, "task_frame_yaw"),
+        (
+            "task_frame_roll_pitch_jitter_rad",
+            "invalid",
+            "task_frame_roll_pitch",
+        ),
     ],
 )
 def test_invalid_pose_randomization_is_rejected(
@@ -306,8 +670,111 @@ def test_randomize_object_pose_returns_live_pose_after_optional_settle() -> None
     torch.testing.assert_close(entity.set_local_pose.call_args.args[0], pose)
 
 
-def test_randomize_articulation_root_translation_is_deterministic() -> None:
-    """Articulation pose batches vary only in translation and remain replayable."""
+def test_track_level_object_yaw_is_batched_and_deterministic() -> None:
+    """Each environment gets a reproducible yaw while translation stays fixed."""
+    batch_size = 4
+    initial_pose = torch.eye(4).repeat(batch_size, 1, 1)
+    initial_pose[:, :3, 3] = torch.tensor([-0.42, -0.08, 0.05])
+    handle = Mock(initial_pose=initial_pose, entity=Mock())
+    scenario = AtomicTaskScenario()
+    config = {
+        "_pose_batch_object_yaw_jitter_rad": 0.5,
+        "_pose_batch_seed_stride": 1,
+    }
+
+    first = scenario.randomize_object_pose(handle, config, seed=11, stream=201)
+    second = scenario.randomize_object_pose(handle, config, seed=11, stream=201)
+
+    yaw = torch.atan2(first[:, 1, 0], first[:, 0, 0])
+    torch.testing.assert_close(first, second)
+    torch.testing.assert_close(first[:, :3, 3], initial_pose[:, :3, 3])
+    assert torch.all(yaw.abs() <= 0.5)
+    assert torch.unique(yaw).numel() == batch_size
+
+
+def test_target_spatial_rotation_is_batched_without_translating_the_goal() -> None:
+    """Target 3D orientation rows vary reproducibly around a fixed position."""
+    batch_size = 4
+    target = torch.eye(4).repeat(batch_size, 1, 1)
+    target[:, :3, 3] = torch.tensor([0.4, -0.2, 0.7])
+    config = {
+        "_pose_batch_target_yaw_jitter_rad": 0.5,
+        "_pose_batch_target_roll_pitch_jitter_rad": [0.2, 0.3],
+        "_pose_batch_seed_stride": 1,
+    }
+
+    first = target.clone()
+    second = target.clone()
+    _apply_target_rotation_randomization(first, config, seed=11, stream=312)
+    _apply_target_rotation_randomization(second, config, seed=11, stream=312)
+
+    torch.testing.assert_close(first, second)
+    torch.testing.assert_close(first[:, :3, 3], target[:, :3, 3])
+    assert torch.unique(first[:, :3, :3], dim=0).shape[0] == batch_size
+    identity = torch.eye(3).expand(batch_size, -1, -1)
+    assert not torch.allclose(first[:, :3, :3], identity)
+
+
+def test_task_frame_transform_is_shared_by_scene_objects() -> None:
+    """A task-frame sample preserves relative distance between scene objects."""
+    batch_size = 4
+    first_pose = torch.eye(4).repeat(batch_size, 1, 1)
+    second_pose = torch.eye(4).repeat(batch_size, 1, 1)
+    first_pose[:, :3, 3] = torch.tensor([0.4, -0.2, 0.1])
+    second_pose[:, :3, 3] = torch.tensor([-0.1, 0.3, 0.1])
+    first_handle = Mock(initial_pose=first_pose, entity=Mock())
+    second_handle = Mock(initial_pose=second_pose, entity=Mock())
+    scenario = AtomicTaskScenario()
+    config = {
+        "_pose_batch_task_frame_translation_jitter_m": [0.03, 0.03, 0.0],
+        "_pose_batch_task_frame_yaw_jitter_rad": 0.2,
+        "_pose_batch_task_frame_roll_pitch_jitter_rad": [0.1, 0.1],
+        "_pose_batch_seed_stride": 1,
+    }
+
+    first = scenario.randomize_object_pose(first_handle, config, seed=11, stream=901)
+    second = scenario.randomize_object_pose(second_handle, config, seed=11, stream=903)
+
+    initial_distance = torch.linalg.vector_norm(
+        first_pose[:, :3, 3] - second_pose[:, :3, 3], dim=-1
+    )
+    transformed_distance = torch.linalg.vector_norm(
+        first[:, :3, 3] - second[:, :3, 3], dim=-1
+    )
+    torch.testing.assert_close(transformed_distance, initial_distance)
+    torch.testing.assert_close(first[:, :3, :3], second[:, :3, :3])
+
+
+def test_support_object_ranges_do_not_inherit_primary_object_ranges() -> None:
+    """Primary, support, and shared-frame perturbations remain independent."""
+    config = {
+        "_pose_batch_object_translation_jitter_m": [0.03, 0.03, 0.0],
+        "_pose_batch_object_yaw_jitter_rad": 0.5,
+        "_pose_batch_support_object_translation_jitter_m": [0.02, 0.01, 0.0],
+        "_pose_batch_support_object_yaw_jitter_rad": 0.3,
+        "_pose_batch_support_object_roll_pitch_jitter_rad": [0.2, 0.15],
+        "_pose_batch_task_frame_translation_jitter_m": [0.01, 0.01, 0.0],
+        "_pose_batch_task_frame_yaw_jitter_rad": 0.1,
+    }
+
+    support = _support_randomization_config(config)
+
+    assert support["object_position_jitter_m"] == [0.02, 0.01, 0.0]
+    assert support["object_yaw_jitter_rad"] == pytest.approx(0.3)
+    assert support["object_roll_pitch_jitter_rad"] == [0.2, 0.15]
+    assert "_pose_batch_object_translation_jitter_m" not in support
+    assert "_pose_batch_object_yaw_jitter_rad" not in support
+    assert "_pose_batch_object_roll_pitch_jitter_rad" not in support
+    assert support["_pose_batch_task_frame_translation_jitter_m"] == [
+        0.01,
+        0.01,
+        0.0,
+    ]
+    assert support["_pose_batch_task_frame_yaw_jitter_rad"] == pytest.approx(0.1)
+
+
+def test_randomize_articulation_root_pose_is_deterministic() -> None:
+    """Articulation roots vary reproducibly over enabled 3D pose axes."""
     batch_size = 4
     initial_pose = torch.eye(4).repeat(batch_size, 1, 1)
     initial_pose[:, :3, 3] = torch.tensor([-1.0, -0.3, 0.4])
@@ -330,7 +797,9 @@ def test_randomize_articulation_root_translation_is_deterministic() -> None:
     scenario = AtomicTaskScenario()
     scenario.simulation = Mock()
     config = {
-        "articulation_position_jitter_m": [0.03, 0.02, 0.0],
+        "articulation_position_jitter_m": [0.03, 0.02, 0.01],
+        "_pose_batch_object_yaw_jitter_rad": 0.4,
+        "_pose_batch_object_roll_pitch_jitter_rad": [0.1, 0.2],
         "_pose_batch_seed_stride": 1,
     }
 
@@ -349,11 +818,11 @@ def test_randomize_articulation_root_translation_is_deterministic() -> None:
 
     offsets = first[:, :3, 3] - initial_pose[:, :3, 3]
     torch.testing.assert_close(first, second)
-    torch.testing.assert_close(first[:, :3, :3], initial_pose[:, :3, :3])
     assert torch.all(offsets[:, 0].abs() <= 0.03)
     assert torch.all(offsets[:, 1].abs() <= 0.02)
-    assert torch.equal(offsets[:, 2], torch.zeros(batch_size))
-    assert torch.unique(offsets[:, :2], dim=0).shape[0] == batch_size
+    assert torch.all(offsets[:, 2].abs() <= 0.01)
+    assert torch.unique(offsets, dim=0).shape[0] == batch_size
+    assert torch.unique(first[:, :3, :3], dim=0).shape[0] == batch_size
     assert scenario.simulation.update.call_count == 2
     scenario.simulation.update.assert_called_with(step=1)
 
@@ -579,9 +1048,40 @@ def test_pose_batch_internal_ranges_are_not_exposed_as_legacy_jitter() -> None:
             "_pose_batch_seed_stride": 1,
             "_pose_batch_translation_jitter_m": [0.1, 0.1, 0.0],
             "_pose_batch_object_translation_jitter_m": [0.2, 0.2, 0.0],
+            "_pose_batch_object_yaw_jitter_rad": 0.5,
+            "_pose_batch_object_roll_pitch_jitter_rad": [0.1, 0.2],
+            "_pose_batch_target_yaw_jitter_rad": 0.4,
+            "_pose_batch_target_roll_pitch_jitter_rad": [0.2, 0.3],
+            "_pose_batch_support_object_translation_jitter_m": [0.03, 0.03, 0.0],
+            "_pose_batch_support_object_yaw_jitter_rad": 0.3,
+            "_pose_batch_support_object_roll_pitch_jitter_rad": [0.3, 0.4],
+            "_pose_batch_task_frame_translation_jitter_m": [0.01, 0.01, 0.0],
+            "_pose_batch_task_frame_yaw_jitter_rad": 0.2,
+            "_pose_batch_task_frame_roll_pitch_jitter_rad": [0.4, 0.5],
             "target_offset_jitter_m": [0.1, 0.1, 0.0],
         },
         seed=11,
     )
     assert all(not key.startswith("_pose_batch_") for key in parameters["ranges"])
     assert parameters["pose_batch"] is True
+    assert parameters["pose_batch_object_yaw_jitter_rad"] == pytest.approx(0.5)
+    assert parameters["pose_batch_object_roll_pitch_jitter_rad"] == [0.1, 0.2]
+    assert parameters["pose_batch_target_yaw_jitter_rad"] == pytest.approx(0.4)
+    assert parameters["pose_batch_target_roll_pitch_jitter_rad"] == [0.2, 0.3]
+    assert parameters["pose_batch_support_object_translation_jitter_m"] == [
+        0.03,
+        0.03,
+        0.0,
+    ]
+    assert parameters["pose_batch_support_object_yaw_jitter_rad"] == pytest.approx(0.3)
+    assert parameters["pose_batch_support_object_roll_pitch_jitter_rad"] == [
+        0.3,
+        0.4,
+    ]
+    assert parameters["pose_batch_task_frame_translation_jitter_m"] == [
+        0.01,
+        0.01,
+        0.0,
+    ]
+    assert parameters["pose_batch_task_frame_yaw_jitter_rad"] == pytest.approx(0.2)
+    assert parameters["pose_batch_task_frame_roll_pitch_jitter_rad"] == [0.4, 0.5]

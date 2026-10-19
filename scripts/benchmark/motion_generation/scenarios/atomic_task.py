@@ -20,8 +20,8 @@ from __future__ import annotations
 
 import math
 import time
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -47,6 +47,7 @@ from embodichain.lab.sim.atomic_actions import (
     PressAffordance,
     PressGoal,
     PressOptions,
+    SceneSnapshot,
     SlideAffordance,
     SlideGoal,
     SlideOptions,
@@ -59,14 +60,21 @@ from embodichain.lab.sim.atomic_actions import (
 )
 from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory
 from embodichain.lab.sim.motion.planners.utils import PlanResult
-from embodichain.toolkits.graspkit import GraspPoseGenerator
+from embodichain.toolkits.graspkit import (
+    GraspPoseGenerator,
+    ParallelJawGraspPoseGenerator,
+)
 from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
 
 from ..atomic_skill import AtomicSkillCaseProvider
 from ..contracts import (
     ExecutionObservation as _ExecutionObservation,
+    PhysicalEvaluation,
+    ReplayObservationTrace,
+    ReplayObservationWindow,
     validate_physical_evaluations,
 )
+from ..evaluation import TOLERANCES, StageEvidence, evaluate_skill_stage_batch
 from ..config import (
     SuiteCfg,
     TrackCfg,
@@ -105,6 +113,9 @@ _TOP_DOWN_ROTATION = (
     (0.0401, 0.0000, -0.9992),
 )
 _TASK_DIFFICULTIES = {"simple", "medium", "hard"}
+_TASK_FRAME_TRANSLATION_STREAM = 90_001
+_TASK_FRAME_YAW_STREAM = 90_002
+_TASK_FRAME_ROLL_PITCH_STREAM = 90_003
 _GRIPPER_SKILLS = {
     "pick_up",
     "move_held_object",
@@ -112,6 +123,13 @@ _GRIPPER_SKILLS = {
     "press",
     "slide",
     "twist",
+    "open_door",
+    "pour",
+    "axis_align",
+    "push_object",
+    "hand_over",
+    "coordinated_pickment",
+    "coordinated_placement",
 }
 _CASE_QPOS_RESOLUTION_RAD = 1.0e-4
 
@@ -125,6 +143,40 @@ class _ReplayMetrics:
     articulation_joint_initial: torch.Tensor | None = None
     articulation_joint_final: torch.Tensor | None = None
     articulation_joint_peak_signed_delta: torch.Tensor | None = None
+    articulation_joint_effect_end: torch.Tensor | None = None
+    object_rotation_peak_signed_rad: torch.Tensor | None = None
+    replay_traces: Mapping[str, ReplayObservationTrace] = field(default_factory=dict)
+
+
+@dataclass
+class _ReplayTraceAccumulator:
+    """Mutable samples for one validated replay observation window."""
+
+    window: ReplayObservationWindow
+    tcp_pose: list[torch.Tensor] = field(default_factory=list)
+    object_pose: list[torch.Tensor] = field(default_factory=list)
+    articulation_joint: list[torch.Tensor] = field(default_factory=list)
+    gripper_qpos: dict[str, list[torch.Tensor]] = field(default_factory=dict)
+    scene_object_poses: dict[str, list[torch.Tensor]] = field(default_factory=dict)
+
+    def finish(self) -> ReplayObservationTrace:
+        """Stack synchronized samples into the public immutable trace."""
+        return ReplayObservationTrace(
+            tcp_pose=torch.stack(self.tcp_pose) if self.tcp_pose else None,
+            object_pose=torch.stack(self.object_pose) if self.object_pose else None,
+            articulation_joint=(
+                torch.stack(self.articulation_joint)
+                if self.articulation_joint
+                else None
+            ),
+            gripper_qpos={
+                part: torch.stack(values) for part, values in self.gripper_qpos.items()
+            },
+            scene_object_poses={
+                object_id: torch.stack(values)
+                for object_id, values in self.scene_object_poses.items()
+            },
+        )
 
 
 @dataclass(frozen=True)
@@ -264,6 +316,222 @@ def _seeded_jitter(
     return values[0] if batch_size == 1 else values
 
 
+def _seeded_yaw_rotation(
+    *,
+    batch_size: int,
+    amplitude: object,
+    name: str,
+    seed: int,
+    stream: int,
+    seed_stride: int,
+    dtype: torch.dtype,
+    device: torch.device,
+) -> torch.Tensor:
+    """Return deterministic world-Z rotation matrices for a pose batch."""
+    yaw_amplitude = float(amplitude)
+    if not math.isfinite(yaw_amplitude) or yaw_amplitude < 0.0:
+        raise ValueError(f"{name} must be finite and non-negative.")
+    yaw = _seeded_jitter(
+        (yaw_amplitude,),
+        seed=seed,
+        stream=stream,
+        dtype=dtype,
+        device=device,
+        batch_size=batch_size,
+        seed_stride=seed_stride,
+    )
+    if yaw.dim() == 1:
+        yaw = yaw[:1]
+    else:
+        yaw = yaw[:, 0]
+    cosine = torch.cos(yaw)
+    sine = torch.sin(yaw)
+    yaw_rotation = torch.eye(3, dtype=dtype, device=device).repeat(batch_size, 1, 1)
+    yaw_rotation[:, 0, 0] = cosine
+    yaw_rotation[:, 0, 1] = -sine
+    yaw_rotation[:, 1, 0] = sine
+    yaw_rotation[:, 1, 1] = cosine
+    return yaw_rotation
+
+
+def _seeded_roll_pitch_rotation(
+    *,
+    batch_size: int,
+    amplitude: object,
+    name: str,
+    seed: int,
+    stream: int,
+    seed_stride: int,
+    dtype: torch.dtype,
+    device: torch.device,
+) -> torch.Tensor:
+    """Return deterministic ``Ry(pitch) @ Rx(roll)`` rotations."""
+    roll_pitch_amplitude = _float_vector(
+        amplitude,
+        name=name,
+        length=2,
+        default=(0.0, 0.0),
+    )
+    if any(value < 0.0 for value in roll_pitch_amplitude):
+        raise ValueError(f"{name} values must be non-negative.")
+    angles = _seeded_jitter(
+        roll_pitch_amplitude,
+        seed=seed,
+        stream=stream,
+        dtype=dtype,
+        device=device,
+        batch_size=batch_size,
+        seed_stride=seed_stride,
+    )
+    if angles.dim() == 1:
+        angles = angles.unsqueeze(0)
+    roll = angles[:, 0]
+    pitch = angles[:, 1]
+    roll_rotation = torch.eye(3, dtype=dtype, device=device).repeat(batch_size, 1, 1)
+    roll_rotation[:, 1, 1] = torch.cos(roll)
+    roll_rotation[:, 1, 2] = -torch.sin(roll)
+    roll_rotation[:, 2, 1] = torch.sin(roll)
+    roll_rotation[:, 2, 2] = torch.cos(roll)
+    pitch_rotation = torch.eye(3, dtype=dtype, device=device).repeat(batch_size, 1, 1)
+    pitch_rotation[:, 0, 0] = torch.cos(pitch)
+    pitch_rotation[:, 0, 2] = torch.sin(pitch)
+    pitch_rotation[:, 2, 0] = -torch.sin(pitch)
+    pitch_rotation[:, 2, 2] = torch.cos(pitch)
+    return pitch_rotation @ roll_rotation
+
+
+def _seeded_spatial_rotation(
+    *,
+    batch_size: int,
+    roll_pitch_amplitude: object,
+    yaw_amplitude: object,
+    roll_pitch_name: str,
+    yaw_name: str,
+    seed: int,
+    roll_pitch_stream: int,
+    yaw_stream: int,
+    seed_stride: int,
+    dtype: torch.dtype,
+    device: torch.device,
+) -> torch.Tensor:
+    """Return deterministic world-frame ``Rz @ Ry @ Rx`` rotations."""
+    roll_pitch = _seeded_roll_pitch_rotation(
+        batch_size=batch_size,
+        amplitude=roll_pitch_amplitude,
+        name=roll_pitch_name,
+        seed=seed,
+        stream=roll_pitch_stream,
+        seed_stride=seed_stride,
+        dtype=dtype,
+        device=device,
+    )
+    yaw = _seeded_yaw_rotation(
+        batch_size=batch_size,
+        amplitude=yaw_amplitude,
+        name=yaw_name,
+        seed=seed,
+        stream=yaw_stream,
+        seed_stride=seed_stride,
+        dtype=dtype,
+        device=device,
+    )
+    return yaw @ roll_pitch
+
+
+def _apply_seeded_spatial_rotation(
+    pose: torch.Tensor,
+    *,
+    roll_pitch_amplitude: object,
+    yaw_amplitude: object,
+    roll_pitch_name: str,
+    yaw_name: str,
+    seed: int,
+    roll_pitch_stream: int,
+    yaw_stream: int,
+    seed_stride: int,
+) -> None:
+    """Pre-multiply each pose by a deterministic world-frame rotation."""
+    rotation = _seeded_spatial_rotation(
+        batch_size=pose.shape[0],
+        roll_pitch_amplitude=roll_pitch_amplitude,
+        yaw_amplitude=yaw_amplitude,
+        roll_pitch_name=roll_pitch_name,
+        yaw_name=yaw_name,
+        seed=seed,
+        roll_pitch_stream=roll_pitch_stream,
+        yaw_stream=yaw_stream,
+        seed_stride=seed_stride,
+        dtype=pose.dtype,
+        device=pose.device,
+    )
+    pose[:, :3, :3] = rotation @ pose[:, :3, :3]
+
+
+def _task_frame_rotation(
+    config: Mapping[str, object],
+    *,
+    seed: int,
+    batch_size: int,
+    dtype: torch.dtype,
+    device: torch.device,
+) -> torch.Tensor:
+    """Resolve the shared deterministic 3D task-frame rotation."""
+    return _seeded_spatial_rotation(
+        batch_size=batch_size,
+        roll_pitch_amplitude=config.get(
+            "_pose_batch_task_frame_roll_pitch_jitter_rad", (0.0, 0.0)
+        ),
+        yaw_amplitude=config.get("_pose_batch_task_frame_yaw_jitter_rad", 0.0),
+        roll_pitch_name="task_frame_roll_pitch_jitter_rad",
+        yaw_name="task_frame_yaw_jitter_rad",
+        seed=seed,
+        roll_pitch_stream=_TASK_FRAME_ROLL_PITCH_STREAM,
+        yaw_stream=_TASK_FRAME_YAW_STREAM,
+        seed_stride=int(config.get("_pose_batch_seed_stride", 1)),
+        dtype=dtype,
+        device=device,
+    )
+
+
+def _apply_task_frame_randomization(
+    pose: torch.Tensor,
+    config: Mapping[str, object],
+    *,
+    seed: int,
+) -> None:
+    """Apply one shared 3D task-frame transform to every scene entity."""
+    stride = int(config.get("_pose_batch_seed_stride", 1))
+    translation_amplitude = _float_vector(
+        config.get("_pose_batch_task_frame_translation_jitter_m"),
+        name="task_frame_translation_jitter_m",
+        length=3,
+        default=(0.0, 0.0, 0.0),
+    )
+    if any(value < 0.0 for value in translation_amplitude):
+        raise ValueError("task_frame_translation_jitter_m values must be non-negative.")
+    rotation = _task_frame_rotation(
+        config,
+        seed=seed,
+        batch_size=pose.shape[0],
+        dtype=pose.dtype,
+        device=pose.device,
+    )
+    translation = _seeded_jitter(
+        translation_amplitude,
+        seed=seed,
+        stream=_TASK_FRAME_TRANSLATION_STREAM,
+        dtype=pose.dtype,
+        device=pose.device,
+        batch_size=pose.shape[0],
+        seed_stride=stride,
+    )
+    if translation.dim() == 1:
+        translation = translation.unsqueeze(0)
+    pose[:, :3, 3] = torch.bmm(rotation, pose[:, :3, 3, None]).squeeze(-1)
+    pose[:, :3, 3] += translation
+    pose[:, :3, :3] = rotation @ pose[:, :3, :3]
+
+
 def _case_generation_seed(seed: int, *, skill_index: int, case_index: int) -> int:
     """Derive one stable RNG seed for all stochastic IK work in a case."""
     return (
@@ -365,7 +633,46 @@ def _randomized_vector_batch(
     base_tensor = torch.tensor(base_values, dtype=dtype, device=device).expand(
         batch_size, -1
     )
-    return base_tensor + jitter
+    randomized = base_tensor + jitter
+    if jitter_name in {"target_offset_jitter_m", "target_object_offset_jitter_m"}:
+        task_frame_rotation = _task_frame_rotation(
+            config,
+            seed=seed,
+            batch_size=batch_size,
+            dtype=dtype,
+            device=device,
+        )
+        randomized = torch.bmm(task_frame_rotation, randomized[:, :, None]).squeeze(-1)
+    return randomized
+
+
+def _apply_target_rotation_randomization(
+    pose: torch.Tensor,
+    config: Mapping[str, object],
+    *,
+    seed: int,
+    stream: int,
+) -> None:
+    """Apply configured goal-relative roll, pitch, and yaw to a target pose."""
+    amplitude = config.get("target_yaw_jitter_rad")
+    if amplitude is None:
+        amplitude = config.get("_pose_batch_target_yaw_jitter_rad", 0.0)
+    roll_pitch_amplitude = config.get("target_roll_pitch_jitter_rad")
+    if roll_pitch_amplitude is None:
+        roll_pitch_amplitude = config.get(
+            "_pose_batch_target_roll_pitch_jitter_rad", (0.0, 0.0)
+        )
+    _apply_seeded_spatial_rotation(
+        pose,
+        roll_pitch_amplitude=roll_pitch_amplitude,
+        yaw_amplitude=amplitude,
+        roll_pitch_name="target_roll_pitch_jitter_rad",
+        yaw_name="target_yaw_jitter_rad",
+        seed=seed,
+        roll_pitch_stream=stream + 1,
+        yaw_stream=stream,
+        seed_stride=int(config.get("_pose_batch_seed_stride", 1)),
+    )
 
 
 def _randomization_parameters(
@@ -401,10 +708,77 @@ def _randomization_parameters(
                         (0.0, 0.0, 0.0),
                     )
                 ),
+                "pose_batch_object_yaw_jitter_rad": float(
+                    config.get("_pose_batch_object_yaw_jitter_rad", 0.0)
+                ),
+                "pose_batch_object_roll_pitch_jitter_rad": list(
+                    config.get("_pose_batch_object_roll_pitch_jitter_rad", (0.0, 0.0))
+                ),
+                "pose_batch_target_yaw_jitter_rad": float(
+                    config.get("_pose_batch_target_yaw_jitter_rad", 0.0)
+                ),
+                "pose_batch_target_roll_pitch_jitter_rad": list(
+                    config.get("_pose_batch_target_roll_pitch_jitter_rad", (0.0, 0.0))
+                ),
+                "pose_batch_support_object_translation_jitter_m": list(
+                    config.get(
+                        "_pose_batch_support_object_translation_jitter_m",
+                        (0.0, 0.0, 0.0),
+                    )
+                ),
+                "pose_batch_support_object_yaw_jitter_rad": float(
+                    config.get("_pose_batch_support_object_yaw_jitter_rad", 0.0)
+                ),
+                "pose_batch_support_object_roll_pitch_jitter_rad": list(
+                    config.get(
+                        "_pose_batch_support_object_roll_pitch_jitter_rad",
+                        (0.0, 0.0),
+                    )
+                ),
+                "pose_batch_task_frame_translation_jitter_m": list(
+                    config.get(
+                        "_pose_batch_task_frame_translation_jitter_m",
+                        (0.0, 0.0, 0.0),
+                    )
+                ),
+                "pose_batch_task_frame_yaw_jitter_rad": float(
+                    config.get("_pose_batch_task_frame_yaw_jitter_rad", 0.0)
+                ),
+                "pose_batch_task_frame_roll_pitch_jitter_rad": list(
+                    config.get(
+                        "_pose_batch_task_frame_roll_pitch_jitter_rad",
+                        (0.0, 0.0),
+                    )
+                ),
                 "batch_semantics": "one_pose_per_environment_row",
             }
         )
     return parameters
+
+
+def _signed_rotation_about_axis(
+    reference_rotation: torch.Tensor,
+    current_rotation: torch.Tensor,
+    world_axis: torch.Tensor,
+) -> torch.Tensor:
+    """Return the signed angle of ``current @ reference^T`` about ``world_axis``.
+
+    The sine comes from the relative rotation's skew part projected on the
+    axis and the cosine from its trace, so a rotation purely about the axis is
+    recovered exactly over the full ``(-pi, pi]`` range.
+    """
+    relative = current_rotation @ reference_rotation.transpose(-1, -2)
+    skew = 0.5 * torch.stack(
+        (
+            relative[:, 2, 1] - relative[:, 1, 2],
+            relative[:, 0, 2] - relative[:, 2, 0],
+            relative[:, 1, 0] - relative[:, 0, 1],
+        ),
+        dim=-1,
+    )
+    sine = (skew * world_axis).sum(dim=-1)
+    cosine = 0.5 * (torch.diagonal(relative, dim1=-2, dim2=-1).sum(dim=-1) - 1.0)
+    return torch.atan2(sine, cosine)
 
 
 def _motion_valid_mask(
@@ -460,7 +834,7 @@ def _object_pose_success(
     observation: _ExecutionObservation,
     motion_outcomes: tuple[CaseOutcome, ...],
 ) -> torch.Tensor:
-    """Gate object transport/place success on measured position and tilt."""
+    """Gate object transport/place success on its configured pose metric."""
     if scenario.suite is None:
         raise RuntimeError("Atomic Task suite is not configured.")
     final_pose = observation.final_object_pose
@@ -474,23 +848,30 @@ def _object_pose_success(
     translation = torch.linalg.vector_norm(
         final_pose[:, :3, 3] - target[:, :3, 3], dim=-1
     )
-    target_up = target[:, :3, 2]
-    final_up = final_pose[:, :3, 2]
-    tilt = torch.arccos(torch.clamp((target_up * final_up).sum(dim=-1), -1.0, 1.0))
-    position_threshold = float(case.case_parameters["object_position_threshold_m"])
-    tilt_threshold = float(
-        case.case_parameters.get(
+    rotation_threshold = case.case_parameters.get("object_rotation_threshold_rad")
+    if rotation_threshold is None:
+        target_up = target[:, :3, 2]
+        final_up = final_pose[:, :3, 2]
+        rotation = torch.arccos(
+            torch.clamp((target_up * final_up).sum(dim=-1), -1.0, 1.0)
+        )
+        rotation_threshold = case.case_parameters.get(
             "object_tilt_threshold_rad",
             scenario.suite.protocol.rotation_threshold_rad,
         )
-    )
+    else:
+        relative = target[:, :3, :3].transpose(-1, -2) @ final_pose[:, :3, :3]
+        trace = torch.diagonal(relative, dim1=-2, dim2=-1).sum(dim=-1)
+        rotation = torch.arccos(torch.clamp((trace - 1.0) * 0.5, -1.0, 1.0))
+    position_threshold = float(case.case_parameters["object_position_threshold_m"])
+    rotation_threshold = float(rotation_threshold)
     return (
         observation.execution_success
         & _motion_valid_mask(motion_outcomes, device=translation.device)
         & torch.isfinite(translation)
-        & torch.isfinite(tilt)
+        & torch.isfinite(rotation)
         & (translation <= position_threshold)
-        & (tilt <= tilt_threshold)
+        & (rotation <= rotation_threshold)
     )
 
 
@@ -549,6 +930,713 @@ def _executed_final_pose_errors(
             f"'half_turn_about_z', got {rotation_symmetry!r}."
         )
     return translation, rotation
+
+
+def _stage_evidence_batch(
+    *,
+    stage_id: str,
+    window: str,
+    measurements: Mapping[str, torch.Tensor],
+    method: str,
+    valid_mask: torch.Tensor | None = None,
+    source: Literal["simulation_state", "contact_sensor", "measured_proxy"] = (
+        "simulation_state"
+    ),
+) -> tuple[Mapping[str, StageEvidence], ...]:
+    """Convert measured batch scalars into row-local standard evidence."""
+    if not measurements:
+        raise ValueError("Stage evidence requires at least one measurement.")
+    values = tuple(measurements.values())
+    if any(value.dim() != 1 for value in values):
+        raise ValueError("Stage measurement values must be one-dimensional batches.")
+    batch_size = values[0].shape[0]
+    if any(value.shape[0] != batch_size for value in values):
+        raise ValueError("Stage measurement batches must have the same size.")
+    if valid_mask is not None and (
+        valid_mask.dtype != torch.bool or valid_mask.shape != (batch_size,)
+    ):
+        raise ValueError("Evidence validity must be a boolean environment vector.")
+
+    def scalar(value: torch.Tensor, index: int) -> float | bool:
+        item = value[index].item()
+        return bool(item) if value.dtype == torch.bool else float(item)
+
+    rows: list[Mapping[str, StageEvidence]] = []
+    for env_index in range(batch_size):
+        if valid_mask is not None and not bool(valid_mask[env_index].item()):
+            rows.append({})
+            continue
+        row_measurements = {
+            name: scalar(value, env_index) for name, value in measurements.items()
+        }
+        if any(
+            type(value) is not bool and not math.isfinite(value)
+            for value in row_measurements.values()
+        ):
+            rows.append({})
+            continue
+        rows.append(
+            {
+                stage_id: StageEvidence(
+                    window=window,
+                    source=source,
+                    measurements=row_measurements,
+                    method=method,
+                )
+            }
+        )
+    return tuple(rows)
+
+
+def _trace_validity(
+    *traces: ReplayObservationTrace,
+    observation: _ExecutionObservation,
+) -> torch.Tensor:
+    """Preserve row-local raw-data validity before deriving boolean proxies."""
+    valid = None
+    for trace in traces:
+        values = [
+            value
+            for value in (
+                trace.tcp_pose,
+                trace.object_pose,
+                trace.articulation_joint,
+                *trace.gripper_qpos.values(),
+                *trace.scene_object_poses.values(),
+            )
+            if value is not None
+        ]
+        for value in values:
+            rows = torch.isfinite(value).movedim(1, 0).flatten(start_dim=1).all(dim=1)
+            valid = rows if valid is None else valid & rows
+        for part in trace.gripper_qpos:
+            for commands in (
+                observation.gripper_open_qpos,
+                observation.gripper_grasp_qpos,
+            ):
+                command = commands.get(part)
+                if command is not None:
+                    finite = torch.isfinite(command)
+                    rows = finite.all() if command.dim() == 1 else finite.all(dim=-1)
+                    valid = valid & rows.to(valid.device)
+    if valid is None:
+        raise ValueError("Evidence validity requires a measured trace.")
+    return valid
+
+
+def _merge_stage_evidence_batches(
+    *batches: Sequence[Mapping[str, StageEvidence]],
+) -> tuple[Mapping[str, StageEvidence], ...]:
+    """Merge stage batches while preserving stable environment order."""
+    if not batches:
+        return ()
+    batch_size = len(batches[0])
+    if any(len(batch) != batch_size for batch in batches):
+        raise ValueError("Stage evidence batches must have the same environment size.")
+    merged: list[dict[str, StageEvidence]] = []
+    for env_index in range(batch_size):
+        row: dict[str, StageEvidence] = {}
+        for batch in batches:
+            overlap = set(row) & set(batch[env_index])
+            if overlap:
+                raise ValueError(f"Duplicate stage evidence: {sorted(overlap)}.")
+            row.update(batch[env_index])
+        merged.append(row)
+    return tuple(merged)
+
+
+def _replay_trace(
+    observation: _ExecutionObservation, observation_id: str
+) -> ReplayObservationTrace | None:
+    """Return one measured replay trace without fabricating missing evidence."""
+    return observation.replay_traces.get(observation_id)
+
+
+def _minimum_height_above_initial_support(
+    trace: ReplayObservationTrace,
+    case: BenchmarkCase,
+) -> torch.Tensor | None:
+    """Return the minimum object-reference height above its frozen start plane."""
+    if trace.object_pose is None:
+        return None
+    initial = torch.as_tensor(
+        case.case_parameters["object_initial_pose"],
+        dtype=trace.object_pose.dtype,
+        device=trace.object_pose.device,
+    )
+    return trace.object_pose[:, :, 2, 3].min(dim=0).values - initial[:, 2, 3]
+
+
+def _gripper_released(
+    trace: ReplayObservationTrace,
+    observation: _ExecutionObservation,
+    part: str,
+) -> torch.Tensor | None:
+    """Return whether the final window sample is nearer open than grasp."""
+    qpos = trace.gripper_qpos.get(part)
+    open_qpos = observation.gripper_open_qpos.get(part)
+    grasp_qpos = observation.gripper_grasp_qpos.get(part)
+    if qpos is None or open_qpos is None or grasp_qpos is None:
+        return None
+    final = qpos[-1]
+    open_qpos = open_qpos.to(device=final.device, dtype=final.dtype)
+    grasp_qpos = grasp_qpos.to(device=final.device, dtype=final.dtype)
+    return torch.linalg.vector_norm(
+        final - open_qpos, dim=-1
+    ) <= torch.linalg.vector_norm(final - grasp_qpos, dim=-1)
+
+
+def _gripper_holding(
+    trace: ReplayObservationTrace,
+    observation: _ExecutionObservation,
+    part: str,
+    *,
+    gap: float = 1.0e-3,
+) -> torch.Tensor | None:
+    """Return whether the final sample stopped between open and grasp commands."""
+    qpos = trace.gripper_qpos.get(part)
+    open_qpos = observation.gripper_open_qpos.get(part)
+    grasp_qpos = observation.gripper_grasp_qpos.get(part)
+    if qpos is None or open_qpos is None or grasp_qpos is None:
+        return None
+    final = qpos[-1]
+    open_qpos = open_qpos.to(device=final.device, dtype=final.dtype)
+    grasp_qpos = grasp_qpos.to(device=final.device, dtype=final.dtype)
+    direction = torch.sign(grasp_qpos - open_qpos)
+    closed = (final - open_qpos) * direction
+    remaining = (grasp_qpos - final) * direction
+    return ((closed >= gap) & (remaining >= gap)).all(dim=-1)
+
+
+def _pose_rotation_error(actual: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    """Return the geodesic rotation error for matching pose batches."""
+    relative = target[..., :3, :3].transpose(-1, -2) @ actual[..., :3, :3]
+    trace = torch.diagonal(relative, dim1=-2, dim2=-1).sum(dim=-1)
+    return torch.arccos(torch.clamp((trace - 1.0) * 0.5, -1.0, 1.0))
+
+
+class _PickUpEvaluator:
+    """Evaluate grasp, lift, and terminal retention from replayed state."""
+
+    def evaluate(
+        self,
+        case: BenchmarkCase,
+        observation: _ExecutionObservation,
+        motion_outcomes: tuple[CaseOutcome, ...],
+    ) -> tuple[PhysicalEvaluation, ...]:
+        del motion_outcomes
+        grasp = _replay_trace(observation, "pickup_grasp")
+        lift = _replay_trace(observation, "pickup_lift")
+        settle = _replay_trace(observation, "pickup_settle")
+        part = next(iter(observation.gripper_open_qpos), "")
+        batches: list[Sequence[Mapping[str, StageEvidence]]] = []
+        if grasp is not None:
+            established = _gripper_holding(grasp, observation, part)
+            if established is not None:
+                batches.append(
+                    _stage_evidence_batch(
+                        valid_mask=_trace_validity(grasp, observation=observation),
+                        stage_id="grasped",
+                        window="grasp_end",
+                        measurements={"grasp_established": established},
+                        method="gripper_joint_state",
+                        source="measured_proxy",
+                    )
+                )
+        if lift is not None and lift.object_pose is not None:
+            initial = torch.as_tensor(
+                case.case_parameters["object_initial_pose"],
+                dtype=lift.object_pose.dtype,
+                device=lift.object_pose.device,
+            )
+            min_height = _minimum_height_above_initial_support(lift, case)
+            if min_height is not None:
+                batches.append(
+                    _stage_evidence_batch(
+                        valid_mask=_trace_validity(lift, observation=observation),
+                        stage_id="lifted",
+                        window="lift_end",
+                        measurements={
+                            "lift_delta_m": lift.object_pose[-1, :, 2, 3]
+                            - initial[:, 2, 3],
+                            "min_height_above_support_m": min_height,
+                        },
+                        method="object_lift_trace",
+                    )
+                )
+        if settle is not None:
+            retained = _gripper_holding(settle, observation, part)
+            min_height = _minimum_height_above_initial_support(settle, case)
+            if (
+                retained is not None
+                and min_height is not None
+                and lift is not None
+                and lift.tcp_pose is not None
+                and lift.object_pose is not None
+                and settle.tcp_pose is not None
+                and settle.object_pose is not None
+            ):
+                reference = pose_inv(lift.tcp_pose[-1]) @ lift.object_pose[-1]
+                relative = pose_inv(settle.tcp_pose) @ settle.object_pose
+                position_drift = torch.linalg.vector_norm(
+                    relative[..., :3, 3] - reference[None, :, :3, 3], dim=-1
+                ).amax(dim=0)
+                rotation_drift = _pose_rotation_error(
+                    relative, reference[None].expand_as(relative)
+                ).amax(dim=0)
+                initial = _case_pose(
+                    case, "object_initial_pose", device=relative.device
+                )
+                lift_remaining = (
+                    settle.object_pose[:, :, 2, 3].amin(dim=0) - initial[:, 2, 3]
+                )
+                retained = (
+                    retained
+                    & (lift_remaining >= TOLERANCES["pick_min_lift_m"])
+                    & (position_drift <= TOLERANCES["task_position_m"])
+                    & (rotation_drift <= TOLERANCES["task_rotation_rad"])
+                )
+                batches.append(
+                    _stage_evidence_batch(
+                        valid_mask=_trace_validity(
+                            settle, lift, observation=observation
+                        ),
+                        stage_id="held",
+                        window="terminal_settle",
+                        measurements={
+                            "object_retained": retained,
+                            "min_height_above_support_m": min_height,
+                            "relative_position_drift_m": position_drift,
+                            "relative_rotation_drift_rad": rotation_drift,
+                            "remaining_lift_m": lift_remaining,
+                        },
+                        method="gripper_and_object_settle_trace",
+                        source="measured_proxy",
+                    )
+                )
+        evidence = (
+            _merge_stage_evidence_batches(*batches)
+            if batches
+            else tuple({} for _ in range(case.batch_size))
+        )
+        return evaluate_skill_stage_batch("pick_up", evidence)
+
+
+class _MoveHeldObjectEvaluator:
+    """Evaluate transport plus the held object's settled pose and retention."""
+
+    def evaluate(
+        self,
+        case: BenchmarkCase,
+        observation: _ExecutionObservation,
+        motion_outcomes: tuple[CaseOutcome, ...],
+    ) -> tuple[PhysicalEvaluation, ...]:
+        del motion_outcomes
+        transport = _replay_trace(observation, "held_object_transport")
+        settle = _replay_trace(observation, "held_object_settle")
+        batches: list[Sequence[Mapping[str, StageEvidence]]] = []
+        for stage_id, window, trace in (
+            ("transported", "actuation_end", transport),
+            ("settled", "terminal_settle", settle),
+        ):
+            if trace is None or trace.object_pose is None:
+                continue
+            final = trace.object_pose[-1]
+            target = _case_pose(
+                case, "target_object_pose", device=trace.object_pose.device
+            ).to(dtype=trace.object_pose.dtype)
+            min_height = _minimum_height_above_initial_support(trace, case)
+            if min_height is None:
+                continue
+            measurements: dict[str, torch.Tensor] = {
+                "position_error_m": torch.linalg.vector_norm(
+                    final[:, :3, 3] - target[:, :3, 3], dim=-1
+                ),
+                "rotation_error_rad": _pose_rotation_error(final, target),
+                "min_height_above_support_m": min_height,
+            }
+            batches.append(
+                _stage_evidence_batch(
+                    valid_mask=_trace_validity(trace, observation=observation),
+                    stage_id=stage_id,
+                    window=window,
+                    measurements=measurements,
+                    method=(
+                        "object_transport_trace"
+                        if stage_id == "transported"
+                        else "terminal_object_pose_trace"
+                    ),
+                )
+            )
+        if settle is not None:
+            part = next(iter(observation.gripper_open_qpos), "")
+            retained = _gripper_holding(settle, observation, part)
+            min_height = _minimum_height_above_initial_support(settle, case)
+            if retained is not None and min_height is not None:
+                batches.append(
+                    _stage_evidence_batch(
+                        valid_mask=_trace_validity(settle, observation=observation),
+                        stage_id="held",
+                        window="terminal_settle",
+                        measurements={
+                            "object_retained": retained,
+                            "min_height_above_support_m": min_height,
+                        },
+                        method="gripper_and_object_settle_trace",
+                        source="measured_proxy",
+                    )
+                )
+        evidence = (
+            _merge_stage_evidence_batches(*batches)
+            if batches
+            else tuple({} for _ in range(case.batch_size))
+        )
+        return evaluate_skill_stage_batch("move_held_object", evidence)
+
+
+class _PlaceEvaluator:
+    """Evaluate release, terminal placement, and post-release stability."""
+
+    def evaluate(
+        self,
+        case: BenchmarkCase,
+        observation: _ExecutionObservation,
+        motion_outcomes: tuple[CaseOutcome, ...],
+    ) -> tuple[PhysicalEvaluation, ...]:
+        del motion_outcomes
+        release = _replay_trace(observation, "place_release")
+        settle = _replay_trace(observation, "place_settle")
+        part = next(iter(observation.gripper_open_qpos), "")
+        batches: list[Sequence[Mapping[str, StageEvidence]]] = []
+        if release is not None:
+            released = _gripper_released(release, observation, part)
+            if released is not None:
+                batches.append(
+                    _stage_evidence_batch(
+                        valid_mask=_trace_validity(release, observation=observation),
+                        stage_id="released",
+                        window="release_end",
+                        measurements={"release_established": released},
+                        method="gripper_joint_state",
+                        source="measured_proxy",
+                    )
+                )
+        if settle is not None and settle.object_pose is not None:
+            poses = settle.object_pose
+            target = _case_pose(case, "target_object_pose", device=poses.device).to(
+                dtype=poses.dtype
+            )
+            min_height = _minimum_height_above_initial_support(settle, case)
+            if min_height is not None:
+                final = poses[-1]
+                if "object_rotation_threshold_rad" in case.case_parameters:
+                    orientation_error = _pose_rotation_error(final, target)
+                else:
+                    orientation_error = torch.arccos(
+                        torch.clamp(
+                            (final[:, :3, 2] * target[:, :3, 2]).sum(dim=-1),
+                            -1.0,
+                            1.0,
+                        )
+                    )
+                batches.append(
+                    _stage_evidence_batch(
+                        valid_mask=_trace_validity(settle, observation=observation),
+                        stage_id="placed",
+                        window="terminal_settle",
+                        measurements={
+                            "position_error_m": torch.linalg.vector_norm(
+                                final[:, :3, 3] - target[:, :3, 3], dim=-1
+                            ),
+                            "orientation_error_rad": orientation_error,
+                            "min_height_above_support_m": min_height,
+                        },
+                        method="terminal_object_pose_trace",
+                    )
+                )
+                if poses.shape[0] >= 2:
+                    position_drift = torch.linalg.vector_norm(
+                        poses[:, :, :3, 3] - poses[:1, :, :3, 3], dim=-1
+                    ).amax(dim=0)
+                    rotation_drift = _pose_rotation_error(
+                        poses, poses[:1].expand_as(poses)
+                    ).amax(dim=0)
+                    batches.append(
+                        _stage_evidence_batch(
+                            valid_mask=_trace_validity(settle, observation=observation),
+                            stage_id="stable",
+                            window="settle_interval",
+                            measurements={
+                                "position_drift_m": position_drift,
+                                "rotation_drift_rad": rotation_drift,
+                                "min_height_above_support_m": min_height,
+                            },
+                            method="object_settle_drift_trace",
+                        )
+                    )
+        evidence = (
+            _merge_stage_evidence_batches(*batches)
+            if batches
+            else tuple({} for _ in range(case.batch_size))
+        )
+        return evaluate_skill_stage_batch("place", evidence)
+
+
+class _PressEvaluator:
+    """Evaluate contact and signed button stroke inside the press segment."""
+
+    def evaluate(
+        self,
+        case: BenchmarkCase,
+        observation: _ExecutionObservation,
+        motion_outcomes: tuple[CaseOutcome, ...],
+    ) -> tuple[PhysicalEvaluation, ...]:
+        del motion_outcomes
+        trace = _replay_trace(observation, "press_actuation")
+        if trace is None or trace.articulation_joint is None:
+            return evaluate_skill_stage_batch(
+                "press", tuple({} for _ in range(case.batch_size))
+            )
+        values = trace.articulation_joint
+        sign = float(case.case_parameters.get("effect_joint_sign", 1.0))
+        peak = ((values - values[:1]) * sign).amax(dim=0)
+        stroke = float(case.case_parameters["articulation_joint_stroke"])
+        contacted = peak > float(
+            case.case_parameters.get("contact_minimum_joint_delta", 1.0e-5)
+        )
+        evidence = _merge_stage_evidence_batches(
+            _stage_evidence_batch(
+                valid_mask=_trace_validity(trace, observation=observation),
+                stage_id="contacted",
+                window="actuation_interval",
+                measurements={"contact_established": contacted},
+                method="target_joint_motion_proxy",
+                source="measured_proxy",
+            ),
+            _stage_evidence_batch(
+                valid_mask=_trace_validity(trace, observation=observation),
+                stage_id="pressed",
+                window="actuation_interval",
+                measurements={"peak_signed_stroke_ratio": peak / stroke},
+                method="target_joint_trace",
+            ),
+        )
+        return evaluate_skill_stage_batch("press", evidence)
+
+
+class _SlideEvaluator:
+    """Evaluate grasp proxy, drawer travel, and release at their phase windows."""
+
+    def evaluate(
+        self,
+        case: BenchmarkCase,
+        observation: _ExecutionObservation,
+        motion_outcomes: tuple[CaseOutcome, ...],
+    ) -> tuple[PhysicalEvaluation, ...]:
+        del motion_outcomes
+        actuation = _replay_trace(observation, "slide_actuation")
+        release = _replay_trace(observation, "slide_release")
+        if actuation is None or actuation.articulation_joint is None:
+            return evaluate_skill_stage_batch(
+                "slide", tuple({} for _ in range(case.batch_size))
+            )
+        joint = actuation.articulation_joint
+        displacement = joint[-1] - joint[0]
+        effect_sign = float(case.case_parameters.get("effect_joint_sign", 1.0))
+        requested_displacement = effect_sign * float(
+            case.case_parameters["translation_distance_m"]
+        )
+        grasped = displacement * effect_sign > float(
+            case.case_parameters.get("contact_minimum_joint_delta", 1.0e-5)
+        )
+        travel_error = (displacement - requested_displacement).abs()
+        batches: list[Sequence[Mapping[str, StageEvidence]]] = [
+            _stage_evidence_batch(
+                valid_mask=_trace_validity(actuation, observation=observation),
+                stage_id="grasped",
+                window="grasp_end",
+                measurements={"grasp_established": grasped},
+                method="target_joint_motion_proxy",
+                source="measured_proxy",
+            ),
+            _stage_evidence_batch(
+                valid_mask=_trace_validity(actuation, observation=observation),
+                stage_id="slid",
+                window="actuation_end",
+                measurements={"travel_error_m": travel_error},
+                method="target_joint_segment_end",
+            ),
+        ]
+        if release is not None:
+            part = next(iter(observation.gripper_open_qpos), "")
+            released = _gripper_released(release, observation, part)
+            if released is not None:
+                batches.append(
+                    _stage_evidence_batch(
+                        valid_mask=_trace_validity(release, observation=observation),
+                        stage_id="released",
+                        window="release_end",
+                        measurements={"release_established": released},
+                        method="gripper_joint_state",
+                        source="measured_proxy",
+                    )
+                )
+        return evaluate_skill_stage_batch(
+            "slide", _merge_stage_evidence_batches(*batches)
+        )
+
+
+class _TwistEvaluator:
+    """Evaluate executed TCP twist rather than substituting knob displacement."""
+
+    def evaluate(
+        self,
+        case: BenchmarkCase,
+        observation: _ExecutionObservation,
+        motion_outcomes: tuple[CaseOutcome, ...],
+    ) -> tuple[PhysicalEvaluation, ...]:
+        del motion_outcomes
+        actuation = _replay_trace(observation, "twist_actuation")
+        release = _replay_trace(observation, "twist_release")
+        if (
+            actuation is None
+            or actuation.articulation_joint is None
+            or actuation.tcp_pose is None
+        ):
+            return evaluate_skill_stage_batch(
+                "twist", tuple({} for _ in range(case.batch_size))
+            )
+        joint = actuation.articulation_joint
+        grasped = (joint[-1] - joint[0]).abs() > float(
+            case.case_parameters.get("contact_minimum_joint_delta", 1.0e-5)
+        )
+        tcp = actuation.tcp_pose
+        target_pose = _case_pose(case, "twist_target_pose", device=tcp.device).to(
+            dtype=tcp.dtype
+        )
+        axis_local = torch.as_tensor(
+            case.case_parameters["twist_axis"], dtype=tcp.dtype, device=tcp.device
+        )
+        axis_local = axis_local / torch.linalg.vector_norm(axis_local)
+        world_axis = target_pose[:, :3, :3] @ axis_local
+        executed = _signed_rotation_about_axis(
+            tcp[0, :, :3, :3], tcp[-1, :, :3, :3], world_axis
+        )
+        error = (executed - float(case.case_parameters["twist_angle_rad"])).abs()
+        batches: list[Sequence[Mapping[str, StageEvidence]]] = [
+            _stage_evidence_batch(
+                valid_mask=_trace_validity(actuation, observation=observation),
+                stage_id="grasped",
+                window="grasp_end",
+                measurements={"grasp_established": grasped},
+                method="target_joint_motion_proxy",
+                source="measured_proxy",
+            ),
+            _stage_evidence_batch(
+                valid_mask=_trace_validity(actuation, observation=observation),
+                stage_id="twisted",
+                window="actuation_end",
+                measurements={"tcp_axis_angle_error_rad": error},
+                method="tcp_segment_rotation",
+            ),
+        ]
+        if release is not None:
+            part = next(iter(observation.gripper_open_qpos), "")
+            released = _gripper_released(release, observation, part)
+            if released is not None:
+                batches.append(
+                    _stage_evidence_batch(
+                        valid_mask=_trace_validity(release, observation=observation),
+                        stage_id="released",
+                        window="release_end",
+                        measurements={"release_established": released},
+                        method="gripper_joint_state",
+                        source="measured_proxy",
+                    )
+                )
+        return evaluate_skill_stage_batch(
+            "twist", _merge_stage_evidence_batches(*batches)
+        )
+
+
+class _MoveEndEffectorEvaluator:
+    """Score the physically settled TCP position without planner state."""
+
+    def evaluate(
+        self,
+        case: BenchmarkCase,
+        observation: _ExecutionObservation,
+        motion_outcomes: tuple[CaseOutcome, ...],
+    ) -> tuple[PhysicalEvaluation, ...]:
+        del motion_outcomes
+        final_tcp_pose = observation.final_tcp_pose
+        target = case.target_waypoints[:, -1].to(
+            device=final_tcp_pose.device,
+            dtype=final_tcp_pose.dtype,
+        )
+        if final_tcp_pose.shape != target.shape:
+            raise ValueError(
+                "Final TCP observations must match the batched terminal target pose."
+            )
+        position_error, rotation_error = _executed_final_pose_errors(
+            case, final_tcp_pose
+        )
+        return evaluate_skill_stage_batch(
+            "move_end_effector",
+            _stage_evidence_batch(
+                stage_id="reached",
+                window="terminal_settle",
+                measurements={
+                    "tcp_position_error_m": position_error,
+                    "tcp_rotation_error_rad": rotation_error,
+                },
+                method="terminal_tcp_pose",
+            ),
+        )
+
+
+class _MoveJointsEvaluator:
+    """Score the physically settled arm joints without planner state."""
+
+    def evaluate(
+        self,
+        case: BenchmarkCase,
+        observation: _ExecutionObservation,
+        motion_outcomes: tuple[CaseOutcome, ...],
+    ) -> tuple[PhysicalEvaluation, ...]:
+        del motion_outcomes
+        final_arm_qpos = observation.final_arm_qpos
+        if final_arm_qpos is None:
+            return evaluate_skill_stage_batch(
+                "move_joints", tuple({} for _ in range(case.batch_size))
+            )
+        target = torch.as_tensor(
+            case.case_parameters["target_qpos"],
+            dtype=final_arm_qpos.dtype,
+            device=final_arm_qpos.device,
+        )
+        if target.dim() != 3 or target.shape[0] != case.batch_size:
+            raise ValueError("MoveJoints target_qpos must have shape (B, W, D).")
+        target = target[:, -1]
+        if final_arm_qpos.shape != target.shape:
+            raise ValueError(
+                "Final arm observations must match the batched terminal joint target."
+            )
+        error = torch.linalg.vector_norm(final_arm_qpos - target, dim=-1)
+        return evaluate_skill_stage_batch(
+            "move_joints",
+            _stage_evidence_batch(
+                stage_id="reached",
+                window="terminal_settle",
+                measurements={"joint_error_l2_rad": error},
+                method="terminal_arm_qpos",
+            ),
+        )
+
+
+def _grasp_sample_count(case: BenchmarkCase) -> int:
+    """Return the grasp sampler size a self-sampling case was frozen with."""
+    return int(case.case_parameters.get("grasp_sample_count", 10_000))
 
 
 def _case_pose(case: BenchmarkCase, name: str, *, device: torch.device) -> torch.Tensor:
@@ -823,6 +1911,174 @@ class _FrozenArticulationGraspPoseGenerator(GraspPoseGenerator):
         )
 
 
+class _ActiveCaseGraspPoseGenerator(GraspPoseGenerator):
+    """Serve the manifest grasp of the case being compiled.
+
+    Skills such as OpenDoor sample their own grasp and accept no explicit one.
+    The scenario activates the case's frozen ``(target, grasp)`` pair around
+    compilation; the target-local grasp is replayed for the observed target
+    pose.  Without an active pair the request goes to ``fallback``.
+    """
+
+    def __init__(self, fallback: GraspPoseGenerator | None = None) -> None:
+        self._fallback = fallback
+        self._target_to_grasp: torch.Tensor | None = None
+
+    def activate(self, target_pose: torch.Tensor, grasp_pose: torch.Tensor) -> None:
+        """Freeze one case's target-local grasp for the next compilation."""
+        if target_pose.shape != grasp_pose.shape or target_pose.shape[-2:] != (4, 4):
+            raise ValueError("Frozen target and grasp poses must be equal (B, 4, 4).")
+        self._target_to_grasp = torch.bmm(
+            pose_inv(target_pose.to(dtype=torch.float32)),
+            grasp_pose.to(dtype=torch.float32),
+        )
+
+    def deactivate(self) -> None:
+        """Return to the fallback generator after compilation."""
+        self._target_to_grasp = None
+
+    def _resolve(self, obj_poses: torch.Tensor) -> torch.Tensor:
+        assert self._target_to_grasp is not None
+        target_to_grasp = self._target_to_grasp.to(device=obj_poses.device)
+        if target_to_grasp.shape[0] != obj_poses.shape[0]:
+            if target_to_grasp.shape[0] != 1:
+                raise ValueError("Frozen grasp batch does not match the target batch.")
+            target_to_grasp = target_to_grasp.expand(obj_poses.shape[0], -1, -1)
+        return torch.bmm(obj_poses.to(dtype=torch.float32), target_to_grasp)
+
+    def _require_fallback(self) -> GraspPoseGenerator:
+        if self._fallback is None:
+            raise RuntimeError("No frozen benchmark grasp is active for this request.")
+        return self._fallback
+
+    def get_valid_grasp_poses(
+        self,
+        *,
+        mesh_vertices: torch.Tensor,
+        mesh_triangles: torch.Tensor,
+        obj_poses: torch.Tensor,
+        approach_direction: torch.Tensor,
+        obj_longest_axis: torch.Tensor | None = None,
+        is_positive_part: bool | torch.Tensor = True,
+    ) -> list[tuple[torch.Tensor, torch.Tensor]]:
+        """Return the active frozen grasp as one zero-cost candidate per row."""
+        if self._target_to_grasp is None:
+            return self._require_fallback().get_valid_grasp_poses(
+                mesh_vertices=mesh_vertices,
+                mesh_triangles=mesh_triangles,
+                obj_poses=obj_poses,
+                approach_direction=approach_direction,
+                obj_longest_axis=obj_longest_axis,
+                is_positive_part=is_positive_part,
+            )
+        poses = self._resolve(obj_poses)
+        return [
+            (
+                poses[index : index + 1],
+                torch.zeros(1, dtype=torch.float32, device=poses.device),
+            )
+            for index in range(poses.shape[0])
+        ]
+
+    def get_best_grasp_poses(
+        self,
+        *,
+        mesh_vertices: torch.Tensor,
+        mesh_triangles: torch.Tensor,
+        obj_poses: torch.Tensor,
+        approach_direction: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return the active frozen grasp for every target row."""
+        if self._target_to_grasp is None:
+            return self._require_fallback().get_best_grasp_poses(
+                mesh_vertices=mesh_vertices,
+                mesh_triangles=mesh_triangles,
+                obj_poses=obj_poses,
+                approach_direction=approach_direction,
+            )
+        poses = self._resolve(obj_poses)
+        return (
+            torch.ones(poses.shape[0], dtype=torch.bool, device=poses.device),
+            poses,
+            torch.zeros(poses.shape[0], dtype=torch.float32, device=poses.device),
+        )
+
+
+def _parallel_jaw_sampler(n_sample: int) -> ParallelJawGraspPoseGenerator:
+    """Build the PGI grasp sampler a self-sampling case compiles with."""
+    from scripts.tutorials.atomic_action.tutorial_utils import (
+        create_parallel_jaw_grasp_pose_generator,
+    )
+
+    return create_parallel_jaw_grasp_pose_generator(
+        n_sample=n_sample, force_refresh=False
+    )
+
+
+class _CaseSampleCountGraspPoseGenerator(ParallelJawGraspPoseGenerator):
+    """Serve each grasp-sampling case from a sampler with its own sample count.
+
+    Skills such as CoordinatedPickment sample their grasps during compilation
+    and the case manifest froze the waypoints those grasps produced with the
+    case's ``grasp_sample_count``.  The scenario activates that count around
+    compilation so another case in the track cannot change the sampled
+    surface.  Without an active count the request goes to ``default_count``.
+    """
+
+    def __init__(
+        self,
+        samplers: Mapping[int, ParallelJawGraspPoseGenerator],
+        *,
+        default_count: int,
+    ) -> None:
+        if default_count not in samplers:
+            raise ValueError("The default sample count needs its own sampler.")
+        super().__init__(samplers[default_count].gripper_model)
+        self._samplers = dict(samplers)
+        self._default_count = default_count
+        self._active_count = default_count
+
+    def activate(self, sample_count: int) -> None:
+        """Use the sampler built with ``sample_count`` for the next compilation."""
+        if sample_count not in self._samplers:
+            raise ValueError(f"No grasp sampler was prepared for {sample_count}.")
+        self._active_count = sample_count
+
+    def deactivate(self) -> None:
+        """Return to the default sampler after compilation."""
+        self._active_count = self._default_count
+
+    @property
+    def _sampler(self) -> ParallelJawGraspPoseGenerator:
+        return self._samplers[self._active_count]
+
+    def get_valid_grasp_poses(self, **kwargs: object) -> list:
+        """Forward the request to the active sampler."""
+        return self._sampler.get_valid_grasp_poses(**kwargs)
+
+    def get_best_grasp_poses(self, **kwargs: object) -> tuple:
+        """Forward the request to the active sampler."""
+        return self._sampler.get_best_grasp_poses(**kwargs)
+
+    def get_grasp_candidates(self, **kwargs: object) -> list:
+        """Forward the request to the active sampler."""
+        return self._sampler.get_grasp_candidates(**kwargs)
+
+    def get_dual_arm_valid_grasp_poses(self, **kwargs: object) -> list:
+        """Forward the request to the active sampler."""
+        return self._sampler.get_dual_arm_valid_grasp_poses(**kwargs)
+
+
+def _with_plan_options(
+    invocation: ActionInvocation, plan_opts: object
+) -> ActionInvocation:
+    """Give a motion-generation invocation planner options it left unset."""
+    policy = invocation.motion_policy
+    if policy.strategy != "motion_gen" or policy.plan_opts is not None:
+        return invocation
+    return replace(invocation, motion_policy=replace(policy, plan_opts=plan_opts))
+
+
 def _nearest_half_turn_pose(
     target_pose: torch.Tensor,
     reference_pose: torch.Tensor,
@@ -1034,6 +2290,10 @@ class _MoveEndEffectorCases(AtomicSkillCaseProvider):
             ),
             "task_goal_miss",
         )
+
+    def physical_evaluator(self) -> _MoveEndEffectorEvaluator:
+        """Evaluate the terminal measured TCP position under the v1 standard."""
+        return _MoveEndEffectorEvaluator()
 
 
 class _PickUpCases(AtomicSkillCaseProvider):
@@ -1266,6 +2526,40 @@ class _PickUpCases(AtomicSkillCaseProvider):
         """Return the lift boundary emitted by PickUp."""
         return compiled.segment(0, "lift").start
 
+    def replay_observation_windows(
+        self, compiled: CompiledTrajectory, case: BenchmarkCase
+    ) -> tuple[ReplayObservationWindow, ...]:
+        """Collect grasp, lift, and terminal retention evidence."""
+        del case
+        close = compiled.segment(0, "close")
+        lift = compiled.segment(0, "lift")
+        waypoint_count = compiled.trajectory.waypoint_count
+        return (
+            ReplayObservationWindow(
+                "pickup_grasp",
+                close.start,
+                close.stop,
+                frozenset({"gripper_qpos"}),
+            ),
+            ReplayObservationWindow(
+                "pickup_lift",
+                lift.start,
+                lift.stop,
+                frozenset({"object_pose", "tcp_pose"}),
+            ),
+            ReplayObservationWindow(
+                "pickup_settle",
+                waypoint_count,
+                waypoint_count,
+                frozenset({"object_pose", "tcp_pose", "gripper_qpos"}),
+                include_settle=True,
+            ),
+        )
+
+    def physical_evaluator(self) -> _PickUpEvaluator:
+        """Return the v1 PickUp evaluator."""
+        return _PickUpEvaluator()
+
     def task_result(
         self,
         scenario: "AtomicTaskScenario",
@@ -1441,6 +2735,10 @@ class _MoveJointsCases(AtomicSkillCaseProvider):
             & (error <= float(case.case_parameters["joint_threshold_rad"]))
         )
         return success, "joint_goal_miss"
+
+    def physical_evaluator(self) -> _MoveJointsEvaluator:
+        """Evaluate the terminal measured joint state under the v1 standard."""
+        return _MoveJointsEvaluator()
 
 
 class _HeldObjectCases(AtomicSkillCaseProvider):
@@ -1640,6 +2938,12 @@ class _MoveHeldObjectCases(_HeldObjectCases):
             dtype=object_pose.dtype,
             device=object_pose.device,
         )
+        _apply_target_rotation_randomization(
+            target_object,
+            config,
+            seed=seed,
+            stream=312,
+        )
         # The object is now picked from the table and lifted before the
         # transport action.  Express the transport target relative to that
         # lifted state instead of the old teleported held-object pose.
@@ -1720,6 +3024,12 @@ class _MoveHeldObjectCases(_HeldObjectCases):
                         suite.protocol.rotation_threshold_rad,
                     )
                 ),
+                "object_rotation_threshold_rad": float(
+                    config.get(
+                        "object_rotation_threshold_rad",
+                        suite.protocol.rotation_threshold_rad,
+                    )
+                ),
                 "randomization": _randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },
@@ -1748,6 +3058,33 @@ class _MoveHeldObjectCases(_HeldObjectCases):
             ),
             skill_options=MoveHeldObjectOptions(),
         )
+
+    def replay_observation_windows(
+        self, compiled: CompiledTrajectory, case: BenchmarkCase
+    ) -> tuple[ReplayObservationWindow, ...]:
+        """Collect transport plus settled pose and grasp state."""
+        del case
+        transport = compiled.segment(1, "transport")
+        waypoint_count = compiled.trajectory.waypoint_count
+        return (
+            ReplayObservationWindow(
+                "held_object_transport",
+                transport.start,
+                transport.stop,
+                frozenset({"object_pose"}),
+            ),
+            ReplayObservationWindow(
+                "held_object_settle",
+                waypoint_count,
+                waypoint_count,
+                frozenset({"object_pose", "gripper_qpos"}),
+                include_settle=True,
+            ),
+        )
+
+    def physical_evaluator(self) -> _MoveHeldObjectEvaluator:
+        """Return the v1 MoveHeldObject evaluator."""
+        return _MoveHeldObjectEvaluator()
 
     def task_result(
         self,
@@ -1801,6 +3138,12 @@ class _PlaceCases(_HeldObjectCases):
             batch_size=object_pose.shape[0],
             dtype=object_pose.dtype,
             device=object_pose.device,
+        )
+        _apply_target_rotation_randomization(
+            target_object,
+            config,
+            seed=seed,
+            stream=322,
         )
         release = torch.bmm(target_object, object_to_eef)
         lift_height = float(config.get("retract_height_m", 0.10))
@@ -1887,6 +3230,12 @@ class _PlaceCases(_HeldObjectCases):
                         suite.protocol.rotation_threshold_rad,
                     )
                 ),
+                "object_rotation_threshold_rad": float(
+                    config.get(
+                        "object_rotation_threshold_rad",
+                        suite.protocol.rotation_threshold_rad,
+                    )
+                ),
                 "randomization": _randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },
@@ -1916,6 +3265,33 @@ class _PlaceCases(_HeldObjectCases):
                 lift_height=float(case.case_parameters["retract_height_m"]),
             ),
         )
+
+    def replay_observation_windows(
+        self, compiled: CompiledTrajectory, case: BenchmarkCase
+    ) -> tuple[ReplayObservationWindow, ...]:
+        """Collect release and terminal stability evidence."""
+        del case
+        release = compiled.segment(1, "release")
+        waypoint_count = compiled.trajectory.waypoint_count
+        return (
+            ReplayObservationWindow(
+                "place_release",
+                release.start,
+                release.stop,
+                frozenset({"gripper_qpos"}),
+            ),
+            ReplayObservationWindow(
+                "place_settle",
+                waypoint_count,
+                waypoint_count,
+                frozenset({"object_pose"}),
+                include_settle=True,
+            ),
+        )
+
+    def physical_evaluator(self) -> _PlaceEvaluator:
+        """Return the v1 Place evaluator."""
+        return _PlaceEvaluator()
 
     def task_result(
         self,
@@ -1979,6 +3355,14 @@ class _PressCases(AtomicSkillCaseProvider):
             start_qpos, name=scenario.control_part, to_matrix=True
         )
         articulation_initial_qpos = handle.entity.get_qpos().clone()
+        joint_index = handle.entity.joint_names.index(target_joint)
+        joint_limits = handle.entity.get_qpos_limits(joint_ids=[joint_index])[0, 0]
+        articulation_joint_stroke = float((joint_limits[1] - joint_limits[0]).item())
+        if (
+            not math.isfinite(articulation_joint_stroke)
+            or articulation_joint_stroke <= 0
+        ):
+            raise ValueError("Press target joint must expose a finite positive stroke.")
         target_pose = handle.link_pose(target_link).to(device=start_pose.device)
         geometry = scenario.sample_articulation_geometry(
             handle,
@@ -2073,6 +3457,10 @@ class _PressCases(AtomicSkillCaseProvider):
                 "target_joint": target_joint,
                 "target_entity_id": f"{handle.entity.uid}:{target_link}",
                 "effect_joint_sign": float(config.get("effect_joint_sign", 1.0)),
+                "articulation_joint_stroke": articulation_joint_stroke,
+                "contact_minimum_joint_delta": float(
+                    config.get("contact_minimum_joint_delta", 1.0e-5)
+                ),
                 "minimum_articulation_joint_delta": float(
                     config.get("minimum_joint_delta_m", 0.004)
                 ),
@@ -2137,6 +3525,25 @@ class _PressCases(AtomicSkillCaseProvider):
         """Score button displacement only while the tool travels into it."""
         del case
         return "press"
+
+    def replay_observation_windows(
+        self, compiled: CompiledTrajectory, case: BenchmarkCase
+    ) -> tuple[ReplayObservationWindow, ...]:
+        """Collect the target-joint trace only during commanded pressing."""
+        del case
+        segment = compiled.segment(0, "press")
+        return (
+            ReplayObservationWindow(
+                "press_actuation",
+                segment.start,
+                segment.stop,
+                frozenset({"articulation_joint"}),
+            ),
+        )
+
+    def physical_evaluator(self) -> _PressEvaluator:
+        """Return the v1 press-stage evaluator."""
+        return _PressEvaluator()
 
     def task_result(
         self,
@@ -2397,6 +3804,33 @@ class _SlideCases(AtomicSkillCaseProvider):
         """Score displacement while the primitive pulls or pushes the drawer."""
         return _slide_direction(case.case_parameters["direction"])
 
+    def replay_observation_windows(
+        self, compiled: CompiledTrajectory, case: BenchmarkCase
+    ) -> tuple[ReplayObservationWindow, ...]:
+        """Collect the commanded slide and release windows."""
+        actuation = compiled.segment(
+            0, _slide_direction(case.case_parameters["direction"])
+        )
+        release = compiled.segment(0, "open")
+        return (
+            ReplayObservationWindow(
+                "slide_actuation",
+                actuation.start,
+                actuation.stop,
+                frozenset({"articulation_joint"}),
+            ),
+            ReplayObservationWindow(
+                "slide_release",
+                release.start,
+                release.stop,
+                frozenset({"gripper_qpos"}),
+            ),
+        )
+
+    def physical_evaluator(self) -> _SlideEvaluator:
+        """Return the v1 slide-stage evaluator."""
+        return _SlideEvaluator()
+
     def task_result(
         self,
         scenario: "AtomicTaskScenario",
@@ -2636,6 +4070,32 @@ class _TwistCases(AtomicSkillCaseProvider):
         del case
         return "twist"
 
+    def replay_observation_windows(
+        self, compiled: CompiledTrajectory, case: BenchmarkCase
+    ) -> tuple[ReplayObservationWindow, ...]:
+        """Collect executed TCP/joint traces and the release boundary."""
+        del case
+        actuation = compiled.segment(0, "twist")
+        release = compiled.segment(0, "open")
+        return (
+            ReplayObservationWindow(
+                "twist_actuation",
+                actuation.start,
+                actuation.stop,
+                frozenset({"tcp_pose", "articulation_joint"}),
+            ),
+            ReplayObservationWindow(
+                "twist_release",
+                release.start,
+                release.stop,
+                frozenset({"gripper_qpos"}),
+            ),
+        )
+
+    def physical_evaluator(self) -> _TwistEvaluator:
+        """Return the v1 twist-stage evaluator."""
+        return _TwistEvaluator()
+
     def task_result(
         self,
         scenario: "AtomicTaskScenario",
@@ -2675,7 +4135,12 @@ class AtomicTaskScenario(ScenarioProvider):
         self._base_full_qpos: torch.Tensor | None = None
         self._gripper_open: torch.Tensor | None = None
         self._gripper_grasp: torch.Tensor | None = None
+        self._gripper_states: dict[str, tuple[torch.Tensor, torch.Tensor]] = {}
+        self._fixtures: dict[str, AtomicObjectHandle] = {}
         self._engine: AtomicActionEngine | None = None
+        self._case_grasp_generators: dict[str, _ActiveCaseGraspPoseGenerator] = {}
+        self._case_grasp_sampler: _CaseSampleCountGraspPoseGenerator | None = None
+        self._reference_motion_generator: object | None = None
         self._runtime_entities_created = False
 
     def batch_sizes(self, suite: SuiteCfg, track: TrackCfg) -> list[int]:
@@ -2711,6 +4176,23 @@ class AtomicTaskScenario(ScenarioProvider):
                 )
             self._articulations[handle.object_id] = handle
 
+        fixture_values = track.config.get("fixtures", [])
+        if not isinstance(fixture_values, list):
+            raise TypeError("atomic-task fixtures must be a list of mappings.")
+        for value in fixture_values:
+            if not isinstance(value, Mapping):
+                raise TypeError("Every atomic-task fixture must be a mapping.")
+            # Fixtures such as tables and support slabs stay at their declared
+            # pose for every case; they are never parked or reset.
+            handle = create_atomic_object(
+                simulation,
+                {"body_type": "static", **dict(value)},
+                initialize=False,
+            )
+            if handle.object_id in self._fixtures:
+                raise ValueError(f"Duplicate atomic fixture id {handle.object_id!r}.")
+            self._fixtures[handle.object_id] = handle
+
         object_values = track.config.get("objects", [])
         if not isinstance(object_values, list):
             raise TypeError("atomic-task objects must be a list of mappings.")
@@ -2721,6 +4203,7 @@ class AtomicTaskScenario(ScenarioProvider):
             if (
                 handle.object_id in self._objects
                 or handle.object_id in self._articulations
+                or handle.object_id in self._fixtures
             ):
                 raise ValueError(f"Duplicate atomic object id {handle.object_id!r}.")
             self._objects[handle.object_id] = handle
@@ -2756,49 +4239,69 @@ class AtomicTaskScenario(ScenarioProvider):
             isinstance(value, Mapping) and value.get("id") in _GRIPPER_SKILLS
             for value in track.config.get("skills", [])
         ):
-            gripper_value = track.config.get("gripper")
-            if not isinstance(gripper_value, Mapping):
-                raise ValueError(
-                    "Atomic gripper-action tracks must define a gripper mapping."
+            gripper_values = track.config.get("grippers")
+            if gripper_values is None:
+                gripper_value = track.config.get("gripper")
+                if not isinstance(gripper_value, Mapping):
+                    raise ValueError(
+                        "Atomic gripper-action tracks must define a gripper mapping."
+                    )
+                gripper_values = [gripper_value]
+            elif track.config.get("gripper") is not None:
+                raise ValueError("Define either gripper or grippers, not both.")
+            if not isinstance(gripper_values, list) or not gripper_values:
+                raise ValueError("grippers must be a non-empty list of mappings.")
+            for gripper_value in gripper_values:
+                part, open_state, grasp_state = self._resolve_gripper(
+                    robot, gripper_value
                 )
-            end_effector_part = gripper_value.get("control_part")
-            if not isinstance(end_effector_part, str) or not end_effector_part:
-                raise ValueError("gripper.control_part must be a non-empty string.")
-            self.end_effector_part = end_effector_part
-            limits = robot.get_qpos_limits(name=end_effector_part)[0].to(
-                device=robot.device, dtype=torch.float32
+                if part in self._gripper_states:
+                    raise ValueError(f"Gripper {part!r} is configured twice.")
+                self._gripper_states[part] = (open_state, grasp_state)
+            self.end_effector_part = next(iter(self._gripper_states))
+            self._gripper_open, self._gripper_grasp = self._gripper_states[
+                self.end_effector_part
+            ]
+
+    @staticmethod
+    def _resolve_gripper(
+        robot: Robot, gripper_value: object
+    ) -> tuple[str, torch.Tensor, torch.Tensor]:
+        """Validate one gripper control part and its open/grasp commands."""
+        if not isinstance(gripper_value, Mapping):
+            raise ValueError("Every gripper entry must be a mapping.")
+        end_effector_part = gripper_value.get("control_part")
+        if not isinstance(end_effector_part, str) or not end_effector_part:
+            raise ValueError("gripper.control_part must be a non-empty string.")
+        limits = robot.get_qpos_limits(name=end_effector_part)[0].to(
+            device=robot.device, dtype=torch.float32
+        )
+        dofs = limits.shape[0]
+        open_qpos = _float_vector(
+            gripper_value.get("open_qpos"),
+            name="gripper.open_qpos",
+            length=dofs,
+            default=limits[:, 0].detach().cpu().tolist(),
+        )
+        grasp_qpos = _float_vector(
+            gripper_value.get("grasp_qpos"),
+            name="gripper.grasp_qpos",
+            length=dofs,
+        )
+        open_state = torch.tensor(open_qpos, dtype=limits.dtype, device=limits.device)
+        grasp_state = torch.tensor(grasp_qpos, dtype=limits.dtype, device=limits.device)
+        if bool(
+            (
+                (open_state < limits[:, 0])
+                | (open_state > limits[:, 1])
+                | (grasp_state < limits[:, 0])
+                | (grasp_state > limits[:, 1])
             )
-            dofs = limits.shape[0]
-            open_qpos = _float_vector(
-                gripper_value.get("open_qpos"),
-                name="gripper.open_qpos",
-                length=dofs,
-                default=limits[:, 0].detach().cpu().tolist(),
-            )
-            grasp_qpos = _float_vector(
-                gripper_value.get("grasp_qpos"),
-                name="gripper.grasp_qpos",
-                length=dofs,
-            )
-            self._gripper_open = torch.tensor(
-                open_qpos, dtype=limits.dtype, device=limits.device
-            )
-            self._gripper_grasp = torch.tensor(
-                grasp_qpos, dtype=limits.dtype, device=limits.device
-            )
-            if bool(
-                (
-                    (self._gripper_open < limits[:, 0])
-                    | (self._gripper_open > limits[:, 1])
-                    | (self._gripper_grasp < limits[:, 0])
-                    | (self._gripper_grasp > limits[:, 1])
-                )
-                .any()
-                .item()
-            ):
-                raise ValueError(
-                    "gripper open/grasp qpos must lie within joint limits."
-                )
+            .any()
+            .item()
+        ):
+            raise ValueError("gripper open/grasp qpos must lie within joint limits.")
+        return end_effector_part, open_state, grasp_state
 
     def generate_cases(
         self,
@@ -2891,9 +4394,9 @@ class AtomicTaskScenario(ScenarioProvider):
         """Inject shared pose-batch controls into one skill configuration.
 
         Skill-specific jitter keys remain authoritative.  The track-level
-        translation range is only a fallback, allowing a compact YAML block
-        to drive all object and target pose variants.  No randomization is
-        applied when the track does not opt in.
+        translation and yaw ranges are only fallbacks, allowing a compact
+        YAML block to drive object and target pose variants.  No randomization
+        is applied when the track does not opt in.
         """
         randomization = resolve_atomic_pose_randomization(track)
         if randomization.enabled:
@@ -2902,12 +4405,44 @@ class AtomicTaskScenario(ScenarioProvider):
                     "Atomic pose-batch size must match the simulator batch: "
                     f"{randomization.pose_batch_size} != {batch_size}."
                 )
-            if randomization.mode == "translation":
+            if randomization.mode in {"translation", "planar_pose", "spatial_pose"}:
                 config["_pose_batch_translation_jitter_m"] = list(
                     randomization.target_translation_jitter_m
                 )
                 config["_pose_batch_object_translation_jitter_m"] = list(
                     randomization.object_translation_jitter_m
+                )
+                config["_pose_batch_support_object_translation_jitter_m"] = list(
+                    randomization.support_object_translation_jitter_m
+                )
+                config["_pose_batch_task_frame_translation_jitter_m"] = list(
+                    randomization.task_frame_translation_jitter_m
+                )
+            if randomization.mode in {"planar_pose", "spatial_pose"}:
+                config["_pose_batch_object_yaw_jitter_rad"] = (
+                    randomization.object_yaw_jitter_rad
+                )
+                config["_pose_batch_target_yaw_jitter_rad"] = (
+                    randomization.target_yaw_jitter_rad
+                )
+                config["_pose_batch_support_object_yaw_jitter_rad"] = (
+                    randomization.support_object_yaw_jitter_rad
+                )
+                config["_pose_batch_task_frame_yaw_jitter_rad"] = (
+                    randomization.task_frame_yaw_jitter_rad
+                )
+            if randomization.mode == "spatial_pose":
+                config["_pose_batch_object_roll_pitch_jitter_rad"] = list(
+                    randomization.object_roll_pitch_jitter_rad
+                )
+                config["_pose_batch_target_roll_pitch_jitter_rad"] = list(
+                    randomization.target_roll_pitch_jitter_rad
+                )
+                config["_pose_batch_support_object_roll_pitch_jitter_rad"] = list(
+                    randomization.support_object_roll_pitch_jitter_rad
+                )
+                config["_pose_batch_task_frame_roll_pitch_jitter_rad"] = list(
+                    randomization.task_frame_roll_pitch_jitter_rad
                 )
             config["_pose_batch_seed_stride"] = randomization.seed_stride
             config["_pose_batch_enabled"] = True
@@ -2919,22 +4454,37 @@ class AtomicTaskScenario(ScenarioProvider):
         """Bind one AtomicActionEngine to the adapter-owned MotionGenerator."""
         del first_case
         control_profiles = None
+        grippers = self._configured_grippers()
         if any(provider.requires_gripper for provider in self._case_providers.values()):
-            if (
-                self.end_effector_part is None
-                or self._gripper_open is None
-                or self._gripper_grasp is None
-            ):
+            if not grippers:
                 raise RuntimeError("Configured gripper command states are unavailable.")
             control_profiles = {
-                self.end_effector_part: ControlPartCommandProfile.joint_positions(
-                    open=self._gripper_open,
-                    grasp=self._gripper_grasp,
+                part: ControlPartCommandProfile.joint_positions(
+                    open=open_state,
+                    grasp=grasp_state,
                 )
+                for part, (open_state, grasp_state) in grippers.items()
             }
         motion_generator = adapter.require_motion_generator()
         scene_entities = tuple(handle.entity for handle in self._objects.values())
-        grasp_pose_generators = None
+        grasp_pose_generators: dict[str, GraspPoseGenerator] | None = None
+        self._case_grasp_sampler = None
+        sampling_counts = {
+            _grasp_sample_count(self._cases_by_id[case_id])
+            for case_id, provider in self._case_providers.items()
+            if provider.samples_grasps
+        }
+        if sampling_counts:
+            self._case_grasp_sampler = _CaseSampleCountGraspPoseGenerator(
+                {
+                    count: _parallel_jaw_sampler(count)
+                    for count in sorted(sampling_counts)
+                },
+                default_count=max(sampling_counts),
+            )
+            grasp_pose_generators = {
+                part: self._case_grasp_sampler for part in grippers
+            }
         slide_cases = [
             self._cases_by_id[case_id]
             for case_id, provider in self._case_providers.items()
@@ -2944,6 +4494,7 @@ class AtomicTaskScenario(ScenarioProvider):
             if self.end_effector_part is None:
                 raise RuntimeError("Configured Slide grasp endpoint is unavailable.")
             grasp_pose_generators = {
+                **(grasp_pose_generators or {}),
                 self.end_effector_part: _FrozenArticulationGraspPoseGenerator(
                     [
                         (
@@ -2960,7 +4511,25 @@ class AtomicTaskScenario(ScenarioProvider):
                         )
                         for case in slide_cases
                     ]
-                )
+                ),
+            }
+        frozen_parts = {
+            part
+            for case_id, provider in self._case_providers.items()
+            for part in provider.frozen_grasps(self, self._cases_by_id[case_id])
+        }
+        self._case_grasp_generators = {
+            part: _ActiveCaseGraspPoseGenerator(
+                None
+                if grasp_pose_generators is None
+                else grasp_pose_generators.get(part)
+            )
+            for part in sorted(frozen_parts)
+        }
+        if self._case_grasp_generators:
+            grasp_pose_generators = {
+                **(grasp_pose_generators or {}),
+                **self._case_grasp_generators,
             }
         if scene_entities:
             self._engine = create_simulation_atomic_action_engine(
@@ -2976,10 +4545,24 @@ class AtomicTaskScenario(ScenarioProvider):
                 grasp_pose_generators=grasp_pose_generators,
             )
 
+    def _configured_grippers(self) -> dict[str, tuple[torch.Tensor, torch.Tensor]]:
+        """Return every configured gripper's open and grasp commands."""
+        if self._gripper_states:
+            return dict(self._gripper_states)
+        if (
+            self.end_effector_part is None
+            or self._gripper_open is None
+            or self._gripper_grasp is None
+        ):
+            return {}
+        return {self.end_effector_part: (self._gripper_open, self._gripper_grasp)}
+
     def close_planner(self, adapter: PlannerAdapter) -> None:
         """Drop the engine before its adapter closes the shared generator."""
         del adapter
         self._engine = None
+        self._case_grasp_generators = {}
+        self._case_grasp_sampler = None
 
     def require_engine(self) -> AtomicActionEngine:
         """Return the prepared Atomic Action engine."""
@@ -3012,8 +4595,17 @@ class AtomicTaskScenario(ScenarioProvider):
             ]
             | None
         ) = None
+        scene_object_poses = {
+            str(object_id): torch.tensor(pose, dtype=torch.float32, device=robot.device)
+            for object_id, pose in dict(
+                case.case_parameters.get("scene_object_poses", {})
+            ).items()
+        }
         for index, handle in enumerate(self._objects.values()):
-            if handle.object_id == active_id:
+            if handle.object_id in scene_object_poses and handle.object_id != active_id:
+                handle.entity.set_local_pose(scene_object_poses[handle.object_id])
+                handle.entity.clear_dynamics()
+            elif handle.object_id == active_id:
                 reset_steps = int(
                     case.case_parameters.get("pre_action_settle_steps", reset_steps)
                 )
@@ -3067,6 +4659,10 @@ class AtomicTaskScenario(ScenarioProvider):
             if active_handle is not None:
                 active_handle.entity.set_local_pose(active_object_pose)
                 active_handle.entity.clear_dynamics()
+        for object_id, pose in scene_object_poses.items():
+            if object_id != active_id:
+                self.object_handle(object_id).entity.set_local_pose(pose)
+                self.object_handle(object_id).entity.clear_dynamics()
         if active_articulation_state is not None:
             # Settling may advance a weakly driven button/knob from the exact
             # state used to derive the frozen link target.  Restore the
@@ -3140,11 +4736,36 @@ class AtomicTaskScenario(ScenarioProvider):
             )
             invocations = (pick_invocation, invocation)
             task = TaskState(batch_size=case.batch_size, device=self.robot.device)
+        else:
+            prefix = provider.prefix_invocations(self, case)
+            if prefix:
+                invocations = (*prefix, invocation)
+        plan_opts = adapter.atomic_plan_options()
+        if plan_opts is not None:
+            invocations = tuple(
+                _with_plan_options(item, plan_opts) for item in invocations
+            )
         context = engine.initial_context(
             task=task,
+            scene=provider.initial_scene(self, case),
             control_dt=float(self.simulation.sim_config.physics_dt),
         )
-        return engine.compile(invocations, context=context)
+        frozen = provider.frozen_grasps(self, case)
+        missing = sorted(set(frozen) - set(self._case_grasp_generators))
+        if missing:
+            raise RuntimeError(f"No prepared frozen-grasp generator for {missing}.")
+        for part, (target_pose, grasp_pose) in frozen.items():
+            self._case_grasp_generators[part].activate(target_pose, grasp_pose)
+        sampler = self._case_grasp_sampler if provider.samples_grasps else None
+        if sampler is not None:
+            sampler.activate(_grasp_sample_count(case))
+        try:
+            return engine.compile(invocations, context=context)
+        finally:
+            for part in frozen:
+                self._case_grasp_generators[part].deactivate()
+            if sampler is not None:
+                sampler.deactivate()
 
     def plan_contract_error(self, result: object) -> str | None:
         """Accept compiled Atomic Action trajectories instead of raw plans."""
@@ -3203,6 +4824,9 @@ class AtomicTaskScenario(ScenarioProvider):
             dynamic_limit_tolerance=suite.protocol.dynamic_limit_tolerance,
             timing_is_solved=timing_is_solved,
         )
+        motion_outcomes = self._with_other_arm_validity(
+            result, case, robot, suite, motion_outcomes
+        )
         provider = self._case_providers[case.case_id]
         observation = self._execute(result, case, provider)
         physical_results = ()
@@ -3218,6 +4842,8 @@ class AtomicTaskScenario(ScenarioProvider):
             articulation_final = None
             articulation_delta = None
             articulation_peak = None
+            articulation_effect_end = None
+            object_rotation_peak = None
             task_failure_code = "task_goal_miss"
         else:
             execution_success = observation.execution_success
@@ -3255,6 +4881,8 @@ class AtomicTaskScenario(ScenarioProvider):
                 else articulation_final - articulation_initial
             )
             articulation_peak = observation.articulation_joint_peak_signed_delta
+            articulation_effect_end = observation.articulation_joint_effect_end
+            object_rotation_peak = observation.object_rotation_peak_signed_rad
 
         executed_translation_mm: torch.Tensor | None = None
         executed_rotation_deg: torch.Tensor | None = None
@@ -3328,6 +4956,16 @@ class AtomicTaskScenario(ScenarioProvider):
                         if articulation_peak is None
                         else float(articulation_peak[index].item())
                     ),
+                    articulation_joint_effect_end=(
+                        None
+                        if articulation_effect_end is None
+                        else float(articulation_effect_end[index].item())
+                    ),
+                    object_rotation_peak_signed_rad=(
+                        None
+                        if object_rotation_peak is None
+                        else float(object_rotation_peak[index].item())
+                    ),
                     replan_count=0,
                     failure_code=failure_code,
                     executed_final_translation_err_mm=(
@@ -3370,6 +5008,78 @@ class AtomicTaskScenario(ScenarioProvider):
                 ),
             },
         )
+
+    @staticmethod
+    def _with_other_arm_validity(
+        result: CompiledTrajectory,
+        case: BenchmarkCase,
+        robot: Robot,
+        suite: SuiteCfg,
+        motion_outcomes: tuple[CaseOutcome, ...],
+    ) -> tuple[CaseOutcome, ...]:
+        """Also require every other declared arm to pass its ordered waypoints.
+
+        Coordinated skills move two arms.  ``case.target_waypoints`` belongs to
+        the robot's primary control part; ``arm_waypoints`` lists the frozen
+        poses of each other arm.  A row is motion-valid only when every arm
+        passes its own waypoints in order within the joint limits.
+        """
+        arm_waypoints = case.case_parameters.get("arm_waypoints")
+        if not arm_waypoints:
+            return motion_outcomes
+        if case.full_start_qpos is None:
+            raise ValueError("Multi-arm cases require full_start_qpos.")
+        merged = list(motion_outcomes)
+        for part, waypoints in dict(arm_waypoints).items():
+            joint_ids = list(robot.get_joint_ids(name=part))
+            targets = torch.tensor(waypoints, dtype=torch.float32, device=robot.device)
+            part_case = replace(
+                case,
+                num_waypoints=targets.shape[1],
+                target_waypoints=targets,
+                start_qpos=case.full_start_qpos[:, joint_ids].to(robot.device),
+                reference_qpos=torch.zeros(
+                    case.batch_size,
+                    targets.shape[1],
+                    len(joint_ids),
+                    device=robot.device,
+                ),
+                case_parameters={
+                    **case.case_parameters,
+                    "motion_validity": "ordered_cartesian_waypoints",
+                    "waypoint_rotation_symmetry": None,
+                },
+            )
+            part_outcomes = compute_case_outcomes(
+                PlanResult(
+                    success=result.plan_success,
+                    positions=result.trajectory.positions[:, :, joint_ids],
+                    dt=result.trajectory.dt,
+                ),
+                part_case,
+                robot,
+                part,
+                validation_samples=suite.protocol.validation_samples,
+                position_threshold_m=suite.protocol.position_threshold_m,
+                rotation_threshold_rad=suite.protocol.rotation_threshold_rad,
+                joint_limit_tolerance_rad=suite.protocol.joint_limit_tolerance_rad,
+            )
+            for index, (outcome, other) in enumerate(
+                zip(merged, part_outcomes, strict=True)
+            ):
+                merged[index] = replace(
+                    outcome,
+                    ordered_waypoints_reached=(
+                        outcome.ordered_waypoints_reached
+                        and other.ordered_waypoints_reached
+                    ),
+                    motion_valid=outcome.motion_valid and other.motion_valid,
+                    joint_limit_violation=(
+                        outcome.joint_limit_violation or other.joint_limit_violation
+                    ),
+                    failure_code=outcome.failure_code or other.failure_code,
+                )
+        return tuple(merged)
 
     def record_replay(
         self,
@@ -3473,6 +5183,31 @@ class AtomicTaskScenario(ScenarioProvider):
             articulation_joint_peak_signed_delta=(
                 replay_metrics.articulation_joint_peak_signed_delta
             ),
+            articulation_joint_effect_end=replay_metrics.articulation_joint_effect_end,
+            object_rotation_peak_signed_rad=(
+                replay_metrics.object_rotation_peak_signed_rad
+            ),
+            scene_object_final_poses={
+                str(object_id): self.object_handle(str(object_id))
+                .entity.get_local_pose(to_matrix=True)
+                .clone()
+                for object_id in dict(
+                    case.case_parameters.get("scene_object_poses", {})
+                )
+            },
+            final_gripper_qpos={
+                part: self.robot.get_qpos(name=part).clone()
+                for part in self._configured_grippers()
+            },
+            gripper_open_qpos={
+                part: states[0].clone()
+                for part, states in self._configured_grippers().items()
+            },
+            gripper_grasp_qpos={
+                part: states[1].clone()
+                for part, states in self._configured_grippers().items()
+            },
+            replay_traces=replay_metrics.replay_traces,
         )
 
     def _physics_settings(self) -> _PhysicsReplaySettings:
@@ -3512,6 +5247,78 @@ class AtomicTaskScenario(ScenarioProvider):
         """Allow finite failed planner rollouts in diagnostic videos."""
         trajectory = compiled.trajectory.positions
         return trajectory.shape[1] > 0 and bool(torch.isfinite(trajectory).all().item())
+
+    def _capture_replay_samples(
+        self,
+        accumulators: Sequence[_ReplayTraceAccumulator],
+        *,
+        object_handle: AtomicObjectHandle | None,
+        scene_object_handles: Mapping[str, AtomicObjectHandle],
+        articulation_handle: AtomicArticulationHandle | None,
+        articulation_joint_name: str | None,
+    ) -> None:
+        """Append one synchronized simulator sample to active windows."""
+        if not accumulators:
+            return
+        if self.robot is None:
+            raise RuntimeError("Atomic Task runtime is not configured.")
+        channels = frozenset(
+            channel
+            for accumulator in accumulators
+            for channel in accumulator.window.channels
+        )
+        tcp_pose = None
+        object_pose = None
+        articulation_joint = None
+        grippers: dict[str, torch.Tensor] = {}
+        scene_object_poses: dict[str, torch.Tensor] = {}
+        if "tcp_pose" in channels:
+            tcp_pose = self.robot.compute_fk(
+                self.robot.get_qpos(name=self.control_part),
+                name=self.control_part,
+                to_matrix=True,
+            ).clone()
+        if "object_pose" in channels and object_handle is not None:
+            object_pose = object_handle.entity.get_local_pose(to_matrix=True).clone()
+        if (
+            "articulation_joint" in channels
+            and articulation_handle is not None
+            and articulation_joint_name is not None
+        ):
+            articulation_joint = articulation_handle.joint_qpos(articulation_joint_name)
+        if "gripper_qpos" in channels:
+            grippers = {
+                part: self.robot.get_qpos(name=part).clone()
+                for part in self._configured_grippers()
+            }
+        if "scene_object_pose" in channels:
+            requested_ids = {
+                object_id
+                for accumulator in accumulators
+                for object_id in accumulator.window.scene_object_ids
+            }
+            scene_object_poses = {
+                object_id: scene_object_handles[object_id]
+                .entity.get_local_pose(to_matrix=True)
+                .clone()
+                for object_id in requested_ids
+            }
+        for accumulator in accumulators:
+            requested = accumulator.window.channels
+            if "tcp_pose" in requested and tcp_pose is not None:
+                accumulator.tcp_pose.append(tcp_pose)
+            if "object_pose" in requested and object_pose is not None:
+                accumulator.object_pose.append(object_pose)
+            if "articulation_joint" in requested and articulation_joint is not None:
+                accumulator.articulation_joint.append(articulation_joint)
+            if "gripper_qpos" in requested:
+                for part, qpos in grippers.items():
+                    accumulator.gripper_qpos.setdefault(part, []).append(qpos)
+            if "scene_object_pose" in requested:
+                for object_id in accumulator.window.scene_object_ids:
+                    accumulator.scene_object_poses.setdefault(object_id, []).append(
+                        scene_object_poses[object_id]
+                    )
 
     def _replay_physics(
         self,
@@ -3565,6 +5372,30 @@ class AtomicTaskScenario(ScenarioProvider):
         effect_start = 0
         effect_stop = 0
         effect_sign = 1.0
+        articulation_effect_end: torch.Tensor | None = None
+        effect_end_index = -1
+        rotation_window = (
+            None
+            if provider is None or not collect_metrics or object_handle is None
+            else provider.object_rotation_segment(compiled)
+        )
+        rotation_axis_local: torch.Tensor | None = None
+        rotation_sign = 1.0
+        rotation_reference: torch.Tensor | None = None
+        rotation_axis_world: torch.Tensor | None = None
+        rotation_peak: torch.Tensor | None = None
+        if rotation_window is not None:
+            rotation_axis_local = torch.tensor(
+                case.case_parameters["object_rotation_axis"],
+                dtype=torch.float32,
+                device=trajectory.device,
+            )
+            rotation_axis_local = rotation_axis_local / torch.linalg.vector_norm(
+                rotation_axis_local
+            )
+            rotation_sign = float(case.case_parameters.get("object_rotation_sign", 1.0))
+            if rotation_sign not in (-1.0, 1.0):
+                raise ValueError("object_rotation_sign must be 1 or -1.")
         if collect_metrics:
             squared_tracking_error = torch.zeros(
                 case.batch_size, dtype=trajectory.dtype, device=trajectory.device
@@ -3596,11 +5427,94 @@ class AtomicTaskScenario(ScenarioProvider):
                 # the command segment ends.  Start at the manipulation segment,
                 # then observe through release, retract, and the final hold.
                 effect_start, effect_stop = segment.start, trajectory.shape[1]
+                effect_end_index = segment.stop - 1
+        observation_windows = (
+            ()
+            if provider is None or not collect_metrics
+            else provider.replay_observation_windows(compiled, case)
+        )
+        if len({window.observation_id for window in observation_windows}) != len(
+            observation_windows
+        ):
+            raise ValueError("Replay observation IDs must be unique within one case.")
+        waypoint_count = trajectory.shape[1]
+        for window in observation_windows:
+            if window.stop > waypoint_count:
+                raise ValueError(
+                    f"Replay observation {window.observation_id!r} exceeds the "
+                    "compiled trajectory."
+                )
+            if window.include_settle and window.stop != waypoint_count:
+                raise ValueError(
+                    "Only a window ending at the trajectory boundary may include "
+                    "terminal settle."
+                )
+        trace_accumulators = {
+            window.observation_id: _ReplayTraceAccumulator(window)
+            for window in observation_windows
+        }
+        requested_scene_object_ids = {
+            object_id
+            for window in observation_windows
+            for object_id in window.scene_object_ids
+        }
+        missing_scene_object_ids = requested_scene_object_ids - set(self._objects)
+        if missing_scene_object_ids:
+            raise ValueError(
+                "Replay observations reference unknown scene objects: "
+                f"{sorted(missing_scene_object_ids)}."
+            )
+        scene_object_handles = {
+            object_id: self._objects[object_id]
+            for object_id in requested_scene_object_ids
+        }
         for waypoint_index in range(trajectory.shape[1]):
+            self._capture_replay_samples(
+                [
+                    trace_accumulators[window.observation_id]
+                    for window in observation_windows
+                    if window.start == waypoint_index
+                ],
+                object_handle=object_handle,
+                scene_object_handles=scene_object_handles,
+                articulation_handle=articulation_handle,
+                articulation_joint_name=articulation_joint_name,
+            )
+            if rotation_window is not None and waypoint_index == rotation_window[0]:
+                assert object_handle is not None and rotation_axis_local is not None
+                rotation_reference = (
+                    object_handle.entity.get_local_pose(to_matrix=True)[:, :3, :3]
+                    .to(device=trajectory.device, dtype=torch.float32)
+                    .clone()
+                )
+                rotation_axis_world = rotation_reference @ rotation_axis_local
+                rotation_peak = torch.zeros(
+                    case.batch_size, dtype=torch.float32, device=trajectory.device
+                )
             positions = trajectory[:, waypoint_index]
             self.robot.set_qpos(positions, target=True)
             for _ in range(settings.steps_per_waypoint):
                 self.simulation.update(step=1)
+                if (
+                    rotation_window is not None
+                    and rotation_reference is not None
+                    and rotation_axis_world is not None
+                    and rotation_peak is not None
+                    and rotation_window[0] <= waypoint_index < rotation_window[1]
+                ):
+                    assert object_handle is not None
+                    current_rotation = object_handle.entity.get_local_pose(
+                        to_matrix=True
+                    )[:, :3, :3].to(device=trajectory.device, dtype=torch.float32)
+                    rotation_peak = torch.maximum(
+                        rotation_peak,
+                        _signed_rotation_about_axis(
+                            rotation_reference,
+                            current_rotation,
+                            rotation_axis_world,
+                        )
+                        * rotation_sign,
+                    )
                 if (
                     articulation_handle is not None
                     and articulation_joint_name is not None
@@ -3615,6 +5529,25 @@ class AtomicTaskScenario(ScenarioProvider):
                         articulation_peak,
                         (current_joint - articulation_initial) * effect_sign,
                     )
+                self._capture_replay_samples(
+                    [
+                        trace_accumulators[window.observation_id]
+                        for window in observation_windows
+                        if window.start <= waypoint_index < window.stop
+                    ],
+                    object_handle=object_handle,
+                    scene_object_handles=scene_object_handles,
+                    articulation_handle=articulation_handle,
+                    articulation_joint_name=articulation_joint_name,
+                )
+            if (
+                articulation_handle is not None
+                and articulation_joint_name is not None
+                and waypoint_index == effect_end_index
+            ):
+                articulation_effect_end = articulation_handle.joint_qpos(
+                    articulation_joint_name
+                )
             if squared_tracking_error is not None:
                 observed = self.robot.get_qpos()
                 squared_tracking_error += ((observed - positions) ** 2).sum(dim=1)
@@ -3628,6 +5561,18 @@ class AtomicTaskScenario(ScenarioProvider):
                 object_handle.entity.clear_dynamics()
                 dynamics_cleared = True
         final_command = trajectory[:, -1]
+        settling = [
+            trace_accumulators[window.observation_id]
+            for window in observation_windows
+            if window.include_settle
+        ]
+        self._capture_replay_samples(
+            settling,
+            object_handle=object_handle,
+            scene_object_handles=scene_object_handles,
+            articulation_handle=articulation_handle,
+            articulation_joint_name=articulation_joint_name,
+        )
         for _ in range(settings.hold_steps):
             self.robot.set_qpos(final_command, target=True)
             self.simulation.update(step=settings.hold_sim_steps)
@@ -3646,6 +5591,13 @@ class AtomicTaskScenario(ScenarioProvider):
                 observed = self.robot.get_qpos()
                 squared_tracking_error += ((observed - final_command) ** 2).sum(dim=1)
                 tracking_value_count += observed.shape[1]
+            self._capture_replay_samples(
+                settling,
+                object_handle=object_handle,
+                scene_object_handles=scene_object_handles,
+                articulation_handle=articulation_handle,
+                articulation_joint_name=articulation_joint_name,
+            )
         if collect_metrics:
             if squared_tracking_error is None:
                 raise RuntimeError("Timed replay lost its tracking accumulator.")
@@ -3659,6 +5611,21 @@ class AtomicTaskScenario(ScenarioProvider):
                 articulation_joint_initial=articulation_initial,
                 articulation_joint_final=articulation_final,
                 articulation_joint_peak_signed_delta=articulation_peak,
+                articulation_joint_effect_end=articulation_effect_end,
+                object_rotation_peak_signed_rad=(
+                    None if rotation_peak is None else rotation_peak * rotation_sign
+                ),
+                replay_traces={
+                    observation_id: accumulator.finish()
+                    for observation_id, accumulator in trace_accumulators.items()
+                    if (
+                        accumulator.tcp_pose
+                        or accumulator.object_pose
+                        or accumulator.articulation_joint
+                        or accumulator.gripper_qpos
+                        or accumulator.scene_object_poses
+                    )
+                },
             )
         return None
 
@@ -3713,6 +5680,68 @@ class AtomicTaskScenario(ScenarioProvider):
         planner therefore receives the same explicit grasp pose and planning
         latency excludes grasp generation.
         """
+
+        def pick_up_poses(grasp: torch.Tensor) -> tuple[torch.Tensor, ...]:
+            pre_grasp = grasp.clone()
+            pre_grasp[:, :3, 3] -= approach_direction * pre_grasp_distance
+            lift = grasp.clone()
+            lift[:, 2, 3] += lift_height
+            return pre_grasp, grasp, lift
+
+        return self.screen_antipodal_grasp(
+            handle,
+            object_pose,
+            approach_direction,
+            seed=seed,
+            start_qpos=start_qpos,
+            n_sample=n_sample,
+            max_candidates=max_candidates,
+            alignment_max_angle_deg=alignment_max_angle_deg,
+            waypoint_poses=pick_up_poses,
+        )
+
+    def screen_antipodal_grasp(
+        self,
+        handle: AtomicObjectHandle,
+        object_pose: torch.Tensor,
+        approach_direction: torch.Tensor,
+        *,
+        seed: int,
+        start_qpos: torch.Tensor,
+        n_sample: int,
+        max_candidates: int,
+        alignment_max_angle_deg: float,
+        waypoint_poses: Callable[[torch.Tensor], Sequence[torch.Tensor]],
+        rank: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None = None,
+    ) -> torch.Tensor:
+        """Freeze the first sampled object grasp whose skill poses are reachable.
+
+        Candidates are sampled once with ``seed``, ordered by ``rank`` (grasp
+        cost by default), filtered by approach alignment, and tried with their
+        half-turn variant.  The first variant whose ``waypoint_poses`` pass
+        sequential IK from ``start_qpos`` is returned.
+
+        Args:
+            handle: Object whose mesh is sampled.
+            object_pose: Frozen object pose batch.
+            approach_direction: World approach axis the grasp must follow.
+            seed: Sampling seed.
+            start_qpos: Arm state the IK chain starts from.
+            n_sample: Generator surface-sample count.
+            max_candidates: Number of ranked candidates to screen.
+            alignment_max_angle_deg: Maximum grasp-axis deviation from the
+                approach axis.
+            waypoint_poses: Skill poses that a grasp variant must reach, in
+                order, given that variant with shape ``(1, 4, 4)``.
+            rank: Optional ordering of finite candidates from their poses and
+                costs; returns candidate indices, best first.
+
+        Returns:
+            The selected grasp with shape ``(1, 4, 4)``.
+
+        Raises:
+            RuntimeError: No candidate variant reaches every skill pose.
+        """
         if self.robot is None:
             raise RuntimeError("Atomic Task runtime is not configured.")
         if n_sample < 1 or max_candidates < 1:
@@ -3757,7 +5786,11 @@ class AtomicTaskScenario(ScenarioProvider):
             raise RuntimeError(
                 f"No valid antipodal grasp candidates were found for {handle.object_id!r}."
             )
-        ranked = finite_indices[torch.argsort(costs[finite_indices])]
+        if rank is None:
+            ranked = finite_indices[torch.argsort(costs[finite_indices])]
+        else:
+            order = rank(candidates[finite_indices], costs[finite_indices])
+            ranked = finite_indices[order.to(device=finite_indices.device)]
         ranked = ranked[:max_candidates].detach().to("cpu").tolist()
         minimum_alignment = math.cos(math.radians(alignment_max_angle_deg))
         for candidate_index in ranked:
@@ -3774,28 +5807,29 @@ class AtomicTaskScenario(ScenarioProvider):
             mirrored[:3, 1] = -mirrored[:3, 1]
             for variant in (candidate, mirrored):
                 grasp = variant.unsqueeze(0)
-                pre_grasp = grasp.clone()
-                pre_grasp[:, :3, 3] -= approach_direction * pre_grasp_distance
-                lift = grasp.clone()
-                lift[:, 2, 3] += lift_height
-                seed = start_qpos
-                feasible = True
-                for pose in (pre_grasp, grasp, lift):
-                    success, seed = self.robot.compute_ik(
-                        pose=pose,
-                        joint_seed=seed,
-                        name=self.control_part,
-                    )
-                    if not bool(torch.as_tensor(success).all().item()):
-                        feasible = False
-                        break
-                    seed = _canonical_case_qpos(seed)
-                if feasible:
+                if self._ik_chain_feasible(start_qpos, waypoint_poses(grasp)):
                     return grasp
         raise RuntimeError(
             f"No independently reachable antipodal grasp remained for "
             f"{handle.object_id!r} after screening {len(ranked)} candidates."
         )
+
+    def _ik_chain_feasible(
+        self, start_qpos: torch.Tensor, poses: Sequence[torch.Tensor]
+    ) -> bool:
+        """Return whether every pose is reachable by IK seeded from the last."""
+        assert self.robot is not None
+        seed = start_qpos
+        for pose in poses:
+            success, seed = self.robot.compute_ik(
+                pose=pose,
+                joint_seed=seed,
+                name=self.control_part,
+            )
+            if not bool(torch.as_tensor(success).all().item()):
+                return False
+            seed = _canonical_case_qpos(seed)
+        return True
 
     def resolve_articulation_grasp(
         self,
@@ -3814,20 +5848,91 @@ class AtomicTaskScenario(ScenarioProvider):
         alignment_max_angle_deg: float,
     ) -> torch.Tensor:
         """Freeze a geometry-aware PGI grasp that can complete a Slide path."""
+        translation_sign = -1.0 if direction == "pull" else 1.0
+
+        def slide_poses(grasp: torch.Tensor) -> list[torch.Tensor]:
+            translated = grasp.clone()
+            translated[:, :3, 3] += (
+                approach_direction * translation_sign * translation_distance
+            )
+            approach = grasp.clone()
+            approach[:, :3, 3] -= approach_direction * approach_distance
+            poses = [approach, grasp, translated]
+            if direction == "push":
+                poses.append(approach)
+            return poses
+
+        return self.screen_articulation_grasp(
+            mesh_vertices=mesh_vertices,
+            mesh_triangles=mesh_triangles,
+            target_pose=target_pose,
+            approach_direction=approach_direction,
+            start_qpos=start_qpos,
+            seed=seed,
+            n_sample=n_sample,
+            max_candidates=max_candidates,
+            alignment_max_angle_deg=alignment_max_angle_deg,
+            waypoint_poses=slide_poses,
+        )
+
+    def screen_articulation_grasp(
+        self,
+        *,
+        mesh_vertices: torch.Tensor,
+        mesh_triangles: torch.Tensor,
+        target_pose: torch.Tensor,
+        approach_direction: torch.Tensor,
+        start_qpos: torch.Tensor,
+        seed: int,
+        n_sample: int,
+        max_candidates: int,
+        alignment_max_angle_deg: float,
+        waypoint_poses: Callable[[torch.Tensor], Sequence[torch.Tensor]],
+    ) -> torch.Tensor:
+        """Freeze the first sampled link grasp whose skill poses are reachable.
+
+        All rows share one target-link mesh and differ only by the articulation
+        root pose, so candidates are sampled once and the selected target-local
+        grasp is preserved across the batch.
+
+        Args:
+            mesh_vertices: Target-link vertices in the link frame.
+            mesh_triangles: Target-link triangle indices.
+            target_pose: Link pose batch with shape ``(B, 4, 4)``.
+            approach_direction: World approach axes with shape ``(B, 3)``.
+            start_qpos: Arm state batch the IK chain starts from.
+            seed: Sampling seed.
+            n_sample: Generator surface-sample count.
+            max_candidates: Number of lowest-cost candidates to screen.
+            alignment_max_angle_deg: Maximum grasp-axis deviation from the
+                approach axis in every row.
+            waypoint_poses: Skill poses that a batched grasp variant must reach,
+                in order.
+
+        Returns:
+            The selected grasp batch with shape ``(B, 4, 4)``.
+
+        Raises:
+            RuntimeError: No candidate variant reaches every skill pose.
+        """
         if self.robot is None:
             raise RuntimeError("Atomic Task runtime is not configured.")
         if target_pose.dim() != 3 or target_pose.shape[1:] != (4, 4):
-            raise ValueError("Physical Slide target poses must have shape (B, 4, 4).")
+            raise ValueError(
+                "Articulation grasp target poses must have shape (B, 4, 4)."
+            )
         if approach_direction.shape != (target_pose.shape[0], 3):
             raise ValueError(
-                "Physical Slide approach directions must have shape (B, 3)."
+                "Articulation grasp approach directions must have shape (B, 3)."
             )
         if start_qpos.shape[0] != target_pose.shape[0]:
             raise ValueError(
-                "Physical Slide start states and target poses must share a batch."
+                "Articulation grasp start states and target poses must share a batch."
             )
         if n_sample < 1 or max_candidates < 1:
-            raise ValueError("Slide grasp sample/candidate counts must be positive.")
+            raise ValueError(
+                "Articulation grasp sample/candidate counts must be positive."
+            )
         if not 0.0 < alignment_max_angle_deg <= 90.0:
             raise ValueError("grasp_alignment_max_angle_deg must be in (0, 90].")
         from scripts.tutorials.atomic_action.tutorial_utils import (
@@ -3848,19 +5953,17 @@ class AtomicTaskScenario(ScenarioProvider):
             candidates, costs = generator.get_valid_grasp_poses(
                 mesh_vertices=mesh_vertices,
                 mesh_triangles=mesh_triangles,
-                # All rows share one target-link mesh and differ only by the
-                # articulation root pose.  Sample PGI candidates once, then
-                # preserve the selected target-local grasp across the batch.
                 obj_poses=target_pose[:1],
                 approach_direction=approach_direction[:1],
             )[0]
         finite_indices = torch.nonzero(torch.isfinite(costs), as_tuple=False).flatten()
         if finite_indices.numel() == 0:
-            raise RuntimeError("No valid antipodal Slide grasp candidates were found.")
+            raise RuntimeError(
+                "No valid antipodal articulation grasp candidates were found."
+            )
         ranked = finite_indices[torch.argsort(costs[finite_indices])]
         ranked = ranked[:max_candidates].detach().to("cpu").tolist()
         minimum_alignment = math.cos(math.radians(alignment_max_angle_deg))
-        translation_sign = -1.0 if direction == "pull" else 1.0
         for candidate_index in ranked:
             candidate = candidates[candidate_index].to(
                 device=self.robot.device, dtype=torch.float32
@@ -3879,31 +5982,10 @@ class AtomicTaskScenario(ScenarioProvider):
                 alignment = torch.sum(variant[:, :3, 2] * approach_direction, dim=-1)
                 if not bool((alignment >= minimum_alignment).all().item()):
                     continue
-                translated = variant.clone()
-                translated[:, :3, 3] += (
-                    approach_direction * translation_sign * translation_distance
-                )
-                approach = variant.clone()
-                approach[:, :3, 3] -= approach_direction * approach_distance
-                poses = [approach, variant, translated]
-                if direction == "push":
-                    poses.append(approach)
-                qpos_seed = start_qpos
-                feasible = True
-                for pose in poses:
-                    success, qpos_seed = self.robot.compute_ik(
-                        pose=pose,
-                        joint_seed=qpos_seed,
-                        name=self.control_part,
-                    )
-                    if not bool(torch.as_tensor(success).all().item()):
-                        feasible = False
-                        break
-                    qpos_seed = _canonical_case_qpos(qpos_seed)
-                if feasible:
+                if self._ik_chain_feasible(start_qpos, waypoint_poses(variant)):
                     return variant
         raise RuntimeError(
-            "No independently reachable antipodal Slide grasp remained after "
+            "No independently reachable antipodal articulation grasp remained after "
             f"screening {len(ranked)} candidates."
         )
 
@@ -3968,11 +6050,10 @@ class AtomicTaskScenario(ScenarioProvider):
         seed: int,
         stream: int,
     ) -> torch.Tensor:
-        """Translate an articulation root independently in every environment.
+        """Translate and yaw an articulation root in every environment.
 
-        The articulation orientation and joint state stay frozen.  A
-        skill-local ``articulation_position_jitter_m`` range overrides the
-        pose-batch track's object-translation range.
+        The articulation joint state stays frozen.  Skill-local position and
+        yaw ranges override the pose-batch track's object-pose ranges.
         """
         configured = config.get("articulation_position_jitter_m")
         if configured is None:
@@ -4001,6 +6082,26 @@ class AtomicTaskScenario(ScenarioProvider):
             if translation.dim() == 1:
                 translation = translation.unsqueeze(0)
             pose[:, :3, 3] += translation
+        yaw_jitter = config.get("articulation_yaw_jitter_rad")
+        if yaw_jitter is None:
+            yaw_jitter = config.get("_pose_batch_object_yaw_jitter_rad", 0.0)
+        roll_pitch_jitter = config.get("articulation_roll_pitch_jitter_rad")
+        if roll_pitch_jitter is None:
+            roll_pitch_jitter = config.get(
+                "_pose_batch_object_roll_pitch_jitter_rad", (0.0, 0.0)
+            )
+        _apply_seeded_spatial_rotation(
+            pose,
+            roll_pitch_amplitude=roll_pitch_jitter,
+            yaw_amplitude=yaw_jitter,
+            roll_pitch_name="articulation_roll_pitch_jitter_rad",
+            yaw_name="articulation_yaw_jitter_rad",
+            seed=seed,
+            roll_pitch_stream=stream + 2,
+            yaw_stream=stream + 1,
+            seed_stride=int(config.get("_pose_batch_seed_stride", 1)),
+        )
+        _apply_task_frame_randomization(pose, config, seed=seed)
         handle.reset(pose=pose, qpos=handle.initial_qpos)
 
         update_steps = handle.config.get("reset_settle_steps", 10)
@@ -4057,32 +6158,26 @@ class AtomicTaskScenario(ScenarioProvider):
             seed_stride=int(config.get("_pose_batch_seed_stride", 1)),
         )
 
-        yaw_amplitude = float(config.get("object_yaw_jitter_rad", 0.0))
-        if not math.isfinite(yaw_amplitude) or yaw_amplitude < 0.0:
-            raise ValueError("object_yaw_jitter_rad must be finite and non-negative.")
-        yaw = _seeded_jitter(
-            (yaw_amplitude,),
+        yaw_jitter = config.get("object_yaw_jitter_rad")
+        if yaw_jitter is None:
+            yaw_jitter = config.get("_pose_batch_object_yaw_jitter_rad", 0.0)
+        roll_pitch_jitter = config.get("object_roll_pitch_jitter_rad")
+        if roll_pitch_jitter is None:
+            roll_pitch_jitter = config.get(
+                "_pose_batch_object_roll_pitch_jitter_rad", (0.0, 0.0)
+            )
+        _apply_seeded_spatial_rotation(
+            pose,
+            roll_pitch_amplitude=roll_pitch_jitter,
+            yaw_amplitude=yaw_jitter,
+            roll_pitch_name="object_roll_pitch_jitter_rad",
+            yaw_name="object_yaw_jitter_rad",
             seed=seed,
-            stream=stream + 1,
-            dtype=pose.dtype,
-            device=pose.device,
-            batch_size=pose.shape[0],
+            roll_pitch_stream=stream + 2,
+            yaw_stream=stream + 1,
             seed_stride=int(config.get("_pose_batch_seed_stride", 1)),
         )
-        if yaw.dim() == 1:
-            yaw = yaw[:1]
-        else:
-            yaw = yaw[:, 0]
-        cosine = torch.cos(yaw)
-        sine = torch.sin(yaw)
-        yaw_rotation = torch.eye(3, dtype=pose.dtype, device=pose.device).repeat(
-            pose.shape[0], 1, 1
-        )
-        yaw_rotation[:, 0, 0] = cosine
-        yaw_rotation[:, 0, 1] = -sine
-        yaw_rotation[:, 1, 0] = sine
-        yaw_rotation[:, 1, 1] = cosine
-        pose[:, :3, :3] = yaw_rotation @ pose[:, :3, :3]
+        _apply_task_frame_randomization(pose, config, seed=seed)
 
         handle.entity.set_local_pose(pose)
         handle.entity.clear_dynamics()
@@ -4136,6 +6231,21 @@ class AtomicTaskScenario(ScenarioProvider):
         if self.simulation is not None:
             self.simulation.update(step=2)
         return handle
+
+    def activate_objects(self, object_ids: Sequence[str]) -> list[AtomicObjectHandle]:
+        """Reset several case objects together and park every other one."""
+        handles = [self.object_handle(object_id) for object_id in object_ids]
+        active = {handle.object_id for handle in handles}
+        for index, candidate in enumerate(self._objects.values()):
+            if candidate.object_id in active:
+                candidate.reset()
+            else:
+                candidate.park(index)
+        for index, candidate in enumerate(self._articulations.values()):
+            candidate.park(len(self._objects) + index)
+        if self.simulation is not None:
+            self.simulation.update(step=2)
+        return handles
 
     def activate_articulation(self, object_id: str) -> AtomicArticulationHandle:
         """Reset one articulation and park all inactive scene objects."""
@@ -4243,8 +6353,46 @@ class AtomicTaskScenario(ScenarioProvider):
                 f"joint {resolved.name!r}, not configured joint {target_joint!r}."
             )
 
+    def reference_motion_generator(self) -> object:
+        """Return the TOPPRA generator used to record a skill's own key poses.
+
+        Coordinated skills compute their waypoints internally.  Providers
+        compile them once with this generator while building the manifest and
+        freeze the poses the skill requests; those poses do not depend on the
+        planner later being benchmarked.
+        """
+        if self.robot is None:
+            raise RuntimeError("Atomic Task runtime is not configured.")
+        if self._reference_motion_generator is None:
+            from embodichain.lab.sim.motion.motion_generator import (
+                MotionGenCfg,
+                MotionGenerator,
+            )
+            from embodichain.lab.sim.motion.planners import ToppraPlannerCfg
+
+            self._reference_motion_generator = MotionGenerator(
+                MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=self.robot.uid))
+            )
+        return self._reference_motion_generator
+
+    def open_grippers(self) -> None:
+        """Command and set every configured gripper to its open state."""
+        if self.robot is None:
+            raise RuntimeError("Atomic Task runtime is not configured.")
+        batch_size = self.robot.get_qpos().shape[0]
+        for part, (open_state, _) in self._configured_grippers().items():
+            command = open_state.unsqueeze(0).expand(batch_size, -1)
+            for target in (False, True):
+                self.robot.set_qpos(command, name=part, target=target)
+        self.robot.clear_dynamics()
+
     def close_runtime(self) -> None:
         """Release Python references before SimulationManager teardown."""
+        reference = self._reference_motion_generator
+        self._reference_motion_generator = None
+        close = getattr(getattr(reference, "planner", None), "close", None)
+        if close is not None:
+            close()
         self._engine = None
         self._case_providers.clear()
         self._cases_by_id.clear()
@@ -4255,6 +6403,8 @@ class AtomicTaskScenario(ScenarioProvider):
         self.end_effector_part = None
         self._gripper_open = None
         self._gripper_grasp = None
+        self._gripper_states.clear()
+        self._fixtures.clear()
         self.simulation = None
         self.robot = None
         self.suite = None

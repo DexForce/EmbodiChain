@@ -33,6 +33,7 @@ from ..models import AlgorithmRole, BenchmarkCase, PlannerMetadata
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.motion.motion_generator import MotionGenerator
+    from embodichain.lab.sim.motion.planners import PlanOptions
 
 __all__ = ["PlannerAdapter", "PlannerContext"]
 
@@ -167,6 +168,19 @@ class PlannerAdapter(ABC):
                 f"Planner adapter {self.spec.id!r} does not expose a MotionGenerator."
             )
         return motion_generator
+
+    def atomic_plan_options(self) -> "PlanOptions | None":
+        """Return planner options for Atomic Skill calls that leave them unset.
+
+        Atomic Skill providers stay planner-neutral and usually build motion
+        policies without backend options.  A backend whose own defaults cannot
+        plan such calls returns the options it uses for free-space cases.
+
+        Returns:
+            Options applied to every motion policy without ``plan_opts``, or
+            ``None`` to keep the backend defaults.
+        """
+        return None
 
     @abstractmethod
     def plan(self, case: BenchmarkCase) -> PlanResult:

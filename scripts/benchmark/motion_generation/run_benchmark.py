@@ -52,7 +52,9 @@ def add_parser_arguments(parser: argparse.ArgumentParser) -> None:
         help=(
             "Suite short name (smoke/coverage/atomic_franka_pgi_curobo, "
             "atomic_franka_pgi_curobo_randomized, "
-            "atomic_franka_pgi_curobo_pose_batch) "
+            "atomic_franka_pgi_curobo_pose_batch, "
+            "atomic_franka_pgi_spatial_generalization, or any other "
+            "file stem under suites/) "
             "or an explicit YAML path."
         ),
     )

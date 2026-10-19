@@ -25,6 +25,7 @@ from embodichain.lab.sim.motion.motion_generator import (
     MotionGenerator,
 )
 from embodichain.lab.sim.motion.planners import (
+    MoveType,
     PlanResult,
     PlanState,
     ToppraPlannerCfg,
@@ -41,9 +42,17 @@ __all__ = ["ToppraAdapter"]
 
 
 class ToppraAdapter(PlannerAdapter):
-    """Pre-interpolate EEF targets through IK, then run TOPPRA."""
+    """Pre-interpolate EEF targets through IK, then run TOPPRA.
 
-    capabilities = frozenset({"eef_waypoint", "batched", "empty_world"})
+    TOPPRA is the dual-arm Atomic Skill backend: the coordinated skills reject
+    cuRobo, so the adapter also exposes its MotionGenerator to
+    :class:`AtomicActionEngine` and plans joint-space cases from their frozen
+    reference configurations.
+    """
+
+    capabilities = frozenset(
+        {"eef_waypoint", "joint_waypoint", "batched", "empty_world", "atomic_action"}
+    )
     native_timing = True
     """TOPPRA solves the time parameterization under velocity and acceleration
     limits."""
@@ -62,15 +71,48 @@ class ToppraAdapter(PlannerAdapter):
             MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=self.context.robot.uid))
         )
 
+    def _plan_options(self) -> ToppraPlanOptions:
+        """Return the suite-configured TOPPRA limits and sample count."""
+        config = self.spec.config
+        return ToppraPlanOptions(
+            constraints={
+                "velocity": float(config.get("velocity", 0.2)),
+                "acceleration": float(config.get("acceleration", 0.5)),
+            },
+            sample_method=TrajectorySampleMethod.QUANTITY,
+            sample_interval=self.context.sample_interval,
+        )
+
+    def atomic_plan_options(self) -> ToppraPlanOptions:
+        """Use the free-space limits for Atomic Skill calls without options.
+
+        The backend default requests a quantity of ``0.01`` samples, below
+        TOPPRA's two-sample minimum, so skills that leave the sample count to
+        the backend would otherwise always fail.
+        """
+        return self._plan_options()
+
     def plan(self, case: BenchmarkCase) -> PlanResult:
-        """Plan EEF waypoints through the existing IK-to-TOPPRA pipeline."""
+        """Plan ordered EEF or joint waypoints through the IK-to-TOPPRA pipeline."""
         if self.motion_generator is None:
             raise RuntimeError("TOPPRA adapter must be built before plan().")
-        config = self.spec.config
-        targets = [
-            PlanState.from_xpos(case.target_waypoints[:, index])
-            for index in range(case.num_waypoints)
-        ]
+        validity = case.case_parameters.get(
+            "motion_validity", "ordered_cartesian_waypoints"
+        )
+        if validity == "ordered_joint_waypoints":
+            targets = [
+                PlanState.from_qpos(
+                    case.reference_qpos[:, index], move_type=MoveType.JOINT_MOVE
+                )
+                for index in range(case.num_waypoints)
+            ]
+        elif validity == "ordered_cartesian_waypoints":
+            targets = [
+                PlanState.from_xpos(case.target_waypoints[:, index])
+                for index in range(case.num_waypoints)
+            ]
+        else:
+            raise ValueError(f"Unsupported motion_validity mode {validity!r}.")
         return self.motion_generator.generate(
             targets,
             MotionGenOptions(
@@ -78,14 +120,7 @@ class ToppraAdapter(PlannerAdapter):
                 control_part=self.context.control_part,
                 is_interpolate=True,
                 is_linear=True,
-                plan_opts=ToppraPlanOptions(
-                    constraints={
-                        "velocity": float(config.get("velocity", 0.2)),
-                        "acceleration": float(config.get("acceleration", 0.5)),
-                    },
-                    sample_method=TrajectorySampleMethod.QUANTITY,
-                    sample_interval=self.context.sample_interval,
-                ),
+                plan_opts=self._plan_options(),
             ),
         )
 
