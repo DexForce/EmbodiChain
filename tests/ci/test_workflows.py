@@ -141,6 +141,7 @@ def test_simulator_test_job_installs_node_before_workflow_contract_tests() -> No
         "wrong_entry_point_group",
         "foreign_package",
         "bytecode",
+        "missing_asset_config",
     ],
 )
 def test_release_guard_validates_bundled_robot_catalog(
@@ -170,7 +171,7 @@ def test_release_guard_validates_bundled_robot_catalog(
         entry_points = entry_points.replace("[embodichain.robots]", "[other.robots]")
     members = {
         "embodichain/VERSION": version,
-        "embodichain/gen_sim/simready_pipeline/configs/gen_config.json": "{}",
+        "embodichain/gen_sim/asset_engine/configs/gen_config.json": "{}",
         "embodichain_tasks/__init__.py": "",
         task_config: source.read_text(),
         "embodichain_robots/__init__.py": "",
@@ -188,6 +189,8 @@ def test_release_guard_validates_bundled_robot_catalog(
         members["foreign/__init__.py"] = ""
     elif invalid_contents == "bytecode":
         members["embodichain_robots/__pycache__/_catalog.cpython-311.pyc"] = ""
+    elif invalid_contents == "missing_asset_config":
+        del members["embodichain/gen_sim/asset_engine/configs/gen_config.json"]
     dist = tmp_path / "dist"
     dist.mkdir()
     with ZipFile(dist / f"embodichain-{version}-py3-none-any.whl", "w") as wheel:
