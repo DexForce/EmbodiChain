@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from collections.abc import Callable
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field, replace
@@ -115,6 +116,9 @@ class _PickSelection:
     depth_recovery_attempts: int = 0
     depth_trace: list[dict[str, Any]] = field(default_factory=list)
     closing_scene_checks: list[dict[str, Any]] = field(default_factory=list)
+    native_candidate_expanders: dict[int, Callable[[], AffordancePoseCandidates]] = (
+        field(default_factory=dict)
+    )
 
 
 def _pick_ik_tensor(value: Any) -> dict[str, Any]:
@@ -528,9 +532,16 @@ class GenSimPickUp(PickUp):
         *,
         candidate_costs: torch.Tensor | None = None,
         candidate_limit: int | None = None,
+        first_feasible: bool = False,
+        candidate_route: int | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Prefilter grasp columns, leaving IK and roll selection to shared PickUp."""
         selection = _PICK_SELECTION.get()
+        checkpoint = (
+            _RandomState.capture(_cuda_devices(grasp_xpos.device))
+            if first_feasible and candidate_route is not None
+            else None
+        )
         if selection is not None:
             selection.object_pose = object_poses
         if candidate_limit is None and (
@@ -560,6 +571,10 @@ class GenSimPickUp(PickUp):
         # candidate. Only columns rejected by every row can be removed safely.
         keep = aligned.any(dim=(0, 2))
         indices = torch.nonzero(keep, as_tuple=False).flatten()
+        selected = eef_variants[:, :, 0].clone()
+        success = torch.zeros(
+            grasp_xpos.shape[:2], dtype=torch.bool, device=self.device
+        )
         if candidate_limit is not None:
             if (
                 grasp_xpos.shape[0] != 1
@@ -574,7 +589,12 @@ class GenSimPickUp(PickUp):
             ranked = eligible[order]
             retained, count, checked = [], 0, 0
             while checked < len(ranked) and count < candidate_limit:
-                stop = min(len(ranked), checked + candidate_limit - count)
+                width = (
+                    min(50, candidate_limit - count)
+                    if first_feasible
+                    else candidate_limit - count
+                )
+                stop = min(len(ranked), checked + width)
                 chunk = ranked[checked:stop]
                 qualified = self._approach_alignment_mask(
                     eef_variants[:, chunk], options, approach_direction
@@ -583,6 +603,19 @@ class GenSimPickUp(PickUp):
                 retained.append(accepted)
                 count += len(accepted)
                 checked = stop
+                if first_feasible and len(accepted):
+                    poses, valid = self._shared_grasp_variants(
+                        grasp_xpos[:, accepted],
+                        start_qpos,
+                        object_poses,
+                        manipulator,
+                        options,
+                        approach_direction,
+                    )
+                    selected[:, accepted] = poses
+                    success[:, accepted] = valid
+                    if valid.any():
+                        break
             indices = torch.cat(retained) if retained else ranked[:0]
             if selection is not None:
                 selection.closing_scene_checks.append(
@@ -596,12 +629,34 @@ class GenSimPickUp(PickUp):
                         "retained": len(indices),
                         "limit": candidate_limit,
                         "physical_evidence": False,
+                        "first_feasible_batch": first_feasible,
                     }
                 )
-        selected = eef_variants[:, :, 0].clone()
-        success = torch.zeros(
-            grasp_xpos.shape[:2], dtype=torch.bool, device=self.device
-        )
+            if first_feasible:
+                if (
+                    selection is not None
+                    and candidate_route is not None
+                    and success.any()
+                    and checked < len(ranked)
+                    and count < candidate_limit
+                ):
+
+                    def expand():
+                        with _pick_depth_random_scope(checkpoint):
+                            poses, valid = self._select_feasible_grasp_variants(
+                                grasp_xpos,
+                                start_qpos,
+                                object_poses,
+                                manipulator,
+                                options,
+                                approach_direction,
+                                candidate_costs=candidate_costs,
+                                candidate_limit=candidate_limit,
+                            )
+                        return AffordancePoseCandidates(poses, candidate_costs, valid)
+
+                    selection.native_candidate_expanders[candidate_route] = expand
+                return selected, success
         if len(indices):
             poses, valid = self._shared_grasp_variants(
                 grasp_xpos[:, indices],
@@ -614,6 +669,15 @@ class GenSimPickUp(PickUp):
             selected[:, indices] = poses
             success[:, indices] = valid
         return selected, success
+
+    def _expand_native_pick_candidates(self, selection: _PickSelection) -> None:
+        """Restore the original filtered recovery population only after path failure."""
+        if selection.depth_recovery_attempts >= 4:
+            return
+        for index, (strategy, pool, direction) in enumerate(selection.candidate_routes):
+            expand = selection.native_candidate_expanders.pop(strategy, None)
+            if expand is not None:
+                selection.candidate_routes[index] = (strategy, expand(), direction)
 
     def _plan(self, request, context):
         if self.adaptive_unconstrained:
@@ -724,6 +788,7 @@ class GenSimPickUp(PickUp):
                     )
                     if qualified.plan_success.all():
                         return finish(qualified)
+                    self._expand_native_pick_candidates(selection)
                     first = self._retry_ordinary_pick_candidates(
                         request, context, qualified, selection
                     )
@@ -897,7 +962,9 @@ class GenSimPickUp(PickUp):
                 to_matrix=True,
             )
             for strategy, raw, direction in selection.raw_candidate_routes:
-                pool = geometric_variants(self, raw, request, context, direction)
+                pool = geometric_variants(
+                    self, raw, request, context, direction, qualify=False
+                )
                 rotation = quat_from_matrix(pool.poses[0, :, :3, :3])
                 rotation_error = quat_error_magnitude(
                     rotation, quat_from_matrix(start[0, :3, :3]).expand_as(rotation)
@@ -924,10 +991,20 @@ class GenSimPickUp(PickUp):
             while routes and len(attempts) < budget:
                 remaining = []
                 for strategy, pool, direction, indices in routes:
+                    if len(attempts) >= budget:
+                        break
                     index = next(indices, None)
-                    while index is not None and any(
-                        torch.equal(pool.poses[:, index], value) for value in seen
-                    ):
+                    while index is not None:
+                        pose = pool.poses[:, index]
+                        duplicate = any(torch.equal(pose, value) for value in seen)
+                        if not duplicate and bool(
+                            self._approach_alignment_mask(
+                                pose[:, None, None],
+                                request.skill_options,
+                                direction[:, None, None],
+                            ).all()
+                        ):
+                            break
                         index = next(indices, None)
                     if index is None:
                         continue
@@ -1692,7 +1769,23 @@ class GenSimPickUp(PickUp):
                     effective,
                     approach[:, None, None, :],
                     **(
-                        {"candidate_costs": pool_costs, "candidate_limit": limit}
+                        {
+                            "candidate_costs": pool_costs,
+                            "candidate_limit": limit,
+                            "candidate_route": index,
+                            "first_feasible": (
+                                (self.pick_purposes or {}).get(request.invocation_id)
+                                == "ordinary"
+                                and not selection.constrained
+                                and request.invocation_id
+                                not in (self.continuation_previews or {})
+                                and not getattr(
+                                    getattr(context, "affordance_sampling", None),
+                                    "enabled",
+                                    False,
+                                )
+                            ),
+                        }
                         if limit is not None
                         else {}
                     ),
@@ -1773,6 +1866,8 @@ class GenSimPickUp(PickUp):
                 )
                 attempt[key] = bool(clear)
                 accepted &= bool(clear)
+            if not accepted.any():
+                self._expand_native_pick_candidates(selection)
             if full is None:
                 full = context.last_qpos[:, None].expand_as(candidate_path).clone()
                 lengths = candidate_lengths

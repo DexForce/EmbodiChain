@@ -18,6 +18,10 @@
 
 from __future__ import annotations
 
+from embodichain.lab.sim.atomic_actions.affordance_sampling import (
+    AffordancePoseCandidates,
+)
+
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -301,3 +305,92 @@ def test_lazy_native_limit_matches_exhaustive_ranking_with_rejected_prefix(limit
         _PICK_SELECTION.reset(token)
     assert retained == [1, 3, 5, 7, 9][:limit]
     assert queried == list(range(min(10, 2 * limit)))
+
+
+@pytest.mark.parametrize("reject_geometry, reject_ik", [(0, 0), (60, 0), (0, 50)])
+def test_streamed_native_candidates_stop_after_first_feasible_batch(
+    reject_geometry, reject_ik
+):
+    action = GenSimPickUp()
+    action._planning_services = SimpleNamespace(device=torch.device("cpu"))
+    poses = torch.eye(4).repeat(1, 1000, 1, 1)
+    poses[:, :, :3, :3] = torch.diag(torch.tensor([1.0, -1.0, -1.0]))
+    poses[0, :, 0, 3] = torch.arange(1000)
+    queried, solved = [], []
+
+    def mask(values, _):
+        queried.extend(values[0, :, 0, 0, 3].tolist())
+        return values[..., 0, 3] >= reject_geometry
+
+    def shared(values, *_):
+        solved.extend(values[0, :, 0, 3].tolist())
+        return values, values[..., 0, 3] >= reject_ik
+
+    action._shared_grasp_variants = shared
+    token = _PICK_SELECTION.set(
+        _PickSelection(closing_geometry=SimpleNamespace(mask=mask))
+    )
+    try:
+        _, valid = action._select_feasible_grasp_variants(
+            poses,
+            torch.zeros(1, 1),
+            torch.eye(4)[None],
+            object(),
+            PickUpOptions(approach_alignment_max_angle=0.1),
+            torch.tensor([0.0, 0.0, -1.0]),
+            candidate_costs=torch.arange(1000, dtype=torch.float32)[None],
+            candidate_limit=500,
+            first_feasible=True,
+        )
+    finally:
+        _PICK_SELECTION.reset(token)
+    assert valid.any()
+    assert len(queried) <= 150 and max(solved) < 150
+    assert min(solved) >= reject_geometry
+
+
+def test_failed_fast_path_restores_full_filtered_route_without_regenerating():
+    action = GenSimPickUp()
+    action._planning_services = SimpleNamespace(device=torch.device("cpu"))
+    poses = torch.eye(4).repeat(1, 100, 1, 1)
+    poses[:, :, :3, :3] = torch.diag(torch.tensor([1.0, -1.0, -1.0]))
+    poses[0, :, 0, 3] = torch.arange(100)
+    direction = torch.tensor([[[[0.0, 0.0, -1.0]]]])
+    screen = SimpleNamespace(
+        mask=lambda v, _: torch.ones(v.shape[:3], dtype=torch.bool)
+    )
+    selection = _PickSelection(closing_geometry=screen)
+    seeds = []
+
+    def shared(values, *_):
+        seeds.append(torch.rand(1))
+        return values, torch.ones(values.shape[:2], dtype=torch.bool)
+
+    action._shared_grasp_variants = shared
+    costs = torch.arange(100, dtype=torch.float32)[None]
+    token = _PICK_SELECTION.set(selection)
+    try:
+        chosen, valid = action._select_feasible_grasp_variants(
+            poses,
+            torch.zeros(1, 1),
+            torch.eye(4)[None],
+            object(),
+            PickUpOptions(approach_alignment_max_angle=0.1),
+            direction,
+            candidate_costs=costs,
+            candidate_limit=100,
+            first_feasible=True,
+            candidate_route=7,
+        )
+        assert valid.sum() == 50
+        other = AffordancePoseCandidates(chosen, costs, valid)
+        selection.candidate_routes = [(3, other, direction), (7, other, direction)]
+        state = torch.get_rng_state().clone()
+        action._expand_native_pick_candidates(selection)
+        assert torch.equal(torch.get_rng_state(), state)
+    finally:
+        _PICK_SELECTION.reset(token)
+    assert selection.candidate_routes[0][1] is other
+    assert selection.candidate_routes[1][1].valid.sum() == 100
+    assert not selection.native_candidate_expanders
+    assert torch.equal(seeds[0], seeds[1])

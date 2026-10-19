@@ -415,7 +415,7 @@ def test_empty_ik_pool_recovery_hands_the_same_trajectory_to_shared_effect_build
     original = request.skill_options
     request.skill_options = replace(original, rotate_upright=0.5)
     # Geometric qualification has already applied the original transform.
-    monkeypatch.setattr(candidate, "geometric_variants", lambda *args: _pool())
+    monkeypatch.setattr(candidate, "geometric_variants", lambda *args, **kw: _pool())
 
     def build(self, selected, context):
         exact = _PICK_SELECTION.get().trajectory
@@ -479,6 +479,55 @@ def test_raw_retry_shares_old_four_candidate_budget(monkeypatch):
     assert (
         action._recover_raw_pick_candidates(request, context, first, selection) is first
     )
+
+
+def test_raw_recovery_qualifies_only_attempted_prefix(monkeypatch):
+    action, request, context, _, direction, _ = _fixture(monkeypatch)
+    poses = torch.eye(4).repeat(1, 100, 1, 1)
+    poses[0, :, 0, 3] = torch.arange(100)
+    pool = AffordancePoseCandidates(
+        poses,
+        torch.arange(100, dtype=torch.float32)[None],
+        torch.ones(1, 100, dtype=torch.bool),
+    )
+    selection = _PickSelection(
+        request=request,
+        object_pose=torch.eye(4)[None],
+        raw_candidate_routes=[(0, pool, direction)],
+    )
+    checked = []
+
+    def qualify(values, *_):
+        checked.extend(values[..., 0, 3].flatten().tolist())
+        return values[..., 0, 3] >= 2
+
+    action._approach_alignment_mask = qualify
+    action._qualify_pick_candidate = Mock(return_value=(None, {}))
+    first = Plan(torch.tensor([False]), PlannerDiagnostics(backend="mock"))
+    result = action._recover_raw_pick_candidates(request, context, first, selection)
+    assert not result.plan_success.any()
+    assert action._qualify_pick_candidate.call_count == 4
+    assert checked == [0, 0, 1, 1, 2, 2, 3, 3]
+
+
+def test_raw_recovery_does_not_screen_later_routes_after_success(monkeypatch):
+    action, request, context, _, direction, _ = _fixture(monkeypatch)
+    selection = _PickSelection(
+        request=request,
+        object_pose=torch.eye(4)[None],
+        raw_candidate_routes=[(0, _pool(), direction), (1, _pool(), direction)],
+    )
+    checked = []
+    action._approach_alignment_mask = lambda values, *_: (
+        checked.append(values.clone()) or torch.ones(values.shape[:3], dtype=torch.bool)
+    )
+    success = Plan(torch.tensor([True]), PlannerDiagnostics(backend="mock"))
+    action._qualify_pick_candidate = Mock(return_value=(success, {}))
+    first = Plan(torch.tensor([False]), PlannerDiagnostics(backend="mock"))
+    assert action._recover_raw_pick_candidates(
+        request, context, first, selection
+    ).plan_success.all()
+    assert len(checked) == 1 and checked[0].numel() == 16
 
 
 def _fixed_fixture(monkeypatch):

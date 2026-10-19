@@ -32,6 +32,7 @@ def setup(
     endpoint_clear: bool,
     path_success: bool = True,
     consume_rng: bool = False,
+    native_limit: int | None = None,
 ):
     action = actions.GenSimPickUp()
     action.pick_purposes = {"probe": "ordinary"}
@@ -40,7 +41,7 @@ def setup(
     calls = []
     options = PickUpOptions()
 
-    def feasible(poses, start, obj, arm, opt, approach):
+    def feasible(poses, start, obj, arm, opt, approach, **kwargs):
         if consume_rng:
             torch.rand(2)
         return poses @ opt.grasp_frame_to_eef, torch.ones(1, 1, dtype=torch.bool)
@@ -106,7 +107,7 @@ def setup(
     def run():
         return action._select_adaptive_pick(
             object(),
-            object(),
+            SimpleNamespace(native_proposal_limit=native_limit),
             torch.eye(4)[None],
             torch.zeros(1, 1),
             object(),
@@ -232,3 +233,22 @@ def test_cached_depth_pool_never_calls_upstream_generator() -> None:
             "same",
             candidate_pool=pool,
         )
+
+
+@pytest.mark.parametrize("has_continuation", [False, True])
+def test_streamed_fast_path_does_not_truncate_a_continuation_owner(
+    monkeypatch, has_continuation
+):
+    action, _, _, _, run = setup(monkeypatch, endpoint_clear=True, native_limit=100)
+    if has_continuation:
+        action.continuation_previews = {"probe": object()}
+    modes = []
+    original = action._select_feasible_grasp_variants
+
+    def feasible(*args, **kwargs):
+        modes.append(kwargs["first_feasible"])
+        return original(*args, **kwargs)
+
+    action._select_feasible_grasp_variants = feasible
+    assert run().success.all()
+    assert modes == [not has_continuation]

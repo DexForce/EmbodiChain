@@ -101,6 +101,8 @@ def geometric_variants(
     request: Any,
     context: Any,
     direction: torch.Tensor,
+    *,
+    qualify: bool = True,
 ) -> AffordancePoseCandidates:
     """Retain source geometry validity and calibrated, aligned symmetric rolls."""
     mirrored = pool.poses.clone()
@@ -132,9 +134,10 @@ def geometric_variants(
         ).reshape_as(valid)
     variants = variants @ options.grasp_frame_to_eef.to(variants)
     valid = valid & torch.isfinite(variants).all(dim=(-1, -2))
-    valid = valid & action._approach_alignment_mask(
-        variants, options, direction[:, None, None]
-    )
+    if qualify:
+        valid = valid & action._approach_alignment_mask(
+            variants, options, direction[:, None, None]
+        )
     return AffordancePoseCandidates(
         poses=variants.flatten(1, 2),
         costs=pool.costs[..., None].expand(-1, -1, 2).flatten(1, 2),

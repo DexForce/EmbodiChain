@@ -200,6 +200,20 @@ for already-incompatible columns; it adds no new acceptance condition.
 Qualification follows the original stable cost order and stops when the
 configured number of valid candidates is filled. This is the same qualified
 top-k set as an exhaustive screen, without checking a provably higher-cost tail.
+Ordinary B1 Picks without continuation previews or affordance branch sampling
+qualify and solve candidates
+in stable-cost batches of at most 50, stopping at the first IK-feasible batch
+before invoking the existing full-path checks. The configured qualified-candidate
+cap is still an upper bound, not a required population. Other callers retain the
+exhaustive qualified top-k selector.
+If the selected path or its full safety qualification fails, the original raw
+pool and pre-IK random checkpoint restore that route's complete qualified-cap
+population in place before the existing filtered recovery. This preserves
+candidate coverage, not bitwise equivalence of random full-path planning.
+Failed-path raw recovery qualifies individual
+TCP rolls on demand in the existing cost/nearest-roll/route order; it does not
+scan every raw route before applying the shared four-path budget. No native
+source/scene check or execution gate is removed.
 Revision 8 also checks the same native cooked hand against other rigid bodies'
 actual pair rest offsets over the original precontact grid. Source contact
 remains separately owned; the existing robot/articulation/proxy checks remain.
