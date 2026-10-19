@@ -368,3 +368,46 @@ def test_same_assets_with_distinct_pour_or_initial_geometry_get_distinct_ids(
     assert yaml.safe_load(changed_source.deployment_path.read_text())["id"] not in {
         identity[0] for identity in identities
     }
+
+
+def test_pouring_preserves_schema_default_position_tolerance(pouring, tmp_path):
+    from embodichain.lab.task_program.language.schema import (
+        ObjectNearTargetValidatorCfg,
+    )
+
+    source, requirements = pouring
+    program_path = source.parent / "program.yaml"
+    program = yaml.safe_load(program_path.read_text())
+    for segment in program["program"]["items"]:
+        for validator in segment.get("validators", []):
+            if validator["kind"] == "object_near_target":
+                validator.pop("position_tolerance", None)
+    _dump(program_path, program)
+    resolved = resolve_asset_set(requirements, _prepared(tmp_path / "assets"))
+    result = materialize_asset_deployment(
+        source,
+        requirements,
+        resolved,
+        output_dir=tmp_path / "out",
+        adaptations=AssetAdaptationCfg(pour=AssetPourAdaptationCfg()),
+    )
+    adapted = yaml.safe_load(
+        (result.deployment_path.parent / "program.yaml").read_text()
+    )
+    validators = [
+        item
+        for segment in adapted["program"]["items"]
+        for item in segment.get("validators", [])
+        if item["kind"] == "object_relative_position"
+    ]
+    assert validators
+    for validator in validators:
+        assert validator["position_tolerance"] == pytest.approx(
+            [
+                ObjectNearTargetValidatorCfg(
+                    object="bottle", target="return"
+                ).position_tolerance
+                / math.sqrt(3)
+            ]
+            * 3
+        )

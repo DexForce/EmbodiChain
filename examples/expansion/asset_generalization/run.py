@@ -110,6 +110,14 @@ def _template(root: Path, *, side: float, seed: int, batch_index: int) -> Path:
     support["object_target_pose"][11] = (
         platform["shape"]["size"][2] / 2 + side / 2 + 0.002
     )
+    for segment in program["program"]["items"]:
+        for validator in segment.get("validators", []):
+            if (
+                validator["kind"] == "object_relative_position"
+                and validator["object"] == "cube"
+                and validator["reference"] == "platform"
+            ):
+                validator["position_offset"][2] = support["object_target_pose"][11]
     for name, value in (
         ("task", task),
         ("env", environment),

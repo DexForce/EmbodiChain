@@ -461,7 +461,7 @@ def finish_pour_adaptation(
                 else support_id
             )
             offset = offsets[(object_id, reference)]
-            tolerance = validator.get("position_tolerance", 0.01)
+            tolerance = validator.get("position_tolerance", 0.03)
             target_id = validator.get("target")
             targets = p.program.get("targets", {})
             if target_id in targets:
