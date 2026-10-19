@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import copy
 import hashlib
-import math
 import os
 import threading
 import time
@@ -31,7 +30,8 @@ import torch
 from tensordict import TensorDict, TensorDictBase
 
 from ._sampling import _context_indices, _draw_budgeted_rows, _pad_context
-from .sequence import DataBudgetExhaustedError, SequenceSpecCfg
+from .sequence import DataBudgetExhaustedError, DataUnavailableError, SequenceSpecCfg
+from .schema import validate_data_schema
 
 if TYPE_CHECKING:
     from embodichain.data_pipeline.engine.data import OnlineDataEngine
@@ -43,8 +43,6 @@ def _check_features(data: TensorDictBase, schema: Mapping[str, Any]) -> None:
     for key, section in (("obs", "observation"), ("actions", "action")):
         value = data[key]
         definition = schema.get(section, {})
-        if not isinstance(definition, Mapping):
-            raise ValueError(f"Schema {section} must be a mapping")
         if isinstance(value, TensorDictBase):
             if "names" in definition:
                 raise ValueError(
@@ -52,27 +50,21 @@ def _check_features(data: TensorDictBase, schema: Mapping[str, Any]) -> None:
                 )
             if not list(value.keys(include_nested=True, leaves_only=True)):
                 raise ValueError(f"Schema {section} requires nonempty numeric features")
+            dtype = definition.get("dtype")
+            if dtype is not None and any(
+                str(leaf.dtype).removeprefix("torch.") != dtype
+                for leaf in value.values(include_nested=True, leaves_only=True)
+            ):
+                raise ValueError(f"Schema {section} dtype mismatch")
             continue
         names = definition.get("names")
         if names is not None and (
-            value.ndim != data.batch_dims + 1
-            or not isinstance(names, list)
-            or len(names) != value.shape[-1]
-            or not all(isinstance(name, str) and name for name in names)
-            or len(set(names)) != len(names)
+            value.ndim != data.batch_dims + 1 or len(names) != value.shape[-1]
         ):
             raise ValueError(f"Schema {section}.names must name all ordered features")
         dtype = definition.get("dtype")
         if dtype is not None and dtype != str(value.dtype).removeprefix("torch."):
             raise ValueError(f"Schema {section} dtype mismatch")
-    step_dt = schema.get("action", {}).get("step_dt")
-    if step_dt is not None and (
-        isinstance(step_dt, bool)
-        or not isinstance(step_dt, (float, int))
-        or not math.isfinite(step_dt)
-        or step_dt <= 0
-    ):
-        raise ValueError("Action step_dt must be finite and positive")
 
 
 class OnlineDataSource:
@@ -98,6 +90,7 @@ class OnlineDataSource:
             Callable[[Any], torch.Tensor | TensorDictBase] | None
         ) = None,
     ) -> None:
+        validate_data_schema(schema)
         self.engine = engine
         self.schema = copy.deepcopy(dict(schema))
         self.source_id = str(engine.run_id)
@@ -215,6 +208,7 @@ class TensorDataSource:
         copy_data: bool = True,
         metadata: Mapping[str, Any] | None = None,
     ) -> None:
+        validate_data_schema(schema)
         if data.batch_dims != 2 or any(size < 1 for size in data.batch_size):
             raise ValueError(
                 "Resident data must have nonempty [episode, time] batch axes"
@@ -557,7 +551,7 @@ class TensorDataSource:
             valid = eligible_valid
         eligible = eligible_valid.any(1).nonzero().flatten()
         if not len(eligible):
-            raise RuntimeError("No valid offline context anchor")
+            raise DataUnavailableError("No valid offline context anchor")
         rows = self._draw_rows(eligible, batch_size, generator)
         anchors = torch.multinomial(
             eligible_valid[rows].float(), 1, replacement=True, generator=generator

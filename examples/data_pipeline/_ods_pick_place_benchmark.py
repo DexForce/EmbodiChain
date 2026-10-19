@@ -33,6 +33,8 @@ from typing import Any
 
 import torch
 
+from embodichain.data_pipeline.datasets import data_schema_fingerprint
+
 __all__ = [
     "EfficiencyTracker",
     "resource_snapshot",
@@ -121,7 +123,7 @@ def _validate_tensors(tensors: dict[str, torch.Tensor], schema: dict[str, Any]) 
 def _content_manifest(
     tensors: dict[str, torch.Tensor], schema: dict[str, Any]
 ) -> dict[str, Any]:
-    schema_hash = hashlib.sha256(_json_bytes(schema)).hexdigest()
+    schema_hash = data_schema_fingerprint(schema)
     episodes = []
     for row, mask in enumerate(tensors["valid"]):
         episodes.append(

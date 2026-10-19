@@ -11,7 +11,7 @@ belongs to [data-assets](../data-assets/data-assets.md).
 |---|---|
 | Online worker and sample selection | `embodichain/data_pipeline/engine/data.py`: `OnlineDataEngine` |
 | Throughput-derived settings and protected reuse profiles | `embodichain/data_pipeline/configuration.py`: `configure_ods`; sampler enforcement in `engine/data.py` |
-| PyTorch chunk/context wrappers | `embodichain/data_pipeline/datasets/{online_data,offline_data}.py`: `OnlineDataset`, `OfflineDataset` |
+| PyTorch iteration | `embodichain/data_pipeline/datasets/`: `sequence_data.py` owns `SequenceDataset`; `online_data.py` preserves `OnlineDataset`; `OfflineDataset` is an alias |
 | Shared sequence contract and sources | `embodichain/data_pipeline/datasets/sequence.py`, `sources.py`, `_sampling.py` |
 | Bounded numeric LeRobot loading | `embodichain/data_pipeline/datasets/lerobot.py`: `LeRobotDataSource`, explicit field mapping |
 | PickPlace BC and offline comparisons | `examples/data_pipeline/ods_pick_place_showcase.py`; private training/benchmark helpers alongside it; task-owned physical evidence in `embodichain_tasks.manipulation.pick_place` |
@@ -32,7 +32,10 @@ for fragment transactions, async ownership, depth output and shutdown. Read
 validation, and conversion across Python/LeRobot versions.
 
 `BatchSource.sample_context()` returns owned TensorDicts under a shared
-`SequenceSpecCfg`. ODS and resident sources reuse window/mask and quota-draw
+`SequenceSpecCfg`; `SequenceDataset` supplies the common iteration interface.
+The package's `schema.py` owns common semantic validation and schema fingerprints;
+all source constructors require explicit action semantics and control period.
+ODS and resident sources reuse window/mask and quota-draw
 helpers while retaining distinct lifecycle/lock ownership. `LeRobotDataSource`
 requires explicit action semantics, step duration, field mapping and a resident
 memory limit; imports do not initialize simulation or import the SDK until load.
@@ -72,9 +75,9 @@ action contracts independently of the expert-controller schema; see
 [online sampling](online-sampling.md) before changing stored action meaning.
 
 Distinguish a terminal worker failure from a sampling request with no eligible
-unlocked window. The latter raises `RuntimeError` immediately without itself
-setting `FAILED` or triggering a refill. `OnlineDataset` propagates both kinds
-of exception; it does not supply an automatic retry loop.
+unlocked window. The latter raises `DataUnavailableError` (a `RuntimeError`)
+immediately without itself setting `FAILED` or triggering a refill. Datasets
+propagate both kinds of exception without an automatic retry loop.
 
 ## Persistence contract
 
@@ -134,7 +137,7 @@ time are available through the recorder's async stats.
 
 | Change | Tests |
 |---|---|
-| Public schemas, sources, context wrappers and SDK reads | `tests/data_pipeline/test_sources.py`, `test_lerobot_source.py` |
+| Public schemas, sources, context wrappers and SDK reads | `tests/data_pipeline/test_schema.py`, `test_sources.py`, `test_lerobot_source.py` |
 | Worker states, valid sampling, continuity, DataLoader | `tests/data_pipeline/test_online_data.py` |
 | Sync commit, FPS, fragments and depth routing | `tests/gym/envs/managers/test_dataset_functors.py` |
 | Legacy/action-contract schemas and official task mapping | `tests/gym/envs/managers/test_dataset_functors.py` |

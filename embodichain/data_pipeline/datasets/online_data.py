@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import copy
 from typing import Callable, Iterator, List, Literal, Optional
 from collections.abc import Mapping
 from typing import Any
@@ -28,7 +27,7 @@ from torch.utils.data import IterableDataset
 
 from embodichain.data_pipeline.engine.data import OnlineDataEngine
 from embodichain.data_pipeline.datasets.sampler import ChunkSizeSampler
-from .offline_data import _iter_context
+from .sequence_data import SequenceDataset
 from .sequence import SequenceSpecCfg
 from .sources import OnlineDataSource
 
@@ -80,6 +79,10 @@ class OnlineDataset(IterableDataset):
     tokenize them in the consumer or a transform. The text dictionaries append
     new entries without changing existing indices, so previously sampled items
     retain their language when the engine refills trajectory slots.
+
+    New context consumers may use ``SequenceDataset(OnlineDataSource(...),
+    sequence, ...)`` directly. This wrapper preserves legacy chunk APIs and
+    delegates its opt-in context iteration to that same Dataset implementation.
 
     Args:
         engine: A started OnlineDataEngine whose shared buffer is used for
@@ -155,9 +158,8 @@ class OnlineDataset(IterableDataset):
         observation_transform: Callable[[Any], torch.Tensor] | None = None,
         generator: torch.Generator | None = None,
     ) -> None:
-        self._sequence = copy.deepcopy(sequence)
+        self._context_dataset = None
         self.source = None
-        self._generator = generator
         if sequence is not None:
             sequence._check()
             if chunk_size is not None or sampling_mode != "episode":
@@ -174,6 +176,13 @@ class OnlineDataset(IterableDataset):
                 raise ValueError("batch_size must be None or a positive integer")
             self.source = OnlineDataSource(
                 engine, schema=schema, observation_transform=observation_transform
+            )
+            self._context_dataset = SequenceDataset(
+                self.source,
+                sequence,
+                batch_size=batch_size,
+                transform=transform,
+                generator=generator,
             )
         elif (
             generator is not None
@@ -247,14 +256,8 @@ class OnlineDataset(IterableDataset):
             TensorDict sampled from the engine's shared buffer, optionally
             post-processed by ``transform``.
         """
-        if self._sequence is not None:
-            yield from _iter_context(
-                self.source,
-                self._sequence,
-                self._batch_size,
-                self._transform,
-                self._generator,
-            )
+        if self._context_dataset is not None:
+            yield from self._context_dataset
             return
         if self._batch_size is None:
             # In item mode, keep chunk_size fixed per iterator to preserve

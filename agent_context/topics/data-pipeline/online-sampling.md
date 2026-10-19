@@ -193,10 +193,13 @@ for rate units, protected scene splits and measurement limits.
 
 `sample_batch()` checks the shared worker error, READY state and worker liveness
 before selecting a window. Invalid arguments raise `ValueError`. If no unlocked
-valid window satisfies `chunk_size` and `sampling_mode`, it raises `RuntimeError`
+valid window satisfies `chunk_size` and `sampling_mode`, it raises `DataUnavailableError`
 immediately; that eligibility failure does not itself change the engine state.
 Refill accounting runs only after a successful clone. `OnlineDataset.__iter__()`
-does not catch these exceptions, so retry policy belongs to the consumer.
+and `SequenceDataset` propagate these exceptions, so retry policy belongs to the
+consumer. `DataUnavailableError` subclasses `RuntimeError`; quota exhaustion
+and terminal worker/read failures remain distinct and must not be retried by
+matching exception messages.
 
 ## Failure diagnosis
 

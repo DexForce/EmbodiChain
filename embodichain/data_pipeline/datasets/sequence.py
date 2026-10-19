@@ -26,11 +26,26 @@ from tensordict import TensorDict
 
 from embodichain.utils import configclass
 
-__all__ = ["SequenceSpecCfg", "BatchSource", "DataBudgetExhaustedError"]
+__all__ = [
+    "SequenceSpecCfg",
+    "BatchSource",
+    "DataBudgetExhaustedError",
+    "DataUnavailableError",
+]
 
 
 class DataBudgetExhaustedError(RuntimeError):
     """A complete requested batch exceeds eligible source delivery allowances."""
+
+
+class DataUnavailableError(RuntimeError):
+    """No eligible unlocked window exists under the current source/filter state.
+
+    This is distinct from quota depletion and a terminal producer/read failure.
+    The caller decides whether new publication can help and whether to wait
+    with a deadline; a fixed offline source may never satisfy the request.
+    Legacy consumers catching RuntimeError remain compatible.
+    """
 
 
 @configclass
@@ -111,7 +126,8 @@ class BatchSource(Protocol):
         Raises:
             DataBudgetExhaustedError: Eligible delivery credits cannot provide
                 the entire batch. No partial debit is performed.
-            RuntimeError: No eligible anchor exists, or source reading fails.
+            DataUnavailableError: No eligible anchor exists in the current data.
+            RuntimeError: A producer or source read failed.
             ValueError: Schema or requested capabilities are incompatible.
         """
         ...

@@ -40,12 +40,13 @@ from tensordict import TensorDict
 
 from embodichain.data_pipeline.datasets import (
     BatchSource,
+    DataBudgetExhaustedError,
+    DataUnavailableError,
     OnlineDataSource,
     SequenceSpecCfg,
 )
 
 from embodichain.data_pipeline.engine.data import (
-    OnlineDataBudgetExhaustedError,
     OnlineDataEngine,
     OnlineDataEngineCfg,
     OnlineDataEngineState,
@@ -420,15 +421,8 @@ def _sample(
         try:
             batch = source.sample_context(count, sequence)
             break
-        except RuntimeError as error:
-            if (
-                engine is None
-                or engine.state is not OnlineDataEngineState.READY
-                or (
-                    "No unlocked valid chunk" not in str(error)
-                    and not isinstance(error, OnlineDataBudgetExhaustedError)
-                )
-            ):
+        except (DataUnavailableError, DataBudgetExhaustedError) as error:
+            if engine is None or engine.state is not OnlineDataEngineState.READY:
                 raise
             if blocked is None:
                 blocked = tracker.elapsed_seconds()
@@ -1331,7 +1325,7 @@ def run(args: argparse.Namespace) -> None:
                 try:
                     with sampling_rng.scope():
                         batch = _sample(source, args.batch_size, tracker, sequence)
-                except OnlineDataBudgetExhaustedError:
+                except DataBudgetExhaustedError:
                     if corpus is None:
                         raise
                     end_reason = "usage_budget"

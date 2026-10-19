@@ -38,7 +38,11 @@ from examples.data_pipeline._ods_pick_place_benchmark import (
 
 _SCHEMA = {
     "observation": {"names": ["joint", "height"]},
-    "action": {"names": ["request"]},
+    "action": {
+        "names": ["request"],
+        "semantics": "policy_request",
+        "step_dt": 1 / 30,
+    },
 }
 
 

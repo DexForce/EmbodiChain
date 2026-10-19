@@ -46,7 +46,7 @@ def _corpus() -> TensorDataSource:
             },
             batch_size=valid.shape,
         ),
-        schema={},
+        schema={"action": {"semantics": "policy_request", "step_dt": 1 / 30}},
         source_id="quota-test",
     )
 

@@ -30,6 +30,7 @@ from tensordict import TensorDict
 
 from embodichain.utils import configclass
 from .sources import TensorDataSource
+from .schema import validate_data_schema
 
 __all__ = ["LeRobotFieldMappingCfg", "LeRobotDataSource"]
 
@@ -215,19 +216,7 @@ class LeRobotDataSource(TensorDataSource):
             raise ValueError("max_episode_steps must be a positive integer")
         mapping = mapping or LeRobotFieldMappingCfg()
         mapping.__post_init__()
-        action = schema.get("action", {})
-        step_dt = action.get("step_dt")
-        if not isinstance(
-            action.get("semantics", action.get("representation")), str
-        ) or not action.get("semantics", action.get("representation")):
-            raise ValueError("Explicit action semantics or representation is required")
-        if (
-            isinstance(step_dt, bool)
-            or not isinstance(step_dt, (float, int))
-            or not math.isfinite(step_dt)
-            or step_dt <= 0
-        ):
-            raise ValueError("Explicit finite positive action step_dt is required")
+        validate_data_schema(schema)
         if not isinstance(source_id, str) or not source_id:
             raise ValueError("source_id must be a nonempty persisted dataset identity")
         # The SDK transform creates tensors without an explicit device.

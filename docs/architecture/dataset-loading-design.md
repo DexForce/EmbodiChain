@@ -5,9 +5,11 @@ Updated 2026-10-19. Image/video sequence loading and out-of-core storage remain 
 
 ## Problem and acceptance criterion
 
-`OnlineDataset` preserves its original chunk API and adds opt-in context
-sampling. `OnlineDataSource`, `TensorDataSource` and `LeRobotDataSource` implement
-the public `BatchSource` contract; `OfflineDataset` supplies PyTorch iteration.
+`SequenceDataset` supplies one PyTorch context-iteration interface for live and
+resident sources. `OnlineDataSource`, `TensorDataSource` and `LeRobotDataSource`
+implement the public `BatchSource` contract. `OfflineDataset` remains a
+compatibility alias; `OnlineDataset` preserves its original chunk API and
+delegates its opt-in context iteration to the common Dataset.
 PickPlace now consumes these sources and retains its own feature transformation,
 writer, sidecar/content auditing and experimental accounting. The public numeric
 reader also accepts standard LeRobot datasets without the PickPlace sidecar
@@ -31,13 +33,34 @@ The components below are exported from that package.
 | `OnlineDataSource` | Delegate publication, locks, provenance, errors and quotas to the existing engine. |
 | `LeRobotDataSource` | Read through the official SDK, validate or explicitly map metadata, and provide bounded resident numeric storage. |
 | `TensorDataSource` | Resident CPU TensorDict storage, temporal metadata and optional per-source quotas. |
-| Dataset wrappers | Shared context iteration/collation; compatible `OnlineDataset` and new `OfflineDataset`. |
+| `SequenceDataset` | Storage-independent context iteration/collation and explicit per-iterator limits. |
+| Compatibility entries | `OfflineDataset` aliases `SequenceDataset`; `OnlineDataset` preserves chunk APIs and delegates context iteration. |
+| Schema utilities | `validate_data_schema` and `data_schema_fingerprint` share semantic validation and persistable identity. |
 
 Pure window/mask calculations and canonical padding are shared between source
 adapters. Source ownership, synchronization and lifecycle remain separate. The
 public contract must not depend on Franka, a 51-feature layout or ChunkBC.
 Task features, absolute TCP-target construction, normalization fitting, noise,
 training and efficiency reporting remain with their existing owners.
+
+```mermaid
+flowchart LR
+    Engine[ODS Engine] --> Online[OnlineDataSource]
+    Files[LeRobot files] --> Stored[LeRobotDataSource]
+    Tensors[Resident tensors] --> Resident[TensorDataSource]
+    Online --> Contract[BatchSource]
+    Stored --> Contract
+    Resident --> Contract
+    Contract --> Dataset[SequenceDataset]
+    Dataset --> Learner[BC or SFT consumer]
+```
+
+Select a source object, rather than adding an online/offline flag and mutually
+exclusive path/engine arguments to the Dataset. Source adapters retain their
+own allocation, SDK, producer-lock and quota ownership. The common Dataset
+does not create environments, load files, request refill or become a replay
+owner. Direct `sample_context()` consumption remains supported for callers
+that explicitly schedule production and training.
 
 ## Batch and sequence contract
 
@@ -59,6 +82,19 @@ training and efficiency reporting remain with their existing owners.
 - Schema validation includes ordered names/slices, dtype, observation timing,
   action representation, normalization, frame, rotation convention and step
   duration. A matching vector width alone does not establish compatibility.
+- All public source constructors use the same declaration validator: explicit
+  action semantics or representation and positive `step_dt` are required.
+  Optional observation timing must be `pre_action`, as required by this source
+  contract. Names/dtypes and supplied root/feature versions are checked; actual
+  tensor layouts and ODS action descriptors are checked by their adapters.
+  Older `TensorDataSource(schema={})` calls must supply truthful action metadata;
+  legacy engine/chunk APIs are unchanged.
+- Keep storage-column adaptation separate from task/model feature conversion.
+  `schema.observation.version` can identify a feature transform, as in PickPlace.
+  Persist versions, units, frames and normalization declarations rather than
+  inferring them. `data_schema_fingerprint()` hashes finite canonical JSON;
+  reordered mapping keys do not change it, while feature order and declared
+  versions do. It neither identifies callable code nor proves a declaration true.
 - Persist portable dataset/episode/frame identities. Keep engine-local run ID,
   generation and acceptance time as optional origin metadata, not a replacement
   for portable identity. Resolve language using the source's own dictionary;
@@ -99,8 +135,10 @@ with explicit owner-process consumption and reject unsupported worker modes.
 
 Finite stored episodes may be sampled repeatedly. State source cardinality,
 iteration limits and quota exhaustion separately. Preserve immediate empty
-window errors and distinguish quota exhaustion, permanent read/worker failure
-and schema errors. Retry/wait deadlines belong to the caller. Do not catch a
+window errors with `DataUnavailableError`, a `RuntimeError` subclass compatible
+with existing handlers. Distinguish it from `DataBudgetExhaustedError`, permanent
+read/worker failures and schema errors. No eligible window in a fixed source
+does not imply waiting can help. Retry/wait deadlines belong to the caller. Do not catch a
 permanent failure and silently continue with old data.
 
 Use a common delivered-chunk unit for optional per-source limits, including
@@ -109,6 +147,29 @@ failed optimization does not refund delivered chunks. Live replacement retires
 unused credits, whereas an offline source does not refill. Offline protected
 resume must restore its ledger or fail; ODS resume continues to declare a new
 source run rather than exact shared-cache recovery.
+
+`max_batches` bounds one iterator and never resets source budgets. A new iterator
+may draw again only within the remaining source allowance. Prefetch and failed
+transforms already consumed delivered chunks; report delivered and completed
+optimizer chunks separately. Initial protected usage remains owner-process
+consumption. RLinf adapters may define bounded logical training epochs without
+inferring unique-data cardinality from an ODS cache.
+
+## Relationship to ODS and RLinf
+
+This is the numeric online BC/SFT loading path and pre-RLinf showcase milestone
+of [#788](https://github.com/DexForce/EmbodiChain/issues/788), which supersedes
+[#672](https://github.com/DexForce/EmbodiChain/issues/672). Per-source delivery
+protection and throughput pacing remain in the existing engine/configurator;
+the Dataset does not derive learning-safe reuse bounds from throughput alone.
+
+The future DAgger handoff is committed, labeled episodes into RLinf replay.
+RLinf is then the single training aggregation/eviction/sampling owner; ODS
+publishes experience without maintaining a second training replay. Same-state
+expert queries, separate expert/behavior actions and label-validity masks,
+commit acknowledgment/deduplication and coordinated resume remain later work.
+The existing BC `actions/valid/loss_mask` contract must not silently acquire
+DAgger semantics or success-only eligibility for learner failures.
 
 ## Alignment gate
 
@@ -138,7 +199,7 @@ version. Numerical parity is not evidence of a throughput improvement.
 
 ### Completed PickPlace validation
 
-The [recorded check](../../extensions/embodichain_tasks/configs/tasks/manipulation/pick_place/ODS_ALIGNMENT_VALIDATION.json)
+The earlier [recorded check](../../extensions/embodichain_tasks/configs/tasks/manipulation/pick_place/ODS_ALIGNMENT_VALIDATION.json)
 passed nine paired CPU cases and 146 related regression cases. A real expert
 producer also supplied two generations/four accepted episodes (1,330 valid
 frames); four paired batches/32 chunks and four optimizer updates matched
@@ -148,14 +209,21 @@ showcase path, not the proposed public API or every batch of the previous pilot.
 The record retains an earlier harness filename failure and the native shutdown
 warning; neither is silently removed from the evidence.
 
+The public API validation and subsequent SequenceDataset consolidation are
+recorded separately in
+[DATASET_LOADING_VALIDATION.json](../../extensions/embodichain_tasks/configs/tasks/manipulation/pick_place/DATASET_LOADING_VALIDATION.json).
+Its follow-up section distinguishes the current CPU/SDK regression checks from
+the earlier physical producer experiments and implementation hashes.
+
 ## Delivery and performance gate
 
 1. Canonical padding, continuity rejection and paired tests are in place. Retain
    previous experimental records with their original source revisions.
 2. Public contracts and shared pure sampling helpers are extracted. Existing
    engine defaults are preserved, with explicit context RNG/filter options.
-3. The bounded LeRobot numeric adapter, offline Dataset wrapper and opt-in
-   OnlineDataset context mode are implemented. Old chunk APIs remain available.
+3. The bounded LeRobot numeric adapter and common SequenceDataset are
+   implemented. OfflineDataset is a compatibility alias; OnlineDataset context
+   mode delegates to the common implementation. Old chunk APIs remain available.
 4. The showcase uses public sources; its duplicate resident sampler and SDK
    loading loop are removed. It retains task hashes, writing and experiments.
 5. Qualify end-to-end overhead before repeating timed comparisons. Include B=1
@@ -181,7 +249,7 @@ verified; unannotated external data requires a truthful caller mapping.
 ```python
 from torch.utils.data import DataLoader
 from embodichain.data_pipeline.datasets import (
-    LeRobotDataSource, OfflineDataset, OnlineDataset, SequenceSpecCfg,
+    LeRobotDataSource, OnlineDataSource, SequenceDataset, SequenceSpecCfg,
 )
 
 sequence = SequenceSpecCfg(history_length=2, prediction_horizon=64)
@@ -189,17 +257,18 @@ source = LeRobotDataSource(
     "/path/to/lerobot", schema=schema, source_id="my-dataset-v1",
     memory_limit_bytes=512 * 1024 * 1024,
 )
-dataset = OfflineDataset(source, sequence, batch_size=64, max_batches=1000)
+dataset = SequenceDataset(source, sequence, batch_size=64, max_batches=1000)
 loader = DataLoader(dataset, batch_size=None, num_workers=0)
 # batch contains obs/actions/valid/loss_mask and source frame_ids.
 for batch in loader:
     train_step(batch)
 
 # engine is already started and remains caller-owned.
-online = OnlineDataset(
-    engine, sequence=sequence, schema=schema, batch_size=64,
+online_source = OnlineDataSource(
+    engine, schema=schema,
     observation_transform=feature_fn,
 )
+online = SequenceDataset(online_source, sequence, batch_size=64, max_batches=1000)
 ```
 
 A learner that explicitly schedules refill/waits can call the source's

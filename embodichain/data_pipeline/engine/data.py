@@ -46,6 +46,7 @@ from embodichain.data_pipeline.datasets._sampling import (
 )
 from embodichain.data_pipeline.datasets.sequence import (
     DataBudgetExhaustedError as OnlineDataBudgetExhaustedError,
+    DataUnavailableError,
 )
 
 __all__ = [
@@ -1637,7 +1638,9 @@ class OnlineDataEngine:
 
         Raises:
             ValueError: If an argument is invalid.
-            RuntimeError: If no unlocked valid window satisfies the policy.
+            DataUnavailableError: If no unlocked valid window satisfies the
+                policy. Subclasses RuntimeError for existing callers.
+            RuntimeError: If a producer fails or the engine is not ready.
             OnlineDataBudgetExhaustedError: If eligible source quotas cannot
                 supply the complete batch. No partial batch is charged.
         """
@@ -1677,7 +1680,8 @@ class OnlineDataEngine:
 
         Raises:
             ValueError: If context lengths are not positive integers.
-            RuntimeError: If the worker fails or no unlocked valid anchor exists.
+            DataUnavailableError: If no unlocked valid anchor exists.
+            RuntimeError: If the worker fails or the engine is not ready.
             OnlineDataBudgetExhaustedError: If eligible source quotas cannot
                 supply the complete batch. Each context costs one chunk.
         """
@@ -1819,7 +1823,11 @@ class OnlineDataEngine:
                 valid_windows.any(dim=1).nonzero(as_tuple=False).squeeze(-1)
             )
             if candidate_rows.numel() == 0:
-                raise RuntimeError(
+                error = self._receive_worker_error()
+                if error is not None:
+                    raise error
+                self._ensure_worker_alive()
+                raise DataUnavailableError(
                     "[OnlineDataEngine] No unlocked valid chunk satisfies "
                     f"sampling_mode={sampling_mode!r} and chunk_size={chunk_size}."
                 )

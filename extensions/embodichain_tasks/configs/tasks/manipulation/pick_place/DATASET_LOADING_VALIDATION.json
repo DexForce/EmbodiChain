@@ -266,5 +266,52 @@
     "scope": "After the physical common-payload integrations, preserve optional ODS acceptance/publication timestamps in canonical batches and LeRobot scalar mappings.",
     "validation": "Final 1245-test regression and 40-case source/SDK/alignment group pass, including exact timestamp values and -1 padding.",
     "clock_semantics": "accepted_at_ns is Unix nanoseconds; published_at_monotonic_ns belongs to the originating host clock and is provenance across offline replay."
+  },
+  "sequence_dataset_followup": {
+    "date": "2026-10-19",
+    "base_revision": "4704c9d91eb10e0f41041e2f1fe51b364ffb05f6",
+    "scope": "One common SequenceDataset, compatibility aliases/delegation, shared schema validation/fingerprints and typed unavailable-data errors. No new physical training or throughput experiment.",
+    "implementation_sha256": {
+      "embodichain/data_pipeline/datasets/__init__.py": "731259a672e56ba55cdd545b4b47280bec0d6fd833a71a9fe21f98b5b9b60125",
+      "embodichain/data_pipeline/datasets/schema.py": "e32ecd1fb8364cad340314730f95ee6997572acdd207d99de5960b4959d5ced5",
+      "embodichain/data_pipeline/datasets/sequence.py": "4db71355b04704936180a9f2546b5f2766d8a42f712a2e9f3e74cb2815c202d2",
+      "embodichain/data_pipeline/datasets/sequence_data.py": "73038dce33da170035f00be840d024fdbeb06d98131464a6a266bc0d79c045d1",
+      "embodichain/data_pipeline/datasets/offline_data.py": "5a54e62911abaa68bb49ab8b40dfb918a88150ba34d28986cd6e68a0cfe1f6fc",
+      "embodichain/data_pipeline/datasets/online_data.py": "23252abdb41b5a36749043b19854d443b6c367b180790d13ecd7522dda944725",
+      "embodichain/data_pipeline/datasets/sources.py": "f17787d24e8796b91eb8fc20e4975fead19dd6bf05144019752f081a2e6c52ba",
+      "embodichain/data_pipeline/datasets/lerobot.py": "a018a7df5d55cf4ee5fbe583dd99fefd546fcd0f223a3565c5302567c5f7f233",
+      "embodichain/data_pipeline/engine/data.py": "c4aab00cdcbe745c6387b93ca8168746495367057c6721caf5dc3521659cffa8",
+      "examples/data_pipeline/_ods_pick_place_training.py": "301eda72242630407f52a636a5694cdbb0101b8efb4b0127d61543ab077274b6",
+      "examples/data_pipeline/_ods_pick_place_benchmark.py": "186e557ec089cfefbd348f868abee19a8d17ee60f76acc9e5b407b595de011e6"
+    },
+    "tests": {
+      "command": "python -m pytest -q tests/data_pipeline tests/docs/test_check_api_docs.py tests/test_agent_context_map.py tests/test_agent_context_tools.py",
+      "passed": 1269,
+      "skipped": 1,
+      "elapsed_seconds": 31.78,
+      "native_environment": "PYTHONPATH=.:extensions:extensions/embodichain_tasks:/tmp/ods-dexsim-runtime; OMP/MKL/OPENBLAS_NUM_THREADS=1; default host CUDA visibility; PYTHONDONTWRITEBYTECODE=1",
+      "coverage": [
+        "Same common Dataset accepts actual engine sampler and resident source; exact all-field/RNG parity retains existing optimizer-alignment tests",
+        "OfflineDataset is only an alias; old OnlineDataset chunks remain supported and context mode delegates to SequenceDataset",
+        "Finite iterator limits and new iterators do not reset source delivery budgets",
+        "Failed downstream transforms remain charged; common transforms restore canonical padding",
+        "No eligible-window, budget depletion and permanent failures propagate without hidden retries",
+        "All source constructors reject malformed semantic declarations before SDK loading; nested feature dtype is checked",
+        "Schema identity preserves ordered features and versions, ignores dictionary key order and rejects nonfinite/non-JSON metadata",
+        "Public imports remain lazy and do not initialize simulation or import the SDK"
+      ]
+    },
+    "checks": {
+      "black": "26.3.1; black .; 1387 files unchanged",
+      "api_documentation": "2692/2692 exports documented",
+      "sphinx": "Affected API section and OnlineDataset built with dummy builder and warnings as errors; full site not built",
+      "context": "Map/link check and routing for SequenceDataset, DataUnavailableError and ActionDescriptor pass",
+      "whitespace_and_changed_python_structure": "pass"
+    },
+    "limitations": [
+      "Earlier physical integrations and performance measurements above retain their original implementation hashes and are not reruns of this follow-up.",
+      "Image/video decoding, distributed/global quota ownership, DAgger and RLinf integration remain outside this change.",
+      "Action semantics and positive step_dt are now required for every public numeric source; legacy engine/chunk defaults are unchanged."
+    ]
   }
 }

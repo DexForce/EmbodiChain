@@ -27,7 +27,16 @@ Datasets and samplers for live simulation and bounded resident numeric data.
       LeRobotFieldMappingCfg
       LeRobotDataSource
       OfflineDataset
+      SequenceDataset
       DataBudgetExhaustedError
+      DataUnavailableError
+
+   .. rubric:: Schema utilities
+
+   .. autosummary::
+
+      validate_data_schema
+      data_schema_fingerprint
 
 .. automodule:: embodichain.data_pipeline.datasets
    :members:
@@ -61,11 +70,21 @@ resident-memory limit and schema/column mapping. SDK caches and bounded staging
 are separate from that resident tensor limit. Large out-of-core visual loading
 is outside this backend's contract.
 
-``OfflineDataset`` supplies item or prebatched PyTorch iteration. Stored
+``SequenceDataset`` supplies common item or prebatched PyTorch iteration for
+live and resident sources. ``OfflineDataset`` is its compatibility alias. Stored
 cardinality does not imply an epoch length; set ``max_batches`` for finite
 iteration. ``OnlineDataset`` retains its existing chunk interface and accepts
 an opt-in ``sequence`` plus explicit ``schema`` for the common context contract.
-Quota exhaustion and permanent source failures propagate without hidden retry.
+It delegates context iteration to ``SequenceDataset``. Quota exhaustion,
+``DataUnavailableError`` and permanent source failures propagate without hidden
+retry. Production, bounded waiting and refill remain caller-owned.
+
+All source constructors use ``validate_data_schema``: action semantics (or
+representation) and a positive control period are required. Optional observation
+timing must be pre-action. Feature names, dtypes and declared versions are
+validated consistently. ``data_schema_fingerprint`` hashes finite JSON schema
+metadata, including ordered names and supplied transformation/normalization
+versions; it does not identify trajectory content or infer missing semantics.
 
 .. automodule:: embodichain.data_pipeline.datasets.sequence
    :members:
@@ -77,6 +96,12 @@ Quota exhaustion and permanent source failures propagate without hidden retry.
    :members:
 
 .. automodule:: embodichain.data_pipeline.datasets.offline_data
+   :members:
+
+.. automodule:: embodichain.data_pipeline.datasets.sequence_data
+   :members:
+
+.. automodule:: embodichain.data_pipeline.datasets.schema
    :members:
 
 Offline dataset inspection

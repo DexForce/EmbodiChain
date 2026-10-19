@@ -30,10 +30,13 @@ from torch.utils.data import DataLoader
 
 from embodichain.data_pipeline.datasets import (
     BatchSource,
+    DataBudgetExhaustedError,
+    DataUnavailableError,
     OfflineDataset,
     OnlineDataset,
     OnlineDataSource,
     SequenceSpecCfg,
+    SequenceDataset,
     TensorDataSource,
 )
 from embodichain.data_pipeline.engine.data import (
@@ -267,9 +270,9 @@ def test_dataset_wrappers_share_context_iteration(paired_sources, batch_size):
     "options", [{"generator": torch.Generator()}, {"max_batches": 2}]
 )
 def test_explicit_generator_cannot_be_copied_into_workers(monkeypatch, options):
-    from embodichain.data_pipeline.datasets import offline_data
+    from embodichain.data_pipeline.datasets import sequence_data
 
-    monkeypatch.setattr(offline_data, "get_worker_info", lambda: object())
+    monkeypatch.setattr(sequence_data, "get_worker_info", lambda: object())
     source = TensorDataSource(_data(), schema=_SCHEMA, source_id="test")
     with pytest.raises(RuntimeError, match="owner-process"):
         next(iter(OfflineDataset(source, SequenceSpecCfg(), **options)))
@@ -277,7 +280,7 @@ def test_explicit_generator_cannot_be_copied_into_workers(monkeypatch, options):
 
 def test_offline_public_imports_do_not_import_simulation_or_sdk():
     root = Path(__file__).resolve().parents[2]
-    program = "from embodichain.data_pipeline.datasets import LeRobotDataSource, TensorDataSource, OfflineDataset; import sys; assert not any(k.startswith(('embodichain.lab', 'gymnasium', 'dexsim', 'lerobot')) for k in sys.modules)"
+    program = "from embodichain.data_pipeline.datasets import LeRobotDataSource, TensorDataSource, SequenceDataset, OfflineDataset, DataUnavailableError, validate_data_schema, data_schema_fingerprint; import sys; assert not any(k.startswith(('embodichain.lab', 'gymnasium', 'dexsim', 'lerobot')) for k in sys.modules)"
     result = subprocess.run(
         [sys.executable, "-c", program],
         cwd=root,
@@ -286,3 +289,106 @@ def test_offline_public_imports_do_not_import_simulation_or_sdk():
         timeout=30,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_offline_dataset_is_only_a_compatibility_name():
+    from embodichain.data_pipeline.datasets.offline_data import OfflineDataset as legacy
+
+    assert OfflineDataset is SequenceDataset is legacy
+
+
+@pytest.mark.parametrize("batch_size", [None, 3])
+def test_unified_dataset_preserves_live_and_resident_batches(
+    paired_sources, batch_size
+):
+    sequence = SequenceSpecCfg(2, 3)
+    datasets = [
+        SequenceDataset(
+            source,
+            sequence,
+            batch_size=batch_size,
+            max_batches=2,
+            generator=torch.Generator().manual_seed(88),
+        )
+        for source in paired_sources
+    ]
+    # Changing the caller's config cannot change an established iterator.
+    sequence.prediction_horizon = 1
+    left, right = [list(dataset) for dataset in datasets]
+    assert len(left) == len(right) == 2
+    for a, b in zip(left, right):
+        assert a.batch_size == b.batch_size
+        assert a.batch_size[-1] == 4
+        assert all(torch.equal(a[key], b[key]) for key in a.keys())
+
+
+def test_new_dataset_iterator_does_not_replenish_source_budget():
+    source = TensorDataSource(_data(), schema=_SCHEMA, source_id="test")
+    source.configure_sampling_budget(2, 2)
+    dataset = SequenceDataset(source, SequenceSpecCfg(), batch_size=2, max_batches=1)
+    assert len(list(dataset)) == len(list(dataset)) == 1
+    with pytest.raises(DataBudgetExhaustedError):
+        next(iter(dataset))
+    assert source.get_sampling_budget_snapshot()["total_delivered_chunks"] == 4
+
+
+@pytest.mark.parametrize(
+    "error_type", [DataUnavailableError, DataBudgetExhaustedError, RuntimeError]
+)
+def test_dataset_propagates_source_errors_without_retry(monkeypatch, error_type):
+    source = TensorDataSource(_data(), schema=_SCHEMA, source_id="test")
+    calls = []
+    error = error_type("source failure")
+
+    def fail(*args, **kwargs):
+        calls.append(1)
+        raise error
+
+    monkeypatch.setattr(source, "sample_context", fail)
+    with pytest.raises(error_type) as captured:
+        next(iter(SequenceDataset(source, SequenceSpecCfg())))
+    assert captured.value is error and len(calls) == 1
+
+
+def test_empty_window_error_is_distinct_from_failure_and_quota(paired_sources):
+    live, resident = paired_sources
+    live.engine.shared_buffer["valid"].zero_()
+    resident.data["valid"].zero_()
+    for source in (live, resident):
+        with pytest.raises(DataUnavailableError) as captured:
+            source.sample_context(2, SequenceSpecCfg())
+        assert isinstance(captured.value, RuntimeError)
+        assert not isinstance(captured.value, DataBudgetExhaustedError)
+
+
+def test_failed_transform_keeps_delivery_charged():
+    source = TensorDataSource(_data(), schema=_SCHEMA, source_id="test")
+    source.configure_sampling_budget(2, 2)
+
+    def fail(batch):
+        raise ValueError("feature transform failed")
+
+    dataset = SequenceDataset(source, SequenceSpecCfg(), batch_size=2, transform=fail)
+    with pytest.raises(ValueError, match="feature transform"):
+        next(iter(dataset))
+    assert source.get_sampling_budget_snapshot()["total_delivered_chunks"] == 2
+
+
+def test_common_transform_restores_canonical_padding():
+    source = TensorDataSource(_data(), schema=_SCHEMA, source_id="test")
+
+    def convert(batch):
+        batch["obs"] += 1
+        return batch
+
+    dataset = SequenceDataset(
+        source,
+        SequenceSpecCfg(4, 8),
+        batch_size=16,
+        transform=convert,
+        generator=torch.Generator().manual_seed(4),
+    )
+    batch = next(iter(dataset))
+    assert (~batch["valid"]).any()
+    assert (batch["obs"][~batch["valid"]] == 0).all()
+    assert not batch["loss_mask"][:, :3].any()
