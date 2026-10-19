@@ -1,0 +1,19 @@
+# Preview with:
+# embodichain preview-robot --robot-config examples/sim/robots/pika_gripper/ur5.yaml --viser
+class_type: ur5
+uid: UR5PikaGripper
+urdf_cfg:
+  components:
+    - component_type: arm
+      urdf_path: UniversalRobots/UR5/UR5.urdf
+    - component_type: hand
+      urdf_path: PikaGripper/PikaGripper.urdf
+control_parts:
+  arm: [joint1, joint2, joint3, joint4, joint5, joint6]
+  eef: [FINGER1_JOINT, FINGER2_JOINT]
+joint_drive_props:
+  drive_type: force
+  stiffness: {arm: 10000.0, eef: 1000.0}
+  damping: {arm: 1000.0, eef: 100.0}
+  max_effort: {arm: 150.0, eef: 100.0}
+init_qpos: [0.0, -1.2, 1.6, -1.97, -1.57, 0.0, 0.05, 0.05]
