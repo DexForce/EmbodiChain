@@ -15,7 +15,9 @@ Dexforce W1 is a dual-arm humanoid robot developed by DexForce Technology Co., L
 </div>
 
 The V030 image uses the registered `v030/bare` asset in a bent-elbow display
-pose. Its physical wrist flanges are shown without detachable end effectors.
+pose, rendered with `RenderCfg(renderer="rt")` (OfflineRT). All other
+`RenderCfg` fields and scene lighting use their defaults. Its physical wrist flanges
+are shown without detachable end effectors.
 
 ## Key Features
 
