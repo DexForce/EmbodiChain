@@ -50,6 +50,20 @@ Its Python facade and native extension must match. An import failure mentioning
 Newton render kernels or `open3d.cpu` is an installation failure that occurs
 before the demo creates a world. The task itself uses `physics: default`.
 
+On the validation host, activate `py311` and select the already-existing
+compatible native runtime before running the commands below:
+
+```bash
+conda activate py311
+export PYTHONPATH="$PWD:$PWD/extensions:$PWD/extensions/embodichain_tasks:/tmp/ods-dexsim-runtime"
+```
+
+This temporary overlay is host-specific and is not shipped with the example.
+The unmodified installed DexSim facade currently fails to import
+`reconstruct_cable_rings_kernel` from its Newton module. Validation uses the
+compatible runtime above with the default physics backend. Other installations
+need their own matched DexSim runtime.
+
 Select an available physical GPU before importing Python libraries; it becomes
 local `cuda:0` in the processes below. Use a fresh output directory for every run.
 
@@ -194,6 +208,9 @@ qualification. Resume uses `--resume CHECKPOINT` with a fresh output directory
 and the same model/sampling settings. ODS is recreated and filled under a new
 run ID; the shared cache is not restored exactly. Protected offline resume is
 rejected because its per-source quota state is not restored.
+On resume, `rounds × updates-per-round` specifies additional updates for this
+invocation; checkpoint steps remain cumulative. For example, resuming step 10
+with three rounds of five updates saves step 25.
 
 Omit `--no-viewer` in training to expose Viser on port 8080 and TensorBoard on
 6006. Omit `--no-video` to record the configured comparison videos. Display and
@@ -220,27 +237,26 @@ failed-model diaries, and one-off tuning campaigns remain accessible in Git
 history. The retained pilot did not establish a general ODS speed advantage;
 instrumentation overhead qualification and multi-seed testing remain necessary.
 
-Reorganization checks: 281 CPU model/data/CLI checks and 7 environment checks
-passed. A real online smoke consumed two generations and completed 10 updates.
-A real cold LeRobot smoke wrote/read 4 episodes (1,330 frames), exhausted its
-per-source quota after one update, saved the final checkpoint, and shut down.
-The independent evaluator loaded the retained trained model and succeeded on
-2/2 development scenes. Those small checks verify integration; the full learning
-curves above are the earlier pilot. This host's native DexSim facade is currently
-inconsistent; real checks used the same existing compatible runtime overlay as
-the earlier experiments, without changing the global installation.
+Runtime revalidation on 2026-10-19 used `conda run -n py311`, Python 3.11.14,
+PyTorch 2.7.0/CUDA 12.8, LeRobot 0.4.4, and the documented native runtime above.
+The tested implementation revision was `77884122`; the source stayed unchanged
+throughout these runs. [Structured validation record](docs/PY311_VALIDATION.json).
 
-On the validation host, use the `py311` environment and the already-existing
-compatible runtime overlay to repeat the native checks:
+| Check | Observed result |
+| --- | --- |
+| Model/data/CLI tests | 281 passed |
+| Environment predicates/reset tests | 7 passed |
+| Context map/tools | 40 passed; API coverage 2613/2613 |
+| Online ODS smoke | 10 updates, 40 chunks from generations 1 and 2 |
+| Cold LeRobot smoke | 4 episodes/1,330 frames; quota 1 per source; 1 update/4 chunks |
+| Resume | Step 10 → 25; exact starting model and sampler RNG restored, frozen normalization, new source run ID |
+| Independent student evaluation | Retained trained checkpoint succeeded on 2/2 development scenes |
+| Other entry points | Module/file help, throughput configuration, and existing-run comparison passed |
+| Output/process audit | 31 checks passed; no timeout, forced cleanup or surviving observed child processes |
 
-```bash
-conda activate py311
-export PYTHONPATH="$PWD:$PWD/extensions:$PWD/extensions/embodichain_tasks:/tmp/ods-dexsim-runtime"
-```
-
-That temporary overlay is host-specific and is not shipped with this example;
-other installations need a matched DexSim runtime. Full Sphinx validation on
-this host remains blocked by the installed Open3D package's missing CPU module.
-The isolated official-task package test deliberately resets `PYTHONPATH` and
-also encounters the mismatched global DexSim facade. API coverage and focused
-context/documentation checks passed.
+These small runs verify engineering correctness and checkpoint compatibility;
+the full learning curves above remain the earlier pilot. Training smokes used
+engineering scenes 920000–920001 and 921000–921001; independent evaluation reused
+development scenes 810000–810001. No reserved formal test scene was opened. The
+unmodified installed-runtime import failure is retained in the validation record;
+the successful native checks require the documented compatible runtime.

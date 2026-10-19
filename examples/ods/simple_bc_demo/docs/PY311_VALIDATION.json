@@ -1,0 +1,191 @@
+{
+  "status": "passed_with_documented_native_runtime",
+  "checks": {
+    "all_documented_runtime_commands_passed": true,
+    "no_runtime_timeouts": true,
+    "no_surviving_owned_processes": true,
+    "source_unchanged_during_validation": true,
+    "online_updates": true,
+    "online_chunks": true,
+    "online_weights_changed": true,
+    "online_normalization_frozen": true,
+    "online_optimizer_and_rng_saved": true,
+    "online_cleanup": true,
+    "offline_updates": true,
+    "offline_chunks": true,
+    "offline_weights_changed": true,
+    "offline_normalization_frozen": true,
+    "offline_optimizer_and_rng_saved": true,
+    "offline_cleanup": true,
+    "resume_updates": true,
+    "resume_chunks": true,
+    "resume_weights_changed": true,
+    "resume_normalization_frozen": true,
+    "resume_optimizer_and_rng_saved": true,
+    "resume_cleanup": true,
+    "online_consumed_both_generations": true,
+    "resume_restores_exact_model": true,
+    "resume_keeps_sampler_rng": true,
+    "resume_new_source_run_id": true,
+    "offline_quota_bound": true,
+    "offline_direct_streaming": true,
+    "offline_episode_count": true,
+    "offline_no_pt_dataset": true,
+    "independent_eval": true
+  },
+  "environment": {
+    "python": "/root/miniconda3/envs/py311/bin/python",
+    "prefix": "/root/miniconda3/envs/py311",
+    "conda_default_env": "py311",
+    "gpu_uuid": "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5",
+    "cpu_affinity": "32-47",
+    "overlay": "/tmp/ods-dexsim-runtime",
+    "versions": {
+      "torch": "2.7.0+cu128",
+      "lerobot": "0.4.4",
+      "numpy": "2.4.6",
+      "gymnasium": "1.3.0",
+      "black": "26.3.1"
+    }
+  },
+  "tested_source_revision": "77884122d1d9979d6d7f73d1bb85ec54a1dd6685",
+  "raw_artifact_directory": "/tmp/simple-bc-py311-validation-20261019-v1",
+  "native_runtime_precondition": {
+    "unmodified_installed_import_passed": false,
+    "error": "reconstruct_cable_rings_kernel missing in installed DexSim Newton facade",
+    "compatible_runtime": "/tmp/ods-dexsim-runtime",
+    "physics_backend": "default"
+  },
+  "unit_tests": {
+    "model_data_cli": 281,
+    "environment": 7,
+    "context": 40
+  },
+  "runtime_results": {
+    "environment-tests": {
+      "returncode": 0,
+      "seconds": 13.052793266018853,
+      "timeout": false,
+      "observed_owned_pids": [],
+      "surviving_owned_pids": []
+    },
+    "module-help": {
+      "returncode": 0,
+      "seconds": 2.260937741957605,
+      "timeout": false,
+      "observed_owned_pids": [],
+      "surviving_owned_pids": []
+    },
+    "file-help": {
+      "returncode": 0,
+      "seconds": 2.26031283615157,
+      "timeout": false,
+      "observed_owned_pids": [],
+      "surviving_owned_pids": []
+    },
+    "configure": {
+      "returncode": 0,
+      "seconds": 1.257263062056154,
+      "timeout": false,
+      "observed_owned_pids": [],
+      "surviving_owned_pids": []
+    },
+    "online": {
+      "returncode": 0,
+      "seconds": 171.48092740401626,
+      "timeout": false,
+      "observed_owned_pids": [
+        446452,
+        446460,
+        446462,
+        446490,
+        446496,
+        446497
+      ],
+      "surviving_owned_pids": []
+    },
+    "offline": {
+      "returncode": 0,
+      "seconds": 134.78789280494675,
+      "timeout": false,
+      "observed_owned_pids": [
+        448714,
+        448722,
+        448724,
+        450891,
+        450892,
+        455236,
+        455257
+      ],
+      "surviving_owned_pids": []
+    },
+    "resume": {
+      "returncode": 0,
+      "seconds": 165.44043733295985,
+      "timeout": false,
+      "observed_owned_pids": [
+        457501,
+        457509,
+        457511,
+        457555,
+        457556,
+        457669,
+        457684,
+        457699
+      ],
+      "surviving_owned_pids": []
+    },
+    "evaluation": {
+      "returncode": 0,
+      "seconds": 38.43793147196993,
+      "timeout": false,
+      "observed_owned_pids": [
+        457749,
+        457750,
+        457767
+      ],
+      "surviving_owned_pids": []
+    },
+    "compare": {
+      "returncode": 0,
+      "seconds": 0.7545248561073095,
+      "timeout": false,
+      "observed_owned_pids": [],
+      "surviving_owned_pids": []
+    }
+  },
+  "offline_episodes": 4,
+  "offline_frames": 1330,
+  "independent_evaluation_successes": 2,
+  "resume_steps": [
+    10,
+    25
+  ],
+  "observed_owned_pids": [
+    446452,
+    446460,
+    446462,
+    446490,
+    446496,
+    446497,
+    448714,
+    448722,
+    448724,
+    450891,
+    450892,
+    455236,
+    455257,
+    457501,
+    457509,
+    457511,
+    457555,
+    457556,
+    457669,
+    457684,
+    457699,
+    457749,
+    457750,
+    457767
+  ],
+  "scope": "Engineering correctness and a retained trained-checkpoint regression; no full learning benchmark or formal held-out test."
+}
