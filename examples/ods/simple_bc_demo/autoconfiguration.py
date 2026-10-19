@@ -64,7 +64,7 @@ def apply_configuration(args: argparse.Namespace) -> None:
     """Resolve pipeline settings before creating a producer or model."""
     report = load_configuration(args.auto_config_input)
     expected = {
-        "task": "PickPlace-Franka-v1",
+        "task": "examples.ods.simple_bc_demo.environment:SimpleBCPickPlace-Franka-v1",
         "policy": args.policy,
         "prediction_horizon": args.prediction_horizon,
         "action_horizon": args.action_horizon,

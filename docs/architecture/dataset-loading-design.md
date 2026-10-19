@@ -1,6 +1,6 @@
 # Reusable online and offline training-data loading
 
-Status: the initial numeric source/loader API and showcase migration are implemented.
+Status: the initial numeric source/loader API and local BC demo integration are implemented.
 Updated 2026-10-19. Image/video sequence loading and out-of-core storage remain outside this implementation.
 
 ## Problem and acceptance criterion
@@ -10,9 +10,12 @@ resident sources. `OnlineDataSource`, `TensorDataSource` and `LeRobotDataSource`
 implement the public `BatchSource` contract. `OfflineDataset` remains a
 compatibility alias; `OnlineDataset` preserves its original chunk API and
 delegates its opt-in context iteration to the common Dataset.
-PickPlace now consumes these sources and retains its own feature transformation,
-writer, sidecar/content auditing and experimental accounting. The public numeric
-reader also accepts standard LeRobot datasets without the PickPlace sidecar
+The [local ChunkBC demo](../../examples/ods/simple_bc_demo/README.md) consumes
+these sources and owns its feature transformation, writer, sidecar/content
+auditing and experimental accounting. Its task, model, trainer, checkpoint
+and evaluator live in `examples/ods/simple_bc_demo/`, outside the official task
+catalog. The public numeric reader also accepts standard LeRobot datasets
+without the demo sidecar
 through explicit schema and column mapping. Inspection/depth tools retain their
 separate ownership.
 
@@ -41,7 +44,7 @@ Pure window/mask calculations and canonical padding are shared between source
 adapters. Source ownership, synchronization and lifecycle remain separate. The
 public contract must not depend on Franka, a 51-feature layout or ChunkBC.
 Task features, absolute TCP-target construction, normalization fitting, noise,
-training and efficiency reporting remain with their existing owners.
+training and efficiency reporting remain with the local demo.
 
 ```mermaid
 flowchart LR
@@ -199,23 +202,27 @@ defined tolerances for nondeterministic device operations. Report corpus
 identity, selected frame IDs, schema, normalizer/model/RNG states and SDK
 version. Numerical parity is not evidence of a throughput improvement.
 
-### Completed PickPlace validation
+### Historical PickPlace validation
 
-The earlier [recorded check](../../extensions/embodichain_tasks/configs/tasks/manipulation/pick_place/ODS_ALIGNMENT_VALIDATION.json)
+The earlier [recorded check](../../examples/ods/simple_bc_demo/docs/ODS_ALIGNMENT_VALIDATION.json)
 passed nine paired CPU cases and 146 related regression cases. A real expert
 producer also supplied two generations/four accepted episodes (1,330 valid
 frames); four paired batches/32 chunks and four optimizer updates matched
 exactly, including sampling RNG, loss, gradients and optimizer state. All eight
-observed owned processes exited. These checks validate the current numeric
-showcase path, not the proposed public API or every batch of the previous pilot.
+observed owned processes exited. These checks validate the recorded numeric
+example revision, preceding public API extraction; they do not validate every
+batch of the previous pilot or rerun the relocated implementation.
 The record retains an earlier harness filename failure and the native shutdown
 warning; neither is silently removed from the evidence.
 
 The public API validation and subsequent SequenceDataset consolidation are
 recorded separately in
-[DATASET_LOADING_VALIDATION.json](../../extensions/embodichain_tasks/configs/tasks/manipulation/pick_place/DATASET_LOADING_VALIDATION.json).
-Its follow-up section distinguishes the current CPU/SDK regression checks from
-the earlier physical producer experiments and implementation hashes.
+[DATASET_LOADING_VALIDATION.json](../../examples/ods/simple_bc_demo/docs/DATASET_LOADING_VALIDATION.json).
+Its follow-up section distinguishes its CPU/SDK regression checks from
+the earlier physical producer experiments and implementation hashes. The record
+also retains pre-extraction golden outputs and later removal of dedicated
+example tests. Original paths/hashes remain unchanged in the relocated JSON;
+see the [evidence index](../../examples/ods/simple_bc_demo/docs/README.md).
 
 ## Delivery and performance gate
 

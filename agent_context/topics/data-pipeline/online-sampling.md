@@ -87,8 +87,8 @@ targets from measured accepted episodes/s and training chunks/s. It reads an
 explicit qualified/provisional reuse profile and runtime metadata; it does not
 infer scientific bounds or change the measured batch size/concurrency. Memory
 constraints can reduce active consumption rather than raise quotas. Measurement
-helpers preserve units and common monotonic windows. See the task's
-[configuration guide](../../../extensions/embodichain_tasks/configs/tasks/manipulation/pick_place/ODS_CONFIGURATION_GUIDE.md)
+helpers preserve units and common monotonic windows. See the local demo's
+[configuration guide](../../../examples/ods/simple_bc_demo/docs/CONFIGURATION.md)
 for CLI binding and current limitations.
 
 ## Recorded actions and provenance
@@ -122,75 +122,59 @@ Invalid frames, including history padding, retain `-1` in every provenance field
 from valid-frame counts. These IDs do not provide shared-buffer checkpoint
 recovery or portable offline content identity.
 
-## PickPlace experiment integration
+## Local BC demo integration
 
-`examples/data_pipeline/ods_pick_place_showcase.py` owns the entry point, policy
-models, measured-state features and separate student evaluator. The private
-`_ods_pick_place_training.py` orchestrates geometry policies;
-`_ods_pick_place_policy.py` owns the short-history absolute-target chunk learner;
-`_ods_pick_place_benchmark.py` owns task corpus hashes and efficiency accounting.
-Public `datasets/sources.py` owns resident context sampling and source quotas. The geometry feature contract uses measured
-proprioception, TCP/cube transforms, goal-relative positions and cube velocity.
-Normalization is frozen from initial training data. Policies do not consume
-expert segment annotations during inference.
+`examples/ods/simple_bc_demo/train.py` is the runnable entry point. The same
+directory owns `environment.py`, `config.py`, local `configs/`, ChunkBC in
+`models.py`, shared `trainer.py`, and the independent `evaluation.py` CLI.
+The module-qualified Gym ID is
+`examples.ods.simple_bc_demo.environment:SimpleBCPickPlace-Franka-v1`; the task
+is outside the official task catalog. See the [demo README](../../../examples/ods/simple_bc_demo/README.md)
+for commands and the [evidence index](../../../examples/ods/simple_bc_demo/docs/README.md)
+for historical implementation hashes and validation limits.
 
-The showcase uses one ChunkBC learner. It derives absolute TCP targets from
-pre-action observations and recorded requests; only causal history is a model
-input. The student executes queued network targets through the bounded
-relative-pose controller, replans periodically, and clears history/queue at
-reset. Input and target statistics are frozen from initial training data and
-included in comparison fingerprints.
+The sole learner uses measured geometry and causal history to predict absolute
+TCP/gripper targets. Input/target normalization is frozen from the initial
+training cache. Student execution has no expert segment inputs. Checkpoints
+restore ChunkBC/optimizer/RNG state; live resume creates a fresh ODS cache.
 
-The runner consumes the public `BatchSource` contract for live online supply,
-a frozen initial cache, and resident LeRobot offline data. A shared pure quota-selection helper in
-`datasets/_sampling.py` preserves the draw algorithm across online and offline
-sources; their ledgers retain their distinct process/lock ownership. Corpus
-manifests validate schema and numeric content independently of engine run IDs.
-Resume restores ChunkBC/optimizer/RNG state, creating a fresh ODS cache for live
-runs. Unsupported policy/checkpoint types fail explicitly.
+The runner consumes public `BatchSource` adapters for live supply, a frozen
+initial cache and resident LeRobot data. Shared pure quota selection in
+`datasets/_sampling.py` preserves the draw algorithm while source ledgers keep
+their distinct process/lock ownership. `data.py` owns experiment corpus hashes
+and accounting, not a separate sampler. `collection.py` and `lerobot.py` own
+bounded single-writer persistence and sidecar/content auditing around the public
+reader. Cold offline episode count is explicit and independent of training
+rounds. Run-local SDK caches count toward final disk footprint; temporary write
+peaks remain unmeasured. Writer/producer failures propagate before publishing
+an incomplete corpus.
 
-Cold offline runs write LeRobot data with an explicit `--offline-episodes`
-count independently of training rounds. The private
-`_ods_pick_place_collection.py` overlaps the next accepted generation with
-bounded, single-writer SDK persistence; it does not stage an intermediate `.pt`
-corpus. The public `LeRobotDataSource` loads numeric tensors under an explicit resident
-memory allowance. The example additionally verifies its own schema/content
-hashes. SDK backing reads are bounded and scalar fallback is explicit. Run-local SDK caches are included in final disk footprint;
-temporary write peaks remain unmeasured. Writer/producer failures and deadlines
-propagate before an incomplete dataset can be published.
+`TensorDataSource.configure_sampling_budget()` optionally protects resident
+sampling with one nonrefillable per-source allowance. It is creator-process/
+thread only, rejects duplicate source identities and cannot be enabled after
+sampling. Protected offline resume is rejected until allowance restoration
+exists. Conventional offline baselines retain unrestricted reuse.
 
-`TensorDataSource.configure_sampling_budget()` optionally protects all resident
-context sampling with one nonrefillable per-source allowance. It is
-creator-process/thread only, rejects duplicate source identities and cannot be
-enabled after sampling. Protected offline resume is rejected until allowance
-restoration exists. Conventional offline baselines retain unrestricted reuse.
-`--deferred-evaluation-schedule updates` aligns checkpoint panels across online
-and offline modes; it does not claim online time-to-certification. G1 content,
-model initialization and all normalization hashes are reported separately.
+`configure.py` binds public throughput planning to this fixed learner.
+`--auto-config-input` enables protected per-source allowances and deferred
+evaluation; defaults retain fixed-round scheduling. Source caps do not establish
+learning sufficiency. `--deferred-evaluation-schedule updates` aligns saved
+panels; producer shutdown precedes deferred evaluation, so results are post hoc
+and cannot certify online time-to-target. Comparison fingerprints retain G1
+content, initialization and frozen normalization separately. Missing save times
+remain unknown, and drawdown covers only evaluated policies. Resource sampling
+covers startup/waits independently of updates; process-tree PSS is a sampled
+peak and learner Torch counters exclude native simulator allocations.
 
-Unit tests target reusable data-pipeline contracts. The learning example's
-model, private persistence and orchestration are validated through runnable
-experiments and recorded evidence, without dedicated example unit tests.
-Small-data gates, expert physical qualification and student learning assessment
-are separate. Smoke success and low training loss do not establish physical
-student success or an efficiency advantage. See the task-owned
-[experiment protocol](../../../extensions/embodichain_tasks/configs/tasks/manipulation/pick_place/OFFLINE_PILOT.md)
-for comparable acquisition-inclusive/data-ready budgets and
-[task guidance](../../../extensions/embodichain_tasks/configs/tasks/manipulation/pick_place/README.md)
-for commands and measured results. Compact source-use accounting lives in
-`_ods_pick_place_usage.py`. Throughput-based pacing uses protected per-source
-allowances through `--auto-config-input`; defaults retain fixed round scheduling.
-Deferred evaluation closes the producer before evaluating
-saved policies, so its model-selection results are post hoc and cannot certify
-online time-to-target. Evaluation scalars use each checkpoint's actual policy
-step; save-completion events separately timestamp when its weights became
-available. Comparison reports preserve missing save times and compute drawdown
-only over evaluated policies. Background resource sampling
-covers startup and waits independently of update counts; process-tree PSS is a
-sampled peak and learner Torch counters exclude native simulator allocations.
-See the task-owned
-[configuration guide](../../../extensions/embodichain_tasks/configs/tasks/manipulation/pick_place/ODS_CONFIGURATION_GUIDE.md)
-for rate units, protected scene splits and measurement limits.
+Unit tests target reusable data-pipeline contracts. The demo model, persistence
+and orchestration use runnable experiments and recorded evidence without
+dedicated example unit tests. Expert physical qualification, small-data
+diagnostics and student learning are separate; smoke success and low loss do
+not establish a learning or efficiency advantage. The local
+[configuration guide](../../../examples/ods/simple_bc_demo/docs/CONFIGURATION.md)
+owns rate units and measurement limits; the historical
+[pilot protocol](../../../examples/ods/simple_bc_demo/docs/OFFLINE_PILOT.md)
+separates acquisition-inclusive and data-ready budgets.
 
 ## Sampling failure boundary
 

@@ -17,7 +17,7 @@
 """Compare existing PickPlace run artifacts without launching experiments.
 
 Example:
-    python examples/data_pipeline/ods_pick_place_compare.py RUN_ODS RUN_OFFLINE --output REPORT
+    python examples/ods/simple_bc_demo/compare.py RUN_ODS RUN_OFFLINE --output REPORT
 
 The same paths may be supplied with ``--runs``. Missing measurements stay null;
 T80 ratios are omitted for an entire pairing when any intended pair is censored,

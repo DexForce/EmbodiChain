@@ -419,7 +419,7 @@ topics:
   status: active
 - id: data-pipeline
   title: Data Pipeline
-  aliases: [online data, online dataset, async recorder, dataset persistence, 数据管线, 在线数据, 数据集持久化, 数据保存,
+  aliases: [online data, online dataset, async recorder, dataset persistence, simple BC demo, 数据管线, 在线数据, 数据集持久化, 数据保存,
     深度视频, 数据集校验, 数据集转换, 数据集划分]
   keywords: [OnlineDataEngine, OnlineDataset, sample_batch, sample_batch_with_context, lock_index, LeRobotRecorder, AsyncLeRobotRecorder,
     DepthSidecarManager, depth_meta.json, fragment_id, finalize, expert action schema, qpos_slice, qvel_slice,
@@ -427,7 +427,7 @@ topics:
     SharedLanguageRegistry, resolve_language, configure_ods, ODSReuseProfileCfg,
     episode_sample_budget, OnlineDataBudgetExhaustedError, ODS 自动配置, BatchSource, SequenceSpecCfg,
     OnlineDataSource, TensorDataSource, LeRobotDataSource, OfflineDataset, SequenceDataset,
-    DataUnavailableError, validate_data_schema, data_schema_fingerprint, 数据集加载, 离线加载]
+    DataUnavailableError, validate_data_schema, data_schema_fingerprint, ChunkBC, SimpleBCPickPlace, 数据集加载, 离线加载]
   paths: [topics/data-pipeline/data-pipeline.md]
   source_of_truth:
   - embodichain/data_pipeline/engine/data.py
@@ -450,9 +450,10 @@ topics:
   - embodichain/cli/dataset.py
   - tools/lerobot_export/
   - embodichain/lab/scripts/run_task.py
+  - examples/ods/simple_bc_demo/
   watch_paths: [embodichain/data_pipeline/, embodichain/lab/gym/envs/managers/dataset_manager.py, embodichain/lab/gym/envs/managers/datasets.py,
     embodichain/lab/gym/envs/managers/async_datasets.py, embodichain/lab/gym/envs/embodied_env.py, embodichain/lab/scripts/run_task.py,
-    tests/data_pipeline/, embodichain/cli/dataset.py, tools/lerobot_export/]
+    tests/data_pipeline/, embodichain/cli/dataset.py, tools/lerobot_export/, examples/ods/simple_bc_demo/]
   related_topics: [manager-functor, env-framework, task-programs, sensor-system]
   status: active
 - id: robot-workspace

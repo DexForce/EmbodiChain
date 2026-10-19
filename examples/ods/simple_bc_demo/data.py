@@ -216,7 +216,7 @@ class EfficiencyTracker:
         self._start_wall = time.time() - self.elapsed_seconds()
         self.allocated_gpu_ids = sorted({str(value) for value in allocated_gpu_ids})
         self.targets = 0
-        from examples.data_pipeline._ods_pick_place_usage import CompactFrameSet
+        from examples.ods.simple_bc_demo.usage import CompactFrameSet
 
         self.unique_frames = CompactFrameSet()
         self.timeline: list[dict[str, Any]] = []

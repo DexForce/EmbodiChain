@@ -32,7 +32,7 @@ START = (-0.42, -0.08, 0.025)
 GOAL = (-0.42, 0.28, 0.025)
 
 
-@register_env("PickPlace-Franka-v1", max_episode_steps=600)
+@register_env("SimpleBCPickPlace-Franka-v1", max_episode_steps=600)
 class PickPlaceEnv(EmbodiedEnv):
     """Physically lift, transport, release and withdraw from a cube.
 

@@ -51,22 +51,20 @@ from embodichain.data_pipeline.engine.data import (
     OnlineDataEngineCfg,
     OnlineDataEngineState,
 )
-from examples.data_pipeline._ods_pick_place_benchmark import (
+from examples.ods.simple_bc_demo.data import (
     _content_manifest,
     EfficiencyTracker,
     resource_snapshot,
 )
-from examples.data_pipeline.ods_pick_place_showcase import (
-    _evaluate_worker,
+from examples.ods.simple_bc_demo.evaluation import _evaluate_worker, _receive
+from examples.ods.simple_bc_demo.observations import (
     _geometry_statistics,
-    _receive,
-    load_policy,
-    load_task_config,
     policy_observations,
-    save_checkpoint,
 )
-from examples.data_pipeline._ods_pick_place_policy import ChunkBC, pose_targets
-from examples.data_pipeline._ods_pick_place_usage import (
+from examples.ods.simple_bc_demo.config import load_task_config
+from examples.ods.simple_bc_demo.checkpoint import load_policy, save_checkpoint
+from examples.ods.simple_bc_demo.models import ChunkBC, pose_targets
+from examples.ods.simple_bc_demo.usage import (
     CompactFrameSet,
     SamplingRNG,
     UsageTracker,
@@ -273,7 +271,7 @@ def _reuse_qualification(
         )
     for key in (
         "embodichain/lab/gym/envs/managers/actions.py",
-        "extensions/embodichain_tasks/embodichain_tasks/manipulation/pick_place.py",
+        "examples/ods/simple_bc_demo/environment.py",
     ):
         if environment.get("source_sha256", {}).get(key) != source_hashes[key]:
             raise ValueError("Expert qualification task/controller source differs")
@@ -536,24 +534,37 @@ def run(args: argparse.Namespace) -> None:
     metadata["commit"] = subprocess.check_output(
         ["git", "rev-parse", "HEAD"], text=True
     ).strip()
-    root = Path(__file__).resolve().parents[2]
+    root = Path(__file__).resolve().parents[3]
     source_paths = [
-        "examples/data_pipeline/ods_pick_place_showcase.py",
-        "examples/data_pipeline/_ods_pick_place_training.py",
-        "examples/data_pipeline/_ods_pick_place_benchmark.py",
-        "examples/data_pipeline/_ods_pick_place_lerobot.py",
-        "examples/data_pipeline/_ods_pick_place_policy.py",
-        "examples/data_pipeline/_ods_pick_place_usage.py",
-        "examples/data_pipeline/_ods_pick_place_configuration.py",
-        "examples/data_pipeline/_ods_pick_place_collection.py",
-        "examples/data_pipeline/_ods_pick_place_flow.py",
+        "examples/ods/simple_bc_demo/train.py",
+        "examples/ods/simple_bc_demo/trainer.py",
+        "examples/ods/simple_bc_demo/data.py",
+        "examples/ods/simple_bc_demo/lerobot.py",
+        "examples/ods/simple_bc_demo/models.py",
+        "examples/ods/simple_bc_demo/usage.py",
+        "examples/ods/simple_bc_demo/autoconfiguration.py",
+        "examples/ods/simple_bc_demo/collection.py",
+        "examples/ods/simple_bc_demo/flow.py",
+        "examples/ods/simple_bc_demo/checkpoint.py",
+        "examples/ods/simple_bc_demo/config.py",
+        "examples/ods/simple_bc_demo/evaluation.py",
+        "examples/ods/simple_bc_demo/observations.py",
+        "examples/ods/simple_bc_demo/configs/task.yaml",
+        "examples/ods/simple_bc_demo/configs/env.yaml",
+        "examples/ods/simple_bc_demo/configs/franka.yaml",
+        "embodichain/data_pipeline/datasets/schema.py",
+        "embodichain/data_pipeline/datasets/sequence.py",
+        "embodichain/data_pipeline/datasets/sequence_data.py",
+        "embodichain/data_pipeline/datasets/sources.py",
+        "embodichain/data_pipeline/datasets/lerobot.py",
+        "embodichain/data_pipeline/datasets/_sampling.py",
         "embodichain/data_pipeline/configuration.py",
         "embodichain/data_pipeline/engine/data.py",
         "embodichain/lab/gym/envs/embodied_env.py",
         "embodichain/lab/gym/envs/base_env.py",
         "embodichain/lab/sim/objects/rigid_object.py",
         "embodichain/lab/gym/envs/managers/actions.py",
-        "extensions/embodichain_tasks/embodichain_tasks/manipulation/pick_place.py",
+        "examples/ods/simple_bc_demo/environment.py",
     ]
     metadata["source_sha256"] = {
         path: hashlib.sha256((root / path).read_bytes()).hexdigest()
@@ -803,7 +814,7 @@ def run(args: argparse.Namespace) -> None:
             }:
                 raise ValueError("--offline-data requires an offline or frozen mode")
             load_started = tracker.elapsed_seconds()
-            from examples.data_pipeline._ods_pick_place_lerobot import (
+            from examples.ods.simple_bc_demo.lerobot import (
                 load_lerobot_corpus,
             )
 
@@ -874,10 +885,10 @@ def run(args: argparse.Namespace) -> None:
                 offline_episodes = getattr(args, "offline_episodes", None) or (
                     args.buffer_size * (1 if args.mode == "offline-32" else args.rounds)
                 )
-                from examples.data_pipeline._ods_pick_place_collection import (
+                from examples.ods.simple_bc_demo.collection import (
                     collect_lerobot,
                 )
-                from examples.data_pipeline._ods_pick_place_lerobot import (
+                from examples.ods.simple_bc_demo.lerobot import (
                     load_lerobot_corpus,
                 )
 
@@ -1507,7 +1518,7 @@ def run(args: argparse.Namespace) -> None:
         if usage is not None:
             usage_report = usage.summary()
             if auto_plan is not None:
-                from examples.data_pipeline._ods_pick_place_flow import summarize_flow
+                from examples.ods.simple_bc_demo.flow import summarize_flow
 
                 flow = summarize_flow(
                     monotonic_origin_seconds=tracker.start_monotonic,

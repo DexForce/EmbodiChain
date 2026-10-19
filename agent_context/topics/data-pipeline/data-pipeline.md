@@ -14,7 +14,7 @@ belongs to [data-assets](../data-assets/data-assets.md).
 | PyTorch iteration | `embodichain/data_pipeline/datasets/`: `sequence_data.py` owns `SequenceDataset`; `online_data.py` preserves `OnlineDataset`; `OfflineDataset` is an alias |
 | Shared sequence contract and sources | `embodichain/data_pipeline/datasets/sequence.py`, `sources.py`, `_sampling.py` |
 | Bounded numeric LeRobot loading | `embodichain/data_pipeline/datasets/lerobot.py`: `LeRobotDataSource`, explicit field mapping |
-| PickPlace BC and offline comparisons | `examples/data_pipeline/ods_pick_place_showcase.py`; private training/benchmark helpers alongside it; task-owned physical evidence in `embodichain_tasks.manipulation.pick_place` |
+| Local Franka ChunkBC demo and offline comparisons | `examples/ods/simple_bc_demo/train.py`; local task/config/model/trainer/evaluator and evidence in the same directory |
 | Commit/discard/finalization dispatch | `embodichain/lab/gym/envs/managers/dataset_manager.py` |
 | Synchronous LeRobot persistence | `embodichain/lab/gym/envs/managers/datasets.py`: `LeRobotRecorder` |
 | Background persistence | `embodichain/lab/gym/envs/managers/async_datasets.py`: `AsyncLeRobotRecorder` |
@@ -41,8 +41,8 @@ requires explicit action semantics, step duration, field mapping and a resident
 memory limit; imports do not initialize simulation or import the SDK until load.
 The first backend samples resident numeric tensors after bounded SDK reads.
 
-The PickPlace example uses these public sources. Its `_ods_pick_place_lerobot.py`
-retains only task-owned writing and sidecar/hash auditing around the public
+The local BC demo uses these public sources. Its `lerobot.py`
+retains only example-owned writing and sidecar/hash auditing around the public
 reader. This does not measure per-minibatch disk reads or replace the recording
 and offline-inspection tools. See the [loading design](../../../docs/architecture/dataset-loading-design.md)
 for boundaries and usage links.

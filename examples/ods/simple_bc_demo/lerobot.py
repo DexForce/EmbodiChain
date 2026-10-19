@@ -43,11 +43,11 @@ from typing import Any, Callable
 import torch
 
 if __package__ in {None, ""}:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from embodichain.data_pipeline.datasets import LeRobotDataSource, LeRobotFieldMappingCfg
 
-from examples.data_pipeline._ods_pick_place_benchmark import (
+from examples.ods.simple_bc_demo.data import (
     _content_manifest,
     _json_bytes,
     _validate_tensors,

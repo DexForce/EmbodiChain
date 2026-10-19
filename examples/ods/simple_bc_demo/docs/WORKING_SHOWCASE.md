@@ -1,11 +1,11 @@
 # Working PickPlace policy validation
 
-This record establishes physical feasibility of the current ChunkBC/DLS recipe
+This historical record establishes physical feasibility of the ChunkBC/DLS recipe
 and preserves its later refresh regression. The executed implementation is
 retained at `b683c4c699a71562341d4b213d06857f0fbdf744`.
 [Structured evidence](WORKING_SHOWCASE_RESULTS.json) keeps the qualification,
 checkpoint-selection basis and every outcome in both 100-scene evaluations.
-For the current acquisition-inclusive comparison, use the
+For the later acquisition-inclusive comparison, use the
 [four-arm results](OFFLINE_PILOT_RESULTS.md).
 
 ## Fixed recipe and acceptance

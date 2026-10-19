@@ -5,8 +5,9 @@ Status: executed at `3cd6379a092f8106f08ea6073f13bec9a4bd6f63`,
 The subsequent [counter optimization](ODS_ACCOUNTING_AUDIT.md) was tested
 separately and was not applied to these four runs. Freeze the
 execution commit, CLI, GPU UUID, CPU affinity and measurement packet before the
-first timed run. This four-run development pilot is the current comparison
-protocol. A balanced multi-seed study and fresh held-out verification remain
+first timed run. This document preserves the executed four-run development
+protocol and its original task ID. A balanced multi-seed study and fresh held-out
+verification remain
 future work; the pilot does not qualify formal efficiency claims.
 
 ## Question and scope

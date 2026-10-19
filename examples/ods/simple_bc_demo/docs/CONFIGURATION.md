@@ -1,8 +1,9 @@
 # Configure ODS from measured supply and training demand
 
-Status: configurator, strict CPU shared sampling quotas, measurement helpers and
-PickPlace integration are implemented; profile qualification and cross-rate
-validation remain separate work. The two explicit
+The reusable configurator, strict CPU shared sampling quotas and measurement
+helpers live in `embodichain.data_pipeline`. This local demo binds them to its
+ChunkBC learner. Profile qualification and cross-rate validation remain separate
+work. The two explicit
 user inputs are data-generation throughput and model-training throughput.
 The system reads batch size, sampling units, trajectory metadata, resource limits
 and a versioned reuse-protection profile from the measurement JSON. Missing
@@ -90,8 +91,8 @@ used that often: replacement, failures or early termination can leave it unused,
 which must be reported. Do not generate an unbounded backlog to meet the plan.
 
 Illustrative arithmetic only: g=1 trajectory/s, t=1000 chunks/s, profile
-K_min=200, K_max=600, K_hard=1000 gives K=600, training600 chunks/s and estimated
-60% learner duty. The system must not raise K to1000 just to keep the GPU busy.
+K_min=200, K_max=600, K_hard=1000 gives K=600, training 600 chunks/s and estimated
+60% learner duty. The system must not raise K to 1000 just to keep the GPU busy.
 These profile values are hypothetical, not validated Franka defaults.
 
 Automatic outputs include K, its profile/cap, pacing targets, initial fill/cache
@@ -178,22 +179,12 @@ burst allowance. Per-trajectory count caps remain strict without this allowance.
 | Refill lead time | Estimate remaining funded training time as credits/(B*u_cap). Request before it falls below a measured publication-latency margin. Distinguish first publication from full refill; the first batch may not sustain demand until the next batch. |
 | Initial fill and end of supply | Bound updates on the initial cache. When production ends, make remaining credit and the stopping rule explicit; continued updates on the last cache are a separate fixed-data phase. |
 
-Compatibility mode: the example also retains aggregate publication credits via
-`--usage-schedule anchor_budget --anchor-reuse R --usage-statistics`, together
-with `--producer-envs P`, `--buffer-size C`, `--batch-size B` and an explicit
-`--max-generated-episodes D`. Every new eligible anchor grants r credits; each
-completed optimizer batch spends B. Credit capacity is max(B,r*A0), overflow is
-reported, and a remainder smaller than B cannot fund another update. Very small
-initial budgets therefore require checking actual grants and batch rounding.
-
-Current refill lead time is1.25 times measured p95 first-publication latency,
-with a30-second cold prior. These are implementation heuristics, not validated
-universal constants or independent CLI settings. An excessive cold prior can
-replace initial rows too early. Record the prior and actual latency separately.
-Credits are transferable across generations; this scheduler does not enforce
-per-episode reuse limits. Cache replacement is sequential, and writing rows are
-unavailable to consumers. Short windows and first/last generations are not
-steady-state estimates.
+The protected path uses `--auto-config-input`, `--max-generated-episodes`,
+`--rounds` and `--updates-per-round`. The accepted-episode cap must be a multiple
+of the derived cache size. Defaults retain fixed-round scheduling when no
+auto-configuration input is supplied. Cache replacement is sequential and
+writing rows are unavailable to consumers. Short windows and first/last
+generations are not steady-state estimates.
 
 ## 5. Diagnose deviations before changing parameters
 
@@ -243,21 +234,25 @@ are `profile_id`, `scope`, explicit `qualified`, `min_chunks_per_episode`,
 `bytes_per_episode`, `min_cache_episodes` and `measurement_scope`. Memory is the
 episode-payload allowance, not total process/GPU memory.
 
-Binding fields must match the run: task=`PickPlace-Franka-v1`,
+Binding fields must match the run:
+task=`examples.ods.simple_bc_demo.environment:SimpleBCPickPlace-Franka-v1`,
 policy=`chunk-pose`, `prediction_horizon`, `action_horizon`, and `pose_ik`. The
 runner rejects conflicting explicit batch/cache/concurrency values. Bounds from
 a provisional profile remain labeled provisional in every output.
 
 ```bash
-python -m scripts.benchmark.data_pipeline.configure_ods \
+python -m examples.ods.simple_bc_demo.configure \
   --input /path/to/measured-input.json --output /path/to/configuration-report.json
-python examples/data_pipeline/ods_pick_place_showcase.py \
+python -m examples.ods.simple_bc_demo.train \
   --policy chunk-pose --auto-config-input /path/to/measured-input.json \
   --output /path/to/new-run --sim-device cuda:0 --train-device cuda:0 \
   --no-viewer --no-video
 ```
 
-The calculator accepts optional `--generation-throughput` and
+The local `configs/throughput.example.json` supplies a complete historical input
+with provisional rates and profile values. Re-measure these for a new workload;
+the example packet does not qualify the profile or hardware. The calculator
+accepts optional `--generation-throughput` and
 `--training-throughput` overrides and records them explicitly. Pass the same
 effective input to the showcase; the report wrapper is not itself a run input.
 The auto path enables exact usage statistics and deferred development evaluation
@@ -275,10 +270,12 @@ record the configurator and reporter too. These are observed paced-workload
 rates, not a claim of simultaneous saturation. Recalibrate after changing the
 profile or runtime placement. No built-in profile is claimed universally safe.
 
-## 8. Implementation validation
+## 8. Historical implementation validation
 
 At implementation revision `8748aa22`, 429 focused runtime tests and 49 context/
-documentation tests passed. API coverage is2614/2614. A real P2/C4/B64 run with
+documentation tests passed; API coverage was 2614/2614. These are historical
+counts, before the example tests were removed and the task moved locally.
+A real P2/C4/B64 run with
 provisional budget/hard limit64 produced8 accepted trajectories across2 generations
 and performed6 parameter updates. All384 delivered chunks were consumed; every
 trajectory stayed at or below64 selections. The last four trajectories consumed
@@ -290,8 +287,9 @@ The measured service-start spacing respected the configured12.047 chunks/s cap
 with the one-batch burst allowance. The tiny budget intentionally tests plumbing
 and termination, not learning success. CPU sampler measurements at C32 and B64/
 256/1024 showed p50 quota overhead of4.29%/0.92%/1.17%; these include selection,
-lock and clone, but are not end-to-end training overhead claims. Full Sphinx
-validation remains blocked by the environment's missing `open3d.cpu` dependency.
+lock and clone, but are not end-to-end training overhead claims. That revision's
+full Sphinx validation was blocked by the environment's missing `open3d.cpu`
+dependency.
 Detailed evidence and limitations: [validation record](ODS_CONFIGURATION_VALIDATION.json).
 
 ## 9. Subsequent regime and learning tests

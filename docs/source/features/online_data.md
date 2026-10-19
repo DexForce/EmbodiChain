@@ -13,24 +13,22 @@ These components live under `embodichain/data_pipeline/` and are designed to wor
 ## OnlineDataEngine
 
 For an end-to-end BC experiment, run
-`python examples/data_pipeline/ods_pick_place_showcase.py` from an installed
-checkout. The Franka task qualifies a physical expert, trains a geometry MLP
-by default, and evaluates immutable student checkpoints in a separate process.
-`--policy gru-pose` selects a GRU with the same measured geometry and pose-request
-contract; `--policy mlp-joint` selects joint residuals. The older `--policy gru`
-route retains its original observation and joint-command contracts. Cameras
-are display-only; policy geometry comes from measured robot/object state.
+`python -m examples.ods.simple_bc_demo.train` from an installed checkout.
+The local Franka task qualifies a physical expert, trains the sole ChunkBC
+learner, and evaluates immutable checkpoints in a separate process. The task,
+configs, trainer and evaluator live together in `examples/ods/simple_bc_demo/`;
+the module-qualified Gym ID is
+`examples.ods.simple_bc_demo.environment:SimpleBCPickPlace-Franka-v1`.
+Cameras are display-only; policy geometry comes from measured robot/object state.
 
-The runner supports live ODS, frozen initial data, offline full-corpus training,
-exact offline MLP minibatch replay and serial refresh. Exact replay requires
-`--mode offline-matched`, a validated `--offline-data` corpus and a matching
-`--batch-manifest`; it is not available for the geometry GRU. Serial refresh
-uses an unmatched supervision schedule, so its timings alone do not isolate
-the effect of overlap. Use `--stage overfit-one` or `--stage overfit-four` for
-small-data diagnostics and `--smoke --no-viewer --no-video` for an engineering
-check. These checks do not establish physical student success or a learning
-advantage. Commands, results and the comparison protocol live under
-`extensions/embodichain_tasks/configs/tasks/manipulation/pick_place/`.
+The runner supports live ODS, a frozen initial cache and resident LeRobot data
+with either an initial-cache or full-corpus offline baseline. It consumes the
+public `BatchSource` adapters; the shared engine and loaders remain in
+`embodichain.data_pipeline`. Use `--stage overfit-one|overfit-four` for small-data
+diagnostics and `--smoke --no-viewer --no-video` for an engineering check.
+These checks do not establish policy quality or an efficiency advantage.
+Commands and retained historical evidence are indexed in the
+[demo README](https://github.com/DexForce/EmbodiChain/blob/main/examples/ods/simple_bc_demo/README.md).
 
 ### Configuration and recorded-action meaning
 

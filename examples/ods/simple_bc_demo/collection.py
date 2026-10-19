@@ -23,7 +23,7 @@ import math
 from pathlib import Path
 from typing import Any, Callable
 
-from examples.data_pipeline._ods_pick_place_lerobot import DirectLeRobotWriter
+from examples.ods.simple_bc_demo.lerobot import DirectLeRobotWriter
 
 
 def collect_lerobot(

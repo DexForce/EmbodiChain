@@ -1,16 +1,21 @@
 # Protected ODS configuration: regime and learning tests
 
-These tests validate the configuration method and source-level sampling bounds.
+These historical tests validate the configuration method and source-level
+sampling bounds.
 They do not select a universal optimal tuple. Real learning uses frozen revision
 `6d2ff529`; a separate default-device compatibility fix is `69d65ecd`.
 
 ## Engineering coverage
 
-The new regime suite passes 580 tests: 576 deterministic input combinations plus
+At the recorded revision, the regime suite passed 580 tests: 576 deterministic
+input combinations plus
 public-sampler boundary cases. Of the matrix cases, 414 satisfy the constraints
 and 162 are explicitly infeasible. Exact rational and independent finite-search
 checks cover supply-limited, learner-limited, latency/memory-limited and integer
-budget regimes. A combined core/configuration/regime run passes 792 tests.
+budget regimes. A combined core/configuration/regime run passed 792 tests.
+Subsequent example-test removal and consolidation are recorded separately in
+[public loading validation](DATASET_LOADING_VALIDATION.json); these counts are
+not current CI coverage.
 
 An independent review found CPU quota temporaries inherited the application's
 PyTorch default device. Two new regressions fail on the old implementation and
@@ -131,6 +136,7 @@ protocol, amendment/correction, six-run and replication results, source and raw
 artifact identities, rate recalculation, test counts and cleanup audit. Original
 commands and logs remain under `/tmp/ods-quota-validation/`.
 
-Project context was reviewed: the device fix enforces the existing CPU shared-
+At that revision, project context was reviewed: the device fix enforces the
+existing CPU shared-
 buffer contract; no task registration, RL or Task Program behavior changed.
 The existing online-sampling context remains accurate.

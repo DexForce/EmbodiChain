@@ -47,7 +47,11 @@ Descriptive latest-development ordering only; tied policies and reused scenes ar
 
 ![Development success by checkpoint availability](OFFLINE_PILOT_CURVES.png)
 
-Lines connect measured checkpoints; they do not identify an earlier threshold-crossing time or online certification.
+The complete checkpoint curves remain in [the evidence JSON](OFFLINE_PILOT_RESULTS.json).
+The original report is recorded as
+`/tmp/ods-offline-pilot/pilot-19001/pilot_report.json`, SHA256
+`a061c313b31bfbe02a63b3b336f2428af89ded8e56851a4b0c8c6aee7933bb7e`.
+Measured checkpoints do not identify an earlier threshold-crossing time or online certification.
 
 ## Qualification limits and next work
 

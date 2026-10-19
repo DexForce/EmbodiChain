@@ -1,6 +1,7 @@
 # Exact usage-accounting validation
 
-Correctness passed; the strict performance gate remains incomplete. The selected
+Historical correctness checks passed; the strict performance gate remains
+incomplete. The selected
 C32 median overhead is +5.127%, above the unchanged 5% limit. This result limits
 timing claims in the [offline comparison](OFFLINE_PILOT_RESULTS.md).
 [Structured evidence](ODS_ACCOUNTING_AUDIT.json) retains the original baseline,

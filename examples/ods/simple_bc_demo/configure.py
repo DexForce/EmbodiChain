@@ -16,7 +16,7 @@
 
 """Resolve a PickPlace ODS input/profile JSON without starting simulation.
 
-Run with python -m scripts.benchmark.data_pipeline.configure_ods --input INPUT
+Run with python examples/ods/simple_bc_demo/configure.py --input INPUT
 --output REPORT. Optional rate overrides are explicit and saved in the report.
 """
 
@@ -26,13 +26,17 @@ import argparse
 from dataclasses import asdict
 import json
 from pathlib import Path
+import sys
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from embodichain.data_pipeline.configuration import (
     ODSReuseProfileCfg,
     ODSRuntimeCfg,
     configure_ods,
 )
-from examples.data_pipeline._ods_pick_place_configuration import load_configuration
+from examples.ods.simple_bc_demo.autoconfiguration import load_configuration
 
 
 def main() -> None:
