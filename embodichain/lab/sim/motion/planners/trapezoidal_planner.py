@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import math
 from copy import deepcopy
+from dataclasses import field
 from typing import Literal
 
 import torch
@@ -39,6 +40,11 @@ from .base_planner import (
 )
 from ._blend_constraints import bound_blended_derivatives, bound_path_derivatives
 from ._scalar_time_law import ScalarTimeLaw
+from ._joint_limits import (
+    _DEFAULT_ACCELERATION,
+    _DEFAULT_VELOCITY,
+    _resolve_joint_constraints,
+)
 from .utils import MoveType, PlanResult, PlanState, TrajectorySampleMethod
 
 __all__ = [
@@ -61,8 +67,10 @@ class TrapezoidalPlanOptions(PlanOptions):
 
     Args:
         profile: Scalar time profile used for every linear joint-path segment.
-        constraints: Positive scalar or per-joint ``velocity``, ``acceleration``,
-            and ``jerk`` limits. Jerk is required by the ``double_s`` profile.
+        constraints: Scalar or per-joint ``velocity``, ``acceleration``, and
+            ``jerk`` limits. ``None`` velocity resolves robot speed caps;
+            ``None`` acceleration uses the planner default. Explicit speeds
+            are capped by robot limits. Jerk is required by ``double_s``.
         sample_method: Fixed output quantity or approximately fixed time step.
         sample_interval: Output count for ``QUANTITY`` or seconds for ``TIME``.
         minimum_duration: Optional lower bound on each environment trajectory's
@@ -78,9 +86,11 @@ class TrapezoidalPlanOptions(PlanOptions):
     """
 
     profile: Literal["trapezoidal", "double_s"] = "trapezoidal"
+    control_part: str | None = field(default=None, kw_only=True)
+    """Control group whose joint order matches the trajectory columns."""
     constraints: dict = {  # noqa: RUF012
-        "velocity": 0.2,
-        "acceleration": 0.5,
+        "velocity": None,
+        "acceleration": None,
         "jerk": 2.0,
     }
     sample_method: TrajectorySampleMethod = TrajectorySampleMethod.QUANTITY
@@ -643,6 +653,14 @@ def _plan_linear_profiles(
     options: TrapezoidalPlanOptions,
 ) -> PlanResult:
     """Plan batched piecewise-linear joint paths without simulation state."""
+    if any(options.constraints[key] is None for key in ("velocity", "acceleration")):
+        options = deepcopy(options)
+        for key, fallback in (
+            ("velocity", _DEFAULT_VELOCITY),
+            ("acceleration", _DEFAULT_ACCELERATION),
+        ):
+            if options.constraints[key] is None:
+                options.constraints[key] = fallback
     options._validate_waypoint_policy()
     if waypoints.ndim != 3 or waypoints.shape[1] < 2 or waypoints.shape[2] < 1:
         raise ValueError("waypoints must have shape (B, K, DOF) with K >= 2.")
@@ -828,11 +846,40 @@ class TrapezoidalPlanner(BasePlanner):
             Batched positions, velocities, accelerations, and explicit timing.
 
         Raises:
-            ValueError: If fewer than two valid joint waypoints are supplied.
+            ValueError: If fewer than two valid joint waypoints are supplied,
+                or a joint with a zero velocity cap is requested to move.
         """
         if len(target_states) < 2 or any(state.qpos is None for state in target_states):
             raise ValueError("TrapezoidalPlanner requires at least two qpos waypoints.")
         waypoints = torch.stack([state.qpos for state in target_states], dim=1).to(
             self.device
         )
-        return _plan_linear_profiles(waypoints, options)
+        resolved = deepcopy(options)
+        resolved.constraints = _resolve_joint_constraints(
+            self.robot,
+            options.constraints,
+            control_part=options.control_part,
+            dof=waypoints.shape[-1],
+            batch_size=waypoints.shape[0],
+        )
+        velocity = resolved.constraints["velocity"]
+        frozen = velocity == 0
+        has_frozen = bool(frozen.any())
+        if has_frozen:
+            frozen_columns = frozen.to(waypoints.device)
+            locked = waypoints[..., frozen_columns]
+            if bool((locked != locked[:, :1]).any()):
+                raise ValueError("Trajectory moves a joint with a zero velocity limit.")
+            # Timing kernels require positive limits; constant joints impose
+            # no timing bound. Preserve the real cap in the diagnostic report.
+            resolved.constraints["velocity"] = velocity.masked_fill(frozen, 1.0)
+            # Interpolate these constant coordinates at zero to avoid roundoff.
+            waypoints[..., frozen_columns] = 0.0
+        result = _plan_linear_profiles(waypoints, resolved)
+        if has_frozen:
+            result.positions[..., frozen_columns] = locked[:, :1]
+            if result.constraint_report is not None:
+                result.constraint_report["velocity_limit"] = (
+                    velocity.amax().to(result.positions).expand(waypoints.shape[0])
+                )
+        return result

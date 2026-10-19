@@ -36,6 +36,9 @@ from embodichain.lab.task_program import (
     HandOverCfg,
     InvokeCfg,
     ObjectNearTargetValidatorCfg,
+    ObjectLiftedValidatorCfg,
+    ObjectRelativePositionValidatorCfg,
+    ObjectUprightValidatorCfg,
     PickCfg,
     PlaceCfg,
     PoseCfg,
@@ -645,3 +648,54 @@ def test_compiler_rechecks_mutated_repeat_and_target_bounds() -> None:
         TaskProgramCompiler.from_scene_registry(registry).compile(config)
     assert target_error.value.code == "empty_target_values"
     assert target_error.value.path == ("targets", "drop_pose", "values")
+
+
+def test_measured_object_validators_compile_without_observation_and_own_values() -> (
+    None
+):
+    registry, provider = _scene_registry()
+    relative = ObjectRelativePositionValidatorCfg(
+        object="sim_cube",
+        reference="tray",
+        position_offset=[-0.08, 0.0, 0.0],
+        position_tolerance=[0.035, 0.03, None],
+    )
+    config = _program(
+        SegmentCfg(
+            name="checked",
+            steps=InvokeCfg(call=PickCfg(object="cube")),
+            validators=(
+                ObjectLiftedValidatorCfg(object="cube"),
+                relative,
+                ObjectUprightValidatorCfg(object="tray"),
+            ),
+        )
+    )
+    compiled = TaskProgramCompiler.from_scene_registry(registry).compile(config)
+    relative.position_offset = (9.0, 9.0, 9.0)
+    relative.position_tolerance = (9.0, 9.0, 9.0)
+    for _ in range(2):
+        segment = next(iter(compiled))
+        assert provider.calls == 0
+        assert segment.validators[1].object == SceneObjectRef("cube")
+        assert segment.validators[1].reference == SceneObjectRef("tray")
+        assert segment.validators[1].cfg.position_offset == (-0.08, 0.0, 0.0)
+        assert segment.validators[1].cfg.position_tolerance == (0.035, 0.03, None)
+        with pytest.raises(FrozenInstanceError):
+            segment.validators[0].cfg.minimum_lift = 99.0
+
+
+def test_relative_position_validator_rejects_unresolved_reference_at_compile() -> None:
+    registry, provider = _scene_registry()
+    config = _program(
+        SegmentCfg(
+            name="checked",
+            steps=InvokeCfg(call=PickCfg(object="cube")),
+            validators=(
+                ObjectRelativePositionValidatorCfg(object="cube", reference="missing"),
+            ),
+        )
+    )
+    with pytest.raises(TaskProgramCompileError, match="reference"):
+        TaskProgramCompiler.from_scene_registry(registry).compile(config)
+    assert provider.calls == 0

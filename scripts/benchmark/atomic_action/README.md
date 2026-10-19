@@ -7,13 +7,13 @@ embodichain benchmark atomic-action --robot ur5 --skill all --planner trapezoida
 
 Each case builds its own simulation, compiles `AtomicActionEngine` invocations,
 drives the robot, and scores the measured object/joint state. It does not load
-`run_task`, `run-env`, Gym deployments, or Task Programs. Shared production
+`run_task`, `run-task`, Gym deployments, or Task Programs. Shared production
 helpers under `embodichain/lab/scripts/_atomic_action/` supply the sample assets,
 grippers, mounts, poses and expansion machinery.
 
 UR5 single-arm scenes use DH PGI-140-80. **Handover explicitly mounts
 `Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf` on both arms**, matching the
-`run-env` Robotiq demo. This applies to every supported Handover arm preset.
+`run-task` Robotiq demo. This applies to every supported Handover arm preset.
 
 ## Selection and replay
 

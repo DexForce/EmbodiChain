@@ -4,7 +4,7 @@ Activate the `embodichain` conda environment and run from the repository root:
 
 ```bash
 conda activate embodichain
-embodichain run-env --gym-config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml
+embodichain run-task --gym-config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml
 ```
 
 These deployments use the scenes and gripper calibrations from
@@ -95,7 +95,7 @@ identity and recorder boundary; reset jumps are not stored as continuous motion.
 Use explicit recipe indices to inspect selected variants or reduce a run:
 
 ```bash
-embodichain run-env \
+embodichain run-task \
   --gym-config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml \
   --headless --num-envs 2 --max_episodes 4 \
   --expansion-recipe-indices 0 1 4 5 \

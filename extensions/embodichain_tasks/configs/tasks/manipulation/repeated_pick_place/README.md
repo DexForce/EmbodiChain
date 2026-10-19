@@ -2,7 +2,7 @@
 
 ```bash
 conda activate embodichain
-embodichain run-env --gym-config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml
+embodichain run-task --gym-config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml
 ```
 
 Each episode repeats Pick/Place three times. UR5, its PGI gripper, initial
@@ -21,7 +21,7 @@ shared expansion parameters live in `components/expansion_policies/atomic_fixed_
 For a smaller run, including two reset batches:
 
 ```bash
-embodichain run-env \
+embodichain run-task \
   --gym-config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml \
   --headless --num-envs 2 --max_episodes 4 \
   --expansion-recipe-indices 0 1 4 5 \
@@ -45,6 +45,12 @@ phase protection, repetition and output behavior.
 | ur5 | ur5_dh_pgi_140_80 | default or newton | `task.ur5.yaml` |
 | tianji_marvin | tianji_marvin | default | `task.tianji_marvin.yaml` |
 
+Inspect the available deployments:
+
+```bash
+embodichain show-task embodichain_tasks:repeated_pick_place
+```
+
 ## Tianji Marvin tabletop demo
 
 The Marvin deployment uses `envs/tabletop.default.yaml`, a 750 mm tabletop and
@@ -59,7 +65,7 @@ measured drop onto the support are observed before retracting.
 Run without creating a training dataset:
 
 ```bash
-python -m embodichain run-env \
+python -m embodichain run-task \
   --gym-config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.tianji_marvin.yaml \
   --headless --viser --renderer hybrid --seed 0 --max_episodes 1 --filter-dataset-saving
 ```

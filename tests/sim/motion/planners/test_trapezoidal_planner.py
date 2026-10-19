@@ -1225,6 +1225,13 @@ def test_planner_adapts_batched_plan_states() -> None:
     planner = TrapezoidalPlanner.__new__(TrapezoidalPlanner)
     planner.device = torch.device("cpu")
     planner.cfg = SimpleNamespace(planner_type="trapezoidal")
+    planner.robot = SimpleNamespace(
+        joint_names=["first", "second"],
+        mimic_ids=(),
+        mimic_parents=(),
+        mimic_multipliers=(),
+        get_qvel_limits=lambda **kwargs: torch.tensor([[0.2, 0.2]]),
+    )
     states = [
         PlanState.from_qpos(torch.tensor([[0.0, 0.0]])),
         PlanState.from_qpos(torch.tensor([[0.5, -0.25]])),

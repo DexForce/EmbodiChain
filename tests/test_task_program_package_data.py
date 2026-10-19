@@ -45,6 +45,12 @@ _PROGRAMS = {
         "tabletop_hand_over"
     ),
     Path(
+        "tasks/manipulation/tableware/stack_blocks_two/task_program/program.yaml"
+    ): "stack_two_blocks",
+    Path(
+        "tasks/manipulation/tableware/blocks_ranking_rgb/task_program/program.yaml"
+    ): "rank_blocks_rgb",
+    Path(
         "tasks/manipulation/rubiks_cube_pick_place/task_program/program.yaml"
     ): "rubiks_cube_pick_place",
     Path("tasks/manipulation/repeated_pick_place/task_program/program.yaml"): (
@@ -78,6 +84,16 @@ _DEPLOYMENTS = {
         "pour_water_with_right_arm",
         "pour_water_tianji_marvin",
         "tianji_marvin",
+    ),
+    Path("tasks/manipulation/tableware/stack_blocks_two/task.cobotmagic.yaml"): (
+        "stack_two_blocks",
+        "task_program_stack_blocks_two",
+        "cobotmagic",
+    ),
+    Path("tasks/manipulation/tableware/blocks_ranking_rgb/task.cobotmagic.yaml"): (
+        "rank_blocks_rgb",
+        "task_program_blocks_ranking_rgb",
+        "cobotmagic",
     ),
     Path("tasks/manipulation/rubiks_cube_pick_place/task.ur5.yaml"): (
         "rubiks_cube_pick_place",
@@ -124,6 +140,17 @@ _RESOURCE_PATHS = frozenset(
     {
         *_PROGRAMS,
         *_DEPLOYMENTS,
+        Path("components/execution_policies/trajectory_open_loop_manipulation.yaml"),
+        *(
+            Path("tasks/manipulation/tableware") / task_name / relative_path
+            for task_name in ("stack_blocks_two", "blocks_ranking_rgb")
+            for relative_path in (
+                "env.yaml",
+                "catalog.yaml",
+                "README.md",
+                "task_program/integration.yaml",
+            )
+        ),
         Path("tasks/manipulation/repeated_pick_place/catalog.yaml"),
         Path("tasks/manipulation/repeated_pick_place/README.md"),
         Path("tasks/manipulation/repeated_pick_place/objective.yaml"),

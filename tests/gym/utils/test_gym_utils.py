@@ -1618,12 +1618,17 @@ class TestConfigToCfgFromFile:
             "stack_cups",
         ),
     )
-    def test_official_handwritten_config_uses_shared_embodiment(
+    def test_official_tableware_config_uses_shared_embodiment(
         self,
         task_name: str,
     ) -> None:
-        """CobotMagic handwritten demos share one exact physical component."""
-        config_path = _TABLEWARE_CONFIG_ROOT / task_name / "env.json"
+        """CobotMagic task solutions share one exact physical component."""
+        filename = (
+            "task.cobotmagic.yaml"
+            if task_name in {"blocks_ranking_rgb", "stack_blocks_two"}
+            else "env.json"
+        )
+        config_path = _TABLEWARE_CONFIG_ROOT / task_name / filename
         config = load_config(config_path)
 
         assert config["embodiment"] == {
@@ -1649,11 +1654,13 @@ class TestConfigToCfgFromFile:
             type(sensor) is CameraCfg for sensor in [*cfg.sensor, *cfg.robot.sensors]
         )
 
-    def test_official_handwritten_config_can_disable_shared_embodiment_sensors(
+    def test_official_tableware_config_can_disable_shared_embodiment_sensors(
         self,
     ) -> None:
         """A deployment can keep the shared sensor declaration unused."""
-        config_path = _TABLEWARE_CONFIG_ROOT / "blocks_ranking_rgb" / "env.json"
+        config_path = (
+            _TABLEWARE_CONFIG_ROOT / "blocks_ranking_rgb" / "task.cobotmagic.yaml"
+        )
         config = load_config(config_path)
         config["enable_sensor"] = False
 

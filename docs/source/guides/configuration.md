@@ -140,7 +140,7 @@ Example paths in the repository:
 
 | Use case | JSON example | YAML example |
 |---|---|---|
-| Runnable Gym deployment | `embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/env.json` | `embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml` |
+| Runnable Gym deployment | `embodichain_tasks/configs/tasks/manipulation/push_cube/env.json` | `embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml` |
 | RL training | `embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/ppo.json` | `embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/ppo.yaml` |
 
 When a training config references a gym config (via `trainer.gym_config`), the nested path may also use any supported extension.
@@ -261,7 +261,7 @@ when the backend should change.
 
 `device` is optional. If omitted, the backend config keeps its own default
 (`cpu` for Default and `cuda:0` for Newton). An explicitly configured device,
-or an explicit `run-env --device ...` override, is applied to both the
+or an explicit `run-task --device ...` override, is applied to both the
 environment tensors and the selected physics backend. In particular,
 `--device cpu` is not ignored for Newton.
 
@@ -317,10 +317,10 @@ The `visualization` section is optional and defaults to
 `{"backend": "none"}`. Setting `"backend": "viser"` starts browser
 visualization when the environment constructs its `SimulationManager`. The
 `--viser*` command-line options override these values for
-`embodichain run-env`.
+`embodichain run-task`.
 
 Set `sensor_image_fps` to `null` to capture camera previews once per eligible
-simulation step instead of applying a wall-clock FPS limit. `run-env --viser`
+simulation step instead of applying a wall-clock FPS limit. `run-task --viser`
 uses this step-synchronized mode by default when neither the configuration nor
 `--viser-image-fps` supplies a rate.
 

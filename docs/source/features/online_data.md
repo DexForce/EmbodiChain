@@ -49,7 +49,7 @@ valid, episode_step, segment_id, segment_step,
 segment_start, segment_end, terminated, truncated
 ```
 
-Tasks use the same `create_demo_segments()` protocol as `run-env`; legacy
+Tasks use the same `create_demo_segments()` protocol as `run-task`; legacy
 `create_demo_action_list()` tasks are treated as one segment. The worker checks
 termination after every action and retries a failed episode up to
 `max_generation_attempts` before reporting an error.

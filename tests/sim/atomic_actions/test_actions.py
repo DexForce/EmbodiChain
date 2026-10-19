@@ -288,6 +288,8 @@ def _robot() -> Mock:
     robot = Mock()
     robot.device = torch.device("cpu")
     robot.dof = ROBOT_DOF
+    robot.joint_names = [f"joint_{index}" for index in range(ROBOT_DOF)]
+    robot.num_instances = NUM_ENVS
     robot.control_parts = {
         "arm": object(),
         "hand": object(),
@@ -364,6 +366,10 @@ def _robot() -> Mock:
     robot.compute_batch_ik.side_effect = compute_batch_ik
     robot.compute_fk.side_effect = compute_fk
     robot.compute_batch_fk.side_effect = compute_batch_fk
+    robot.get_qvel_limits.return_value = torch.full((NUM_ENVS, ROBOT_DOF), torch.inf)
+    robot.mimic_ids = []
+    robot.mimic_parents = []
+    robot.mimic_multipliers = []
     return robot
 
 
@@ -7022,6 +7028,7 @@ def test_move_joints_supports_sparse_trapezoidal_planning() -> None:
     planner = object.__new__(TrapezoidalPlanner)
     planner.cfg = SimpleNamespace(planner_type="trapezoidal")
     planner.device = torch.device("cpu")
+    planner.robot = generator.robot
     generator.planner = planner
     action = _bind_action(generator, MoveJoints())
     target = torch.full((NUM_ENVS, ARM_DOF), 0.1)
@@ -7052,6 +7059,7 @@ def test_move_joints_holds_stationary_trapezoidal_goal() -> None:
     planner = object.__new__(TrapezoidalPlanner)
     planner.cfg = SimpleNamespace(planner_type="trapezoidal")
     planner.device = torch.device("cpu")
+    planner.robot = generator.robot
     generator.planner = planner
     action = _bind_action(generator, MoveJoints())
     target = torch.zeros(NUM_ENVS, ARM_DOF)

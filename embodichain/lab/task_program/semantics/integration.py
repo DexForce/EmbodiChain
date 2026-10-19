@@ -157,6 +157,7 @@ class SceneEntityManifest(SceneEntityMetadata):
             affordance_payload_type=metadata.affordance_payload_type,
             affordance_revision=metadata.affordance_revision,
             relative_pose=metadata.relative_pose,
+            pose_source_revision=metadata.pose_source_revision,
         )
 
 

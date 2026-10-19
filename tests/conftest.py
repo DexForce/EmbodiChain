@@ -36,7 +36,7 @@ def _discover_task_packages():
     auto-registered by importing
     ``embodichain.lab.gym.envs``, so tests that build task envs via
     ``make(env_id)`` / ``build_env`` / ``train_from_config`` need discovery to
-    run first. This mirrors what the ``run_env`` and ``train-rl`` CLIs do at
+    run first. This mirrors what the ``run_task`` and ``train-rl`` CLIs do at
     startup.
     """
     from embodichain.lab.gym.utils.registration import (

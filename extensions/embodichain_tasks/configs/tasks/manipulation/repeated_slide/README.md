@@ -2,7 +2,7 @@
 
 ```bash
 conda activate embodichain
-embodichain run-env --gym-config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_slide/task.ur5.yaml
+embodichain run-task --gym-config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_slide/task.ur5.yaml
 ```
 
 The scene uses the UR5/PGI gripper, drawer pose and handle geometry from the
@@ -20,7 +20,7 @@ reach, closure, pull/push and release commands exact. Parameters are selected th
 `expansion/open_drawer.yaml` and the shared `atomic_fixed_scene` policy.
 
 ```bash
-embodichain run-env \
+embodichain run-task \
   --gym-config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_slide/task.ur5.yaml \
   --headless --num-envs 2 --max_episodes 2 \
   --expansion-recipe-indices 0 1 \

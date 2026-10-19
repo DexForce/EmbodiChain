@@ -65,7 +65,7 @@ from embodichain.lab.sim.atomic_actions import (
 from embodichain.lab.sim.motion.planners.trapezoidal_planner import (
     TrapezoidalPlanOptions,
 )
-from embodichain.lab.scripts.run_env import (
+from embodichain.lab.scripts.run_task import (
     _create_parser,
     _resolve_expansion_request,
     resolve_collection_plan,

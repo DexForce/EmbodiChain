@@ -4,9 +4,8 @@ Scene expansion proposes changes before a new Task Program execution. The core
 is independent of Task Program, GenSim and Gym; injected host callbacks own the
 actual scene preparation and measured task evidence. General composition,
 layout and physical state services are owned by
-[scene services](../scene-services/scene-services.md); legacy
-`sim.scene_expansion` imports re-export the canonical `sim.scene.expansion`
-contracts.
+[scene services](../scene-services/scene-services.md). Proposal contracts are
+provided by `sim.scene.expansion`.
 
 ## Entry points
 
@@ -16,6 +15,9 @@ contracts.
 | Candidate limits and movable entity permissions | `cfg.py` in that package |
 | Arena poses and proposal identity | `contracts.py` in that package |
 | One Task Program attempt and result metadata | `embodichain/lab/task_program/integrations/scene_expansion.py` |
+| Physical preparation and owned state restore | `embodichain/lab/task_program/integrations/simulation/scene_expansion.py` |
+| Reusable object/workspace proposals and pose IK | `embodichain/lab/sim/scene/workspace.py` |
+| Preparation hook before final observations | `embodichain/lab/gym/envs/base_env.py` |
 | Reset-time persistence eligibility | `embodichain/lab/gym/envs/embodied_env.py` |
 | Action consumption and recording lifecycle | `embodichain/lab/gym/envs/demo.py` |
 
@@ -36,15 +38,43 @@ entities, not a replacement SceneGraph or runtime registry. Current execution
 is B=1 and requires a Task Program; explicit canonical bridge creation prevents
 legacy segment overrides from changing the selected source.
 
-The preparation callback is responsible for restore/application, physical
-settling, actual initial-state checks, saved-state identity, binding refresh and
-recording observation refresh. Generic execution does not provide those
-physical operations. Callbacks can use the shared scene state, operations and
-validation services. The concrete Gym reset host and robot-workspace adapter
-are supplied separately by [PR #750](https://github.com/DexForce/EmbodiChain/pull/750).
-The measured callback supplies task-specific state and
-event evidence. Gym remains the owner of reset, stepping and recording; no new
-generation session or persistence writer is introduced.
+`SimulationSceneExpansionHost` implements the preparation callback for a fixed
+B=1 scene: preflight topology and capture, apply existing-rigid-object changes,
+settle, reset sensor/observation history, refresh current contacts without stepping,
+capture the actual state and run explicit
+initial checks. Its trusted reset hook runs after ordinary reset events and
+before physical objectives, final observations and recording seeding. A new
+Task Program bridge creates fresh providers and motion generators, preventing
+reuse of the old episode's same-clock scene cache or collision bindings.
+
+The measured callback supplies task-specific state and event evidence. Gym
+remains the owner of reset, stepping and recording; no new generation session or
+persistence writer is introduced.
+
+## Physical restore and workspace boundary
+
+`SimulationSceneInitialState` retains host provenance and the Gym control
+period around the shared scene physical-state representation. Numeric capture,
+restore, rigid-pose application and state comparison delegate to
+[scene services](../scene-services/scene-services.md). Restoration requires the owning host, unchanged bindings,
+topology, assets/physical parameters, backend and control period. The host measures
+mass properties, rigid friction/damping and articulation drives/limits before and
+after reset events and rejects parameter drift. It restores
+without settling again, reruns initial validation and records a mandatory
+numeric round-trip check with quaternion-sign equivalence. Only measured qpos
+receives the explicit `1e-4` limit excursion allowance; targets remain strict.
+Empty initial validation remains unavailable despite passing auxiliary checks. Actual hashes can
+differ within tolerance. Solver history/external forces are cleared; this is
+episode restoration, not a complete backend checkpoint. Rigid groups,
+deformables and explicit rigid constraints are rejected.
+
+The shared `sim.scene.workspace.RobotSceneWorkspace` service selects one control part explicitly, consumes valid-only
+current-arena TCP samples, and derives object poses by inverting the object-local
+grasp transform. Optional bounds apply to object origins. It returns scene check reports; the legacy Task Program path converts them to
+execution validation results. Sampling supplies
+joint seeds and scores; actual pose IK also checks targets absent from the
+cache and verifies joint limits and full-pose FK residuals. Recheck settled or modified poses. Support, collision planning between
+phases and measured success remain separate gates.
 
 The attempt guard spans preparation, execution and measurement. It suppresses
 automatic reset and blocks persistence during explicit callback resets, even
@@ -90,11 +120,14 @@ integrations and GenSim asset/model dependencies in GenSim. Extend the host
 boundary when adding physical preparation, preserving Gym lifecycle ownership.
 
 ```bash
-pytest -q tests/sim/scene_expansion
+pytest -q tests/sim/scene/expansion
 pytest -q tests/gym/envs/task_program/test_scene_expansion.py
+pytest -q tests/gym/envs/task_program/test_scene_workspace.py tests/gym/envs/task_program/test_simulation_scene_expansion.py
+pytest -q tests/gym/envs/task_program/test_simulation_environment.py
 python docs/scripts/check_api_docs.py
 ```
 
 The focused tests exercise immutable geometry and identities, bounded source
-consumption, real demo dispatch and reset-time recording gates using CPU ports.
+consumption, real demo dispatch, reset ordering, full state restoration, workspace
+frames/masks/IK, fresh bridge observations and recording gates using CPU ports.
 They do not establish physical success across robot models or scene layouts.

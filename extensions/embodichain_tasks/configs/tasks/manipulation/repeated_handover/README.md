@@ -26,7 +26,7 @@ the lifted can in the shared pickup region instead of projecting it toward
 that origin.
 
 ```bash
-python -m embodichain run-env \
+python -m embodichain run-task \
   --gym-config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_handover/task.tianji_marvin.yaml \
   --headless --viser --renderer hybrid --seed 0 --max_episodes 1 --filter-dataset-saving
 ```

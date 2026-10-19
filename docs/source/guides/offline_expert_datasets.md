@@ -203,7 +203,7 @@ support traceability but do not replace the full initial scene state.
 Enable the existing replay recorder when that state is needed:
 
 ```bash
-embodichain run-env \
+embodichain run-task \
     --gym_config embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml \
     --headless --max_episodes 1 \
     --record_trajectory --trajectory_save_dir outputs/replay

@@ -112,6 +112,8 @@ Generic profiles and candidate coordination stay in
 | `TaskProgramOpenDrawer-Newton-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/repeated_slide/task.ur5.yaml` with `--physics newton` |
 | `HandOver-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/repeated_handover/` |
 | `PourWater-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/` |
+| `StackBlocksTwo-v1` | projected with measured segment validators | `extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/` |
+| `BlocksRankingRGB-v1` | projected with measured segment validators | `extensions/embodichain_tasks/configs/tasks/manipulation/tableware/blocks_ranking_rgb/` |
 
 The [packaged manipulation guide](../../../extensions/embodichain_tasks/configs/tasks/manipulation/README.md)
 routes the ten Atomic reference scenes and existing MoveHeldObject/PushObject

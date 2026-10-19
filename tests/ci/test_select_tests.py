@@ -87,6 +87,10 @@ def test_repository_manifest_selectors_resolve() -> None:
             "tests/lab/scripts/test_preview_joint_control.py",
         ),
         (
+            "embodichain/lab/scripts/run_task.py",
+            "tests/lab/scripts/test_run_task.py",
+        ),
+        (
             "scripts/tutorials/atomic_action/pickup.py",
             "tests/sim/atomic_actions/test_core.py",
         ),

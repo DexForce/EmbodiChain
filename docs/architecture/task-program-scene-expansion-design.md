@@ -4,7 +4,7 @@ Status: Design proposal, to be implemented in stages. Date: 2026-10-10 (Asia/Sha
 
 Implementation and review tracking: [Issue #748](https://github.com/DexForce/EmbodiChain/issues/748).
 
-This design connects robot workspace analysis, scene expansion that preserves task semantics, and Task Program execution into a shared expert trajectory generation workflow for handwritten Task Programs and GenSim. It retains a dedicated `embodichain.lab.sim.scene_expansion` module for spatial candidate generation. Task Program integrations connect task constraints to execution, while Gym continues to own the physical lifecycle and recording.
+This design connects robot workspace analysis, scene expansion that preserves task semantics, and Task Program execution into a shared expert trajectory generation workflow for handwritten Task Programs and GenSim. It uses `embodichain.lab.sim.scene.expansion` for spatial candidate generation. Task Program integrations connect task constraints to execution, while Gym continues to own the physical lifecycle and recording.
 
 Code references: workspace baseline `57334705733d9d3208795f77e6df2442e896a001`; reviewed revision of [PR #729](https://github.com/DexForce/EmbodiChain/pull/729): `b60d90ee1f972ad12c8e81c715faf70e4ee8c6f7`. The PR was still OPEN when checked. The following sections distinguish existing foundations from proposed capabilities; they do not imply that this design is implemented or that the PR has merged.
 
@@ -44,7 +44,7 @@ Kinematic reachability, planning success, program completion, physical task succ
 
 | Module | Responsibilities | Responsibilities outside its ownership |
 | --- | --- | --- |
-| **New `lab.sim.scene_expansion`** | Scene candidate contracts, layout sampling, distractor placement, deployment candidates, and spatial constraint screening | Parsing TaskSpec/Task Program, model calls, reset/step, full task acceptance, and writing datasets |
+| **`lab.sim.scene.expansion`** | Scene candidate contracts, layout sampling, distractor placement, deployment candidates, and spatial constraint screening | Parsing TaskSpec/Task Program, model calls, reset/step, full task acceptance, and writing datasets |
 | `lab.sim.motion.workspace` | Kinematic caches, end-effector sampling, and manipulability metrics | Scene materialization, collision-world maintenance, and task success decisions |
 | `lab.task_program.integrations` | Translate task requirements into expansion inputs; connect scene preparation, binding refresh, program preparation, and acceptance | A separate compiler/runtime or physical execution loop |
 | `lab.task_program.semantics` and the existing runtime | Roles, affordances, call/effect contracts, and execution | Scene generation pipelines and asset production |

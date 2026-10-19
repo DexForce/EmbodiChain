@@ -124,7 +124,7 @@ class AtomicBenchmarkScene:
 
 
 def _create_robot(sim: Any, args: argparse.Namespace) -> Any:
-    """Retain sample mounts and the run-env Handover Robotiq grippers."""
+    """Retain sample mounts and the run-task Handover Robotiq grippers."""
     skill = args._config["skill"]
     if skill == "handover":
         from embodichain.lab.scripts._atomic_action import handover

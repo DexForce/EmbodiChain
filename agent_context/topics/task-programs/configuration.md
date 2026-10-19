@@ -34,6 +34,14 @@ not establish semantic boundaries for an unannotated recorded demonstration.
 Language instructions express intent; physical acceptance still depends on the
 selected effect authority and validators, not on the presence of a label.
 
+Measured segment validators can check lift from the segment's incoming pose,
+world-axis position relative to another live object, and object uprightness.
+They belong to the program's acceptance contract; a projected call completing
+does not replace these measurements. The Gym tutorial at
+`scripts/tutorials/gym/simple_task_program.py` shows Cartesian end-effector
+motion with a tutorial-local registered call, the existing `MoveEndEffector`
+Atomic Skill, and the common Gym environment and demonstration executor.
+
 Unknown fields, duplicate keys, non-finite values, invalid exact types,
 excessive depth/nodes/repeats, cyclic or executable registered payloads, and
 unresolved references fail before live providers are touched.
@@ -169,3 +177,10 @@ fixed internal epsilon rather than an author-controlled tolerance. The
 configured decoder derives those relations and normalizes the authoring
 hierarchy into the flat `SimulationSceneBinding` / `SceneRegistry` index.
 Scene-level affordance collections are not accepted.
+
+Placement affordances default to composing `object_target_pose` in their parent's
+frame. Select `object_target_frame: world_axes` when a target should follow the
+parent's measured position while its offset and orientation stay in world axes.
+This distinction matters for left/right sorting after reference-object rotation.
+World-axis targets fingerprint both their frame and declared pose; static
+manifests and live registries retain the same identity.
