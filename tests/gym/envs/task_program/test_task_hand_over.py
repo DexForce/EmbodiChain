@@ -515,7 +515,7 @@ def _run_real_sim_expert_episode() -> dict[str, object]:
 def _run_real_sim_expanded_episodes(metadata_path: Path) -> None:
     """Measure holding through handover for one branch's four real variants."""
     from embodichain.lab.gym.envs.base_env import BaseEnv
-    from embodichain.lab.scripts import run_env
+    from embodichain.lab.scripts import run_task
     from embodichain.lab.task_program.integrations import (
         CombinedTaskProgramExpansionFactory,
     )
@@ -523,7 +523,7 @@ def _run_real_sim_expanded_episodes(metadata_path: Path) -> None:
     _initialize_child_sim_engine()
     original_transform = CombinedTaskProgramExpansionFactory._transform
     original_step = BaseEnv.step
-    original_main = run_env.main
+    original_main = run_task.main
     current: dict[str, object] = {}
     report = {"episodes": 0, "expanded_variants": 0, "held_checks": 0}
 
@@ -578,9 +578,9 @@ def _run_real_sim_expanded_episodes(metadata_path: Path) -> None:
 
     CombinedTaskProgramExpansionFactory._transform = inspect_transform
     BaseEnv.step = inspect_step
-    run_env.main = inspect_main
+    run_task.main = inspect_main
     try:
-        run_env.cli(
+        run_task.cli(
             [
                 "--gym_config",
                 str(_gym_config_path()),
@@ -604,7 +604,7 @@ def _run_real_sim_expanded_episodes(metadata_path: Path) -> None:
     finally:
         CombinedTaskProgramExpansionFactory._transform = original_transform
         BaseEnv.step = original_step
-        run_env.main = original_main
+        run_task.main = original_main
 
 
 @pytest.mark.requires_sim
