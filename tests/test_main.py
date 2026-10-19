@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -540,7 +541,8 @@ def test_benchmark_help_distinguishes_benchmark_domains(
     output = " ".join(capsys.readouterr().out.split())
     assert "motion-generation" in output
     assert "Motion Planning or Atomic Skills suites" in output
-    assert "atomic-action" in output
+    assert "atomic-action-profile" in output
+    assert not re.search(r"\batomic-action\b(?!-profile)", output)
     assert "Profile individual atomic actions" in output
     assert "robotics-kinematic-solver" in output
     assert "rendering" in output
@@ -576,3 +578,69 @@ def test_motion_generation_dispatch_selects_suite(
 
     assert received["suite_name"] == expected_suite
     assert received["algorithms"] == ["toppra"]
+
+
+def test_atomic_action_profile_help_uses_complete_parser(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Profiling help exposes the selected action and workload profile."""
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["benchmark", "atomic-action-profile", "--help"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "usage: embodichain benchmark atomic-action-profile" in output
+    assert "--action" in output
+    assert "--profile" in output
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_atomic_action_profile_forwards_arguments_and_restores_argv(
+    monkeypatch: pytest.MonkeyPatch,
+    fail: bool,
+) -> None:
+    """Delegated parsing preserves arguments and restores argv on either exit."""
+    from scripts.benchmark.atomic_action import run_benchmark
+
+    received: dict[str, object] = {}
+    original_argv = ["caller", "--unrelated-option"]
+    monkeypatch.setattr(sys, "argv", original_argv)
+
+    def fake_run_action_subprocess(action_name: str, args: argparse.Namespace) -> Path:
+        received.update(
+            action=action_name,
+            profile=args.profile,
+            argv=list(sys.argv),
+        )
+        if fail:
+            raise RuntimeError("profiling failed")
+        return Path("profile.md")
+
+    monkeypatch.setattr(
+        run_benchmark, "_run_action_subprocess", fake_run_action_subprocess
+    )
+    forwarded = ["--action", "move_joints", "--profile", "full"]
+
+    if fail:
+        with pytest.raises(SystemExit, match="profiling failed"):
+            cli.main(["benchmark", "atomic-action-profile", *forwarded])
+    else:
+        cli.main(["benchmark", "atomic-action-profile", *forwarded])
+
+    assert received == {
+        "action": "move_joints",
+        "profile": "full",
+        "argv": ["embodichain benchmark atomic-action-profile", *forwarded],
+    }
+    assert sys.argv is original_argv
+
+
+def test_atomic_action_benchmark_name_is_rejected(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The former command is removed rather than retained as an alias."""
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["benchmark", "atomic-action", "--smoke"])
+
+    assert exc_info.value.code == 2
+    assert "invalid choice: 'atomic-action'" in capsys.readouterr().err

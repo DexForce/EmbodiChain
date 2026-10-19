@@ -55,10 +55,18 @@ from scripts.benchmark.motion_generation.scenarios import (
 )
 from scripts.benchmark.motion_generation.scenarios.atomic_skill import (
     AtomicSkillScenario,
-    _ActiveCaseGraspPoseGenerator,
-    _ExecutionObservation,
-    _signed_rotation_about_axis,
-    _with_plan_options,
+)
+from scripts.benchmark.motion_generation.scenarios.atomic_grasps import (
+    ActiveCaseGraspPoseGenerator,
+)
+from scripts.benchmark.motion_generation.contracts import ExecutionObservation
+from scripts.benchmark.motion_generation.scenarios.atomic_evaluation import (
+    signed_rotation_about_axis,
+)
+from scripts.benchmark.motion_generation.scenarios.atomic_policy import (
+    with_plan_options,
+)
+from scripts.benchmark.motion_generation.atomic_skill import (
     create_atomic_skill_provider,
 )
 
@@ -116,8 +124,8 @@ def _outcomes(batch_size: int, *, motion_valid: bool = True) -> tuple[CaseOutcom
     )
 
 
-def _observation(batch_size: int, **values: object) -> _ExecutionObservation:
-    return _ExecutionObservation(
+def _observation(batch_size: int, **values: object) -> ExecutionObservation:
+    return ExecutionObservation(
         execution_success=torch.ones(batch_size, dtype=torch.bool),
         final_tcp_pose=torch.eye(4).repeat(batch_size, 1, 1),
         joint_tracking_rmse_rad=torch.zeros(batch_size),
@@ -563,7 +571,7 @@ def test_pour_poses_rotate_the_held_object_about_its_axis_and_return() -> None:
     poured = torch.bmm(poses[:, 3], pose_inv(object_to_eef))
     world_axis = lifted[0, :3, :3] @ internal
     assert torch.allclose(poured[0, :3, :3] @ internal, world_axis, atol=1.0e-6)
-    assert _signed_rotation_about_axis(
+    assert signed_rotation_about_axis(
         lifted[:, :3, :3], poured[:, :3, :3], world_axis.unsqueeze(0)
     ).item() == pytest.approx(-0.7, abs=1.0e-5)
     assert torch.allclose(poured[:, :3, 3], lifted[:, :3, 3], atol=1.0e-6)
@@ -728,11 +736,11 @@ def test_signed_rotation_about_axis_recovers_both_directions() -> None:
     )
     axis = torch.tensor([0.0, 0.0, 1.0]).expand(3, -1)
 
-    angle = _signed_rotation_about_axis(reference, current, axis)
+    angle = signed_rotation_about_axis(reference, current, axis)
 
     assert torch.allclose(angle, torch.tensor([1.1, -2.5, 0.0]), atol=1.0e-5)
     assert torch.allclose(
-        _signed_rotation_about_axis(reference, current, -axis),
+        signed_rotation_about_axis(reference, current, -axis),
         torch.tensor([-1.1, 2.5, 0.0]),
         atol=1.0e-5,
     )
@@ -740,7 +748,7 @@ def test_signed_rotation_about_axis_recovers_both_directions() -> None:
 
 def test_active_case_grasp_generator_replays_the_frozen_target_local_grasp() -> None:
     fallback = Mock()
-    generator = _ActiveCaseGraspPoseGenerator(fallback)
+    generator = ActiveCaseGraspPoseGenerator(fallback)
     target = torch.eye(4).unsqueeze(0)
     grasp = target.clone()
     grasp[:, :3, 3] = torch.tensor([0.1, 0.0, 0.0])
@@ -779,7 +787,7 @@ def test_active_case_grasp_generator_replays_the_frozen_target_local_grasp() -> 
     )
     fallback.get_valid_grasp_poses.assert_called_once()
     with pytest.raises(RuntimeError, match="No frozen benchmark grasp"):
-        _ActiveCaseGraspPoseGenerator().get_best_grasp_poses(
+        ActiveCaseGraspPoseGenerator().get_best_grasp_poses(
             mesh_vertices=torch.zeros(3, 3),
             mesh_triangles=torch.zeros(1, 3, dtype=torch.long),
             obj_poses=target,
@@ -799,13 +807,11 @@ def test_backend_plan_options_fill_only_unset_motion_generation_policies() -> No
             motion_policy=policy,
         )
 
-    filled = _with_plan_options(
-        invocation(MotionPolicy(strategy="motion_gen")), options
-    )
-    kept = _with_plan_options(
+    filled = with_plan_options(invocation(MotionPolicy(strategy="motion_gen")), options)
+    kept = with_plan_options(
         invocation(MotionPolicy(strategy="motion_gen", plan_opts=explicit)), options
     )
-    interpolated = _with_plan_options(invocation(MotionPolicy()), options)
+    interpolated = with_plan_options(invocation(MotionPolicy()), options)
 
     assert filled.motion_policy.plan_opts.sample_interval == 40
     assert kept.motion_policy.plan_opts.sample_interval == 10
@@ -893,7 +899,9 @@ def test_replay_measures_hinge_at_segment_end_and_peak_object_rotation() -> None
         object_rotation_sign=-1.0,
     )
 
-    metrics = scenario._replay_physics(compiled, case, provider, collect_metrics=True)
+    metrics = scenario._replay_runtime().replay_physics(
+        compiled, case, provider, collect_metrics=True
+    )
 
     # The reference is read after waypoint 0; waypoints 1 and 2 add two steps.
     assert metrics.object_rotation_peak_signed_rad.item() == pytest.approx(
@@ -915,7 +923,7 @@ def test_replay_measures_hinge_at_segment_end_and_peak_object_rotation() -> None
         _case("open_door", 1, target_joint="door_hinge"), object_id="microwave"
     )
 
-    metrics = scenario._replay_physics(
+    metrics = scenario._replay_runtime().replay_physics(
         compiled, door_case, provider, collect_metrics=True
     )
 

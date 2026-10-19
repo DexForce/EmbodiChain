@@ -59,16 +59,27 @@ from scripts.benchmark.motion_generation.scenarios.atomic_objects import (
 )
 from scripts.benchmark.motion_generation.scenarios.atomic_skill import (
     AtomicSkillScenario,
-    _ExecutionObservation,
-    _atomic_case_id,
-    _articulation_effect_success,
-    _benchmark_motion_attribution,
-    _benchmark_motion_policy_strategy,
-    _canonical_case_qpos,
-    _case_generation_seed,
-    _randomization_parameters,
-    _seeded_jitter,
-    _snapshot_case_qpos,
+)
+from scripts.benchmark.motion_generation.scenarios.atomic_replay import (
+    AtomicReplayRuntime,
+)
+from scripts.benchmark.motion_generation.contracts import ExecutionObservation
+from scripts.benchmark.motion_generation.scenarios.atomic_case_utils import (
+    atomic_case_id,
+    canonical_case_qpos,
+    case_generation_seed,
+    randomization_parameters,
+    seeded_jitter,
+    snapshot_case_qpos,
+)
+from scripts.benchmark.motion_generation.scenarios.atomic_evaluation import (
+    articulation_effect_success,
+)
+from scripts.benchmark.motion_generation.scenarios.atomic_policy import (
+    benchmark_motion_attribution,
+    benchmark_motion_policy_strategy,
+)
+from scripts.benchmark.motion_generation.atomic_skill import (
     atomic_skill_provider_names,
     create_atomic_skill_provider,
 )
@@ -142,8 +153,8 @@ def _atomic_outcome() -> CaseOutcome:
 
 
 def test_atomic_case_identity_includes_simulator_batch_size() -> None:
-    case_b1 = _atomic_case_id("atomic-skill", "pick_up", "cube", batch_size=1, seed=11)
-    case_b8 = _atomic_case_id("atomic-skill", "pick_up", "cube", batch_size=8, seed=11)
+    case_b1 = atomic_case_id("atomic-skill", "pick_up", "cube", batch_size=1, seed=11)
+    case_b8 = atomic_case_id("atomic-skill", "pick_up", "cube", batch_size=8, seed=11)
 
     assert case_b1 == "atomic-skill:pick_up:cube:b1:s11"
     assert case_b8 == "atomic-skill:pick_up:cube:b8:s11"
@@ -271,7 +282,7 @@ def test_move_end_effector_provider_uses_settled_tcp_standard_evidence() -> None
     )
     final_tcp = torch.eye(4).repeat(2, 1, 1)
     final_tcp[:, 0, 3] = torch.tensor([0.002, 0.004])
-    observation = _ExecutionObservation(
+    observation = ExecutionObservation(
         execution_success=torch.ones(2, dtype=torch.bool),
         final_tcp_pose=final_tcp,
         joint_tracking_rmse_rad=torch.zeros(2),
@@ -300,7 +311,7 @@ def test_move_end_effector_rejects_wrong_terminal_orientation() -> None:
     final_tcp[:, :3, :3] = axis_angle_to_rotation_matrix(
         torch.tensor([[0.0, 0.0, math.pi]])
     )
-    observation = _ExecutionObservation(
+    observation = ExecutionObservation(
         execution_success=torch.ones(1, dtype=torch.bool),
         final_tcp_pose=final_tcp,
         joint_tracking_rmse_rad=torch.zeros(1),
@@ -324,7 +335,7 @@ def test_move_end_effector_keeps_non_finite_failures_row_local() -> None:
     )
     final_tcp = torch.eye(4).repeat(2, 1, 1)
     final_tcp[1, 0, 3] = torch.nan
-    observation = _ExecutionObservation(
+    observation = ExecutionObservation(
         execution_success=torch.ones(2, dtype=torch.bool),
         final_tcp_pose=final_tcp,
         joint_tracking_rmse_rad=torch.zeros(2),
@@ -355,7 +366,7 @@ def test_move_joints_provider_uses_l2_settled_joint_error() -> None:
             "target_qpos": [[[0.0, 0.0]], [[0.0, 0.0]]],
         },
     )
-    observation = _ExecutionObservation(
+    observation = ExecutionObservation(
         execution_success=torch.ones(2, dtype=torch.bool),
         final_tcp_pose=torch.eye(4).repeat(2, 1, 1),
         joint_tracking_rmse_rad=torch.zeros(2),
@@ -383,7 +394,7 @@ def test_move_joints_missing_terminal_observation_is_unavailable() -> None:
         skill_id="move_joints",
         case_parameters={"target_qpos": [[[0.0, 0.0]]]},
     )
-    observation = _ExecutionObservation(
+    observation = ExecutionObservation(
         execution_success=torch.ones(1, dtype=torch.bool),
         final_tcp_pose=torch.eye(4).reshape(1, 4, 4),
         joint_tracking_rmse_rad=torch.zeros(1),
@@ -410,7 +421,7 @@ def test_pick_up_provider_uses_grasp_lift_and_retention_windows() -> None:
     lift = torch.eye(4).repeat(2, 2, 1, 1)
     lift[-1, :, 2, 3] = torch.tensor([0.05, 0.03])
     held = torch.full((2, 2, 1), 0.5)
-    observation = _ExecutionObservation(
+    observation = ExecutionObservation(
         execution_success=torch.ones(2, dtype=torch.bool),
         final_tcp_pose=torch.eye(4).repeat(2, 1, 1),
         joint_tracking_rmse_rad=torch.zeros(2),
@@ -460,7 +471,7 @@ def test_move_held_object_provider_uses_measured_transport_pose() -> None:
             "target_object_pose": target.tolist(),
         },
     )
-    observation = _ExecutionObservation(
+    observation = ExecutionObservation(
         execution_success=torch.ones(2, dtype=torch.bool),
         final_tcp_pose=torch.eye(4).repeat(2, 1, 1),
         joint_tracking_rmse_rad=torch.zeros(2),
@@ -502,7 +513,7 @@ def test_move_held_object_requires_terminal_retention() -> None:
             "target_object_pose": target.tolist(),
         },
     )
-    observation = _ExecutionObservation(
+    observation = ExecutionObservation(
         execution_success=torch.ones(1, dtype=torch.bool),
         final_tcp_pose=torch.eye(4).reshape(1, 4, 4),
         joint_tracking_rmse_rad=torch.zeros(1),
@@ -544,7 +555,7 @@ def test_place_provider_separates_release_goal_and_stability() -> None:
             "target_object_pose": target.tolist(),
         },
     )
-    observation = _ExecutionObservation(
+    observation = ExecutionObservation(
         execution_success=torch.ones(2, dtype=torch.bool),
         final_tcp_pose=torch.eye(4).repeat(2, 1, 1),
         joint_tracking_rmse_rad=torch.zeros(2),
@@ -588,7 +599,7 @@ def test_place_rejects_wrong_terminal_height_and_orientation() -> None:
             "target_object_pose": target.tolist(),
         },
     )
-    observation = _ExecutionObservation(
+    observation = ExecutionObservation(
         execution_success=torch.ones(2, dtype=torch.bool),
         final_tcp_pose=torch.eye(4).repeat(2, 1, 1),
         joint_tracking_rmse_rad=torch.zeros(2),
@@ -625,7 +636,7 @@ def test_press_provider_scores_only_the_requested_actuation_trace() -> None:
             "effect_joint_sign": 1.0,
         },
     )
-    observation = _ExecutionObservation(
+    observation = ExecutionObservation(
         execution_success=torch.ones(2, dtype=torch.bool),
         final_tcp_pose=torch.eye(4).repeat(2, 1, 1),
         joint_tracking_rmse_rad=torch.zeros(2),
@@ -661,7 +672,7 @@ def test_slide_provider_uses_actuation_and_release_windows() -> None:
             "effect_joint_sign": 1.0,
         },
     )
-    observation = _ExecutionObservation(
+    observation = ExecutionObservation(
         execution_success=torch.ones(2, dtype=torch.bool),
         final_tcp_pose=torch.eye(4).repeat(2, 1, 1),
         joint_tracking_rmse_rad=torch.zeros(2),
@@ -700,7 +711,7 @@ def test_slide_rejects_opposite_joint_direction() -> None:
             "effect_joint_sign": 1.0,
         },
     )
-    observation = _ExecutionObservation(
+    observation = ExecutionObservation(
         execution_success=torch.ones(1, dtype=torch.bool),
         final_tcp_pose=torch.eye(4).reshape(1, 4, 4),
         joint_tracking_rmse_rad=torch.zeros(1),
@@ -742,7 +753,7 @@ def test_twist_provider_scores_executed_tcp_rotation_not_knob_angle() -> None:
     tcp[-1, :, :3, :3] = axis_angle_to_rotation_matrix(
         torch.tensor([[0.0, 0.0, 0.5], [0.0, 0.0, 0.2]])
     )
-    observation = _ExecutionObservation(
+    observation = ExecutionObservation(
         execution_success=torch.ones(2, dtype=torch.bool),
         final_tcp_pose=torch.eye(4).repeat(2, 1, 1),
         joint_tracking_rmse_rad=torch.zeros(2),
@@ -783,7 +794,7 @@ def test_twist_rejects_opposite_tcp_rotation() -> None:
     )
     tcp = torch.eye(4).repeat(2, 1, 1, 1)
     tcp[-1, :, :3, :3] = axis_angle_to_rotation_matrix(torch.tensor([[0.0, 0.0, 0.5]]))
-    observation = _ExecutionObservation(
+    observation = ExecutionObservation(
         execution_success=torch.ones(1, dtype=torch.bool),
         final_tcp_pose=torch.eye(4).reshape(1, 4, 4),
         joint_tracking_rmse_rad=torch.zeros(1),
@@ -1045,10 +1056,10 @@ def test_seeded_jitter_is_reproducible_bounded_and_stream_separated():
         "dtype": torch.float64,
         "device": torch.device("cpu"),
     }
-    first = _seeded_jitter(stream=5, **kwargs)
-    repeated = _seeded_jitter(stream=5, **kwargs)
-    different_seed = _seeded_jitter(stream=5, **{**kwargs, "seed": 108})
-    different_stream = _seeded_jitter(stream=6, **kwargs)
+    first = seeded_jitter(stream=5, **kwargs)
+    repeated = seeded_jitter(stream=5, **kwargs)
+    different_seed = seeded_jitter(stream=5, **{**kwargs, "seed": 108})
+    different_stream = seeded_jitter(stream=6, **kwargs)
 
     assert torch.equal(first, repeated)
     assert not torch.equal(first, different_seed)
@@ -1058,23 +1069,23 @@ def test_seeded_jitter_is_reproducible_bounded_and_stream_separated():
 
 
 def test_case_generation_seed_is_stable_and_stratified():
-    value = _case_generation_seed(107, skill_index=2, case_index=3)
+    value = case_generation_seed(107, skill_index=2, case_index=3)
 
-    assert value == _case_generation_seed(107, skill_index=2, case_index=3)
-    assert value != _case_generation_seed(108, skill_index=2, case_index=3)
-    assert value != _case_generation_seed(107, skill_index=3, case_index=3)
-    assert value != _case_generation_seed(107, skill_index=2, case_index=4)
+    assert value == case_generation_seed(107, skill_index=2, case_index=3)
+    assert value != case_generation_seed(108, skill_index=2, case_index=3)
+    assert value != case_generation_seed(107, skill_index=3, case_index=3)
+    assert value != case_generation_seed(107, skill_index=2, case_index=4)
 
 
 def test_case_qpos_canonicalization_removes_sub_resolution_noise():
     first = torch.tensor([[0.123421, -0.456779]], dtype=torch.float32)
     second = torch.tensor([[0.123419, -0.456781]], dtype=torch.float32)
 
-    assert torch.equal(_canonical_case_qpos(first), _canonical_case_qpos(second))
+    assert torch.equal(canonical_case_qpos(first), canonical_case_qpos(second))
 
 
 def test_randomization_manifest_records_contract_and_seed():
-    parameters = _randomization_parameters(
+    parameters = randomization_parameters(
         {
             "target_offset_jitter_m": [0.03, 0.02, 0.01],
             "object_yaw_jitter_rad": 0.4,
@@ -1138,21 +1149,21 @@ def test_atomic_invocation_uses_motion_generator_policy():
     "skill_id", ["open_door", "press", "push_object", "slide", "twist"]
 )
 def test_contact_benchmarks_use_attributed_ik_interpolation(skill_id: str) -> None:
-    assert _benchmark_motion_policy_strategy(skill_id) == "ik_interp"
+    assert benchmark_motion_policy_strategy(skill_id) == "ik_interp"
     expected = {
         "motion_policy_strategy": "ik_interp",
         "selected_planner_backend_used": False,
         "effective_motion_algorithm": "sequential_ik_interpolation",
     }
-    assert _benchmark_motion_attribution(skill_id) == expected
+    assert benchmark_motion_attribution(skill_id) == expected
     assert AtomicSkillScenario().trial_metadata(
         replace(_atomic_case(), skill_id=skill_id)
     ) == {**expected, "timing_scope": "atomic_action_compile", "timing_is_solved": True}
 
 
 def test_noncontact_benchmarks_retain_selected_planner_attribution() -> None:
-    assert _benchmark_motion_policy_strategy("move_end_effector") == "motion_gen"
-    assert _benchmark_motion_attribution("move_end_effector") == {
+    assert benchmark_motion_policy_strategy("move_end_effector") == "motion_gen"
+    assert benchmark_motion_attribution("move_end_effector") == {
         "motion_policy_strategy": "motion_gen",
         "selected_planner_backend_used": True,
         "effective_motion_algorithm": "selected_planner_backend",
@@ -1356,7 +1367,7 @@ def test_new_atomic_skill_cases_freeze_reference_waypoints(
 
     assert case.skill_id == skill_id
     assert case.case_id == f"atomic-skill:{skill_id}:{config['name']}:b8:s11"
-    assert torch.equal(case.full_start_qpos, _canonical_case_qpos(raw_start))
+    assert torch.equal(case.full_start_qpos, canonical_case_qpos(raw_start))
     assert torch.equal(case.start_qpos, case.full_start_qpos[:, list(range(7))])
     assert not torch.equal(case.start_qpos, raw_start)
     assert case.num_waypoints == expected_waypoints
@@ -1488,10 +1499,8 @@ def _compiled_replay_batch(
 
 def test_partial_compiled_batch_is_replayable() -> None:
     """One successful row should not be blocked by another failed row."""
-    assert AtomicSkillScenario._is_replayable(_compiled_replay_batch([True, False]))
-    assert not AtomicSkillScenario._is_replayable(
-        _compiled_replay_batch([False, False])
-    )
+    assert AtomicReplayRuntime.is_replayable(_compiled_replay_batch([True, False]))
+    assert not AtomicReplayRuntime.is_replayable(_compiled_replay_batch([False, False]))
 
 
 def test_replay_holds_failed_rows_at_their_frozen_start() -> None:
@@ -1522,7 +1531,9 @@ def test_replay_holds_failed_rows_at_their_frozen_start() -> None:
         }
     )
 
-    scenario._replay_physics(compiled, case, None, collect_metrics=False)
+    scenario._replay_runtime().replay_physics(
+        compiled, case, None, collect_metrics=False
+    )
 
     commands = [item.args[0] for item in scenario.robot.set_qpos.call_args_list]
     assert len(commands) == 2
@@ -1551,7 +1562,8 @@ def test_execute_masks_failed_plan_rows_from_execution_success() -> None:
         }
     )
     scenario.control_part = "arm"
-    scenario._replay_physics = Mock(
+    runtime = scenario._replay_runtime()
+    runtime.replay_physics = Mock(
         return_value=Mock(
             squared_tracking_error=torch.zeros(batch_size),
             tracking_value_count=7,
@@ -1569,7 +1581,7 @@ def test_execute_masks_failed_plan_rows_from_execution_success() -> None:
         full_start_qpos=torch.zeros(batch_size, 9),
     )
 
-    observation = scenario._execute(_compiled_replay_batch([True, False]), case, Mock())
+    observation = runtime.execute(_compiled_replay_batch([True, False]), case, Mock())
 
     assert observation is not None
     assert observation.execution_success.tolist() == [True, False]
@@ -1580,7 +1592,7 @@ def test_articulation_effect_uses_peak_displacement_when_joint_rebounds():
         _atomic_case(),
         case_parameters={"minimum_articulation_joint_delta": 0.004},
     )
-    observation = _ExecutionObservation(
+    observation = ExecutionObservation(
         execution_success=torch.tensor([True]),
         final_tcp_pose=torch.eye(4).unsqueeze(0),
         joint_tracking_rmse_rad=torch.zeros(1),
@@ -1591,7 +1603,7 @@ def test_articulation_effect_uses_peak_displacement_when_joint_rebounds():
         articulation_joint_peak_signed_delta=torch.tensor([0.005]),
     )
 
-    success = _articulation_effect_success(
+    success = articulation_effect_success(
         case,
         observation,
         (_atomic_outcome(),),
@@ -1611,7 +1623,7 @@ def test_pick_up_requires_measured_object_lift() -> None:
         skill_id="pick_up",
         case_parameters={"minimum_object_lift_m": 0.04},
     )
-    observation = _ExecutionObservation(
+    observation = ExecutionObservation(
         execution_success=torch.ones(2, dtype=torch.bool),
         final_tcp_pose=torch.eye(4).repeat(2, 1, 1),
         joint_tracking_rmse_rad=torch.zeros(2),
@@ -1658,7 +1670,7 @@ def test_object_motion_requires_measured_target_pose(
             "object_tilt_threshold_rad": 0.10,
         },
     )
-    observation = _ExecutionObservation(
+    observation = ExecutionObservation(
         execution_success=torch.ones(3, dtype=torch.bool),
         final_tcp_pose=torch.eye(4).repeat(3, 1, 1),
         joint_tracking_rmse_rad=torch.zeros(3),
@@ -1700,7 +1712,7 @@ def test_target_yaw_domain_requires_measured_full_rotation(skill_id: str) -> Non
             "object_rotation_threshold_rad": 0.10,
         },
     )
-    observation = _ExecutionObservation(
+    observation = ExecutionObservation(
         execution_success=torch.ones(2, dtype=torch.bool),
         final_tcp_pose=torch.eye(4).repeat(2, 1, 1),
         joint_tracking_rmse_rad=torch.zeros(2),
@@ -1726,7 +1738,7 @@ def test_articulation_tasks_require_measured_joint_displacement(skill_id: str) -
         skill_id=skill_id,
         case_parameters={"minimum_articulation_joint_delta": 0.004},
     )
-    observation = _ExecutionObservation(
+    observation = ExecutionObservation(
         execution_success=torch.ones(2, dtype=torch.bool),
         final_tcp_pose=torch.eye(4).repeat(2, 1, 1),
         joint_tracking_rmse_rad=torch.zeros(2),
@@ -1849,7 +1861,7 @@ def test_planner_aggregates_report_bypassed_cases_under_effective_algorithm():
         skill_id=selected_case.skill_id,
         task_difficulty=selected_case.task_difficulty,
         primary_success=selected_case.primary_success,
-        metadata=_benchmark_motion_attribution(selected_case.skill_id),
+        metadata=benchmark_motion_attribution(selected_case.skill_id),
         outcomes=(replace(_atomic_outcome(), task_success=False),),
     )
     bypassed_record = replace(
@@ -1858,7 +1870,7 @@ def test_planner_aggregates_report_bypassed_cases_under_effective_algorithm():
         case_id=bypassed_case.case_id,
         skill_id=bypassed_case.skill_id,
         cost_time_ms=1.0,
-        metadata=_benchmark_motion_attribution(bypassed_case.skill_id),
+        metadata=benchmark_motion_attribution(bypassed_case.skill_id),
         outcomes=(_atomic_outcome(),),
     )
 
@@ -1915,7 +1927,7 @@ def test_runner_preserves_preplan_attribution_after_planner_error(tmp_path):
         skill_id="press",
     )
     provider = Mock(spec=ScenarioProvider)
-    provider.trial_metadata.return_value = _benchmark_motion_attribution(case.skill_id)
+    provider.trial_metadata.return_value = benchmark_motion_attribution(case.skill_id)
     provider.plan_case.side_effect = RuntimeError("planner failed")
     provider.failure_outcomes.return_value = ()
     runner = object.__new__(BenchmarkRunner)
@@ -2051,6 +2063,7 @@ def test_atomic_record_replay_swallows_recorder_errors(tmp_path):
     sim.is_window_recording.return_value = False
     scenario.simulation = sim
     scenario.robot = Mock()
+    scenario.track = Mock(config={})
     scenario.reset_case = Mock()
 
     path = scenario.record_replay(
@@ -2212,7 +2225,11 @@ def test_physical_evaluator_dispatch_preserves_row_results_and_execution_gates(
     monkeypatch.setattr(provider, "task_result", forbid_legacy)
     scenario = AtomicSkillScenario()
     scenario._case_providers[case.case_id] = provider
-    monkeypatch.setattr(scenario, "_execute", lambda *args: observation)
+    monkeypatch.setattr(
+        scenario,
+        "_replay_runtime",
+        lambda: SimpleNamespace(execute=lambda *args: observation),
+    )
     robot = Mock(device=torch.device("cpu"))
     robot.get_joint_ids.return_value = list(range(7))
     result = scenario.evaluate_case(
@@ -2316,15 +2333,15 @@ def test_case_snapshot_uses_one_read_and_runtime_joint_order() -> None:
     robot.get_qpos.return_value = raw
     robot.get_joint_ids.return_value = [2, 0]
 
-    start, full = _snapshot_case_qpos(robot, "noncontiguous_arm")
+    start, full = snapshot_case_qpos(robot, "noncontiguous_arm")
 
     robot.get_qpos.assert_called_once_with()
     robot.get_joint_ids.assert_called_once_with(name="noncontiguous_arm")
-    assert torch.equal(full, _canonical_case_qpos(before))
+    assert torch.equal(full, canonical_case_qpos(before))
     assert torch.equal(start, full[:, [2, 0]])
     full.fill_(9.0)
     assert torch.equal(raw, before)
-    assert torch.equal(start, _canonical_case_qpos(before)[:, [2, 0]])
+    assert torch.equal(start, canonical_case_qpos(before)[:, [2, 0]])
 
 
 def test_ur5_atomic_move_joints_case_uses_six_controlled_joints() -> None:
@@ -2376,8 +2393,8 @@ def test_move_joints_case_uses_canonical_snapshot_for_targets(tmp_path: Path) ->
     ).repeat(2, 1)
     raw[1] += 0.001
     alternate = torch.nextafter(raw, torch.full_like(raw, float("inf")))
-    canonical = _canonical_case_qpos(raw)
-    assert torch.equal(canonical, _canonical_case_qpos(alternate))
+    canonical = canonical_case_qpos(raw)
+    assert torch.equal(canonical, canonical_case_qpos(alternate))
     config = {
         "name": "canonical_joint_offsets",
         "target_offsets_rad": [[0.1] * 7, [-0.05] * 7],
@@ -2441,7 +2458,7 @@ def test_pickup_retention_tracks_the_target_object(
         skill_id="pick_up",
         case_parameters={"object_initial_pose": initial.tolist()},
     )
-    observation = _ExecutionObservation(
+    observation = ExecutionObservation(
         execution_success=torch.ones(1, dtype=torch.bool),
         final_tcp_pose=final_tcp,
         joint_tracking_rmse_rad=torch.zeros(1),
@@ -2496,7 +2513,7 @@ def test_nonfinite_grasp_evidence_is_unavailable_per_row(invalid_channel: str) -
         skill_id="pick_up",
         case_parameters={"object_initial_pose": initial.tolist()},
     )
-    observation = _ExecutionObservation(
+    observation = ExecutionObservation(
         execution_success=torch.ones(2, dtype=torch.bool),
         final_tcp_pose=lifted,
         joint_tracking_rmse_rad=torch.zeros(2),
@@ -2550,7 +2567,7 @@ def test_nonfinite_press_joint_evidence_does_not_count_as_contact_failure(
         skill_id="press",
         case_parameters={"articulation_joint_stroke": 0.006},
     )
-    observation = _ExecutionObservation(
+    observation = ExecutionObservation(
         execution_success=torch.ones(2, dtype=torch.bool),
         final_tcp_pose=torch.eye(4).repeat(2, 1, 1),
         joint_tracking_rmse_rad=torch.zeros(2),

@@ -74,8 +74,14 @@ from scripts.benchmark.motion_generation.run_benchmark import (
 )
 from scripts.benchmark.motion_generation.scenarios.atomic_skill import (
     AtomicSkillScenario,
-    _FrozenArticulationGraspPoseGenerator,
-    _executed_final_pose_errors,
+)
+from scripts.benchmark.motion_generation.scenarios.atomic_grasps import (
+    FrozenArticulationGraspPoseGenerator,
+)
+from scripts.benchmark.motion_generation.scenarios.atomic_evaluation import (
+    executed_final_pose_errors,
+)
+from scripts.benchmark.motion_generation.atomic_skill import (
     create_atomic_skill_provider,
 )
 
@@ -218,11 +224,11 @@ def test_executed_final_pose_errors_accept_half_turn_about_eef_z_symmetry():
         case_parameters={"waypoint_rotation_symmetry": "half_turn_about_z"},
     )
 
-    _, strict_rotation = _executed_final_pose_errors(
+    _, strict_rotation = executed_final_pose_errors(
         strict_case,
         symmetric_final.unsqueeze(0),
     )
-    translation, symmetric_rotation = _executed_final_pose_errors(
+    translation, symmetric_rotation = executed_final_pose_errors(
         symmetric_case,
         symmetric_final.unsqueeze(0),
     )
@@ -1544,7 +1550,7 @@ def test_frozen_articulation_grasp_generator_preserves_batch_shapes():
     target_pose = torch.eye(4).unsqueeze(0)
     grasp_pose = target_pose.clone()
     grasp_pose[:, 0, 3] = 0.04
-    generator = _FrozenArticulationGraspPoseGenerator([(target_pose, grasp_pose)])
+    generator = FrozenArticulationGraspPoseGenerator([(target_pose, grasp_pose)])
     object_poses = torch.eye(4).repeat(2, 1, 1)
     object_poses[:, 1, 3] = torch.tensor([0.1, 0.2])
     mesh_vertices = torch.zeros(3, 3)
@@ -1579,7 +1585,7 @@ def test_frozen_articulation_grasp_generator_replays_batched_manifest_rows():
     target_pose[:, 0, 3] = torch.tensor([-0.82, -0.79, -0.85])
     grasp_pose = target_pose.clone()
     grasp_pose[:, 1, 3] += torch.tensor([0.01, 0.02, 0.03])
-    generator = _FrozenArticulationGraspPoseGenerator([(target_pose, grasp_pose)])
+    generator = FrozenArticulationGraspPoseGenerator([(target_pose, grasp_pose)])
     replay_target = target_pose.clone()
     replay_target[:, 2, 3] += torch.tensor([0.04, -0.01, 0.02])
 
@@ -1605,7 +1611,7 @@ def test_frozen_articulation_grasp_generator_rejects_ambiguous_cases():
     second_grasp[:, 1, 3] += 0.02
 
     with pytest.raises(ValueError, match="identical target batches"):
-        _FrozenArticulationGraspPoseGenerator(
+        FrozenArticulationGraspPoseGenerator(
             [(target_pose, first_grasp), (target_pose, second_grasp)]
         )
 

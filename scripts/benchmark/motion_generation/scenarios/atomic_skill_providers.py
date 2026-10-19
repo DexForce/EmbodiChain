@@ -59,31 +59,33 @@ from ..config import SuiteCfg, TrackCfg
 from ..contracts import PhysicalEvaluation, ReplayObservationWindow
 from ..evaluation import StageEvidence, evaluate_skill_stage_batch
 from ..models import BenchmarkCase, CaseOutcome
-from .atomic_skill import (
-    _TOP_DOWN_ROTATION,
-    _ExecutionObservation,
-    _atomic_case_id,
-    _benchmark_motion_policy,
-    _canonical_case_qpos,
-    _case_name,
-    _case_pose,
-    _difficulty,
-    _float_vector,
-    _gripper_holding,
-    _gripper_released,
-    _merge_stage_evidence_batches,
-    _minimum_height_above_initial_support,
-    _motion_valid_mask,
-    _object_pose_success,
-    _randomization_parameters,
-    _randomized_vector_batch,
-    _replay_trace,
-    _signed_rotation_about_axis,
-    _snapshot_case_qpos,
-    _stage_evidence_batch,
-    _trace_validity,
-    register_atomic_skill_provider,
+from .atomic_case_utils import (
+    TOP_DOWN_ROTATION,
+    atomic_case_id,
+    canonical_case_qpos,
+    case_name,
+    case_pose,
+    difficulty,
+    float_vector,
+    randomization_parameters,
+    randomized_vector_batch,
+    snapshot_case_qpos,
 )
+from ..contracts import ExecutionObservation
+from .atomic_policy import benchmark_motion_policy
+from .atomic_evaluation import (
+    gripper_holding,
+    gripper_released,
+    merge_stage_evidence_batches,
+    minimum_height_above_initial_support,
+    motion_valid_mask,
+    object_pose_success,
+    replay_trace,
+    signed_rotation_about_axis,
+    stage_evidence_batch,
+    trace_validity,
+)
+from ..atomic_skill import register_atomic_skill_provider
 
 if TYPE_CHECKING:
     from ..planners.base import PlannerAdapter
@@ -102,12 +104,12 @@ class _OpenDoorEvaluator:
     def evaluate(
         self,
         case: BenchmarkCase,
-        observation: _ExecutionObservation,
+        observation: ExecutionObservation,
         motion_outcomes: tuple[CaseOutcome, ...],
     ) -> tuple[PhysicalEvaluation, ...]:
         del motion_outcomes
-        actuation = _replay_trace(observation, "door_actuation")
-        release = _replay_trace(observation, "door_release")
+        actuation = replay_trace(observation, "door_actuation")
+        release = replay_trace(observation, "door_release")
         if actuation is None or actuation.articulation_joint is None:
             return evaluate_skill_stage_batch(
                 "open_door", tuple({} for _ in range(case.batch_size))
@@ -121,16 +123,16 @@ class _OpenDoorEvaluator:
             joint[-1] - float(case.case_parameters["target_joint_position"])
         ).abs()
         batches: list[Sequence[Mapping[str, StageEvidence]]] = [
-            _stage_evidence_batch(
-                valid_mask=_trace_validity(actuation, observation=observation),
+            stage_evidence_batch(
+                valid_mask=trace_validity(actuation, observation=observation),
                 stage_id="grasped",
                 window="grasp_end",
                 measurements={"grasp_established": grasped},
                 method="hinge_motion_proxy",
                 source="measured_proxy",
             ),
-            _stage_evidence_batch(
-                valid_mask=_trace_validity(actuation, observation=observation),
+            stage_evidence_batch(
+                valid_mask=trace_validity(actuation, observation=observation),
                 stage_id="opened",
                 window="actuation_end",
                 measurements={"hinge_angle_error_rad": opened_error},
@@ -139,11 +141,11 @@ class _OpenDoorEvaluator:
         ]
         if release is not None:
             part = next(iter(observation.gripper_open_qpos), "")
-            released = _gripper_released(release, observation, part)
+            released = gripper_released(release, observation, part)
             if released is not None:
                 batches.append(
-                    _stage_evidence_batch(
-                        valid_mask=_trace_validity(release, observation=observation),
+                    stage_evidence_batch(
+                        valid_mask=trace_validity(release, observation=observation),
                         stage_id="released",
                         window="release_end",
                         measurements={"release_established": released},
@@ -152,7 +154,7 @@ class _OpenDoorEvaluator:
                     )
                 )
         return evaluate_skill_stage_batch(
-            "open_door", _merge_stage_evidence_batches(*batches)
+            "open_door", merge_stage_evidence_batches(*batches)
         )
 
 
@@ -162,12 +164,12 @@ class _PourEvaluator:
     def evaluate(
         self,
         case: BenchmarkCase,
-        observation: _ExecutionObservation,
+        observation: ExecutionObservation,
         motion_outcomes: tuple[CaseOutcome, ...],
     ) -> tuple[PhysicalEvaluation, ...]:
         del motion_outcomes
-        actuation = _replay_trace(observation, "pour_actuation")
-        settle = _replay_trace(observation, "pour_settle")
+        actuation = replay_trace(observation, "pour_actuation")
+        settle = replay_trace(observation, "pour_settle")
         batches: list[Sequence[Mapping[str, StageEvidence]]] = []
         if actuation is not None and actuation.object_pose is not None:
             poses = actuation.object_pose
@@ -181,18 +183,18 @@ class _PourEvaluator:
             world_axis = reference @ axis
             angles = torch.stack(
                 [
-                    _signed_rotation_about_axis(reference, pose[:, :3, :3], world_axis)
+                    signed_rotation_about_axis(reference, pose[:, :3, :3], world_axis)
                     for pose in poses
                 ]
             )
             sign = float(case.case_parameters.get("object_rotation_sign", 1.0))
             peak = (angles * sign).amax(dim=0)
             error = (peak - abs(float(case.case_parameters["rotate_angle_rad"]))).abs()
-            min_height = _minimum_height_above_initial_support(actuation, case)
+            min_height = minimum_height_above_initial_support(actuation, case)
             if min_height is not None:
                 batches.append(
-                    _stage_evidence_batch(
-                        valid_mask=_trace_validity(actuation, observation=observation),
+                    stage_evidence_batch(
+                        valid_mask=trace_validity(actuation, observation=observation),
                         stage_id="poured",
                         window="actuation_interval",
                         measurements={
@@ -204,8 +206,8 @@ class _PourEvaluator:
                 )
         if settle is not None and settle.object_pose is not None:
             part = next(iter(observation.gripper_open_qpos), "")
-            retained = _gripper_holding(settle, observation, part)
-            min_height = _minimum_height_above_initial_support(settle, case)
+            retained = gripper_holding(settle, observation, part)
+            min_height = minimum_height_above_initial_support(settle, case)
             initial = torch.as_tensor(
                 case.case_parameters["object_initial_pose"],
                 dtype=settle.object_pose.dtype,
@@ -213,8 +215,8 @@ class _PourEvaluator:
             )
             if min_height is not None:
                 batches.append(
-                    _stage_evidence_batch(
-                        valid_mask=_trace_validity(settle, observation=observation),
+                    stage_evidence_batch(
+                        valid_mask=trace_validity(settle, observation=observation),
                         stage_id="settled",
                         window="terminal_settle",
                         measurements={
@@ -228,8 +230,8 @@ class _PourEvaluator:
                 )
                 if retained is not None:
                     batches.append(
-                        _stage_evidence_batch(
-                            valid_mask=_trace_validity(settle, observation=observation),
+                        stage_evidence_batch(
+                            valid_mask=trace_validity(settle, observation=observation),
                             stage_id="held",
                             window="terminal_settle",
                             measurements={
@@ -241,7 +243,7 @@ class _PourEvaluator:
                         )
                     )
         evidence = (
-            _merge_stage_evidence_batches(*batches)
+            merge_stage_evidence_batches(*batches)
             if batches
             else tuple({} for _ in range(case.batch_size))
         )
@@ -254,13 +256,13 @@ class _AxisAlignEvaluator:
     def evaluate(
         self,
         case: BenchmarkCase,
-        observation: _ExecutionObservation,
+        observation: ExecutionObservation,
         motion_outcomes: tuple[CaseOutcome, ...],
     ) -> tuple[PhysicalEvaluation, ...]:
         del motion_outcomes
-        actuation = _replay_trace(observation, "axis_align_actuation")
-        grasp = _replay_trace(observation, "axis_align_grasp")
-        settle = _replay_trace(observation, "axis_align_settle")
+        actuation = replay_trace(observation, "axis_align_actuation")
+        grasp = replay_trace(observation, "axis_align_grasp")
+        settle = replay_trace(observation, "axis_align_settle")
         if actuation is None or actuation.object_pose is None:
             return evaluate_skill_stage_batch(
                 "axis_align", tuple({} for _ in range(case.batch_size))
@@ -280,7 +282,7 @@ class _AxisAlignEvaluator:
             poses[-1, :, :3, :3] @ internal, dim=-1
         )
         aligned_error = torch.arccos(torch.clamp(final_axis @ target, -1.0, 1.0))
-        actuation_height = _minimum_height_above_initial_support(actuation, case)
+        actuation_height = minimum_height_above_initial_support(actuation, case)
         if actuation_height is None:
             return evaluate_skill_stage_batch(
                 "axis_align", tuple({} for _ in range(case.batch_size))
@@ -293,11 +295,11 @@ class _AxisAlignEvaluator:
         part = next(iter(observation.gripper_open_qpos), "")
         batches: list[Sequence[Mapping[str, StageEvidence]]] = []
         if grasp is not None:
-            established = _gripper_holding(grasp, observation, part)
+            established = gripper_holding(grasp, observation, part)
             if established is not None:
                 batches.append(
-                    _stage_evidence_batch(
-                        valid_mask=_trace_validity(grasp, observation=observation),
+                    stage_evidence_batch(
+                        valid_mask=trace_validity(grasp, observation=observation),
                         stage_id="grasped",
                         window="grasp_end",
                         measurements={"grasp_established": established},
@@ -306,8 +308,8 @@ class _AxisAlignEvaluator:
                     )
                 )
         batches.append(
-            _stage_evidence_batch(
-                valid_mask=_trace_validity(actuation, observation=observation),
+            stage_evidence_batch(
+                valid_mask=trace_validity(actuation, observation=observation),
                 stage_id="aligned",
                 window="actuation_end",
                 measurements={
@@ -319,9 +321,9 @@ class _AxisAlignEvaluator:
             ),
         )
         if settle is not None:
-            min_height = _minimum_height_above_initial_support(settle, case)
+            min_height = minimum_height_above_initial_support(settle, case)
             part = next(iter(observation.gripper_open_qpos), "")
-            retained = _gripper_holding(settle, observation, part)
+            retained = gripper_holding(settle, observation, part)
             if settle.object_pose is not None and min_height is not None:
                 final_pose = settle.object_pose[-1]
                 final_axis = torch.nn.functional.normalize(
@@ -334,8 +336,8 @@ class _AxisAlignEvaluator:
                     device=final_pose.device, dtype=final_pose.dtype
                 )
                 batches.append(
-                    _stage_evidence_batch(
-                        valid_mask=_trace_validity(settle, observation=observation),
+                    stage_evidence_batch(
+                        valid_mask=trace_validity(settle, observation=observation),
                         stage_id="settled",
                         window="terminal_settle",
                         measurements={
@@ -350,8 +352,8 @@ class _AxisAlignEvaluator:
                 )
                 if retained is not None:
                     batches.append(
-                        _stage_evidence_batch(
-                            valid_mask=_trace_validity(settle, observation=observation),
+                        stage_evidence_batch(
+                            valid_mask=trace_validity(settle, observation=observation),
                             stage_id="held",
                             window="terminal_settle",
                             measurements={
@@ -363,13 +365,13 @@ class _AxisAlignEvaluator:
                         )
                     )
         return evaluate_skill_stage_batch(
-            "axis_align", _merge_stage_evidence_batches(*batches)
+            "axis_align", merge_stage_evidence_batches(*batches)
         )
 
 
 def _unit_vector(value: object, *, name: str, default: Sequence[float]) -> list[float]:
     """Resolve a non-zero 3-vector and normalize it."""
-    vector = _float_vector(value, name=name, length=3, default=default)
+    vector = float_vector(value, name=name, length=3, default=default)
     norm = math.sqrt(sum(item * item for item in vector))
     if norm <= 1.0e-6:
         raise ValueError(f"{name} must be non-zero.")
@@ -453,9 +455,9 @@ def _set_pre_pick_start(
     )
     if not bool(torch.as_tensor(success).all().item()):
         raise RuntimeError(
-            f"Independent IK rejected the {skill} start {_case_name(config)!r}."
+            f"Independent IK rejected the {skill} start {case_name(config)!r}."
         )
-    scenario.set_robot_start(_canonical_case_qpos(pre_pick_qpos), open_gripper=True)
+    scenario.set_robot_start(canonical_case_qpos(pre_pick_qpos), open_gripper=True)
 
 
 def _fixed_grasp(
@@ -467,7 +469,7 @@ def _fixed_grasp(
 ) -> torch.Tensor:
     """Return the configured fixed-rotation grasp at the object origin."""
     rotation = torch.tensor(
-        config.get("grasp_rotation", _TOP_DOWN_ROTATION),
+        config.get("grasp_rotation", TOP_DOWN_ROTATION),
         dtype=object_pose.dtype,
         device=object_pose.device,
     )
@@ -475,8 +477,8 @@ def _fixed_grasp(
         raise ValueError("grasp_rotation must be a 3x3 matrix.")
     grasp = object_pose[:1].clone()
     grasp[:, :3, :3] = rotation
-    grasp[:, :3, 3] += _randomized_vector_batch(
-        _float_vector(
+    grasp[:, :3, 3] += randomized_vector_batch(
+        float_vector(
             config.get("grasp_offset_m"),
             name="grasp_offset_m",
             length=3,
@@ -535,10 +537,10 @@ def _case_identity(
     batch_size: int,
 ) -> str:
     """Return the Atomic Skill case id for one configured case."""
-    return _atomic_case_id(
+    return atomic_case_id(
         track.id,
         skill_id,
-        _case_name(config),
+        case_name(config),
         batch_size=batch_size,
         seed=seed,
     )
@@ -693,7 +695,7 @@ class _OpenDoorCases(AtomicSkillCaseProvider):
             handle, config, seed=seed, stream=62
         )
         scenario.randomize_robot_start(config, seed=seed, stream=61)
-        start_qpos, full_start_qpos = _snapshot_case_qpos(
+        start_qpos, full_start_qpos = snapshot_case_qpos(
             scenario.robot, scenario.control_part
         )
         articulation_initial_qpos = handle.entity.get_qpos().clone()
@@ -780,7 +782,7 @@ class _OpenDoorCases(AtomicSkillCaseProvider):
             robot_id=suite.robot.id,
             skill_id=self.skill_id,
             object_id=articulation_id,
-            task_difficulty=_difficulty(config),
+            task_difficulty=difficulty(config),
             primary_success="task_success",
             full_start_qpos=full_start_qpos,
             case_parameters={
@@ -829,7 +831,7 @@ class _OpenDoorCases(AtomicSkillCaseProvider):
                 "target_entity_id": f"{handle.entity.uid}:{target_link}",
                 "effect_joint_sign": float(opening_direction),
                 "task_success_scope": "physical_hinge_angle_at_open_end",
-                "randomization": _randomization_parameters(config, seed=seed),
+                "randomization": randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },
         )
@@ -852,11 +854,11 @@ class _OpenDoorCases(AtomicSkillCaseProvider):
             self.skill_id,
             OpenDoorGoal(
                 semantics,
-                _case_pose(case, "door_target_pose", device=device),
+                case_pose(case, "door_target_pose", device=device),
                 open_fraction=float(case.case_parameters["open_fraction"]),
             ),
             control_parts=_primary_control_parts(scenario, "OpenDoor"),
-            motion_policy=_benchmark_motion_policy(
+            motion_policy=benchmark_motion_policy(
                 self.skill_id, int(case.case_parameters["sample_count"])
             ),
             skill_options=OpenDoorOptions(
@@ -897,8 +899,8 @@ class _OpenDoorCases(AtomicSkillCaseProvider):
         device = torch.device("cpu")
         return {
             scenario.end_effector_part: (
-                _case_pose(case, "door_target_pose", device=device),
-                _case_pose(case, "grasp_pose", device=device),
+                case_pose(case, "door_target_pose", device=device),
+                case_pose(case, "grasp_pose", device=device),
             )
         }
 
@@ -938,7 +940,7 @@ class _OpenDoorCases(AtomicSkillCaseProvider):
         scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         compiled: CompiledTrajectory,
-        observation: _ExecutionObservation,
+        observation: ExecutionObservation,
         motion_outcomes: tuple[CaseOutcome, ...],
     ) -> tuple[torch.Tensor, str]:
         del scenario, compiled
@@ -951,7 +953,7 @@ class _OpenDoorCases(AtomicSkillCaseProvider):
         tolerance = float(case.case_parameters["hinge_angle_tolerance_rad"])
         return (
             observation.execution_success
-            & _motion_valid_mask(motion_outcomes, device=hinge.device)
+            & motion_valid_mask(motion_outcomes, device=hinge.device)
             & torch.isfinite(error)
             & (error <= tolerance),
             "articulation_effect_miss",
@@ -1071,10 +1073,10 @@ class _PourCases(AtomicSkillCaseProvider):
         )
         if not bool(torch.as_tensor(success).all().item()):
             raise RuntimeError(
-                f"Independent IK rejected the Pour pre-grasp {_case_name(config)!r}."
+                f"Independent IK rejected the Pour pre-grasp {case_name(config)!r}."
             )
-        scenario.set_robot_start(_canonical_case_qpos(pre_pick_qpos), open_gripper=True)
-        start_qpos, full_start_qpos = _snapshot_case_qpos(
+        scenario.set_robot_start(canonical_case_qpos(pre_pick_qpos), open_gripper=True)
+        start_qpos, full_start_qpos = snapshot_case_qpos(
             scenario.robot, scenario.control_part
         )
         references = scenario.solve_reference_qpos(start_qpos, targets)
@@ -1096,7 +1098,7 @@ class _PourCases(AtomicSkillCaseProvider):
             robot_id=suite.robot.id,
             skill_id=self.skill_id,
             object_id=handle.object_id,
-            task_difficulty=_difficulty(config),
+            task_difficulty=difficulty(config),
             primary_success="task_success",
             full_start_qpos=full_start_qpos,
             case_parameters={
@@ -1121,7 +1123,7 @@ class _PourCases(AtomicSkillCaseProvider):
                     config.get("minimum_object_lift_m", 0.04)
                 ),
                 "task_success_scope": "physical_peak_object_rotation_while_held",
-                "randomization": _randomization_parameters(config, seed=seed),
+                "randomization": randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },
         )
@@ -1148,8 +1150,8 @@ class _PourCases(AtomicSkillCaseProvider):
                 "pick_up",
                 GraspGoal(
                     semantics=semantics,
-                    grasp_xpos=_case_pose(case, "grasp_pose", device=device),
-                    object_pose=_case_pose(case, "object_initial_pose", device=device),
+                    grasp_xpos=case_pose(case, "grasp_pose", device=device),
+                    object_pose=case_pose(case, "object_initial_pose", device=device),
                 ),
                 control_parts=_primary_control_parts(scenario, "Pour"),
                 motion_policy=MotionPolicy(
@@ -1230,7 +1232,7 @@ class _PourCases(AtomicSkillCaseProvider):
         scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         compiled: CompiledTrajectory,
-        observation: _ExecutionObservation,
+        observation: ExecutionObservation,
         motion_outcomes: tuple[CaseOutcome, ...],
     ) -> tuple[torch.Tensor, str]:
         del scenario, compiled
@@ -1243,7 +1245,7 @@ class _PourCases(AtomicSkillCaseProvider):
         error = (peak - float(case.case_parameters["rotate_angle_rad"])).abs()
         return (
             observation.execution_success
-            & _motion_valid_mask(motion_outcomes, device=peak.device)
+            & motion_valid_mask(motion_outcomes, device=peak.device)
             & torch.isfinite(error)
             & (error <= float(case.case_parameters["pour_angle_tolerance_rad"]))
             & (lift >= float(case.case_parameters["minimum_object_lift_m"])),
@@ -1400,7 +1402,7 @@ class _AxisAlignCases(AtomicSkillCaseProvider):
         pre_grasp_distance = float(config.get("pre_grasp_distance_m", 0.15))
         lift_height = float(config.get("lift_height_m", 0.16))
         _set_pre_pick_start(scenario, object_pose, config, skill="AxisAlign")
-        start_qpos, full_start_qpos = _snapshot_case_qpos(
+        start_qpos, full_start_qpos = snapshot_case_qpos(
             scenario.robot, scenario.control_part
         )
         start_pose = scenario.robot.compute_fk(
@@ -1478,7 +1480,7 @@ class _AxisAlignCases(AtomicSkillCaseProvider):
             robot_id=suite.robot.id,
             skill_id=self.skill_id,
             object_id=handle.object_id,
-            task_difficulty=_difficulty(config),
+            task_difficulty=difficulty(config),
             primary_success="task_success",
             full_start_qpos=full_start_qpos,
             case_parameters={
@@ -1501,7 +1503,7 @@ class _AxisAlignCases(AtomicSkillCaseProvider):
                     config.get("minimum_object_lift_m", 0.04)
                 ),
                 "task_success_scope": "physical_object_axis_while_held",
-                "randomization": _randomization_parameters(config, seed=seed),
+                "randomization": randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },
         )
@@ -1528,7 +1530,7 @@ class _AxisAlignCases(AtomicSkillCaseProvider):
             self.skill_id,
             AxisAlignGoal(
                 semantics,
-                grasp_xpos=_case_pose(case, "grasp_pose", device=device),
+                grasp_xpos=case_pose(case, "grasp_pose", device=device),
             ),
             control_parts=_primary_control_parts(scenario, "AxisAlign"),
             motion_policy=MotionPolicy(
@@ -1591,7 +1593,7 @@ class _AxisAlignCases(AtomicSkillCaseProvider):
         scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         compiled: CompiledTrajectory,
-        observation: _ExecutionObservation,
+        observation: ExecutionObservation,
         motion_outcomes: tuple[CaseOutcome, ...],
     ) -> tuple[torch.Tensor, str]:
         del scenario, compiled
@@ -1616,7 +1618,7 @@ class _AxisAlignCases(AtomicSkillCaseProvider):
         error = torch.arccos(torch.clamp(world_axis @ target, -1.0, 1.0))
         return (
             observation.execution_success
-            & _motion_valid_mask(motion_outcomes, device=final_pose.device)
+            & motion_valid_mask(motion_outcomes, device=final_pose.device)
             & torch.isfinite(error)
             & (error <= float(parameters["axis_angle_tolerance_rad"]))
             & (lift >= float(parameters["minimum_object_lift_m"])),
@@ -1635,13 +1637,13 @@ class _PushObjectEvaluator:
     def evaluate(
         self,
         case: BenchmarkCase,
-        observation: _ExecutionObservation,
+        observation: ExecutionObservation,
         motion_outcomes: tuple[CaseOutcome, ...],
     ) -> tuple[PhysicalEvaluation, ...]:
         del motion_outcomes
-        contact = _replay_trace(observation, "push_contact")
-        actuation = _replay_trace(observation, "push_actuation")
-        settle = _replay_trace(observation, "push_settle")
+        contact = replay_trace(observation, "push_contact")
+        actuation = replay_trace(observation, "push_actuation")
+        settle = replay_trace(observation, "push_settle")
         batches: list[Sequence[Mapping[str, StageEvidence]]] = []
         if contact is not None and contact.object_pose is not None:
             contact_motion = torch.linalg.vector_norm(
@@ -1649,8 +1651,8 @@ class _PushObjectEvaluator:
                 dim=-1,
             )
             batches.append(
-                _stage_evidence_batch(
-                    valid_mask=_trace_validity(contact, observation=observation),
+                stage_evidence_batch(
+                    valid_mask=trace_validity(contact, observation=observation),
                     stage_id="contacted",
                     window="contact_end",
                     measurements={
@@ -1672,7 +1674,7 @@ class _PushObjectEvaluator:
                 dtype=poses.dtype,
                 device=poses.device,
             )
-            target = _case_pose(case, "target_object_pose", device=poses.device).to(
+            target = case_pose(case, "target_object_pose", device=poses.device).to(
                 dtype=poses.dtype
             )
             normal = torch.nn.functional.normalize(target[:, :3, 2], dim=-1)
@@ -1683,8 +1685,8 @@ class _PushObjectEvaluator:
             residual = target[:, :3, 3] - poses[-1, :, :3, 3]
             residual -= (residual * normal).sum(dim=-1, keepdim=True) * normal
             batches.append(
-                _stage_evidence_batch(
-                    valid_mask=_trace_validity(actuation, observation=observation),
+                stage_evidence_batch(
+                    valid_mask=trace_validity(actuation, observation=observation),
                     stage_id="pushed",
                     window="actuation_end",
                     measurements={
@@ -1696,7 +1698,7 @@ class _PushObjectEvaluator:
             )
         if settle is not None and settle.object_pose is not None:
             final = settle.object_pose[-1]
-            target = _case_pose(case, "target_object_pose", device=final.device).to(
+            target = case_pose(case, "target_object_pose", device=final.device).to(
                 dtype=final.dtype
             )
             normal = torch.nn.functional.normalize(target[:, :3, 2], dim=-1)
@@ -1707,8 +1709,8 @@ class _PushObjectEvaluator:
             residual = target[:, :3, 3] - final[:, :3, 3]
             residual -= (residual * normal).sum(dim=-1, keepdim=True) * normal
             batches.append(
-                _stage_evidence_batch(
-                    valid_mask=_trace_validity(settle, observation=observation),
+                stage_evidence_batch(
+                    valid_mask=trace_validity(settle, observation=observation),
                     stage_id="on_support_plane",
                     window="terminal_settle",
                     measurements={
@@ -1728,7 +1730,7 @@ class _PushObjectEvaluator:
                 )
             )
         evidence = (
-            _merge_stage_evidence_batches(*batches)
+            merge_stage_evidence_batches(*batches)
             if batches
             else tuple({} for _ in range(case.batch_size))
         )
@@ -1799,12 +1801,12 @@ class _PushObjectCases(AtomicSkillCaseProvider):
             scenario, handle, config, seed=seed, stream=601
         )
         scenario.randomize_robot_start(config, seed=seed, stream=602)
-        start_qpos, full_start_qpos = _snapshot_case_qpos(
+        start_qpos, full_start_qpos = snapshot_case_qpos(
             scenario.robot, scenario.control_part
         )
         target_pose = object_pose.clone()
-        target_pose[:, :3, 3] += _randomized_vector_batch(
-            _float_vector(
+        target_pose[:, :3, 3] += randomized_vector_batch(
+            float_vector(
                 config.get("target_object_offset_m"),
                 name="target_object_offset_m",
                 length=3,
@@ -1826,7 +1828,7 @@ class _PushObjectCases(AtomicSkillCaseProvider):
         if calibration.shape != (4, 4):
             raise ValueError("contact_frame_to_eef must be a 4x4 matrix.")
         contact_offset = torch.tensor(
-            _float_vector(
+            float_vector(
                 config.get("object_contact_offset_m"),
                 name="object_contact_offset_m",
                 length=3,
@@ -1873,7 +1875,7 @@ class _PushObjectCases(AtomicSkillCaseProvider):
             robot_id=suite.robot.id,
             skill_id=self.skill_id,
             object_id=handle.object_id,
-            task_difficulty=_difficulty(config),
+            task_difficulty=difficulty(config),
             primary_success="task_success",
             full_start_qpos=full_start_qpos,
             case_parameters={
@@ -1906,7 +1908,7 @@ class _PushObjectCases(AtomicSkillCaseProvider):
                     config.get("support_plane_tolerance_m", _TASK_POSITION_TOLERANCE_M)
                 ),
                 "task_success_scope": "physical_object_pose_after_push",
-                "randomization": _randomization_parameters(config, seed=seed),
+                "randomization": randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },
         )
@@ -1925,10 +1927,10 @@ class _PushObjectCases(AtomicSkillCaseProvider):
             self.skill_id,
             PushObjectGoal(
                 _object_semantics(handle, Affordance()),
-                target_pose=_case_pose(case, "target_object_pose", device=device),
+                target_pose=case_pose(case, "target_object_pose", device=device),
             ),
             control_parts=_primary_control_parts(scenario, "PushObject"),
-            motion_policy=_benchmark_motion_policy(
+            motion_policy=benchmark_motion_policy(
                 self.skill_id, int(parameters["sample_count"])
             ),
             skill_options=PushObjectOptions(
@@ -1989,12 +1991,12 @@ class _PushObjectCases(AtomicSkillCaseProvider):
         scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         compiled: CompiledTrajectory,
-        observation: _ExecutionObservation,
+        observation: ExecutionObservation,
         motion_outcomes: tuple[CaseOutcome, ...],
     ) -> tuple[torch.Tensor, str]:
         del compiled
         return (
-            _object_pose_success(scenario, case, observation, motion_outcomes),
+            object_pose_success(scenario, case, observation, motion_outcomes),
             "object_goal_miss",
         )
 

@@ -31,11 +31,15 @@ from scripts.benchmark.motion_generation.config import (
 )
 from scripts.benchmark.motion_generation.scenarios.atomic_skill import (
     AtomicSkillScenario,
-    _apply_target_rotation_randomization,
-    _randomization_parameters,
-    _randomized_vector_batch,
-    _seeded_jitter,
-    _workspace_shell_profile,
+)
+from scripts.benchmark.motion_generation.scenarios.atomic_case_utils import (
+    apply_target_rotation_randomization,
+    randomization_parameters,
+    randomized_vector_batch,
+    seeded_jitter,
+    workspace_shell_profile,
+)
+from scripts.benchmark.motion_generation.atomic_skill import (
     atomic_skill_provider_names,
     create_atomic_skill_provider,
 )
@@ -669,8 +673,8 @@ def test_stratified_pose_sampling_is_deterministic_and_covers_bounds() -> None:
         "seed_stride": 1,
         "sampling_pattern": "stratified",
     }
-    first = _seeded_jitter(**kwargs)
-    second = _seeded_jitter(**kwargs)
+    first = seeded_jitter(**kwargs)
+    second = seeded_jitter(**kwargs)
 
     torch.testing.assert_close(first, second)
     for dimension, amplitude in enumerate(kwargs["amplitude"]):
@@ -695,9 +699,9 @@ def test_workspace_shell_sampling_covers_radius_buckets_and_height() -> None:
         "seed_stride": 1,
         "sampling_pattern": "workspace_shell",
     }
-    first = _seeded_jitter(**kwargs)
-    second = _seeded_jitter(**kwargs)
-    radii, labels = _workspace_shell_profile(8)
+    first = seeded_jitter(**kwargs)
+    second = seeded_jitter(**kwargs)
+    radii, labels = workspace_shell_profile(8)
     realized_radii = torch.sqrt(
         (first[:, 0] / amplitude[0]).square() + (first[:, 1] / amplitude[1]).square()
     )
@@ -717,7 +721,7 @@ def test_workspace_shell_sampling_rejects_single_xy_axis(
 ) -> None:
     """A radial shell cannot preserve its labels on only one active XY axis."""
     with pytest.raises(ValueError, match="both X and Y"):
-        _seeded_jitter(
+        seeded_jitter(
             amplitude,
             seed=47,
             stream=203,
@@ -1101,8 +1105,8 @@ def test_target_spatial_rotation_is_batched_without_translating_the_goal() -> No
 
     first = target.clone()
     second = target.clone()
-    _apply_target_rotation_randomization(first, config, seed=11, stream=312)
-    _apply_target_rotation_randomization(second, config, seed=11, stream=312)
+    apply_target_rotation_randomization(first, config, seed=11, stream=312)
+    apply_target_rotation_randomization(second, config, seed=11, stream=312)
 
     torch.testing.assert_close(first, second)
     torch.testing.assert_close(first[:, :3, 3], target[:, :3, 3])
@@ -1412,7 +1416,7 @@ def test_pose_fallback_does_not_leak_into_local_grasp_offsets() -> None:
         "_pose_batch_object_translation_jitter_m": [0.25, 0.25, 0.25],
         "_pose_batch_seed_stride": 1,
     }
-    target = _randomized_vector_batch(
+    target = randomized_vector_batch(
         [0.0, 0.0, 0.0],
         config,
         jitter_name="target_offset_jitter_m",
@@ -1422,7 +1426,7 @@ def test_pose_fallback_does_not_leak_into_local_grasp_offsets() -> None:
         dtype=torch.float32,
         device=torch.device("cpu"),
     )
-    held = _randomized_vector_batch(
+    held = randomized_vector_batch(
         [0.0, 0.0, 0.0],
         config,
         jitter_name="held_object_offset_jitter_m",
@@ -1438,7 +1442,7 @@ def test_pose_fallback_does_not_leak_into_local_grasp_offsets() -> None:
 
 def test_pose_batch_internal_ranges_are_not_exposed_as_legacy_jitter() -> None:
     """Manifest ranges retain user keys while dedicated pose metadata is explicit."""
-    parameters = _randomization_parameters(
+    parameters = randomization_parameters(
         {
             "_pose_batch_enabled": True,
             "_pose_batch_seed_stride": 1,
@@ -1488,7 +1492,7 @@ def test_pose_batch_internal_ranges_are_not_exposed_as_legacy_jitter() -> None:
 
 def test_workspace_shell_manifest_records_row_buckets() -> None:
     """Case metadata maps every shell row to its normalized radial bucket."""
-    parameters = _randomization_parameters(
+    parameters = randomization_parameters(
         {
             "_pose_batch_enabled": True,
             "_pose_batch_size": 8,

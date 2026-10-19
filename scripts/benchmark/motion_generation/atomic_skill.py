@@ -40,7 +40,12 @@ if TYPE_CHECKING:
     from .planners.base import PlannerAdapter
     from .scenarios.atomic_skill import AtomicSkillScenario
 
-__all__ = ["AtomicSkillCaseProvider"]
+__all__ = [
+    "AtomicSkillCaseProvider",
+    "register_atomic_skill_provider",
+    "create_atomic_skill_provider",
+    "atomic_skill_provider_names",
+]
 
 
 class AtomicSkillCaseProvider(ABC):
@@ -179,3 +184,38 @@ class AtomicSkillCaseProvider(ABC):
         raise NotImplementedError(
             "Provide physical_evaluator() or legacy task_result()."
         )
+
+
+AtomicSkillProviderType = type[AtomicSkillCaseProvider]
+
+
+_ATOMIC_SKILL_PROVIDERS: dict[str, AtomicSkillProviderType] = {}
+
+
+def register_atomic_skill_provider(
+    skill_id: str, provider_type: AtomicSkillProviderType
+) -> None:
+    """Register one Atomic Action case provider."""
+    if not skill_id:
+        raise ValueError("Atomic skill id must not be empty.")
+    previous = _ATOMIC_SKILL_PROVIDERS.get(skill_id)
+    if previous is not None and previous is not provider_type:
+        raise ValueError(f"Atomic skill provider {skill_id!r} is already registered.")
+    _ATOMIC_SKILL_PROVIDERS[skill_id] = provider_type
+
+
+def atomic_skill_provider_names() -> tuple[str, ...]:
+    """Return registered Atomic Action case providers."""
+    return tuple(sorted(_ATOMIC_SKILL_PROVIDERS))
+
+
+def create_atomic_skill_provider(skill_id: str) -> AtomicSkillCaseProvider:
+    """Construct one registered Atomic Action case provider."""
+    try:
+        provider_type = _ATOMIC_SKILL_PROVIDERS[skill_id]
+    except KeyError as exc:
+        raise ValueError(
+            f"Unknown atomic skill {skill_id!r}; registered skills: "
+            f"{atomic_skill_provider_names()}."
+        ) from exc
+    return provider_type()

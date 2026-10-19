@@ -15,6 +15,12 @@ Skills results. They share adapters, robot configuration, effective motion
 limits, trajectory validation and raw artifacts. They maintain separate
 populations and rankings, without a combined score.
 
+The domain command is `embodichain benchmark motion-generation`; `--suite`
+selects either family. The separate `embodichain benchmark atomic-action-profile`
+command diagnoses individual actions over object and position presets, with
+optional replay videos. It has its own reports and is outside this framework's
+planner comparisons and leaderboards.
+
 Motion Planning suites `motion_panda_free_space_smoke`,
 `motion_panda_free_space_coverage` and `motion_ur5_free_space_coverage` use
 version 2 populations with both EEF and joint goals. The matrix owns planner
@@ -267,7 +273,7 @@ embodichain benchmark motion-generation --suite atomic_franka_pgi_smoke
 Both families use `motion-generation`; `--suite` determines their population
 and scenario. Separate domains keep their commands: `rl`,
 `robotics-kinematic-solver`, `grasp-pose-generator`, `workspace-analyzer`, and
-`rendering`. The separate `atomic-action` runner profiles individual actions
+`rendering`. The separate `atomic-action-profile` runner profiles individual actions
 over object and position presets. See the [README](./README.md#run) for the
 command matrix.
 
@@ -282,11 +288,25 @@ Reuse established patterns from the current benchmark system:
   and optional-baseline flow;
 - one Markdown report, three tables per family, and complete separate rankings.
 
-The original decomposition sketch below is retained as design history. Current
-owners are `config.py`, `runner.py`, `scenarios/free_space.py`,
-`scenarios/atomic_skill.py`, `metrics/trajectory.py`, `limits.py`,
-`aggregation.py` and `reporting.py`; consult the source for exact extension APIs.
-The sketch is not a filesystem inventory:
+Current framework owners are `config.py`, `runner.py`,
+`scenarios/free_space.py`, `metrics/trajectory.py`, `limits.py`, `aggregation.py`
+and `reporting.py`. For Atomic Skills, `atomic_skill.py` owns the provider
+contract and registry, and `scenarios/atomic_skill.py` orchestrates the lifecycle.
+Within `scenarios/`, `atomic_case_utils.py`, `atomic_policy.py`,
+`atomic_grasps.py` and `atomic_evaluation.py` own deterministic case helpers,
+motion policy and attribution, grasp services, and measured evidence/evaluators.
+Base providers live in `atomic_motion_cases.py`, `atomic_manipulation_cases.py`
+and `atomic_contact_cases.py`; the additional single-arm and dual-arm providers
+reuse these shared owners. `atomic_replay.py` composes `AtomicReplayRuntime`
+from explicit simulator, robot, object/articulation, gripper and track bindings,
+so measured replay and video use the same execution path. Scene reset and
+teardown stay with the scenario. This decomposition preserves behavior, suite
+definitions and report schemas; wheel packaging remains future work. See the
+[provider ownership guide](./README.md#provider-and-evaluator-interfaces) when
+adding a skill.
+
+The original decomposition sketch below is retained as design history, not a
+filesystem inventory:
 
 ```text
 scripts/benchmark/motion_generation/

@@ -200,7 +200,9 @@ def test_ik_skill_timing_is_independent_of_unused_planner(monkeypatch) -> None:
     case = _case("press")
     scenario = AtomicSkillScenario()
     scenario._case_providers[case.case_id] = object()
-    monkeypatch.setattr(scenario, "_execute", lambda *args: None)
+    monkeypatch.setattr(
+        scenario, "_replay_runtime", lambda: SimpleNamespace(execute=lambda *args: None)
+    )
     suite = SuiteCfg(protocol=ProtocolCfg(joint_velocity_limit_rad_s=0.05))
     rows = [
         scenario.evaluate_case(
@@ -223,8 +225,8 @@ def test_ik_skill_timing_is_independent_of_unused_planner(monkeypatch) -> None:
 def test_coordinated_pickment_keeps_its_fixed_clock_out_of_planner_attribution() -> (
     None
 ):
-    from scripts.benchmark.motion_generation.scenarios.atomic_skill import (
-        _benchmark_motion_policy_strategy,
+    from scripts.benchmark.motion_generation.scenarios.atomic_policy import (
+        benchmark_motion_policy_strategy,
     )
 
     metadata = AtomicSkillScenario().trial_metadata(_case("coordinated_pickment"))
@@ -232,7 +234,7 @@ def test_coordinated_pickment_keeps_its_fixed_clock_out_of_planner_attribution()
     assert metadata["effective_motion_algorithm"] == "coordinated_ik_projection"
     assert metadata["timing_is_solved"] is False
     assert metadata["motion_policy_strategy"] == "motion_gen"
-    assert _benchmark_motion_policy_strategy("coordinated_pickment") == "motion_gen"
+    assert benchmark_motion_policy_strategy("coordinated_pickment") == "motion_gen"
 
 
 def test_coordinated_placement_keeps_the_selected_planner_attribution() -> None:
@@ -259,12 +261,12 @@ def _budget_invocation(skill_id: str, strategy: str):
 def test_scenario_owned_motion_consumes_shared_scalar_budget(
     skill: str, strategy: str
 ) -> None:
-    from scripts.benchmark.motion_generation.scenarios.atomic_skill import (
-        _with_motion_budget,
+    from scripts.benchmark.motion_generation.scenarios.atomic_policy import (
+        with_motion_budget,
     )
 
     invocation = _budget_invocation(skill, strategy)
-    updated = _with_motion_budget(
+    updated = with_motion_budget(
         invocation,
         ProtocolCfg(
             joint_velocity_limit_rad_s=0.2, joint_acceleration_limit_rad_s2=3.0
@@ -277,15 +279,15 @@ def test_scenario_owned_motion_consumes_shared_scalar_budget(
 
 
 def test_vector_policy_budget_is_conservative_and_recorded() -> None:
-    from scripts.benchmark.motion_generation.scenarios.atomic_skill import (
-        _with_motion_budget,
+    from scripts.benchmark.motion_generation.scenarios.atomic_policy import (
+        with_motion_budget,
     )
 
     protocol = ProtocolCfg(
         joint_velocity_limit_rad_s=[0.2, 0.1],
         joint_acceleration_limit_rad_s2=[3.0, 2.0],
     )
-    updated = _with_motion_budget(_budget_invocation("press", "ik_interp"), protocol)
+    updated = with_motion_budget(_budget_invocation("press", "ik_interp"), protocol)
     scenario = AtomicSkillScenario()
     scenario.suite = SuiteCfg(protocol=protocol)
     recorded = scenario.trial_metadata(_case("press"))["policy_motion_limits"]
@@ -299,15 +301,15 @@ def test_vector_policy_budget_is_conservative_and_recorded() -> None:
 
 
 def test_policy_budget_keeps_unset_defaults_and_selected_backend_vectors() -> None:
-    from scripts.benchmark.motion_generation.scenarios.atomic_skill import (
-        _with_motion_budget,
+    from scripts.benchmark.motion_generation.scenarios.atomic_policy import (
+        with_motion_budget,
     )
 
     own_motion = _budget_invocation("press", "ik_interp")
-    assert _with_motion_budget(own_motion, ProtocolCfg()) is own_motion
+    assert with_motion_budget(own_motion, ProtocolCfg()) is own_motion
     selected = _budget_invocation("move_end_effector", "motion_gen")
     protocol = ProtocolCfg(
         joint_velocity_limit_rad_s=[0.2, 0.1],
         joint_acceleration_limit_rad_s2=[3.0, 2.0],
     )
-    assert _with_motion_budget(selected, protocol) is selected
+    assert with_motion_budget(selected, protocol) is selected

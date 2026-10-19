@@ -18,7 +18,7 @@
 
 Measures Place-only planning latency and memory usage once a held-object state
 has been produced by the PickUp action.
-Run: embodichain benchmark atomic-action --action place
+Run: embodichain benchmark atomic-action-profile --action place
 """
 
 from __future__ import annotations

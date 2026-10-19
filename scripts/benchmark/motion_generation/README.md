@@ -23,12 +23,18 @@ domains:
 | --- | --- |
 | `embodichain benchmark motion-generation --suite motion_panda_free_space_smoke` | Motion Planning |
 | `embodichain benchmark motion-generation --suite atomic_franka_pgi_smoke` | Atomic Skills |
-| `embodichain benchmark atomic-action --smoke` | Individual action profiling over object and position presets |
+| `embodichain benchmark atomic-action-profile --smoke` | Individual action profiling over object and position presets |
 | `embodichain benchmark rl` | RL training and evaluation |
 | `embodichain benchmark robotics-kinematic-solver` | FK/IK accuracy and speed |
 | `embodichain benchmark grasp-pose-generator` | Grasp sampling and pose selection |
 | `embodichain benchmark workspace-analyzer` | Workspace analysis |
 | `embodichain benchmark rendering` | Offscreen rendering and denoising |
+
+Use `motion-generation --suite atomic_...` to compare planners on Atomic Skills
+with shared cases and evaluation. Use `atomic-action-profile --action pick_up
+--profile smoke` to inspect an individual action over preset scenes, including
+optional replay videos. The profiling command uses its own reports and does not
+contribute to the shared Atomic Skills leaderboard.
 
 Run from a source checkout with the domain command above or its Python module:
 
@@ -302,7 +308,8 @@ scenes. Use `--no-headless` instead to open the live simulator viewer.
   suites also declare the gripper control part and open/grasp qpos under `gripper`.
 - Object: add another `objects` entry for built-in `cube`/`mesh`, or register a
   new object-kind factory.
-- Atomic skill: implement and register an `AtomicSkillCaseProvider`; the runner,
+- Atomic skill: implement `AtomicSkillCaseProvider` and register it through
+  `atomic_skill.py`; the runner,
   artifact schema, aggregation, and report stay unchanged. Optional provider
   hooks cover skills with a precondition or their own sampling:
   `prefix_invocations()` compiles actions such as the PickUp that a Pour needs,
@@ -327,6 +334,8 @@ scenes. Use `--no-headless` instead to open the live simulator viewer.
 - Dual-arm suites run on TOPPRA only; no collision-aware planner currently
   accepts the coordinated skills
 - Latency-budget Pareto sweeps, confidence intervals, subprocess isolation
+- Benchmark modules and suite resources currently require a source checkout;
+  wheel packaging remains future work.
 
 
 ## Atomic Skill contract foundation (#669)
@@ -404,9 +413,30 @@ population; later populations extend the manifest.
 
 ### Provider and evaluator interfaces
 
-`atomic_skill.py` owns `AtomicSkillCaseProvider`; `scenarios/atomic_skill.py`
-owns `AtomicSkillScenario`. All 15 registered Atomic Skills use
-v1 physical evaluators. Terminal skills score settled replay state; staged
+Atomic Skill implementation is divided by responsibility. Paths below are
+relative to `motion_generation/`; the split preserves case generation, suite
+definitions, evaluation behavior, and report schemas.
+
+| Owner | Responsibility |
+| --- | --- |
+| `atomic_skill.py` | `AtomicSkillCaseProvider` contract and skill registry |
+| `scenarios/atomic_skill.py` | `AtomicSkillScenario` setup, case generation, compilation, evaluation and video orchestration |
+| `scenarios/atomic_case_utils.py` | Deterministic case identity, pose randomization and goal helpers |
+| `scenarios/atomic_policy.py` | Motion policies, motion-source attribution and budget application |
+| `scenarios/atomic_grasps.py` | Frozen and case-scoped grasp generators |
+| `scenarios/atomic_evaluation.py` | Shared measured-evidence helpers and base skill evaluators |
+| `scenarios/atomic_motion_cases.py`, `scenarios/atomic_manipulation_cases.py`, `scenarios/atomic_contact_cases.py` | Motion, pick/held-object/place, and articulated-contact case providers |
+| `scenarios/atomic_replay.py` | `AtomicReplayRuntime`, shared by measured physics replay and video capture |
+
+The additional single-arm and dual-arm providers in
+`scenarios/atomic_skill_providers.py` and `scenarios/atomic_dual_arm_providers.py` import
+helpers from these owners. Extend the appropriate provider module and reuse
+those helpers directly. `AtomicReplayRuntime` receives explicit simulation,
+robot, control-part, object/articulation maps, gripper commands and track-config
+bindings; the scenario retains scene reset and simulator teardown.
+
+All 15 registered Atomic Skills use v1 physical evaluators. Terminal skills
+score settled replay state; staged
 skills declare compiled-coordinate replay windows and score the resulting raw
 simulator traces. Providers override `physical_evaluator()` to return an
 implementation of `contracts.PhysicalStageEvaluator`:

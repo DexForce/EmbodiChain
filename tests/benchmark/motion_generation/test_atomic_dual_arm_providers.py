@@ -43,12 +43,17 @@ from scripts.benchmark.motion_generation.registry import create_robot_provider
 from scripts.benchmark.motion_generation.scenarios import (
     atomic_dual_arm_providers as dual,
 )
+from scripts.benchmark.motion_generation.scenarios import atomic_case_utils
 from scripts.benchmark.motion_generation.scenarios import atomic_skill
 from scripts.benchmark.motion_generation.scenarios.atomic_skill import (
     AtomicSkillScenario,
-    _ActiveCaseGraspPoseGenerator,
-    _CaseSampleCountGraspPoseGenerator,
-    _ExecutionObservation,
+)
+from scripts.benchmark.motion_generation.scenarios.atomic_grasps import (
+    ActiveCaseGraspPoseGenerator,
+    CaseSampleCountGraspPoseGenerator,
+)
+from scripts.benchmark.motion_generation.contracts import ExecutionObservation
+from scripts.benchmark.motion_generation.atomic_skill import (
     create_atomic_skill_provider,
 )
 
@@ -109,8 +114,8 @@ def _outcome(*, motion_valid: bool = True) -> CaseOutcome:
     )
 
 
-def _observation(**values: object) -> _ExecutionObservation:
-    return _ExecutionObservation(
+def _observation(**values: object) -> ExecutionObservation:
+    return ExecutionObservation(
         execution_success=torch.ones(1, dtype=torch.bool),
         final_tcp_pose=torch.eye(4).unsqueeze(0),
         joint_tracking_rmse_rad=torch.zeros(1),
@@ -577,7 +582,9 @@ def test_replay_collects_named_scene_object_poses_in_sync() -> None:
         object_id="placing",
     )
 
-    metrics = scenario._replay_physics(compiled, case, provider, collect_metrics=True)
+    metrics = scenario._replay_runtime().replay_physics(
+        compiled, case, provider, collect_metrics=True
+    )
 
     assert metrics is not None
     trace = metrics.replay_traces["relative"]
@@ -827,8 +834,8 @@ def test_coordinated_placement_transforms_fixed_targets_with_task_frame(monkeypa
     }
     placing_pose = nominal_placing_pose.clone()
     support_pose = nominal_support_pose.clone()
-    atomic_skill._apply_task_frame_randomization(placing_pose, config, seed=11)
-    atomic_skill._apply_task_frame_randomization(support_pose, config, seed=11)
+    atomic_case_utils.apply_task_frame_randomization(placing_pose, config, seed=11)
+    atomic_case_utils.apply_task_frame_randomization(support_pose, config, seed=11)
     placing_vertices = torch.tensor(
         [
             [-0.04, -0.03, -0.01],
@@ -861,7 +868,7 @@ def test_coordinated_placement_transforms_fixed_targets_with_task_frame(monkeypa
         Mock(), Mock(), nominal_placing_pose, nominal_support_pose, {}, seed=11
     )
     task_frame_pose = torch.eye(4).repeat(batch_size, 1, 1)
-    atomic_skill._apply_task_frame_randomization(task_frame_pose, config, seed=11)
+    atomic_case_utils.apply_task_frame_randomization(task_frame_pose, config, seed=11)
     expected_placing = torch.bmm(task_frame_pose, nominal["placing_target_pose"])
     expected_support = torch.bmm(task_frame_pose, nominal["support_target_pose"])
 
@@ -935,7 +942,7 @@ def test_scenario_configures_every_gripper_and_freezes_each_hand_over_grasp():
     engine = scenario.require_engine()
     assert set(engine.control_profiles) == {"left_eef", "right_eef"}
     assert all(
-        isinstance(engine.grasp_pose_generators[part], _ActiveCaseGraspPoseGenerator)
+        isinstance(engine.grasp_pose_generators[part], ActiveCaseGraspPoseGenerator)
         for part in ("left_eef", "right_eef")
     )
 
@@ -958,7 +965,7 @@ class _CountingSampler(ParallelJawGraspPoseGenerator):
 
 
 def test_each_self_sampling_case_compiles_with_its_own_sample_count(monkeypatch):
-    monkeypatch.setattr(atomic_skill, "_parallel_jaw_sampler", _CountingSampler)
+    monkeypatch.setattr(atomic_skill, "parallel_jaw_sampler", _CountingSampler)
     robot = Mock(device=CPU)
     robot.control_parts = {"left_eef": object(), "right_eef": object()}
     robot.get_joint_ids.side_effect = lambda name: {
@@ -1001,7 +1008,7 @@ def test_each_self_sampling_case_compiles_with_its_own_sample_count(monkeypatch)
     scenario.prepare_planner(adapter, Mock())
 
     sampler = scenario.require_engine().grasp_pose_generators["left_eef"]
-    assert isinstance(sampler, _CaseSampleCountGraspPoseGenerator)
+    assert isinstance(sampler, CaseSampleCountGraspPoseGenerator)
     assert scenario.require_engine().grasp_pose_generators["right_eef"] is sampler
     engine = Mock(motion_generator=motion_generator)
     engine.compile.side_effect = lambda *args, **kwargs: (
