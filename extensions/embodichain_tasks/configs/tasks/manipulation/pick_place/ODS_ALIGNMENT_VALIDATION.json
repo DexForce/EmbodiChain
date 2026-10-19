@@ -1,0 +1,134 @@
+{
+  "date": "2026-10-19",
+  "base_revision": "ecf47fc431234c2119281038e99367b2fec85861",
+  "validated_with_uncommitted_alignment_fix": true,
+  "implementation_sha256": {
+    "examples/data_pipeline/ods_pick_place_showcase.py": "14e7d7503c392f1fc401cc9ec7a211d331766c734eb991532ea5b1aaf4bca8b5",
+    "examples/data_pipeline/_ods_pick_place_training.py": "e229185c486a0e9b88395d7c4c736d75b49f9050f8e8a540eb99a4f881775092",
+    "examples/data_pipeline/_ods_pick_place_policy.py": "e818d620853d25013c4c0d94426001b4dd9752fffa42a2d55cb6106541d0d5f1",
+    "examples/data_pipeline/_ods_pick_place_benchmark.py": "1e5a4a3a53303f2e80af30f353623b88db4683a3338f28f202251d30f897d912",
+    "examples/data_pipeline/_ods_pick_place_lerobot.py": "56a281af9ffcf121d85d717831ded699bf9dd39b1d50031ed3c3eefafa6be55a",
+    "embodichain/data_pipeline/engine/data.py": "a6740224b964f48210fe4065a796da664fab5b77812fcbac7d99c338163af06d"
+  },
+  "scope": "PickPlace numeric training batches and CPU optimization; not arbitrary dataset interchangeability, learning quality or throughput evidence",
+  "runtime": {
+    "python": "3.11",
+    "torch": "2.7.0+cu128",
+    "lerobot": "0.4.4",
+    "tensordict": "0.13.0",
+    "native_runtime_overlay": "/tmp/ods-dexsim-runtime"
+  },
+  "automated_checks": {
+    "alignment_test": "tests/data_pipeline/test_ods_pick_place_alignment.py",
+    "alignment_cases_passed": 9,
+    "related_tests_passed": 108,
+    "engine_context_and_budget_tests_passed": 38,
+    "unique_tests_passed": 155,
+    "comparison": "torch.equal for all training-batch fields, sampler RNG, losses, gradients and model/optimizer tensors",
+    "cases": [
+      "episode starts/ends",
+      "single-frame spans",
+      "validity gaps",
+      "dirty NaN tails",
+      "horizons 1/4/64",
+      "binding per-source quotas and full-batch exhaustion",
+      "three optimizer updates with matched observation-noise RNG",
+      "unsupported continuity rejection"
+    ],
+    "pre_fix_observation_parity_failed": true
+  },
+  "physical": {
+    "scope": "physical producer, paired CPU tensors and optimization; not timing or held-out learning evidence",
+    "generations": [
+      {
+        "generation": 1,
+        "episodes": 2,
+        "valid_frames": 666,
+        "content_id": "db88299a40f0329bb064088449a644ac5ec85fe33c9f050b5c69150468adb310",
+        "episode_ids": [
+          0,
+          1
+        ]
+      },
+      {
+        "generation": 2,
+        "episodes": 2,
+        "valid_frames": 664,
+        "content_id": "85b86dd7f6a64970010f1d860e3b404a25418b8f4ef4fa830badb8d391447f6e",
+        "episode_ids": [
+          2,
+          3
+        ]
+      }
+    ],
+    "paired_batches": 4,
+    "paired_chunks": 32,
+    "optimizer_updates": 4,
+    "passed": true,
+    "parameters_updated": true,
+    "tensor_equality": "bitwise",
+    "optimizer_equality": "bitwise"
+  },
+  "physical_configuration": {
+    "seed": 29101,
+    "producer_seed": 1029101,
+    "sampling_seed": 39101,
+    "sim_device": "cuda:0",
+    "train_device": "cpu",
+    "prediction_horizon": 4,
+    "action_horizon": 2,
+    "batch_size": 8,
+    "buffer_size": 2,
+    "producer_envs": 1
+  },
+  "initial_model_sha256": "9b7b106660e2df67680c498c88d522bee7f95fb2df2e76fdaae16ce1524e885e",
+  "normalization_sha256": "4b638017394ce875f158aaef91636169e19202b6b7ca3934ec0bc7a2c21b2332",
+  "process_audit": {
+    "returncode": 0,
+    "forced": false,
+    "observed_owned_pids": [
+      365150,
+      365238,
+      365246,
+      365248,
+      365439,
+      365440,
+      365490,
+      365523
+    ],
+    "surviving_owned_pids": [],
+    "source_unchanged": true,
+    "elapsed_seconds": 148.29288858990185,
+    "gpu": "GPU-3b85e500-27ff-35d9-eb8d-d54f9ff0898d"
+  },
+  "prior_setup_attempt": {
+    "result": "failed validation harness: requested step_0.pt instead of initial_step_0.pt; corrected before retry",
+    "local_artifacts": "/tmp/ods-dataset-alignment-real-jo3v0i5j",
+    "process_audit": {
+      "returncode": 1,
+      "forced": false,
+      "observed_owned_pids": [
+        363676,
+        363686,
+        363694,
+        363696,
+        363754,
+        363755
+      ],
+      "surviving_owned_pids": [],
+      "source_unchanged": true,
+      "elapsed_seconds": 76.157838789979,
+      "gpu": "GPU-3b85e500-27ff-35d9-eb8d-d54f9ff0898d"
+    }
+  },
+  "local_artifacts": "/tmp/ods-dataset-alignment-real-7uh5h71z",
+  "local_validator": "/tmp/ods-dataset-alignment-validation/run.py",
+  "limitations": [
+    "Physical comparison freezes each completed generation; it does not verify every minibatch in the previous 256-episode pilot.",
+    "Synthetic cases exercise actual engine sampling and SDK readback without a live producer.",
+    "Physical run uses four paired batches/optimizer updates and no held-out final tests.",
+    "Device-to-device numerical equality and large-dataset loading are outside this gate.",
+    "Native runtime emitted its existing entity-balance warning during shutdown; all observed processes exited.",
+    "Public loading interfaces are proposed only; existing telemetry overhead qualification remains unresolved."
+  ]
+}

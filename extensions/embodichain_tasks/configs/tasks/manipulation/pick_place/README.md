@@ -131,6 +131,32 @@ python examples/data_pipeline/ods_pick_place_compare.py \
   --output /tmp/pick-place-comparison
 ```
 
+## Online/offline alignment
+
+The paired gate uses the real ODS sampler with a deterministic shared CPU
+buffer, official LeRobot SDK serialization/readback and the current learner:
+
+```bash
+OMP_NUM_THREADS=1 python -m pytest -q tests/data_pipeline/test_ods_pick_place_alignment.py
+```
+
+Install the optional LeRobot SDK to run the roundtrip checks. Identical source
+data and RNG states must give exactly equal observations, actions, masks,
+provenance and optimizer updates. Tests cover starts/ends, validity gaps, dirty
+tails, horizon 1/4/64 and binding source quotas. Canonical feature padding is
+applied after geometry conversion; unsupported continuity is rejected during
+offline snapshot creation. This validates data semantics, not an ODS speedup.
+
+The [alignment evidence](ODS_ALIGNMENT_VALIDATION.json) also records a real
+producer check: two generations/four accepted episodes, 1,330 valid frames,
+32 paired chunks and four matched optimizer updates. Every training-batch field,
+sampling RNG, loss, gradient and model/optimizer tensor matched exactly on CPU;
+all eight observed processes exited. No held-out final tests were opened.
+
+The proposed [public loading design](../../../../../../docs/architecture/dataset-loading-design.md)
+specifies shared contracts and staged extraction. Those public interfaces are
+not yet implemented; the current offline reader remains showcase-owned.
+
 ## Artifacts and recovery
 
 Use fresh output directories. Runs retain configuration/source hashes,

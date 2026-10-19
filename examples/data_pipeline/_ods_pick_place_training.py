@@ -289,17 +289,20 @@ def _snapshot(engine: OnlineDataEngine) -> dict[str, torch.Tensor]:
     with engine._lock_index.get_lock():
         batch = engine.shared_buffer.clone()
     continuity = batch.get("continuity_id", None)
-    if (
-        continuity is not None
-        and (
+    if continuity is not None and (
+        (batch["valid"] & (continuity < 0)).any()
+        or (
             batch["valid"][:, 1:]
             & batch["valid"][:, :-1]
             & (continuity[:, 1:] != continuity[:, :-1])
         ).any()
     ):
-        raise ValueError("Offline episodes must be continuous within each valid span")
+        raise ValueError(
+            "Offline episodes must be continuous within each valid span "
+            "with nonnegative continuity IDs"
+        )
     return {
-        "observations": policy_observations(batch["obs"]),
+        "observations": policy_observations(batch["obs"], valid_mask=batch["valid"]),
         "actions": batch["actions"],
         "valid": batch["valid"],
         "frame_ids": torch.stack(
@@ -422,7 +425,7 @@ def _sample(
     ended = tracker.elapsed_seconds()
     tracker.record_interval("data_wait", ended if blocked is None else blocked, ended)
     return {
-        "observations": policy_observations(batch["obs"]),
+        "observations": policy_observations(batch["obs"], valid_mask=batch["valid"]),
         "actions": batch["actions"],
         "frame_ids": torch.stack(
             (batch["ods_run_id"], batch["ods_episode_id"], batch["ods_frame_index"]),

@@ -60,8 +60,10 @@ TASK_CONFIG = (
 )
 
 
-def policy_observations(obs: Any) -> torch.Tensor:
-    """Pack the current measured 51-feature state, without demonstration labels."""
+def policy_observations(
+    obs: Any, *, valid_mask: torch.Tensor | None = None
+) -> torch.Tensor:
+    """Pack measured geometry, canonicalizing optional padding after conversion."""
     from embodichain.utils.math import matrix_from_quat
 
     tcp = obs["tcp_pose"]
@@ -75,7 +77,7 @@ def policy_observations(obs: Any) -> torch.Tensor:
         quaternion.norm(dim=-1, keepdim=True) == 0, identity, quaternion
     )
     rotation = matrix_from_quat(quaternion)
-    return torch.cat(
+    values = torch.cat(
         (
             obs["robot"]["qpos"],
             obs["robot"]["qvel"],
@@ -90,6 +92,13 @@ def policy_observations(obs: Any) -> torch.Tensor:
         ),
         dim=-1,
     ).float()
+    if valid_mask is not None:
+        if valid_mask.dtype != torch.bool or valid_mask.shape != values.shape[:-1]:
+            raise ValueError("Geometry valid_mask must match observation batch axes")
+        # Rotation conversion maps a zero quaternion to identity. Restore the
+        # same zero feature padding used by resident/offline context sampling.
+        values.masked_fill_(~valid_mask[..., None], 0)
+    return values
 
 
 def _geometry_statistics(values: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
