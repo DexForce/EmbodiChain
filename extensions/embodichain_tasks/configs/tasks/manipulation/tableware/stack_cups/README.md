@@ -7,7 +7,7 @@ bundled RL training configuration.
 
 ```bash
 embodichain show-task embodichain_tasks:stack_cups
-embodichain run-env --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_cups/env.json
+embodichain run-task --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_cups/env.json
 ```
 
 Environment availability does not imply a successful stacking controller. No

@@ -72,7 +72,7 @@ class RobotCfg(ArticulationCfg):
         stiffness=1e4,
         damping=1e3,
         max_effort=1e10,
-        max_velocity=1e10,
+        max_velocity=None,
         friction=0.0,
         armature=0.0,
     )

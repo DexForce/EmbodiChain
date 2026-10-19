@@ -308,6 +308,8 @@ def _robot() -> Mock:
     robot = Mock()
     robot.device = torch.device("cpu")
     robot.dof = ROBOT_DOF
+    robot.joint_names = [f"joint_{index}" for index in range(ROBOT_DOF)]
+    robot.num_instances = NUM_ENVS
     robot.control_parts = {
         "arm": object(),
         "hand": object(),
@@ -392,6 +394,10 @@ def _robot() -> Mock:
     robot.compute_batch_ik.side_effect = compute_batch_ik
     robot.compute_fk.side_effect = compute_fk
     robot.compute_batch_fk.side_effect = compute_batch_fk
+    robot.get_qvel_limits.return_value = torch.full((NUM_ENVS, ROBOT_DOF), torch.inf)
+    robot.mimic_ids = []
+    robot.mimic_parents = []
+    robot.mimic_multipliers = []
     return robot
 
 
@@ -5265,6 +5271,33 @@ def _handover_context(
     )
 
 
+@pytest.mark.no_sim
+def test_handover_midpoint_preserves_coincident_roots_per_row() -> None:
+    """Torso-rooted arms retain their lifted pose in a mixed embodiment batch."""
+    lifted = torch.eye(4).repeat(4, 1, 1)
+    lifted[:, :3, 3] = torch.tensor([0.45, 0.12, 0.95])
+    source = torch.eye(4).repeat(4, 1, 1)
+    destination = source.clone()
+    source[0, 0, 3] = -0.3
+    destination[0, 0, 3] = 0.3
+    source[1, 1, 3] = -0.3
+    destination[1, 1, 3] = 0.3
+    # Include numerical noise below the one-micrometre separation boundary.
+    destination[3, 0, 3] = 1.0e-6
+    original = lifted.clone()
+
+    middle = HandOver._middle_object_pose(lifted, source, destination)
+
+    expected = lifted.clone()
+    expected[0, 0, 3] = 0.0
+    expected[1, 1, 3] = 0.0
+    torch.testing.assert_close(middle, expected)
+    torch.testing.assert_close(lifted, original)
+    torch.testing.assert_close(
+        HandOver._middle_object_pose(lifted, destination, source), expected
+    )
+
+
 def test_handover_picks_with_nearer_arm_and_preserves_waypoint_rotations(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -7248,6 +7281,7 @@ def test_move_joints_supports_sparse_trapezoidal_planning() -> None:
     planner = object.__new__(TrapezoidalPlanner)
     planner.cfg = SimpleNamespace(planner_type="trapezoidal")
     planner.device = torch.device("cpu")
+    planner.robot = generator.robot
     generator.planner = planner
     action = _bind_action(generator, MoveJoints())
     target = torch.full((NUM_ENVS, ARM_DOF), 0.1)
@@ -7278,6 +7312,7 @@ def test_move_joints_holds_stationary_trapezoidal_goal() -> None:
     planner = object.__new__(TrapezoidalPlanner)
     planner.cfg = SimpleNamespace(planner_type="trapezoidal")
     planner.device = torch.device("cpu")
+    planner.robot = generator.robot
     generator.planner = planner
     action = _bind_action(generator, MoveJoints())
     target = torch.zeros(NUM_ENVS, ARM_DOF)

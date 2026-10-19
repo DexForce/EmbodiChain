@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-
 from embodichain.lab.sim.motion.motion_generator import (
     MotionGenCfg,
     MotionGenOptions,
@@ -62,7 +61,7 @@ class ToppraAdapter(PlannerAdapter):
         self.motion_generator: MotionGenerator | None = None
 
     def availability(self) -> tuple[bool, str | None]:
-        """The in-tree TOPPRA implementation is always available."""
+        """The in-tree TOPPRA implementation needs no optional external package."""
         return True, None
 
     def build(self) -> None:
@@ -84,12 +83,7 @@ class ToppraAdapter(PlannerAdapter):
         )
 
     def atomic_plan_options(self) -> ToppraPlanOptions:
-        """Use the free-space limits for Atomic Skill calls without options.
-
-        The backend default requests a quantity of ``0.01`` samples, below
-        TOPPRA's two-sample minimum, so skills that leave the sample count to
-        the backend would otherwise always fail.
-        """
+        """Use the suite limits and sample count for Atomic Skill calls."""
         return self._plan_options()
 
     def plan(self, case: BenchmarkCase) -> PlanResult:
@@ -125,7 +119,7 @@ class ToppraAdapter(PlannerAdapter):
         )
 
     def close(self) -> None:
-        """Release TOPPRA worker pools and drop the motion generator."""
+        """Drop the motion generator through the common planner lifecycle."""
         self._close_motion_generator()
 
 

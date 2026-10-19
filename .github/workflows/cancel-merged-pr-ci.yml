@@ -1,0 +1,55 @@
+name: Cancel merged PR CI
+
+on:
+  pull_request_target:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  actions: write
+
+jobs:
+  cancel:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # This privileged workflow must never check out or execute PR code.
+      - name: Cancel unfinished PR checks
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        with:
+          script: |
+            const repo = context.repo;
+            const pr = context.payload.pull_request;
+
+            for (const status of ['queued', 'in_progress']) {
+              const runs = await github.paginate(
+                github.rest.actions.listWorkflowRunsForRepo,
+                { ...repo, event: 'pull_request', status, per_page: 100 },
+              );
+
+              for (const run of runs) {
+                if (run.event !== 'pull_request') continue;
+                const linked = run.pull_requests ?? [];
+                // GitHub can omit PR associations after a merge. In that case,
+                // require the exact source repository, branch and head commit.
+                const matches = linked.length > 0
+                  ? linked.some(candidate => candidate.number === pr.number)
+                  : pr.head.repo?.id != null &&
+                    run.head_repository?.id === pr.head.repo.id &&
+                    run.head_branch === pr.head.ref &&
+                    run.head_sha === pr.head.sha;
+                if (!matches) continue;
+
+                try {
+                  await github.rest.actions.cancelWorkflowRun({
+                    ...repo, run_id: run.id,
+                  });
+                  core.info(`Requested cancellation of PR #${pr.number} run ${run.id}`);
+                } catch (error) {
+                  // A run can finish between listing it and requesting cancellation.
+                  if (error.status !== 409) throw error;
+                  core.info(`Run ${run.id} is no longer cancellable`);
+                }
+              }
+            }

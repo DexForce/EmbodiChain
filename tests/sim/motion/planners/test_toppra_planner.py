@@ -80,6 +80,7 @@ class TestToppraPlanner:
         ]
 
         opts = ToppraPlanOptions(
+            control_part="left_arm",
             sample_method=TrajectorySampleMethod.TIME,
             sample_interval=0.1,
             constraints={"velocity": 1.0, "acceleration": 2.0},
@@ -97,7 +98,6 @@ class TestToppraPlanner:
             )
             is True
         )
-        assert self.planner._pool is None
 
 
 if __name__ == "__main__":

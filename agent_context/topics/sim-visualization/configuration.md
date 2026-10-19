@@ -80,7 +80,7 @@ file-based config may also contain a `visualization` section. The old nested
 key `visualization.server` is accepted and normalized to
 `visualization.viser_server`.
 
-`run-env` changes the omitted `--viser-image-fps` default to `None`, so camera
+`run-task` changes the omitted `--viser-image-fps` default to `None`, so camera
 images are captured once per environment step after its final physics substep.
 An explicit CLI value or file-based `sensor_image_fps` retains wall-clock rate
 limiting.

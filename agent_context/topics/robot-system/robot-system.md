@@ -122,6 +122,28 @@ on an isolated robot configuration using its environment acquisition setting.
 Concrete defaults live in `embodichain_robots` and reach Gym and online buffers
 through the shared catalog resolver. `URDFCfg.sensors` remains physical sensor
 asset assembly, separate from these runtime camera declarations.
+`TianjiMarvinCfg` preserves source mass, inertia and COM values, including for
+custom URDFs. The bundled `tianji_marvin.yaml` embodiment explicitly opts into
+recorded simulation mass/tensor overrides (1000 times the pinned asset entries).
+Source units are unconfirmed; this is a demo calibration assumption, not a
+manufacturer-verified SI conversion. The component records the asset revision
+and fingerprint and preserves source COMs. The reusable embodiment aligns the
+catalog tool convention with GraspKit's opening/approach axes and calibrates
+gripper drives. Reuse that component for Task Programs; the standalone catalog
+retains its documented source-tool TCP convention.
+The gripper-equipped Marvin preset also owns two 640×360 wrist RGB-D cameras,
+`cam_left_wrist` and `cam_right_wrist`, parented to the hand-base links.
+Their nominal 87°×58° optics approximate D405; mounting transforms are measured
+from the bundled single-lens mesh, not calibrated on hardware, and depth is
+ideal rendered geometry. The bare-arm variant declares no cameras. Explicit
+`sensors` overrides replace the suite; standalone creation and Gym acquisition
+continue to use the existing sensor switches. The embodiment's independent
+`sensor` list does not duplicate these mounted declarations.
+Both Marvin variants default to the compact ready pose with lowered elbows;
+the gripper variant appends four open-finger positions. `init_qpos` follows
+source order (interleaved left/right arm joints, then fingers). The shared
+embodiment explicitly pins the same pose, and the official Marvin demos inherit
+it; their deployment files do not duplicate older ready-pose overrides.
 The manager qualifies parent links with the final robot UID without changing
 the declaration. Independent cameras remain deployment/embodiment-owned.
 Creation, attachment and rebuild behavior belong to
@@ -140,6 +162,11 @@ selects per-part caches; `get_workspace()` loads them on first access, while
 `attach_workspace()` accepts an existing cache on the robot device. Follow
 [robot workspace](../robot-workspace/robot-workspace.md) for cache ownership and
 [motion planning](../motion-planning/motion-planning.md) for planner integration.
+
+`RobotCfg` preserves asset velocity limits unless a drive override is configured.
+Planning reads effective speeds through `get_qvel_limits()` and existing mimic
+metadata. Acceleration budgets and missing-speed fallback belong to the
+[planner contracts](../motion-planning/planner-details.md).
 
 ## Focused validation
 

@@ -827,6 +827,10 @@ def test_move_joint_expansion_preserves_required_mid_waypoint(
         get_qpos_limits=lambda name=None: (
             limits[:, :arm_dof] if name == "arm" else limits
         ),
+        get_qvel_limits=lambda **kwargs: torch.full(qpos.shape, torch.inf),
+        mimic_ids=(),
+        mimic_parents=(),
+        mimic_multipliers=(),
     )
     planner = object.__new__(TrapezoidalPlanner)
     planner.device = robot.device

@@ -565,3 +565,50 @@ def test_autograd_batches_noncontiguous_inputs_without_cross_row_gradients() -> 
     expected = torch.autograd.grad(single["dt"].sum(), separate)[0]
     torch.testing.assert_close(batched_gradient[0], expected[0].T)
     assert batched_gradient[1].count_nonzero() == 0
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("grad", [False, True])
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+def test_frozen_joint_raw_excursions_fail_before_deduplication(
+    monkeypatch: pytest.MonkeyPatch, dtype: torch.dtype, grad: bool, device: str
+) -> None:
+    from embodichain.compute.trajectory import _toppra_warp as adapter
+
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA unavailable")
+    points = torch.tensor(
+        [
+            [[0.0, 0.0], [0.0, 1e-7], [0.4, 0.0]],
+            [[0.0, 0.0], [0.4, 0.0], [0.4, 1e-7]],
+            [[0.0, 0.0], [0.0, 0.0], [0.4, 0.0]],
+            [[0.0, 0.0], [0.0, 0.0], [0.0, 0.0]],
+        ],
+        dtype=dtype,
+        device=device,
+        requires_grad=grad,
+    )
+    # The second row's moved tail is outside its declared valid path prefix.
+    monkeypatch.setattr(adapter, "_cpu_workers", lambda *args: 2)
+    result = _retime_toppra_warp(
+        points,
+        [0.5, 0.0],
+        0.5,
+        path_lengths=torch.tensor([3, 2, 3, 3], device=device),
+        sample_count=17,
+    )
+    assert result["success"].tolist() == [False, True, True, True]
+    for key in ("positions", "velocities", "accelerations", "dt"):
+        assert result[key][0].count_nonzero() == 0
+    assert result["positions"][1, :, 1].count_nonzero() == 0
+    if grad:
+        result["dt"].sum().backward()
+        assert points.grad[0].count_nonzero() == 0
+        assert points.grad[1, 2].count_nonzero() == 0
+
+
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+def test_numpy_frozen_joint_raw_excursion_is_not_dropped(dtype) -> None:
+    points = np.array([[0.0, 0.0], [0.0, 1e-7], [0.4, 0.0]], dtype=dtype)
+    with pytest.raises(ValueError, match="zero-speed joints"):
+        _NumpyToppra(points, [0.5, 0.0], 0.5)

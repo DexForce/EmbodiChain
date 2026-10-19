@@ -19,7 +19,7 @@ inactive rows still hold their measured positions.
 From the repository root, using the project's simulation Python environment:
 
 ```bash
-python -m embodichain run-env \
+python -m embodichain run-task \
   --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml
 ```
 
@@ -80,6 +80,39 @@ The preparation script itself does not publish anything.
 The Task Program uses projected effects, with measured bottle-position and
 cup-position validators. Water transfer is not measured; this scene does not
 include fluid simulation.
+
+## Tianji Marvin deployment
+
+`task.tianji_marvin.yaml` selects `env.tianji_marvin.yaml` and
+`task_program/program.tianji_marvin.yaml`. This 750 mm tabletop variant lowers
+the table, bottle, cup and all absolute task targets by 125 mm from the
+CobotMagic scene, giving the compact ready pose elbow clearance. Assets,
+lighting, four program segments, 100 Hz control and the 60-degree object-space
+tilt remain the same; the original CobotMagic deployment is unchanged.
+Both arms inherit the shared compact ready pose. The right arm carries the
+bottle while the left arm retains its initial target. The deployment selects
+the reusable Marvin embodiment, a calibrated
+object-to-TCP grasp, and the dual-arm variant of the slow projected policy
+with 480 samples. The robot's base placement adapts it to the existing scene.
+
+```bash
+python -m embodichain run-task \
+  --gym-config extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.tianji_marvin.yaml \
+  --headless --viser --renderer hybrid --seed 0 --max_episodes 1 --filter-dataset-saving
+```
+
+Use `--no-headless` without `--viser` for the native window. Sensor-enabled
+runs expose the robot preset's `cam_left_wrist` and `cam_right_wrist`, each
+providing 640×360 RGB and aligned ideal depth. Their D405-equivalent nominal
+optics and mesh-estimated mounts are simulation defaults, not hardware
+calibration. Use `--disable-sensor` to skip acquisition; the command above
+disables dataset saving independently. Acceptance retains the existing
+10 mm pre-pour bottle checkpoint, 50 mm bottle return tolerance and 2 mm cup
+position tolerance. Independent qualification also measures lift, tilt,
+grasp drift, upright return, idle-arm movement and bottle/cup clearance;
+projected program completion alone does not establish those physical results.
+
+The CobotMagic drive/load measurements below qualify that deployment only.
 
 ## Grasp and pouring clearance
 

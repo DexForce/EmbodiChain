@@ -23,6 +23,9 @@ validate and size variable-length output; no path is solved through NumPy.
 from __future__ import annotations
 
 from contextlib import nullcontext
+from concurrent.futures import ThreadPoolExecutor, wait
+import os
+from threading import Lock
 from typing import Any
 
 import numpy as np
@@ -30,10 +33,129 @@ import torch
 import warp as wp
 from torch.autograd.function import once_differentiable
 
-from ._toppra import _limits, _validate_grid_size, _validate_sampling
+from ._toppra_common import _limits, _validate_grid_size, _validate_sampling
 from ._warp import toppra as kernels
 
 __all__ = []
+
+_CPU_POOL: ThreadPoolExecutor | None = None
+_CPU_POOL_LOCK = Lock()
+
+
+def _reset_cpu_pool() -> None:
+    """Discard inherited executor state; fork does not preserve its threads."""
+    global _CPU_POOL, _CPU_POOL_LOCK
+    _CPU_POOL = None
+    _CPU_POOL_LOCK = Lock()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_cpu_pool)
+
+
+def _cpu_pool() -> ThreadPoolExecutor:
+    """Reuse at most eight CPU workers across concurrent inference requests."""
+    global _CPU_POOL
+    with _CPU_POOL_LOCK:
+        if _CPU_POOL is None:
+            _CPU_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="toppra")
+        return _CPU_POOL
+
+
+def _cpu_workers(batch: int, count: int, dofs: int, grid_size: int) -> int:
+    """Amortize task overhead while respecting the caller's CPU affinity."""
+    available = (
+        len(os.sched_getaffinity(0))
+        if hasattr(os, "sched_getaffinity")
+        else (os.cpu_count() or 1)
+    )
+    # Long paths contain enough work to use smaller row blocks. Tiny batches
+    # and low-DoF paths stay inline instead of paying for thread submission.
+    row_grain = 4 if count >= 32 else 8
+    work = batch * max(grid_size - 1, 10 * count - 1) * (6 * dofs + 2) ** 2
+    return max(1, min(8, available, batch // row_grain, work // 1_000_000))
+
+
+def _cpu_chunk(
+    waypoints: torch.Tensor,
+    velocity: torch.Tensor,
+    acceleration: torch.Tensor,
+    path_lengths: torch.Tensor,
+    sample_count: int | None,
+    sample_dt: float | None,
+    grid_size: int,
+    grad_enabled: bool,
+    inference_mode: bool,
+) -> dict[str, torch.Tensor]:
+    """Run a row block with the caller's Torch thread-local execution modes."""
+    with torch.inference_mode(inference_mode), torch.set_grad_enabled(grad_enabled):
+        return _launch_toppra(
+            waypoints,
+            velocity,
+            acceleration,
+            path_lengths,
+            sample_count=sample_count,
+            sample_dt=sample_dt,
+            grid_size=grid_size,
+        )
+
+
+def _launch_cpu_parallel(
+    waypoints: torch.Tensor,
+    velocity: torch.Tensor,
+    acceleration: torch.Tensor,
+    path_lengths: torch.Tensor,
+    workers: int,
+    sample_count: int | None,
+    sample_dt: float | None,
+    grid_size: int,
+) -> dict[str, torch.Tensor]:
+    """Compute independent row blocks and restore the global padding contract."""
+    wp.init()
+    # Compile/load once on the submitting thread, before concurrent launches.
+    wp.load_module(module=kernels, device="cpu")
+    pool = _cpu_pool()
+    block = (len(waypoints) + workers - 1) // workers
+    futures = [
+        pool.submit(
+            _cpu_chunk,
+            waypoints[start : start + block],
+            velocity,
+            acceleration,
+            path_lengths[start : start + block],
+            sample_count,
+            sample_dt,
+            grid_size,
+            torch.is_grad_enabled(),
+            torch.is_inference_mode_enabled(),
+        )
+        for start in range(0, len(waypoints), block)
+    ]
+    try:
+        results = [future.result() for future in futures]
+    except BaseException:
+        for future in futures:
+            future.cancel()
+        wait(futures)
+        raise
+    samples = max(result["positions"].shape[1] for result in results)
+    merged = {"success": torch.cat([result["success"] for result in results])}
+    for key in ("positions", "velocities", "accelerations", "dt"):
+        parts = []
+        for result in results:
+            value = result[key]
+            extra = samples - value.shape[1]
+            if extra:
+                shape = (value.shape[0], extra, *value.shape[2:])
+                padding = (
+                    value[:, -1:].expand(shape)
+                    if key == "positions"
+                    else value.new_zeros(shape)
+                )
+                value = torch.cat((value, padding), dim=1)
+            parts.append(value)
+        merged[key] = torch.cat(parts)
+    return merged
 
 
 class _ToppraAutograd(torch.autograd.Function):
@@ -125,6 +247,8 @@ def _retime_toppra_warp(
     derivatives/dt.
     The floating outputs use the input dtype and device. Computation uses
     float64 on both Warp CPU and CUDA, and honors the current Torch stream.
+    CPU inference uses a shared, bounded thread pool for sufficiently large
+    batches; small requests and all adjoint-recording calls stay inline.
 
     Waypoints and tensor motion limits support first-order Warp adjoints on
     CPU and CUDA with either sampling mode. Derivatives hold discrete filtering,
@@ -160,6 +284,19 @@ def _retime_toppra_warp(
         return dict(
             zip(("success", "positions", "velocities", "accelerations", "dt"), values)
         )
+    if waypoints.device.type == "cpu":
+        workers = _cpu_workers(*waypoints.shape, grid_size)
+        if workers > 1:
+            return _launch_cpu_parallel(
+                waypoints,
+                velocity,
+                acceleration,
+                path_lengths,
+                workers,
+                sample_count,
+                sample_dt,
+                grid_size,
+            )
     return _launch_toppra(
         waypoints,
         velocity,
@@ -266,6 +403,7 @@ def _launch_toppra(
             inputs=[
                 points,
                 wp.from_torch(path_lengths),
+                wp.from_torch(velocity.detach(), dtype=wp.float64, requires_grad=False),
                 clean,
                 kept,
                 counts,
@@ -276,6 +414,7 @@ def _launch_toppra(
                 wp.float64(duplicate_tolerance),
             ],
             device=device,
+            record_tape=False,
         )
         with tape:
             if differentiable:
@@ -290,6 +429,7 @@ def _launch_toppra(
                     dim=clean.shape,
                     inputs=[points, kept, counts, success, clean],
                     device=device,
+                    record_tape=differentiable,
                 )
             diagonal = wp.zeros_like(clean, requires_grad=False)
             eliminated = wp.zeros_like(clean)
@@ -313,6 +453,7 @@ def _launch_toppra(
                     coefficients,
                 ],
                 device=device,
+                record_tape=differentiable,
             )
             velocity_wp = wp.from_torch(
                 velocity.detach(), dtype=wp.float64, requires_grad=differentiable
@@ -349,12 +490,14 @@ def _launch_toppra(
                     c,
                 ],
                 device=device,
+                record_tape=differentiable,
             )
             wp.launch(
                 kernels._velocity_caps,
                 dim=(batch, capacity),
                 inputs=[velocity_caps, intervals, success, a, b, c],
                 device=device,
+                record_tape=differentiable,
             )
             caps = wp.zeros(
                 (batch, capacity),
@@ -363,10 +506,15 @@ def _launch_toppra(
                 requires_grad=differentiable,
             )
             wp.launch(
-                kernels._project_caps,
+                (
+                    kernels._project_caps_fast
+                    if not differentiable and (device.is_cpu or batch >= 128)
+                    else kernels._project_caps
+                ),
                 dim=(batch, capacity),
                 inputs=[a, b, c, intervals, caps],
                 device=device,
+                record_tape=differentiable,
             )
             controllable = wp.zeros(
                 (batch, capacity + 1),
@@ -378,9 +526,18 @@ def _launch_toppra(
             durations = wp.zeros(
                 batch, dtype=wp.float64, device=device, requires_grad=differentiable
             )
+            solver, solve_dim, solve_block = kernels._solve, batch, 256
+            if device.is_cuda and not differentiable:
+                from ._warp import toppra_cuda
+
+                solver = toppra_cuda._solve
+                solve_dim, solve_block = (
+                    batch,
+                    toppra_cuda._BLOCK_DIM,
+                ), toppra_cuda._BLOCK_DIM
             wp.launch(
-                kernels._solve,
-                dim=batch,
+                solver,
+                dim=solve_dim,
                 inputs=[
                     a,
                     b,
@@ -394,6 +551,8 @@ def _launch_toppra(
                     success,
                 ],
                 device=device,
+                record_tape=differentiable,
+                block_dim=solve_block,
             )
             duration_tensor = wp.to_torch(durations)
             ok = wp.to_torch(success).bool()
@@ -411,9 +570,19 @@ def _launch_toppra(
                 sample_lengths = desired.to(torch.int32).clamp_min(2)
             sample_lengths = torch.where(moving, sample_lengths, 2).contiguous()
             samples = int(sample_lengths.max().item())
+            # Reuse scalar searches only when dense output amortizes the
+            # point-wise joint loop; small outputs retain the flat sampler.
+            cpu_sampling = device.is_cpu and not differentiable and samples >= 512
+            # Narrow only on final stores. Avoid nested Torch cast work in
+            # CPU worker threads and an extra double-precision output buffer.
+            sample_dtype = (
+                wp.float32
+                if cpu_sampling and waypoints.dtype == torch.float32
+                else wp.float64
+            )
             positions = wp.zeros(
                 (batch, samples, dofs),
-                dtype=wp.float64,
+                dtype=sample_dtype,
                 device=device,
                 requires_grad=differentiable,
             )
@@ -422,13 +591,13 @@ def _launch_toppra(
             )
             dt = wp.zeros(
                 (batch, samples),
-                dtype=wp.float64,
+                dtype=sample_dtype,
                 device=device,
                 requires_grad=differentiable,
             )
             wp.launch(
-                kernels._sample,
-                dim=(batch, samples, dofs),
+                kernels._sample_cpu if cpu_sampling else kernels._sample,
+                dim=(batch, samples) if cpu_sampling else (batch, samples, dofs),
                 inputs=[
                     clean,
                     coefficients,
@@ -445,6 +614,7 @@ def _launch_toppra(
                     dt,
                 ],
                 device=device,
+                record_tape=differentiable,
             )
         if state is not None:
             state.update(

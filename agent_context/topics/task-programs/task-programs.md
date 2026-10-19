@@ -108,6 +108,16 @@ not by Task Program or Gym.
 | `TaskProgramOpenDrawer-Newton-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/open_drawer/task.ur5.yaml` with `--physics newton` |
 | `HandOver-v1` | verified | `extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/` |
 | `PourWater-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/` |
+| `StackBlocksTwo-v1` | projected with measured segment validators | `extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/` |
+| `BlocksRankingRGB-v1` | projected with measured segment validators | `extensions/embodichain_tasks/configs/tasks/manipulation/tableware/blocks_ranking_rgb/` |
+
+Marvin deployments use `task.tianji_marvin.yaml` in `repeated_pick_place`,
+`hand_over` and `tableware/pour_water`. The first two select verified tabletop
+programs; pouring selects a 750 mm table variant that lowers the scene and
+absolute targets by 125 mm while retaining the four-segment program behavior,
+dual-arm slow policy and independent measured checkpoints. All three inherit
+the shared compact ready pose. The shared embodiment owns calibrated
+grasp-frame TCPs and gripper evidence, not task-local object IDs.
 
 The task-local configured expansion example is bound through the deployment's
 shared expansion policy; its README routes to

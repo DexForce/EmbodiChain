@@ -71,7 +71,7 @@ gensim = [
 
 [project.scripts]
 # Unified EmbodiChain CLI with sub-commands (mirrors ``python -m embodichain``).
-# ``embodichain run-env`` discovers all installed task packages (via the
+# ``embodichain run-task`` discovers all installed task packages (via the
 # ``embodichain.tasks`` entry points) and runs their init hooks (via
 # ``embodichain.init``) before building and launching the environment.
 # Other commands cover environment discovery, data assets, SimReady generation,

@@ -23,6 +23,8 @@ accumulators do not retain the intermediate values needed by the adjoint.
 
 from __future__ import annotations
 
+from typing import Any
+
 import warp as wp
 
 __all__ = []
@@ -32,6 +34,7 @@ __all__ = []
 def _prepare(
     points: wp.array3d(dtype=wp.float64),
     path_lengths: wp.array(dtype=int),
+    velocity: wp.array2d(dtype=wp.float64),
     clean: wp.array3d(dtype=wp.float64),
     kept: wp.array2d(dtype=int),
     counts: wp.array(dtype=int),
@@ -52,6 +55,14 @@ def _prepare(
             for j in range(points.shape[2]):
                 value = points[row, i, j]
                 if not wp.isfinite(value):
+                    valid = 0
+                # Preserve explicit runtime zero-speed joints before waypoint
+                # filtering can hide a sub-tolerance interior excursion.
+                if (
+                    velocity[j, 0] == wp.float64(0.0)
+                    and velocity[j, 1] == wp.float64(0.0)
+                    and value != points[row, 0, j]
+                ):
                     valid = 0
                 if count == 0:
                     different = 1
@@ -392,6 +403,87 @@ def _project_caps(
     caps[row, i] = value
 
 
+@wp.kernel(enable_backward=False)
+def _project_caps_fast(
+    a: wp.array3d(dtype=wp.float64),
+    b: wp.array3d(dtype=wp.float64),
+    c: wp.array3d(dtype=wp.float64),
+    intervals: wp.array(dtype=int),
+    caps: wp.array2d(dtype=wp.float64),
+):
+    """Project the 2-D feasible polygon by descending active intersections.
+
+    Rest is feasible, so each positive-x pair bound is an upper bound on the
+    optimum. Start at the independent upper bound, find the tightest lower
+    and upper y boundaries there, and descend to their intersection until
+    y is feasible. Each pass scans O(D) planes instead of enumerating all
+    O(D**2) pairs. A rounding-stalled or nonfinite intersection uses the
+    exhaustive reference projection; this also bounds the iteration count.
+    """
+    row, i = wp.tid()
+    if i >= intervals[row]:
+        return
+    cap = wp.float64(wp.inf)
+    for j in range(a.shape[2]):
+        seed_a, seed_b = a[row, i, j], b[row, i, j]
+        if seed_a > wp.float64(0.0) and seed_b >= wp.float64(0.0):
+            cap = wp.min(cap, c[row, i, j] / seed_a)
+    feasible = int(0)
+    for iteration in range(a.shape[2]):
+        if not wp.isfinite(cap):
+            break
+        lower = wp.float64(0.0)
+        upper = wp.float64(wp.inf)
+        lower_index, upper_index = int(-1), int(-1)
+        for j in range(a.shape[2]):
+            plane_b = b[row, i, j]
+            if plane_b != wp.float64(0.0):
+                ordinate = (c[row, i, j] - a[row, i, j] * cap) / plane_b
+                if plane_b < wp.float64(0.0) and ordinate > lower:
+                    lower, lower_index = ordinate, j
+                elif plane_b > wp.float64(0.0) and ordinate < upper:
+                    upper, upper_index = ordinate, j
+        if lower <= upper:
+            feasible = 1
+            break
+        if lower_index < 0 or upper_index < 0:
+            break
+        aj, bj, cj = (
+            a[row, i, lower_index],
+            b[row, i, lower_index],
+            c[row, i, lower_index],
+        )
+        ak, bk, ck = (
+            a[row, i, upper_index],
+            b[row, i, upper_index],
+            c[row, i, upper_index],
+        )
+        coefficient = aj * bk - bj * ak
+        if coefficient <= wp.float64(0.0):
+            break
+        bound = (cj * bk - bj * ck) / coefficient
+        if not wp.isfinite(bound) or bound < wp.float64(0.0) or bound >= cap:
+            break
+        cap = bound
+    if feasible == 0:
+        active_j, active_k = _projection_active(a, b, c, row, i)
+        cap = wp.float64(wp.inf)
+        if active_j >= 0:
+            fallback_a = a[row, i, active_j]
+            fallback_b = b[row, i, active_j]
+            fallback_c = c[row, i, active_j]
+            if active_k < 0:
+                cap = fallback_c / fallback_a
+            else:
+                other_a = a[row, i, active_k]
+                other_b = b[row, i, active_k]
+                other_c = c[row, i, active_k]
+                cap = (fallback_c * other_b - fallback_b * other_c) / (
+                    fallback_a * other_b - fallback_b * other_a
+                )
+    caps[row, i] = cap
+
+
 @wp.func
 def _controllable_active(
     a: wp.array3d(dtype=wp.float64),
@@ -606,3 +698,88 @@ def _sample(
         velocity_value = wp.float64(0.0)
     positions[row, sample, joint] = position
     velocities[row, sample, joint] = velocity_value
+
+
+@wp.kernel(enable_backward=False)
+def _sample_cpu(
+    points: wp.array3d(dtype=wp.float64),
+    coefficients: wp.array4d(dtype=wp.float64),
+    counts: wp.array(dtype=int),
+    intervals: wp.array(dtype=int),
+    success: wp.array(dtype=int),
+    x: wp.array2d(dtype=wp.float64),
+    times: wp.array2d(dtype=wp.float64),
+    durations: wp.array(dtype=wp.float64),
+    sample_counts: wp.array(dtype=int),
+    positions: wp.array3d(dtype=Any),
+    velocities: wp.array3d(dtype=Any),
+    accelerations: wp.array3d(dtype=Any),
+    dt: wp.array2d(dtype=Any),
+):
+    # CPU inference shares the time search and scalar state across joints.
+    # Keep the recorded per-joint sampler for its existing adjoint contract.
+    row, sample = wp.tid()
+    if success[row] == 0:
+        return
+    n, valid = counts[row], sample_counts[row]
+    if sample >= valid or n == 1:
+        for joint in range(points.shape[2]):
+            positions[row, sample, joint] = positions.dtype(points[row, n - 1, joint])
+        return
+    step = durations[row] / wp.float64(valid - 1)
+    query = step * wp.float64(sample)
+    if sample > 0:
+        dt[row, sample] = dt.dtype(step)
+    total = intervals[row]
+    i = _sample_interval(times, row, total, query)
+    elapsed = query - times[row, i]
+    accel = (x[row, i + 1] - x[row, i]) * wp.float64(total) / wp.float64(2.0)
+    initial = _speed(x[row, i])
+    speed = wp.max(wp.float64(0.0), initial + accel * elapsed)
+    s = wp.clamp(
+        wp.float64(i) / wp.float64(total)
+        + initial * elapsed
+        + wp.float64(0.5) * accel * elapsed * elapsed,
+        wp.float64(i) / wp.float64(total),
+        wp.float64(i + 1) / wp.float64(total),
+    )
+    segment = wp.min(int(s * wp.float64(n - 1)), n - 2)
+    delta = s - wp.float64(segment) / wp.float64(n - 1)
+    for joint in range(points.shape[2]):
+        ca, cb = (
+            coefficients[row, segment, joint, 0],
+            coefficients[row, segment, joint, 1],
+        )
+        cc, cd = (
+            coefficients[row, segment, joint, 2],
+            coefficients[row, segment, joint, 3],
+        )
+        first = cb + delta * (wp.float64(2.0) * cc + wp.float64(3.0) * delta * cd)
+        second = wp.float64(2.0) * cc + wp.float64(6.0) * delta * cd
+        position = ca + delta * (cb + delta * (cc + delta * cd))
+        velocity_value = first * speed
+        accelerations[row, sample, joint] = accelerations.dtype(
+            second * speed * speed + first * accel
+        )
+        if sample == 0:
+            position = points[row, 0, joint]
+            velocity_value = wp.float64(0.0)
+        elif sample == valid - 1:
+            position = points[row, n - 1, joint]
+            velocity_value = wp.float64(0.0)
+        positions[row, sample, joint] = positions.dtype(position)
+        velocities[row, sample, joint] = velocities.dtype(velocity_value)
+
+
+# Register both concrete variants before the submitting thread loads this
+# module. CPU worker threads must not race to instantiate a generic kernel.
+for _output_dtype in (wp.float32, wp.float64):
+    wp.overload(
+        _sample_cpu,
+        {
+            "positions": wp.array3d(dtype=_output_dtype),
+            "velocities": wp.array3d(dtype=_output_dtype),
+            "accelerations": wp.array3d(dtype=_output_dtype),
+            "dt": wp.array2d(dtype=_output_dtype),
+        },
+    )

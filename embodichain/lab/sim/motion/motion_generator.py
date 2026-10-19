@@ -500,9 +500,7 @@ class MotionGenerator:
             )
             constraints: dict[str, float | None] = {
                 "velocity": velocity_limit,
-                "acceleration": (
-                    0.5 if acceleration_limit is None else acceleration_limit
-                ),
+                "acceleration": acceleration_limit,
             }
             if planner_type == "trapezoidal":
                 constraints["jerk"] = 2.0

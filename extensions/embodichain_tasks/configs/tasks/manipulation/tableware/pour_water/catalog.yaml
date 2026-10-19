@@ -1,6 +1,6 @@
 task_key: pour_water
 title: Pour Water
-summary: Pour water using a configured CobotMagic Task Program.
+summary: Pick, tilt and return a bottle above a cup using a configured Task Program.
 tags:
 - tableware
 - manipulation
@@ -9,3 +9,5 @@ default_deployment: cobotmagic
 deployments:
   cobotmagic:
     config: task.cobotmagic.yaml
+  tianji_marvin:
+    config: task.tianji_marvin.yaml

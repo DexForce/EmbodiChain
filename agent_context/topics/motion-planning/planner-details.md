@@ -50,15 +50,47 @@ Preserve these coupled result rules in `motion_generator.py`:
 and applies supported generic timing constraints. Atomic Skills call this facade
 rather than branching on concrete planner option classes.
 
+`planners/_joint_limits.py` resolves effective speeds through
+`Robot.get_qvel_limits()` and existing articulation mimic metadata. It selects
+trajectory joints, reduces participating environments to their strictest caps,
+and intersects speed requests with those caps. Acceleration is a planner-owned
+budget, supplied through plan options or backend defaults; it is not
+an inferred asset or physics limit. Partial-joint trajectories require an
+explicit control part when their column mapping is ambiguous. Explicit zero
+runtime speeds hold those joints; moving them must fail planning. Imported
+nonpositive speeds follow DexSim's unspecified-limit semantics, and unavailable
+runtime caps use planner fallbacks.
+
+A finite backend value does not prove that a speed was authored in the asset:
+DexSim's legacy URDF reader substitutes a positive default when the field is
+missing. Preserve backend import semantics instead of guessing provenance from
+the number; calibrated presets can supply explicit limits. Asset zero placeholders
+must not be interpreted as explicit runtime zero-speed commands.
+
+cuRobo writes absolute speed caps into a cache-owned URDF copy and acceleration
+caps into YAML in active cspace order, excluding mimic followers. Keep velocity
+scales at one so loading and cloning preserve these caps. Mesh paths retain the
+source asset root. cuRobo rejects controlled zero-speed joints before loading;
+it cannot represent zero-width velocity intervals. `CuroboPlannerCfg.max_acceleration`
+sets its acceleration budget, preserving the existing 15.0 default; CPU timing
+planners retain their 0.5 default. Its YAML and backend caches include effective
+speeds and the configured acceleration budget; changing robot limits closes and rebuilds the
+affected backend. Neural policy rollout retains its configured timing. The
+`ik_interp` path resolves robot speed caps and generic motion limits in the
+facade independently of the selected planner backend.
+
 ## Backend-specific boundaries
 
 ### TOPPRA
 
-`toppra_planner.py` selects Warp on CUDA or when input gradients are required,
-and otherwise selects NumPy on CPU. The config can explicitly select either
-backend. Numerical ownership is in
-`compute/trajectory/_toppra.py`, `_toppra_warp.py`, and `_warp/toppra.py`.
-Both preserve uniform not-a-knot cubic geometry, the existing waypoint
+`toppra_planner.py` uses Warp on CPU and CUDA. Numerical ownership is in
+`compute/trajectory/_toppra_warp.py` and `_warp/toppra.py`, with cooperative
+CUDA inference in `_warp/toppra_cuda.py`; shared validation
+lives in `_toppra_common.py`. `_toppra.py` is an offline NumPy oracle and must
+not be imported by the runtime planner or Warp adapter.
+Robot-backed planning retains shared speed-cap and control-part resolution,
+including gradients of uncapped requested limits.
+The runtime and reference preserve uniform not-a-knot cubic geometry, the existing waypoint
 deduplication tolerance and final knot, and signed velocity/acceleration bounds
 containing rest. Planner outputs retain float32 and quantity sampling retains
 the existing integer coercion, independently of backend or input precision.
@@ -66,19 +98,30 @@ Interval bounds are conservative; timing need not match the former external
 TOPPRA package. Tiny real moves must retain positive duration.
 
 Warp constructs splines, bounds, controllable sets and samples on the input
-device. It honors the current Torch stream and reads a scalar to size output;
-it does not use a CPU worker pool. NumPy fans batched solves into independent
-CPU workers, which must remain picklable and avoid CUDA/Warp/simulation state.
-Single-worker/single-row NumPy execution can run inline. The automatic process
-context uses spawn with GPU simulation; do not force fork to reduce overhead.
+device. It honors the current Torch stream and reads a scalar to size output.
+CUDA inference reduces constraint planes across one block per path; all
+early exits must remain uniform across the block. Inference may use fast
+polygon projection, while recorded calls retain the selected-expression
+projection and serial solver needed by the adjoint. Dense CPU inference sampling
+shares scalar timing and interval searches across the joints of each sample;
+recorded sampling retains its per-joint adjoint path.
+CPU inference amortizes sufficiently large batches over a shared bounded thread
+pool; small requests and adjoint-recording calls stay inline. Row blocks own
+their numerical buffers, inherit Torch grad/inference modes and merge using
+the global endpoint/zero-derivative/zero-dt padding contract. Ordinary inference
+launches must not record into Warp's process-global tape. CPU pool state is
+discarded after fork; it is not owned by an individual planner's `close()`.
+Planning has no process backend, per-planner worker state or process cleanup.
+The removed `backend`, `max_workers` and `mp_context` configuration fields must
+be removed from callers; do not restore them as ignored compatibility options.
 
 Warp records first-order adjoints when Torch gradient tracking is enabled and
 waypoints or tensor velocity/acceleration bounds require gradients. Both time
 and quantity sampling propagate position, velocity, acceleration and duration
 losses through the timing solve. Scalar, per-joint and signed tensor bounds keep
 their graphs on either device; TOPPRA option copies preserve these tensor
-references while copying mutable containers. Explicit NumPy selection rejects
-gradient requests; `torch.no_grad()` retains ordinary forward planning.
+references while copying mutable containers. `torch.no_grad()` retains
+ordinary forward planning.
 Filtering, grid topology, sample counts and active-constraint choices are
 discrete: derivatives apply locally away from their switches. Time sampling
 keeps `ceil(duration / sample_dt) + 1` points uniformly spread across the full
@@ -89,11 +132,12 @@ generator option copying/resampling and CUDA backward stream behavior in the
 TOPPRA tests.
 
 Variable-length outputs pad with the terminal position without adding duration.
-Per-row failures preserve other rows; a broken worker pool is discarded and
-rebuilt on a later call. Test these lifecycle boundaries in
+Per-row failures preserve other rows. Test planner contracts and the absence
+of process workers in
 `tests/sim/motion/planners/test_toppra_batched.py`; numerical limits, geometry,
 CPU/Warp agreement and CUDA stream behavior are covered in
-`tests/compute/test_toppra.py`.
+`tests/compute/test_toppra.py`; CPU projection, thread isolation, variable-length
+assembly and pool inheritance are covered in `tests/compute/test_toppra_cpu.py`.
 
 ### Trapezoidal and Double-S
 
@@ -150,9 +194,9 @@ semantics are owned by [collision worlds](collision-worlds.md).
 `toppra_planner.py::retime_joint_paths()` is the shared entry point for
 re-parameterizing an already-planned joint path under velocity and acceleration
 limits, used by planners that emit geometry without executable timing. It is
-the planner's own time parameterization. CUDA paths, gradient requests and
-CPU batches of more than one row run on Warp, since the function has no worker
-pool to fan NumPy rows out to; a single CPU row stays on NumPy. It resamples
+the planner's own time parameterization. All CPU/CUDA rows run on Warp,
+including single-row calls, so batch size does not change waypoint cleanup
+precision or the helper's float32/float64 output dtype. It resamples
 along the fitted spline, so recompute derived poses from its output rather
 than reusing the input samples. Optional per-row path lengths exclude
 rectangular tail holds from spline fitting; without them, an explicit repeated

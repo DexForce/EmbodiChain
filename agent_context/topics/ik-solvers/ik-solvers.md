@@ -39,6 +39,11 @@ Use [add-solver](../../../.agents/skills/add-solver/SKILL.md) for a new solver.
 Read [solver details](solver-details.md) for cross-call state, analytical buffer
 ownership, Pink frame/limit adaptation or seed-cache invalidation.
 
+For graph-preserving fixed-step DLS, use the standalone
+[learning layers](../learning-layers/learning-layers.md). They call the compute
+implementation directly without a registered runtime solver. Existing solver
+names do not imply end-to-end differentiability.
+
 ## Frame and result contracts
 
 Solvers consume poses relative to the configured chain root and apply the TCP

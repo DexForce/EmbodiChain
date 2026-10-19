@@ -143,3 +143,31 @@ assert "toppra" not in sys.modules
         timeout=60,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_warp_toppra_does_not_import_the_offline_numpy_solver() -> None:
+    script = """
+import importlib.abc
+import sys
+class BlockReference(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == 'embodichain.compute.trajectory._toppra':
+            raise AssertionError('Production Warp must not load the offline solver')
+        if fullname == 'toppra' or fullname.startswith('toppra.'):
+            raise AssertionError('External toppra must not be imported')
+sys.meta_path.insert(0, BlockReference())
+import torch
+from embodichain.compute.trajectory._toppra_warp import _retime_toppra_warp
+points = torch.linspace(0, .73, 4, dtype=torch.float64).view(1, 4, 1).expand(32, 4, 7).contiguous()
+result = _retime_toppra_warp(points, 1., 1.7, sample_count=17)
+assert result['success'].all()
+points.requires_grad_()
+result = _retime_toppra_warp(points, 1., 1.7, sample_dt=.13)
+result['dt'].sum().backward()
+assert torch.isfinite(points.grad).all()
+assert 'embodichain.compute.trajectory._toppra' not in sys.modules
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, timeout=60
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

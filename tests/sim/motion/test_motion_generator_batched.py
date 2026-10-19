@@ -81,11 +81,8 @@ def _timed_result(
 def test_generate_preserves_trapezoidal_constraint_report(
     sample_count: int | None,
 ) -> None:
-    planner = object.__new__(TrapezoidalPlanner)
-    planner.device = torch.device("cpu")
-    generator = object.__new__(MotionGenerator)
-    generator.planner = planner
-    generator.device = torch.device("cpu")
+    generator = _trapezoidal_generator()
+    planner = generator.planner
     targets = [
         PlanState.from_qpos(torch.tensor([qpos], dtype=torch.float64))
         for qpos in ([0.0, 0.0], [1.0, 0.0], [1.0, 1.0])
@@ -107,17 +104,27 @@ def test_generate_preserves_trapezoidal_constraint_report(
         assert torch.equal(result.constraint_report[name], value)
 
 
-def _trapezoidal_generator() -> MotionGenerator:
+def _trapezoidal_generator(robot: object | None = None) -> MotionGenerator:
     """Build the real CPU planner behind the MotionGenerator facade."""
     planner = object.__new__(TrapezoidalPlanner)
     planner.cfg = SimpleNamespace(planner_type="trapezoidal")
     planner.device = torch.device("cpu")
+    planner.robot = (
+        robot
+        if robot is not None
+        else SimpleNamespace(
+            joint_names=["first", "second"],
+            mimic_ids=(),
+            mimic_parents=(),
+            mimic_multipliers=(),
+            num_instances=1,
+            get_qvel_limits=lambda **kwargs: torch.tensor([[0.2, 0.2]]),
+        )
+    )
     generator = object.__new__(MotionGenerator)
     generator.planner = planner
+    generator.robot = planner.robot
     generator.device = torch.device("cpu")
-    generator.robot = SimpleNamespace(
-        get_qvel_limits=lambda *, name=None: torch.full((2, 1), 10.0)
-    )
     return generator
 
 
@@ -650,7 +657,7 @@ def test_resolve_trapezoidal_preserves_omitted_velocity_limit() -> None:
 
     assert isinstance(options, TrapezoidalPlanOptions)
     assert options.constraints["velocity"] is None
-    assert options.constraints["acceleration"] == pytest.approx(0.5)
+    assert options.constraints["acceleration"] is None
 
 
 def test_ik_velocity_limits_preserve_caps_and_intersect_scalar_request() -> None:
@@ -744,6 +751,15 @@ def test_ik_interpolation_respects_robot_per_joint_velocity_caps() -> None:
     peak_velocity = (positions.diff(dim=1) / 0.1).abs().amax(dim=(0, 1))
     assert peak_velocity[0] <= 0.05 + 1.0e-6
     assert peak_velocity[1] <= 1.2 + 1.0e-6
+
+
+@pytest.mark.parametrize("planner_type", ["toppra", "trapezoidal"])
+def test_sample_count_preserves_robot_limit_resolution(planner_type: str) -> None:
+    generator = object.__new__(MotionGenerator)
+    generator.planner = SimpleNamespace(cfg=SimpleNamespace(planner_type=planner_type))
+    options = generator.resolve_plan_options(None, sample_count=100, velocity_limit=0.1)
+    assert options.constraints["velocity"] == 0.1
+    assert options.constraints["acceleration"] is None
 
 
 def _mock_generator(
@@ -1331,12 +1347,19 @@ def test_normalization_resamples_by_time_and_recomputes_derivatives() -> None:
 class _CartesianRobot:
     """CPU kinematics double: one joint translates the TCP along x."""
 
+    mimic_ids = ()
+    mimic_parents = ()
+    mimic_multipliers = ()
+    joint_names = ["joint"]
+
     device = torch.device("cpu")
     num_instances = 2
 
-    def get_qvel_limits(self, *, name: str | None = None) -> torch.Tensor:
-        del name
-        return torch.full((self.num_instances, 1), 10.0)
+    def get_joint_ids(self, name: str) -> list[int]:
+        return [0]
+
+    def get_qvel_limits(self, *, joint_ids: list[int]) -> torch.Tensor:
+        return torch.full((self.num_instances, 1), 0.2)[:, joint_ids]
 
     def get_solver(self, name: str) -> SimpleNamespace:
         return SimpleNamespace(supports_continuous_batch_ik=False)
@@ -1505,8 +1528,7 @@ def test_batch_ik_rejects_malformed_solver_results(malformed: str) -> None:
 @pytest.mark.parametrize("strategy", ["motion_gen", "ik_interp"])
 def test_cartesian_ik_failure_holds_only_failed_environment(strategy: str) -> None:
     """A failed final target cannot turn into a successful truncated path."""
-    generator = _trapezoidal_generator()
-    generator.robot = _CartesianRobot()
+    generator = _trapezoidal_generator(robot=_CartesianRobot())
     goal = torch.eye(4).repeat(2, 1, 1)
     goal[:, 0, 3] = 1.0
     options = MotionGenOptions(
@@ -1535,8 +1557,7 @@ def test_cartesian_preparation_accepts_mixed_pose_and_fk_precision(
     pose_dtype: torch.dtype, entry_point: str
 ) -> None:
     """Cartesian input precision may differ from the robot's FK buffers."""
-    generator = _trapezoidal_generator()
-    generator.robot = _CartesianRobot()
+    generator = _trapezoidal_generator(robot=_CartesianRobot())
     poses = torch.eye(4, dtype=pose_dtype).repeat(2, 2, 1, 1)
     poses[:, 1, 0, 3] = 0.5
     original_poses = poses.clone()
@@ -1570,8 +1591,7 @@ def test_cartesian_preparation_preserves_fk_confirmed_singular_start(
     continuous: bool,
 ) -> None:
     """An observed start needs no new IK solution, even at a singularity."""
-    generator = _trapezoidal_generator()
-    generator.robot = _CartesianRobot()
+    generator = _trapezoidal_generator(robot=_CartesianRobot())
     generator.robot.get_solver = lambda name: SimpleNamespace(
         supports_continuous_batch_ik=continuous
     )
@@ -1613,8 +1633,7 @@ def test_cartesian_preparation_requires_ik_for_unconfirmed_start_rows(
     continuous: bool, max_targets: int
 ) -> None:
     """Reusing one row's known start cannot hide another row's IK failure."""
-    generator = _trapezoidal_generator()
-    generator.robot = _CartesianRobot()
+    generator = _trapezoidal_generator(robot=_CartesianRobot())
     generator.robot.get_solver = lambda name: SimpleNamespace(
         supports_continuous_batch_ik=continuous
     )
@@ -1667,8 +1686,7 @@ def test_batch_ik_accepts_fk_confirmed_only_waypoint(continuous: bool) -> None:
 def test_motion_gen_rejects_fixed_cartesian_samples_instead_of_bypassing_limits() -> (
     None
 ):
-    generator = _trapezoidal_generator()
-    generator.robot = _CartesianRobot()
+    generator = _trapezoidal_generator(robot=_CartesianRobot())
     goals = [torch.eye(4).repeat(2, 1, 1) for _ in range(2)]
     for goal, position in zip(goals, (0.1, 0.2)):
         goal[:, 0, 3] = position
@@ -1698,7 +1716,7 @@ def test_motion_gen_rejects_fixed_cartesian_samples_instead_of_bypassing_limits(
     ],
 )
 def test_ik_interp_consumes_backend_neutral_motion_limits(limit_option: dict) -> None:
-    generator = _trapezoidal_generator()
+    generator = _trapezoidal_generator(robot=_CartesianRobot())
     result = generator.generate(
         [PlanState.from_qpos(torch.ones(1, 1))],
         MotionGenOptions(
@@ -1777,9 +1795,8 @@ def test_resampled_collision_trajectory_is_checked_on_the_output_grid(
 @pytest.mark.gpu
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is unavailable")
 def test_cartesian_preinterpolation_accepts_cpu_seed_on_gpu() -> None:
-    generator = _trapezoidal_generator()
+    generator = _trapezoidal_generator(robot=_CartesianRobot())
     generator.device = torch.device("cuda:0")
-    generator.robot = _CartesianRobot()
     poses = torch.eye(4, device=generator.device).repeat(2, 2, 1, 1)
     poses[:, 1, 0, 3] = 1.0
     positions, _, success = generator._interpolate_waypoints(
@@ -1799,8 +1816,7 @@ def test_cartesian_preinterpolation_accepts_cpu_seed_on_gpu() -> None:
 def test_intermediate_ik_failure_stays_failed_after_reachable_goal(
     strategy: str,
 ) -> None:
-    generator = _trapezoidal_generator()
-    generator.robot = _CartesianRobot()
+    generator = _trapezoidal_generator(robot=_CartesianRobot())
     solved_positions: list[torch.Tensor] = []
 
     def solve(*, pose, joint_seed, **kwargs):
@@ -1842,8 +1858,7 @@ def test_ik_interp_rejects_ambiguous_linear_path_request() -> None:
 
 
 def test_public_interpolation_rejects_failed_required_waypoints() -> None:
-    generator = _trapezoidal_generator()
-    generator.robot = _CartesianRobot()
+    generator = _trapezoidal_generator(robot=_CartesianRobot())
     poses = torch.eye(4).repeat(2, 2, 1, 1)
     poses[:, 1, 0, 3] = 1.0
     with pytest.raises(ValueError, match="required IK waypoints"):
@@ -1858,8 +1873,7 @@ def test_public_interpolation_rejects_failed_required_waypoints() -> None:
 
 @pytest.mark.parametrize("strategy", ["motion_gen", "ik_interp"])
 def test_nonfinite_ik_solution_fails_only_its_environment(strategy: str) -> None:
-    generator = _trapezoidal_generator()
-    generator.robot = _CartesianRobot()
+    generator = _trapezoidal_generator(robot=_CartesianRobot())
     original_ik = generator.robot.compute_batch_ik
 
     def nonfinite_ik(**kwargs):

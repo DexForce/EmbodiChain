@@ -1,0 +1,14 @@
+id: PourWater-TianjiMarvin-v1
+
+environment:
+  component: env.tianji_marvin.yaml
+
+task_program:
+  program: task_program/program.tianji_marvin.yaml
+  integration: task_program/integration.tianji_marvin.yaml
+  execution_policy: ../../../../components/execution_policies/trajectory_open_loop_dual_arm_slow.yaml
+
+embodiment:
+  component: ../../../../components/embodiments/tianji_marvin.yaml
+  overrides:
+    init_pos: [0.1, 0.0, 0.0]

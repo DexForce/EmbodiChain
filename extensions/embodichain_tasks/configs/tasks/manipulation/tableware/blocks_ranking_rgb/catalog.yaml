@@ -1,11 +1,13 @@
 task_key: blocks_ranking_rgb
 title: Blocks Ranking RGB
-summary: Rank tableware blocks using RGB observations.
+summary: Use both arms in sequence to arrange known red and blue blocks around the
+  green block.
 tags:
 - tableware
-- vision
-- reinforcement_learning
+- rearrangement
+- task_program
+- expert_trajectory
 default_deployment: default
 deployments:
   default:
-    config: env.json
+    config: task.cobotmagic.yaml

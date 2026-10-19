@@ -15,7 +15,7 @@ belongs to [data-assets](../data-assets/data-assets.md).
 | Synchronous LeRobot persistence | `embodichain/lab/gym/envs/managers/datasets.py`: `LeRobotRecorder` |
 | Background persistence | `embodichain/lab/gym/envs/managers/async_datasets.py`: `AsyncLeRobotRecorder` |
 | Depth sidecars | `embodichain/data_pipeline/depth_video/writer.py`, `reader.py` |
-| Offline collection retries and final partial batch | `embodichain/lab/scripts/run_env.py` |
+| Offline collection retries and final partial batch | `embodichain/lab/scripts/run_task.py` |
 | File-only validation and grouped quality splits | `embodichain/data_pipeline/datasets/inspection.py`; `embodichain dataset validate\|split` |
 | Durable commit diagnostics and metadata repair | `embodichain/data_pipeline/recording/journal.py`; `embodichain dataset recover` |
 | Isolated LeRobot 0.6.1 language/depth conversion | `tools/lerobot_export/` (Python >=3.12, independent dependencies) |
@@ -123,7 +123,7 @@ time are available through the recorder's async stats.
 For corrupt or duplicate recordings, establish whether failure preceded or
 followed the LeRobot commit before changing retry logic. For engine failure,
 inspect the shared worker error and attempt limit before adding consumer retries.
-Benchmark throughput using `scripts/benchmark/data_pipeline/benchmark_lerobot_save.py`
-with recorded hardware, image size, environment count and writer settings.
+Measure writer throughput using a runnable task, recording hardware, image size,
+environment count and writer settings alongside the results.
 The CPU-only `benchmark_segment_annotations.py` isolates the validated frame-map
 lookup from simulation and storage costs.

@@ -19,7 +19,9 @@
 Private Warp kernels implement FEP, OPW, SRS, UR, and trapezoidal/Double-S profiles.
 Stateful solver interfaces and robot configuration remain in
 ``embodichain.lab.sim.motion.solvers``.
-Pure batched manipulability helpers live in :mod:`.manipulability`."""
+Pure batched manipulability helpers live in :mod:`.manipulability`.
+Differentiable fixed-step IK, SE(3) residuals and serial-chain FK/Jacobians
+provide simulation-independent computation for Torch learning layers."""
 
 from __future__ import annotations
 
@@ -29,7 +31,18 @@ from embodichain.compute.kinematics.manipulability import (
     yoshikawa_manipulability,
 )
 
+from .dls import damped_least_squares_step, solve_dls_ik
+from .pose_error import pose_error
+from .serial_chain import SerialChainKinematics
+from .types import DifferentiableIKCfg, DifferentiableIKResult
+
 __all__ = [
+    "damped_least_squares_step",
+    "solve_dls_ik",
+    "pose_error",
+    "SerialChainKinematics",
+    "DifferentiableIKCfg",
+    "DifferentiableIKResult",
     "condition_number",
     "select_jacobian_rows",
     "yoshikawa_manipulability",

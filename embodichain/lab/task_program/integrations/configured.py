@@ -604,7 +604,13 @@ def _decode_placement_affordance(
         path=path,
         required=frozenset({"kind", "entity_id", "native_name"}),
         optional=frozenset(
-            {"aliases", "object_target_pose", "minimum_confidence", "is_default"}
+            {
+                "aliases",
+                "object_target_pose",
+                "object_target_frame",
+                "minimum_confidence",
+                "is_default",
+            }
         ),
     )
     kind = _identifier(config["kind"], path=f"{path}.kind")
@@ -630,6 +636,10 @@ def _decode_placement_affordance(
         "is_default": _boolean(
             config.get("is_default", False),
             path=f"{path}.is_default",
+        ),
+        "object_target_frame": _identifier(
+            config.get("object_target_frame", "parent"),
+            path=f"{path}.object_target_frame",
         ),
     }
     if "object_target_pose" in config:
@@ -668,6 +678,7 @@ def _decode_entity_affordance(
                 "internal_axis",
                 "grasp_link",
                 "object_target_pose",
+                "object_target_frame",
                 "minimum_confidence",
                 "is_default",
             }
