@@ -45,7 +45,13 @@ from .baseline import (
     _source_digest,
     _support_groups,
 )
-from .cfg import _GENERATION_FIELDS, _UniqueKeyLoader, _validate_generation_parameters
+from .cfg import (
+    _BATCH_GENERATOR,
+    _INTRA_GENERATORS,
+    _LEGACY_GENERATOR,
+    _UniqueKeyLoader,
+    _validate_policy,
+)
 from .persistence import _check_geometry
 
 if TYPE_CHECKING:
@@ -62,13 +68,14 @@ class LoadedLayouts:
     Args:
         output_root: Source Scene Engine workspace.
         baseline_poses: Original arena-local poses keyed by entity UID.
-        variants: Reconstructed layouts in proposal order.
+        variants: Reconstructed layouts in proposal order. Batch-generated
+            layouts use an owned lazy sequence after full file/identity checks.
         names: Candidate names corresponding to ``variants``.
     """
 
     output_root: Path
     baseline_poses: dict[str, np.ndarray]
-    variants: tuple[SceneVariant, ...]
+    variants: Sequence[SceneVariant]
     names: tuple[str, ...]
 
 
@@ -103,16 +110,7 @@ def _load(directory: Path, paths: list[Path]) -> LoadedLayouts:
 
     run = directory.parent
     _, manifest = _read_json(run / "run_result.json")
-    listing = manifest["layouts"]
-    listed = {_relative(run, item["path"]): item for item in listing}
-    if (
-        type(manifest["schema_version"]) is not int
-        or manifest["schema_version"] != 1
-        or set(listed) != set(paths)
-        or len(listed) != len(listing)
-    ):
-        raise ValueError("Manifest must list every candidate file exactly once.")
-    records = [(path, _read_json(path)[1]) for path in paths]
+    listed, records = _layout_records(directory, paths, manifest)
     for _, record in records:
         if (
             type(record["proposal_ordinal"]) is not int
@@ -156,13 +154,7 @@ def _load(directory: Path, paths: list[Path]) -> LoadedLayouts:
         )
     except yaml.YAMLError as exc:
         raise ValueError("Invalid resolved policy YAML.") from exc
-    if (
-        set(policy) != {"schema_version", *_GENERATION_FIELDS}
-        or type(policy["schema_version"]) is not int
-        or policy["schema_version"] != 1
-    ):
-        raise ValueError("Unsupported resolved policy schema.")
-    _validate_generation_parameters(**{key: policy[key] for key in _GENERATION_FIELDS})
+    _validate_policy(policy)
     policy_hash = hashlib.sha256(
         json.dumps(
             policy, sort_keys=True, separators=(",", ":"), allow_nan=False
@@ -176,21 +168,81 @@ def _load(directory: Path, paths: list[Path]) -> LoadedLayouts:
         or manifest["max_attempts"] != policy["max_attempts"]
         or type(manifest["attempts"]) is not int
         or not len(records) <= manifest["attempts"] <= policy["max_attempts"]
-        or manifest["algorithm_version"] != "scene_engine.group_randomization/v1"
+        or manifest["algorithm_version"]
+        not in (
+            _INTRA_GENERATORS
+            if policy["schema_version"] == 3
+            else (
+                (_BATCH_GENERATOR,)
+                if policy["schema_version"] == 2
+                else (_LEGACY_GENERATOR,)
+            )
+        )
         or manifest["status"] not in {"completed", "budget_exhausted", "unsupported"}
     ):
         raise ValueError("Manifest and resolved policy are inconsistent.")
     _check_references(manifest, run, source, export_root, base_path, baseline)
-    variants, names, ordinals = [], [], set()
+    variants, names, ordinals, centers = [], [], set(), []
+    hierarchical = manifest["algorithm_version"] in _INTRA_GENERATORS
+    geometry = None
+    if hierarchical:
+        counts = manifest["solver_status_counts"]
+        if (
+            manifest["schema_version"] != 3
+            or manifest.get("layout_storage") not in ("json", "packed")
+            or set(counts) != {"solved", "no_solution"}
+            or any(type(v) is not int or v < 0 for v in counts.values())
+            or counts["solved"] != len(records)
+            or sum(counts.values()) != manifest["attempts"]
+            or (
+                manifest["status"] == "completed"
+                and (
+                    len(records) != policy["candidate_count"]
+                    or records[-1][1]["proposal_ordinal"] + 1 != manifest["attempts"]
+                )
+            )
+            or (
+                manifest["status"] == "budget_exhausted"
+                and (
+                    len(records) >= policy["candidate_count"]
+                    or manifest["attempts"] != policy["max_attempts"]
+                )
+            )
+            or manifest["status"] == "unsupported"
+        ):
+            raise ValueError("Hierarchical run accounting is inconsistent.")
+        from ._intra_geometry import _cache_path, _load_geometry
+        from .baseline import PreparedSceneBaseline
+        from .cfg import _decode_intra
+
+        intra_cfg = _decode_intra(policy["intra_group"])
+        geometry_path = _relative(run, manifest["support_geometry"]["path"])
+        geometry = _load_geometry(geometry_path, baseline, intra_cfg)
+        expected_path = _cache_path(
+            PreparedSceneBaseline(base_path, True, baseline),
+            intra_cfg,
+            extractor=geometry["inputs"]["extractor"],
+        )
+        if geometry_path != expected_path:
+            raise ValueError("Unexpected support cache reference.")
+        if manifest["support_geometry"]["data_sha256"] != geometry["data_sha256"]:
+            raise ValueError("Support cache digest differs from saved run.")
+    batched = manifest["algorithm_version"] == _BATCH_GENERATOR
     for index, (path, record) in enumerate(records):
         _check_references(record, directory, source, export_root, base_path, baseline)
         ordinal = record["proposal_ordinal"]
         if (
             type(record["schema_version"]) is not int
-            or record["schema_version"] != 1
+            or record["schema_version"] != (3 if hierarchical else 1)
             or record["coordinate_frame"] != "local_arena_z_up"
-            or record["geometry_model"] != "fixed_orientation_aabb"
+            or record["geometry_model"]
+            != (
+                "hierarchical_support_grid_xy_yaw"
+                if hierarchical
+                else "fixed_orientation_aabb"
+            )
             or record["algorithm_version"] != manifest["algorithm_version"]
+            or type(record["seed"]) is not int
             or record["seed"] != policy["seed"]
             or record["policy_sha256"] != policy_hash
             or _relative(directory, record["policy_file"]) != policy_path
@@ -198,6 +250,7 @@ def _load(directory: Path, paths: list[Path]) -> LoadedLayouts:
             or ordinal >= manifest["attempts"]
             or record["candidate_id"] != f"candidate_{ordinal:06d}"
             or path.stem != record["candidate_id"]
+            or type(record["variant_ordinal"]) is not int
             or record["variant_ordinal"] != index
             or any(
                 record[key] != listed[path][key]
@@ -205,16 +258,96 @@ def _load(directory: Path, paths: list[Path]) -> LoadedLayouts:
             )
         ):
             raise ValueError(f"Candidate metadata does not match its run: {path.name}.")
-        variant = _variant(record, baseline, policy["collision_margin_m"])
-        variants.append(variant)
+        if hierarchical:
+            if (
+                _relative(directory, record["support_geometry"]["path"])
+                != geometry_path
+                or record["support_geometry"]["data_sha256"] != geometry["data_sha256"]
+            ):
+                raise ValueError(
+                    "Candidate support cache reference differs from its run."
+                )
+        elif batched:
+            group_centers = _record_centers(record, baseline)
+            _check_variant_metadata(record, baseline)
+            centers.append(
+                [group_centers[group["root_id"]] for group in baseline["groups"]]
+            )
+        else:
+            variants.append(_variant(record, baseline, policy["collision_margin_m"]))
         names.append(record["candidate_id"])
         ordinals.add(ordinal)
+    if hierarchical:
+        from ._intra import _LoadedIntraVariants
+
+        variants = _LoadedIntraVariants(
+            baseline, geometry, [record for _, record in records], policy
+        )
+    elif batched:
+        from ._batch import _check_centers, _LoadedVariants
+
+        numeric_centers = np.asarray(centers, dtype=np.float64)
+        _check_centers(baseline, numeric_centers, policy["collision_margin_m"])
+        variants = _LoadedVariants(
+            baseline, numeric_centers, [record for _, record in records], policy["seed"]
+        )
+    else:
+        variants = tuple(variants)
     return LoadedLayouts(
         export_root.parent,
         {entry["uid"]: _entry_pose(entry) for entry in entries},
-        tuple(variants),
+        variants,
         tuple(names),
     )
+
+
+def _layout_records(
+    directory: Path, paths: list[Path], manifest: dict
+) -> tuple[dict, list[tuple[Path, dict]]]:
+    """Read legacy files or a single indexed atomic candidate container."""
+    run = directory.parent
+    listing = manifest["layouts"]
+    version = manifest["schema_version"]
+    if type(version) is not int or version not in (1, 2, 3):
+        raise ValueError("Unsupported layout manifest schema.")
+    if version == 1 or (version == 3 and manifest.get("layout_storage") == "json"):
+        listed = {_relative(run, item["path"]): item for item in listing}
+        if set(listed) != set(paths) or len(listed) != len(listing):
+            raise ValueError("Manifest must list every candidate file exactly once.")
+        return listed, [(path, _read_json(path)[1]) for path in paths]
+    packed_path = directory / "candidates.json"
+    if (
+        manifest.get("layout_storage") != "packed"
+        or _relative(run, manifest["candidate_file"]) != packed_path
+        or set(paths) != {packed_path}
+    ):
+        raise ValueError(
+            "Packed manifest must reference exactly one candidate container."
+        )
+    _, packed = _read_json(packed_path)
+    if type(packed["schema_version"]) is not int or packed["schema_version"] != 1:
+        raise ValueError("Unsupported candidate container schema.")
+    candidates = packed["candidates"]
+    if (
+        not isinstance(candidates, list)
+        or not candidates
+        or len(candidates) != len(listing)
+    ):
+        raise ValueError("Packed candidates and manifest listing differ.")
+    listed, records = {}, []
+    for index, (item, candidate) in enumerate(zip(listing, candidates, strict=True)):
+        if (
+            type(item["index"]) is not int
+            or item["index"] != index
+            or _relative(run, item["path"]) != packed_path
+        ):
+            raise ValueError("Packed candidate indices must be complete and ordered.")
+        path = directory / f"{candidate['candidate_id']}.json"
+        if path in listed:
+            raise ValueError("Packed candidate identities must be unique.")
+        listed[path] = item
+        records.append((path, candidate))
+    return listed, records
 
 
 def _relative(parent: Path, value: object) -> Path:
@@ -243,7 +376,8 @@ def _check_references(
         )
 
 
-def _variant(record: dict, baseline: dict, margin: float) -> SceneVariant:
+def _record_centers(record: dict, baseline: dict) -> dict[str, np.ndarray]:
+    """Decode a complete group mapping before geometry validation."""
     groups = record["groups"]
     centers = {}
     for group in groups:
@@ -266,6 +400,22 @@ def _variant(record: dict, baseline: dict, margin: float) -> SceneVariant:
         raise ValueError(
             "Every baseline group must appear exactly once in each layout."
         )
+    return centers
+
+
+def _check_variant_metadata(record: dict, baseline: dict) -> None:
+    """Validate source and proposal provenance before materialization."""
+    metadata = record["variant_metadata"]
+    if (
+        metadata.get("generator") != record["algorithm_version"]
+        or metadata.get("baseline_sha256") != baseline["data_sha256"]
+        or metadata.get("proposal_ordinal") != str(record["proposal_ordinal"])
+    ):
+        raise ValueError("Saved variant provenance is inconsistent.")
+
+
+def _variant(record: dict, baseline: dict, margin: float) -> SceneVariant:
+    centers = _record_centers(record, baseline)
     _check_geometry(baseline, centers, margin)
     changes = []
     for group in baseline["groups"]:
@@ -280,19 +430,13 @@ def _variant(record: dict, baseline: dict, margin: float) -> SceneVariant:
             )
             for member in group["members"]
         )
-    metadata = record["variant_metadata"]
-    if (
-        metadata.get("generator") != record["algorithm_version"]
-        or metadata.get("baseline_sha256") != baseline["data_sha256"]
-        or metadata.get("proposal_ordinal") != str(record["proposal_ordinal"])
-    ):
-        raise ValueError("Saved variant provenance is inconsistent.")
+    _check_variant_metadata(record, baseline)
     variant = SceneVariant(
         baseline["source_scene"]["content_sha256"],
         record["seed"],
         record["variant_ordinal"],
         tuple(changes),
-        tuple(metadata.items()),
+        tuple(record["variant_metadata"].items()),
     )
     if variant.variant_id != record["variant_id"]:
         raise ValueError(
@@ -325,9 +469,7 @@ class _Playback:
                 for change in self.loaded.variants[self.index].pose_changes
             }
             name = self.loaded.names[self.index]
-        apply_changes(
-            self.view, SceneChangeSet(poses, tuple(self.loaded.baseline_poses))
-        )
+        apply_changes(self.view, SceneChangeSet(poses, tuple(poses)))
         self.deadline = now + self.interval
         print(f"Layout preview: {name}")
         return True

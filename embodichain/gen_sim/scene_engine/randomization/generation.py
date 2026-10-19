@@ -19,7 +19,9 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from collections.abc import Sequence
 from dataclasses import dataclass, fields
+from pathlib import Path
 from typing import Literal
 
 import numpy as np
@@ -42,7 +44,12 @@ from .baseline import (
     _source_digest,
     prepare_scene_baseline,
 )
-from .cfg import SceneRandomizationCfg, _validate_generation_parameters
+from .cfg import (
+    SceneRandomizationCfg,
+    _validate_generation_parameters,
+    _validate_backend,
+    _validate_scopes,
+)
 
 __all__ = ["SceneRandomizationResult", "randomize_scene"]
 
@@ -56,6 +63,8 @@ class SceneRandomizationResult:
     Attributes:
         baseline: Validated shared geometry and relative member poses.
         candidates: Successful proposals with every group member expanded.
+            Batched results are an owned lazy sequence: accessing an item
+            constructs detached runtime configurations; saving uses numeric data.
         attempts: Number of calls to the shared procedural generator.
         status: Whether the requested count was reached, the attempt budget
             was exhausted, or the shared generator reported unsupported input.
@@ -63,16 +72,16 @@ class SceneRandomizationResult:
         resolved_parameters: Owned snapshot of actual parameters after overrides.
         algorithm_version: Version of the adapter that generated these candidates.
 
-    Candidates establish fixed-orientation group AABB bounds and XY clearances
-    only. They do not establish physical stability or task acceptance.
+    Candidates establish conservative support and AABB bounds/clearances.
+    They do not establish physical stability or task acceptance.
     """
 
     baseline: PreparedSceneBaseline
-    candidates: tuple[GeneratedScene, ...]
+    candidates: Sequence[GeneratedScene]
     attempts: int
     status: Literal["completed", "budget_exhausted", "unsupported"]
     solver_status_counts: dict[str, int]
-    resolved_parameters: dict[str, int | float]
+    resolved_parameters: dict
     algorithm_version: str
 
 
@@ -89,9 +98,20 @@ def randomize_scene(
 
     Every attempt starts from the same baseline. A group consists of a direct
     table child and all descendants; its full AABB must remain inside the
-    table's persisted safe rectangle. Only XY translations change. This
-    function prepares the existing baseline cache but does not save candidates
-    or modify the source scene.
+    table's persisted safe rectangle. Group-only sampling changes XY root
+    translations. A configured ``intra_group`` additionally samples selected
+    members in parent support XY/yaw, preserves their authored tilt and aligns
+    root geometry to the support gap, propagating complete subtrees. Group roots
+    can remain fixed with ``randomize_groups=False``. Preparation writes an
+    immutable support cache; source scene files and the original baseline are
+    retained. This function does not save candidates.
+
+    ``cfg.backend="batched"`` selects counter-addressed CPU/CUDA rejection
+    sampling instead of SLSQP repair. Its result retains numeric candidates and
+    constructs runtime fragments only on access. Logical attempt accounting
+    excludes unused proposals beyond the requested successful prefix; changing
+    ``batch_size`` does not change that prefix. The backend is explicitly
+    versioned because its acceptance rate/distribution differs from SLSQP.
 
     Args:
         cfg: Validated scene paths and generation parameters from the loader.
@@ -130,7 +150,35 @@ def randomize_scene(
     if type(rebuild) is not bool:
         raise ValueError("rebuild must be a boolean.")
 
+    _validate_backend(backend=cfg.backend, device=cfg.device, batch_size=cfg.batch_size)
+    _validate_scopes(cfg.randomize_groups, cfg.intra_group, cfg.backend)
     baseline = prepare_scene_baseline(cfg, rebuild=rebuild)
+    if cfg.intra_group is not None and cfg.intra_group.targets:
+        from ._intra import _randomize_intra
+
+        return _randomize_intra(
+            cfg,
+            baseline,
+            {
+                "seed": seed,
+                "candidate_count": candidate_count,
+                "max_attempts": max_attempts,
+                "collision_margin_m": float(collision_margin_m),
+            },
+        )
+    if cfg.backend == "batched":
+        from ._batch import _randomize_batched
+
+        return _randomize_batched(
+            cfg,
+            baseline,
+            {
+                "seed": seed,
+                "candidate_count": candidate_count,
+                "max_attempts": max_attempts,
+                "collision_margin_m": float(collision_margin_m),
+            },
+        )
     recipe = _build_recipe(baseline)
     layout_cfg = LayoutCfg(collision_margin_m=float(collision_margin_m))
     candidates: list[GeneratedScene] = []
@@ -206,6 +254,23 @@ def _build_recipe(baseline: PreparedSceneBaseline) -> SceneRecipe:
         centers[uid] = tuple(group["aabb_2d"]["center_xy"])
         half_extents[uid] = tuple(half)
 
+    entities = _runtime_entities(entries, export_root)
+    return SceneRecipe(
+        source["content_sha256"],
+        SceneFragment(entities),
+        LayoutProblem(
+            support_uid=data["table"]["entity_id"],
+            seed_xy_by_uid=centers,
+            half_extents_xy_by_uid=half_extents,
+            bounds_xy_by_uid={uid: bounds for uid in centers},
+        ),
+    )
+
+
+def _runtime_entities(
+    entries: list[dict], export_root: Path
+) -> tuple[RigidObjectCfg, ...]:
+    """Adapt authored runtime fields independently of group proxy feasibility."""
     allowed_fields = {field.name for field in fields(RigidObjectCfg)}
     entities = []
     for entry in entries:
@@ -226,16 +291,7 @@ def _build_recipe(baseline: PreparedSceneBaseline) -> SceneRecipe:
         _set_pose(entity, _entry_pose(entry))
         entity.init_rot = tuple(entry.get("init_rot", (0.0, 0.0, 0.0)))
         entities.append(entity)
-    return SceneRecipe(
-        source["content_sha256"],
-        SceneFragment(entities),
-        LayoutProblem(
-            support_uid=data["table"]["entity_id"],
-            seed_xy_by_uid=centers,
-            half_extents_xy_by_uid=half_extents,
-            bounds_xy_by_uid={uid: bounds for uid in centers},
-        ),
-    )
+    return tuple(entities)
 
 
 def _expand_groups(

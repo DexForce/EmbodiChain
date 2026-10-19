@@ -345,10 +345,53 @@ Generate and save layouts, then cycle the original scene and saved candidates:
    python -m embodichain.gen_sim.scene_engine.randomization.loading \
        --layout-dir ./workspace/scene_layouts/run_001/layouts --interval 3
 
+Version 3 adds hierarchical member XY/yaw sampling on CPU or CUDA:
+
+.. code-block:: yaml
+
+   schema_version: 3
+   backend: batched
+   device: cuda:0
+   randomize_groups: true
+   intra_group:
+     targets:
+       mug_001:
+         xy_offset_bounds_m: null
+         yaw_delta_range_deg: [-180, 180]
+
+``randomize_groups: false`` holds group roots fixed. Unselected members retain
+parent-relative poses and follow moved ancestors. XY bounds, when supplied as
+``[[min_x, min_y], [max_x, max_y]]``, bound the original entity origin's offset
+in its parent support frame. A null bound uses the complete feasible region.
+Yaw increments rotate around the support normal while retaining authored tilt.
+Defaults are 2 mm boundary and sibling margins, 1 mm support gap and 1 mm grid
+resolution. ``intra_group.support_overrides`` accepts parent UID entries with
+a proper rigid ``parent_from_support`` matrix and GeoJSON ``polygon``; overrides
+must have mesh support evidence. Invalid polygons are rejected during policy
+loading before scene preparation. Ambiguous automatic layers raise an error.
+The positive height deviation of the selected near-planar layer is included in
+its conservative support height, retaining the configured minimum gap over
+shallow raised geometry.
+
+Content-addressed geometry caches leave the original baseline unchanged.
+Hierarchical layouts save v3 root XY translations and full selected member
+poses relative to their parents, using JSON or packed storage. Replay validates
+source, cache, policy, geometry and identity before exposing lazy variants and
+does not sample again. The existing v1/v2 group layouts and earlier v3
+hierarchical layouts remain readable. New hierarchical proposals use algorithm
+version 2: dynamic group centers are sampled from the remaining free rectangular
+area without nested retries. Support caches use extraction version 2 and include
+a conservative layer height ceiling; older caches retain their recorded height
+semantics on replay. Saving compares the on-disk cache against the generated
+snapshot before publishing a completed run.
+
 .. currentmodule:: embodichain.gen_sim.scene_engine.randomization.cfg
 
 .. autosummary::
 
+   MemberRandomizationCfg
+   SupportOverrideCfg
+   IntraGroupRandomizationCfg
    SceneRandomizationCfg
    load_randomization_config
 
@@ -357,9 +400,12 @@ embodichain.gen_sim.scene_engine.randomization.generation
 
 Uses the shared seeded procedural generator and XY layout solver, then expands
 every group from the same baseline. Successful candidates contain a full
-``SceneFragment`` and a ``SceneVariant`` that preserve each object's orientation,
-height, scale and exported collision hull budget. Acceptance checks group AABB
-bounds and clearances; it does not establish physical stability or task success.
+``SceneFragment`` and a ``SceneVariant``. Group-only sampling preserves authored
+orientation and height. Hierarchical sampling changes selected members' support
+XY/yaw, aligns their geometric bottom to the support gap and propagates subtrees.
+Scale and exported collision hull budgets are preserved. Acceptance checks
+conservative support coverage, sibling/group AABBs and table bounds; it does not
+establish physical stability or task success.
 
 ``budget_exhausted`` is a normal result that retains any successful candidates.
 The result records actual parameters, proposal attempts and solver outcomes;

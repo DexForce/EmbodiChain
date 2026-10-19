@@ -69,14 +69,47 @@ scene graph and file formats. General services consume explicit UID/geometry
 inputs rather than `SceneObject`, image masks or generation output directories.
 
 Grouped randomization consumes one rigid-GLB table export and its explicit
-support graph. The adapter caches group geometry and relative poses, expands
-shared XY proposals from that baseline, and preserves exported collision
-configuration in returned fragments. Saving owns policy/candidate provenance
-and publishes the completion manifest last; playback verifies the unchanged
-source and baseline, then applies absolute poses without physics steps. These
-checks establish group AABB bounds and clearances, not physical or task success.
-See the [public API supplement](../../../docs/source/api_reference/public_api.rst)
-for policy and playback examples.
+support graph. The default SLSQP path retains the shared procedural solver;
+the optional batched backend uses CPU/CUDA counter-addressed rejection sampling
+from `compute.geometry._sampling`. Rejection has a different distribution and
+acceptance rate from SLSQP repair. Batch boundaries do not change logical
+proposal ordinals or the consumed attempt budget. CUDA selection is explicit.
+
+The adapter owns group/member transforms, source/configuration snapshots and
+canonical CPU float64 pose expansion for persisted identities. Version-3 policies
+add explicit non-root XY/yaw targets and optional fixed group roots; empty targets
+retain the original group path. `_intra.py` composes numeric postorder subtree
+proposals with dynamic outer AABBs. UID-addressed streams retain the logical
+prefix across batch sizes, and each failed layout consumes one whole attempt.
+Hierarchical generator v2 samples outer roots from free center rectangles rather
+than retrying collisions; version-1 hierarchical runs remain replayable.
+Free-region temporaries use obstacle chunks and an adaptive batch ceiling;
+resolved policies record the effective batch size without changing the prefix.
+
+`_intra_geometry.py` adapts scaled assets and graph topology to the shared
+parent-local support-grid strategy. Child bottom geometry guides plane selection;
+ambiguous layers require evidence-checked overrides. Immutable content-addressed
+caches include source/extractor/settings identities and leave the original
+baseline unchanged. Cache v2 records the upper height deviation of the selected
+layer so shallow bumps do not consume the support gap. Preserve earlier cache
+height semantics when replaying old runs. Do mesh loading, plane extraction and polygon rasterization
+only during preparation; do not call scene construction or SLSQP per candidate.
+
+Batch candidates and loaded variants own lazy numeric sequences; consuming an
+item constructs typed poses/configurations while saving validates numeric evidence.
+Runtime collision settings are preserved. V3 layouts store root XY translations,
+selected parent-relative full poses and cache references, then validate all source,
+geometry, accounting and identities before exposing variants. Playback reconstructs
+saved results without sampling or stepping physics. Existing v1 individual and
+v2 packed group runs remain readable; complete resolved policies can be reused.
+
+JSON remains the default storage; packed writes one atomic candidate container.
+Both revalidate source/baseline and the exact cache snapshot before publishing
+the completion manifest last. Concurrent cache writers use distinct staging files. Geometric
+support/AABB acceptance does not establish physical or task success. See
+[`scripts/tutorials/scene/README.md`](../../../scripts/tutorials/scene/README.md)
+for policy settings, demo and end-to-end CPU/CUDA benchmarks and the
+[public API supplement](../../../docs/source/api_reference/public_api.rst).
 
 ## Runtime and extension boundaries
 

@@ -23,7 +23,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 import yaml
@@ -36,7 +36,7 @@ from .baseline import (
     _rigid_entries,
     _source_digest,
 )
-from .cfg import _GENERATION_FIELDS, _UniqueKeyLoader, _validate_generation_parameters
+from .cfg import _BATCH_FIELDS, _UniqueKeyLoader, _validate_policy
 
 if TYPE_CHECKING:
     from .generation import SceneRandomizationResult
@@ -44,7 +44,12 @@ if TYPE_CHECKING:
 __all__ = ["save_layouts"]
 
 
-def save_layouts(result: SceneRandomizationResult, *, output_root: str | Path) -> Path:
+def save_layouts(
+    result: SceneRandomizationResult,
+    *,
+    output_root: str | Path,
+    layout_format: Literal["json", "packed"] = "json",
+) -> Path:
     """Save successful grouped layouts and generation accounting in a new run.
 
     Layouts reference the existing baseline and source export through relative
@@ -52,11 +57,14 @@ def save_layouts(result: SceneRandomizationResult, *, output_root: str | Path) -
     poses are not duplicated. ``run_result.json`` is published last, including
     for runs with no successful candidates. Its presence marks a complete run.
     ``policy_sha256`` hashes canonical sorted JSON of the resolved policy
-    (schema version and four actual parameters), independently of YAML formatting.
+    independently of YAML formatting. Packed storage writes all candidates in
+    one atomic, fsynced JSON container and publishes a version-2 manifest last.
 
     Args:
         result: Generated candidates and their actual resolved parameter snapshot.
         output_root: Workspace receiving ``scene_layouts/run_NNN/``.
+        layout_format: ``json`` retains individual candidate files; ``packed``
+            amortizes file creation and durability costs over the complete run.
 
     Returns:
         Absolute directory of the newly saved run.
@@ -69,6 +77,8 @@ def save_layouts(result: SceneRandomizationResult, *, output_root: str | Path) -
     """
     if not isinstance(output_root, (str, Path)) or not str(output_root).strip():
         raise ValueError("output_root must be a nonempty directory path.")
+    if layout_format not in ("json", "packed"):
+        raise ValueError("layout_format must be json or packed.")
     try:
         policy, candidates = _prepare_result(result)
         export_root = _verify_baseline(result.baseline)
@@ -91,41 +101,95 @@ def save_layouts(result: SceneRandomizationResult, *, output_root: str | Path) -
             ordinal += 1
     (run / "layouts").mkdir()
     _write_atomic(run / "policy_resolved.yaml", policy)
+    hierarchical = policy["schema_version"] == 3
     common = {
-        "schema_version": 1,
+        "schema_version": 3 if hierarchical else 1,
         "seed": policy["seed"],
         "algorithm_version": result.algorithm_version,
         "policy_sha256": policy_hash,
     }
     layouts = []
-    for candidate in candidates:
+    packed = []
+    references = _references(result.baseline, export_root, run / "layouts")
+    if hierarchical:
+        references["support_geometry"] = {
+            "path": Path(
+                os.path.relpath(result.candidates._geometry_path, run / "layouts")
+            ).as_posix(),
+            "data_sha256": result.candidates._geometry["data_sha256"],
+        }
+    for index, candidate in enumerate(candidates):
         name = candidate["candidate_id"]
         path = run / "layouts" / f"{name}.json"
-        _write_atomic(
-            path,
-            {
-                **common,
-                **candidate,
-                **_references(result.baseline, export_root, path.parent),
-                "coordinate_frame": "local_arena_z_up",
-                "geometry_model": "fixed_orientation_aabb",
-                "policy_file": "../policy_resolved.yaml",
-            },
-        )
+        payload = {
+            **common,
+            **candidate,
+            **references,
+            "coordinate_frame": "local_arena_z_up",
+            "geometry_model": (
+                "hierarchical_support_grid_xy_yaw"
+                if hierarchical
+                else "fixed_orientation_aabb"
+            ),
+            "policy_file": "../policy_resolved.yaml",
+        }
+        if layout_format == "packed":
+            path = run / "layouts" / "candidates.json"
+            packed.append(payload)
+        else:
+            _write_atomic(path, payload)
         layouts.append(
             {
                 key: candidate[key]
                 for key in ("candidate_id", "proposal_ordinal", "variant_id")
             }
             | {"path": path.relative_to(run).as_posix()}
+            | ({"index": index} if layout_format == "packed" else {})
+        )
+    if layout_format == "packed":
+        _write_atomic(
+            run / "layouts" / "candidates.json",
+            {"schema_version": 1, "candidates": packed},
         )
     # Recheck after writing candidates so concurrent source changes cannot
     # publish a completed manifest tied to stale geometry or relative poses.
     _verify_baseline(result.baseline)
+    if hierarchical:
+        from ._intra_geometry import _load_geometry
+        from .cfg import _decode_intra
+
+        _load_geometry(
+            result.candidates._geometry_path,
+            result.baseline.data,
+            _decode_intra(policy["intra_group"]),
+            expected_sha256=result.candidates._geometry["data_sha256"],
+        )
     _write_atomic(
         run / "run_result.json",
         {
             **common,
+            **(
+                {
+                    "schema_version": 3 if hierarchical else 2,
+                    "layout_storage": "packed",
+                    "candidate_file": "layouts/candidates.json",
+                }
+                if layout_format == "packed"
+                else {}
+            ),
+            **(
+                {
+                    "layout_storage": layout_format,
+                    "support_geometry": {
+                        "path": Path(
+                            os.path.relpath(result.candidates._geometry_path, run)
+                        ).as_posix(),
+                        "data_sha256": result.candidates._geometry["data_sha256"],
+                    },
+                }
+                if hierarchical
+                else {}
+            ),
             **_references(result.baseline, export_root, run),
             "status": result.status,
             "requested_count": policy["candidate_count"],
@@ -142,9 +206,15 @@ def save_layouts(result: SceneRandomizationResult, *, output_root: str | Path) -
 
 def _prepare_result(result: SceneRandomizationResult) -> tuple[dict, list[dict]]:
     parameters = dict(result.resolved_parameters)
-    if set(parameters) != set(_GENERATION_FIELDS):
-        raise ValueError("Resolved parameters must contain the four generation fields.")
-    _validate_generation_parameters(**parameters)
+    policy = {
+        "schema_version": (
+            3
+            if "intra_group" in parameters
+            else (2 if set(parameters) & set(_BATCH_FIELDS) else 1)
+        ),
+        **parameters,
+    }
+    _validate_policy(policy)
     counts = result.solver_status_counts
     count = len(result.candidates)
     if (
@@ -180,6 +250,15 @@ def _prepare_result(result: SceneRandomizationResult) -> tuple[dict, list[dict]]
     ):
         raise ValueError("algorithm_version must identify the actual generator.")
     data = result.baseline.data
+    from ._batch import _CandidatePool
+
+    if isinstance(result.candidates, _CandidatePool):
+        candidates = result.candidates._records(
+            result.baseline, parameters, result.algorithm_version
+        )
+        if candidates and candidates[-1]["proposal_ordinal"] >= result.attempts:
+            raise ValueError("Candidate proposal ordinals exceed the attempt budget.")
+        return policy, candidates
     groups = {group["root_id"]: group for group in data["groups"]}
     expected_uids = set(groups) | {
         member["entity_id"] for group in groups.values() for member in group["members"]
@@ -254,7 +333,7 @@ def _prepare_result(result: SceneRandomizationResult) -> tuple[dict, list[dict]]
             }
         )
         last_ordinal = proposal_ordinal
-    return {"schema_version": 1, **parameters}, candidates
+    return policy, candidates
 
 
 def _check_geometry(data: dict, centers: dict[str, np.ndarray], margin: float) -> None:
@@ -334,7 +413,18 @@ def _write_atomic(path: Path, data: dict[str, Any]) -> None:
             if path.suffix == ".yaml":
                 yaml.safe_dump(data, stream, sort_keys=False, allow_unicode=True)
             else:
-                json.dump(data, stream, indent=2, ensure_ascii=False, allow_nan=False)
+                if path.name == "candidates.json":
+                    json.dump(
+                        data,
+                        stream,
+                        separators=(",", ":"),
+                        ensure_ascii=False,
+                        allow_nan=False,
+                    )
+                else:
+                    json.dump(
+                        data, stream, indent=2, ensure_ascii=False, allow_nan=False
+                    )
                 stream.write("\n")
             stream.flush()
             os.fsync(stream.fileno())

@@ -36,7 +36,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="embodichain scene-randomization",
         description=(
-            "Prepare a reusable baseline, generate grouped XY layouts using "
+            "Prepare a reusable baseline, generate group XY and member XY/yaw layouts using "
             "validated YAML parameters, and save each successful layout."
         ),
     )
@@ -45,9 +45,19 @@ def main(argv: Sequence[str] | None = None) -> None:
         required=True,
         help="Scene workspace containing scene_export/; the baseline is written there.",
     )
-    parser.add_argument("--config", required=True, help="Version-1 YAML configuration.")
+    parser.add_argument(
+        "--config",
+        required=True,
+        help="Version-1/2 group policy or version-3 hierarchical XY/yaw policy.",
+    )
     parser.add_argument(
         "--rebuild", action="store_true", help="Recompute an existing baseline cache."
+    )
+    parser.add_argument(
+        "--layout-format",
+        choices=("json", "packed"),
+        default="json",
+        help="Individual JSON files or a single atomic packed candidate file.",
     )
     args = parser.parse_args(argv)
 
@@ -62,7 +72,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     try:
         cfg = load_randomization_config(args.config, output_root=args.output_root)
         result = randomize_scene(cfg, rebuild=args.rebuild)
-        run_dir = save_layouts(result, output_root=args.output_root)
+        if args.layout_format == "json":
+            run_dir = save_layouts(result, output_root=args.output_root)
+        else:
+            run_dir = save_layouts(
+                result, output_root=args.output_root, layout_format=args.layout_format
+            )
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
 
