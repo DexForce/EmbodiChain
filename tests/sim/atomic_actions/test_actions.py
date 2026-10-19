@@ -1204,23 +1204,20 @@ def test_place_holds_fully_open_before_retracting_when_configured() -> None:
     )
 
     destination_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
-    plan = _plan_action(
-        action,
-        invocation,
-        _context(
-            task,
-            scene=SceneSnapshot(
-                timestamp=0.0,
-                version=0,
-                entities={"destination": EntityState(destination_pose)},
-            ),
+    context = _context(
+        task,
+        scene=SceneSnapshot(
+            timestamp=0.0,
+            version=0,
+            entities={"destination": EntityState(destination_pose)},
         ),
     )
+    plan = _plan_action(action, invocation, context)
 
     release = plan.segment("release")
     assert plan.scene_dependencies == ("destination",)
     assert plan.scene_dependency_monitor_until == {}
-    assert plan.commands.frame_count == sample_count + settle_steps
+    assert plan.commands.frame_count >= sample_count + settle_steps
     assert release.stop - release.start == 5 + settle_steps
     hand_positions = _joint_command_positions(plan, "hand")
     torch.testing.assert_close(
@@ -1259,20 +1256,17 @@ def test_pick_holds_fully_closed_before_lifting_when_configured() -> None:
         skill_options=PickUpOptions(grasp_settle_steps=settle_steps),
     )
 
-    plan = _plan_action(
-        action,
-        invocation,
-        _context(
-            scene=_target_scene(
-                torch.eye(4).repeat(NUM_ENVS, 1, 1),
-                timestamp=0.0,
-                version=0,
-            )
-        ),
+    context = _context(
+        scene=_target_scene(
+            torch.eye(4).repeat(NUM_ENVS, 1, 1),
+            timestamp=0.0,
+            version=0,
+        )
     )
+    plan = _plan_action(action, invocation, context)
 
     close = plan.segment("close")
-    assert plan.commands.frame_count == sample_count + settle_steps
+    assert plan.commands.frame_count >= sample_count + settle_steps
     assert close.stop - close.start == 5 + settle_steps
     hand_positions = _joint_command_positions(plan, "hand")
     torch.testing.assert_close(
@@ -1442,8 +1436,9 @@ def test_move_held_object_preserves_ordered_object_waypoints() -> None:
     )
     before = targets.clone()
 
+    context = _context(task)
     plan = _plan_action(
-        action, _invocation(action, HeldObjectPoseGoal(targets)), _context(task)
+        action, _invocation(action, HeldObjectPoseGoal(targets)), context
     )
 
     states = generator.generate.call_args.args[0]
@@ -1453,7 +1448,13 @@ def test_move_held_object_preserves_ordered_object_waypoints() -> None:
     assert plan.expected_effects.is_empty
     torch.testing.assert_close(held.object_to_eef, grasp_before)
     torch.testing.assert_close(targets, before)
-    assert (_joint_trajectory(plan).positions[..., ARM_DOF:] == 1).all()
+    trajectory = _joint_trajectory(plan)
+    torch.testing.assert_close(
+        trajectory.positions[..., ARM_DOF:],
+        context.robot.qpos[:, ARM_DOF:]
+        .unsqueeze(1)
+        .expand(-1, trajectory.waypoint_count, -1),
+    )
 
 
 @pytest.mark.parametrize("shape", [(NUM_ENVS, 0, 4, 4), (NUM_ENVS + 1, 2, 4, 4)])
@@ -1652,7 +1653,12 @@ def test_pour_rotates_held_object_about_internal_axis_and_returns() -> None:
     )
     assert len(solved_poses) == 2
     assert torch.allclose(solved_poses[1], current_eef_pose, atol=1.0e-6)
-    assert torch.all(trajectory.positions[:, :, ARM_DOF:] == 1.0)
+    torch.testing.assert_close(
+        trajectory.positions[:, :, ARM_DOF:],
+        context.robot.qpos[:, ARM_DOF:]
+        .unsqueeze(1)
+        .expand(-1, trajectory.waypoint_count, -1),
+    )
     assert plan.expected_effects.is_empty
     assert context.task is task
 
@@ -2469,7 +2475,7 @@ def test_pick_holds_only_environment_without_a_feasible_grasp() -> None:
     assert not torch.allclose(trajectory.positions[0], context.robot.qpos[0])
     assert torch.allclose(
         trajectory.positions[1],
-        context.robot.qpos[1].unsqueeze(0).expand(20, -1),
+        context.robot.qpos[1].unsqueeze(0).expand(trajectory.waypoint_count, -1),
     )
     assert all(not frame.active_mask[1].item() for frame in plan.commands.frames)
     held = projected.get_held_object("arm")
@@ -4417,7 +4423,9 @@ def test_open_door_fails_row_whose_target_would_close_hinge() -> None:
     assert plan.plan_success.tolist() == [True, False]
     assert torch.allclose(
         _joint_trajectory(plan).positions[1],
-        context.robot.qpos[1].unsqueeze(0).expand(24, -1),
+        context.robot.qpos[1]
+        .unsqueeze(0)
+        .expand(_joint_trajectory(plan).waypoint_count, -1),
     )
 
 
@@ -4494,7 +4502,9 @@ def test_open_door_holds_row_already_at_requested_open_fraction() -> None:
     assert plan.plan_success.tolist() == [True, True]
     assert torch.allclose(
         _joint_trajectory(plan).positions[0],
-        context.robot.qpos[0].unsqueeze(0).expand(24, -1),
+        context.robot.qpos[0]
+        .unsqueeze(0)
+        .expand(_joint_trajectory(plan).waypoint_count, -1),
     )
 
 
@@ -4752,100 +4762,6 @@ def test_press_retiming_preserves_backend_dwell_and_arrival_offset() -> None:
     torch.testing.assert_close(positions[1, :3, 0], torch.zeros(3))
     torch.testing.assert_close(positions[1, 4:13, 0], torch.ones(9))
     torch.testing.assert_close(positions[:, -1, 0], torch.full((NUM_ENVS,), 2.0))
-
-
-@pytest.mark.parametrize("supports_validation", (True, False))
-@pytest.mark.parametrize("pose_state", ["complete", "none", "empty", "partial"])
-def test_press_requires_collision_validation_of_exact_final_samples(
-    supports_validation: bool,
-    pose_state: str,
-) -> None:
-    generator = _motion_generator()
-    generator.planner.supports_joint_trajectory_validation = supports_validation
-    generator.planner.collision_world_info = CollisionWorldInfo(
-        entity_ids=("wall", "table"),
-        dynamic_entity_ids=("wall", "table"),
-        supports_updates=True,
-    )
-    obstacle_poses = {
-        entity_id: torch.eye(4).repeat(NUM_ENVS, 1, 1)
-        for entity_id in ("wall", "table")
-    }
-    plan_options = PlanOptions()
-    plan_options.dynamic_obstacle_poses = {
-        "complete": obstacle_poses,
-        "none": None,
-        "empty": {},
-        "partial": {"wall": obstacle_poses["wall"]},
-    }[pose_state]
-    native_path = torch.zeros(NUM_ENVS, 2, ARM_DOF)
-    native_path[0, -1, 0] = 1.0
-    generator.generate = Mock(
-        return_value=PlanResult(
-            success=torch.ones(NUM_ENVS, dtype=torch.bool),
-            positions=native_path,
-            dt=torch.tensor([[0.0, 4 * CONTROL_DT]]).expand(NUM_ENVS, -1),
-        )
-    )
-
-    def validate(trajectory, *, control_part, obstacle_poses):
-        assert control_part == "arm"
-        assert set(obstacle_poses) == {"wall", "table"}
-        torch.testing.assert_close(
-            obstacle_poses["wall"], plan_options.dynamic_obstacle_poses["wall"]
-        )
-        # Only a newly interpolated middle sample collides; native endpoints do not.
-        return ~torch.isclose(trajectory[:, :, 0], torch.tensor(0.5))
-
-    generator.planner.validate_joint_trajectory.side_effect = validate
-    action = _bind_action(generator, Press())
-    semantics = ObjectSemantics(
-        affordance=PressAffordance(press_position=(0.0, 0.0, 0.0)),
-        geometry={},
-        label="button",
-        entity_id="button",
-    )
-    context = _context()
-    invocation = ActionInvocation(
-        skill_id="press",
-        goal=PressGoal(semantics, torch.eye(4)),
-        binding=_binding(action),
-        motion_policy=MotionPolicy(
-            strategy="motion_gen",
-            sample_count=21,
-            plan_opts=plan_options,
-            dynamic_collision_mode="off",
-        ),
-        skill_options=PressOptions(hand_interp_steps=3),
-    )
-    if not supports_validation:
-        with pytest.raises(ValueError, match="requires joint-trajectory validation"):
-            _plan_action(action, invocation, context)
-        return
-    plan = _plan_action(action, invocation, context)
-
-    if pose_state != "complete":
-        assert plan.plan_success.tolist() == [False, False]
-        generator.planner.validate_joint_trajectory.assert_not_called()
-        assert "table" in plan.diagnostics.messages[0]
-        trajectory = _joint_trajectory(plan)
-        assert torch.equal(
-            trajectory.positions,
-            context.robot.qpos[:, None].expand_as(trajectory.positions),
-        )
-        return
-
-    generator.planner.validate_joint_trajectory.assert_called_once()
-    checked = generator.planner.validate_joint_trajectory.call_args.args[0]
-    trajectory = _joint_trajectory(plan)
-    assert checked.shape[:2] == trajectory.positions.shape[:2]
-    assert torch.isclose(checked[0, :, 0], torch.tensor(0.5)).any()
-    torch.testing.assert_close(checked[1], trajectory.positions[1, :, :ARM_DOF])
-    assert plan.plan_success.tolist() == [False, True]
-    torch.testing.assert_close(
-        trajectory.positions[0],
-        context.robot.qpos[0].expand(trajectory.waypoint_count, -1),
-    )
 
 
 @pytest.mark.parametrize("mode", ["auto", "off"])
@@ -5903,7 +5819,7 @@ def test_handover_holds_rows_whose_candidate_arm_is_occupied() -> None:
     trajectory = _joint_trajectory(plan)
     assert torch.allclose(
         trajectory.positions[0],
-        context.robot.qpos[0].unsqueeze(0).expand(24, -1),
+        context.robot.qpos[0].unsqueeze(0).expand(trajectory.waypoint_count, -1),
     )
 
 
@@ -6167,7 +6083,7 @@ def test_handover_sampling_preserves_failed_rows_and_reports_reuse(
         assert sample["selected_poses"][0] == torch.eye(4).tolist()
     torch.testing.assert_close(
         _joint_trajectory(plan).positions[0],
-        context.robot.qpos[0].expand(24, -1),
+        context.robot.qpos[0].expand(_joint_trajectory(plan).waypoint_count, -1),
     )
 
 

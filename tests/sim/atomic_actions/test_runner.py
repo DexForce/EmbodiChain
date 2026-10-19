@@ -1554,6 +1554,43 @@ def test_effect_result_and_effect_verifier_are_mutually_exclusive() -> None:
     assert sink.sent == []
 
 
+def test_explicit_effect_result_cannot_be_combined_with_physical_verifier() -> None:
+    runner, _, _, sink, action = _make_runner(with_effect=True)
+    result = _effect_result(
+        verification_id=0,
+        success_mask=torch.tensor([True]),
+        failure_mask=torch.tensor([False]),
+    )
+
+    with pytest.raises(ValueError, match="effect_result and physical_effect_verifier"):
+        runner.step(effect_result=result, physical_effect_verifier=Mock())
+
+    assert action.plan_count == 1
+    assert sink.sent == []
+
+
+def test_explicit_phase_gate_result_cannot_be_combined_with_physical_verifier() -> None:
+    runner, _, _, sink, _ = _make_runner(with_phase_gate=True)
+    blocked = runner.run_until_blocked()
+    assert (
+        blocked.tick is not None and blocked.tick.pending_phase_effect_gate is not None
+    )
+    request = blocked.tick.pending_phase_effect_gate
+    result = _phase_gate_result(request, success=True, batch_size=BATCH_SIZE)
+    sent_before = list(sink.sent)
+
+    with pytest.raises(
+        ValueError,
+        match="phase_effect_gate_result and physical_phase_effect_gate_verifier",
+    ):
+        runner.step(
+            phase_effect_gate_result=result,
+            physical_phase_effect_gate_verifier=Mock(),
+        )
+
+    assert sink.sent == sent_before
+
+
 @pytest.mark.parametrize(
     "invalid_result",
     [None, True],

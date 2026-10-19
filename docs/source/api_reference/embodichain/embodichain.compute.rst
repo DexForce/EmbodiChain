@@ -47,6 +47,7 @@ means trajectory deformation.
    differentiate_positions
    resample_in_time
    interpolate_with_distance
+   interpolate_minimum_jerk
    interpolate_with_nums
    resample_with_distance
    sort_and_padding_key_frame

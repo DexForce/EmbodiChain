@@ -22,6 +22,7 @@ import hashlib
 import json
 import math
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -333,6 +334,10 @@ class SuiteCfg:
                 config = _merge_mappings(track.config, domain.overrides)
                 if track.scenario == _FREE_SPACE_SCENARIO:
                     _validate_free_space(FreeSpaceTrackCfg(**config))
+                elif track.scenario == "atomic_skill":
+                    _validate_atomic_skill_track(
+                        replace(track, id=effective_id, config=config)
+                    )
                 expanded.append(
                     replace(
                         track,
@@ -343,14 +348,30 @@ class SuiteCfg:
                         group_id=group_id,
                     )
                 )
+        expanded_ids = [track.id for track in expanded]
+        if len(expanded_ids) != len(set(expanded_ids)):
+            raise ValueError(
+                "Expanded benchmark track ids must be unique; got duplicates: "
+                f"{sorted({track_id for track_id in expanded_ids if expanded_ids.count(track_id) > 1})}."
+            )
         return expanded
 
     def sync_track_configs(self) -> None:
         """Copy typed free-space settings into the matching track config."""
+        free_space_tracks = [
+            track
+            for track in self.tracks
+            if track.scenario == _FREE_SPACE_SCENARIO and track.enabled
+        ]
         for track in self.tracks:
             if track.scenario == _FREE_SPACE_SCENARIO:
                 track.id = track.id or _FREE_SPACE_TRACK_ID
-                track.config = asdict(self.free_space)
+                if len(free_space_tracks) == 1:
+                    track.config = asdict(self.free_space)
+                elif track.config:
+                    _validate_free_space(FreeSpaceTrackCfg(**track.config))
+                else:
+                    track.config = asdict(self.free_space)
 
     def validate_benchmark(self) -> None:
         """Validate values that affect benchmark correctness."""
@@ -538,9 +559,15 @@ def _resolve_tracks_and_free_space(
                     resolved_domains.append(DomainCfg(**dict(item_domain)))
                 values["domains"] = resolved_domains
             tracks.append(TrackCfg(**values))
-        for track in tracks:
-            if track.scenario == _FREE_SPACE_SCENARIO and track.config:
-                free_space_data = {**free_space_data, **dict(track.config)}
+        free_space_tracks = [
+            track for track in tracks if track.scenario == _FREE_SPACE_SCENARIO
+        ]
+        if len(free_space_tracks) == 1 and free_space_tracks[0].config:
+            free_space_data = {**free_space_data, **dict(free_space_tracks[0].config)}
+        elif len(free_space_tracks) > 1 and free_space_data:
+            for track in free_space_tracks:
+                if not track.config:
+                    track.config = deepcopy(free_space_data)
     return tracks, FreeSpaceTrackCfg(**free_space_data)
 
 
@@ -548,13 +575,13 @@ def _merge_mappings(
     base: Mapping[str, Any], override: Mapping[str, Any]
 ) -> dict[str, Any]:
     """Recursively merge domain overrides without mutating suite input."""
-    merged = {str(key): value for key, value in base.items()}
+    merged = {str(key): deepcopy(value) for key, value in base.items()}
     for key, value in override.items():
         key = str(key)
         if isinstance(merged.get(key), Mapping) and isinstance(value, Mapping):
             merged[key] = _merge_mappings(merged[key], value)
         else:
-            merged[key] = value
+            merged[key] = deepcopy(value)
     return merged
 
 

@@ -571,17 +571,20 @@ class ExecutionRunner:
                 pending request. It runs after a fresh due-cycle observation
                 and before the session consumes the result. It is not called
                 after the request deadline. Mutually exclusive with
-                ``effect_result``.
+                ``effect_result`` and ``physical_effect_verifier``.
             physical_effect_verifier: Evidence-aware alternative to
                 ``effect_verifier``. It receives the fresh evidence frame
-                collected by this runner.
+                collected by this runner and is mutually exclusive with
+                ``effect_result``.
             phase_effect_gate_result: Optional externally produced result for
                 the current blocking trajectory-segment entry gate.
             phase_effect_gate_verifier: Optional synchronous verifier for the
                 current gate. It runs on a fresh due-cycle observation and is
-                mutually exclusive with ``phase_effect_gate_result``.
+                mutually exclusive with ``phase_effect_gate_result`` and
+                ``physical_phase_effect_gate_verifier``.
             physical_phase_effect_gate_verifier: Evidence-aware alternative
-                to ``phase_effect_gate_verifier``.
+                to ``phase_effect_gate_verifier``. It is mutually exclusive
+                with ``phase_effect_gate_result``.
             held_object_guard_verifier: Optional synchronous phase-aware
                 verifier. It receives a fresh observation and the current
                 command-phase request before :meth:`ExecutionSession.tick` and
@@ -598,6 +601,10 @@ class ExecutionRunner:
             raise ValueError(
                 "effect_result and effect_verifier are mutually exclusive."
             )
+        if effect_result is not None and physical_effect_verifier is not None:
+            raise ValueError(
+                "effect_result and physical_effect_verifier are mutually exclusive."
+            )
         if effect_verifier is not None and physical_effect_verifier is not None:
             raise ValueError(
                 "effect_verifier and physical_effect_verifier are mutually exclusive."
@@ -609,6 +616,14 @@ class ExecutionRunner:
             raise ValueError(
                 "phase_effect_gate_result and phase_effect_gate_verifier are "
                 "mutually exclusive."
+            )
+        if (
+            phase_effect_gate_result is not None
+            and physical_phase_effect_gate_verifier is not None
+        ):
+            raise ValueError(
+                "phase_effect_gate_result and physical_phase_effect_gate_verifier "
+                "are mutually exclusive."
             )
         if (
             phase_effect_gate_verifier is not None

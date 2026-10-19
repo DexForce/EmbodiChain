@@ -3034,6 +3034,34 @@ def test_runner_capability_gate_and_fake_adapter_lifecycle(tmp_path):
             record.failure_code == "unsupported_capability" for record in joint_records
         )
         assert not any(record.phase is TrialPhase.CONSTRUCT for record in joint_records)
+
+        runner.embodiment_resolution = replace(
+            runner.embodiment_resolution,
+            capabilities=frozenset({"motion.cartesian_pose"}),
+        )
+        embodiment_case = replace(
+            case,
+            case_id="embodiment-case",
+            required_capabilities=frozenset({"motion.cartesian_pose"}),
+        )
+        runner._run_adapter(
+            writer,
+            sim,
+            robot,
+            specs[0],
+            [embodiment_case],
+            required,
+        )
+        embodiment_records = [
+            record
+            for record in runner.records
+            if record.case_id == embodiment_case.case_id
+        ]
+        assert any(record.phase is TrialPhase.MEASURED for record in embodiment_records)
+        assert not any(
+            record.failure_code == "unsupported_capability"
+            for record in embodiment_records
+        )
     finally:
         for name in names:
             unregister_planner_adapter(name)

@@ -29,6 +29,9 @@ from embodichain.lab.sim.motion.planners.base_planner import (
     CollisionWorldInfo,
     PlanOptions,
 )
+from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
+    CuroboPlanOptions,
+)
 from embodichain.lab.sim.motion.motion_generator import (
     MotionGenerator,
     MotionGenOptions,
@@ -659,6 +662,37 @@ def test_resolve_trapezoidal_preserves_omitted_velocity_limit() -> None:
     assert isinstance(options, TrapezoidalPlanOptions)
     assert options.constraints["velocity"] is None
     assert options.constraints["acceleration"] is None
+
+
+def test_resolve_curobo_forwards_per_invocation_motion_limits() -> None:
+    planner = Mock()
+    planner.cfg.planner_type = "curobo"
+    generator = object.__new__(MotionGenerator)
+    generator.planner = planner
+
+    resolved = generator.resolve_plan_options(
+        plan_opts=None,
+        sample_count=20,
+        velocity_limit=0.3,
+        acceleration_limit=0.8,
+    )
+
+    assert isinstance(resolved, CuroboPlanOptions)
+    assert resolved.max_velocity == pytest.approx(0.3)
+    assert resolved.max_acceleration == pytest.approx(0.8)
+
+    supplied = CuroboPlanOptions(max_velocity=1.0, max_acceleration=2.0)
+    overridden = generator.resolve_plan_options(
+        supplied,
+        sample_count=20,
+        velocity_limit=0.4,
+        acceleration_limit=0.9,
+    )
+    assert overridden is not supplied
+    assert overridden.max_velocity == pytest.approx(0.4)
+    assert overridden.max_acceleration == pytest.approx(0.9)
+    assert supplied.max_velocity == pytest.approx(1.0)
+    assert supplied.max_acceleration == pytest.approx(2.0)
 
 
 def test_ik_velocity_limits_preserve_caps_and_intersect_scalar_request() -> None:

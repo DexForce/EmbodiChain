@@ -24,9 +24,12 @@ from collections.abc import Sequence
 import torch
 
 __all__ = [
+    "interpolate_minimum_jerk",
     "interpolate_with_distance",
     "interpolate_with_nums",
 ]
+
+_MAX_MINIMUM_JERK_INTERVALS = 10_000
 
 
 def interpolate_minimum_jerk(
@@ -143,6 +146,18 @@ def interpolate_minimum_jerk(
     ).to(torch.int64)
     interval_counts = required.amax(dim=0).clamp_min(1)
 
+    def validate_interval_budget() -> None:
+        total_intervals = int(interval_counts.sum().item())
+        if total_intervals > _MAX_MINIMUM_JERK_INTERVALS:
+            raise ValueError(
+                "minimum-jerk interpolation requires "
+                f"{total_intervals} control intervals, exceeding the safety "
+                f"limit of {_MAX_MINIMUM_JERK_INTERVALS}. Increase the motion "
+                "limits or reduce the keyframe displacement."
+            )
+
+    validate_interval_budget()
+
     minimum_intervals = minimum_sample_count - 1
     missing = minimum_intervals - int(interval_counts.sum().item())
     if missing > 0:
@@ -160,6 +175,7 @@ def interpolate_minimum_jerk(
             ranked = torch.argsort(quotas - additions, descending=True, stable=True)
             additions[ranked[:remainder]] += 1
         interval_counts += additions
+        validate_interval_budget()
 
     def build_positions() -> torch.Tensor:
         segments = [trajectory[:, :1]]
@@ -210,6 +226,7 @@ def interpolate_minimum_jerk(
             torch.int64
         )
         interval_counts = torch.maximum(expanded, interval_counts + 1)
+        validate_interval_budget()
 
     raise ValueError(
         "Unable to satisfy discrete velocity and acceleration limits in the "

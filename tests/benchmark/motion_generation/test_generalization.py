@@ -148,6 +148,90 @@ def test_suite_expands_domains_without_changing_the_case_provider_schema() -> No
     assert suite.resolved_embodiment_id.endswith("franka_panda.yaml")
 
 
+def test_suite_rejects_colliding_expanded_track_ids() -> None:
+    suite = SuiteCfg.from_dict(
+        {
+            "planners": [{"id": "baseline", "adapter": "ik_interpolate"}],
+            "tracks": [
+                {
+                    "id": "foo",
+                    "scenario": "free_space",
+                    "domains": [
+                        {"id": "x", "version": "v1", "kind": "nominal"},
+                        {"id": "y", "version": "v1", "kind": "robustness"},
+                    ],
+                },
+                {"id": "foo@x", "scenario": "free_space"},
+            ],
+        }
+    )
+
+    with pytest.raises(ValueError, match="Expanded benchmark track ids"):
+        suite.evaluation_tracks()
+
+
+def test_suite_validates_atomic_domain_overrides_before_execution() -> None:
+    suite = SuiteCfg.from_dict(
+        {
+            "planners": [{"id": "baseline", "adapter": "ik_interpolate"}],
+            "tracks": [
+                {
+                    "id": "atomic",
+                    "scenario": "atomic_skill",
+                    "config": {"batch_sizes": [1], "seeds": [1]},
+                    "domains": [
+                        {
+                            "id": "bad",
+                            "version": "v1",
+                            "kind": "robustness",
+                            "overrides": {
+                                "randomization": {
+                                    "enabled": True,
+                                    "mode": "none",
+                                    "pose_batch_size": 2,
+                                    "object_translation_jitter_m": [0.1, 0.0, 0.0],
+                                }
+                            },
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(ValueError, match="mode='none'"):
+        suite.evaluation_tracks()
+
+
+def test_suite_preserves_multiple_free_space_track_configs() -> None:
+    common = {
+        "waypoint_counts": [1],
+        "path_shapes": ["direct"],
+        "start_state_bins": ["nominal"],
+        "seeds": [1],
+        "target_types": ["eef"],
+    }
+    suite = SuiteCfg.from_dict(
+        {
+            "planners": [{"id": "baseline", "adapter": "ik_interpolate"}],
+            "tracks": [
+                {
+                    "id": "small",
+                    "scenario": "free_space",
+                    "config": {**common, "batch_sizes": [1]},
+                },
+                {
+                    "id": "large",
+                    "scenario": "free_space",
+                    "config": {**common, "batch_sizes": [8]},
+                },
+            ],
+        }
+    )
+
+    assert [track.config["batch_sizes"] for track in suite.tracks] == [[1], [8]]
+
+
 def test_generalization_excludes_unsupported_cases_but_reports_coverage() -> None:
     nominal = EvaluationDomain(id="nominal", version="v1", kind="nominal")
     held_out = EvaluationDomain(id="objects", version="v1", kind="held_out")

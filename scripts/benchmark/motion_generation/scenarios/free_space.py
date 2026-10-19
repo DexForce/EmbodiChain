@@ -249,8 +249,16 @@ class FreeSpaceScenario(ScenarioProvider):
     def _case_matrix(suite: SuiteCfg, track: TrackCfg) -> FreeSpaceTrackCfg:
         """Resolve the case matrix for one expanded evaluation track."""
         if track.domain is None:
-            return suite.free_space
-        return FreeSpaceTrackCfg(**track.config)
+            free_space_tracks = [
+                candidate
+                for candidate in suite.tracks
+                if candidate.scenario == "free_space" and candidate.enabled
+            ]
+            if len(free_space_tracks) == 1:
+                return suite.free_space
+        if track.config:
+            return FreeSpaceTrackCfg(**track.config)
+        return suite.free_space
 
     def batch_sizes(self, suite: SuiteCfg, track: TrackCfg) -> list[int]:
         return list(self._case_matrix(suite, track).batch_sizes)

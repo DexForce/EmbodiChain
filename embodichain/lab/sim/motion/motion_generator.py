@@ -41,6 +41,7 @@ from embodichain.lab.sim.motion.planners import (
     NeuralPlannerCfg,
     CuroboPlanner,
     CuroboPlannerCfg,
+    CuroboPlanOptions,
 )
 from embodichain.compute.trajectory import (
     interpolate_with_distance,
@@ -484,8 +485,23 @@ class MotionGenerator:
         if sample_count is not None and sample_count < 2:
             raise ValueError("sample_count must be at least 2.")
         if plan_opts is not None:
-            return deepcopy(plan_opts)
+            resolved = deepcopy(plan_opts)
+            if isinstance(resolved, CuroboPlanOptions):
+                if velocity_limit is not None:
+                    resolved.max_velocity = float(velocity_limit)
+                if acceleration_limit is not None:
+                    resolved.max_acceleration = float(acceleration_limit)
+            return resolved
         planner_type = getattr(getattr(self.planner, "cfg", None), "planner_type", None)
+        if planner_type == "curobo":
+            return CuroboPlanOptions(
+                max_velocity=(
+                    None if velocity_limit is None else float(velocity_limit)
+                ),
+                max_acceleration=(
+                    None if acceleration_limit is None else float(acceleration_limit)
+                ),
+            )
         if planner_type in {"toppra", "trapezoidal"} and (
             sample_count is not None
             or velocity_limit is not None

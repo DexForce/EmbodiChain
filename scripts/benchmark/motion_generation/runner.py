@@ -40,7 +40,11 @@ from .artifacts import (
     write_resolved_suite,
 )
 from .config import PlannerSpecCfg, SuiteCfg, stable_hash
-from .embodiments import EmbodimentResolution, resolve_embodiment
+from .embodiments import (
+    EmbodimentResolution,
+    check_embodiment_capabilities,
+    resolve_embodiment,
+)
 from .metrics import timed_call
 from .models import (
     BenchmarkCase,
@@ -489,19 +493,31 @@ class BenchmarkRunner:
         self.metadata.setdefault(metadata.algorithm_id, metadata)
         supported_cases = []
         for case in cases:
-            case_required_capabilities = set(required_capabilities) | set(
-                case.required_capabilities
+            embodiment_decision = check_embodiment_capabilities(
+                self.embodiment_resolution,
+                case.required_capabilities,
             )
-            missing_case_capabilities = sorted(
-                case_required_capabilities - set(adapter.capabilities)
-            )
-            if missing_case_capabilities:
+            if embodiment_decision.status != "supported":
                 self._record_unavailable(
                     writer,
                     metadata,
                     case,
-                    "missing required capabilities: "
-                    + ", ".join(missing_case_capabilities),
+                    embodiment_decision.reason or "unsupported embodiment capability",
+                    failure_code="unsupported_capability",
+                    record_metadata=self._trial_metadata(provider, case, metadata),
+                )
+                continue
+            planner_required_capabilities = set(required_capabilities)
+            missing_planner_capabilities = sorted(
+                planner_required_capabilities - set(adapter.capabilities)
+            )
+            if missing_planner_capabilities:
+                self._record_unavailable(
+                    writer,
+                    metadata,
+                    case,
+                    "missing required capabilities on planner adapter: "
+                    + ", ".join(missing_planner_capabilities),
                     failure_code="unsupported_capability",
                     record_metadata=self._trial_metadata(provider, case, metadata),
                 )

@@ -23,10 +23,10 @@ import torch
 import warp as wp
 
 from embodichain.compute.trajectory import (
+    interpolate_minimum_jerk,
     interpolate_with_distance,
     resample_with_distance,
 )
-from embodichain.compute.trajectory.interpolation import interpolate_minimum_jerk
 
 
 def test_minimum_jerk_expands_sample_count_and_preserves_limits() -> None:
@@ -115,6 +115,28 @@ def test_minimum_jerk_allows_only_stationary_zero_speed_joints() -> None:
             step_dt=0.05,
             velocity_limit=torch.tensor([0.0, 0.2]),
             acceleration_limit=0.5,
+        )
+
+
+def test_minimum_jerk_rejects_unbounded_interval_requests() -> None:
+    with pytest.raises(ValueError, match="exceeding the safety limit"):
+        interpolate_minimum_jerk(
+            torch.tensor([[[0.0], [1.0]]]),
+            minimum_sample_count=3,
+            step_dt=0.01,
+            velocity_limit=1.0e-12,
+            acceleration_limit=1.0,
+        )
+
+
+def test_minimum_jerk_rejects_oversized_requested_sample_count() -> None:
+    with pytest.raises(ValueError, match="exceeding the safety limit"):
+        interpolate_minimum_jerk(
+            torch.tensor([[[0.0], [0.0]]]),
+            minimum_sample_count=10_002,
+            step_dt=0.01,
+            velocity_limit=1.0,
+            acceleration_limit=1.0,
         )
 
 
