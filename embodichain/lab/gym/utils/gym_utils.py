@@ -523,6 +523,18 @@ def config_to_cfg(
     )
     from embodichain.utils import configclass
     from embodichain.data import get_data_path
+    from embodichain.lab.sim.cfg.source import _asset_file_path
+
+    def resolve_asset_paths(
+        asset: RigidObjectCfg | VisualObjectCfg | ArticulationCfg,
+    ) -> None:
+        path = _asset_file_path(asset)
+        if getattr(asset, "source", None) is not None:
+            asset.source.file_path = get_data_path(path)
+        elif isinstance(getattr(asset, "shape", None), MeshCfg) and path is not None:
+            asset.shape.fpath = get_data_path(path)
+        elif isinstance(asset, ArticulationCfg) and path is not None:
+            asset.fpath = get_data_path(path)
 
     @configclass
     class ComponentCfg:
@@ -736,6 +748,8 @@ def config_to_cfg(
 
     env_cfg.robot = _robot_cfg_from_dict(config["robot"])
     env_cfg.robot.enable_sensor = env_cfg.enable_sensor
+    if env_cfg.robot.source is not None:
+        resolve_asset_paths(env_cfg.robot)
 
     # Parse source-neutral expert trajectory settings owned by the environment.
     # Keep this under ``env`` so deployment configs do not duplicate runtime
@@ -761,49 +775,40 @@ def config_to_cfg(
 
     for visual_dict in config.get("visual_object", []):
         visual = VisualObjectCfg.from_dict(visual_dict)
-        if isinstance(visual.shape, MeshCfg) and visual.shape.fpath is not None:
-            visual.shape.fpath = get_data_path(visual.shape.fpath)
+        resolve_asset_paths(visual)
         env_cfg.visual_object.append(visual)
 
     # parser background objects config
     if "background" in config:
         for obj_dict in config["background"]:
-            shape_type = obj_dict["shape"]["shape_type"]
-            if shape_type == "Mesh":
-                obj_dict["shape"]["fpath"] = get_data_path(obj_dict["shape"]["fpath"])
             # Set to static object if not specified.
             obj_dict["body_type"] = (
                 "static" if "body_type" not in obj_dict else obj_dict["body_type"]
             )
             cfg = RigidObjectCfg.from_dict(obj_dict)
+            resolve_asset_paths(cfg)
             env_cfg.background.append(cfg)
 
     # parser scene objects config
     if "rigid_object" in config:
         for obj_dict in config["rigid_object"]:
-            shape_type = obj_dict["shape"]["shape_type"]
-            if shape_type == "Mesh":
-                obj_dict["shape"]["fpath"] = get_data_path(obj_dict["shape"]["fpath"])
             cfg = RigidObjectCfg.from_dict(obj_dict)
+            resolve_asset_paths(cfg)
             env_cfg.rigid_object.append(cfg)
 
     if "rigid_object_group" in config:
         for obj_dict in config["rigid_object_group"]:
             if "folder_path" in obj_dict:
                 obj_dict["folder_path"] = get_data_path(obj_dict["folder_path"])
-            for rigid_obj in obj_dict["rigid_objects"].values():
-                shape_type = rigid_obj["shape"]["shape_type"]
-                if shape_type == "Mesh" and "fpath" in rigid_obj["shape"]:
-                    rigid_obj["shape"]["fpath"] = get_data_path(
-                        rigid_obj["shape"]["fpath"]
-                    )
             cfg = RigidObjectGroupCfg.from_dict(obj_dict)
+            for member in cfg.rigid_objects.values():
+                resolve_asset_paths(member)
             env_cfg.rigid_object_group.append(cfg)
 
     if "articulation" in config:
         for obj_dict in config["articulation"]:
-            obj_dict["fpath"] = get_data_path(obj_dict["fpath"])
             cfg = ArticulationCfg.from_dict(obj_dict)
+            resolve_asset_paths(cfg)
             env_cfg.articulation.append(cfg)
 
     env_cfg.control_parts = config["env"].get("control_parts", None)

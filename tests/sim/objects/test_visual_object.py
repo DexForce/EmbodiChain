@@ -24,7 +24,7 @@ import pytest
 import torch
 from dexsim.spawn import CollisionDesc, ObjectDesc, RigidBodyPhysicsDesc
 
-from embodichain.lab.sim.cfg import VisualObjectCfg
+from embodichain.lab.sim.cfg import VisualObjectCfg, UsdSourceCfg
 from embodichain.lab.sim.cfg import ObjectBaseCfg, RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject, VisualObject
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
@@ -243,7 +243,10 @@ def test_explicit_visual_usd_selection_imports_only_appearance(tmp_path):
     path = _usd_scene(tmp_path)
     descriptor, _ = visual_desc_from_usd(
         VisualObjectCfg(
-            uid="selected", shape=MeshCfg(fpath=str(path)), prim_path="/World/Physical"
+            uid="selected",
+            source=UsdSourceCfg(
+                file_path=str(path), source_prim_path="/World/Physical"
+            ),
         )
     )
     assert descriptor.name == "selected"
@@ -391,33 +394,37 @@ def test_visual_mesh_file_config_and_spawn_match_rigid_convention(tmp_path, suff
     assert not descriptor.collisions
 
 
-def test_prim_selection_is_inherited_and_shared_by_visual_and_rigid(tmp_path):
-    assert "prim_path" in ObjectBaseCfg.__annotations__
+def test_usd_source_selection_is_shared_by_visual_and_rigid(tmp_path):
+    assert "prim_path" not in ObjectBaseCfg.__annotations__
     path = _usd_scene(tmp_path)
     data = {
         "uid": "selected",
-        "shape": {"shape_type": "Mesh", "fpath": str(path)},
-        "prim_path": "/World/Physical",
+        "source": {"file_path": str(path), "source_prim_path": "/World/Physical"},
     }
     visual, _ = visual_desc_from_usd(VisualObjectCfg.from_dict(data))
     rigid, _ = rigid_desc_from_usd(RigidObjectCfg.from_dict(data))
-    assert visual.usd.prim_path == rigid.usd.prim_path == data["prim_path"]
+    assert (
+        visual.usd.prim_path
+        == rigid.usd.prim_path
+        == data["source"]["source_prim_path"]
+    )
     assert visual.physics is None
     assert rigid.physics is not None
 
 
-def test_shared_prim_selector_preserves_existing_positional_config_arguments():
+def test_source_preserves_existing_positional_config_arguments():
     cfg = RigidObjectCfg("rigid", (1.0, 2.0, 3.0))
     assert cfg.uid == "rigid"
     assert cfg.init_pos == (1.0, 2.0, 3.0)
-    assert cfg.prim_path is None
+    assert cfg.source is None
 
 
-def test_visual_spawn_rejects_prim_selector_for_basic_mesh(tmp_path):
+def test_visual_spawn_rejects_non_usd_source_file(tmp_path):
     cfg = VisualObjectCfg(
         uid="bad",
-        shape=MeshCfg(fpath=str(tmp_path / "mesh.obj")),
-        prim_path="/World/Mesh",
+        source=UsdSourceCfg(
+            file_path=str(tmp_path / "mesh.obj"), source_prim_path="/World/Mesh"
+        ),
     )
     with pytest.raises(ValueError, match="requires a USD source"):
         visual_desc_from_cfg(cfg)

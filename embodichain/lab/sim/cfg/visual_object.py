@@ -18,12 +18,15 @@
 
 from __future__ import annotations
 
+from dataclasses import field
+
 # Resolve inherited ObjectBaseCfg annotations in runtime type inspection.
 import numpy as np
 
 from embodichain.utils import configclass
 from ..shapes import ShapeCfg
 from .asset import ObjectBaseCfg
+from .source import UsdSourceCfg
 
 __all__ = ["VisualObjectCfg"]
 
@@ -34,14 +37,17 @@ class VisualObjectCfg(ObjectBaseCfg):
 
     Like :class:`~embodichain.lab.sim.cfg.RigidObjectCfg`, ``MeshCfg.fpath``
     supplies ordinary mesh files such as OBJ, STL, GLB and glTF.
-    The inherited ``prim_path`` optionally
-    selects one mesh object from a USD scene. Explicit
+    ``source=UsdSourceCfg(...)`` optionally selects one mesh object from a
+    source USD scene. Explicit
     visual-object creation uses only its appearance; USD physics is omitted.
     Whole-scene import instead preserves each entity's authored physical type.
     """
 
-    shape: ShapeCfg = ShapeCfg()
+    shape: ShapeCfg | None = None
     """Mesh, cube or sphere supplying the object's appearance."""
+
+    source: UsdSourceCfg | None = field(default=None, kw_only=True)
+    """USD source asset; mutually exclusive with :attr:`shape`."""
 
     body_scale: tuple[float, float, float] = (1.0, 1.0, 1.0)
     """Scale applied to the visual geometry, independently of its root pose."""

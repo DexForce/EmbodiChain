@@ -106,6 +106,7 @@ from embodichain.lab.sim.cfg import (
     LightCfg,
     RigidObjectCfg,
     VisualObjectCfg,
+    UsdSourceCfg,
     DeformableObjectCfg,
     SurfaceDeformableObjectCfg,
     VolumeDeformableObjectCfg,
@@ -117,6 +118,7 @@ from embodichain.lab.sim.cfg import (
     RigidConstraintCfg,
 )
 from embodichain.lab.sim.physics import make_physics_backend
+from embodichain.lab.sim.cfg.source import _asset_file_path
 from embodichain.lab.sim.spawn.descriptors import (
     articulation_desc_from_cfg,
     configure_articulation_desc,
@@ -2541,6 +2543,14 @@ class SimulationManager:
                 if descriptor.physics is None and not descriptor.collisions:
                     cfg = VisualObjectCfg(
                         uid=descriptor.name,
+                        source=UsdSourceCfg(
+                            file_path=file_path,
+                            source_prim_path=(
+                                descriptor.usd.prim_path
+                                if descriptor.usd is not None
+                                else None
+                            ),
+                        ),
                         init_local_pose=descriptor.pose.copy(),
                         body_scale=tuple(
                             float(value) for value in descriptor.body_scale
@@ -2562,6 +2572,14 @@ class SimulationManager:
                     }[descriptor.physics.actor_type]
                 cfg = RigidObjectCfg(
                     uid=descriptor.name,
+                    source=UsdSourceCfg(
+                        file_path=file_path,
+                        source_prim_path=(
+                            descriptor.usd.prim_path
+                            if descriptor.usd is not None
+                            else None
+                        ),
+                    ),
                     init_local_pose=descriptor.pose.copy(),
                     body_type=body_type,
                     body_scale=tuple(float(value) for value in descriptor.body_scale),
@@ -2593,7 +2611,13 @@ class SimulationManager:
                     else ArticulationCfg(uid=descriptor.name)
                 )
                 cfg.uid = descriptor.name
-                cfg.fpath = file_path
+                cfg.fpath = None
+                cfg.source = UsdSourceCfg(
+                    file_path=file_path,
+                    source_prim_path=(
+                        descriptor.usd.prim_path if descriptor.usd is not None else None
+                    ),
+                )
                 cfg.init_local_pose = descriptor.pose.copy()
                 cfg.asset_physics_mode = "preserve"
                 if robot_cfg is None:
@@ -2628,15 +2652,15 @@ class SimulationManager:
         """Declare a render-only mesh or primitive, without physics or colliders.
 
         Args:
-            cfg: Appearance and initial state. A USD source may select one
-                object with ``prim_path``; only its appearance is imported.
+            cfg: Appearance and initial state. ``source=UsdSourceCfg(...)``
+                selects a source USD object; only its appearance is imported.
 
         Returns:
             The declared facade, bound after ``prepare()``.
         """
         if cfg.uid is None or cfg.uid in self.asset_uids:
             raise ValueError("Visual object requires a unique, nonempty UID.")
-        path = getattr(cfg.shape, "fpath", None)
+        path = _asset_file_path(cfg)
         if _is_usd_path(path):
             descriptor, materials = visual_desc_from_usd(cfg)
         else:
@@ -2758,7 +2782,7 @@ class SimulationManager:
 
         declarations = []
         for cfg in cfgs:
-            source_path = getattr(cfg.shape, "fpath", None)
+            source_path = _asset_file_path(cfg)
             if _is_usd_path(source_path):
                 descriptor, materials = rigid_desc_from_usd(
                     cfg,
@@ -3179,7 +3203,7 @@ class SimulationManager:
             member_cfg = deepcopy(member)
             member_cfg.uid = f"{uid}__member_{index}"
             member_cfg.body_type = cfg.body_type
-            source_path = getattr(member_cfg.shape, "fpath", None)
+            source_path = _asset_file_path(member_cfg)
             if _is_usd_path(source_path):
                 descriptor, materials = rigid_desc_from_usd(
                     member_cfg,
@@ -3287,12 +3311,13 @@ class SimulationManager:
         """
         uid = cfg.uid
         if uid is None:
-            if cfg.fpath is None:
+            source_path = _asset_file_path(cfg)
+            if source_path is None:
                 raise ValueError(
                     "Articulation configuration must provide fpath when uid "
                     "is not specified."
                 )
-            uid = os.path.splitext(os.path.basename(cfg.fpath))[0]
+            uid = os.path.splitext(os.path.basename(source_path))[0]
             cfg.uid = uid
         if uid in self._articulations:
             raise ValueError(f"Articulation {uid!r} already exists.")
@@ -3352,7 +3377,8 @@ class SimulationManager:
             )
 
         uid = cfg.uid
-        if cfg.fpath is None:
+        source_path = _asset_file_path(cfg)
+        if source_path is None:
             if cfg.urdf_cfg is None:
                 logger.log_error(
                     "Robot configuration must have a valid fpath or urdf_cfg."
@@ -3360,6 +3386,7 @@ class SimulationManager:
                 return None
 
             cfg.fpath = cfg.urdf_cfg.assemble_urdf()
+            source_path = cfg.fpath
 
             if cfg.solver_cfg is not None:
                 if isinstance(cfg.solver_cfg, dict):
@@ -3368,7 +3395,7 @@ class SimulationManager:
                             value.urdf_path = cfg.fpath
 
         if uid is None:
-            uid = os.path.splitext(os.path.basename(cfg.fpath))[0]
+            uid = os.path.splitext(os.path.basename(source_path))[0]
             cfg.uid = uid
         if uid in self._robots:
             logger.log_error(f"Robot {uid} already exists.")
@@ -3419,7 +3446,7 @@ class SimulationManager:
         backend materializes it. Runtime Batch data is created at the shared
         prepare boundary.
         """
-        if _is_usd_path(cfg.fpath):
+        if _is_usd_path(_asset_file_path(cfg)):
             descriptor, materials = articulation_desc_from_usd(
                 cfg,
                 per_env=True,

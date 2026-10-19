@@ -39,6 +39,7 @@ from .articulation import (
     link_attrs_from_dict,
 )
 from .asset import AssetPhysicsMode, ObjectBaseCfg, _resolve_asset_physics_mode
+from .source import UsdSourceCfg
 from .deformable import (
     SurfaceElementPropertiesCfg,
     VolumeDeformableMeshingCfg,
@@ -118,6 +119,7 @@ __all__ = [
     "NewtonRigidBodyMaterialCfg",
     "RigidBodyPhysicsCfg",
     "ObjectBaseCfg",
+    "UsdSourceCfg",
     "LightCfg",
     "RigidObjectCfg",
     "VisualObjectCfg",

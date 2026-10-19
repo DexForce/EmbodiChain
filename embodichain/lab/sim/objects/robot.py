@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from tensordict import TensorDict
 
 from embodichain.lab.sim.cfg import RobotCfg, RobotWorkspaceCfg
+from embodichain.lab.sim.cfg.source import _asset_file_path
 from embodichain.lab.sim.motion.solvers import SolverCfg, BaseSolver
 from embodichain.lab.sim.objects import Articulation
 from embodichain.lab.sim.utility.tensor import to_tensor
@@ -1341,7 +1342,7 @@ class Robot(Articulation):
                 )
 
             if cfg.urdf_path is None:
-                cfg.urdf_path = self.cfg.fpath
+                cfg.urdf_path = _asset_file_path(self.cfg)
             self._solvers["default"] = cfg.init_solver(device=self.device)
             self._sync_solver_limits()
         elif isinstance(cfg, Dict):
@@ -1353,7 +1354,7 @@ class Robot(Articulation):
             # If solver_cfg is a dictionary, iterate through it to create solvers
             for name, solver_cfg in cfg.items():
                 if solver_cfg.urdf_path is None:
-                    solver_cfg.urdf_path = self.cfg.fpath
+                    solver_cfg.urdf_path = _asset_file_path(self.cfg)
                 _, part_names, value = resolve_matching_names_values(
                     {name: solver_cfg}, self.cfg.control_parts.keys()
                 )

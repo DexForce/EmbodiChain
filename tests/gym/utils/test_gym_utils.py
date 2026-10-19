@@ -2661,3 +2661,33 @@ def test_config_to_cfg_loads_render_only_objects():
     assert isinstance(cfg.visual_object[0].shape, CubeCfg)
     assert not cfg.rigid_object
     assert not cfg.background
+
+
+def test_config_to_cfg_resolves_usd_source_files(monkeypatch, tmp_path):
+    from embodichain.lab.sim.cfg import UsdSourceCfg
+
+    monkeypatch.setattr(
+        "embodichain.data.get_data_path", lambda path: str(tmp_path / path)
+    )
+    config = {
+        "id": "EmbodiedEnv-v1",
+        "physics": "default",
+        "env": {},
+        "robot": {"uid": "robot"},
+    }
+    for key in ("visual_object", "rigid_object", "background", "articulation"):
+        config[key] = [
+            {
+                "uid": key,
+                "source": {
+                    "file_path": "scene.usda",
+                    "source_prim_path": "/World/Asset",
+                },
+            }
+        ]
+    cfg = config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+    for key in ("visual_object", "rigid_object", "background", "articulation"):
+        asset = getattr(cfg, key)[0]
+        assert isinstance(asset.source, UsdSourceCfg)
+        assert asset.source.file_path == str(tmp_path / "scene.usda")
+        assert asset.source.source_prim_path == "/World/Asset"

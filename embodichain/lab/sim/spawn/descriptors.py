@@ -38,6 +38,8 @@ import os
 import warnings
 from typing import TYPE_CHECKING
 
+from embodichain.lab.sim.cfg.source import _asset_file_path
+
 import numpy as np
 from dexsim.spawn import (
     ArticulationDesc,
@@ -294,13 +296,11 @@ def visual_desc_from_cfg(
     """
     cfg.validate()
     uid = _required_uid(cfg.uid, "Visual object")
-    if isinstance(cfg.shape, MeshCfg) and _is_usd_path(cfg.shape.fpath):
+    if _is_usd_path(_asset_file_path(cfg)):
         raise NotImplementedError(
             "USD files describe typed scenes; use visual_desc_from_usd() to "
             "select a visual object's appearance."
         )
-    if cfg.prim_path is not None:
-        raise ValueError("VisualObjectCfg.prim_path requires a USD source.")
     shape = cfg.shape
     if isinstance(shape, MeshCfg):
         geometry = _mesh_geometry_from_cfg(shape, segment_name=uid)
@@ -343,17 +343,11 @@ def rigid_desc_from_cfg(
 ) -> tuple[ObjectDesc, dict[str, MaterialDesc]]:
     """Translate a rigid-object config into a DexSim Spawn descriptor."""
     uid = _required_uid(cfg.uid, "Rigid object")
-    if (
-        isinstance(cfg.shape, MeshCfg)
-        and not _is_missing(cfg.shape.fpath)
-        and _is_usd_path(cfg.shape.fpath)
-    ):
+    if _is_usd_path(_asset_file_path(cfg)):
         raise NotImplementedError(
             "USD files describe typed scenes; use rigid_desc_from_usd() to "
             "select one rigid object."
         )
-    if cfg.prim_path is not None:
-        raise ValueError("RigidObjectCfg.prim_path requires a USD source.")
 
     physics = _with_procedural_collision_defaults(
         _resolve_rigid_physics(
@@ -663,7 +657,8 @@ def articulation_desc_from_cfg(
     newton_solver_type: str | None = None,
 ) -> ArticulationDesc:
     """Translate an articulation config into a DexSim Spawn descriptor."""
-    path = source_path if source_path is not None else cfg.fpath
+    configured_path = _asset_file_path(cfg)
+    path = source_path if source_path is not None else configured_path
     if path is None or not str(path).strip():
         raise ValueError(
             "No articulation source path is available. Assemble the robot URDF "
@@ -674,8 +669,6 @@ def articulation_desc_from_cfg(
             "USD files describe typed scenes; use articulation_desc_from_usd() "
             "to select one articulation."
         )
-    if cfg.prim_path is not None:
-        raise ValueError("ArticulationCfg.prim_path requires a USD source.")
     if cfg.resolve_asset_physics_mode() == "overlay":
         _validate_articulation_rigid_physics(
             cfg,
@@ -820,7 +813,7 @@ def configure_articulation_desc(
         cfg.attrs,
         newton_solver_type=newton_solver_type,
     )
-    author_newton_shape_defaults = not _is_usd_path(cfg.fpath)
+    author_newton_shape_defaults = not _is_usd_path(_asset_file_path(cfg))
     default_link_properties = _compile_link_properties(
         default_physics,
         newton_solver_type=newton_solver_type,

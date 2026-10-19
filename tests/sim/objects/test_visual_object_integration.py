@@ -28,6 +28,8 @@ from embodichain.lab.sim import (
 from embodichain.lab.sim.cfg import (
     RenderCfg,
     RigidObjectCfg,
+    ArticulationCfg,
+    UsdSourceCfg,
     VisualObjectCfg,
     physics_cfg_for_backend,
 )
@@ -158,14 +160,19 @@ def test_visual_mesh_sources_use_native_batch_pose(physics, tmp_path):
                 "init_rot": (10.0, 20.0, 30.0),
             }
             if path == usd_path:
-                data["prim_path"] = "/World/Physical"
+                del data["shape"]
+                data["source"] = {
+                    "file_path": str(path),
+                    "source_prim_path": "/World/Physical",
+                }
             cfg = VisualObjectCfg.from_dict(data)
             visuals.append(sim.add_visual_object(cfg))
         rigid = sim.add_rigid_object(
             RigidObjectCfg(
                 uid="selected_rigid",
-                shape=MeshCfg(fpath=str(usd_path)),
-                prim_path="/World/Physical",
+                source=UsdSourceCfg(
+                    file_path=str(usd_path), source_prim_path="/World/Physical"
+                ),
             )
         )
         sim.prepare()
@@ -268,4 +275,59 @@ def test_visual_native_cuda_pose_buffers():
     finally:
         sim.destroy(exit_process=False)
         visual = None
+        SimulationManager.flush_cleanup_queue()
+
+
+@pytest.mark.parametrize("physics", ["default", "newton"])
+def test_usd_source_selects_articulation_root(physics, tmp_path):
+    from pxr import Usd, UsdGeom, UsdPhysics
+
+    path = tmp_path / "arms.usda"
+    stage = Usd.Stage.CreateNew(str(path))
+    for name in ("ArmA", "ArmB"):
+        root = UsdGeom.Xform.Define(stage, f"/World/{name}").GetPrim()
+        UsdPhysics.ArticulationRootAPI.Apply(root)
+        for link in ("Base", "Tip"):
+            body = UsdGeom.Xform.Define(stage, f"/World/{name}/{link}").GetPrim()
+            UsdPhysics.RigidBodyAPI.Apply(body)
+            UsdPhysics.MassAPI.Apply(body).CreateMassAttr().Set(1.0)
+            mesh = UsdGeom.Cube.Define(stage, f"/World/{name}/{link}/mesh")
+            mesh.CreateSizeAttr().Set(0.1)
+            UsdPhysics.CollisionAPI.Apply(mesh.GetPrim())
+        fixed = UsdPhysics.FixedJoint.Define(stage, f"/World/{name}/root_joint")
+        fixed.CreateBody1Rel().SetTargets([f"/World/{name}/Base"])
+        hinge = UsdPhysics.RevoluteJoint.Define(stage, f"/World/{name}/hinge")
+        hinge.CreateBody0Rel().SetTargets([f"/World/{name}/Base"])
+        hinge.CreateBody1Rel().SetTargets([f"/World/{name}/Tip"])
+        hinge.CreateAxisAttr().Set("Z")
+        hinge.CreateLowerLimitAttr().Set(-45.0)
+        hinge.CreateUpperLimitAttr().Set(45.0)
+    stage.GetRootLayer().Save()
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            device="cpu",
+            num_envs=2,
+            scene_node_capacity=128,
+            physics_cfg=physics_cfg_for_backend(physics),
+            render_cfg=RenderCfg(renderer="hybrid"),
+        )
+    )
+    articulation = None
+    try:
+        articulation = sim.add_articulation(
+            ArticulationCfg(
+                source=UsdSourceCfg(file_path=str(path), source_prim_path="/World/ArmB")
+            )
+        )
+        sim.prepare()
+        assert sim.get_articulation_uid_list() == ["arms"]
+        assert articulation.dof == 1
+        assert articulation.num_instances == 2
+        assert articulation.pk_chain is not None
+        assert articulation.cfg.fpath is None
+        assert articulation.cfg.source.source_prim_path == "/World/ArmB"
+    finally:
+        sim.destroy(exit_process=False)
+        articulation = None
         SimulationManager.flush_cleanup_queue()

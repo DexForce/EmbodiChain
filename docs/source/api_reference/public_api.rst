@@ -999,10 +999,28 @@ embodichain.lab.sim.diff.bridge
    NewtonStepFunc
    tape_context
 
+embodichain.lab.sim.cfg.source
+-------------------------------
+
+USD source configuration identifies a file and an optional exact prim inside
+that file. Source selection is independent of runtime identity, placement and
+parent/link attachment. Supply it through ``source`` on a visual, rigid-object
+or articulation configuration. Existing mesh and URDF file inputs remain
+available; each asset has one file owner.
+
+.. currentmodule:: embodichain.lab.sim.cfg.source
+
+.. autosummary::
+
+   UsdSourceCfg
+
+.. autoclass:: UsdSourceCfg
+   :members:
+
 embodichain.lab.sim.cfg.visual_object
 -------------------------------------
 
-Render-only geometry, optional USD prim selection, and initial visual state.
+Render-only geometry or a USD source, and initial visual state.
 
 .. currentmodule:: embodichain.lab.sim.cfg.visual_object
 

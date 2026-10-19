@@ -32,6 +32,7 @@ from dexsim.spawn import (
 from dexsim.types import ActorType
 
 from embodichain.lab.sim.cfg import ArticulationCfg, RigidObjectCfg, VisualObjectCfg
+from embodichain.lab.sim.cfg.source import _asset_file_path, _source_prim_path
 from embodichain.lab.sim.spawn.descriptors import (
     _apply_newton_gap_default,
     _compile_default_collision,
@@ -119,7 +120,10 @@ def visual_desc_from_usd(
     """
     cfg.validate()
     scene, desc = _parse_singleton(
-        cfg.shape.fpath, "mesh_objects", "visual object", prim_path=cfg.prim_path
+        _asset_file_path(cfg),
+        "mesh_objects",
+        "visual object",
+        prim_path=_source_prim_path(cfg),
     )
     desc.name = _required_uid(cfg.uid, "Visual object")
     desc.pose = _pose_from_cfg(cfg)
@@ -130,7 +134,7 @@ def visual_desc_from_usd(
     desc.body_scale = scale
     materials = _namespace_materials(desc.renders, scene.materials, desc.name)
     material_ref, material_entry = _compile_visual_material(
-        desc.name, cfg.shape.visual_material
+        desc.name, getattr(cfg.shape, "visual_material", None)
     )
     if material_entry is not None:
         materials = {material_entry[0]: material_entry[1]}
@@ -148,9 +152,9 @@ def rigid_desc_from_usd(
 ) -> tuple[ObjectDesc, dict[str, MaterialDesc]]:
     """Select a rigid object by exact prim path, or require a singleton stage."""
     uid = _required_uid(cfg.uid, "Rigid object")
-    path = getattr(cfg.shape, "fpath", None)
+    path = _asset_file_path(cfg)
     scene, desc = _parse_singleton(
-        path, "mesh_objects", "rigid object", prim_path=cfg.prim_path
+        path, "mesh_objects", "rigid object", prim_path=_source_prim_path(cfg)
     )
 
     desc.name = uid
@@ -197,7 +201,7 @@ def rigid_desc_from_usd(
     _apply_newton_gap_default(desc.collisions, newton_solver_type)
     material_ref, material_entry = _compile_visual_material(
         uid,
-        cfg.shape.visual_material,
+        getattr(cfg.shape, "visual_material", None),
     )
     if material_entry is not None:
         materials = {material_entry[0]: material_entry[1]}
@@ -221,9 +225,10 @@ def articulation_desc_from_usd(
             cfg,
             newton_solver_type=newton_solver_type,
         )
-    path = source_path or cfg.fpath
+    configured_path = _asset_file_path(cfg)
+    path = source_path or configured_path
     scene, desc = _parse_singleton(
-        path, "articulations", "articulation", prim_path=cfg.prim_path
+        path, "articulations", "articulation", prim_path=_source_prim_path(cfg)
     )
     uid = _required_uid(
         cfg.uid or os.path.splitext(os.path.basename(str(path)))[0],
