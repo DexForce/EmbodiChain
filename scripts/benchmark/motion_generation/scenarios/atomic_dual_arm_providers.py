@@ -65,6 +65,7 @@ from ..evaluation import StageEvidence, evaluate_skill_stage_batch
 from ..models import BenchmarkCase, CaseOutcome
 from .atomic_task import (
     _ExecutionObservation,
+    _apply_task_frame_randomization,
     _apply_target_rotation_randomization,
     _atomic_case_id,
     _case_name,
@@ -1419,6 +1420,9 @@ def _placement_pose_row(
     local_min: torch.Tensor,
     local_max: torch.Tensor,
     config: Mapping[str, object],
+    *,
+    placing_target_frame_pose: torch.Tensor | None = None,
+    support_target_frame_pose: torch.Tensor | None = None,
 ) -> dict[str, torch.Tensor]:
     """Build one row of coordinated-placement grasps and targets."""
     from scripts.tutorials.atomic_action import coordinated_placement as tutorial
@@ -1438,9 +1442,15 @@ def _placement_pose_row(
         device,
         z_clearance=float(config.get("support_grasp_z_clearance_m", 0.0)),
     )
-    support_target = tutorial.build_support_object_target_pose(support_pose, device)
+    if placing_target_frame_pose is None:
+        placing_target_frame_pose = placing_pose
+    if support_target_frame_pose is None:
+        support_target_frame_pose = support_pose
+    support_target = tutorial.build_support_object_target_pose(
+        support_target_frame_pose, device
+    )
     placing_target = tutorial.build_placing_object_target_pose(
-        placing_pose,
+        placing_target_frame_pose,
         placing_vertices,
         support_vertices,
         support_target,
@@ -1485,6 +1495,13 @@ def _placement_poses(
     placing_vertices, support_vertices, local_min, local_max = _placement_geometry(
         placing, support, device
     )
+    task_frame_pose = torch.eye(4, dtype=placing_pose.dtype, device=device).repeat(
+        placing_pose.shape[0], 1, 1
+    )
+    _apply_task_frame_randomization(task_frame_pose, config, seed=seed)
+    world_to_task_frame = pose_inv(task_frame_pose)
+    placing_target_frame_pose = torch.bmm(world_to_task_frame, placing_pose)
+    support_target_frame_pose = torch.bmm(world_to_task_frame, support_pose)
     rows = [
         _placement_pose_row(
             placing_pose[row],
@@ -1494,10 +1511,14 @@ def _placement_poses(
             local_min,
             local_max,
             config,
+            placing_target_frame_pose=placing_target_frame_pose[row],
+            support_target_frame_pose=support_target_frame_pose[row],
         )
         for row in range(placing_pose.shape[0])
     ]
     poses = {name: torch.stack([row[name] for row in rows]) for name in rows[0]}
+    for name in ("placing_target_pose", "support_target_pose"):
+        poses[name] = torch.bmm(task_frame_pose, poses[name])
     target_offset = _randomized_vector_batch(
         _float_vector(
             config.get("target_object_offset_m"),
