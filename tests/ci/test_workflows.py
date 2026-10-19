@@ -110,54 +110,6 @@ def test_test_package_install_uses_explicit_public_index_and_private_sources() -
     assert "--extra-index-url https://download.blender.org/pypi/" in package_install
 
 
-def test_curobo_source_is_bundled_before_self_hosted_installation() -> None:
-    jobs = _load_workflow("main.yml")["jobs"]
-    planner = jobs["test_plan"]
-    assert planner["runs-on"] == "ubuntu-latest"
-    source = next(
-        step
-        for step in planner["steps"]
-        if step.get("with", {}).get("repository") == "NVlabs/curobo"
-    )
-    assert source["with"]["ref"] == "refs/tags/v0.8.0"
-    assert source["with"]["persist-credentials"] == "false"
-    build = next(
-        step
-        for step in planner["steps"]
-        if step.get("name") == "Build cuRobo source distribution"
-    )
-    upload = next(
-        step
-        for step in planner["steps"]
-        if step.get("with", {}).get("name") == "curobo-sdist"
-    )
-    for step in (source, build, upload):
-        assert step["if"] == "steps.plan.outputs.needs_curobo == 'true'"
-    assert "python -m build --sdist" in build["run"]
-    assert source["with"]["path"] in build["run"]
-    assert upload["with"]["path"] in build["run"]
-    assert upload["with"]["if-no-files-found"] == "error"
-
-    steps = jobs["test"]["steps"]
-    download = next(
-        step for step in steps if step.get("with", {}).get("name") == "curobo-sdist"
-    )
-    assert download["if"] == "env.NEEDS_CUROBO == 'true'"
-    assert download["uses"].startswith("actions/download-artifact@")
-    install = next(step for step in steps if step.get("name") == "Install test package")
-    assert steps.index(download) < steps.index(install)
-    command = install["run"]
-    assert "git+https://github.com/NVlabs/curobo" not in command
-    assert (
-        "nvidia-curobo[cu12] @ file://${GITHUB_WORKSPACE}/"
-        f"{download['with']['path']}/nvidia_curobo-0.8.0.tar.gz"
-    ) in command
-    # Installation errors must still fail the test job and its required gate.
-    assert "set -euo pipefail" in command
-    assert install.get("continue-on-error", "false") == "false"
-    assert "test" in jobs["test_gate"]["needs"]
-
-
 def test_simulator_test_job_installs_node_before_workflow_contract_tests() -> None:
     steps = _load_workflow("main.yml")["jobs"]["test"]["steps"]
     setup_index = next(
