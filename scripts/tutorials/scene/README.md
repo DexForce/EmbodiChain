@@ -273,6 +273,11 @@ replication offsets. The application result lists the host caches requiring
 refresh. Geometric acceptance does not establish robot reachability or task
 success.
 
+The main support uses a mesh-covered rectangular sampling region. Detection
+retains tabletop openings and chooses a rectangle that excludes them; an
+irregular support may therefore offer a smaller sampling area. Content-addressed
+preparation caches from earlier extractors remain untouched and are not reused.
+
 Handwritten expert and simulator RL environments configure the same service as
 an ordinary reset event, without a Task Program or an additional environment
 configuration switch:
@@ -312,6 +317,12 @@ To replay v4 layouts, use `source: {kind: saved, layout_dir: /absolute/run/path}
 Replay cycles saved candidates and never resamples. Failed preparation or writes
 block recording for the affected rows.
 
+Reset info and episode metadata use provenance schema 2. Read one event through
+`info["scene_randomization"][row]["events"]["scene_layout"]` for the event name
+above. Each named event retains its own source, variant ID, seed and ordinal.
+Disjoint layout events can coexist; resetting one clears only its selected rows
+and provenance. A success in one event cannot clear another event's failure.
+
 Scene Engine generation/edit APIs accept an optional `scene_randomization` job
 or YAML policy. The combined CLI triggers it once after its final export:
 
@@ -325,6 +336,8 @@ New pipeline jobs produce v4 packages. Existing `scene-randomization` policies
 and v1/v2/v3 runs retain their original behavior. Convert a validated old run
 without sampling or changing its IDs through
 `embodichain.gen_sim.scene_engine.randomization.adapter.convert_layouts`.
+Hierarchical v3 conversion retains the validated support certificate and the
+height rules used by the old extractor, without detecting support again.
 
 Measure the complete shared path, including four-environment native application:
 

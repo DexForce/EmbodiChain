@@ -33,6 +33,7 @@ from embodichain.lab.sim.scene.expansion import (
     SceneRandomizationJobCfg,
     SceneRandomizationPolicyCfg,
     SceneRandomizationBatch,
+    PreparedSceneRandomization,
     generate_scene_variants,
     prepare_scene_randomization,
     save_scene_variants,
@@ -208,7 +209,8 @@ def convert_layouts(
         storage: JSON or packed storage.
 
     Returns:
-        Completed source-independent run.
+        Completed source-independent run retaining the legacy geometry certificate,
+        including its original support-height rules.
     """
     from .loading import load_layouts
 
@@ -228,20 +230,48 @@ def convert_layouts(
         intra_group=policy.get("intra_group"),
         collision_margin_m=policy["collision_margin_m"],
     )
-    prepared = prepare_scene_randomization(source, cfg)
     from .baseline import prepare_scene_baseline
     from .cfg import load_randomization_config
+    from embodichain.lab.sim.scene.expansion.layout import _digest, _policy_data
 
-    baseline = prepare_scene_baseline(
-        load_randomization_config(
-            run / manifest["policy_file"], output_root=loaded.output_root
-        )
+    legacy_cfg = load_randomization_config(
+        run / manifest["policy_file"], output_root=loaded.output_root
     )
+    baseline = prepare_scene_baseline(legacy_cfg)
     table = baseline.data["table"]
     center = np.asarray(table["center_xy"])
     half = np.asarray(table["size_xy"]) / 2
-    geometry = deepcopy(prepared._geometry)
-    if not policy.get("intra_group", {}).get("targets"):
+    bounds = tuple(tuple(row) for row in (center - half, center + half))
+    if manifest["schema_version"] == 3:
+        from ._intra_geometry import _load_geometry
+
+        # The old extractor owns the saved support layer and height rules.
+        # Re-extraction can change them even when the source has not changed.
+        reference = manifest["support_geometry"]
+        geometry = deepcopy(
+            _load_geometry(
+                (run / reference["path"]).resolve(),
+                baseline.data,
+                legacy_cfg.intra_group,
+                expected_sha256=reference["data_sha256"],
+            )
+        )
+        prepared = PreparedSceneRandomization(
+            source,
+            _policy_data(cfg),
+            _digest(geometry),
+            tuple(change.entity_uid for change in loaded.variants[0].pose_changes),
+            geometry,
+            bounds,
+            tuple(
+                i
+                for i, node in enumerate(geometry["nodes"])
+                if node["parent"] < 0 and cfg.randomize_groups
+            ),
+        )
+    else:
+        prepared = prepare_scene_randomization(source, cfg)
+        geometry = deepcopy(prepared._geometry)
         geometry["fixed_orientation_group_proxies"] = {
             group["root_id"]: (
                 np.asarray(group["aabb_2d"]["center_xy"])[None]
@@ -251,14 +281,12 @@ def convert_layouts(
             ).tolist()
             for group in baseline.data["groups"]
         }
-    from embodichain.lab.sim.scene.expansion.layout import _digest
-
-    prepared = replace(
-        prepared,
-        _geometry=geometry,
-        geometry_sha256=_digest(geometry),
-        _table=tuple(tuple(row) for row in (center - half, center + half)),
-    )
+        prepared = replace(
+            prepared,
+            _geometry=geometry,
+            geometry_sha256=_digest(geometry),
+            _table=bounds,
+        )
     result = SceneRandomizationBatch(
         prepared,
         loaded.variants,

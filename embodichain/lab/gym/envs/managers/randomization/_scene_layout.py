@@ -55,6 +55,8 @@ class RandomizeSceneLayout(Functor):
     Geometry is prepared once. Ordinary reset retains prepared geometry and
     unused candidates. EventManager explicit reseeding rewinds candidate and
     replay cursors. This functor does not step physics or certify task success.
+    Per-row provenance uses schema 2 with an ``events`` mapping keyed by the
+    configured event name, retaining every disjoint layout applied to that row.
     """
 
     def __init__(self, cfg: FunctorCfg, env: EmbodiedEnv) -> None:
@@ -111,6 +113,9 @@ class RandomizeSceneLayout(Functor):
         self._available = self._next_ordinal = self._replay_cursor = 0
         self._seed_revision = None
         self._conflicts_checked = False
+        self._invalid_rows = torch.zeros(
+            env.num_envs, dtype=torch.bool, device=env.device
+        )
         if not hasattr(env, "_scene_randomization_metadata"):
             env._scene_randomization_metadata = [None for _ in range(env.num_envs)]
             env._scene_randomization_invalid_rows = torch.zeros(
@@ -120,8 +125,52 @@ class RandomizeSceneLayout(Functor):
     def reset(self, env_ids: list[int] | torch.Tensor | None = None) -> None:
         """Clear selected transient results while preserving geometry and streams."""
         ids = range(self.num_envs) if env_ids is None else env_ids
+        name = self._event_name()
         for row in ids:
-            self._env._scene_randomization_metadata[int(row)] = None
+            self._publish_metadata(int(row), name, None)
+
+    def _event_name(self) -> str:
+        manager = self._env.event_manager
+        names = (
+            []
+            if manager is None
+            else [
+                name
+                for name in manager.active_functors.get("reset", ())
+                if manager.get_functor_cfg(name).func is self
+            ]
+        )
+        if len(names) != 1:
+            raise ValueError(
+                "A scene layout functor must have exactly one reset event name."
+            )
+        return names[0]
+
+    def _publish_metadata(self, row: int, name: str, metadata: dict | None) -> None:
+        current = self._env._scene_randomization_metadata[row]
+        events = {} if current is None else deepcopy(current["events"])
+        if metadata is None:
+            events.pop(name, None)
+        else:
+            events[name] = deepcopy(metadata)
+        combined = {"schema_version": 2, "events": events} if events else None
+        self._env._scene_randomization_metadata[row] = combined
+        episodes = getattr(self._env, "_demo_episode_metadata", None)
+        if episodes is not None:
+            if combined is None:
+                episodes[row].pop("scene_randomization", None)
+            else:
+                episodes[row]["scene_randomization"] = deepcopy(combined)
+
+    def _mark_invalid(self, rows: list[int], invalid: bool) -> None:
+        self._invalid_rows[rows] = invalid
+        combined = self._invalid_rows[rows].clone()
+        manager = self._env.event_manager
+        for name in manager.active_functors.get("reset", ()):
+            functor = manager.get_functor_cfg(name).func
+            if isinstance(functor, RandomizeSceneLayout) and functor is not self:
+                combined |= functor._invalid_rows[rows]
+        self._env._scene_randomization_invalid_rows[rows] = combined
 
     def _check_conflicts(self, env: EmbodiedEnv) -> None:
         manager = env.event_manager
@@ -239,7 +288,8 @@ class RandomizeSceneLayout(Functor):
         rows.sort()
         if not rows:
             return
-        env._scene_randomization_invalid_rows[rows] = True
+        name = self._event_name()
+        self._mark_invalid(rows, True)
         if not self._conflicts_checked:
             self._check_conflicts(env)
         if self._prepared is None:
@@ -319,11 +369,8 @@ class RandomizeSceneLayout(Functor):
                 "geometry_status": "passed",
                 "refresh_required": list(result.refresh_required),
             }
-            env._scene_randomization_metadata[row] = deepcopy(metadata)
-            episodes = getattr(env, "_demo_episode_metadata", None)
-            if episodes is not None:
-                episodes[row]["scene_randomization"] = deepcopy(metadata)
+            self._publish_metadata(row, name, metadata)
         callback = getattr(env, "on_scene_variants_applied", None)
         if callable(callback):
             callback(result)
-        env._scene_randomization_invalid_rows[rows] = False
+        self._mark_invalid(rows, False)

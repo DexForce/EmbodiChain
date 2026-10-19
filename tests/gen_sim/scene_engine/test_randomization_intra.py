@@ -642,6 +642,70 @@ def test_v3_previous_generator_and_cache_still_replay(intra_export, monkeypatch)
 
 
 @pytest.mark.parametrize(
+    "extractor", ["parent_support_grid/v1", "parent_support_grid/v2"]
+)
+@pytest.mark.parametrize("storage", ["json", "packed"])
+def test_v3_conversion_retains_saved_support_height_rules(
+    intra_export, monkeypatch, extractor, storage
+):
+    from embodichain.gen_sim.scene_engine.randomization import (
+        _intra,
+        _intra_geometry,
+        adapter,
+    )
+    from embodichain.lab.sim.scene.expansion import load_scene_variants
+
+    root, cfg, entries = intra_export
+    tray_path = root / entries["tray"]["shape"]["fpath"]
+    tray = trimesh.load(tray_path, force="mesh")
+    patch = trimesh.creation.box(extents=[0.16, 0.0018, 0.14])
+    patch.apply_translation([-0.10, 0.0209, 0])
+    trimesh.util.concatenate([tray, patch]).export(tray_path)
+    cfg.randomize_groups = False
+    cfg.candidate_count = 2
+    cfg.intra_group.targets["cup"] = MemberRandomizationCfg(
+        xy_offset_bounds_m=[[0, 0], [0, 0]], yaw_delta_range_deg=[0, 0]
+    )
+    with monkeypatch.context() as legacy:
+        if extractor.endswith("/v1"):
+            legacy.setattr(
+                _intra,
+                "_INTRA_GENERATOR",
+                "scene_engine.hierarchical_batch_rejection/v1",
+            )
+            legacy.setattr(_intra_geometry, "_EXTRACTOR", extractor)
+            prepare_support = _intra_geometry._prepare_support
+
+            def legacy_support(*args, **kwargs):
+                support = prepare_support(*args, **kwargs)
+                support.pop("height_ceiling_m")
+                return support
+
+            legacy.setattr(_intra_geometry, "_prepare_support", legacy_support)
+        result = randomize_scene(cfg)
+        assert result.status == "completed"
+        run = save_layouts(result, output_root=root.parent, layout_format=storage)
+    before = result.candidates._geometry_path.read_bytes()
+    expected = tuple(load_layouts(run / "layouts").variants)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Legacy conversion must retain its validated support certificate.")
+
+    monkeypatch.setattr(adapter, "prepare_scene_randomization", forbidden)
+    converted = adapter.convert_layouts(
+        run / "layouts", root.parent / "converted", storage=storage
+    )
+    loaded = load_scene_variants(converted)
+    assert tuple(loaded.variants) == expected
+    support = loaded.prepared._geometry["supports"]["tray"]
+    if extractor.endswith("/v1"):
+        assert "height_ceiling_m" not in support
+    else:
+        assert support["height_ceiling_m"] > 0
+    assert result.candidates._geometry_path.read_bytes() == before
+
+
+@pytest.mark.parametrize(
     "field", ["grid_resolution_m", "boundary_margin_m", "support_gap_m"]
 )
 def test_unrepresentable_geometry_controls_are_configuration_errors(tmp_path, field):

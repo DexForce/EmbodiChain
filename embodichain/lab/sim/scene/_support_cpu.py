@@ -34,7 +34,12 @@ __all__ = ["SupportSurfaceConfig", "DetectedSupportSurface", "SupportSurfaceDete
 
 @configclass
 class SupportSurfaceConfig:
-    """Parameters for conservative single-level table-top detection."""
+    """Parameters for conservative single-level table-top detection.
+
+    ``preserve_holes`` retains openings in the selected mesh component and
+    constrains the inscribed rectangle to its actual support. Its default
+    preserves the legacy outer-contour detection contract.
+    """
 
     normal_z_min: float = 0.95  # Minimum z component for an upward face normal.
     min_surface_area_m2: float = 0.01  # Minimum projected area for a candidate level.
@@ -42,6 +47,7 @@ class SupportSurfaceConfig:
         0.01  # Maximum within-face z variation for flatness.
     )
     height_level_tolerance_m: float = 0.005  # Maximum z difference within one level.
+    preserve_holes: bool = False  # Retain openings in the selected mesh contour.
 
 
 @dataclass(frozen=True)
@@ -100,6 +106,8 @@ class SupportSurfaceDetector:
     def _validate_config(self) -> None:
         """Validate mutable thresholds before each detection pass."""
         self.config.validate()
+        if type(self.config.preserve_holes) is not bool:
+            raise ValueError("preserve_holes must be a boolean.")
         if not np.isfinite(
             [
                 self.config.normal_z_min,
@@ -165,7 +173,9 @@ class SupportSurfaceDetector:
         selected_vertices = face_vertices[selected_faces]
         vertices = mesh.vertices.copy()
         faces = mesh.faces[selected_faces].copy()
-        support_polygon = self._extract_largest_support_polygon(vertices[faces, :2])
+        support_polygon = self._extract_largest_support_polygon(
+            vertices[faces, :2], preserve_holes=self.config.preserve_holes
+        )
         self.support_region = DetectedSupportSurface(
             top_z=float(selected_vertices[:, :, 2].max()),
             vertices=vertices,
@@ -321,7 +331,9 @@ class SupportSurfaceDetector:
         return float(areas.sum())
 
     @classmethod
-    def _extract_largest_support_polygon(cls, triangles_xy: np.ndarray) -> Polygon:
+    def _extract_largest_support_polygon(
+        cls, triangles_xy: np.ndarray, *, preserve_holes: bool = False
+    ) -> Polygon:
         triangles = np.zeros((*triangles_xy.shape[:-1], 3), dtype=float)
         triangles[..., :2] = triangles_xy
         _, areas, valid = triangle_geometry(torch.from_numpy(triangles))
@@ -355,12 +367,17 @@ class SupportSurfaceDetector:
         boundary_xy = np.asarray(largest_polygon.exterior.coords, dtype=float)
         if len(boundary_xy) < 4 or not np.isfinite(boundary_xy).all():
             raise ValueError("The merged 2D support contour is degenerate.")
-        return Polygon(boundary_xy)
+        return largest_polygon if preserve_holes else Polygon(boundary_xy)
 
     @staticmethod
     def _largest_inscribed_rectangle(polygon: Polygon) -> Polygon:
         """Find a conservative axis-aligned rectangle contained by the support contour."""
-        coordinates = np.asarray(polygon.exterior.coords[:-1], dtype=float)
+        coordinates = np.concatenate(
+            [
+                np.asarray(ring.coords[:-1], dtype=float)
+                for ring in (polygon.exterior, *polygon.interiors)
+            ]
+        )
         x_values = np.unique(coordinates[:, 0])
         y_values = np.unique(coordinates[:, 1])
         # Keep the search bounded for highly tessellated support contours.

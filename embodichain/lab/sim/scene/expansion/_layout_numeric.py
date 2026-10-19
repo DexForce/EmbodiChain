@@ -152,7 +152,10 @@ def _numeric_geometry(
             inv = np.linalg.inv(np.asarray(support["parent_from_support"]))
             original = inv @ np.asarray(nodes[node]["relative_pose"])
             poses = inv @ selected[:, col]
-            rotation = poses[:, :3, :3] @ original[:3, :3].T
+            # Accepted authored matrices can retain float32 roundoff. Use the
+            # actual inverse so a pure yaw still cancels their original tilt
+            # without weakening the independent tilt-change check.
+            rotation = poses[:, :3, :3] @ np.linalg.inv(original[:3, :3])
             angle = np.rad2deg(np.arctan2(rotation[:, 1, 0], rotation[:, 0, 0]))
             rad = np.deg2rad(angle)
             expected = np.zeros_like(rotation)

@@ -103,8 +103,11 @@ which rejects partial selections unless `allow_partial_envs=True` is explicit.
 Configure it through ordinary `EventCfg` / `env.events`, with `SceneEntityCfg`
 selections, explicit support parents, an online or saved source and the shared
 scene policy. There is no separate environment-level scene-randomization switch.
-The adapter caches geometry, batches selected rows and writes per-row provenance;
-it does not advance physics or certify task success. Conflicting pose/scale
+The adapter caches geometry, batches selected rows and writes per-row provenance
+as schema 2 with an `events` mapping keyed by configured event name. Disjoint
+layout events preserve each other's records and failure masks; selective reset
+clears only the named event's records in selected rows.
+It does not advance physics or certify task success. Conflicting pose/scale
 randomizers for managed entities fail explicitly. Configure layout application
 after other pose initialization and before observation/state-registration events.
 
