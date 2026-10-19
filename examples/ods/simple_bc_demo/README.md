@@ -242,9 +242,26 @@ and feature conversion; it contains no duplicate resident sampler or SDK loader.
 | [Four-arm pilot](docs/OFFLINE_PILOT_RESULTS.md) | Offline32, offline256 and protected ODS comparison |
 | [Accounting audit](docs/ODS_ACCOUNTING_AUDIT.md) | Exact counters; strict performance gate remains incomplete |
 | [Alignment](docs/ODS_ALIGNMENT_VALIDATION.json) and [public loaders](docs/DATASET_LOADING_VALIDATION.json) | Historical exact batch/optimizer evidence, pre-extraction golden outputs, public API and physical integration records |
-| Local-package runtime validation | Pending integration validation; historical runs above do not validate the relocated implementation |
+| [Local-package runtime validation](docs/PY311_VALIDATION.json) | Candidate `d54cfc8a`; 482 production/API/context checks and 31 runtime audits passed in conda `py311` |
 
 Structured historical records retain their executed paths, hashes and test
 counts verbatim. Earlier learner/optimizer checks are historical evidence and
 are not current CI coverage. Exposed development and reserved scenes must not
 be treated as fresh held-out data in a later study.
+
+The local-package rerun used Python 3.11.14, Torch 2.7.0/CUDA 12.8 and LeRobot
+0.4.4 on 2026-10-19 with the matching native runtime documented above. Online
+training completed 10 updates/40 chunks across two generations; cold LeRobot
+collection wrote/read four episodes (1,330 frames), consumed four chunks and
+stopped within its one-selection-per-source budget. Resume restored the model,
+normalization and sampler RNG from step 10 and completed 15 additional updates
+to step 25 under a new data-source run ID. Independent loading of the retained
+trained policy succeeded on two reused development scenes. All observed child
+processes exited normally; source files stayed unchanged during validation.
+
+These are engineering checks, not a rerun of the complete learning studies.
+Training smokes used engineering scenes 920000–920001 and 921000–921001; the
+independent checkpoint regression reused development scenes 810000–810001.
+The original installed DexSim import failure and the earlier unit-test setup
+attempts remain in the validation record. Successful native checks require the
+matching runtime and CUDA visibility documented above.

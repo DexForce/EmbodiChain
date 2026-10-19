@@ -10,6 +10,7 @@ validation host and are not portable download links.
 
 | Record | Executed source / scope |
 | --- | --- |
+| [Current local-package validation](PY311_VALIDATION.json) | `d54cfc8a`: conda py311, current public sources, online/offline/resume and independent student execution |
 | [Working policy](WORKING_SHOWCASE.md), [JSON](WORKING_SHOWCASE_RESULTS.json) | `b683c4c699a71562341d4b213d06857f0fbdf744`: 40/40 expert qualification, selected checkpoint 99/100, later refresh checkpoint 65/100; both outcomes retained |
 | [Quota tests](ODS_QUOTA_TESTS.md), [JSON](ODS_QUOTA_TEST_RESULTS.json) | `6d2ff529` learning trials and `69d65ecd` CPU-device fix: strict source caps, exploratory rate/learning regimes and separate repeat |
 | [Configurator validation](ODS_CONFIGURATION_VALIDATION.json) | `8748aa22000377b7366d5709341eeeaec66cfad4`: CPU contracts, bounded two-generation smoke and scoped sampler costs |
