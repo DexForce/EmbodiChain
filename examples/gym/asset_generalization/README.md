@@ -23,6 +23,7 @@ and the semantic platform placement frame follow the cube dimensions.
 Add `--execute` to build native UR5 environments, execute Pick/Place and save only
 accepted trajectories. The example uses the canonical scene execution gate and
 independent measurements of initial support, final footprint and contact height.
+An executed run exits nonzero if any episode fails acceptance.
 It is a primitive parameter-variation baseline, not a file-asset retrieval test.
 
 ## Replace bottle and cup in PourWater

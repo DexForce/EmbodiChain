@@ -178,6 +178,11 @@ This distinction matters for left/right sorting after reference-object rotation.
 World-axis targets fingerprint both their frame and declared pose; static
 manifests and live registries retain the same identity.
 
+`object_relative_position` validators default to `reference_frame: world_axes`,
+so reference rotation does not rotate their offset or per-axis tolerances.
+Select `reference_frame: parent` to measure both in the live reference frame,
+matching a target whose relative pose composes the complete parent transform.
+
 
 ## Asset role requirements
 

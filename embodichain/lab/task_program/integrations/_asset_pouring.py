@@ -484,6 +484,7 @@ def finish_pour_adaptation(
                 kind="object_relative_position",
                 object=object_id,
                 reference=reference,
+                reference_frame="parent",
                 position_offset=offset,
                 position_tolerance=(
                     [tolerance / math.sqrt(3)] * 3

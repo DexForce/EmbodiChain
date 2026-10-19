@@ -24,12 +24,15 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import trimesh
 
 from embodichain.data.asset_catalog import (
     AssetCandidate,
     AssetDescriptor,
     AssetQuery,
     Bounds3D,
+    ExplicitAssetProvider,
+    PreparationContext,
     PreparedAsset,
 )
 from embodichain.lab.gym.envs import asset_generalization as module
@@ -66,11 +69,18 @@ def _artifact(root: Path, name: str, resolved: ResolvedAssetSet | None = None):
             bounds_m=Bounds3D((0, 0, 0), (0.1, 0.1, 0.1)),
             normalized=True,
         )
-        asset = PreparedAsset(
-            descriptor,
-            "/cache/model.obj",
-            "/cache/model.obj",
-            hashlib.sha256(name.encode()).hexdigest(),
+        package = root / f"{name}_source"
+        package.mkdir()
+        mesh = trimesh.creation.box(extents=(0.1, 0.1, 0.1))
+        mesh.apply_translation((0.05, 0.05, 0.05))
+        mesh.export(package / "model.obj")
+        (package / "asset.catalog.json").write_text(
+            json.dumps({"descriptor": descriptor.to_dict(), "visual_path": "model.obj"})
+        )
+        provider = ExplicitAssetProvider([package])
+        asset = provider.materialize(
+            provider.candidates(AssetQuery(), limit=1)[0],
+            context=PreparationContext(str(folder / "assets")),
         )
         resolved = ResolvedAssetSet({"source": asset}, 0, "b" * 64)
     manifest = folder / "assets.manifest.json"
@@ -79,8 +89,11 @@ def _artifact(root: Path, name: str, resolved: ResolvedAssetSet | None = None):
             {
                 "asset_set_id": resolved.set_id,
                 "files": {
-                    path.name: hashlib.sha256(path.read_bytes()).hexdigest()
-                    for path in folder.glob("*.yaml")
+                    path.relative_to(folder)
+                    .as_posix(): hashlib.sha256(path.read_bytes())
+                    .hexdigest()
+                    for path in folder.rglob("*")
+                    if path.is_file()
                 },
                 "resolved_assets": resolved.to_dict(),
             }

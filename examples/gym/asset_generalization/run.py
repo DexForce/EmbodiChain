@@ -347,6 +347,12 @@ def main() -> None:
             raise
         finally:
             report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        if not all(
+            episode["accepted"]
+            for batch in report["batches"]
+            for episode in batch["episodes"]
+        ):
+            raise SystemExit(f"Primitive acceptance failed; inspect {report_path}")
     print(f"Primitive baseline report: {report_path}")
 
 

@@ -244,6 +244,10 @@ def test_pouring_rebinds_selected_bottle_and_cup_geometry(
     assert "at" not in return_call
     validators = program["program"]["items"][3]["validators"]
     assert all(item["kind"] == "object_relative_position" for item in validators)
+    assert all(item["reference_frame"] == "parent" for item in validators)
+    assert (
+        program["program"]["items"][1]["validators"][0]["reference_frame"] == "parent"
+    )
     assert all(item["reference"] == "bottle_asset_return_table" for item in validators)
     assert validators[0]["position_tolerance"] == pytest.approx(
         [0.05 / math.sqrt(3)] * 3

@@ -28,7 +28,7 @@ from copy import deepcopy
 import json
 from pathlib import Path
 import shutil
-from tempfile import mkdtemp
+from tempfile import NamedTemporaryFile, mkdtemp
 from typing import Any
 
 import gymnasium as gym
@@ -317,9 +317,15 @@ def _measured(env: Any) -> ValidationResult:
         "robot_qpos": env.robot.get_qpos().detach().cpu().tolist(),
         "robot_targets": env.robot.get_qpos(target=True).detach().cpu().tolist(),
     }
-    (
-        Path(env._asset_generalization_recording_root) / "pour-diagnostics.json"
-    ).write_text(json.dumps(report, indent=2), encoding="utf-8")
+    with NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        prefix="pour-diagnostics-",
+        suffix=".json",
+        dir=env._asset_generalization_recording_root,
+        delete=False,
+    ) as diagnostic:
+        diagnostic.write(json.dumps(report, indent=2))
     return result
 
 

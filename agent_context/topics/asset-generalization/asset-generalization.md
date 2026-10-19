@@ -119,6 +119,8 @@ geometry, a proper object-to-TCP grasp transform tied to the exact embodiment
 profile, and an explicit object-local tilt axis. The adapter recomputes the
 cup-relative staging pose for the existing origin-centered Pour primitive,
 creates the semantic return support, and conservatively updates validators.
+Pouring position validators explicitly use the live parent's frame so cup yaw
+rotates both transport targets and their measured acceptance offsets.
 Generic calibration rejection remains in effect outside this declared adapter.
 
 `integrations/simulation/asset_pouring.py` owns `PouringAcceptanceMonitor`.

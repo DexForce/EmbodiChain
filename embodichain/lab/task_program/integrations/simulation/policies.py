@@ -542,12 +542,18 @@ class SimulationSegmentPolicyPort:
             ).to(device=pose.device, dtype=pose.dtype)
             accepted &= torch.isfinite(reference).all(dim=(1, 2))
             offset = pose.new_tensor(validator.cfg.position_offset)
-            error = torch.abs(pose[:, :3, 3] - reference[:, :3, 3] - offset)
+            displacement = pose[:, :3, 3] - reference[:, :3, 3]
+            if validator.cfg.reference_frame == "parent":
+                displacement = torch.bmm(
+                    reference[:, :3, :3].transpose(1, 2), displacement.unsqueeze(-1)
+                ).squeeze(-1)
+            error = torch.abs(displacement - offset)
             for axis, tolerance in enumerate(validator.cfg.position_tolerance):
                 if tolerance is not None:
                     accepted &= error[:, axis] < tolerance
             evidence = {
                 "reference_id": validator.reference.entity_id,
+                "reference_frame": validator.cfg.reference_frame,
                 "position_offset": list(validator.cfg.position_offset),
                 "position_tolerance": list(validator.cfg.position_tolerance),
                 "position_error": [_json_speed_values(row) for row in error],
