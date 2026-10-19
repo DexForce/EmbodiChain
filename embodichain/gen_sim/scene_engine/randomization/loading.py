@@ -94,6 +94,44 @@ def load_layouts(layout_dir: str | Path) -> LoadedLayouts:
         OSError: Referenced files cannot be read.
     """
     directory = Path(layout_dir).expanduser().resolve()
+    manifest_path = directory.parent / "run_result.json"
+    if (
+        manifest_path.is_file()
+        and _read_json(manifest_path)[1].get("schema_version") == 4
+    ):
+        from embodichain.lab.sim.scene.expansion import load_scene_variants
+        from .adapter import scene_layout_input_from_export, _export_digest
+
+        loaded = load_scene_variants(directory)
+        reference = loaded.manifest.get("source_context", {}).get(
+            "scene_engine_output_root"
+        )
+        if not isinstance(reference, str) or not reference:
+            raise ValueError(
+                "Generic v4 layouts have no Scene Engine preview source; use the Sim API."
+            )
+        output_root = (directory.parent / reference).resolve()
+        expected_digest = loaded.manifest.get("source_context", {}).get(
+            "scene_engine_source_sha256"
+        )
+        if (
+            expected_digest is not None
+            and _export_digest(output_root) != expected_digest
+        ):
+            raise ValueError(
+                "Scene Engine source configuration or asset contents changed."
+            )
+        source = scene_layout_input_from_export(
+            output_root, scene_id=loaded.prepared.source.scene_id
+        )
+        if source.fingerprint != loaded.prepared.source.fingerprint:
+            raise ValueError("Scene Engine source changed after layouts were saved.")
+        return LoadedLayouts(
+            output_root,
+            {uid: np.array(pose) for uid, pose in source.poses.items()},
+            loaded.variants,
+            tuple(f"candidate_{i:06d}" for i in range(len(loaded.variants))),
+        )
     paths = sorted(directory.glob("*.json"))
     if not paths:
         raise ValueError("The layout directory contains no candidate JSON files.")

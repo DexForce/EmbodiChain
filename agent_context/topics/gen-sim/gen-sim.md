@@ -111,6 +111,13 @@ support/AABB acceptance does not establish physical or task success. See
 for policy settings, demo and end-to-end CPU/CUDA benchmarks and the
 [public API supplement](../../../docs/source/api_reference/public_api.rst).
 
+`randomization/adapter.py` projects rigid exports into the shared scene-layout
+input. `generate_scene_from_image` and `edit_scene` accept an optional post-export
+job; the CLI's combined generation/edit flow triggers it once after the final
+export. New runs use source-independent v4 storage and retain the original
+export for preview. `convert_layouts` preserves validated legacy poses and IDs
+without sampling. File/model coordinate adaptation remains owned here.
+
 ## Runtime and extension boundaries
 
 Keep parser capabilities idempotent so recorded stages support resume.

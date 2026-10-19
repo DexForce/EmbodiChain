@@ -307,6 +307,17 @@ Entity metadata and deterministic UID indexing for schema-v2 USD scene stages.
    UsdSceneBinding
    UsdSceneIndex
 
+embodichain.gen_sim.scene_engine.randomization.adapter
+------------------------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.randomization.adapter
+
+.. autosummary::
+
+   scene_layout_input_from_export
+   randomize_scene_export
+   convert_layouts
+
 embodichain.gen_sim.scene_engine.randomization.baseline
 -------------------------------------------------------
 
@@ -498,6 +509,33 @@ embodichain.lab.gym.envs.embodied_env
 
    EmbodiedEnvCfg
    EmbodiedEnv
+
+embodichain.lab.sim.scene.expansion.layout
+------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.scene.expansion.layout
+
+.. autosummary::
+
+   SceneLayoutInput
+   PreparedSceneRandomization
+   SceneRandomizationBatch
+   SceneVariantApplicationResult
+   scene_layout_input_from_sim
+   prepare_scene_randomization
+   generate_scene_variants
+   apply_scene_variants
+
+embodichain.lab.sim.scene.expansion.persistence
+-----------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.scene.expansion.persistence
+
+.. autosummary::
+
+   LoadedSceneVariants
+   save_scene_variants
+   load_scene_variants
 
 embodichain.lab.task_program.integrations.simulation.handover
 -------------------------------------------------------------

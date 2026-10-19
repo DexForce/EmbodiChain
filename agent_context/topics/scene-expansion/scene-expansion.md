@@ -7,6 +7,20 @@ layout and physical state services are owned by
 [scene services](../scene-services/scene-services.md). Proposal contracts are
 provided by `sim.scene.expansion`.
 
+The source-independent layout APIs accept `SceneLayoutInput` with scaled local
+meshes, authored arena poses, an explicit support tree and movable permissions.
+`prepare_scene_randomization` owns cold geometry work; `generate_scene_variants`
+returns addressed CPU/CUDA candidates; `apply_scene_variants` preflights all
+selected rows and publishes rigid poses without stepping. This batched application
+does not extend the separate B=1 physical snapshot/settling host.
+
+V4 JSON/packed packages own source, policy and prepared geometry snapshots.
+Loading checks every candidate before exposing a lazy sequence and does not
+repeat mesh extraction or support rasterization. GenSim keeps legacy v1-v3
+readers and migration, while shared loading never imports GenSim. Imported
+fixed-orientation group certificates preserve their original conservative proxy
+rather than being reinterpreted by the hierarchical sampler.
+
 ## Entry points
 
 | Request | Owner |

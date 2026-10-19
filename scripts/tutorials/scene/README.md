@@ -198,3 +198,91 @@ margin, generator version, numeric pipeline cost and full cost with consumption.
 The leaderboard uses the full cost when it is measured. `consume_all` constructs generated fragments
 and reloaded typed variants together to verify round-trip equality. Geometric acceptance does not certify
 physical settling, arbitrary 6D pose changes, reparenting or task feasibility.
+
+## Shared Sim API and task reset events
+
+The source-independent API accepts prepared rigid geometry and an explicit
+support tree. It does not require a Scene Engine workspace. Include the fixed
+objects that participate in layout checks in the input tree.
+
+```python
+from embodichain.lab.sim.scene.expansion import (
+    SceneRandomizationPolicyCfg, scene_layout_input_from_sim,
+    prepare_scene_randomization, generate_scene_variants, apply_scene_variants,
+    save_scene_variants, load_scene_variants,
+)
+
+source = scene_layout_input_from_sim(
+    sim, support_uid="bench",
+    parent_by_uid={"tray": "bench", "mug": "tray", "target": "bench"},
+)
+prepared = prepare_scene_randomization(
+    source, SceneRandomizationPolicyCfg(group_targets=("tray",)),
+)
+result = generate_scene_variants(prepared, seed=42, candidate_count=20)
+apply_scene_variants(
+    sim, result.variants[:2], env_ids=[1, 3],
+    movable_entity_ids=prepared.movable_uids,
+)
+run = save_scene_variants(result, "/tmp/shared-layouts", storage="packed")
+loaded = load_scene_variants(run, scene_input=source)
+```
+
+Geometry is extracted once; candidate sampling and selected-row application do
+not load meshes or advance physics. Source and variant identities exclude arena
+replication offsets. The application result lists the host caches requiring
+refresh. Geometric acceptance does not establish robot reachability or task
+success.
+
+Handwritten expert and simulator RL environments configure the same service as
+an ordinary reset event, without a Task Program or an additional environment
+configuration switch:
+
+```yaml
+env:
+  events:
+    scene_layout:
+      func: RandomizeSceneLayout
+      mode: reset
+      params:
+        entity_cfg: {uid: bench}
+        entity_cfgs:
+          - {uid: tray}
+          - {uid: mug}
+          - {uid: target}
+        parent_by_uid: {tray: bench, mug: tray, target: bench}
+        source: {kind: online}
+        policy:
+          backend: batched
+          device: cpu
+          group_targets: [tray]
+          intra_group:
+            targets:
+              mug:
+                xy_offset_bounds_m: null
+                yaw_delta_range_deg: [-180, 180]
+        candidate_count: 64
+        max_attempts: 10000
+```
+
+Place the event after other pose initialization and before state-registration
+or observation events. Overlapping built-in pose/scale randomizers are rejected.
+Ordinary selective reset retains cached geometry and unused candidates; an
+explicit `reset(seed=...)`, including a repeated seed, rewinds the event stream.
+To replay v4 layouts, use `source: {kind: saved, layout_dir: /absolute/run/path}`.
+Replay cycles saved candidates and never resamples. Failed preparation or writes
+block recording for the affected rows.
+
+Scene Engine generation/edit APIs accept an optional `scene_randomization` job
+or YAML policy. The combined CLI triggers it once after its final export:
+
+```bash
+embodichain scene-engine --image input.png --output_root /tmp/scene \
+  --edit_prompt "move the mug" \
+  --scene-randomization-config scripts/tutorials/scene/grouped_randomization_intra.yaml
+```
+
+New pipeline jobs produce v4 packages. Existing `scene-randomization` policies
+and v1/v2/v3 runs retain their original behavior. Convert a validated old run
+without sampling or changing its IDs through
+`embodichain.gen_sim.scene_engine.randomization.adapter.convert_layouts`.

@@ -1214,13 +1214,19 @@ class EmbodiedEnv(BaseEnv):
         # (including asynchronous snapshots). The existing state buffer retains
         # the source episode's initial state even when training exports fragments.
         _traj_buffer = getattr(self, "_traj_buffer", None)
+        scene_invalid_rows = getattr(self, "_scene_randomization_invalid_rows", None)
+        valid_recording_ids = env_ids_to_process
+        if scene_invalid_rows is not None:
+            valid_recording_ids = env_ids_to_process[
+                ~scene_invalid_rows.to(status_device)[env_ids_to_process]
+            ]
         if (
             save_data
             and _traj_buffer is not None
             and getattr(self.cfg, "trajectory_auto_save", False)
         ):
             with self._profiler.section("trajectory_save"):
-                for env_id in env_ids_to_process.tolist():
+                for env_id in valid_recording_ids.tolist():
                     self._save_trajectory_for_env(env_id)
 
         # Save dataset before clearing buffers for environments that are being reset
@@ -1246,6 +1252,10 @@ class EmbodiedEnv(BaseEnv):
                         successful_envs[env_ids_to_process] | fragment_envs
                     ]
 
+                if scene_invalid_rows is not None:
+                    env_ids_to_save = env_ids_to_save[
+                        ~scene_invalid_rows.to(status_device)[env_ids_to_save]
+                    ]
                 if env_ids_to_save.numel() > 0:
                     with self._profiler.section("dataset_save"):
                         self.dataset_manager.apply(
@@ -1262,9 +1272,20 @@ class EmbodiedEnv(BaseEnv):
                     for functor_cfg in mode_cfgs:
                         if isinstance(functor_cfg.func, record_camera_data):
                             if save_data:
-                                functor_cfg.func.save_and_clear(
-                                    env_ids=env_ids_to_process
-                                )
+                                if valid_recording_ids.numel() > 0:
+                                    functor_cfg.func.save_and_clear(
+                                        env_ids=valid_recording_ids
+                                    )
+                                if scene_invalid_rows is not None:
+                                    invalid_ids = env_ids_to_process[
+                                        scene_invalid_rows.to(status_device)[
+                                            env_ids_to_process
+                                        ]
+                                    ]
+                                    if invalid_ids.numel():
+                                        functor_cfg.func.discard_and_clear(
+                                            env_ids=invalid_ids
+                                        )
                             else:
                                 functor_cfg.func.discard_and_clear(
                                     env_ids=env_ids_to_process
@@ -1440,6 +1461,9 @@ class EmbodiedEnv(BaseEnv):
         expert_action_spec = getattr(self, "expert_action_spec", None)
         if expert_action_spec is not None:
             metadata.update(expert_action_spec.metadata(step_dt=self.step_dt))
+        scene_metadata = getattr(self, "_scene_randomization_metadata", None)
+        if scene_metadata is not None and scene_metadata[env_id] is not None:
+            metadata["scene_randomization"] = copy.deepcopy(scene_metadata[env_id])
         return metadata
 
     def _begin_demo_episode_recording(
@@ -2381,6 +2405,12 @@ class EmbodiedEnv(BaseEnv):
         objective = getattr(self, "physical_objective", None)
         if objective is not None:
             info["physical_objective"] = objective.snapshot()
+        scene_metadata = getattr(self, "_scene_randomization_metadata", None)
+        if scene_metadata is not None:
+            info["scene_randomization"] = copy.deepcopy(scene_metadata)
+            info["scene_randomization_valid"] = (
+                ~self._scene_randomization_invalid_rows.clone()
+            )
         return info
 
     def evaluate(self, **kwargs) -> Dict[str, Any]:

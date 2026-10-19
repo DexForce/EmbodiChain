@@ -17,6 +17,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from embodichain.lab.sim.scene.expansion import SceneRandomizationJobCfg
 
 from embodichain.gen_sim.scene_engine.clients.geometry_generation import (
     GeometryGenerationClient,
@@ -56,6 +60,7 @@ def edit_scene(
     *,
     output_root: str | Path,
     edit_prompt: str,
+    scene_randomization: SceneRandomizationJobCfg | dict | str | Path | None = None,
 ) -> None:
     """Apply one text edit instruction to an existing Scene Engine output."""
     resolved_output_root = Path(output_root).expanduser().resolve()
@@ -133,4 +138,10 @@ def edit_scene(
         log_warning(f"Skipped whole-scene USD export: {exc}")
     log_info("Completed Scene Export")
 
+    if scene_randomization is not None:
+        from embodichain.gen_sim.scene_engine.randomization.adapter import (
+            randomize_scene_export,
+        )
+
+        randomize_scene_export(resolved_output_root, scene_randomization)
     return None

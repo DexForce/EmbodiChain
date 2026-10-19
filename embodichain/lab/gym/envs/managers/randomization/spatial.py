@@ -29,11 +29,13 @@ from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
 from embodichain.lab.gym.envs.managers import Functor, FunctorCfg
 from embodichain.utils.math import sample_uniform, matrix_from_euler, matrix_from_quat
 from embodichain.utils import logger
+from ._scene_layout import RandomizeSceneLayout
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
 
 __all__ = [
+    "RandomizeSceneLayout",
     "get_random_pose",
     "randomize_rigid_object_pose",
     "randomize_robot_eef_pose",

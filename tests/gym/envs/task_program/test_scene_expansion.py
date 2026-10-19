@@ -1245,3 +1245,16 @@ def test_scene_program_override_preserves_selected_language_snapshot() -> None:
     assert result.execution.instruction_source == "task_program"
     assert result.execution.segments[0].instruction == "Selected scene task"
     assert result.execution.segments[0].instruction_source == "task_fallback"
+
+
+def test_layout_preparation_failure_blocks_even_explicit_recording_commit() -> None:
+    env = _CandidateEnv()
+    result = execute_scene_variant(
+        env, _variant(), prepare_scene=env.prepare, measured_validator=env.measure
+    )
+    assert result.accepted
+    env._scene_randomization_invalid_rows = torch.ones(1, dtype=torch.bool)
+    env.persist_via_reset(save_data=True, commit_env_ids=[0])
+    assert env.dataset_manager.saved == []
+    assert env.camera_recorder.saved == 0
+    assert env.trajectory_saves == 0
