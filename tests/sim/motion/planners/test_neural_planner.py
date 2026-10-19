@@ -607,7 +607,7 @@ def test_retime_joint_paths_accepts_single_cpu_bfloat16_inputs(
 
 
 def test_retime_joint_paths_solves_a_cpu_batch_in_one_call(monkeypatch):
-    import embodichain.compute.trajectory._toppra_warp as warp_module
+    from embodichain.lab.sim.motion.planners import toppra_planner as toppra_module
 
     paths = torch.zeros(3, 6, NUM_ARM_JOINTS, dtype=torch.float64)
     paths[:, :, 0] = torch.linspace(0.0, 1.0, 6)
@@ -617,9 +617,9 @@ def test_retime_joint_paths_solves_a_cpu_batch_in_one_call(monkeypatch):
     rows = [retime_joint_paths(paths[i : i + 1], constraints=limits) for i in range(3)]
 
     calls = []
-    original = warp_module._retime_toppra_warp
+    original = toppra_module._retime_toppra_warp
     monkeypatch.setattr(
-        warp_module,
+        toppra_module,
         "_retime_toppra_warp",
         lambda *args, **kwargs: calls.append(1) or original(*args, **kwargs),
     )
