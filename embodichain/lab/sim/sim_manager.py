@@ -2528,6 +2528,7 @@ class SimulationManager:
                         np.asarray(pose, dtype=np.float32).reshape(4, 4)
                         @ descriptor.pose
                     )
+        source.materials = self._spawn_scene._resolve_materials(source.materials)
         descriptors = self._spawn_scene.builder.add_scene(source, per_env=True)
         assets: dict[str, VisualObject | RigidObject | Articulation | Robot] = {}
         robot_cfgs = robot_cfgs or {}
@@ -2667,7 +2668,9 @@ class SimulationManager:
             descriptor, materials = visual_desc_from_cfg(cfg)
         visual = VisualObject(cfg, self.device)
         was_materialized = self.spawn_result is not None
-        self._spawn_scene.builder.materials.update(materials)
+        self._spawn_scene.builder.materials.update(
+            self._spawn_scene._resolve_materials(materials)
+        )
         self._spawn_scene.declare("visual_object", cfg.uid, descriptor, facade=visual)
         self._visual_objects[cfg.uid] = visual
         self.notify_visualization_topology_changed()
@@ -2800,7 +2803,9 @@ class SimulationManager:
 
         was_materialized = self.spawn_result is not None
         for uid, descriptor, materials, rigid_obj in declarations:
-            self._spawn_scene.builder.materials.update(materials)
+            self._spawn_scene.builder.materials.update(
+                self._spawn_scene._resolve_materials(materials)
+            )
             if replace:
                 self._spawn_scene.remove(uid)
             self._spawn_scene.declare("rigid_object", uid, descriptor, facade=rigid_obj)
@@ -2890,7 +2895,9 @@ class SimulationManager:
                 f"{config_cls.__name__}, got {type(cfg).__name__}."
             )
         descriptor, materials = descriptor_factory(cfg, per_env=True)
-        self._spawn_scene.builder.materials.update(materials)
+        self._spawn_scene.builder.materials.update(
+            self._spawn_scene._resolve_materials(materials)
+        )
         deformable = object_cls(
             cfg,
             device=self.device,
@@ -3221,7 +3228,9 @@ class SimulationManager:
                     f"Rigid object group member {index} has no rigid-body physics."
                 )
             descriptor.physics.actor_type = actor_type
-            self._spawn_scene.builder.materials.update(materials)
+            self._spawn_scene.builder.materials.update(
+                self._spawn_scene._resolve_materials(materials)
+            )
             descriptors.append(descriptor)
 
         group = RigidObjectGroup(
@@ -3452,7 +3461,9 @@ class SimulationManager:
                 per_env=True,
                 newton_solver_type=self._active_newton_solver_type,
             )
-            self._spawn_scene.builder.materials.update(materials)
+            self._spawn_scene.builder.materials.update(
+                self._spawn_scene._resolve_materials(materials)
+            )
         else:
             descriptor = articulation_desc_from_cfg(
                 cfg,

@@ -47,6 +47,10 @@ tensor batches through the private Scene visual adapter. That boundary converts
 world matrices to arena-local poses and refreshes parent transforms and native
 IDs after topology changes.
 
+`spawn/_usd_assets.py` materializes package textures into `SpawnScene`-owned
+files. They survive topology rebuilds and are deleted after native Scene closure;
+facade source configs retain the original package address.
+
 `BaseEnv` owns Gym reset/step timing; `EmbodiedEnv` translates task composition
 into manager declarations. Scene replication and collision isolation belong
 to Spawn, not per-object collision-group calculations. Backend differences

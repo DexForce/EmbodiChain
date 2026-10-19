@@ -677,6 +677,7 @@ def test_scene_usd_binds_every_gltf_pbr_texture_channel(tmp_path: Path) -> None:
         "occlusion": (64, 64, 64),
         "emissive": (0, 255, 0),
     }
+    BOTTOM_ROW_COLOR = (17, 29, 43)  # A distinct second row exposes an inverted image.
     scene_usd_root = tmp_path / "scene_usd"
     runtime_root = tmp_path / "runtime"
     texture_root = runtime_root / "textures"
@@ -684,7 +685,10 @@ def test_scene_usd_binds_every_gltf_pbr_texture_channel(tmp_path: Path) -> None:
     image_specs = []
     for channel, color in CHANNEL_COLORS.items():
         filename = f"{channel}.png"
-        Image.new("RGB", (2, 2), color).save(texture_root / filename)
+        image = Image.new("RGB", (2, 2), color)
+        image.putpixel((0, 1), BOTTOM_ROW_COLOR)
+        image.putpixel((1, 1), BOTTOM_ROW_COLOR)
+        image.save(texture_root / filename)
         image_specs.append({"uri": f"textures/{filename}"})
     runtime_gltf = runtime_root / "model.gltf"
     runtime_gltf.write_text(
@@ -782,6 +786,15 @@ def test_scene_usd_binds_every_gltf_pbr_texture_channel(tmp_path: Path) -> None:
     assert _connected_texture_path("normal") == "textures/object_normal.png"
     assert _connected_texture_path("occlusion") == "textures/object_occlusion.png"
     assert _connected_texture_path("emissiveColor") == "textures/object_emissive.png"
+    for channel, color in CHANNEL_COLORS.items():
+        with Image.open(
+            scene_usd_root / "textures" / f"object_{channel}.png"
+        ) as exported:
+            assert exported.getpixel((0, 0)) == BOTTOM_ROW_COLOR
+            assert exported.getpixel((0, 1)) == color
+        with Image.open(texture_root / f"{channel}.png") as original:
+            assert original.getpixel((0, 0)) == color
+            assert original.getpixel((0, 1)) == BOTTOM_ROW_COLOR
 
 
 def test_preview_loads_exported_usdc_as_an_articulation(tmp_path: Path) -> None:

@@ -29,6 +29,7 @@ from dexsim.kit.usd import parse_stage
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd import (
     _bind_base_color_texture,
     _bind_gltf_material_textures,
+    _copy_runtime_texture,
     _export_material_without_texture,
 )
 
@@ -97,17 +98,17 @@ def _textured_triangle() -> tuple[Usd.Stage, UsdShade.Material]:
 
 
 @pytest.mark.parametrize(
-    ("channel", "map_name"),
+    ("channel", "surface_input", "output_name"),
     [
-        ("base_color", "base_color_map"),
-        ("metallic_roughness", "metallic_roughness_map"),
-        ("normal", "normal_map"),
-        ("occlusion", "ao_map"),
-        ("emissive", "emissive_map"),
+        ("base_color", "diffuseColor", "rgb"),
+        ("metallic_roughness", "metallic", "b"),
+        ("normal", "normal", "rgb"),
+        ("occlusion", "occlusion", "r"),
+        ("emissive", "emissiveColor", "rgb"),
     ],
 )
 def test_gltf_texture_orientation_survives_usd_import(
-    tmp_path: Path, channel: str, map_name: str
+    tmp_path: Path, channel: str, surface_input: str, output_name: str
 ) -> None:
     # Four different corners expose a vertical inversion that a solid image hides.
     pixels = np.array(
@@ -120,29 +121,51 @@ def test_gltf_texture_orientation_survives_usd_import(
     original_uvs = (
         stage.GetPrimAtPath("/World/Triangle").GetAttribute("primvars:st").Get()
     )
-    # Rebinding must not apply a second conversion or modify shared mesh UVs.
+    # Re-exporting must not double-flip the image or modify shared mesh UVs.
     for _ in range(2):
+        relative_texture = _copy_runtime_texture(
+            source_texture=texture_path,
+            texture_root=tmp_path / "textures",
+            scene_usd_root=tmp_path,
+            uid="triangle",
+            flip_vertical=True,
+        )
         _bind_gltf_material_textures(
             stage=stage,
             material=material,
-            relative_textures={channel: str(texture_path)},
+            relative_textures={channel: str(tmp_path / relative_texture)},
         )
 
+    # Check the portable USD graph, not unreleased DexSim material metadata.
+    surface = material.ComputeSurfaceSource()[0]
+    connected = surface.GetInput(surface_input).GetConnectedSource()
+    assert connected[1] == output_name
+    texture = UsdShade.Shader(connected[0].GetPrim())
+    coordinate_source = texture.GetInput("st").GetConnectedSource()[0]
+    reader = UsdShade.Shader(coordinate_source.GetPrim())
+    assert reader.GetIdAttr().Get() == "UsdPrimvarReader_float2"
+    assert reader.GetInput("varname").Get() == "st"
+    if channel == "metallic_roughness":
+        roughness = surface.GetInput("roughness").GetConnectedSource()
+        assert roughness[0].GetPrim() == texture.GetPrim()
+        assert roughness[1] == "g"
     parsed = parse_stage(stage)
-    descriptor = next(iter(parsed.materials.values()))
-    settings = descriptor.texture_settings[map_name]
-    assert settings.uv_set == "st"
-    assert descriptor.import_warnings == []
+    assert parsed.materials
+    np.testing.assert_array_equal(
+        parsed.mesh_objects[0].renders[0].uv_coords, np.asarray(original_uvs)
+    )
     assert (
         stage.GetPrimAtPath("/World/Triangle").GetAttribute("primvars:st").Get()
         == original_uvs
     )
     # Sample all four glTF corners using USD's lower-left texture convention.
     gltf_uvs = np.array([(0.25, 0.25), (0.75, 0.25), (0.25, 0.75), (0.75, 0.75)])
-    usd_uvs = gltf_uvs * settings.uv_scale + settings.uv_translation
-    x = np.floor(usd_uvs[:, 0] * 2).astype(int)
-    y = 1 - np.floor(usd_uvs[:, 1] * 2).astype(int)
-    np.testing.assert_array_equal(pixels[y, x], pixels.reshape(-1, 3))
+    x = np.floor(gltf_uvs[:, 0] * 2).astype(int)
+    y = 1 - np.floor(gltf_uvs[:, 1] * 2).astype(int)
+    with Image.open(texture.GetInput("file").Get().path) as exported:
+        np.testing.assert_array_equal(np.asarray(exported)[y, x], pixels.reshape(-1, 3))
+    with Image.open(texture_path) as original:
+        np.testing.assert_array_equal(np.asarray(original), pixels)
 
 
 def test_usd_source_texture_retains_native_orientation(tmp_path: Path) -> None:
@@ -155,6 +178,11 @@ def test_usd_source_texture_retains_native_orientation(tmp_path: Path) -> None:
 
     parsed = parse_stage(stage)
     descriptor = next(iter(parsed.materials.values()))
-    settings = descriptor.texture_settings["base_color_map"]
-    assert settings.uv_scale == (1.0, 1.0)
-    assert settings.uv_translation == (0.0, 0.0)
+    assert descriptor.base_color_map == str(texture_path)
+    surface = material.ComputeSurfaceSource()[0]
+    texture = UsdShade.Shader(
+        surface.GetInput("diffuseColor").GetConnectedSource()[0].GetPrim()
+    )
+    reader = UsdShade.Shader(texture.GetInput("st").GetConnectedSource()[0].GetPrim())
+    assert reader.GetIdAttr().Get() == "UsdPrimvarReader_float2"
+    assert reader.GetInput("varname").Get() == "st"

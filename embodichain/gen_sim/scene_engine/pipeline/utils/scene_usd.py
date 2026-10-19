@@ -1074,6 +1074,7 @@ def _apply_runtime_textures_to_usd(
                         texture_root=texture_root,
                         scene_usd_root=scene_usd_root,
                         uid=uid,
+                        flip_vertical=True,
                     )
                     for channel, source_texture in texture_paths.items()
                 }
@@ -1238,8 +1239,9 @@ def _copy_runtime_texture(
     texture_root: Path,
     scene_usd_root: Path,
     uid: str,
+    flip_vertical: bool = False,
 ) -> str:
-    """Copy one package-local texture and return its scene-USD-relative URI."""
+    """Copy a texture, optionally baking the glTF-to-USD image origin change."""
     safe_uid = _validate_uid(uid, label="Scene USD texture")
     target_texture = _resolve_contained_path(
         texture_root,
@@ -1247,7 +1249,17 @@ def _copy_runtime_texture(
         label="Scene USD texture",
     )
     texture_root.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source_texture, target_texture)
+    if flip_vertical:
+        from PIL import Image
+
+        # glTF uses a top-left image origin; USD samples from the bottom left.
+        # Bake the conversion into the copied image for all PBR channels.
+        # This works with DexSim 0.5.1rc1, which does not apply UsdTransform2d,
+        # and preserves mesh UVs and their normal-map tangent basis.
+        with Image.open(source_texture) as image:
+            image.transpose(Image.Transpose.FLIP_TOP_BOTTOM).save(target_texture)
+    else:
+        shutil.copy2(source_texture, target_texture)
     return target_texture.relative_to(scene_usd_root).as_posix()
 
 
@@ -1267,28 +1279,13 @@ def _bind_gltf_material_textures(
     st_reader.CreateIdAttr("UsdPrimvarReader_float2")
     st_reader.CreateInput("varname", Sdf.ValueTypeNames.Token).Set("st")
 
-    # DexSim exports the native glTF UVs unchanged. glTF samples images from
-    # the upper left, while UsdUVTexture samples from the lower left. Convert
-    # at this glTF texture-binding boundary, including every PBR channel, so
-    # USD-sourced materials and shared mesh primvars retain their conventions.
-    st_transform = UsdShade.Shader.Define(
-        stage, material_path.AppendChild("gltfTextureCoordinates")
-    )
-    st_transform.CreateIdAttr("UsdTransform2d")
-    st_transform.CreateInput("in", Sdf.ValueTypeNames.Float2).ConnectToSource(
-        st_reader.ConnectableAPI(), "result"
-    )
-    st_transform.CreateInput("scale", Sdf.ValueTypeNames.Float2).Set((1.0, -1.0))
-    st_transform.CreateInput("translation", Sdf.ValueTypeNames.Float2).Set((0.0, 1.0))
-    st_transform.CreateOutput("result", Sdf.ValueTypeNames.Float2)
-
     for channel, relative_texture in relative_textures.items():
         texture = _usd_texture_shader(
             stage=stage,
             material_path=material_path,
             channel=channel,
             relative_texture=relative_texture,
-            st_reader=st_transform,
+            st_reader=st_reader,
         )
         if channel == "base_color":
             _connect_usd_texture(

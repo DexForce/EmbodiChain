@@ -41,6 +41,11 @@ compatibility data. Build it only after the complete simulation scene is
 prepared; validate UIDs and keep every packaged asset path inside the output
 root.
 
+glTF image-origin conversion is baked into the copied USD textures. Mesh UVs
+remain authored as exported, and materials use ordinary USD texture nodes so
+loading does not require development-only DexSim texture metadata or UV-transform
+support. The packaged native glTF textures retain their original pixels.
+
 - Scene object IDs and graph node IDs must be equal sets on import and export.
 - Editable scene state is Y-up; portable runtime output is Z-up. Convert world
   pose at this boundary, and preserve `body_scale` separately from mesh geometry.

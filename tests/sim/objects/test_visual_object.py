@@ -29,6 +29,7 @@ from embodichain.lab.sim.cfg import ObjectBaseCfg, RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject, VisualObject
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
 from embodichain.lab.sim.spawn.descriptors import visual_desc_from_cfg
+from embodichain.lab.sim.spawn._usd_assets import _UsdTextureFiles
 from embodichain.lab.sim.spawn.usd import rigid_desc_from_usd, visual_desc_from_usd
 
 pytestmark = pytest.mark.no_sim
@@ -288,6 +289,7 @@ def test_add_usd_classifies_visuals_without_promoting_collision_only_objects(tmp
     scene = object.__new__(SpawnScene)
     scene._num_envs = 2
     scene._assets = {}
+    scene._usd_texture_files = _UsdTextureFiles()
     scene.builder = SimpleNamespace(
         is_finalized=False,
         result=None,
