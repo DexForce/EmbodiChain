@@ -255,14 +255,22 @@ Explicit `post_handover_places` permissions bind only adjacent sequential
 HandOver-to-relative-on Place calls with the same rigid object and exact receiver.
 On real-held planning failure, the declared Place may reuse the existing
 goal-conditioned waypoint branch with its observed `ends` grasp and preserved
-release orientation. The normal attempt and successful plans remain unchanged;
-the single recovery solve retains every shared Place phase keyframe, timing,
-release effect and final FK/velocity/scene-envelope checks. Its fixed phase grids
-allocate at least the original joint-limit-derived interval requirement to each
-keyframe edge; insufficient phase duration fails closed rather than extending
-time or dropping a required pose. Ordinary branch allocation is unchanged. This permission does
-not enable ordinary recovery globally, change yaw or targets, or certify a
-physical release. Absent permissions preserve existing behavior.
+release orientation. The normal Place attempt and successful plans remain unchanged.
+For a singleton release goal with two Cartesian keyframes per translation, the
+recovery distinguishes the generated free-transport midpoint from the original
+preplace/contact/release targets. A fresh payload-aware cuRobo connection replaces
+only that midpoint; continuous seeded IK retains the exact Cartesian descent and
+reverse empty-hand retract. Explicit phase composition preserves passive and
+release commands/effects, remaps phase-boundary monitors, and may extend only the
+approach within the original action timeout. Final FK, velocity, robot mesh and
+scene-envelope checks still qualify the emitted commands. Other waypoint branches
+retain their fixed phase grids and fail closed when duration is insufficient.
+The same explicit route also binds the preceding HandOver: an `ends` grip keeps
+its inverse-grasp withdrawal before the final two waypoints move outward toward
+the source arm's side by the existing retreat distance; a planned exit robot-mesh
+gate participates in the existing bounded direction retry. Ordinary/default calls
+remain unchanged. These planning receipts do not certify physical acquisition,
+release or task success; complete native execution and TaskSpec remain required.
 
 `generate_task_program_bundle(verify_pick_phases=True)` explicitly enables
 registered Pick acquisition/lift verification through its fingerprinted lowerer

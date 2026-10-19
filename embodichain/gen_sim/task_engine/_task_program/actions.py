@@ -1954,6 +1954,52 @@ class GenSimHandOver(HandOver):
     OptionsType = HandOver.OptionsType
     binding_contract = HandOver.binding_contract
     environment_screen_factory: Any = None
+    post_place_exits: dict[str, tuple[str, str, str]] | None = None
+
+    def _owns_post_place_exit(self) -> bool:
+        selection = _RECEIVE_SELECTION.get()
+        if (
+            not self.post_place_exits
+            or selection is None
+            or selection.alternate.numel() != 1
+        ):
+            return False
+        held, resources = selection.held, selection.resources
+        route = (self.post_place_exits or {}).get(selection.request.invocation_id)
+        if route is None:
+            return False
+        return bool(
+            route
+            == (
+                held.semantics.entity_id,
+                resources.first.task_state_key,
+                resources.second.task_state_key,
+            )
+            and held.semantics.affordance.get_custom_config(ADAPTIVE_GRASP) == "ends"
+        )
+
+    def _source_retreat_waypoints(self, *args, **kwargs):
+        result = super()._source_retreat_waypoints(*args, **kwargs)
+        if not self._owns_post_place_exit():
+            return result
+        selection = _RECEIVE_SELECTION.get()
+        if selection.root_poses is None or result.shape != (1, 5, 4, 4):
+            raise ValueError("Post-handover withdrawal requires exact bound arm roots.")
+        source, receiver = selection.root_poses
+        direction = (source[:, :3, 3] - receiver[:, :3, 3]).clone()
+        direction[:, 2] = 0
+        length = torch.linalg.vector_norm(direction, dim=-1, keepdim=True)
+        if not torch.isfinite(direction).all() or (length <= 1e-6).any():
+            raise ValueError(
+                "Post-handover withdrawal has no horizontal arm separation."
+            )
+        result[:, -2:, :3, 3] += (
+            direction[:, None]
+            / length[:, None]
+            * result.new_tensor([0.5, 1.0])[None, :, None]
+            * kwargs["retreat_distance"]
+        )
+        return result
 
     def _resolve_existing_hold_receive(
         self,
@@ -2062,10 +2108,24 @@ class GenSimHandOver(HandOver):
     def _qualify_receiver_environment(
         self, plan: ActionPlan, screen: Any
     ) -> ActionPlan:
-        if screen is None or not plan.plan_success.any():
+        exit_check = self._owns_post_place_exit()
+        if not plan.plan_success.any() or (screen is None and not exit_check):
             return plan
         try:
-            evidence = screen.inspect(plan)
+            evidence = screen.inspect(plan) if screen is not None else {"valid": True}
+            if exit_check:
+                selection = _RECEIVE_SELECTION.get()
+                exit_evidence = _inspect_pick_motion(
+                    self.robot,
+                    plan.joint_trajectory.positions[0, -1:],
+                    selection.resources.second.arm.control_part,
+                )
+                evidence = {
+                    **evidence,
+                    "post_handover_exit": exit_evidence,
+                    "valid": evidence.get("valid") is True
+                    and exit_evidence.get("valid") is True,
+                }
         except (AttributeError, KeyError, TypeError, ValueError, RuntimeError) as error:
             evidence = {"valid": False, "unavailable": str(error)}
         valid = evidence.get("valid") is True

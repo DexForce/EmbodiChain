@@ -548,7 +548,13 @@ def test_post_handover_place_permission_survives_strict_loading(
     )
     loaded = _load_bundle(paths).integration.adapter_factory
     assert len(loaded.post_handover_places) == 1
-    assert loaded.post_handover_places[0][1:] == ("bottle", "right", "tray")
+    route = loaded.post_handover_places[0]
+    assert (route.subject, route.receiver, route.reference) == (
+        "bottle",
+        "right",
+        "tray",
+    )
+    assert route.place_id != route.handover_id
     assert load_config(paths.root / "task_program/constraints.json")[
         "post_handover_places"
     ] == ["receive_place"]

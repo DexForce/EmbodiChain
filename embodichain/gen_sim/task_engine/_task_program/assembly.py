@@ -304,6 +304,10 @@ class _TaskFactory(SimulationTaskProgramFactory):
             pick.closing_geometry_factory = closing_geometry
         engine.register(pick, replace=True)
         handover = GenSimHandOver()
+        handover.post_place_exits = {
+            route.handover_id: (route.subject, route.source, route.receiver)
+            for route in self._post_handover_places
+        }
         if self._handover_scene_clearance:
             from .handover_safety import build_handover_environment_screen
 
@@ -342,8 +346,8 @@ class _TaskFactory(SimulationTaskProgramFactory):
         place = GenSimPlace()
         place.recovery_scene_vertices = meshes
         place.post_handover_places = {
-            identity: (subject, resource, reference)
-            for identity, subject, resource, reference in self._post_handover_places
+            route.place_id: (route.subject, route.receiver, route.reference)
+            for route in self._post_handover_places
         }
         from .place_branch import bind_on_invocations
 

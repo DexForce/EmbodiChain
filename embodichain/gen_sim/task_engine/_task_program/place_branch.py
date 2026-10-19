@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""One goal-conditioned ordinary Place route retaining every phase keyframe."""
+"""Goal-conditioned Place recovery retaining exact release and contact targets."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from collections.abc import Callable, Iterable, Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
 import math
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import torch
 
@@ -53,6 +53,19 @@ from . import place_recovery
 
 __all__: list[str] = []
 
+if TYPE_CHECKING:
+    from .place_transport import _ContactPhases
+
+
+@dataclass(frozen=True)
+class _HandoverPlaceRoute:
+    place_id: str
+    handover_id: str
+    subject: str
+    source: str
+    receiver: str
+    reference: str
+
 
 @dataclass
 class _Scope:
@@ -64,6 +77,7 @@ class _Scope:
     qposes: torch.Tensor | None = None
     solves: int = 0
     receipt: dict[str, Any] = field(default_factory=dict)
+    contact: _ContactPhases | None = None
 
 
 _SCOPE: ContextVar[_Scope | None] = ContextVar("gen_sim_place_branch", default=None)
@@ -121,9 +135,11 @@ def bind_handover_places(value: object, program: Any, scene_binding: Any) -> tup
             )
         identity = f"{program.program_id}/{segment.segment_id}:{segment.calls[0].segment_call_index}"
         result.append(
-            (
+            _HandoverPlaceRoute(
                 identity,
+                f"{program.program_id}/{previous.segment_id}:{previous.calls[0].segment_call_index}",
                 transfer.object.entity_id,
+                transfer.resources["source"],
                 transfer.resources["destination"],
                 place.arguments["reference"],
             )
@@ -453,6 +469,10 @@ def solve_waypoints(
         )
         scope.receipt["waypoints"] = measured
         if measured["valid"]:
+            if scope.velocity_phase_allocation:
+                from .place_transport import prepare_contact
+
+                qposes, scope.contact = prepare_contact(scope, poses, qposes, arm)
             scope.qposes = qposes.detach().clone()
             return torch.ones(1, dtype=torch.bool, device=start_qpos.device), qposes
     scope.receipt["reason"] = "required_waypoint_ik_fk_limits_rejected"
@@ -508,7 +528,17 @@ def _rebuild(scope: _Scope, original: ActionPlan) -> ActionPlan:
     down, back = scope.qposes[:, :n_down], scope.qposes[:, n_down:]
     anchor = down[:, -1:]
     full = original.joint_trajectory.positions.clone()
-    if scope.velocity_phase_allocation:
+    lengths = {s.name: s.stop - s.start for s in original.segments}
+    times = original.joint_trajectory.dt
+    if scope.contact is not None:
+        from .place_transport import compose
+
+        full, lengths, times = compose(scope, original, arm)
+        scope.groups = list(scope.contact.desired)
+        scope.qposes = scope.contact.qposes
+        n_down = scope.groups[0].shape[1]
+        down, back = scope.qposes[:, :n_down], scope.qposes[:, n_down:]
+    elif scope.velocity_phase_allocation:
         steps = original.joint_trajectory.dt[:, 1:]
         if (
             not steps.numel()
@@ -520,8 +550,12 @@ def _rebuild(scope: _Scope, original: ActionPlan) -> ActionPlan:
         step = float(steps[0, 0])
         scope.receipt["velocity_phase_intervals"] = {}
     for segment, keys in (
-        (approach, torch.cat((context.robot.qpos[:, None, ids], down), 1)),
-        (retract, torch.cat((anchor, back), 1)),
+        ()
+        if scope.contact is not None
+        else (
+            (approach, torch.cat((context.robot.qpos[:, None, ids], down), 1)),
+            (retract, torch.cat((anchor, back), 1)),
+        )
     ):
         samples = segment.stop - segment.start
         if scope.velocity_phase_allocation:
@@ -530,7 +564,8 @@ def _rebuild(scope: _Scope, original: ActionPlan) -> ActionPlan:
         else:
             values = interpolate_with_distance(keys, samples, device=full.device)
         full[:, segment.start : segment.stop, ids] = values
-    full[:, release.start : release.stop, ids] = anchor
+    if scope.contact is None:
+        full[:, release.start : release.stop, ids] = anchor
     candidate = action.build_plan(
         request,
         context,
@@ -538,18 +573,23 @@ def _rebuild(scope: _Scope, original: ActionPlan) -> ActionPlan:
         trajectory=TimedTrajectory.from_positions(
             full,
             env_ids=original.joint_trajectory.env_ids,
-            dt=original.joint_trajectory.dt,
+            dt=times,
         ),
         expected_effects=original.expected_effects,
         effect_candidates=original.effect_candidates,
         effect_verification=original.effect_verification,
         replannable=original.replannable,
         diagnostics=original.diagnostics,
-        segment_lengths={s.name: s.stop - s.start for s in original.segments},
-        scene_dependency_monitor_until=original.scene_dependency_monitor_until,
+        segment_lengths=lengths,
+        scene_dependency_monitor_until=(
+            scope.contact.monitor_until
+            if scope.contact is not None
+            else original.scene_dependency_monitor_until
+        ),
         scene_dependency_end_segment=original.scene_dependency_end_segment,
     )
     candidate = replace(candidate, scene_dependencies=original.scene_dependencies)
+    approach, release, retract = _phases(candidate)
     # Validate mandatory samples after phase composition, not the discarded split.
     scope.receipt["mandatory_indices"] = {}
     for segment, qkeys, desired in (
@@ -632,7 +672,7 @@ def plan(
                     "mandatory_counts": [p.shape[1] for p in scope.groups],
                     "solve_requests": scope.solves,
                     "retries": 0,
-                    "timing_unchanged": True,
+                    "timing_unchanged": scope.receipt.get("timing_unchanged", True),
                 },
             },
         ),

@@ -316,8 +316,14 @@ def test_explicit_post_handover_place_binding_is_adjacent_and_exact(damage):
     program = NS(program_id="p", iter_segments=lambda: iter(segments))
     bindings = NS(rigid_objects=(NS(entity_id="spoon"), NS(entity_id="mat")))
     if damage is None:
-        assert route.bind_handover_places(names, program, bindings) == (
-            ("p/s1:0", "spoon", "left", "mat"),
+        (bound,) = route.bind_handover_places(names, program, bindings)
+        assert bound.place_id == "p/s1:0"
+        assert bound.handover_id == "p/s0:0"
+        assert (bound.subject, bound.source, bound.receiver, bound.reference) == (
+            "spoon",
+            "right",
+            "left",
+            "mat",
         )
         assert route.bind_handover_places([], program, bindings) == ()
     else:
