@@ -5,10 +5,9 @@ Status: executed at `3cd6379a092f8106f08ea6073f13bec9a4bd6f63`,
 The subsequent [counter optimization](ODS_ACCOUNTING_AUDIT.md) was tested
 separately and was not applied to these four runs. Freeze the
 execution commit, CLI, GPU UUID, CPU affinity and measurement packet before the
-first timed run. This is a four-run development pilot, not the five-seed formal
-experiment in [BENCHMARK.md](BENCHMARK.md). That historical v2 design and
-[BENCHMARK_PROTOCOL.json](BENCHMARK_PROTOCOL.json) remain unchanged: their P1,
-64-episode, step-5000-refill recipe is not this pilot's configuration.
+first timed run. This four-run development pilot is the current comparison
+protocol. A balanced multi-seed study and fresh held-out verification remain
+future work; the pilot does not qualify formal efficiency claims.
 
 ## Question and scope
 

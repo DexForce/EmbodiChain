@@ -21,7 +21,6 @@ import pytest
 import torch
 
 from examples.data_pipeline._ods_pick_place_usage import (
-    AnchorBudget,
     CompactFrameSet,
     UsageTracker,
 )
@@ -39,38 +38,6 @@ def publication(episode: int, frames: list[int], generation: int = 1) -> dict:
         "eligible_anchor_indices": frames,
         "monotonic_ns": 20_000_000_000,
     }
-
-
-def test_credit_earned_once_debited_only_on_completion_and_capped() -> None:
-    budget = AnchorBudget(2, 4, 4)
-    event = publication(1, [0, 1, 2, 3])
-    budget.publish(event)
-    assert budget.credits == 8
-    budget.publish(event)
-    assert budget.credits == 8
-    budget.complete(4, 0.5)
-    assert budget.credits == 4
-    budget.publish(publication(2, [0, 1, 2, 3], 2))
-    assert budget.credits == 8
-    assert budget.discarded_credits == 4
-    budget.complete(4, 0.5)
-    budget.complete(4, 0.5)
-    assert not budget.can_update
-    with pytest.raises(ValueError, match="credits"):
-        budget.complete(4, 0.5)
-
-
-def test_first_publication_lead_time_and_bootstrap_prior() -> None:
-    budget = AnchorBudget(32, 4, 100, prior_seconds=30)
-    assert budget.lead_seconds == 37.5
-    budget.request(2, 12)
-    budget.request(2, 18)  # Coalescing preserves actual first request time.
-    budget.publish(publication(1, [0], 2))
-    assert budget.lead_seconds == 10
-    budget.publish(publication(2, [0], 2))
-    assert budget.summary()["first_publication_latencies_seconds"] == [8]
-    budget.complete(4, 0.5)
-    assert budget.should_refill()
 
 
 def test_overlapping_chunks_masks_history_and_unused_eviction() -> None:
@@ -140,12 +107,6 @@ def test_invalid_masked_identity_rejected_without_padding_alias() -> None:
     with pytest.raises(ValueError, match="Padding"):
         counts.add_tensor(torch.tensor([[3, 1, -1]]))
     assert len(counts) == 0
-
-
-@pytest.mark.parametrize("reuse", [0, -1, float("nan"), float("inf")])
-def test_invalid_credit_configuration(reuse: float) -> None:
-    with pytest.raises(ValueError):
-        AnchorBudget(reuse, 4, 10)
 
 
 def test_anchor_denominator_excludes_valid_but_ineligible_frames() -> None:

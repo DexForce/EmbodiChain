@@ -892,11 +892,6 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--producer-envs", type=int, default=None)
     p.add_argument("--dev-seed-base", "--dev-seed-start", type=int, default=20000)
     p.add_argument("--test-seed-base", type=int, default=None)
-    p.add_argument(
-        "--usage-schedule", choices=("fixed", "anchor_budget"), default="fixed"
-    )
-    p.add_argument("--anchor-reuse", type=float, default=32.0)
-    p.add_argument("--refill-prior-seconds", type=float, default=30.0)
     p.add_argument("--max-generated-episodes", type=int, default=None)
     p.add_argument("--usage-statistics", action="store_true")
     p.add_argument(
@@ -1027,24 +1022,6 @@ def _parse_args() -> argparse.Namespace:
         or args.max_generated_episodes % args.buffer_size
     ):
         p.error("Accepted episode budget must be a positive multiple of cache capacity")
-    if not np.isfinite(args.anchor_reuse) or args.anchor_reuse <= 0:
-        p.error("Anchor reuse must be finite and positive")
-    if not np.isfinite(args.refill_prior_seconds) or args.refill_prior_seconds <= 0:
-        p.error("Refill lead-time prior must be finite and positive")
-    if args.usage_schedule == "anchor_budget":
-        args.usage_statistics = True
-        if args.mode != "online" or args.policy != "chunk-pose" or args.offline_data:
-            p.error(
-                "Anchor-budget scheduling currently requires live online chunk-pose"
-            )
-        if args.max_generated_episodes is None:
-            p.error("Anchor-budget runs require --max-generated-episodes")
-        if args.buffer_size < 2 * args.producer_envs:
-            p.error("Anchor-budget cache must hold at least two producer batches")
-        if args.export_data:
-            p.error(
-                "Anchor-budget archival export is not supported; use lifecycle/usage records"
-            )
     if args.usage_statistics and args.policy not in {
         "chunk-pose",
         "mlp-pose",

@@ -2,23 +2,19 @@
 
 The entry point trains a small state policy from scratch, with a live expert
 producer, an independent student evaluator, optional Viser/TensorBoard, and
-explicit offline-data controls. See [implementation evidence](IMPLEMENTATION.md),
-[design](REDESIGN.md), [review](REVIEW.md), and [efficiency protocol](BENCHMARK.md).
-The [v2 comparison design](BENCHMARK.md) specifies four cold-start arms, five
-paired seeds and fresh final tests; its [protocol manifest](BENCHMARK_PROTOCOL.json)
-is a design artifact, not yet an executable experiment configuration.
-Engineering smoke and training-reset qualification are separate from the final
-80% success target; inspect each run's `summary.json`.
-The [LeRobot offline experiment](LEROBOT_OFFLINE.md) records actual dataset
-round-trip checks, offline learning results and the frozen-data comparison.
+explicit offline-data controls. The current documentation is:
 
-The [production/reuse tuning study](TUNING.md) describes the optional usage-budget
-scheduler, throughput diagnostics and stability validation before formal comparison.
-Use the [throughput configuration guide](ODS_CONFIGURATION_GUIDE.md) for protected
-per-trajectory budgets. The [direct LeRobot pilot](OFFLINE_PILOT.md) defines the
-current four-arm integration comparison; it is separate from the older v2 design.
-Its [executed pilot results](OFFLINE_PILOT_RESULTS.md) include the strong
-32-episode offline baseline and the limitations on timing and quality claims.
+| Guide or evidence | Purpose |
+| --- | --- |
+| [Throughput configuration](ODS_CONFIGURATION_GUIDE.md) | Derive pacing, cache/refill settings and protected per-trajectory budgets. |
+| [Working policy validation](WORKING_SHOWCASE.md) | Physical qualification, successful checkpoint and retained refresh regression. |
+| [Quota validation](ODS_QUOTA_TESTS.md) | Enforcement, rate regimes and limits of learning-safe reuse recommendations. |
+| [Offline comparison protocol](OFFLINE_PILOT.md) and [results](OFFLINE_PILOT_RESULTS.md) | Completed four-arm comparison, including the strong 32-episode offline baseline. |
+| [Accounting audit](ODS_ACCOUNTING_AUDIT.md) | Exact-counter validation and the incomplete performance gate. |
+
+Engineering smoke, physical qualification and student learning are separate
+checks. Inspect each run's `summary.json`; the single-seed comparison does not
+establish a general ODS efficiency advantage.
 
 ## Run the working recipe
 
@@ -43,9 +39,8 @@ runtime; GPU speed alone does not determine time to completion.
 
 The validated development-selected model achieved **99/100** reserved-test
 successes. The later checkpoint regressed to **65/100**, so load the model named
-by `summary.json.best_checkpoint`. See [failure analysis and working validation](WORKING_SHOWCASE.md). The GRU and
-MLP results in older experiment reports are historical baselines, including the
-previous teacher orientation; they are not claims about this default recipe.
+by `summary.json.best_checkpoint`. See [working validation](WORKING_SHOWCASE.md)
+for the frozen recipe, complete test records and limits of that historical result.
 
 ## Physical task and policy
 
@@ -235,8 +230,9 @@ python examples/data_pipeline/ods_pick_place_compare.py \
 
 The command writes JSON/Markdown and quality/time, GPU-hour and measured resource
 figures. It withholds unsupported speedup claims when attainment, panel sizes,
-resource budgets or pairing are incomplete. See BENCHMARK.md for amortized reuse
-and the distinction between delivery speed and learning efficiency.
+resource budgets or pairing are incomplete. Follow the current
+[comparison protocol](OFFLINE_PILOT.md) for acquisition-inclusive costs and the
+distinction between checkpoint availability and learning efficiency.
 
 ## Artifacts and recovery
 

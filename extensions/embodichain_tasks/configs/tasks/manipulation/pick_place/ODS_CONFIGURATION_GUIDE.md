@@ -9,8 +9,8 @@ and a versioned reuse-protection profile from the measurement JSON. Missing
 latency metadata must be measured before configuration; the first implementation
 does not silently invent it or launch an automatic saturation sweep. It derives pipeline settings within that protection profile.
 Existing measurements are examples, not defaults for other tasks or hardware.
-See [the evidence](TUNING_FINDINGS.md) and
-[the experimental protocol](TUNING.md).
+See [quota and learning validation](ODS_QUOTA_TESTS.md) and the
+[completed offline comparison](OFFLINE_PILOT_RESULTS.md).
 
 ## 1. Measure the actual concurrent workload
 
@@ -38,10 +38,9 @@ for the real consumer pipeline. Repeat the joint measurement after changing P,
 B, device placement or the pacing schedule: sharing a GPU changes both rates.
 
 Capture a shared monotonic time origin for producer events and learner intervals
-so concurrent windows can be intersected. Existing frozen screen logs do not
-contain enough clock alignment to establish fully concurrent saturation rates;
-their productive-refill rates include the learner's actual throttling state.
-Label this limitation instead of treating those rates as saturation capacity.
+so concurrent windows can be intersected. Productive-refill rates measured under
+intentional learner throttling describe that schedule. Record the contention
+and pacing state rather than treating these rates as saturation capacity.
 
 ## 2. Automatic configuration with protected trajectory budgets
 

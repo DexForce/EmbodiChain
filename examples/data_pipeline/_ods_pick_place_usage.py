@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Compact source-frame accounting and optional PickPlace usage pacing.
+"""Compact source-frame accounting for the PickPlace showcase.
 
 Counts use one int64 array per source episode, not one Python tuple per target.
 A source identity is (engine run ID, episode ID); its frame index never aliases
@@ -23,7 +23,6 @@ another publication. Accounting is CPU-side and consumes the copied provenance.
 
 from __future__ import annotations
 
-import math
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -33,7 +32,6 @@ import numpy as np
 import torch
 
 __all__ = [
-    "AnchorBudget",
     "CompactFrameSet",
     "UsageTracker",
     "SamplingRNG",
@@ -232,113 +230,6 @@ class SamplingRNG:
         finally:
             self.state = torch.get_rng_state()
             torch.set_rng_state(previous)
-
-
-class AnchorBudget:
-    """Global chunk credits earned once per published source, never per sample.
-
-    The cold-start lead-time prior is 30 seconds until an observed request to
-    first-publication latency is available. It is a conservative scheduling
-    prior, not a measurement of production latency.
-    """
-
-    def __init__(
-        self,
-        reuse: float,
-        batch_size: int,
-        initial_anchors: int,
-        *,
-        prior_seconds: float = 30.0,
-    ) -> None:
-        if (
-            not math.isfinite(reuse)
-            or reuse <= 0
-            or min(batch_size, initial_anchors) < 1
-        ):
-            raise ValueError("Reuse, batch size and initial anchors must be positive")
-        if not math.isfinite(prior_seconds) or prior_seconds <= 0:
-            raise ValueError("Lead-time prior must be finite and positive")
-        self.reuse = float(reuse)
-        self.batch_size = int(batch_size)
-        self.capacity = max(float(batch_size), reuse * initial_anchors)
-        self.credits = 0.0
-        self.completed_chunks = 0
-        self.discarded_credits = 0.0
-        self._seen: set[tuple[int, int]] = set()
-        self._requests: dict[int, float] = {}
-        self._latencies: list[float] = []
-        self.prior_seconds = prior_seconds
-        self.chunks_per_second: float | None = None
-
-    def publish(self, event: dict[str, Any]) -> None:
-        if event["kind"] != "published":
-            return
-        key = (int(event["run_id"]), int(event["episode_id"]))
-        if key in self._seen:
-            return
-        self._seen.add(key)
-        addition = self.reuse * int(event["eligible_anchors"])
-        if addition < 0:
-            raise ValueError("Eligible anchor count cannot be negative")
-        self.discarded_credits += max(0.0, self.credits + addition - self.capacity)
-        self.credits = min(self.capacity, self.credits + addition)
-        generation = int(event["generation"])
-        if generation in self._requests:
-            self._latencies.append(
-                max(0.0, event["monotonic_ns"] / 1e9 - self._requests.pop(generation))
-            )
-
-    def request(self, generation: int, monotonic_seconds: float) -> None:
-        self._requests.setdefault(generation, monotonic_seconds)
-
-    @property
-    def can_update(self) -> bool:
-        return self.credits + 1e-9 >= self.batch_size
-
-    def complete(self, chunks: int, compute_seconds: float) -> None:
-        if chunks < 1 or chunks > self.credits + 1e-9:
-            raise ValueError("A completed update must fit its granted credits")
-        self.credits = max(0.0, self.credits - chunks)
-        self.completed_chunks += chunks
-        self.observe_rate(chunks, compute_seconds)
-
-    def observe_rate(self, chunks: int, active_seconds: float) -> None:
-        """Observe service/update/accounting time, excluding intentional waits."""
-        if active_seconds > 0:
-            rate = chunks / active_seconds
-            self.chunks_per_second = (
-                rate
-                if self.chunks_per_second is None
-                else 0.9 * self.chunks_per_second + 0.1 * rate
-            )
-
-    @property
-    def lead_seconds(self) -> float:
-        return 1.25 * (
-            float(np.percentile(self._latencies, 95))
-            if self._latencies
-            else self.prior_seconds
-        )
-
-    def should_refill(self) -> bool:
-        if not self.can_update:
-            return True
-        return (
-            self.chunks_per_second is not None
-            and self.credits / self.chunks_per_second <= self.lead_seconds
-        )
-
-    def summary(self) -> dict[str, Any]:
-        return {
-            "target_anchor_reuse": self.reuse,
-            "capacity_chunks": self.capacity,
-            "remaining_chunks": self.credits,
-            "completed_chunks": self.completed_chunks,
-            "discarded_credits": self.discarded_credits,
-            "active_chunks_per_second_ema": self.chunks_per_second,
-            "first_publication_latencies_seconds": self._latencies,
-            "cold_start_prior_seconds": self.prior_seconds,
-        }
 
 
 class UsageTracker:

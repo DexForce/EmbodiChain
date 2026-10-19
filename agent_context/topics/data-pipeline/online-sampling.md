@@ -182,21 +182,22 @@ model initialization and all normalization hashes are reported separately.
 Small-data gates, expert physical qualification and student learning assessment
 are separate. Smoke success and low training loss do not establish physical
 student success or an efficiency advantage. See the task-owned
-[experiment protocol](../../../extensions/embodichain_tasks/configs/tasks/manipulation/pick_place/BENCHMARK.md)
+[experiment protocol](../../../extensions/embodichain_tasks/configs/tasks/manipulation/pick_place/OFFLINE_PILOT.md)
 for comparable acquisition-inclusive/data-ready budgets and
 [task guidance](../../../extensions/embodichain_tasks/configs/tasks/manipulation/pick_place/README.md)
-for commands and measured results. Optional anchor-budget pacing and compact
-source-use accounting live in `_ods_pick_place_usage.py`; defaults retain fixed
-round scheduling. Deferred evaluation closes the producer before evaluating
+for commands and measured results. Compact source-use accounting lives in
+`_ods_pick_place_usage.py`. Throughput-based pacing uses protected per-source
+allowances through `--auto-config-input`; defaults retain fixed round scheduling.
+Deferred evaluation closes the producer before evaluating
 saved policies, so its model-selection results are post hoc and cannot certify
 online time-to-target. Evaluation scalars use each checkpoint's actual policy
 step; save-completion events separately timestamp when its weights became
-available. The study runner preserves missing save times in older runs and
-reports drawdown only over evaluated policies. Background resource sampling
+available. Comparison reports preserve missing save times and compute drawdown
+only over evaluated policies. Background resource sampling
 covers startup and waits independently of update counts; process-tree PSS is a
 sampled peak and learner Torch counters exclude native simulator allocations.
 See the task-owned
-[tuning protocol](../../../extensions/embodichain_tasks/configs/tasks/manipulation/pick_place/TUNING.md)
+[configuration guide](../../../extensions/embodichain_tasks/configs/tasks/manipulation/pick_place/ODS_CONFIGURATION_GUIDE.md)
 for rate units, protected scene splits and measurement limits.
 
 ## Sampling failure boundary

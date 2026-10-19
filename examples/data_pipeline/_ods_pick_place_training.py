@@ -63,7 +63,6 @@ from examples.data_pipeline.ods_pick_place_showcase import (
 )
 from examples.data_pipeline._ods_pick_place_policy import ChunkBC, pose_targets
 from examples.data_pipeline._ods_pick_place_usage import (
-    AnchorBudget,
     CompactFrameSet,
     SamplingRNG,
     UsageTracker,
@@ -688,7 +687,6 @@ def run(args: argparse.Namespace) -> None:
     )
     if usage is not None:
         tracker.unique_frames = CompactFrameSet(usage.targets, accumulate=False)
-    pacing = None
     sampling_rng = SamplingRNG(args.sampling_seed)
 
     def save_training_checkpoint(
@@ -714,9 +712,6 @@ def run(args: argparse.Namespace) -> None:
             return []
         events = engine.drain_lifecycle_events()
         usage.lifecycle(events)
-        if pacing is not None:
-            for event in events:
-                pacing.publish(event)
         return events
 
     recorded_refills: set[int] = set()
@@ -894,20 +889,7 @@ def run(args: argparse.Namespace) -> None:
                 "initial_fill", initial_fill_started, tracker.elapsed_seconds()
             )
             resource_sampler.capture("producer_ready")
-            events = drain_usage()
-            if args.usage_schedule == "anchor_budget":
-                pacing = AnchorBudget(
-                    args.anchor_reuse,
-                    args.batch_size,
-                    sum(
-                        event["eligible_anchors"]
-                        for event in events
-                        if event["kind"] == "published"
-                    ),
-                    prior_seconds=args.refill_prior_seconds,
-                )
-                for event in events:
-                    pacing.publish(event)
+            drain_usage()
             initial = _snapshot(engine)
             initial_data_content_id = _content_manifest(
                 {
@@ -1282,7 +1264,6 @@ def run(args: argparse.Namespace) -> None:
                 round_index
                 and engine is not None
                 and args.mode in {"online", "serial"}
-                and pacing is None
                 and auto_plan is None
                 and (
                     args.max_generated_episodes is None
@@ -1335,56 +1316,6 @@ def run(args: argparse.Namespace) -> None:
                                 f"generation_{completed_generation}_publication_dev",
                             )
                         )
-                if pacing is not None:
-                    blocked_started = None
-                    while True:
-                        drain_usage()
-                        publication = engine.get_stats()
-                        pending = (
-                            publication["requested_generation"]
-                            > publication["completed_generation"]
-                        )
-                        room = (
-                            publication["successful_episodes"]
-                            < args.max_generated_episodes
-                        )
-                        if not pending and room and pacing.should_refill():
-                            requested_at = time.monotonic()
-                            pacing.request(request_refill(), requested_at)
-                            pending = True
-                        if pacing.can_update:
-                            break
-                        if not pending and not room:
-                            # Generation completion is published after its final
-                            # events. Drain again after observing terminal state
-                            # so a concurrent final publication cannot lose credits.
-                            drain_usage()
-                            if pacing.can_update:
-                                break
-                            end_reason = "usage_budget"
-                            break
-                        if (
-                            args.wall_time_budget
-                            and tracker.elapsed_seconds() >= args.wall_time_budget
-                        ):
-                            end_reason = "wall_time_budget"
-                            break
-                        if engine.state is not OnlineDataEngineState.READY:
-                            # Surface the original worker failure immediately.
-                            engine.sample_batch_with_context(
-                                1, 2, args.prediction_horizon
-                            )
-                        if blocked_started is None:
-                            blocked_started = tracker.elapsed_seconds()
-                        time.sleep(0.02)
-                    throttle_ended = tracker.elapsed_seconds()
-                    tracker.record_interval(
-                        "usage_throttle",
-                        throttle_ended if blocked_started is None else blocked_started,
-                        throttle_ended,
-                    )
-                    if end_reason in {"usage_budget", "wall_time_budget"}:
-                        break
                 if auto_plan is not None:
                     quota_wait_started = None
                     while True:
@@ -1576,8 +1507,6 @@ def run(args: argparse.Namespace) -> None:
                     if args.train_device.startswith("cuda:"):
                         torch.cuda.synchronize(args.train_device)
                     completed_target_ids = usage.complete(batch)
-                    if pacing is not None:
-                        pacing.complete(args.batch_size, 0.0)
                 if usage is not None:
                     tracker.record_interval(
                         "training_service", service_started, tracker.elapsed_seconds()
@@ -1655,13 +1584,6 @@ def run(args: argparse.Namespace) -> None:
                             / max(producer_stats["production_seconds"], 1e-9),
                             step,
                         )
-                if pacing is not None:
-                    data_wait = tracker.intervals.get("data_wait", [])[-1:]
-                    wait_seconds = sum(end - begin for begin, end in data_wait)
-                    pacing.observe_rate(
-                        args.batch_size,
-                        tracker.elapsed_seconds() - service_started - wait_seconds,
-                    )
                 if train_steps % args.eval_every == 0 or train_steps == total_updates:
                     checkpoint = args.output / f"step_{step}.pt"
                     save_training_checkpoint(
@@ -1814,7 +1736,6 @@ def run(args: argparse.Namespace) -> None:
                             if corpus is not None
                             else "live_publication"
                         ),
-                        "schedule": None if pacing is None else pacing.summary(),
                     },
                     indent=2,
                 )
@@ -2159,7 +2080,6 @@ def run(args: argparse.Namespace) -> None:
                             if corpus is not None
                             else "live_publication"
                         ),
-                        "schedule": None if pacing is None else pacing.summary(),
                     },
                     indent=2,
                 )

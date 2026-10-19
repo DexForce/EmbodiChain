@@ -92,15 +92,12 @@ def test_cli_applies_rate_plan_before_cache_and_production_validation(
     )
 
 
-@pytest.mark.parametrize(
-    "option", ["--smoke", "--usage-schedule", "--prediction-horizon"]
-)
+@pytest.mark.parametrize("option", ["--smoke", "--prediction-horizon"])
 def test_cli_rejects_overrides_that_change_profile_contract(
     tmp_path, monkeypatch, option
 ):
     extra = {
         "--smoke": [],
-        "--usage-schedule": ["anchor_budget"],
         "--prediction-horizon": ["32"],
     }[option]
     monkeypatch.setattr(

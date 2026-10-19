@@ -342,2208 +342,6 @@
     "goal_error": 0.006768320431001484,
     "episode_length": 332.325
   },
-  "replay_feasibility": [
-    {
-      "mode": "raw_relative",
-      "repeat": 0,
-      "success": true,
-      "lifted": true,
-      "goal_error": 0.014961367473006248,
-      "length": 332
-    },
-    {
-      "mode": "raw_relative",
-      "repeat": 1,
-      "success": true,
-      "lifted": true,
-      "goal_error": 0.017526617273688316,
-      "length": 332
-    },
-    {
-      "mode": "raw_relative",
-      "repeat": 2,
-      "success": true,
-      "lifted": true,
-      "goal_error": 0.028711456805467606,
-      "length": 332
-    },
-    {
-      "mode": "raw_relative",
-      "repeat": 3,
-      "success": true,
-      "lifted": true,
-      "goal_error": 0.012734277173876762,
-      "length": 332
-    },
-    {
-      "mode": "raw_relative",
-      "repeat": 4,
-      "success": true,
-      "lifted": true,
-      "goal_error": 0.017153562977910042,
-      "length": 332
-    },
-    {
-      "mode": "raw_relative",
-      "repeat": 5,
-      "success": true,
-      "lifted": true,
-      "goal_error": 0.028711456805467606,
-      "length": 332
-    },
-    {
-      "mode": "absolute_reference",
-      "repeat": 0,
-      "success": true,
-      "lifted": true,
-      "goal_error": 0.013237899169325829,
-      "length": 332
-    },
-    {
-      "mode": "absolute_reference",
-      "repeat": 1,
-      "success": true,
-      "lifted": true,
-      "goal_error": 0.016038333997130394,
-      "length": 332
-    },
-    {
-      "mode": "absolute_reference",
-      "repeat": 2,
-      "success": true,
-      "lifted": true,
-      "goal_error": 0.01633799448609352,
-      "length": 332
-    },
-    {
-      "mode": "absolute_reference",
-      "repeat": 3,
-      "success": true,
-      "lifted": true,
-      "goal_error": 0.025741765275597572,
-      "length": 332
-    },
-    {
-      "mode": "absolute_reference",
-      "repeat": 4,
-      "success": true,
-      "lifted": true,
-      "goal_error": 0.015481087379157543,
-      "length": 332
-    },
-    {
-      "mode": "absolute_reference",
-      "repeat": 5,
-      "success": true,
-      "lifted": true,
-      "goal_error": 0.025741765275597572,
-      "length": 332
-    }
-  ],
-  "source_initial_positions_match_between_orientation_corpora": true,
-  "prototype_old_teacher_dev20": {
-    "step": 10000,
-    "records": [
-      {
-        "seed": 20000,
-        "success": false,
-        "lifted": true,
-        "goal_error": 0.05785224586725235,
-        "length": 600,
-        "final_cube": [
-          -0.3919343650341034,
-          0.22942131757736206,
-          0.02599998563528061
-        ],
-        "final_tcp": [
-          -0.4009231925010681,
-          0.24709473550319672,
-          0.15529951453208923
-        ],
-        "finger_min": 0.037971965968608856,
-        "cube_speed": 0.0008734100265428424
-      },
-      {
-        "seed": 20001,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.0089151905849576,
-        "length": 341,
-        "final_cube": [
-          -0.4195849597454071,
-          0.2711507976055145,
-          0.02599998563528061
-        ],
-        "final_tcp": [
-          -0.40704354643821716,
-          0.2761996388435364,
-          0.1464231014251709
-        ],
-        "finger_min": 0.0399988628923893,
-        "cube_speed": 0.0008766511455178261
-      },
-      {
-        "seed": 20002,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.016335194930434227,
-        "length": 331,
-        "final_cube": [
-          -0.40980836749076843,
-          0.26727327704429626,
-          0.02599998563528061
-        ],
-        "final_tcp": [
-          -0.39888694882392883,
-          0.2728298604488373,
-          0.1449650526046753
-        ],
-        "finger_min": 0.039981309324502945,
-        "cube_speed": 0.0008716142037883401
-      },
-      {
-        "seed": 20003,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.017202021554112434,
-        "length": 329,
-        "final_cube": [
-          -0.4075453281402588,
-          0.2681766748428345,
-          0.02599998563528061
-        ],
-        "final_tcp": [
-          -0.40044015645980835,
-          0.2733423113822937,
-          0.14586244523525238
-        ],
-        "finger_min": 0.03999389708042145,
-        "cube_speed": 0.0008731256239116192
-      },
-      {
-        "seed": 20004,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.01145627349615097,
-        "length": 340,
-        "final_cube": [
-          -0.40949323773384094,
-          0.2755441665649414,
-          0.02599998563528061
-        ],
-        "final_tcp": [
-          -0.3993300497531891,
-          0.27521660923957825,
-          0.1452019214630127
-        ],
-        "finger_min": 0.03998886048793793,
-        "cube_speed": 0.0008746882085688412
-      },
-      {
-        "seed": 20005,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.00629391148686409,
-        "length": 330,
-        "final_cube": [
-          -0.4229564964771271,
-          0.2745344340801239,
-          0.025999974459409714
-        ],
-        "final_tcp": [
-          -0.44539549946784973,
-          0.2694699168205261,
-          0.14235073328018188
-        ],
-        "finger_min": 0.03999553620815277,
-        "cube_speed": 0.0008653608965687454
-      },
-      {
-        "seed": 20006,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.0172025915235281,
-        "length": 353,
-        "final_cube": [
-          -0.411689817905426,
-          0.2649710178375244,
-          0.02599996328353882
-        ],
-        "final_tcp": [
-          -0.4191645681858063,
-          0.27026888728141785,
-          0.13979104161262512
-        ],
-        "finger_min": 0.039491891860961914,
-        "cube_speed": 0.0008916484075598419
-      },
-      {
-        "seed": 20007,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.019136685878038406,
-        "length": 346,
-        "final_cube": [
-          -0.40458670258522034,
-          0.26870205998420715,
-          0.02599998377263546
-        ],
-        "final_tcp": [
-          -0.3996255099773407,
-          0.2737559676170349,
-          0.14469420909881592
-        ],
-        "finger_min": 0.03992960974574089,
-        "cube_speed": 0.0008737889584153891
-      },
-      {
-        "seed": 20008,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.023974401876330376,
-        "length": 331,
-        "final_cube": [
-          -0.4224211573600769,
-          0.2561691403388977,
-          0.02599998377263546
-        ],
-        "final_tcp": [
-          -0.4183144271373749,
-          0.2666384279727936,
-          0.14019805192947388
-        ],
-        "finger_min": 0.03972099348902702,
-        "cube_speed": 0.0008862746763043106
-      },
-      {
-        "seed": 20009,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.013715364038944244,
-        "length": 321,
-        "final_cube": [
-          -0.4173848032951355,
-          0.2665734589099884,
-          0.025999998673796654
-        ],
-        "final_tcp": [
-          -0.4039367735385895,
-          0.27216824889183044,
-          0.14348046481609344
-        ],
-        "finger_min": 0.03983330726623535,
-        "cube_speed": 0.0008726796368137002
-      },
-      {
-        "seed": 20010,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.029342200607061386,
-        "length": 582,
-        "final_cube": [
-          -0.4084678292274475,
-          0.25303754210472107,
-          0.02599995583295822
-        ],
-        "final_tcp": [
-          -0.4091013967990875,
-          0.2615864872932434,
-          0.1292639672756195
-        ],
-        "finger_min": 0.03982522338628769,
-        "cube_speed": 0.0009021663572639227
-      },
-      {
-        "seed": 20011,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.01208038441836834,
-        "length": 338,
-        "final_cube": [
-          -0.41925448179244995,
-          0.26798418164253235,
-          0.025999993085861206
-        ],
-        "final_tcp": [
-          -0.40698111057281494,
-          0.272735595703125,
-          0.14717331528663635
-        ],
-        "finger_min": 0.03984062746167183,
-        "cube_speed": 0.0008716953452676535
-      },
-      {
-        "seed": 20012,
-        "success": false,
-        "lifted": true,
-        "goal_error": 0.04264006391167641,
-        "length": 600,
-        "final_cube": [
-          -0.4106733500957489,
-          0.2565455734729767,
-          0.059366825968027115
-        ],
-        "final_tcp": [
-          -0.4086977541446686,
-          0.2550235390663147,
-          0.08317416906356812
-        ],
-        "finger_min": 0.03402148559689522,
-        "cube_speed": 0.03284694254398346
-      },
-      {
-        "seed": 20013,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.01809249259531498,
-        "length": 334,
-        "final_cube": [
-          -0.40321919322013855,
-          0.27331095933914185,
-          0.025999976322054863
-        ],
-        "final_tcp": [
-          -0.40543416142463684,
-          0.27472051978111267,
-          0.14436331391334534
-        ],
-        "finger_min": 0.039988916367292404,
-        "cube_speed": 0.0008735144510865211
-      },
-      {
-        "seed": 20014,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.01955919712781906,
-        "length": 338,
-        "final_cube": [
-          -0.4087141156196594,
-          0.26405662298202515,
-          0.025999989360570908
-        ],
-        "final_tcp": [
-          -0.3985186517238617,
-          0.2714077830314636,
-          0.14588849246501923
-        ],
-        "finger_min": 0.039978206157684326,
-        "cube_speed": 0.0008730978588573635
-      },
-      {
-        "seed": 20015,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.015389458276331425,
-        "length": 341,
-        "final_cube": [
-          -0.4080934226512909,
-          0.27030107378959656,
-          0.02599998004734516
-        ],
-        "final_tcp": [
-          -0.4011768102645874,
-          0.27512335777282715,
-          0.14560538530349731
-        ],
-        "finger_min": 0.03999365493655205,
-        "cube_speed": 0.0008736223098821938
-      },
-      {
-        "seed": 20016,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.008777737617492676,
-        "length": 340,
-        "final_cube": [
-          -0.4189719259738922,
-          0.2713402211666107,
-          0.025999989360570908
-        ],
-        "final_tcp": [
-          -0.4165436327457428,
-          0.27319276332855225,
-          0.14773839712142944
-        ],
-        "finger_min": 0.03997448831796646,
-        "cube_speed": 0.0008716187439858913
-      },
-      {
-        "seed": 20017,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.016110792756080627,
-        "length": 331,
-        "final_cube": [
-          -0.4080241918563843,
-          0.26926976442337036,
-          0.02599998749792576
-        ],
-        "final_tcp": [
-          -0.40269720554351807,
-          0.2741033434867859,
-          0.1467716097831726
-        ],
-        "finger_min": 0.039991848170757294,
-        "cube_speed": 0.000873078650329262
-      },
-      {
-        "seed": 20018,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.012236570939421654,
-        "length": 314,
-        "final_cube": [
-          -0.40926581621170044,
-          0.2742111086845398,
-          0.025999989360570908
-        ],
-        "final_tcp": [
-          -0.4018446207046509,
-          0.2756616175174713,
-          0.1447647362947464
-        ],
-        "finger_min": 0.0399896502494812,
-        "cube_speed": 0.0008767173276282847
-      },
-      {
-        "seed": 20019,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.027043478563427925,
-        "length": 343,
-        "final_cube": [
-          -0.41091859340667725,
-          0.25454655289649963,
-          0.02599998377263546
-        ],
-        "final_tcp": [
-          -0.4030180275440216,
-          0.2673840820789337,
-          0.14990951120853424
-        ],
-        "finger_min": 0.039989832788705826,
-        "cube_speed": 0.0008720456389710307
-      }
-    ],
-    "success_rate": 0.9,
-    "lift_rate": 1.0,
-    "goal_error": 0.019667812902480365
-  },
-  "prototype_revised_teacher_dev20": {
-    "step": 10000,
-    "records": [
-      {
-        "seed": 20000,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.005239841993898153,
-        "length": 322,
-        "final_cube": [
-          -0.41617268323898315,
-          0.28343623876571655,
-          0.02599998190999031
-        ],
-        "final_tcp": [
-          -0.418763667345047,
-          0.28620627522468567,
-          0.14690610766410828
-        ],
-        "finger_min": 0.03986698016524315,
-        "cube_speed": 0.0008749301196075976
-      },
-      {
-        "seed": 20001,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.014119469560682774,
-        "length": 329,
-        "final_cube": [
-          -0.41838812828063965,
-          0.29399147629737854,
-          0.02599998004734516
-        ],
-        "final_tcp": [
-          -0.41744622588157654,
-          0.2962283492088318,
-          0.1473132073879242
-        ],
-        "finger_min": 0.03998507186770439,
-        "cube_speed": 0.0008718022145330906
-      },
-      {
-        "seed": 20002,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.007107891142368317,
-        "length": 329,
-        "final_cube": [
-          -0.4164699614048004,
-          0.2860877811908722,
-          0.02599998749792576
-        ],
-        "final_tcp": [
-          -0.41810253262519836,
-          0.28943049907684326,
-          0.1465284824371338
-        ],
-        "finger_min": 0.03997050225734711,
-        "cube_speed": 0.0008704232750460505
-      },
-      {
-        "seed": 20003,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.006676471792161465,
-        "length": 308,
-        "final_cube": [
-          -0.4156871736049652,
-          0.28499749302864075,
-          0.025999996811151505
-        ],
-        "final_tcp": [
-          -0.41849103569984436,
-          0.28793826699256897,
-          0.1459929496049881
-        ],
-        "finger_min": 0.039944443851709366,
-        "cube_speed": 0.0008722256752662361
-      },
-      {
-        "seed": 20004,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.007114361505955458,
-        "length": 309,
-        "final_cube": [
-          -0.4155423045158386,
-          0.285453736782074,
-          0.02599998563528061
-        ],
-        "final_tcp": [
-          -0.4179883897304535,
-          0.28845497965812683,
-          0.1458853781223297
-        ],
-        "finger_min": 0.03965523838996887,
-        "cube_speed": 0.0008737493772059679
-      },
-      {
-        "seed": 20005,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.006155170500278473,
-        "length": 322,
-        "final_cube": [
-          -0.41662928462028503,
-          0.2749478220939636,
-          0.02599998749792576
-        ],
-        "final_tcp": [
-          -0.41805627942085266,
-          0.28385040163993835,
-          0.14623743295669556
-        ],
-        "finger_min": 0.03899870067834854,
-        "cube_speed": 0.0008739969925954938
-      },
-      {
-        "seed": 20006,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.0024193688295781612,
-        "length": 523,
-        "final_cube": [
-          -0.42059409618377686,
-          0.2821214199066162,
-          0.02599998190999031
-        ],
-        "final_tcp": [
-          -0.4163401126861572,
-          0.2959812581539154,
-          0.14081239700317383
-        ],
-        "finger_min": 0.03858731687068939,
-        "cube_speed": 0.0008724460494704545
-      },
-      {
-        "seed": 20007,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.007263485807925463,
-        "length": 319,
-        "final_cube": [
-          -0.4158707559108734,
-          0.2741086781024933,
-          0.025999993085861206
-        ],
-        "final_tcp": [
-          -0.4174516797065735,
-          0.28509989380836487,
-          0.14146868884563446
-        ],
-        "finger_min": 0.03954323008656502,
-        "cube_speed": 0.0008759290794841945
-      },
-      {
-        "seed": 20008,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.007023284211754799,
-        "length": 324,
-        "final_cube": [
-          -0.41690924763679504,
-          0.28622686862945557,
-          0.02599998563528061
-        ],
-        "final_tcp": [
-          -0.41864117980003357,
-          0.2877468168735504,
-          0.14552316069602966
-        ],
-        "finger_min": 0.03993041068315506,
-        "cube_speed": 0.0008749527623876929
-      },
-      {
-        "seed": 20009,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.008440944366157055,
-        "length": 321,
-        "final_cube": [
-          -0.41649118065834045,
-          0.2876116931438446,
-          0.02599998190999031
-        ],
-        "final_tcp": [
-          -0.41846299171447754,
-          0.28898605704307556,
-          0.14525237679481506
-        ],
-        "finger_min": 0.03999703377485275,
-        "cube_speed": 0.0008721306803636253
-      },
-      {
-        "seed": 20010,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.004669455345720053,
-        "length": 310,
-        "final_cube": [
-          -0.4158557057380676,
-          0.2780950665473938,
-          0.02599998563528061
-        ],
-        "final_tcp": [
-          -0.4181350767612457,
-          0.28452810645103455,
-          0.14412042498588562
-        ],
-        "finger_min": 0.039590511471033096,
-        "cube_speed": 0.0008735603769309819
-      },
-      {
-        "seed": 20011,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.0056310659274458885,
-        "length": 318,
-        "final_cube": [
-          -0.41595953702926636,
-          0.27620741724967957,
-          0.02599998749792576
-        ],
-        "final_tcp": [
-          -0.4178127348423004,
-          0.28440484404563904,
-          0.14266641438007355
-        ],
-        "finger_min": 0.039752375334501266,
-        "cube_speed": 0.0008739923941902816
-      },
-      {
-        "seed": 20012,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.005593840964138508,
-        "length": 311,
-        "final_cube": [
-          -0.41493716835975647,
-          0.2778415381908417,
-          0.02599998190999031
-        ],
-        "final_tcp": [
-          -0.4180682301521301,
-          0.2841961085796356,
-          0.14461003243923187
-        ],
-        "finger_min": 0.03967973589897156,
-        "cube_speed": 0.0008732957649044693
-      },
-      {
-        "seed": 20013,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.006304624956101179,
-        "length": 335,
-        "final_cube": [
-          -0.4179714322090149,
-          0.2858850061893463,
-          0.025999989360570908
-        ],
-        "final_tcp": [
-          -0.4176306128501892,
-          0.2909824550151825,
-          0.1467604637145996
-        ],
-        "finger_min": 0.03860875591635704,
-        "cube_speed": 0.0008742437930777669
-      },
-      {
-        "seed": 20014,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.00479847053065896,
-        "length": 321,
-        "final_cube": [
-          -0.4153626263141632,
-          0.2792787253856659,
-          0.02599998377263546
-        ],
-        "final_tcp": [
-          -0.41855376958847046,
-          0.28453630208969116,
-          0.1464456170797348
-        ],
-        "finger_min": 0.039699625223875046,
-        "cube_speed": 0.000874180521350354
-      },
-      {
-        "seed": 20015,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.004554515704512596,
-        "length": 308,
-        "final_cube": [
-          -0.4155745208263397,
-          0.2803986072540283,
-          0.025999989360570908
-        ],
-        "final_tcp": [
-          -0.41779854893684387,
-          0.2871064841747284,
-          0.14396633207798004
-        ],
-        "finger_min": 0.039138033986091614,
-        "cube_speed": 0.00087451480794698
-      },
-      {
-        "seed": 20016,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.003926530946046114,
-        "length": 322,
-        "final_cube": [
-          -0.416379451751709,
-          0.28114429116249084,
-          0.02599998563528061
-        ],
-        "final_tcp": [
-          -0.4180586338043213,
-          0.2857199013233185,
-          0.1455429494380951
-        ],
-        "finger_min": 0.0394679456949234,
-        "cube_speed": 0.0008747624815441668
-      },
-      {
-        "seed": 20017,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.004196963272988796,
-        "length": 339,
-        "final_cube": [
-          -0.4159244894981384,
-          0.28006961941719055,
-          0.02599998749792576
-        ],
-        "final_tcp": [
-          -0.4180543124675751,
-          0.28491225838661194,
-          0.1440047323703766
-        ],
-        "finger_min": 0.03930962458252907,
-        "cube_speed": 0.0008739660843275487
-      },
-      {
-        "seed": 20018,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.008833014406263828,
-        "length": 323,
-        "final_cube": [
-          -0.41654348373413086,
-          0.28806689381599426,
-          0.02599998749792576
-        ],
-        "final_tcp": [
-          -0.41855597496032715,
-          0.2892673909664154,
-          0.14672787487506866
-        ],
-        "finger_min": 0.039965759962797165,
-        "cube_speed": 0.000872676377184689
-      },
-      {
-        "seed": 20019,
-        "success": true,
-        "lifted": true,
-        "goal_error": 0.003771071555092931,
-        "length": 330,
-        "final_cube": [
-          -0.416495144367218,
-          0.28096804022789,
-          0.02599998004734516
-        ],
-        "final_tcp": [
-          -0.4184610843658447,
-          0.28613027930259705,
-          0.14505118131637573
-        ],
-        "finger_min": 0.03990773484110832,
-        "cube_speed": 0.0008752377470955253
-      }
-    ],
-    "success_rate": 1.0,
-    "lift_rate": 1.0,
-    "goal_error": 0.006191992165986449
-  },
-  "offline": {
-    "summary": {
-      "export_complete": null,
-      "batch_manifest_complete": null,
-      "policy": "chunk-pose",
-      "mode": "offline-full",
-      "stage": "showcase",
-      "smoke": false,
-      "training_seed": 42,
-      "parameters_updated": true,
-      "training_step": 10000,
-      "best_checkpoint": "/tmp/ods-v4/integrated-offline/step_10000.pt",
-      "best_dev_success": 1.0,
-      "initial_dev_success": 0.0,
-      "final_success_rate": null,
-      "threshold_test_success": null,
-      "initial_success_rate": null,
-      "learning_target_met": false,
-      "small_data_gate_met": false,
-      "supervised_generations": {
-        "1": 148309010
-      },
-      "stats": null,
-      "efficiency": {
-        "end_reason": "update_budget",
-        "observed_seconds": 561.6455248421989,
-        "horizon_seconds": 561.6455248421989,
-        "efficiency/reached_80": false,
-        "efficiency/t80_dev_seconds": null,
-        "efficiency/t80_dev_right_censored": true,
-        "efficiency/censor_seconds": 561.6455248421989,
-        "efficiency/t80_dev_checkpoint": null,
-        "efficiency/auc_success_time": 0.00011838017382284417,
-        "pipeline/first_update_seconds": 218.10863342229277,
-        "pipeline/targets_per_second": 634151.8937615475,
-        "pipeline/acquisition_inclusive_targets_per_second": 264061.5894547886,
-        "pipeline/training_loop_seconds": 233.8698527261149,
-        "pipeline/exposed_data_wait_seconds": 0,
-        "pipeline/data_wait_fraction": 0.0,
-        "pipeline/batch_latency_ms_p50_p95": [
-          5.21075155120343,
-          5.573287163861093
-        ],
-        "learning/valid_targets": 148309010,
-        "learning/unique_frames": 10638,
-        "learning/targets_to_80": null,
-        "learning/unique_frames_to_80": null,
-        "data/targets_per_unique_frame": 13941.437300244406,
-        "cost/gpu_hours_to_80": null,
-        "cost/allocated_gpu_hours": 0.1560126457894997,
-        "cost/allocated_physical_gpu_ids": [
-          "5"
-        ],
-        "cost/host_pss_sampled_peak_bytes": 5067090944,
-        "cost/cpu_core_seconds_observed": 1932.7299999999998,
-        "cost/torch_cuda_this_process_max_reserved_bytes_by_device": {
-          "cuda:5": 54525952
-        },
-        "cost/gpu_peak_bytes": null,
-        "pipeline/producer_learner_overlap_fraction": null,
-        "horizon_prespecified": false,
-        "data_ready": true,
-        "cost/data_disk_peak_bytes": 5238087,
-        "data/accepted_frames": 10638,
-        "data/consumed_unique_fraction": 1.0,
-        "data/evicted_unused_fraction": null,
-        "data/generation_targets": {
-          "1": 148309010
-        },
-        "data/age_seconds_p50_p95": null,
-        "cost/data_write_read_bytes": null,
-        "cost/data_memory_peak_bytes": null
-      },
-      "final_verification_seconds": 0.001827357104048133,
-      "matching": null
-    },
-    "development": {
-      "name": "step_10000_dev",
-      "checkpoint": "/tmp/ods-v4/integrated-offline/step_10000.pt",
-      "policy_step": "10000",
-      "records": [
-        {
-          "seed": 20000,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.00863729789853096,
-          "length": 289,
-          "initial_arm_target_delta": 0.10454058647155762
-        },
-        {
-          "seed": 20001,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.00537317618727684,
-          "length": 309,
-          "initial_arm_target_delta": 0.09849071502685547
-        },
-        {
-          "seed": 20002,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.005681824870407581,
-          "length": 305,
-          "initial_arm_target_delta": 0.09956061840057373
-        },
-        {
-          "seed": 20003,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.007439275272190571,
-          "length": 314,
-          "initial_arm_target_delta": 0.11193603277206421
-        },
-        {
-          "seed": 20004,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.005545726977288723,
-          "length": 312,
-          "initial_arm_target_delta": 0.06966143846511841
-        },
-        {
-          "seed": 20005,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.00613250071182847,
-          "length": 321,
-          "initial_arm_target_delta": 0.09683966636657715
-        },
-        {
-          "seed": 20006,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.006122796330600977,
-          "length": 309,
-          "initial_arm_target_delta": 0.11019522696733475
-        },
-        {
-          "seed": 20007,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.0035658024717122316,
-          "length": 329,
-          "initial_arm_target_delta": 0.09296834468841553
-        },
-        {
-          "seed": 20008,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.012612437829375267,
-          "length": 310,
-          "initial_arm_target_delta": 0.22271892428398132
-        },
-        {
-          "seed": 20009,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.005950212944298983,
-          "length": 308,
-          "initial_arm_target_delta": 0.10269135236740112
-        },
-        {
-          "seed": 20010,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.004783443175256252,
-          "length": 313,
-          "initial_arm_target_delta": 0.11031816154718399
-        },
-        {
-          "seed": 20011,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.0052693733014166355,
-          "length": 297,
-          "initial_arm_target_delta": 0.11996179819107056
-        },
-        {
-          "seed": 20012,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.005463914480060339,
-          "length": 317,
-          "initial_arm_target_delta": 0.11360107362270355
-        },
-        {
-          "seed": 20013,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.004673686809837818,
-          "length": 314,
-          "initial_arm_target_delta": 0.09951961785554886
-        },
-        {
-          "seed": 20014,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.015012027695775032,
-          "length": 321,
-          "initial_arm_target_delta": 0.20978565514087677
-        },
-        {
-          "seed": 20015,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.008251299150288105,
-          "length": 316,
-          "initial_arm_target_delta": 0.06560534238815308
-        },
-        {
-          "seed": 20016,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.002745239529758692,
-          "length": 326,
-          "initial_arm_target_delta": 0.07007648050785065
-        },
-        {
-          "seed": 20017,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.006238781381398439,
-          "length": 326,
-          "initial_arm_target_delta": 0.091854028403759
-        },
-        {
-          "seed": 20018,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.006752776447683573,
-          "length": 307,
-          "initial_arm_target_delta": 0.10643452405929565
-        },
-        {
-          "seed": 20019,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.008868122473359108,
-          "length": 299,
-          "initial_arm_target_delta": 0.10882019996643066
-        }
-      ],
-      "success_rate": 1.0,
-      "lift_rate": 1.0,
-      "goal_error": 0.00675598579691723,
-      "episode_length": 312.1,
-      "initial_arm_target_delta": 0.1102789893746376
-    },
-    "cleanup": {
-      "seconds": 6.125049348920584,
-      "owned_worker_pids": [
-        3713985
-      ],
-      "evaluator_exitcode": 0,
-      "engine_cleanup_error": null
-    },
-    "format": "numeric .pt corpus; equivalent LeRobot export is available and SDK roundtrip validated"
-  },
-  "online": {
-    "summary": {
-      "export_complete": true,
-      "batch_manifest_complete": null,
-      "policy": "chunk-pose",
-      "mode": "online",
-      "stage": "showcase",
-      "smoke": false,
-      "training_seed": 42,
-      "parameters_updated": true,
-      "training_step": 10000,
-      "best_checkpoint": "/tmp/ods-v4/integrated-online/step_5000.pt",
-      "best_dev_success": 1.0,
-      "initial_dev_success": 0.0,
-      "final_success_rate": null,
-      "threshold_test_success": null,
-      "initial_success_rate": null,
-      "learning_target_met": false,
-      "small_data_gate_met": false,
-      "supervised_generations": {
-        "1": 91732262,
-        "2": 56588907
-      },
-      "stats": {
-        "requested_generation": 2,
-        "completed_generation": 2,
-        "successful_episodes": 64,
-        "failed_episodes": 0,
-        "generated_frames": 21284,
-        "production_seconds": 534.3543577480596,
-        "sampled_chunks": 2560000,
-        "run_id": 3372649994915313492,
-        "valid_frames": 10641
-      },
-      "efficiency": {
-        "end_reason": "update_budget",
-        "observed_seconds": 1283.0505336646456,
-        "horizon_seconds": 1283.0505336646456,
-        "efficiency/reached_80": true,
-        "efficiency/t80_dev_seconds": 1282.8814170407131,
-        "efficiency/t80_dev_right_censored": false,
-        "efficiency/censor_seconds": null,
-        "efficiency/t80_dev_checkpoint": "/tmp/ods-v4/integrated-online/step_10000.pt",
-        "efficiency/auc_success_time": 0.40151088196700735,
-        "pipeline/first_update_seconds": 511.8829999307636,
-        "pipeline/targets_per_second": 280778.35496450216,
-        "pipeline/acquisition_inclusive_targets_per_second": 115600.41098020159,
-        "pipeline/training_loop_seconds": 528.2500106489751,
-        "pipeline/exposed_data_wait_seconds": 234.07188075501472,
-        "pipeline/data_wait_fraction": 0.44310814204707455,
-        "pipeline/batch_latency_ms_p50_p95": [
-          9.904565522447228,
-          10.701805155258626
-        ],
-        "learning/valid_targets": 148321169,
-        "learning/unique_frames": 21284,
-        "learning/targets_to_80": 148321169,
-        "learning/unique_frames_to_80": 21284,
-        "data/targets_per_unique_frame": 6968.669845893629,
-        "cost/gpu_hours_to_80": 0.35635594917797586,
-        "cost/allocated_gpu_hours": 0.35640292601795714,
-        "cost/allocated_physical_gpu_ids": [
-          "1"
-        ],
-        "cost/host_pss_sampled_peak_bytes": 8213195776,
-        "cost/cpu_core_seconds_observed": 7440.34,
-        "cost/torch_cuda_this_process_max_reserved_bytes_by_device": {
-          "cuda:1": 54525952
-        },
-        "cost/gpu_peak_bytes": null,
-        "pipeline/producer_learner_overlap_fraction": null,
-        "horizon_prespecified": false,
-        "data_ready": false,
-        "cost/data_disk_peak_bytes": 10468393,
-        "data/accepted_frames": 21284,
-        "data/consumed_unique_fraction": 1.0,
-        "data/evicted_unused_fraction": null,
-        "data/generation_targets": {
-          "1": 91732262,
-          "2": 56588907
-        },
-        "data/age_seconds_p50_p95": null,
-        "cost/data_write_read_bytes": null,
-        "cost/data_memory_peak_bytes": null
-      },
-      "final_verification_seconds": 0.0019642070401459932,
-      "matching": null
-    },
-    "initial_development": {
-      "name": "initial_dev",
-      "checkpoint": "/tmp/ods-v4/integrated-online/initial_step_0.pt",
-      "policy_step": "0",
-      "records": [
-        {
-          "seed": 20000,
-          "success": false,
-          "lifted": false,
-          "goal_error": 0.33573898673057556,
-          "length": 600,
-          "initial_arm_target_delta": 1.0
-        },
-        {
-          "seed": 20001,
-          "success": false,
-          "lifted": false,
-          "goal_error": 0.3350788354873657,
-          "length": 600,
-          "initial_arm_target_delta": 1.0
-        },
-        {
-          "seed": 20002,
-          "success": false,
-          "lifted": false,
-          "goal_error": 0.3349688649177551,
-          "length": 600,
-          "initial_arm_target_delta": 1.0
-        },
-        {
-          "seed": 20003,
-          "success": false,
-          "lifted": false,
-          "goal_error": 0.3446608781814575,
-          "length": 600,
-          "initial_arm_target_delta": 1.0
-        },
-        {
-          "seed": 20004,
-          "success": false,
-          "lifted": false,
-          "goal_error": 0.3464808166027069,
-          "length": 600,
-          "initial_arm_target_delta": 1.0
-        },
-        {
-          "seed": 20005,
-          "success": false,
-          "lifted": false,
-          "goal_error": 0.35134464502334595,
-          "length": 600,
-          "initial_arm_target_delta": 1.0
-        },
-        {
-          "seed": 20006,
-          "success": false,
-          "lifted": false,
-          "goal_error": 0.367412269115448,
-          "length": 600,
-          "initial_arm_target_delta": 1.0
-        },
-        {
-          "seed": 20007,
-          "success": false,
-          "lifted": false,
-          "goal_error": 0.3285866975784302,
-          "length": 600,
-          "initial_arm_target_delta": 1.0
-        },
-        {
-          "seed": 20008,
-          "success": false,
-          "lifted": false,
-          "goal_error": 0.3977762460708618,
-          "length": 600,
-          "initial_arm_target_delta": 1.0
-        },
-        {
-          "seed": 20009,
-          "success": false,
-          "lifted": false,
-          "goal_error": 0.34814897179603577,
-          "length": 600,
-          "initial_arm_target_delta": 1.0
-        },
-        {
-          "seed": 20010,
-          "success": false,
-          "lifted": false,
-          "goal_error": 0.3656828999519348,
-          "length": 600,
-          "initial_arm_target_delta": 1.0
-        },
-        {
-          "seed": 20011,
-          "success": false,
-          "lifted": false,
-          "goal_error": 0.3355303704738617,
-          "length": 600,
-          "initial_arm_target_delta": 1.0
-        },
-        {
-          "seed": 20012,
-          "success": false,
-          "lifted": false,
-          "goal_error": 0.3653176426887512,
-          "length": 600,
-          "initial_arm_target_delta": 1.0
-        },
-        {
-          "seed": 20013,
-          "success": false,
-          "lifted": false,
-          "goal_error": 0.34222152829170227,
-          "length": 600,
-          "initial_arm_target_delta": 1.0
-        },
-        {
-          "seed": 20014,
-          "success": false,
-          "lifted": false,
-          "goal_error": 0.39484548568725586,
-          "length": 600,
-          "initial_arm_target_delta": 1.0
-        },
-        {
-          "seed": 20015,
-          "success": false,
-          "lifted": false,
-          "goal_error": 0.34791868925094604,
-          "length": 600,
-          "initial_arm_target_delta": 1.0
-        },
-        {
-          "seed": 20016,
-          "success": false,
-          "lifted": false,
-          "goal_error": 0.390297532081604,
-          "length": 600,
-          "initial_arm_target_delta": 1.0
-        },
-        {
-          "seed": 20017,
-          "success": false,
-          "lifted": false,
-          "goal_error": 0.3872321844100952,
-          "length": 600,
-          "initial_arm_target_delta": 1.0
-        },
-        {
-          "seed": 20018,
-          "success": false,
-          "lifted": false,
-          "goal_error": 0.3295651376247406,
-          "length": 600,
-          "initial_arm_target_delta": 1.0
-        },
-        {
-          "seed": 20019,
-          "success": false,
-          "lifted": false,
-          "goal_error": 0.33532071113586426,
-          "length": 600,
-          "initial_arm_target_delta": 1.0
-        }
-      ],
-      "success_rate": 0.0,
-      "lift_rate": 0.0,
-      "goal_error": 0.35420646965503694,
-      "episode_length": 600.0,
-      "initial_arm_target_delta": 1.0
-    },
-    "step_5000_development": {
-      "name": "step_5000_dev",
-      "checkpoint": "/tmp/ods-v4/integrated-online/step_5000.pt",
-      "policy_step": "5000",
-      "records": [
-        {
-          "seed": 20000,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.016059400513768196,
-          "length": 302,
-          "initial_arm_target_delta": 0.299757719039917
-        },
-        {
-          "seed": 20001,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.013098392635583878,
-          "length": 303,
-          "initial_arm_target_delta": 0.29166191816329956
-        },
-        {
-          "seed": 20002,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.005198515485972166,
-          "length": 304,
-          "initial_arm_target_delta": 0.3173261880874634
-        },
-        {
-          "seed": 20003,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.006916647311300039,
-          "length": 304,
-          "initial_arm_target_delta": 0.40239542722702026
-        },
-        {
-          "seed": 20004,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.02447659522294998,
-          "length": 298,
-          "initial_arm_target_delta": 0.2792343497276306
-        },
-        {
-          "seed": 20005,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.011843916028738022,
-          "length": 306,
-          "initial_arm_target_delta": 0.18603894114494324
-        },
-        {
-          "seed": 20006,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.019209060817956924,
-          "length": 312,
-          "initial_arm_target_delta": 0.2994999587535858
-        },
-        {
-          "seed": 20007,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.010458322241902351,
-          "length": 291,
-          "initial_arm_target_delta": 0.37039369344711304
-        },
-        {
-          "seed": 20008,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.01658010669052601,
-          "length": 317,
-          "initial_arm_target_delta": 0.3152787983417511
-        },
-        {
-          "seed": 20009,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.012825321406126022,
-          "length": 312,
-          "initial_arm_target_delta": 0.21866701543331146
-        },
-        {
-          "seed": 20010,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.018998580053448677,
-          "length": 312,
-          "initial_arm_target_delta": 0.2990925908088684
-        },
-        {
-          "seed": 20011,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.015234189108014107,
-          "length": 304,
-          "initial_arm_target_delta": 0.26455166935920715
-        },
-        {
-          "seed": 20012,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.02002682350575924,
-          "length": 311,
-          "initial_arm_target_delta": 0.30245542526245117
-        },
-        {
-          "seed": 20013,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.0025213854387402534,
-          "length": 294,
-          "initial_arm_target_delta": 0.3090761601924896
-        },
-        {
-          "seed": 20014,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.01217695977538824,
-          "length": 316,
-          "initial_arm_target_delta": 0.2765193581581116
-        },
-        {
-          "seed": 20015,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.015930570662021637,
-          "length": 304,
-          "initial_arm_target_delta": 0.3237619996070862
-        },
-        {
-          "seed": 20016,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.009607414714992046,
-          "length": 305,
-          "initial_arm_target_delta": 0.1460595577955246
-        },
-        {
-          "seed": 20017,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.0058057899586856365,
-          "length": 302,
-          "initial_arm_target_delta": 0.15469396114349365
-        },
-        {
-          "seed": 20018,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.0049731978215277195,
-          "length": 302,
-          "initial_arm_target_delta": 0.34240037202835083
-        },
-        {
-          "seed": 20019,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.0056037199683487415,
-          "length": 306,
-          "initial_arm_target_delta": 0.30785948038101196
-        }
-      ],
-      "success_rate": 1.0,
-      "lift_rate": 1.0,
-      "goal_error": 0.012377245468087494,
-      "episode_length": 305.25,
-      "initial_arm_target_delta": 0.2853362292051315
-    },
-    "step_10000_development": {
-      "name": "step_10000_dev",
-      "checkpoint": "/tmp/ods-v4/integrated-online/step_10000.pt",
-      "policy_step": "10000",
-      "records": [
-        {
-          "seed": 20000,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.02439509704709053,
-          "length": 347,
-          "initial_arm_target_delta": 0.16736537218093872
-        },
-        {
-          "seed": 20001,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.02302052266895771,
-          "length": 450,
-          "initial_arm_target_delta": 0.18338164687156677
-        },
-        {
-          "seed": 20002,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.01276266947388649,
-          "length": 333,
-          "initial_arm_target_delta": 0.2200983762741089
-        },
-        {
-          "seed": 20003,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.01763727143406868,
-          "length": 310,
-          "initial_arm_target_delta": 0.2428188920021057
-        },
-        {
-          "seed": 20004,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.015282602049410343,
-          "length": 304,
-          "initial_arm_target_delta": 0.20311081409454346
-        },
-        {
-          "seed": 20005,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.006129191257059574,
-          "length": 319,
-          "initial_arm_target_delta": 0.1263141632080078
-        },
-        {
-          "seed": 20006,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.007664862088859081,
-          "length": 314,
-          "initial_arm_target_delta": 0.2963843047618866
-        },
-        {
-          "seed": 20007,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.007938667200505733,
-          "length": 308,
-          "initial_arm_target_delta": 0.22487539052963257
-        },
-        {
-          "seed": 20008,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.006961455103009939,
-          "length": 344,
-          "initial_arm_target_delta": 0.3022587299346924
-        },
-        {
-          "seed": 20009,
-          "success": false,
-          "lifted": true,
-          "goal_error": 0.08034816384315491,
-          "length": 600,
-          "initial_arm_target_delta": 0.12209415435791016
-        },
-        {
-          "seed": 20010,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.011881636455655098,
-          "length": 323,
-          "initial_arm_target_delta": 0.27729740738868713
-        },
-        {
-          "seed": 20011,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.006586804054677486,
-          "length": 305,
-          "initial_arm_target_delta": 0.13282746076583862
-        },
-        {
-          "seed": 20012,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.013019385747611523,
-          "length": 305,
-          "initial_arm_target_delta": 0.2686314582824707
-        },
-        {
-          "seed": 20013,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.018602976575493813,
-          "length": 321,
-          "initial_arm_target_delta": 0.2556523382663727
-        },
-        {
-          "seed": 20014,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.025318659842014313,
-          "length": 321,
-          "initial_arm_target_delta": 0.2613930404186249
-        },
-        {
-          "seed": 20015,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.013291893526911736,
-          "length": 313,
-          "initial_arm_target_delta": 0.19693225622177124
-        },
-        {
-          "seed": 20016,
-          "success": false,
-          "lifted": false,
-          "goal_error": 0.22706906497478485,
-          "length": 600,
-          "initial_arm_target_delta": 0.16533884406089783
-        },
-        {
-          "seed": 20017,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.0027648538816720247,
-          "length": 339,
-          "initial_arm_target_delta": 0.15190339088439941
-        },
-        {
-          "seed": 20018,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.009801468811929226,
-          "length": 322,
-          "initial_arm_target_delta": 0.23175396025180817
-        },
-        {
-          "seed": 20019,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.006204676348716021,
-          "length": 327,
-          "initial_arm_target_delta": 0.1610354781150818
-        }
-      ],
-      "success_rate": 0.9,
-      "lift_rate": 0.95,
-      "goal_error": 0.026834096119273454,
-      "episode_length": 355.25,
-      "initial_arm_target_delta": 0.2095733739435673
-    },
-    "cleanup": {
-      "seconds": 10.592169512994587,
-      "owned_worker_pids": [
-        3713915
-      ],
-      "evaluator_exitcode": 0,
-      "engine_cleanup_error": null
-    }
-  },
-  "small_data": {
-    "one": {
-      "verification": {
-        "name": "small_data_verification",
-        "checkpoint": "/tmp/ods-v4/integrated-one/step_10000.pt",
-        "policy_step": "10000",
-        "records": [
-          {
-            "seed": 22000,
-            "success": false,
-            "lifted": true,
-            "goal_error": 0.19440799951553345,
-            "length": 600,
-            "initial_arm_target_delta": 0.12603849172592163
-          },
-          {
-            "seed": 22001,
-            "success": true,
-            "lifted": true,
-            "goal_error": 0.005438745487481356,
-            "length": 310,
-            "initial_arm_target_delta": 0.12603849172592163
-          },
-          {
-            "seed": 22002,
-            "success": true,
-            "lifted": true,
-            "goal_error": 0.01418430358171463,
-            "length": 310,
-            "initial_arm_target_delta": 0.12603849172592163
-          },
-          {
-            "seed": 22003,
-            "success": true,
-            "lifted": true,
-            "goal_error": 0.00861345510929823,
-            "length": 308,
-            "initial_arm_target_delta": 0.12603849172592163
-          },
-          {
-            "seed": 22004,
-            "success": false,
-            "lifted": true,
-            "goal_error": 0.04561436176300049,
-            "length": 600,
-            "initial_arm_target_delta": 0.12603849172592163
-          },
-          {
-            "seed": 22005,
-            "success": false,
-            "lifted": true,
-            "goal_error": 0.19440799951553345,
-            "length": 600,
-            "initial_arm_target_delta": 0.12603849172592163
-          },
-          {
-            "seed": 22006,
-            "success": true,
-            "lifted": true,
-            "goal_error": 0.005438745487481356,
-            "length": 310,
-            "initial_arm_target_delta": 0.12603849172592163
-          },
-          {
-            "seed": 22007,
-            "success": true,
-            "lifted": true,
-            "goal_error": 0.01418430358171463,
-            "length": 310,
-            "initial_arm_target_delta": 0.12603849172592163
-          },
-          {
-            "seed": 22008,
-            "success": true,
-            "lifted": true,
-            "goal_error": 0.00861345510929823,
-            "length": 308,
-            "initial_arm_target_delta": 0.12603849172592163
-          },
-          {
-            "seed": 22009,
-            "success": false,
-            "lifted": true,
-            "goal_error": 0.04561436176300049,
-            "length": 600,
-            "initial_arm_target_delta": 0.12603849172592163
-          }
-        ],
-        "success_rate": 0.6,
-        "lift_rate": 1.0,
-        "goal_error": 0.05365177309140563,
-        "episode_length": 425.6,
-        "initial_arm_target_delta": 0.12603849172592163
-      },
-      "summary": {
-        "export_complete": true,
-        "batch_manifest_complete": null,
-        "policy": "chunk-pose",
-        "mode": "frozen",
-        "stage": "overfit-one",
-        "smoke": false,
-        "training_seed": 42,
-        "parameters_updated": true,
-        "training_step": 10000,
-        "best_checkpoint": "/tmp/ods-v4/integrated-one/step_10000.pt",
-        "best_dev_success": 1.0,
-        "initial_dev_success": 0.0,
-        "final_success_rate": null,
-        "threshold_test_success": null,
-        "initial_success_rate": null,
-        "learning_target_met": false,
-        "small_data_gate_met": false,
-        "supervised_generations": {
-          "1": 148335461
-        },
-        "stats": {
-          "requested_generation": 1,
-          "completed_generation": 1,
-          "successful_episodes": 1,
-          "failed_episodes": 0,
-          "generated_frames": 333,
-          "production_seconds": 9.064498513936996,
-          "sampled_chunks": 2560000,
-          "run_id": 3771688018907868892,
-          "valid_frames": 333
-        },
-        "efficiency": {
-          "end_reason": "update_budget",
-          "observed_seconds": 423.92243713187054,
-          "horizon_seconds": 423.92243713187054,
-          "efficiency/reached_80": false,
-          "efficiency/t80_dev_seconds": null,
-          "efficiency/t80_dev_right_censored": true,
-          "efficiency/censor_seconds": 423.92243713187054,
-          "efficiency/t80_dev_checkpoint": null,
-          "efficiency/auc_success_time": 0.0,
-          "pipeline/first_update_seconds": 54.669906047871336,
-          "pipeline/targets_per_second": 514132.571819981,
-          "pipeline/acquisition_inclusive_targets_per_second": 349911.7951944047,
-          "pipeline/training_loop_seconds": 288.5159764823038,
-          "pipeline/exposed_data_wait_seconds": 0,
-          "pipeline/data_wait_fraction": 0.0,
-          "pipeline/batch_latency_ms_p50_p95": [
-            9.449610020965338,
-            10.262090968899429
-          ],
-          "learning/valid_targets": 148335461,
-          "learning/unique_frames": 333,
-          "learning/targets_to_80": null,
-          "learning/unique_frames_to_80": null,
-          "data/targets_per_unique_frame": 445451.83483483485,
-          "cost/gpu_hours_to_80": null,
-          "cost/allocated_gpu_hours": 0.1177562325366307,
-          "cost/allocated_physical_gpu_ids": [
-            "3"
-          ],
-          "cost/host_pss_sampled_peak_bytes": 8175378432,
-          "cost/cpu_core_seconds_observed": 1948.9,
-          "cost/torch_cuda_this_process_max_reserved_bytes_by_device": {
-            "cuda:3": 54525952
-          },
-          "cost/gpu_peak_bytes": null,
-          "pipeline/producer_learner_overlap_fraction": null,
-          "horizon_prespecified": false,
-          "data_ready": false,
-          "cost/data_disk_peak_bytes": 171436,
-          "data/accepted_frames": 333,
-          "data/consumed_unique_fraction": 1.0,
-          "data/evicted_unused_fraction": null,
-          "data/generation_targets": {
-            "1": 148335461
-          },
-          "data/age_seconds_p50_p95": null,
-          "cost/data_write_read_bytes": null,
-          "cost/data_memory_peak_bytes": null
-        },
-        "final_verification_seconds": 0.001852286048233509,
-        "matching": null
-      },
-      "cleanup": {
-        "seconds": 9.554976349929348,
-        "owned_worker_pids": [
-          3730479
-        ],
-        "evaluator_exitcode": 0,
-        "engine_cleanup_error": null
-      }
-    },
-    "four": {
-      "verification": {
-        "name": "small_data_verification",
-        "checkpoint": "/tmp/ods-v4/integrated-four/step_10000.pt",
-        "policy_step": "10000",
-        "records": [
-          {
-            "seed": 22000,
-            "success": false,
-            "lifted": true,
-            "goal_error": 0.10012061148881912,
-            "length": 600,
-            "initial_arm_target_delta": 0.20032019913196564
-          },
-          {
-            "seed": 22001,
-            "success": true,
-            "lifted": true,
-            "goal_error": 0.009150105528533459,
-            "length": 309,
-            "initial_arm_target_delta": 0.20032019913196564
-          },
-          {
-            "seed": 22002,
-            "success": false,
-            "lifted": true,
-            "goal_error": 0.11242000013589859,
-            "length": 600,
-            "initial_arm_target_delta": 0.20032019913196564
-          },
-          {
-            "seed": 22003,
-            "success": true,
-            "lifted": true,
-            "goal_error": 0.014682366512715816,
-            "length": 316,
-            "initial_arm_target_delta": 0.20032019913196564
-          },
-          {
-            "seed": 22004,
-            "success": false,
-            "lifted": true,
-            "goal_error": 0.11711188405752182,
-            "length": 600,
-            "initial_arm_target_delta": 0.20032019913196564
-          },
-          {
-            "seed": 22005,
-            "success": false,
-            "lifted": true,
-            "goal_error": 0.0984395444393158,
-            "length": 600,
-            "initial_arm_target_delta": 0.16133607923984528
-          },
-          {
-            "seed": 22006,
-            "success": false,
-            "lifted": true,
-            "goal_error": 0.1198294386267662,
-            "length": 600,
-            "initial_arm_target_delta": 0.16133607923984528
-          },
-          {
-            "seed": 22007,
-            "success": false,
-            "lifted": true,
-            "goal_error": 0.09051880240440369,
-            "length": 600,
-            "initial_arm_target_delta": 0.16133607923984528
-          },
-          {
-            "seed": 22008,
-            "success": false,
-            "lifted": true,
-            "goal_error": 0.12366745620965958,
-            "length": 600,
-            "initial_arm_target_delta": 0.16133607923984528
-          },
-          {
-            "seed": 22009,
-            "success": false,
-            "lifted": true,
-            "goal_error": 0.11397740244865417,
-            "length": 600,
-            "initial_arm_target_delta": 0.16133607923984528
-          },
-          {
-            "seed": 22010,
-            "success": true,
-            "lifted": true,
-            "goal_error": 0.011733711697161198,
-            "length": 314,
-            "initial_arm_target_delta": 0.1381981074810028
-          },
-          {
-            "seed": 22011,
-            "success": false,
-            "lifted": true,
-            "goal_error": 0.05198477953672409,
-            "length": 600,
-            "initial_arm_target_delta": 0.1381981074810028
-          },
-          {
-            "seed": 22012,
-            "success": false,
-            "lifted": true,
-            "goal_error": 0.05198477953672409,
-            "length": 600,
-            "initial_arm_target_delta": 0.1381981074810028
-          },
-          {
-            "seed": 22013,
-            "success": false,
-            "lifted": true,
-            "goal_error": 0.05198477953672409,
-            "length": 600,
-            "initial_arm_target_delta": 0.1381981074810028
-          },
-          {
-            "seed": 22014,
-            "success": false,
-            "lifted": true,
-            "goal_error": 0.05198477953672409,
-            "length": 600,
-            "initial_arm_target_delta": 0.1381981074810028
-          },
-          {
-            "seed": 22015,
-            "success": true,
-            "lifted": true,
-            "goal_error": 0.01735466904938221,
-            "length": 317,
-            "initial_arm_target_delta": 0.10369900614023209
-          },
-          {
-            "seed": 22016,
-            "success": true,
-            "lifted": true,
-            "goal_error": 0.01735466904938221,
-            "length": 317,
-            "initial_arm_target_delta": 0.10369900614023209
-          },
-          {
-            "seed": 22017,
-            "success": true,
-            "lifted": true,
-            "goal_error": 0.01735466904938221,
-            "length": 317,
-            "initial_arm_target_delta": 0.10369900614023209
-          },
-          {
-            "seed": 22018,
-            "success": true,
-            "lifted": true,
-            "goal_error": 0.01735466904938221,
-            "length": 317,
-            "initial_arm_target_delta": 0.10369900614023209
-          },
-          {
-            "seed": 22019,
-            "success": true,
-            "lifted": true,
-            "goal_error": 0.01735466904938221,
-            "length": 317,
-            "initial_arm_target_delta": 0.10369900614023209
-          }
-        ],
-        "success_rate": 0.4,
-        "lift_rate": 1.0,
-        "goal_error": 0.06031818934716284,
-        "episode_length": 486.2,
-        "initial_arm_target_delta": 0.15088834799826145
-      },
-      "summary": {
-        "export_complete": null,
-        "batch_manifest_complete": null,
-        "policy": "chunk-pose",
-        "mode": "frozen",
-        "stage": "overfit-four",
-        "smoke": false,
-        "training_seed": 42,
-        "parameters_updated": true,
-        "training_step": 10000,
-        "best_checkpoint": "/tmp/ods-v4/integrated-four/step_10000.pt",
-        "best_dev_success": 0.5,
-        "initial_dev_success": 0.0,
-        "final_success_rate": null,
-        "threshold_test_success": null,
-        "initial_success_rate": null,
-        "learning_target_met": false,
-        "small_data_gate_met": false,
-        "supervised_generations": {
-          "1": 148335461
-        },
-        "stats": {
-          "requested_generation": 1,
-          "completed_generation": 1,
-          "successful_episodes": 4,
-          "failed_episodes": 0,
-          "generated_frames": 1332,
-          "production_seconds": 34.518950772006065,
-          "sampled_chunks": 2560000,
-          "run_id": 3690234823390050873,
-          "valid_frames": 1332
-        },
-        "efficiency": {
-          "end_reason": "update_budget",
-          "observed_seconds": 864.9675047257915,
-          "horizon_seconds": 864.9675047257915,
-          "efficiency/reached_80": false,
-          "efficiency/t80_dev_seconds": null,
-          "efficiency/t80_dev_right_censored": true,
-          "efficiency/censor_seconds": 864.9675047257915,
-          "efficiency/t80_dev_checkpoint": null,
-          "efficiency/auc_success_time": 0.0,
-          "pipeline/first_update_seconds": 112.86089204880409,
-          "pipeline/targets_per_second": 487923.6742459142,
-          "pipeline/acquisition_inclusive_targets_per_second": 171492.5245047497,
-          "pipeline/training_loop_seconds": 304.01365793379955,
-          "pipeline/exposed_data_wait_seconds": 0,
-          "pipeline/data_wait_fraction": 0.0,
-          "pipeline/batch_latency_ms_p50_p95": [
-            9.519557119347155,
-            11.001898266840724
-          ],
-          "learning/valid_targets": 148335461,
-          "learning/unique_frames": 1332,
-          "learning/targets_to_80": null,
-          "learning/unique_frames_to_80": null,
-          "data/targets_per_unique_frame": 111362.95870870871,
-          "cost/gpu_hours_to_80": null,
-          "cost/allocated_gpu_hours": 0.24026875131271985,
-          "cost/allocated_physical_gpu_ids": [
-            "3"
-          ],
-          "cost/host_pss_sampled_peak_bytes": 8011531264,
-          "cost/cpu_core_seconds_observed": 2841.8599999999997,
-          "cost/torch_cuda_this_process_max_reserved_bytes_by_device": {
-            "cuda:3": 54525952
-          },
-          "cost/gpu_peak_bytes": null,
-          "pipeline/producer_learner_overlap_fraction": null,
-          "horizon_prespecified": false,
-          "data_ready": false,
-          "cost/data_disk_peak_bytes": 0,
-          "data/accepted_frames": 1332,
-          "data/consumed_unique_fraction": 1.0,
-          "data/evicted_unused_fraction": null,
-          "data/generation_targets": {
-            "1": 148335461
-          },
-          "data/age_seconds_p50_p95": null,
-          "cost/data_write_read_bytes": null,
-          "cost/data_memory_peak_bytes": null
-        },
-        "final_verification_seconds": 0.0018704028334468603,
-        "matching": null
-      },
-      "cleanup": {
-        "seconds": 9.604125291109085,
-        "owned_worker_pids": [
-          3751741
-        ],
-        "evaluator_exitcode": 0,
-        "engine_cleanup_error": null
-      }
-    }
-  },
   "frozen_test_candidates": {
     "candidates": {
       "development_selected": {
@@ -3478,23 +1276,6 @@
     "evaluation_seconds": 437.2169134260621,
     "parallel_independent_B1_evaluators": 3
   },
-  "selected_test_cleanup": [
-    {
-      "pid": 3756633,
-      "exitcode": 0,
-      "forced": false
-    },
-    {
-      "pid": 3756634,
-      "exitcode": 0,
-      "forced": false
-    },
-    {
-      "pid": 3756635,
-      "exitcode": 0,
-      "forced": false
-    }
-  ],
   "two_generation_test100": {
     "checkpoint": "/tmp/ods-v4/integrated-online/step_10000.pt",
     "successes": 65,
@@ -4314,23 +2095,6 @@
     "evaluation_seconds": 570.410201911116,
     "parallel_independent_B1_evaluators": 3
   },
-  "two_generation_test_cleanup": [
-    {
-      "pid": 3759541,
-      "exitcode": 0,
-      "forced": false
-    },
-    {
-      "pid": 3759542,
-      "exitcode": 0,
-      "forced": false
-    },
-    {
-      "pid": 3759543,
-      "exitcode": 0,
-      "forced": false
-    }
-  ],
   "training_generation_fit_audit": {
     "evaluation": "post-training fit on both archived training generations; no tuning or held-out supervision",
     "checkpoints": {
@@ -4368,201 +2132,6 @@
       }
     }
   },
-  "resume": {
-    "summary": {
-      "export_complete": null,
-      "batch_manifest_complete": null,
-      "policy": "chunk-pose",
-      "mode": "online",
-      "stage": "showcase",
-      "smoke": true,
-      "training_seed": 42,
-      "parameters_updated": true,
-      "training_step": 10010,
-      "best_checkpoint": "/tmp/ods-v4/resume-viewer/initial_step_10000.pt",
-      "best_dev_success": 1.0,
-      "initial_dev_success": 1.0,
-      "final_success_rate": 1.0,
-      "threshold_test_success": null,
-      "initial_success_rate": 1.0,
-      "learning_target_met": false,
-      "small_data_gate_met": false,
-      "supervised_generations": {
-        "1": 1379,
-        "2": 925
-      },
-      "stats": {
-        "requested_generation": 2,
-        "completed_generation": 2,
-        "successful_episodes": 4,
-        "failed_episodes": 0,
-        "generated_frames": 1332,
-        "production_seconds": 33.90517147514038,
-        "sampled_chunks": 40,
-        "run_id": 2235104127582867736,
-        "valid_frames": 666
-      },
-      "efficiency": {
-        "end_reason": "update_budget",
-        "observed_seconds": 98.09775240160525,
-        "horizon_seconds": 98.09775240160525,
-        "efficiency/reached_80": false,
-        "efficiency/t80_dev_seconds": null,
-        "efficiency/t80_dev_right_censored": true,
-        "efficiency/censor_seconds": 98.09775240160525,
-        "efficiency/t80_dev_checkpoint": null,
-        "efficiency/auc_success_time": 0.0,
-        "pipeline/first_update_seconds": 82.08066914975643,
-        "pipeline/targets_per_second": 128.38317617892932,
-        "pipeline/acquisition_inclusive_targets_per_second": 23.48677664466345,
-        "pipeline/training_loop_seconds": 17.946276674047112,
-        "pipeline/exposed_data_wait_seconds": 17.3256874429062,
-        "pipeline/data_wait_fraction": 0.965419610852296,
-        "pipeline/batch_latency_ms_p50_p95": [
-          1.5578900929540396,
-          3.063098981510847
-        ],
-        "learning/valid_targets": 2304,
-        "learning/unique_frames": 1092,
-        "learning/targets_to_80": null,
-        "learning/unique_frames_to_80": null,
-        "data/targets_per_unique_frame": 2.10989010989011,
-        "cost/gpu_hours_to_80": null,
-        "cost/allocated_gpu_hours": 0.02724937566711257,
-        "cost/allocated_physical_gpu_ids": [
-          "5"
-        ],
-        "cost/host_pss_sampled_peak_bytes": 9849963520,
-        "cost/cpu_core_seconds_observed": 605.5299999999999,
-        "cost/torch_cuda_this_process_max_reserved_bytes_by_device": {
-          "cuda:5": 50331648
-        },
-        "cost/gpu_peak_bytes": null,
-        "pipeline/producer_learner_overlap_fraction": null,
-        "horizon_prespecified": false,
-        "data_ready": false,
-        "cost/data_disk_peak_bytes": 0,
-        "data/accepted_frames": 1332,
-        "data/consumed_unique_fraction": 0.8198198198198198,
-        "data/evicted_unused_fraction": null,
-        "data/generation_targets": {
-          "1": 1379,
-          "2": 925
-        },
-        "data/age_seconds_p50_p95": null,
-        "cost/data_write_read_bytes": null,
-        "cost/data_memory_peak_bytes": null
-      },
-      "final_verification_seconds": 29.097632410004735,
-      "matching": null
-    },
-    "audit": {
-      "normalization_fields": [
-        "mean",
-        "std",
-        "target_mean",
-        "target_std"
-      ],
-      "restored_model_bitwise_equal": true,
-      "parameters_changed_after_resume": true,
-      "targets": 2304,
-      "tensorboard_rate": 129.53639221191406,
-      "rate_from_valid_targets_and_window": 129.53638711632314,
-      "rate_matches": true,
-      "optimizer_steps": [
-        10010.0
-      ],
-      "viser_closed": true,
-      "tensorboard_closed": true
-    },
-    "http_during_run": {
-      "viser": {
-        "port": 8097,
-        "status": 200
-      },
-      "tensorboard": {
-        "port": 6017,
-        "status": 200
-      }
-    },
-    "cleanup": {
-      "seconds": 12.87963158916682,
-      "owned_worker_pids": [
-        3736063
-      ],
-      "evaluator_exitcode": 0,
-      "engine_cleanup_error": null
-    }
-  },
-  "video": {
-    "path": "/tmp/ods-v4/comparison-video/before_after.mp4",
-    "before": {
-      "name": "before",
-      "checkpoint": "/tmp/ods-v4/integrated-online/initial_step_0.pt",
-      "policy_step": "0",
-      "records": [
-        {
-          "seed": 90000,
-          "success": false,
-          "lifted": false,
-          "goal_error": 0.33944228291511536,
-          "length": 600,
-          "initial_arm_target_delta": 1.0
-        }
-      ],
-      "success_rate": 0.0,
-      "lift_rate": 0.0,
-      "goal_error": 0.33944228291511536,
-      "episode_length": 600.0,
-      "initial_arm_target_delta": 1.0
-    },
-    "after": {
-      "name": "after",
-      "checkpoint": "/tmp/ods-v4/integrated-online/step_5000.pt",
-      "policy_step": "5000",
-      "records": [
-        {
-          "seed": 90000,
-          "success": true,
-          "lifted": true,
-          "goal_error": 0.00837203860282898,
-          "length": 297,
-          "initial_arm_target_delta": 0.3295013904571533
-        }
-      ],
-      "success_rate": 1.0,
-      "lift_rate": 1.0,
-      "goal_error": 0.00837203860282898,
-      "episode_length": 297.0,
-      "initial_arm_target_delta": 0.3295013904571533
-    },
-    "cleanup": {
-      "exitcode": 0,
-      "forced": false
-    }
-  },
-  "validation": {
-    "focused_tests_passed": 283,
-    "api_docs_coverage": "2604/2604",
-    "context_check": "passed",
-    "black_version": "26.3.1",
-    "full_suite_run": false,
-    "full_sphinx_build_run": false,
-    "independent_reviews": [
-      "engine",
-      "ai",
-      "robotics"
-    ],
-    "review_findings_resolved": [
-      "ai-1",
-      "ai-2"
-    ],
-    "owned_gpu_memory_after_cleanup_mib": {
-      "1": 0,
-      "3": 0,
-      "5": 0
-    }
-  },
   "limitations": [
     "One- and four-demonstration diagnostics fail their unchanged 90% thresholds.",
     "The second-round model gets 65/100 despite 18/20 development success. The delivered model is the development-selected step 5000.",
@@ -4572,12 +2141,251 @@
     "The initial integrated runs predate reporting-only fixes. Their primary valid-target counts are correct, but old TensorBoard rates and partial normalization fingerprints cannot support comparisons.",
     "An existing native entity-balance teardown warning remains in logs."
   ],
-  "artifacts": {
-    "root": "/tmp/ods-v4",
-    "lerobot32": "/tmp/ods-v4/yaw-lerobot32",
-    "main_entry": "/root/sources/EmbodiChain-ods-pick-place-showcase/examples/data_pipeline/ods_pick_place_showcase.py",
-    "learning_curve": "/tmp/ods-v4/working_curves.png",
-    "lerobot32_roundtrip_validated": true
+  "separate_final_verification": "Integrated training disabled in-run final scenes; original summary flags are unchanged. The attached frozen-checkpoint tests establish the selected-policy result.",
+  "source_revision": "b683c4c699a71562341d4b213d06857f0fbdf744",
+  "training_summary": {
+    "policy": "chunk-pose",
+    "mode": "online",
+    "training_seed": 42,
+    "parameters_updated": true,
+    "training_step": 10000,
+    "best_checkpoint": "/tmp/ods-v4/integrated-online/step_5000.pt",
+    "best_dev_success": 1.0,
+    "initial_dev_success": 0.0,
+    "supervised_generations": {
+      "1": 91732262,
+      "2": 56588907
+    },
+    "stats": {
+      "requested_generation": 2,
+      "completed_generation": 2,
+      "successful_episodes": 64,
+      "failed_episodes": 0,
+      "generated_frames": 21284,
+      "production_seconds": 534.3543577480596,
+      "sampled_chunks": 2560000,
+      "run_id": 3372649994915313492,
+      "valid_frames": 10641
+    }
   },
-  "separate_final_verification": "Integrated training disabled in-run final scenes; original summary flags are unchanged. The attached frozen-checkpoint tests establish the selected-policy result."
+  "cleanup": {
+    "training": {
+      "seconds": 10.592169512994587,
+      "owned_worker_pids": [
+        3713915
+      ],
+      "evaluator_exitcode": 0,
+      "engine_cleanup_error": null
+    },
+    "selected_test": [
+      {
+        "pid": 3756633,
+        "exitcode": 0,
+        "forced": false
+      },
+      {
+        "pid": 3756634,
+        "exitcode": 0,
+        "forced": false
+      },
+      {
+        "pid": 3756635,
+        "exitcode": 0,
+        "forced": false
+      }
+    ],
+    "later_test": [
+      {
+        "pid": 3759541,
+        "exitcode": 0,
+        "forced": false
+      },
+      {
+        "pid": 3759542,
+        "exitcode": 0,
+        "forced": false
+      },
+      {
+        "pid": 3759543,
+        "exitcode": 0,
+        "forced": false
+      }
+    ]
+  },
+  "small_data_limitations": {
+    "one": {
+      "summary": {
+        "export_complete": true,
+        "batch_manifest_complete": null,
+        "policy": "chunk-pose",
+        "mode": "frozen",
+        "stage": "overfit-one",
+        "smoke": false,
+        "training_seed": 42,
+        "parameters_updated": true,
+        "training_step": 10000,
+        "best_checkpoint": "/tmp/ods-v4/integrated-one/step_10000.pt",
+        "best_dev_success": 1.0,
+        "initial_dev_success": 0.0,
+        "final_success_rate": null,
+        "threshold_test_success": null,
+        "initial_success_rate": null,
+        "learning_target_met": false,
+        "small_data_gate_met": false,
+        "supervised_generations": {
+          "1": 148335461
+        },
+        "stats": {
+          "requested_generation": 1,
+          "completed_generation": 1,
+          "successful_episodes": 1,
+          "failed_episodes": 0,
+          "generated_frames": 333,
+          "production_seconds": 9.064498513936996,
+          "sampled_chunks": 2560000,
+          "run_id": 3771688018907868892,
+          "valid_frames": 333
+        },
+        "efficiency": {
+          "end_reason": "update_budget",
+          "observed_seconds": 423.92243713187054,
+          "horizon_seconds": 423.92243713187054,
+          "efficiency/reached_80": false,
+          "efficiency/t80_dev_seconds": null,
+          "efficiency/t80_dev_right_censored": true,
+          "efficiency/censor_seconds": 423.92243713187054,
+          "efficiency/t80_dev_checkpoint": null,
+          "efficiency/auc_success_time": 0.0,
+          "pipeline/first_update_seconds": 54.669906047871336,
+          "pipeline/targets_per_second": 514132.571819981,
+          "pipeline/acquisition_inclusive_targets_per_second": 349911.7951944047,
+          "pipeline/training_loop_seconds": 288.5159764823038,
+          "pipeline/exposed_data_wait_seconds": 0,
+          "pipeline/data_wait_fraction": 0.0,
+          "pipeline/batch_latency_ms_p50_p95": [
+            9.449610020965338,
+            10.262090968899429
+          ],
+          "learning/valid_targets": 148335461,
+          "learning/unique_frames": 333,
+          "learning/targets_to_80": null,
+          "learning/unique_frames_to_80": null,
+          "data/targets_per_unique_frame": 445451.83483483485,
+          "cost/gpu_hours_to_80": null,
+          "cost/allocated_gpu_hours": 0.1177562325366307,
+          "cost/allocated_physical_gpu_ids": [
+            "3"
+          ],
+          "cost/host_pss_sampled_peak_bytes": 8175378432,
+          "cost/cpu_core_seconds_observed": 1948.9,
+          "cost/torch_cuda_this_process_max_reserved_bytes_by_device": {
+            "cuda:3": 54525952
+          },
+          "cost/gpu_peak_bytes": null,
+          "pipeline/producer_learner_overlap_fraction": null,
+          "horizon_prespecified": false,
+          "data_ready": false,
+          "cost/data_disk_peak_bytes": 171436,
+          "data/accepted_frames": 333,
+          "data/consumed_unique_fraction": 1.0,
+          "data/evicted_unused_fraction": null,
+          "data/generation_targets": {
+            "1": 148335461
+          },
+          "data/age_seconds_p50_p95": null,
+          "cost/data_write_read_bytes": null,
+          "cost/data_memory_peak_bytes": null
+        },
+        "final_verification_seconds": 0.001852286048233509,
+        "matching": null
+      }
+    },
+    "four": {
+      "summary": {
+        "export_complete": null,
+        "batch_manifest_complete": null,
+        "policy": "chunk-pose",
+        "mode": "frozen",
+        "stage": "overfit-four",
+        "smoke": false,
+        "training_seed": 42,
+        "parameters_updated": true,
+        "training_step": 10000,
+        "best_checkpoint": "/tmp/ods-v4/integrated-four/step_10000.pt",
+        "best_dev_success": 0.5,
+        "initial_dev_success": 0.0,
+        "final_success_rate": null,
+        "threshold_test_success": null,
+        "initial_success_rate": null,
+        "learning_target_met": false,
+        "small_data_gate_met": false,
+        "supervised_generations": {
+          "1": 148335461
+        },
+        "stats": {
+          "requested_generation": 1,
+          "completed_generation": 1,
+          "successful_episodes": 4,
+          "failed_episodes": 0,
+          "generated_frames": 1332,
+          "production_seconds": 34.518950772006065,
+          "sampled_chunks": 2560000,
+          "run_id": 3690234823390050873,
+          "valid_frames": 1332
+        },
+        "efficiency": {
+          "end_reason": "update_budget",
+          "observed_seconds": 864.9675047257915,
+          "horizon_seconds": 864.9675047257915,
+          "efficiency/reached_80": false,
+          "efficiency/t80_dev_seconds": null,
+          "efficiency/t80_dev_right_censored": true,
+          "efficiency/censor_seconds": 864.9675047257915,
+          "efficiency/t80_dev_checkpoint": null,
+          "efficiency/auc_success_time": 0.0,
+          "pipeline/first_update_seconds": 112.86089204880409,
+          "pipeline/targets_per_second": 487923.6742459142,
+          "pipeline/acquisition_inclusive_targets_per_second": 171492.5245047497,
+          "pipeline/training_loop_seconds": 304.01365793379955,
+          "pipeline/exposed_data_wait_seconds": 0,
+          "pipeline/data_wait_fraction": 0.0,
+          "pipeline/batch_latency_ms_p50_p95": [
+            9.519557119347155,
+            11.001898266840724
+          ],
+          "learning/valid_targets": 148335461,
+          "learning/unique_frames": 1332,
+          "learning/targets_to_80": null,
+          "learning/unique_frames_to_80": null,
+          "data/targets_per_unique_frame": 111362.95870870871,
+          "cost/gpu_hours_to_80": null,
+          "cost/allocated_gpu_hours": 0.24026875131271985,
+          "cost/allocated_physical_gpu_ids": [
+            "3"
+          ],
+          "cost/host_pss_sampled_peak_bytes": 8011531264,
+          "cost/cpu_core_seconds_observed": 2841.8599999999997,
+          "cost/torch_cuda_this_process_max_reserved_bytes_by_device": {
+            "cuda:3": 54525952
+          },
+          "cost/gpu_peak_bytes": null,
+          "pipeline/producer_learner_overlap_fraction": null,
+          "horizon_prespecified": false,
+          "data_ready": false,
+          "cost/data_disk_peak_bytes": 0,
+          "data/accepted_frames": 1332,
+          "data/consumed_unique_fraction": 1.0,
+          "data/evicted_unused_fraction": null,
+          "data/generation_targets": {
+            "1": 148335461
+          },
+          "data/age_seconds_p50_p95": null,
+          "cost/data_write_read_bytes": null,
+          "cost/data_memory_peak_bytes": null
+        },
+        "final_verification_seconds": 0.0018704028334468603,
+        "matching": null
+      }
+    }
+  }
 }

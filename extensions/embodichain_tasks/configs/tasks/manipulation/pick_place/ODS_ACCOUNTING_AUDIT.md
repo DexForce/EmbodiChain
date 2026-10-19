@@ -1,84 +1,62 @@
-# Exact usage-accounting optimization: final review handoff
+# Exact usage-accounting validation
 
-**Correctness passed; the strict performance gate remains incomplete.** The final selected-backend C32 p50 overhead is +5.127%, narrowly exceeding the unchanged 5% limit. It is not rounded to a pass. No additional experiments or performance retries follow this final run.
+Correctness passed; the strict performance gate remains incomplete. The selected
+C32 median overhead is +5.127%, above the unchanged 5% limit. This result limits
+timing claims in the [offline comparison](OFFLINE_PILOT_RESULTS.md).
+[Structured evidence](ODS_ACCOUNTING_AUDIT.json) retains the original baseline,
+selected implementation, parity checks and runtime integration audit.
 
-## Final API and integration
+## Selected implementation
 
-`UsageTracker(*, episode_capacity_hint: int | None = None)` chooses its exact counter backend once. The default and hints below 64 use the original plain-dictionary counters; hints of 64 or more use compact blocked counters with duplicate-aware integer scatter. `counter_backend` is a read-only property returning `dict` or `blocked`. Publications do not trigger migration, and the hint changes no sampler, metric, budget or numerical result.
+`UsageTracker(episode_capacity_hint=None)` chooses its counter backend once.
+The default and hints below 64 preserve the original dictionary path; hints of
+64 or more use compact blocks with duplicate-aware integer scatter. A CPU
+16/32/64/128/256-source comparison measured block/dict median ratios of
+0.880/0.875/0.687/0.534/0.418. The cutoff 64 preserves the small-cache path and
+selects the first tested capacity with over 25% CPU benefit.
 
-The CPU crossover study tested 16/32/64/128/256 sources. Block/dict median accounting ratios were 0.880/0.875/0.687/0.534/0.418; the smallest case showed startup variability. The conservative cutoff 64 retains the original small-capacity path and selects the first measured case showing over 25% CPU benefit. This is a workload-specific engineering choice based on CPU evidence, not a universal optimum or a GPU gate-selected threshold.
+Blocks allocate observed source rows and frame extents, including sparse or
+maximum-int64 identities. They preserve per-source dictionary views, sampled
+and completed anchors, supervised/history frames, ages, provenance and eviction
+metrics. The tradeoff is spare row/frame capacity and a bounded block lookup.
 
-Root integration after the final profile binds live ODS to `buffer_size`, resident offline data to its eligible valid row count, and frozen/offline-32 imports to eligible generation 1 rows. Replacing the tracker also rebinds its CompactFrameSet view. Both usage.json write paths include the selected backend. No running pilot source was changed.
+The runner supplies live cache capacity or the resident corpus's eligible row
+count. G1-only sampling uses eligible G1 rows. Tracker replacement rebinds its
+`CompactFrameSet` view; both `usage.json` output paths report `counter_backend`.
+This choice changes accounting cost, not sampling or numerical results.
 
-## All retained complete-consumer results
+## Baseline and selected results
 
-| Variant | Resident episodes | p50 overhead | p95 overhead | Mean overhead | Both p50/p95 ≤5% |
-|---|---:|---:|---:|---:|---|
-| Original | 32 | -0.569% | -0.986% | +0.285% | True |
-| Original | 256 | +12.993% | +13.554% | +12.732% | False |
-| Candidate 1: dense block accumulation | 32 | +4.401% | +2.295% | +4.250% | True |
-| Candidate 1: dense block accumulation | 256 | +6.546% | +8.886% | +6.579% | False |
-| Candidate 2: duplicate-aware integer scatter | 32 | +4.161% | +6.428% | +4.021% | False |
-| Candidate 2: duplicate-aware integer scatter | 256 | +3.320% | +1.591% | +3.215% | True |
-| Fixed capacity hint: dict below 64, blocked otherwise | 32 | +5.127% | +4.685% | +5.075% | False |
-| Fixed capacity hint: dict below 64, blocked otherwise | 256 | +3.577% | +3.924% | +3.539% | True |
+| Implementation | Sources | Median overhead | p95 overhead | Both ≤5% |
+| --- | ---: | ---: | ---: | --- |
+| Original dictionary | 32 | -0.569% | -0.986% | Yes |
+| Original dictionary | 256 | +12.993% | +13.554% | No |
+| Selected, dictionary | 32 | +5.127% | +4.685% | No |
+| Selected, blocked | 256 | +3.577% | +3.924% | Yes |
 
-The C256 cardinality penalty is substantially reduced. The final C32 result uses the original dictionary path and still narrowly fails the median gate. Earlier failures are retained, including the original C256 penalty, candidate1 C256 failure and candidate2 C32 tail failure. No result is replaced by a favorable retry. These component measurements do not establish an end-to-end ODS/offline speed advantage or combined telemetry cost. ResourceSampler remains excluded.
+The unchanged small-cache path varied from measurement noise to +5.127%.
+The selected C256 implementation reduces the cardinality penalty, but the
+combined gate remains incomplete. The four-arm pilot used the original
+implementation and its times have not been algebraically corrected.
 
-## Implementation and validation
+## Validation and measurement scope
 
-CPU profiling attributed 0.351s of 0.445s across 240 original sample/complete pairs to repeated per-source loops. Compact blocks keep at most 256 nearby source identifiers, allocate only observed rows, grow row capacity geometrically and frame width in 64-element increments. Sparse or maximum-int64 source IDs do not allocate a maximum-ID-sized array. Exact per-source dictionary views, all four frame/anchor counters, age histograms, first-use metrics, provenance, eviction behavior and denominators remain intact. This uses some spare row/frame capacity and a 256-entry lookup per touched block to avoid repeated Python loops.
+- 960 original-reference summary/counter comparisons cover both backends over
+  40 randomized seeds, sparse identities, duplicates, masks, delayed publication
+  and completion after eviction. Integration-focused CPU validation passed 133 tests.
+- Paired GPU runs preserve input tensors, masks, target identities, and final
+  model/optimizer/RNG hashes exactly. Source and SDK hashes stayed unchanged.
+- Two real single-update checks passed 19 audit conditions: the full corpus
+  selects blocked counters; importing the same corpus for G1-only sampling
+  selects dictionaries. Both update successfully and exit all observed children.
+- ABBA blocks used 20 warmup and 500 measured updates on GPU5/CPU128–143,
+  batch 256, history 2 and horizon 64, with matched CUDA completion boundaries.
+- The measured path includes resident sampling, preparation/H2D and training.
+  SDK loading, production, simulation, evaluation and ResourceSampler are excluded.
+  The protected-offline quota-snapshot caller still needs full-path qualification.
 
-- 84 focused tests passed across usage, added accounting tests and benchmark helpers.
-- 960 complete-summary/raw-counter comparisons passed: 40 randomized seeds exercised both final backends against the frozen original implementation.
-- Coverage includes multiple runs, sparse/max-int64 IDs, duplicates, padding and target masks, sample-only batches, delayed lifecycle publication and completion after eviction.
-- All measured ABBA arms match input tensors/masks/target IDs, initial optimizer/RNG and final model/optimizer/RNG. Final selected-backend hashes also match the original revision.
-- Source and SDK hashes were unchanged during every profile. Root integration edits occurred after the final profile completed. GPU5 was released after each run.
-
-## Measurement scope
-
-Every complete-consumer case used the same GPU5 UUID, NUMA-local CPU 128–143, three idle/VRAM checks, source SDK dataset, G1 normalization, model initialization, batch 256, history 2 and prediction horizon 64. Each ABBA block includes 20warmup and 500measured updates, totaling 2,000 measured updates per capacity. Both arms use unrestricted sampling and identical per-update CUDA completion. OFF retains compact exact target counting; ON adds complete UsageTracker accounting using the selected fixed backend. SDK loading, simulation, production, evaluation, resource sampling and final reporting are outside the measured update. Boundary GPU inventories are not continuous host-isolation guarantees.
-
-## Evidence
-
-- `RESULTS.json`: combined machine-readable outcome and unchanged gate.
-- `backend-crossover.json`: CPU backend choice evidence.
-- `oracle-selected-backends.json`: 960 old-reference comparisons.
-- `consumer-selected-backends/`: final raw update latencies, hashes, source diff and harness.
-- `consumer-candidate/`, `consumer-candidate2/`: all earlier measurements and failed gates.
-- `REPORT-candidate2.md`, `RESULTS-candidate2.json`: preserved pre-final handoff.
-- `baseline-hotpaths.txt`, `candidate1-hotpaths.txt`, `sparse-counter-micro.json`: optimization evidence.
-- `reference_usage.py`, `candidate1_usage.py`, `candidate2_usage.py`: preserved source references.
-- Original harness failure and baseline telemetry measurements remain under `/tmp/ods-offline-pilot/overhead-3cd6379a*`.
-
-Implementation changes owned by this agent are `_ods_pick_place_usage.py` and `tests/data_pipeline/test_usage_accounting.py` in `/root/sources/EmbodiChain-ods-offline-accounting`. Root owns the subsequent integration edits. No commit was made by this agent.
-
-## Runner integration and interpretation
-
-The online tracker receives the configured live buffer capacity. A resident
-offline corpus receives its number of eligible nonempty rows; frozen/offline-32
-filters this hint to generation 1. Construction selects the backend once. Both
-normal and cleanup `usage.json` reports record `counter_backend`; sampler
-selection, quota enforcement and lifecycle denominators remain unchanged.
-
-The original C32 path measured close to noise in the first profile and +5.13%
-in the final profile. This variation reinforces why identical telemetry flags
-alone cannot establish timing fairness. The strict gate remains incomplete.
-These profiles isolate resident consumption and exclude ResourceSampler,
-production, SDK loading, simulation and deferred evaluation. They cannot be
-subtracted from the four-arm wall times or establish an ODS speed advantage.
-
-Validation after integration: 133 focused tests passed, Black 26.3.1 passed,
-and public API coverage remained 2614/2614. No public API changed. The context
-review selected no update: the owning online-sampling guidance remains accurate
-and these private counter storage choices do not alter its contracts.
-
-Two additional real-runtime single-update checks on GPU5 passed 19 audit
-conditions. Loading the complete 256-trajectory SDK corpus selects `blocked`;
-loading that same corpus in G1-only mode selects `dict` and consumes only G1.
-Both retain 256 source records, complete exactly one update/256 chunks, keep
-the frozen source unchanged, use only the selected GPU and exit all observed
-children. They validate runner integration, not learning quality or throughput.
-Raw evidence: `/tmp/ods-offline-accounting-audit/integration-smokes-v2/AUDIT.json`.
-The first harness attempt failed before child launch because an unused packet
-metadata file was missing; its artifacts remain in `integration-smokes/`.
+These scoped results establish counter correctness and an implementation cost
+tradeoff. They do not qualify complete-pipeline instrumentation overhead or an
+ODS speed advantage. Intermediate implementation attempts and handoff notes are
+removed from the current documentation; the original baseline and failed final
+gate remain visible.

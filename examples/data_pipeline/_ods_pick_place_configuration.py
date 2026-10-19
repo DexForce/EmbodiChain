@@ -80,10 +80,6 @@ def apply_configuration(args: argparse.Namespace) -> None:
         raise ValueError(
             "Auto-config cannot combine with offline/export data or smoke overrides"
         )
-    if args.usage_schedule != "fixed":
-        raise ValueError(
-            "Auto-config owns the schedule; do not combine with anchor-budget pacing"
-        )
     plan = report["configuration"]
     for name in ("batch_size", "producer_envs", "buffer_size"):
         supplied = getattr(args, name)

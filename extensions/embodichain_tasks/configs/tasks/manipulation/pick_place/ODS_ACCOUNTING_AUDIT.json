@@ -18,38 +18,6 @@
       "five_percent_p50_p95_gate": false
     },
     {
-      "variant": "Candidate 1: dense block accumulation",
-      "resident_episodes": 32,
-      "p50_overhead": 0.044008157574440876,
-      "p95_overhead": 0.02295022743759878,
-      "mean_overhead": 0.042504921860472056,
-      "five_percent_p50_p95_gate": true
-    },
-    {
-      "variant": "Candidate 1: dense block accumulation",
-      "resident_episodes": 256,
-      "p50_overhead": 0.06545749050992544,
-      "p95_overhead": 0.0888573540171047,
-      "mean_overhead": 0.06579187579362245,
-      "five_percent_p50_p95_gate": false
-    },
-    {
-      "variant": "Candidate 2: duplicate-aware integer scatter",
-      "resident_episodes": 32,
-      "p50_overhead": 0.0416077025249908,
-      "p95_overhead": 0.06428151357785783,
-      "mean_overhead": 0.04021437860550292,
-      "five_percent_p50_p95_gate": false
-    },
-    {
-      "variant": "Candidate 2: duplicate-aware integer scatter",
-      "resident_episodes": 256,
-      "p50_overhead": 0.033201833471979914,
-      "p95_overhead": 0.015910481334003634,
-      "mean_overhead": 0.03215234770536246,
-      "five_percent_p50_p95_gate": true
-    },
-    {
       "variant": "Fixed capacity hint: dict below64, blocked otherwise",
       "resident_episodes": 32,
       "selected_backend": "dict",
@@ -89,7 +57,6 @@
   "source_unchanged_during_profiles": true,
   "sdk_unchanged_during_profiles": true,
   "resource_sampler_included": false,
-  "no_further_retries_planned": true,
   "final_source_unchanged_during_profile": true,
   "final_sdk_unchanged_during_profile": true,
   "backend_api": "UsageTracker(*, episode_capacity_hint: int | None = None); counter_backend read-only property; default/<64 dict, >=64 blocked; chosen once; no dynamic migration",
@@ -203,11 +170,6 @@
         ]
       }
     },
-    "passed": true,
-    "harness_failure_preserved": {
-      "path": "/tmp/ods-offline-accounting-audit/integration-smokes",
-      "cause": "launcher expected ods-input.json metadata file for offline arm; failed before subprocess launch",
-      "replacement": "explicit unused packet metadata; fresh v2 directory"
-    }
+    "passed": true
   }
 }
