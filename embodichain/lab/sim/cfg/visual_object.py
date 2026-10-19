@@ -32,7 +32,10 @@ __all__ = ["VisualObjectCfg"]
 class VisualObjectCfg(ObjectBaseCfg):
     """Configure a render-only object, without a rigid body or colliders.
 
-    ``prim_path`` optionally selects one mesh object from a USD scene. Explicit
+    Like :class:`~embodichain.lab.sim.cfg.RigidObjectCfg`, ``MeshCfg.fpath``
+    supplies ordinary mesh files such as OBJ, STL, GLB and glTF.
+    The inherited ``prim_path`` optionally
+    selects one mesh object from a USD scene. Explicit
     visual-object creation uses only its appearance; USD physics is omitted.
     Whole-scene import instead preserves each entity's authored physical type.
     """
@@ -42,9 +45,6 @@ class VisualObjectCfg(ObjectBaseCfg):
 
     body_scale: tuple[float, float, float] = (1.0, 1.0, 1.0)
     """Scale applied to the visual geometry, independently of its root pose."""
-
-    prim_path: str | None = None
-    """Exact source USD object path; omitted for a singleton USD asset."""
 
     visible: bool = True
     """Initial visibility restored by reset."""

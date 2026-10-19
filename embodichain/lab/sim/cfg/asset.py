@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import field
 from typing import Dict, Literal
 
 import numpy as np
@@ -49,6 +50,13 @@ class ObjectBaseCfg:
     """
 
     uid: str | None = None
+
+    prim_path: str | None = field(default=None, kw_only=True)
+    """Exact USD object or articulation path; omit for a singleton asset.
+
+    The asset file is supplied by the derived configuration, for example
+    ``shape.fpath`` for mesh objects. This selector requires a USD source.
+    """
 
     init_pos: tuple[float, float, float] = (0.0, 0.0, 0.0)
     """Position of the root in simulation world frame. Defaults to (0.0, 0.0, 0.0)."""

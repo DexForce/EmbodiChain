@@ -35,6 +35,7 @@ from embodichain.lab.sim.material import (
 )
 from embodichain.utils.math import matrix_from_quat, quat_from_matrix
 from ._mesh_utils import get_combined_triangles, get_combined_vertices
+from .backends.scene import _SceneVisualObjectView
 
 if TYPE_CHECKING:
     from dexsim.scene import Scene, SpawnedRigidBody
@@ -70,6 +71,7 @@ class VisualObject(BatchEntity):
         self._entities: list[SpawnedRigidBody] = []
         self._declared_num_instances: int | None = None
         self._spawn_result: Scene | None = None
+        self._pose_view: _SceneVisualObjectView | None = None
         self._default_poses: torch.Tensor | None = None
         self._poses: torch.Tensor | None = None
         self._visibility: list[bool] = []
@@ -134,7 +136,8 @@ class VisualObject(BatchEntity):
             raise RuntimeError("VisualObject is already Spawn-bound.")
         if len(self._entities) != self.num_instances:
             raise RuntimeError("VisualObject handles are unavailable; call prepare().")
-        poses = self._read_poses()
+        self._pose_view = _SceneVisualObjectView(result, self._entities, self.device)
+        poses = self._pose_view.fetch_pose(self._pose_view.rows)
         self._apply_visual_uv()
         materials = [
             (
@@ -172,9 +175,10 @@ class VisualObject(BatchEntity):
         revision = int(self._spawn_result.topology_revision)
         if revision == self._spawn_revision:
             return
-        for i, matrix in enumerate(self._poses.detach().cpu().numpy()):
+        self._pose_view.refresh(self._entities)
+        self._pose_view.apply_pose(self._poses, self._pose_view.rows)
+        for i in range(self.num_instances):
             entity = self._entities[i]
-            entity.set_local_pose(matrix)
             entity.set_visible(self._visibility[i])
             render_body = entity.get_render_body()
             if render_body is not None:
@@ -213,30 +217,43 @@ class VisualObject(BatchEntity):
     def user_ids(self) -> torch.Tensor:
         """Return native render-instance IDs as an ``(N,)`` integer tensor."""
         self._require_bound()
-        return torch.tensor(
-            [e.get_user_id() for e in self._entities],
-            dtype=torch.int32,
-            device=self.device,
-        )
+        return self._pose_view.user_ids.clone()
 
-    def _read_poses(self) -> torch.Tensor:
-        return torch.as_tensor(
-            np.stack([e.get_local_pose() for e in self._entities]),
-            dtype=torch.float32,
-            device=self.device,
-        )
+    def _pose_rows(self, env_ids: Sequence[int] | torch.Tensor | None) -> torch.Tensor:
+        self._require_bound()
+        if env_ids is None:
+            return self._pose_view.rows
+        if isinstance(env_ids, torch.Tensor):
+            if env_ids.ndim != 1 or env_ids.dtype not in (torch.int32, torch.int64):
+                raise IndexError(
+                    "VisualObject environment indices must be a 1D integer tensor."
+                )
+            rows = env_ids.to(device=self.device, dtype=torch.long)
+        else:
+            ids = self._indices(env_ids)
+            rows = torch.tensor(ids, dtype=torch.long, device=self.device)
+        if torch.any(rows < 0) or torch.any(rows >= self.num_instances):
+            raise IndexError("VisualObject environment indices are out of range.")
+        if len(torch.unique(rows)) != len(rows):
+            raise ValueError("VisualObject environment indices must be unique.")
+        return rows
 
-    def get_local_pose(self, to_matrix: bool = False) -> torch.Tensor:
+    def get_local_pose(
+        self,
+        to_matrix: bool = False,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> torch.Tensor:
         """Read independent arena-local poses.
 
         Args:
             to_matrix: Return matrices instead of ``xyz + xyzw`` poses.
+            env_ids: Selected environments in output order, or all environments.
 
         Returns:
-            Tensor shaped ``(N, 4, 4)`` or ``(N, 7)``.
+            Tensor shaped ``(M, 4, 4)`` or ``(M, 7)`` for the selected rows.
         """
-        self._require_bound()
-        poses = self._read_poses()
+        rows = self._pose_rows(env_ids)
+        poses = self._pose_view.fetch_pose(rows)
         return (
             poses
             if to_matrix
@@ -254,21 +271,21 @@ class VisualObject(BatchEntity):
             pose: ``(M, 7)`` xyz/xyzw poses or ``(M, 4, 4)`` rigid transforms.
             env_ids: Selected environments, or all environments.
         """
-        ids = self._indices(env_ids)
+        rows = self._pose_rows(env_ids)
         values = torch.as_tensor(pose, dtype=torch.float32, device=self.device)
-        if values.shape == (len(ids), 7):
+        if values.shape == (len(rows), 7):
             if not torch.isfinite(values).all() or torch.any(
                 torch.linalg.vector_norm(values[:, 3:], dim=-1) <= 0
             ):
                 raise ValueError(
                     "VisualObject poses require finite values and nonzero quaternions."
                 )
-            matrices = torch.eye(4, device=self.device).repeat(len(ids), 1, 1)
+            matrices = torch.eye(4, device=self.device).repeat(len(rows), 1, 1)
             matrices[:, :3, :3] = matrix_from_quat(
                 torch.nn.functional.normalize(values[:, 3:], dim=-1)
             )
             matrices[:, :3, 3] = values[:, :3]
-        elif values.shape == (len(ids), 4, 4):
+        elif values.shape == (len(rows), 4, 4):
             matrices = values
         else:
             raise ValueError("VisualObject poses must have shape (M, 7) or (M, 4, 4).")
@@ -278,25 +295,24 @@ class VisualObject(BatchEntity):
             or not torch.allclose(
                 matrices[:, 3],
                 torch.tensor([0.0, 0.0, 0.0, 1.0], device=self.device).expand(
-                    len(ids), -1
+                    len(rows), -1
                 ),
                 atol=1e-5,
             )
             or not torch.allclose(
                 rotation.transpose(1, 2) @ rotation,
-                torch.eye(3, device=self.device).expand(len(ids), -1, -1),
+                torch.eye(3, device=self.device).expand(len(rows), -1, -1),
                 atol=1e-5,
             )
             or not torch.allclose(
                 torch.linalg.det(rotation),
-                torch.ones(len(ids), device=self.device),
+                torch.ones(len(rows), device=self.device),
                 atol=1e-5,
             )
         ):
             raise ValueError("VisualObject matrices must be finite rigid transforms.")
-        for row, (i, matrix) in enumerate(zip(ids, matrices.detach().cpu().numpy())):
-            self._entities[i].set_local_pose(matrix)
-            self._poses[i].copy_(matrices[row].detach())
+        self._pose_view.apply_pose(matrices, rows)
+        self._poses.index_copy_(0, rows, matrices.detach())
 
     def set_visible(
         self, visible: bool = True, env_ids: Sequence[int] | torch.Tensor | None = None
@@ -431,7 +447,7 @@ class VisualObject(BatchEntity):
         Returns:
             One wrapper per selected instance, possibly ``None`` without a material.
         """
-        return [self._visual_materials[i] for i in ids]
+        return [self._visual_materials[i] for i in self._indices(env_ids)]
 
     def reset(self, env_ids: Sequence[int] | torch.Tensor | None = None) -> None:
         """Restore selected initial poses, visibility and material assignments.
@@ -454,6 +470,7 @@ class VisualObject(BatchEntity):
 
     def _release_spawn_references(self) -> None:
         self._spawn_result = None
+        self._pose_view = None
         self._entities.clear()
         self._default_poses = None
         self._poses = None

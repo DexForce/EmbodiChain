@@ -294,6 +294,13 @@ def visual_desc_from_cfg(
     """
     cfg.validate()
     uid = _required_uid(cfg.uid, "Visual object")
+    if isinstance(cfg.shape, MeshCfg) and _is_usd_path(cfg.shape.fpath):
+        raise NotImplementedError(
+            "USD files describe typed scenes; use visual_desc_from_usd() to "
+            "select a visual object's appearance."
+        )
+    if cfg.prim_path is not None:
+        raise ValueError("VisualObjectCfg.prim_path requires a USD source.")
     shape = cfg.shape
     if isinstance(shape, MeshCfg):
         geometry = _mesh_geometry_from_cfg(shape, segment_name=uid)
@@ -343,8 +350,10 @@ def rigid_desc_from_cfg(
     ):
         raise NotImplementedError(
             "USD files describe typed scenes; use rigid_desc_from_usd() to "
-            "select the sole rigid object."
+            "select one rigid object."
         )
+    if cfg.prim_path is not None:
+        raise ValueError("RigidObjectCfg.prim_path requires a USD source.")
 
     physics = _with_procedural_collision_defaults(
         _resolve_rigid_physics(
@@ -663,8 +672,10 @@ def articulation_desc_from_cfg(
     if _is_usd_path(path):
         raise NotImplementedError(
             "USD files describe typed scenes; use articulation_desc_from_usd() "
-            "to select the sole articulation."
+            "to select one articulation."
         )
+    if cfg.prim_path is not None:
+        raise ValueError("ArticulationCfg.prim_path requires a USD source.")
     if cfg.resolve_asset_physics_mode() == "overlay":
         _validate_articulation_rigid_physics(
             cfg,

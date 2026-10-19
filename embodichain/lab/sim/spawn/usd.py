@@ -146,10 +146,12 @@ def rigid_desc_from_usd(
     per_env: bool = True,
     newton_solver_type: str | None = None,
 ) -> tuple[ObjectDesc, dict[str, MaterialDesc]]:
-    """Select the sole rigid object in a USD stage."""
+    """Select a rigid object by exact prim path, or require a singleton stage."""
     uid = _required_uid(cfg.uid, "Rigid object")
     path = getattr(cfg.shape, "fpath", None)
-    scene, desc = _parse_singleton(path, "mesh_objects", "rigid object")
+    scene, desc = _parse_singleton(
+        path, "mesh_objects", "rigid object", prim_path=cfg.prim_path
+    )
 
     desc.name = uid
     desc.pose = _pose_from_cfg(cfg)
@@ -212,7 +214,7 @@ def articulation_desc_from_usd(
     source_path: str | None = None,
     newton_solver_type: str | None = None,
 ) -> tuple[ArticulationDesc, dict[str, MaterialDesc]]:
-    """Select the sole articulation in a USD stage."""
+    """Select an articulation by exact prim path, or require a singleton stage."""
     preserve_asset_physics = cfg.resolve_asset_physics_mode() == "preserve"
     if not preserve_asset_physics:
         _validate_articulation_rigid_physics(
@@ -220,7 +222,9 @@ def articulation_desc_from_usd(
             newton_solver_type=newton_solver_type,
         )
     path = source_path or cfg.fpath
-    scene, desc = _parse_singleton(path, "articulations", "articulation")
+    scene, desc = _parse_singleton(
+        path, "articulations", "articulation", prim_path=cfg.prim_path
+    )
     uid = _required_uid(
         cfg.uid or os.path.splitext(os.path.basename(str(path)))[0],
         "Articulation",

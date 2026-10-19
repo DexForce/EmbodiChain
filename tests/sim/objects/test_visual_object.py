@@ -25,10 +25,11 @@ import torch
 from dexsim.spawn import CollisionDesc, ObjectDesc, RigidBodyPhysicsDesc
 
 from embodichain.lab.sim.cfg import VisualObjectCfg
+from embodichain.lab.sim.cfg import ObjectBaseCfg, RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject, VisualObject
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
 from embodichain.lab.sim.spawn.descriptors import visual_desc_from_cfg
-from embodichain.lab.sim.spawn.usd import visual_desc_from_usd
+from embodichain.lab.sim.spawn.usd import rigid_desc_from_usd, visual_desc_from_usd
 
 pytestmark = pytest.mark.no_sim
 
@@ -55,6 +56,8 @@ class _Handle:
         self.object_desc = ObjectDesc(name="visual")
         self.pose = np.eye(4, dtype=np.float32)
         self.pose[0, 3] = offset
+        self.parent = np.eye(4, dtype=np.float32)
+        self.parent[:3, 3] = (5.0 * offset, 2.0 * offset, 0.0)
         self.visible = True
         self.user_id = 10 + int(offset)
         self.render = _Render()
@@ -67,6 +70,9 @@ class _Handle:
 
     def set_local_pose(self, pose):
         self.pose = pose.copy()
+
+    def get_world_pose(self):
+        return self.parent @ self.pose
 
     def set_visible(self, visible):
         self.visible = visible
@@ -90,12 +96,39 @@ class _Handle:
         return np.array([[0, 1, 2]])
 
 
+class _World:
+    def __init__(self, handles):
+        self.handles = {handle.get_user_id(): handle for handle in handles}
+        self.fetch_calls = 0
+        self.apply_calls = 0
+        self.fetch_status = 0
+        self.apply_status = 0
+
+    def fetch_object_transform(self, transforms, indices):
+        self.fetch_calls += 1
+        if self.fetch_status < 0:
+            return self.fetch_status
+        for row, uid in enumerate(indices.tolist()):
+            handle = self.handles[uid]
+            transforms[row].copy_(torch.from_numpy(handle.parent @ handle.pose))
+        return 0
+
+    def apply_object_transform(self, transforms, indices):
+        self.apply_calls += 1
+        if self.apply_status < 0:
+            return self.apply_status
+        for matrix, uid in zip(transforms.numpy(), indices.tolist()):
+            handle = self.handles[uid]
+            handle.pose = np.linalg.inv(handle.parent) @ matrix
+        return len(indices)
+
+
 def _visual():
     visual = VisualObject(VisualObjectCfg(uid="visual"))
     visual._initialize_spawn_declaration(2)
     handles = [_Handle(0.0), _Handle(1.0)]
     visual.attach_spawn_handles(handles)
-    visual.bind_spawn(SimpleNamespace(topology_revision=1))
+    visual.bind_spawn(SimpleNamespace(topology_revision=1, world=_World(handles)))
     return visual, handles
 
 
@@ -313,10 +346,18 @@ def test_visual_state_survives_native_rebuild_without_changing_reset_baseline():
     )
     # Simulate a backend recreating render actors from initial descriptors.
     handles[1].pose = np.eye(4, dtype=np.float32)
+    handles[1].user_id = 51
+    angle = 0.3
+    handles[1].parent[:2, :2] = [
+        [np.cos(angle), -np.sin(angle)],
+        [np.sin(angle), np.cos(angle)],
+    ]
+    visual._spawn_result.world.handles = {h.get_user_id(): h for h in handles}
     handles[1].visible = True
     handles[1].render.materials = [None]
     visual._spawn_result.topology_revision += 1
     visual._sync_spawn_state()
+    assert visual.user_ids.tolist() == [10, 51]
     torch.testing.assert_close(visual.get_local_pose()[1:], target)
     assert not handles[1].visible
     assert handles[1].render.materials == [replacement]
@@ -335,3 +376,110 @@ def test_visual_config_inherited_annotations_resolve():
         VisualObjectCfg, globalns=vars(sys.modules[VisualObjectCfg.__module__])
     )
     assert hints["init_local_pose"] == np.ndarray | None
+
+
+@pytest.mark.parametrize("suffix", ["obj", "stl", "glb", "gltf"])
+def test_visual_mesh_file_config_and_spawn_match_rigid_convention(tmp_path, suffix):
+    path = tmp_path / f"mesh.{suffix}"
+    cfg = VisualObjectCfg.from_dict(
+        {"uid": "mesh", "shape": {"shape_type": "Mesh", "fpath": str(path)}}
+    )
+    assert isinstance(cfg.shape, MeshCfg)
+    descriptor, _ = visual_desc_from_cfg(cfg)
+    assert descriptor.renders[0].file_path == str(path)
+    assert descriptor.physics is None
+    assert not descriptor.collisions
+
+
+def test_prim_selection_is_inherited_and_shared_by_visual_and_rigid(tmp_path):
+    assert "prim_path" in ObjectBaseCfg.__annotations__
+    path = _usd_scene(tmp_path)
+    data = {
+        "uid": "selected",
+        "shape": {"shape_type": "Mesh", "fpath": str(path)},
+        "prim_path": "/World/Physical",
+    }
+    visual, _ = visual_desc_from_usd(VisualObjectCfg.from_dict(data))
+    rigid, _ = rigid_desc_from_usd(RigidObjectCfg.from_dict(data))
+    assert visual.usd.prim_path == rigid.usd.prim_path == data["prim_path"]
+    assert visual.physics is None
+    assert rigid.physics is not None
+
+
+def test_shared_prim_selector_preserves_existing_positional_config_arguments():
+    cfg = RigidObjectCfg("rigid", (1.0, 2.0, 3.0))
+    assert cfg.uid == "rigid"
+    assert cfg.init_pos == (1.0, 2.0, 3.0)
+    assert cfg.prim_path is None
+
+
+def test_visual_spawn_rejects_prim_selector_for_basic_mesh(tmp_path):
+    cfg = VisualObjectCfg(
+        uid="bad",
+        shape=MeshCfg(fpath=str(tmp_path / "mesh.obj")),
+        prim_path="/World/Mesh",
+    )
+    with pytest.raises(ValueError, match="requires a USD source"):
+        visual_desc_from_cfg(cfg)
+
+
+def test_visual_pose_uses_one_native_batch_and_preserves_selection_order(monkeypatch):
+    visual, handles = _visual()
+    world = visual._spawn_result.world
+    before = visual.get_local_pose(to_matrix=True)
+    for handle in handles:
+        monkeypatch.setattr(
+            handle, "get_local_pose", lambda: pytest.fail("scalar read")
+        )
+        monkeypatch.setattr(
+            handle, "set_local_pose", lambda _: pytest.fail("scalar write")
+        )
+    world.fetch_calls = world.apply_calls = 0
+    rows = torch.tensor([1, 0], dtype=torch.int32)
+    # A strided input also exercises native tensor preparation.
+    storage = torch.eye(4).repeat(2, 1, 2)
+    target = storage[:, :, ::2]
+    target.copy_(before.flip(0))
+    target[:, :3, 3] += torch.tensor([0.3, 0.5, 0.7])
+    assert not target.is_contiguous()
+    visual.set_local_pose(target, rows)
+    result = visual.get_local_pose(to_matrix=True, env_ids=rows)
+    torch.testing.assert_close(result, target)
+    assert world.apply_calls == 1
+    assert world.fetch_calls == 1
+    saved = result.clone()
+    visual.set_local_pose(before)
+    torch.testing.assert_close(result, saved)
+
+
+def test_visual_pose_empty_selection_does_not_dispatch():
+    visual, _ = _visual()
+    world = visual._spawn_result.world
+    world.fetch_calls = world.apply_calls = 0
+    assert visual.get_local_pose(env_ids=[]).shape == (0, 7)
+    assert visual.get_local_pose(to_matrix=True, env_ids=[]).shape == (0, 4, 4)
+    visual.set_local_pose(torch.empty(0, 7), [])
+    assert world.fetch_calls == world.apply_calls == 0
+
+
+@pytest.mark.parametrize("operation", ["fetch", "apply"])
+def test_visual_pose_native_failure_propagates_without_corrupting_cache(operation):
+    visual, handles = _visual()
+    cached = visual._poses.clone()
+    native = [h.pose.copy() for h in handles]
+    world = visual._spawn_result.world
+    setattr(world, f"{operation}_status", -6)
+    with pytest.raises(RuntimeError, match="status -6"):
+        if operation == "fetch":
+            visual.get_local_pose()
+        else:
+            visual.set_local_pose(torch.eye(4).repeat(2, 1, 1))
+    torch.testing.assert_close(visual._poses, cached)
+    for handle, pose in zip(handles, native):
+        np.testing.assert_array_equal(handle.pose, pose)
+
+
+def test_visual_material_read_respects_selected_environments():
+    visual, _ = _visual()
+    assert visual.get_visual_material_inst([1]) == [None]
+    assert visual.get_visual_material_inst([]) == []

@@ -2640,8 +2640,6 @@ class SimulationManager:
         if _is_usd_path(path):
             descriptor, materials = visual_desc_from_usd(cfg)
         else:
-            if cfg.prim_path is not None:
-                raise ValueError("VisualObjectCfg.prim_path requires a USD source.")
             descriptor, materials = visual_desc_from_cfg(cfg)
         visual = VisualObject(cfg, self.device)
         was_materialized = self.spawn_result is not None

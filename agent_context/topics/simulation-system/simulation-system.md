@@ -28,14 +28,20 @@ that same object in place. UIDs identify resources in the manager registry.
 
 `VisualObject` owns render-only root poses, visibility and material assignments,
 with no rigid-body buffers or collision API. Its config lives in
-`cfg/visual_object.py`; `add_visual_object()` compiles mesh/primitive appearance
-or selects a USD object's appearance by `prim_path`. Whole-scene `add_usd()`
+`cfg/visual_object.py`; mesh files use `MeshCfg.fpath`, as for rigid objects.
+`ObjectBaseCfg.prim_path` is the shared exact USD selector for mesh objects and
+articulations. `add_visual_object()` compiles mesh/primitive appearance or
+selects a USD object's appearance. Whole-scene `add_usd()`
 preserves physical types and wraps only objects without physics and colliders
 as visuals. Conflicting visual UIDs receive the scene-name prefix while returned
 keys preserve source prim paths. Other import UID conflicts fail before declaration.
 Visuals retain facade-owned pose/visibility/material-assignment state across native
 topology rebuilds, with separate reset baselines. They use the same prepare,
 replication, selective reset, removal and teardown owners as physical assets. They do not enter physical scene snapshots or planners.
+Pose I/O uses pure-visual `World.fetch_object_transform` / `apply_object_transform`
+tensor batches through the private Scene visual adapter. That boundary converts
+world matrices to arena-local poses and refreshes parent transforms and native
+IDs after topology changes.
 
 `BaseEnv` owns Gym reset/step timing; `EmbodiedEnv` translates task composition
 into manager declarations. Scene replication and collision isolation belong
