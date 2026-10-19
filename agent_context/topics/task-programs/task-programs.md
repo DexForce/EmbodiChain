@@ -108,6 +108,8 @@ not by Task Program or Gym.
 | `TaskProgramOpenDrawer-Newton-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/open_drawer/task.ur5.yaml` with `--physics newton` |
 | `HandOver-v1` | verified | `extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/` |
 | `PourWater-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/` |
+| `StackBlocksTwo-v1` | projected with measured segment validators | `extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/` |
+| `BlocksRankingRGB-v1` | projected with measured segment validators | `extensions/embodichain_tasks/configs/tasks/manipulation/tableware/blocks_ranking_rgb/` |
 
 Marvin deployments use `task.tianji_marvin.yaml` in `repeated_pick_place`,
 `hand_over` and `tableware/pour_water`. The first two select verified tabletop

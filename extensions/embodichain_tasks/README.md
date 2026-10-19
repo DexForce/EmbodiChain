@@ -39,8 +39,8 @@ physical environment variant an `environment_id` and places the runnable `id`
 plus component selections in `task.<embodiment>.yaml`.
 A Gym deployment of any kind may select reusable `environment.component` and
 `embodiment.component` files instead of repeating environment, robot, sensor,
-and scene fields. A physical-only embodiment may omit `skill_profile`; this is
-used by the CobotMagic tableware handwritten demos. Standalone
+and scene fields. A physical-only embodiment may omit `skill_profile` when its
+deployments do not use Task Program. Standalone
 `scene.component` and inline Gym configs remain valid, but component-owned
 fields cannot also be declared inline in the same file.
 
@@ -140,20 +140,20 @@ selected by the `"id"` field of the gym config.
 
 ```bash
 # Data expansion mode
-embodichain run-env --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml
+embodichain run-task --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml
 
 # Newton variant selected from the same deployment
-embodichain run-env --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml --physics newton
+embodichain run-task --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml --physics newton
 
 # Preview mode
-embodichain run-env --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml --preview
+embodichain run-task --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml --preview
 
 # Equivalent invocations
-python -m embodichain run-env --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml
-python -m embodichain.lab.scripts.run_env --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml
+python -m embodichain run-task --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml
+python -m embodichain.lab.scripts.run_task --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml
 
 # Newton variant selected from the same deployment
-python -m embodichain run-env --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/open_drawer/task.ur5.yaml --physics newton
+python -m embodichain run-task --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/open_drawer/task.ur5.yaml --physics newton
 ```
 
 ## How registration works
@@ -199,7 +199,7 @@ To add a task environment:
 4. **Install and run**:
    ```bash
    pip install -e .
-   embodichain run-env --gym_config path/to/your/gym_config.json
+   embodichain run-task --gym_config path/to/your/gym_config.json
    ```
 
 If your tasks need custom manager modules (observation/reward/event/action

@@ -32,7 +32,7 @@ from embodichain.learning.rl.gradients import (
     BatchedGradientNormStats,
     clip_batched_gradient_norm,
 )
-from embodichain.learning.rl.models import Policy
+from embodichain.learning.rl.policies import Policy
 from embodichain.learning.rl.normalization import RunningObservationNormalizer
 from embodichain.learning.rl.utils import flatten_dict_observation
 

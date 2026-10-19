@@ -43,5 +43,5 @@ launcher to switch physics:
 
 .. code-block:: bash
 
-   embodichain run-env \
+   embodichain run-task \
        --gym_config embodichain_tasks/configs/tasks/locomotion/velocity/go2_flat/env.newton.yaml

@@ -138,14 +138,6 @@ Scene Services
 
    embodichain.lab.sim.scene
 
-Scene Expansion Compatibility
------------------------------
-
-.. toctree::
-   :maxdepth: 1
-
-   embodichain.lab.sim.scene_expansion
-
 Shared Types
 ------------
 

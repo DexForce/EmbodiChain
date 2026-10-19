@@ -701,6 +701,86 @@ def test_axis_aligned_grasp_binding_preserves_mesh_and_local_axis() -> None:
     assert live_grasp.mesh_vertices is not None
 
 
+@pytest.mark.parametrize("target_frame", ("parent", "world_axes"))
+def test_placement_frame_follows_live_parent_with_declared_axes(
+    target_frame: str,
+) -> None:
+    """World-axis offsets stay fixed when the measured parent rotates."""
+    simulation = _Simulation()
+    binding = _scene_binding()
+    offset = torch.eye(4)
+    offset[:3, 3] = torch.tensor((0.08, 0.0, 0.1))
+    support = replace(
+        binding.support_surfaces[0],
+        object_target_pose=tuple(offset.flatten().tolist()),
+        object_target_frame=target_frame,
+    )
+    configured = replace(binding, support_surfaces=(support,))
+    registry = configured.build(simulation)
+    assert configured.declare().entries == SceneManifest.from_registry(registry).entries
+    provider = registry.make_scene_provider()
+    parent = simulation.rigid_object.pose
+    parent[:, :3, :3] = torch.tensor(
+        ((0.0, -1.0, 0.0), (1.0, 0.0, 0.0), (0.0, 0.0, 1.0))
+    )
+    parent[:, :3, 3] = torch.tensor(((0.7, 0.1, 0.9), (0.6, -0.1, 0.85)))
+    for timestamp in (0.0, 1.0):
+        snapshot = provider.snapshot(
+            timestamp=timestamp, env_ids=torch.arange(_BATCH_SIZE)
+        )
+        actual = snapshot.entities[support.entity_id].pose
+        if target_frame == "parent":
+            expected = parent @ offset
+        else:
+            expected = offset.repeat(_BATCH_SIZE, 1, 1)
+            expected[:, :3, 3] += parent[:, :3, 3]
+        torch.testing.assert_close(actual, expected)
+        parent[:, 0, 3] += 0.03
+        parent[:, :3, :3] = torch.eye(3)
+
+
+def test_world_axes_placement_fingerprint_covers_offset_and_frame() -> None:
+    """Provider-backed poses retain their declaration in the manifest identity."""
+    from embodichain.lab.task_program.integrations import (
+        SimulationTaskProgramRegistration,
+    )
+
+    binding = _scene_binding()
+    support = replace(binding.support_surfaces[0], object_target_frame="world_axes")
+    changed = replace(binding, support_surfaces=(support,))
+    offset = list(support.object_target_pose)
+    offset[3] += 0.08
+    moved = replace(
+        binding,
+        support_surfaces=(replace(support, object_target_pose=tuple(offset)),),
+    )
+    fingerprints = {
+        SimulationTaskProgramRegistration(
+            scene_binding=value, robot_profile_binding=_profile_binding()
+        ).fingerprint
+        for value in (binding, changed, moved)
+    }
+    assert len(fingerprints) == 3
+    from embodichain.lab.task_program.semantics import SemanticValidationError
+
+    with pytest.raises(SemanticValidationError, match="metadata differs"):
+        changed.declare().validate_registry(moved.build(_Simulation()))
+
+
+@pytest.mark.parametrize(
+    "binding_type", (SupportSurfaceAffordanceBinding, ContainerAffordanceBinding)
+)
+def test_placement_rejects_unknown_target_frame(binding_type: type) -> None:
+    """Frame declarations are closed rather than silently falling back to parent axes."""
+    with pytest.raises(ValueError, match="object_target_frame"):
+        binding_type(
+            entity_id="target",
+            parent_id="cube",
+            native_name="target",
+            object_target_frame="unknown",
+        )
+
+
 def test_scene_binding_fails_closed_on_missing_native_entity() -> None:
     binding = _scene_binding()
     missing = replace(
