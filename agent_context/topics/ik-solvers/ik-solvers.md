@@ -88,7 +88,11 @@ Analytical scratch reuse must not let later calls mutate earlier public results.
 See [buffer lifecycle](solver-details.md#analytical-buffers-and-selection) before
 changing allocation, stream behavior or nearest/all-solutions dispatch.
 
-FEP validates Franka-compatible URDF geometry and shares one CPU/CUDA kernel.
+FEP validates Franka-compatible URDF geometry at its configured `reference_qpos`
+and shares one CPU/CUDA kernel. The optional reference posture rebases geometric
+reconstruction; joint inputs, outputs, seeds, limits and final FK acceptance keep
+the original URDF coordinates. `axis_alignment_tolerance` permits explicitly
+calibrated CAD-axis deviations without relaxing the separate FK tolerances.
 The seed fixes q7 unless `redundancy_search` is enabled; finite search failure
 does not prove global unreachability. Arm-angle preferences are soft, while
 FK acceptance, joint limits and `max_joint_step` remain hard constraints.

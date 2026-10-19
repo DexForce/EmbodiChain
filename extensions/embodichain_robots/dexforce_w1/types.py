@@ -57,6 +57,7 @@ class DexforceW1Version(_W1Enum):
     V021 = "v021"
     V022 = "v022"
     V025 = "v025"
+    V030 = "v030"
 
 
 class DexforceW1HandVersion(_W1Enum):
