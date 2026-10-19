@@ -48,6 +48,7 @@ from embodichain.lab.sim.cfg import (
     RobotCfg,
     RobotPresetCfg,
     RigidObjectCfg,
+    VisualObjectCfg,
     RigidObjectGroupCfg,
     ArticulationCfg,
     LightCfg,
@@ -200,6 +201,9 @@ class EmbodiedEnvCfg(EnvCfg):
     default. Visibility affects native windows and cameras without changing
     ground collisions or the Viser grid.
     """
+
+    visual_object: list[VisualObjectCfg] = []
+    """Render-only assets with no collision or rigid-body state."""
 
     background: List[RigidObjectCfg] = []
 
@@ -2750,6 +2754,8 @@ class EmbodiedEnv(BaseEnv):
 
     def _setup_background(self) -> None:
         """Setup the static rigid objects in the environment."""
+        for cfg in self.cfg.visual_object:
+            self.sim.add_visual_object(cfg)
         for cfg in self.cfg.background:
             if cfg.body_type == "dynamic":
                 logger.log_error(

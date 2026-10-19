@@ -24,6 +24,7 @@ from typing import Any, Callable, Literal
 __all__ = ["SpawnScene"]
 
 _AssetKind = Literal[
+    "visual_object",
     "rigid_object",
     "rigid_object_group",
     "articulation",
@@ -110,6 +111,7 @@ class SpawnScene:
                 configure_source(descriptor)
                 declaration.source_configurator = None
             add_name = {
+                "visual_object": "add_object",
                 "rigid_object": "add_object",
                 "articulation": "add_articulation",
                 "soft_object": "add_soft_object",
@@ -185,6 +187,7 @@ class SpawnScene:
                 self.builder.remove_object(member.name)
         else:
             remove_name = {
+                "visual_object": "remove_object",
                 "rigid_object": "remove_object",
                 "articulation": "remove_articulation",
             }[declaration.kind]

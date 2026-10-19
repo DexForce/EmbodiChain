@@ -87,11 +87,13 @@ from embodichain.utils.string import (
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.material import VisualMaterialCfg
+    from embodichain.lab.sim.cfg import VisualObjectCfg
 
 __all__ = [
     "articulation_desc_from_cfg",
     "configure_articulation_desc",
     "rigid_desc_from_cfg",
+    "visual_desc_from_cfg",
     "surface_deformable_desc_from_cfg",
     "volume_deformable_desc_from_cfg",
 ]
@@ -276,6 +278,54 @@ def _with_procedural_collision_defaults(
         contact_offset=defaults.contact_offset,
         rest_offset=defaults.rest_offset,
     ).merged(physics)
+
+
+def visual_desc_from_cfg(
+    cfg: VisualObjectCfg, *, per_env: bool = True
+) -> tuple[ObjectDesc, dict[str, MaterialDesc]]:
+    """Compile visual geometry without creating physics or collision descriptors.
+
+    Args:
+        cfg: Appearance and initial transform.
+        per_env: Replicate the visual in each environment.
+
+    Returns:
+        Render-only descriptor and referenced material templates.
+    """
+    cfg.validate()
+    uid = _required_uid(cfg.uid, "Visual object")
+    shape = cfg.shape
+    if isinstance(shape, MeshCfg):
+        geometry = _mesh_geometry_from_cfg(shape, segment_name=uid)
+    elif isinstance(shape, CubeCfg):
+        if len(shape.size) != 3 or any(value <= 0 for value in shape.size):
+            raise ValueError("CubeCfg.size must contain three positive values.")
+        geometry = GeometryDesc.cube(shape.size)
+    elif isinstance(shape, SphereCfg):
+        if shape.radius <= 0:
+            raise ValueError("SphereCfg.radius must be positive.")
+        geometry = GeometryDesc.sphere(shape.radius)
+    else:
+        raise NotImplementedError(
+            "Visual objects support MeshCfg, CubeCfg and SphereCfg."
+        )
+    scale = _vector3(cfg.body_scale, field_name="body_scale")
+    material_ref, material_entry = _compile_visual_material(uid, shape.visual_material)
+    return ObjectDesc(
+        name=uid,
+        pose=_pose_from_cfg(cfg),
+        renders=[
+            RenderDesc.from_geometry(
+                geometry,
+                load_option=_compile_load_option(shape),
+                material_ref=material_ref,
+            )
+        ],
+        physics=None,
+        collisions=[],
+        per_env=per_env,
+        body_scale=scale,
+    ), ({} if material_entry is None else {material_entry[0]: material_entry[1]})
 
 
 def rigid_desc_from_cfg(

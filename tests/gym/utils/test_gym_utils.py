@@ -2640,3 +2640,24 @@ def test_launcher_can_explicitly_disable_configured_headless() -> None:
     args = parser.parse_args(["--gym_config", "task.yaml", "--no-headless"])
     merged = merge_args_with_gym_config(args, {"physics": "default", "headless": True})
     assert merged["headless"] is False
+
+
+def test_config_to_cfg_loads_render_only_objects():
+    """The production Gym loader keeps visuals outside the physical registries."""
+    from embodichain.lab.sim.cfg import VisualObjectCfg
+    from embodichain.lab.sim.shapes import CubeCfg
+
+    config = {
+        "id": "EmbodiedEnv-v1",
+        "physics": "default",
+        "env": {},
+        "robot": {"uid": "robot"},
+        "visual_object": [
+            {"uid": "prop", "shape": {"shape_type": "Cube", "size": [0.2, 0.3, 0.4]}}
+        ],
+    }
+    cfg = config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+    assert isinstance(cfg.visual_object[0], VisualObjectCfg)
+    assert isinstance(cfg.visual_object[0].shape, CubeCfg)
+    assert not cfg.rigid_object
+    assert not cfg.background

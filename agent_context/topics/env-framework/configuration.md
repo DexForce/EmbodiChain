@@ -33,6 +33,14 @@ class MyTaskEnv(EmbodiedEnv):
 Format: `<TaskName>-v<N>` (e.g. `PourWater-v1`, `PushCubeRL`).
 RL tasks sometimes drop the `-v<N>` suffix (`CartPoleRL`, `PushCubeRL`).
 
+### Render-only scene objects
+
+`visual_object` lists `VisualObjectCfg` declarations in inline configs or the
+physical environment component. The production loader resolves mesh assets and
+`EmbodiedEnv` declares them alongside background objects. Their state participates
+in selected-environment reset, while physical background/collision semantics stay
+with `background` and `rigid_object`. See the [simulation object boundary](../simulation-system/simulation-system.md).
+
 ### Component ownership
 
 | File / component | Owns | Must not own |

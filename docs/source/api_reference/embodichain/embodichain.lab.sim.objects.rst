@@ -8,7 +8,7 @@ Overview
 
 Scene-object classes spawned into the :class:`SimulationManager`. Every object
 derives from :class:`~embodichain.lab.sim.common.BatchEntity` and pairs a
-runtime class with a ``*Data`` buffer and a ``*Cfg`` config. The hierarchy
+runtime class with a ``*Cfg`` config and, for physical assets, a ``*Data`` buffer. The hierarchy
 covers lights (``Light``), rigid bodies (``RigidObject`` and grouped
 ``RigidObjectGroup``), articulated chains (``Articulation``) and their robot
 specialization (``Robot``), deformables (``VolumeDeformableObject``, ``SurfaceDeformableObject``),
@@ -21,6 +21,8 @@ bodies.
 
     Light
     LightCfg
+    VisualObject
+    VisualObjectCfg
     RigidObject
     CollisionShapeDesc
     RigidBodyData
@@ -54,6 +56,25 @@ Light
     :members:
     :inherited-members:
     :show-inheritance:
+    :exclude-members: __init__, copy, replace, to_dict, validate
+
+Visual Object
+-------------
+
+``VisualObject`` owns render-only appearance and arena-local transforms. It
+provides selected-environment visibility and material-assignment reset without
+creating a rigid body or collision geometry. Declare it with
+``SimulationManager.add_visual_object()`` and prepare the shared Spawn scene.
+Whole-scene USD imports classify objects without physics or colliders as visuals;
+explicit visual-object USD loading can select one object's appearance by prim path.
+
+.. autoclass:: VisualObject
+    :members:
+    :inherited-members:
+    :show-inheritance:
+
+.. autoclass:: VisualObjectCfg
+    :members:
     :exclude-members: __init__, copy, replace, to_dict, validate
 
 Rigid Object

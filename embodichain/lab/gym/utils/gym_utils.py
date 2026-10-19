@@ -499,6 +499,8 @@ def config_to_cfg(
     from embodichain.lab.sim.cfg import (
         DenoisingCfg,
         RigidObjectCfg,
+        VisualObjectCfg,
+        MeshCfg,
         RigidObjectGroupCfg,
         ArticulationCfg,
         LightCfg,
@@ -756,6 +758,12 @@ def config_to_cfg(
             LightCfg.from_dict(l) for l in config["light"].get("direct", [])
         ]
         env_cfg.light.indirect = config["light"].get("indirect", None)
+
+    for visual_dict in config.get("visual_object", []):
+        visual = VisualObjectCfg.from_dict(visual_dict)
+        if isinstance(visual.shape, MeshCfg) and visual.shape.fpath is not None:
+            visual.shape.fpath = get_data_path(visual.shape.fpath)
+        env_cfg.visual_object.append(visual)
 
     # parser background objects config
     if "background" in config:

@@ -63,6 +63,7 @@ from .rigid import (
     RigidBodyPhysicsCfg,
 )
 from .rigid_object import RigidObjectCfg, RigidObjectGroupCfg
+from .visual_object import VisualObjectCfg
 from .scene import LightCfg, RigidConstraintCfg
 from .physics import (
     DefaultPhysicsCfg,
@@ -119,6 +120,7 @@ __all__ = [
     "ObjectBaseCfg",
     "LightCfg",
     "RigidObjectCfg",
+    "VisualObjectCfg",
     "DeformableObjectCfg",
     "VolumeDeformableObjectCfg",
     "SurfaceDeformableObjectCfg",

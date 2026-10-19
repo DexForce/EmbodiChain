@@ -999,6 +999,17 @@ embodichain.lab.sim.diff.bridge
    NewtonStepFunc
    tape_context
 
+embodichain.lab.sim.cfg.visual_object
+-------------------------------------
+
+Render-only geometry, optional USD prim selection, and initial visual state.
+
+.. currentmodule:: embodichain.lab.sim.cfg.visual_object
+
+.. autosummary::
+
+   VisualObjectCfg
+
 embodichain.lab.sim.diff.runtime
 --------------------------------
 
@@ -1077,6 +1088,18 @@ embodichain.lab.sim.objects.robot
    ControlGroup
    Robot
 
+
+embodichain.lab.sim.objects.visual_object
+-----------------------------------------
+
+Batched render-only objects provide pose, visibility and material-assignment operations without physical buffers or collision APIs.
+
+.. currentmodule:: embodichain.lab.sim.objects.visual_object
+
+.. autosummary::
+
+   VisualObject
+   VisualObjectCfg
 
 embodichain.lab.sim.physics
 ---------------------------
@@ -1498,7 +1521,9 @@ into DexSim Spawn descriptors.
    articulation_desc_from_cfg
    articulation_desc_from_usd
    rigid_desc_from_cfg
+   visual_desc_from_cfg
    rigid_desc_from_usd
+   visual_desc_from_usd
    surface_deformable_desc_from_cfg
    volume_deformable_desc_from_cfg
 
@@ -1512,6 +1537,7 @@ embodichain.lab.sim.spawn.descriptors
    articulation_desc_from_cfg
    configure_articulation_desc
    rigid_desc_from_cfg
+   visual_desc_from_cfg
    surface_deformable_desc_from_cfg
    volume_deformable_desc_from_cfg
 
@@ -1542,6 +1568,7 @@ embodichain.lab.sim.spawn.usd
 
    articulation_desc_from_usd
    rigid_desc_from_usd
+   visual_desc_from_usd
 
 embodichain.lab.sim.utility.dynamic_pybind
 ----------------------------------------

@@ -55,6 +55,7 @@ _ENVIRONMENT_DEPLOYMENT_OVERRIDE_FIELDS = frozenset(
 _SCENE_SIMULATION_FIELDS = frozenset(
     {
         "light",
+        "visual_object",
         "background",
         "rigid_object",
         "rigid_object_group",

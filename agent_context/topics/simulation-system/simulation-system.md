@@ -26,6 +26,17 @@ and readiness for each committed topology revision. DexSim `SceneBuilder` and
 and backend handles. `add_*()` returns a declared facade; `prepare()` binds
 that same object in place. UIDs identify resources in the manager registry.
 
+`VisualObject` owns render-only root poses, visibility and material assignments,
+with no rigid-body buffers or collision API. Its config lives in
+`cfg/visual_object.py`; `add_visual_object()` compiles mesh/primitive appearance
+or selects a USD object's appearance by `prim_path`. Whole-scene `add_usd()`
+preserves physical types and wraps only objects without physics and colliders
+as visuals. Conflicting visual UIDs receive the scene-name prefix while returned
+keys preserve source prim paths. Other import UID conflicts fail before declaration.
+Visuals retain facade-owned pose/visibility/material-assignment state across native
+topology rebuilds, with separate reset baselines. They use the same prepare,
+replication, selective reset, removal and teardown owners as physical assets. They do not enter physical scene snapshots or planners.
+
 `BaseEnv` owns Gym reset/step timing; `EmbodiedEnv` translates task composition
 into manager declarations. Scene replication and collision isolation belong
 to Spawn, not per-object collision-group calculations. Backend differences
