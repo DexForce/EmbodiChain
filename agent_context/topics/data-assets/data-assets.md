@@ -58,6 +58,15 @@ when needed. Solver/planner checkpoint download helpers can have separate paths.
 ZIP bundles must include directory entries before nested files for Open3D
 extraction. Validate new bundles through `get_data_path()` with an empty cache.
 
+Demo classes live in `assets/demo_assets.py` and are exported through the existing
+asset registry. `TabletopFourBases/scene_export` resolves the four-support rigid
+tabletop example from `demo/tabletop_four_bases.zip`. Its portable source contains
+only scene configuration, explicit support graph and referenced GLBs; baselines,
+support caches, layouts and previews belong to a separate caller-owned workspace.
+The registered descriptor respects the configured host and falls back to the
+official Hugging Face dataset. The scene tutorial downloads by asset reference
+by default and accepts local exports through `--source`.
+
 ## Pretrained policy bundles
 
 `eval-policy --pretrained` reads the official model index at a pinned HF commit,
@@ -78,7 +87,7 @@ validate a real selected-model download separately.
 | Download races | Inheritance from `EmbodiChainDataset` and one lock scope spanning repair + extraction |
 | Corrupt archive repeatedly retained | `check_zip()` MD5 checks and `is_safe_path()` cleanup guard, particularly with custom roots |
 | Returned path is absent | Caller-owned absolute path or unverified nested extracted path |
-| Bare class name fails | The remainder join in `get_data_path()`; do not assume a class-only reference returns the extraction root |
+| Unexpected path for a bare class reference | Bare class names resolve to `extract_dir`; a supplied subpath is appended beneath it |
 | Automation sees success after download failure | Verify the caller preserves `cmd_download()`'s nonzero exit status |
 
 Change path policy in `dataset.py`, root defaults in `constants.py`, registry

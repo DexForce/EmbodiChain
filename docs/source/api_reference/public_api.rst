@@ -38,6 +38,7 @@ EmbodiChain data cache.
    MultiW1Data
    RubiksCube
    ScoopIceNewEnv
+   TabletopFourBases
 
 embodichain.data.assets.planner_assets
 --------------------------------------

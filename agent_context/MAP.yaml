@@ -438,7 +438,7 @@ topics:
 - id: data-assets
   title: Data Assets
   aliases: [data assets, data path, asset download, 数据资产, 资产下载, 数据路径]
-  keywords: [get_data_path, get_data_class, EmbodiChainDataset, EMBODICHAIN_DATA_ROOT, EMBODICHAIN_DATASET_ROOT,
+  keywords: [get_data_path, get_data_class, EmbodiChainDataset, TabletopFourBases, demo assets, EMBODICHAIN_DATA_ROOT, EMBODICHAIN_DATASET_ROOT,
     CATEGORY_MODULES, download lock, get_registry]
   paths: [topics/data-assets/data-assets.md]
   source_of_truth:

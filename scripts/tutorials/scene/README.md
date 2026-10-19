@@ -1,9 +1,12 @@
-# Grouped scene randomization demo
+# Scene randomization demo
 
-This example uses the grouped randomization APIs from PR #791 and an existing
-Scene Engine export. The `tabletop_four_bases` asset workspace contains a table
+This example downloads the registered `TabletopFourBases` demo asset through
+`get_data_path("TabletopFourBases/scene_export")`. The cached portable scene
+contains a table
 and four support groups: cutting board and fruit, saucer and cup, serving tray
-and bottle/cup, and a small tray and two shapes.
+and bottle/cup, and a small tray and two shapes. The default v4 policy uses the
+shared CPU batch API for group XY and six selected members' XY/yaw. Existing
+v1/v2/v3 policy examples remain available through `--config`.
 
 Use an EmbodiChain environment with its matching DexSim runtime, NumPy, SciPy,
 Trimesh, Shapely and PyYAML. Rendering additionally needs Pillow, a Vulkan-capable
@@ -13,16 +16,44 @@ Run from the repository root, using a new output directory:
 
 ```bash
 python -m scripts.tutorials.scene.grouped_scene_randomization \
-  --source /path/to/tabletop_four_bases \
   --output-root outputs/tabletop_four_bases_demo \
   --render --preview
 ```
 
-The source directory must contain `scene_export/scene_config.json`,
-`scene_graph.json` and their referenced meshes. The example copies that export,
+The first run downloads `demo/tabletop_four_bases.zip` from the configured asset
+host, with the official Hugging Face dataset as a fallback. Later runs reuse
+the standard EmbodiChain cache. To download or list it separately:
+
+```bash
+embodichain data list --category demo
+embodichain data download --name TabletopFourBases
+```
+
+Override `--source` with a local `scene_export` directory, its parent workspace,
+or another registered asset reference. The example copies the selected export,
 recomputes its baseline, generates 20 layouts with seed 42 and a 2 cm group
 clearance, and reloads the saved candidates through the production loader.
-Change `grouped_randomization.yaml` or pass `--config` for another policy.
+Change `shared_scene_randomization.yaml` or pass `--config` for another policy.
+The downloaded assets remain unchanged; caches, layouts and previews belong to
+the separate output workspace.
+
+The downloadable archive contains only:
+
+```text
+scene_export/
+  scene_config.json
+  scene_graph.json
+  mesh_assets/<uid>/<uid>.glb
+  articulated_assets/       # empty for this rigid-only scene
+```
+
+The configuration stores poses/scales and relative asset paths; the graph
+stores the explicit support tree. The twelve GLBs include their materials and
+textures. `scene.json` is optional and can be regenerated on import. Generation
+logs, masks, intermediate models, `scene_usd`, existing randomization baselines,
+geometry caches, generated layouts and preview files are not needed for this
+demo asset. Resuming image-to-scene generation would require its separate
+intermediate artifacts.
 
 Each direct table child moves with all its descendants. The demo independently
 checks actual mesh XY bounds, pairwise group AABB separation, and that every
@@ -32,7 +63,9 @@ budget runs out; the manifest and verification report retain that status.
 
 Outputs under `scene_layouts/run_001/`:
 
-- `policy_resolved.yaml`, `layouts/*.json`, `run_result.json`: production run data.
+- `scene_input.json`, `policy.json`, `prepared_geometry.json`, `layouts/*.json`,
+  `run_result.json`: source-independent v4 run data. Legacy policies retain
+  their original files, including `policy_resolved.yaml`.
 - `demo_verification.json`: measured geometry and group-pose invariants.
 - `preview/layout_*.png`: the original and every variant, using a fixed camera.
 - `preview/contact_sheet.png`: original plus five representative variants.
@@ -54,7 +87,8 @@ python -m embodichain.gen_sim.scene_engine.randomization.loading \
 
 ## CPU/CUDA batch generation
 
-The default policy retains the original CPU SLSQP repair algorithm. For batch
+The legacy `grouped_randomization.yaml` policy retains the original CPU SLSQP
+repair algorithm. For batch
 rejection sampling, add `backend: batched`, `device: cpu` or `device: cuda:0`,
 and `batch_size: 4096` to a version-1 input policy. Logical proposal counters
 preserve the same seeded prefix when batch size changes. This distinct algorithm
