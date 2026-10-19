@@ -239,33 +239,48 @@ def _environment(
     parent.mkdir(exist_ok=True)
     run_root = Path(mkdtemp(prefix="run_", dir=parent))
     cfg.trajectory_save_dir = str(run_root / "trajectories")
-    manifest = json.loads(deployment.manifest_path.read_text())
-    descriptors = {
-        name: value["descriptor"]
-        for name, value in manifest["resolved_assets"]["assets"].items()
-    }
-    bottle, cup = (
-        descriptors[name]["provenance"]["pouring"] for name in ("bottle", "cup")
-    )
-    monitor = PouringAcceptanceMonitor(
-        bottle_mouth_xyz=bottle["mouth_center_m"],
-        cup_mouth_xyz=cup["mouth_center_m"],
-        bottle_mouth_radius_m=bottle["mouth_radius_m"],
-        cup_opening_radius_m=cup["opening_radius_m"],
-    )
     table_top = _table_top_m(config["background"])
     env = build_env(config["id"], cfg)
     env._pour_table_top_m = table_top
-    env._pour_monitor = monitor
-    env._pour_descriptors = descriptors
+    env._pour_initial_robot_id = id(env.robot)
+    env._pour_initial_table_id = id(env.sim.get_rigid_object("table"))
     env._asset_generalization_recording_root = str(run_root)
     return _ObservedPour(env)
 
 
 def _initial(env: Any) -> ValidationResult:
+    descriptors = {
+        role: asset["descriptor"]
+        for role, asset in env._asset_generalization_manifest["resolved_assets"][
+            "assets"
+        ].items()
+    }
+    bottle_record, cup_record = (
+        descriptors[role]["provenance"]["pouring"] for role in ("bottle", "cup")
+    )
+    env._pour_descriptors = descriptors
+    env._pour_monitor = PouringAcceptanceMonitor(
+        bottle_mouth_xyz=bottle_record["mouth_center_m"],
+        cup_mouth_xyz=cup_record["mouth_center_m"],
+        bottle_mouth_radius_m=bottle_record["mouth_radius_m"],
+        cup_opening_radius_m=cup_record["opening_radius_m"],
+    )
     bottle, cup = _poses(env)
     env._pour_monitor.reset(bottle, cup)
-    checks = []
+    checks = [
+        ValidationCheck(
+            "robot_instance_preserved",
+            "passed" if id(env.robot) == env._pour_initial_robot_id else "failed",
+        ),
+        ValidationCheck(
+            "table_instance_preserved",
+            (
+                "passed"
+                if id(env.sim.get_rigid_object("table")) == env._pour_initial_table_id
+                else "failed"
+            ),
+        ),
+    ]
     for role, pose in (("bottle", bottle), ("cup", cup)):
         bottom = float(pose[2, 3] + env._pour_descriptors[role]["bounds_m"]["lower"][2])
         gap = abs(bottom - env._pour_table_top_m)
@@ -295,6 +310,13 @@ def _initial(env: Any) -> ValidationResult:
 def _measured(env: Any) -> ValidationResult:
     result = env._pour_monitor.validate_final(*_poses(env))
     env._demo_episode_metadata[0]["pour_acceptance"] = env._pour_monitor.to_metadata()
+    env._demo_episode_metadata[0]["scene_instances"] = {
+        "environment": id(env),
+        "robot": id(env.robot),
+        "table": id(env.sim.get_rigid_object("table")),
+        "bottle": id(env.sim.get_rigid_object("bottle")),
+        "cup": id(env.sim.get_rigid_object("cup")),
+    }
     # Diagnostic evidence is kept separately from accepted trajectory data.
     report = {
         "monitor": env._pour_monitor.to_metadata(),

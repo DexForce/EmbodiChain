@@ -16,9 +16,9 @@
 
 """Offline asset preparation and sequential Task Program batch collection.
 
-Each batch constructs a new single-row environment. Initial checks, canonical
-program completion and independent measured checks gate reset-time submission;
-recorder finalization remains an explicit, separate close-time outcome.
+Batches reuse one single-row environment and replace selected bodies through
+the existing asset event. Initial and measured checks gate recording; one final
+close drains the shared recorders after all batches.
 """
 
 from __future__ import annotations
@@ -40,6 +40,9 @@ from embodichain.data.asset_catalog import (
     PreparationContext,
     PreparedAsset,
 )
+from embodichain.lab.gym.envs.managers.cfg import EventCfg
+from embodichain.lab.gym.envs.managers.event_manager import EventManager
+from embodichain.lab.gym.envs.managers.events import replace_assets_from_group
 from embodichain.lab.sim.motion.expansion import ValidationResult
 from embodichain.lab.sim.scene.expansion import SceneVariant
 from embodichain.lab.task_program.integrations.asset_materialization import (
@@ -132,7 +135,7 @@ class AssetEpisodeOutcome:
 
 @dataclass(frozen=True)
 class AssetBatchOutcome:
-    """Batch lifecycle summary; successful close finalized configured recorders."""
+    """Batch outcomes; close_finalized refers to the shared session's final close."""
 
     batch_index: int
     asset_set_id: str
@@ -349,100 +352,173 @@ def _flush_cleanup() -> None:
 
 
 def _collect_batch(
+    env: EmbodiedEnv,
     deployment: MaterializedAssetDeployment,
     *,
     cfg: AssetGeneralizationCfg,
     batch_index: int,
+    replacement_events: EventManager,
     initial_validator: Callable[[EmbodiedEnv], ValidationResult],
     measured_validator: Callable[[EmbodiedEnv], ValidationResult],
-    environment_factory: Callable[..., EmbodiedEnv],
     report: dict[str, Any],
-) -> AssetBatchOutcome:
-    # Validate before any native construction or recording side effect.
+) -> None:
+    target = getattr(env, "unwrapped", env)
     validate_materialized_deployment(deployment)
     manifest = json.loads(deployment.manifest_path.read_text(encoding="utf-8"))
     batch_seed = cfg.seed + batch_index
-    env = environment_factory(deployment, seed=batch_seed)
-    target = env
-    original_error: BaseException | None = None
+    replacement_events.get_functor_cfg("replace_assets").params[
+        "deployment"
+    ] = deployment
+    replacement_events.set_seed(batch_seed)
+    report["recording_root"] = getattr(
+        target, "_asset_generalization_recording_root", None
+    )
+    # This reset consumes/discards old buffers before the event changes geometry.
+    # Ordinary reset events run first; episode preparation then observes the new
+    # objects. The next scene host owns a new topology and physical-state snapshot.
+    target.reset(
+        seed=batch_seed,
+        options={
+            "save_data": False,
+            "scene_expansion_prepare": lambda: replacement_events.apply(
+                "reset", env_ids=[0]
+            ),
+        },
+    )
+    report["replacement"] = deepcopy(target._asset_generalization_replacement)
+    host = SimulationSceneExpansionHost(
+        target,
+        initial_validator=lambda: initial_validator(target),
+        settle_steps=cfg.settle_steps,
+    )
+    for episode_index in range(cfg.episodes_per_batch):
+        episode = {
+            "episode_index": episode_index,
+            "accepted": False,
+            "reset_submitted": False,
+        }
+        report["episodes"].append(episode)
+        variant = SceneVariant(
+            parent_scene_id=deployment.asset_set_id,
+            seed=batch_seed,
+            ordinal=episode_index,
+            pose_changes=(),
+            metadata=(("asset_set_id", deployment.asset_set_id),),
+        )
+        result = execute_scene_variant(
+            env,
+            variant,
+            prepare_scene=host,
+            measured_validator=lambda: measured_validator(target),
+            episode_index=episode_index,
+        )
+        episode["accepted"] = result.accepted
+        episode["validation"] = result.to_metadata()
+        target._demo_episode_metadata[0]["asset_generalization"] = {
+            "schema_version": 1,
+            "batch_index": batch_index,
+            "episode_index": episode_index,
+            "seed": batch_seed,
+            "recording_root": report["recording_root"],
+            "replacement": deepcopy(report["replacement"]),
+            "manifest": deepcopy(manifest),
+        }
+        target.reset(
+            options={
+                "save_data": result.accepted,
+                "commit_env_ids": [0] if result.accepted else [],
+            }
+        )
+        episode["reset_submitted"] = True
+
+
+def _collect_shared_environment(
+    selected: tuple[MaterializedAssetDeployment, ...],
+    *,
+    cfg: AssetGeneralizationCfg,
+    environment_factory: Callable[..., EmbodiedEnv],
+    initial_validator: Callable[[EmbodiedEnv], ValidationResult],
+    measured_validator: Callable[[EmbodiedEnv], ValidationResult],
+    report: dict[str, Any],
+) -> tuple[AssetBatchOutcome, ...]:
+    batch_report = {
+        "batch_index": 0,
+        "asset_set_id": selected[0].asset_set_id,
+        "episodes": [],
+        "close_finalized": False,
+    }
+    report["batches"].append(batch_report)
+    validate_materialized_deployment(selected[0])
+    env = environment_factory(selected[0], seed=cfg.seed)
+    target = getattr(env, "unwrapped", env)
+    report["environment_constructions"] = 1
+    original_error = None
     try:
-        target = getattr(env, "unwrapped", env)
         if target.num_envs != 1:
-            raise ValueError("Asset collection requires a fresh B=1 environment.")
-        report["recording_root"] = getattr(
-            target, "_asset_generalization_recording_root", None
-        )
-        target.reset(seed=batch_seed, options={"save_data": False})
-        host = SimulationSceneExpansionHost(
+            raise ValueError("Asset collection requires B=1")
+        # Use the ordinary EventManager and the existing replacement functor.
+        # Its explicit batch dispatch leaves the environment's reset/interval
+        # terms and stateful recorder instances intact.
+        replacement_events = EventManager(
+            {
+                "replace_assets": EventCfg(
+                    func=replace_assets_from_group,
+                    mode="reset",
+                    params={"deployment": None},
+                )
+            },
             target,
-            initial_validator=lambda: initial_validator(target),
-            settle_steps=cfg.settle_steps,
         )
-        for episode_index in range(cfg.episodes_per_batch):
-            episode = {
-                "episode_index": episode_index,
-                "accepted": False,
-                "reset_submitted": False,
-            }
-            report["episodes"].append(episode)
-            variant = SceneVariant(
-                parent_scene_id=deployment.asset_set_id,
-                seed=batch_seed,
-                ordinal=episode_index,
-                pose_changes=(),
-                metadata=(("asset_set_id", deployment.asset_set_id),),
-            )
-            result = execute_scene_variant(
-                env,
-                variant,
-                prepare_scene=host,
-                measured_validator=lambda: measured_validator(target),
-                episode_index=episode_index,
-            )
-            episode["accepted"] = result.accepted
-            episode["validation"] = result.to_metadata()
-            target._demo_episode_metadata[0]["asset_generalization"] = {
-                "schema_version": 1,
-                "batch_index": batch_index,
-                "episode_index": episode_index,
-                "seed": batch_seed,
-                "recording_root": report["recording_root"],
-                "manifest": deepcopy(manifest),
-            }
-            target.reset(
-                options={
-                    "save_data": result.accepted,
-                    "commit_env_ids": [0] if result.accepted else [],
+        for index, deployment in enumerate(selected):
+            if index:
+                batch_report = {
+                    "batch_index": index,
+                    "asset_set_id": deployment.asset_set_id,
+                    "episodes": [],
+                    "close_finalized": False,
                 }
+                report["batches"].append(batch_report)
+            _collect_batch(
+                env,
+                deployment,
+                cfg=cfg,
+                batch_index=index,
+                replacement_events=replacement_events,
+                initial_validator=initial_validator,
+                measured_validator=measured_validator,
+                report=batch_report,
             )
-            episode["reset_submitted"] = True
     except BaseException as error:
         original_error = error
-        report["error_type"] = type(error).__name__
-        report["detail"] = str(error)
+        batch_report["error_type"] = type(error).__name__
+        batch_report["detail"] = str(error)
         raise
     finally:
         try:
             target.close(exit_process=False)
-            report["close_finalized"] = True
+            for item in report["batches"]:
+                item["close_finalized"] = True
         except BaseException as close_error:
-            report["close_error"] = {
+            batch_report["close_error"] = {
                 "error_type": type(close_error).__name__,
                 "detail": str(close_error),
             }
             if original_error is None:
                 raise
             original_error.add_note(f"Environment close also failed: {close_error}")
-    return AssetBatchOutcome(
-        batch_index,
-        deployment.asset_set_id,
-        tuple(
-            AssetEpisodeOutcome(
-                item["episode_index"], item["accepted"], item["reset_submitted"]
-            )
-            for item in report["episodes"]
-        ),
-        report["close_finalized"],
+    return tuple(
+        AssetBatchOutcome(
+            item["batch_index"],
+            item["asset_set_id"],
+            tuple(
+                AssetEpisodeOutcome(
+                    ep["episode_index"], ep["accepted"], ep["reset_submitted"]
+                )
+                for ep in item["episodes"]
+            ),
+            item["close_finalized"],
+        )
+        for item in report["batches"]
     )
 
 
@@ -457,8 +533,10 @@ def collect_asset_batches(
 ) -> tuple[AssetBatchOutcome, ...]:
     """Collect sequential B=1 batches using canonical fail-closed scene execution.
 
-    A fresh environment is closed before the next batch starts. Cleanup is
-    drained only after a successful helper frame has unwound; a failed native
+    One environment and its recorders are retained across batches. Only selected
+    bodies are replaced; every batch obtains fresh task bindings and a new scene
+    acceptance snapshot. Cleanup is drained after the final close and successful
+    helper-frame unwind; a failed native
     constructor or execution traceback must be released by its caller before
     deferred cleanup can safely be drained. Exceptions preserve their original
     identity when close or reporting also fails.
@@ -469,9 +547,10 @@ def collect_asset_batches(
         initial_validator: Required measured checks of the prepared scene.
         measured_validator: Required independent final task checks.
         environment_factory: Optional factory accepting (deployment, seed=...).
-            Custom factories own recording configuration and directory isolation.
-            The default uses
-            a fresh recordings/run_* directory beside each deployment.
+            Called once for the first deployment. Custom factories own recording
+            configuration and directory isolation. The default creates one fresh
+            recordings/run_* directory beside the first deployment; recorder
+            counters and provenance distinguish the batches within that session.
         report_path: Optional JSON lifecycle report, also written on failure.
 
     Returns:
@@ -498,32 +577,20 @@ def collect_asset_batches(
         "batches": [],
         "status": "collecting",
     }
-    outcomes = []
     original_error: BaseException | None = None
     try:
-        for batch_index, deployment in enumerate(selected):
-            batch_report = {
-                "batch_index": batch_index,
-                "asset_set_id": deployment.asset_set_id,
-                "episodes": [],
-                "close_finalized": False,
-            }
-            report["batches"].append(batch_report)
-            outcomes.append(
-                _collect_batch(
-                    deployment,
-                    cfg=cfg,
-                    batch_index=batch_index,
-                    initial_validator=initial_validator,
-                    measured_validator=measured_validator,
-                    environment_factory=factory,
-                    report=batch_report,
-                )
-            )
-            # No native-bearing helper frame remains on the successful path.
-            _flush_cleanup()
+        outcomes = _collect_shared_environment(
+            selected,
+            cfg=cfg,
+            environment_factory=factory,
+            initial_validator=initial_validator,
+            measured_validator=measured_validator,
+            report=report,
+        )
+        # No native-bearing helper frame remains on the successful path.
+        _flush_cleanup()
         report["status"] = "completed"
-        return tuple(outcomes)
+        return outcomes
     except BaseException as error:
         original_error = error
         report["status"] = "failed"

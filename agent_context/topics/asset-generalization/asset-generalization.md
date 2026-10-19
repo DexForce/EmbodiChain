@@ -63,7 +63,7 @@ not rewritten to make a candidate pass. Container collision must preserve its
 annotated cavity; a default convex hull does not qualify.
 
 The materialized manifest binds assets and configuration bytes. Validate it
-before constructing environments, including when restoring an artifact without
+before construction or replacement, including when restoring an artifact without
 the optional manifest digest: selected package inventories and referenced local
 resources must remain complete. Generated asset paths retain their output owner.
 Local resources bundle only their dependency closure under a content digest;
@@ -78,22 +78,41 @@ Focused tests use the production loader in
 `lab/gym/envs/asset_generalization.py` owns `AssetGeneralizationCfg`, bounded
 provider preparation and sequential collection. `prepare_asset_batches` freezes
 one candidate snapshot per role, retains preparation failures in a report and
-materializes seeded combinations. `collect_asset_batches` verifies each artifact
-before construction and uses the canonical scene-variant executor plus
-`SimulationSceneExpansionHost` with no pose changes. Assets are fixed inside a
-batch; a new B=1 environment is created for every next deployment.
+materializes seeded combinations. `collect_asset_batches` constructs one B=1
+environment and reuses it across combinations. It dispatches the existing
+`managers.events.replace_assets_from_group` functor through `EventManager` at
+cleared batch boundaries. Its prepared `deployment` mode jointly replaces only
+selected bodies through `replace_rigid_objects`, then installs a fresh adapter
+and the adapted Task Program. The original directory-sampling mode is preserved.
+`_asset_replacement.py` verifies artifacts, checks fixed environment declarations
+and resolves logical roles through explicit native bindings before mutation.
+Native-bound policy ports are constructed after replacement. Manager terms with
+explicit `SceneEntityCfg` selectors for replaced bodies are reinitialized in
+place; unrelated terms and recorders retain their instances. Independent physical
+objectives retain their authored criteria and bind to the new body. Configuration
+provenance is refreshed for the environment and persistent recorder fallbacks.
+Custom consumers should declare their object selectors or resolve current native
+objects by UID on use; hidden cached handles cannot be automatically rebound.
+Each batch uses a fresh `SimulationSceneExpansionHost` with no pose changes;
+its new topology/physical snapshot belongs to the new assets. Each Task Program
+bridge assembles fresh providers and planner geometry. Assets stay fixed inside
+a batch; the robot, unselected bodies, sensors and recorder instances persist.
 
 Both initial and final measured validators are mandatory. Empty/unavailable
 checks and incomplete programs cannot save data. Asset provenance is attached
-before the ordinary commit/discard reset. Close finalizes recorders and discards
-uncommitted buffers; cleanup drains only after successful host frames unwind.
+before the ordinary commit/discard reset. The batch-switch reset consumes old
+buffers before applying the replacement event and seeds new recording state
+afterward. One final close drains the shared recorders and discards uncommitted
+buffers; cleanup drains only after successful host frames unwind.
 Construction/execution errors preserve their original exception and require
 caller-owned deferred cleanup after traceback release.
 
 `record_trajectory=True` explicitly enables accepted-episode trajectory files
 in the default collection factory. Each invocation scopes dataset, camera and
-trajectory recorder directories beneath a fresh deployment-local run directory.
-Custom environment factories own equivalent isolation. Reports distinguish
+trajectory recorder directories beneath one fresh run directory next to the
+first deployment. Recorder counters continue across batches; repeated collection
+invocations get different directories. Custom environment factories are called
+once and own equivalent isolation. Reports distinguish
 acceptance, returned reset requests and close finalization; none substitutes
 for a per-episode persistence receipt. Normal configuration loading does not
 select providers or enable generation.
@@ -112,12 +131,14 @@ adding official task deployments. Programs, bindings, asset requirements and
 physical environment files remain separate. Ordinary `run-task --gym-config`
 loading does not select assets or invoke Providers.
 
-Asset replacement currently belongs to pre-build preparation and batch
-collection, not a manager-bound Event functor. `BaseEnv` prepares native topology
-before `EmbodiedEnv._init_sim_state` constructs managers and dispatches startup
-events. Switching prepared meshes therefore constructs a fresh environment and
-binding snapshot. Same-topology pose/material randomization remains event-owned;
-there is no pre-build or batch-stage functor adapter for asset preparation yet.
+Provider access, matching and materialization remain pre-collection work.
+The prepared replacement event only consumes verified artifacts; normal config
+loading and Task Program compilation do not invoke Providers. Changing a robot,
+backend, control/recording schema or unselected object is rejected before native
+mutation. Replacement must run after the prior episode has been committed or
+discarded, with no active attempt or nonempty recording buffers. Native prepare
+failures propagate and stop collection, because backend resource rollback is not
+available. Full environment reconstruction is not a Task Program requirement.
 
 
 ## Calibrated bottle/cup pouring

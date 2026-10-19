@@ -717,3 +717,294 @@ def test_local_robot_bundling_preserves_nested_dependencies_only(tmp_path):
         "textures/material.mtl",
         "textures/paint.png",
     }
+
+
+@pytest.fixture
+def replacement(deployment, tmp_path, monkeypatch, request):
+    """Real packaged configurations with a narrow fake native replacement port."""
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    import torch
+
+    from embodichain.lab.task_program.integrations.configured import (
+        _ConfiguredTaskProgramAdapterFactory,
+    )
+
+    source, requirements, resolved = deployment
+    environment_path = source.parent / "env.yaml"
+    environment = yaml.safe_load(environment_path.read_text())
+    environment["env"]["events"] = {}
+    environment["simulation"]["background"].append(
+        {
+            "uid": "fixed_table",
+            "shape": {"shape_type": "Cube", "size": [1, 1, 0.1]},
+            "body_type": "static",
+            "init_pos": [0, 0, -0.1],
+        }
+    )
+    _write(environment_path, environment)
+    if getattr(request, "param", False):
+        task = yaml.safe_load(source.read_text())
+        task["objective"] = {"component": "objective.yaml"}
+        _write(source, task)
+        _write(
+            source.parent / "objective.yaml",
+            {
+                "type": "ordered_stable_regions",
+                "object_uid": "cube",
+                "regions": [{"name": "goal", "lower": [-1, -1, 0], "upper": [1, 1, 1]}],
+                "hold_seconds": 0.01,
+                "max_linear_speed": 1.0,
+                "max_angular_speed": 1.0,
+            },
+        )
+    artifact = materialize_asset_deployment(
+        source, requirements, resolved, output_dir=tmp_path / "replacement"
+    )
+    cfg = config_to_cfg(
+        yaml.safe_load(artifact.deployment_path.read_text()),
+        source_path=artifact.deployment_path,
+    )
+
+    def body(config):
+        pose = torch.eye(4).unsqueeze(0)
+        pose[:, :3, 3] = torch.tensor(config.init_pos)
+        return SimpleNamespace(
+            cfg=config,
+            body_data=SimpleNamespace(
+                lin_vel=torch.zeros(1, 3), ang_vel=torch.zeros(1, 3)
+            ),
+            get_local_pose=lambda to_matrix=False: (
+                pose
+                if to_matrix
+                else torch.cat(
+                    (pose[:, :3, 3], torch.tensor([[0.0, 0.0, 0.0, 1.0]])), dim=1
+                )
+            ),
+        )
+
+    bodies = {obj.uid: body(obj) for obj in (*cfg.rigid_object, *cfg.background)}
+    sim = SimpleNamespace(
+        get_rigid_object=lambda uid: bodies[uid], asset_uids=list(bodies)
+    )
+
+    def replace(configs):
+        for config in configs:
+            bodies[config.uid] = body(config)
+        return [bodies[config.uid] for config in configs]
+
+    sim.replace_rigid_objects = Mock(side_effect=replace)
+    env = SimpleNamespace(
+        num_envs=1,
+        cfg=cfg,
+        sim=sim,
+        robot=object(),
+        sensors={"camera": object()},
+        event_manager=object(),
+        _task_program_adapter=object(),
+        _active_task_program_bridge=object(),
+        _demo_episode_metadata=[{}],
+        _traj_steps=torch.zeros(1, dtype=torch.long),
+        _demo_steps=torch.zeros(1, dtype=torch.long),
+        device=torch.device("cpu"),
+        step_dt=0.01,
+    )
+    adapters = []
+
+    def create_adapter(factory, target):
+        adapter = SimpleNamespace(
+            registration=factory.registration, environment=target, objects=dict(bodies)
+        )
+        adapters.append(adapter)
+        return adapter
+
+    monkeypatch.setattr(
+        _ConfiguredTaskProgramAdapterFactory, "create_adapter", create_adapter
+    )
+    return SimpleNamespace(env=env, artifact=artifact, bodies=bodies, adapters=adapters)
+
+
+def test_prepared_replacement_uses_existing_event_and_preserves_other_instances(
+    replacement,
+):
+    from embodichain.lab.gym.envs.managers import FunctorCfg
+    from embodichain.lab.gym.envs.managers.events import replace_assets_from_group
+
+    env = replacement.env
+    initial_robot, initial_camera, initial_events = (
+        env.robot,
+        env.sensors["camera"],
+        env.event_manager,
+    )
+    old_objects = dict(replacement.bodies)
+    previous_adapter = env._task_program_adapter
+    term = replace_assets_from_group(
+        FunctorCfg(params={"deployment": replacement.artifact}), env
+    )
+    term(env, [0], deployment=replacement.artifact)
+    assert [cfg.uid for cfg in env.sim.replace_rigid_objects.call_args.args[0]] == [
+        "cube",
+        "platform",
+    ]
+    assert env.sim.replace_rigid_objects.call_count == 1
+    assert all(
+        replacement.bodies[uid] is not old_objects[uid] for uid in ("cube", "platform")
+    )
+    assert all(
+        replacement.bodies[uid] is value
+        for uid, value in old_objects.items()
+        if uid not in {"cube", "platform"}
+    )
+    assert env.robot is initial_robot and env.sensors["camera"] is initial_camera
+    assert env.event_manager is initial_events
+    assert env._task_program_adapter is not previous_adapter
+    assert replacement.adapters == [env._task_program_adapter]
+    assert env._task_program_adapter.objects["cube"] is replacement.bodies["cube"]
+    assert env._active_task_program_bridge is None
+    assert (
+        env._asset_generalization_manifest["asset_set_id"]
+        == replacement.artifact.asset_set_id
+    )
+
+
+@pytest.mark.parametrize(
+    "change", ["robot", "physics", "unselected", "uids", "control"]
+)
+def test_prepared_replacement_rejects_changed_environment_before_mutation(
+    replacement, change
+):
+    from embodichain.lab.gym.envs._asset_replacement import _apply_asset_deployment
+
+    env = replacement.env
+    if change == "robot":
+        env.cfg.robot.uid = "another_robot"
+    elif change == "physics":
+        env.cfg.sim_cfg.physics_cfg.gravity = (0, 0, -1)
+    elif change == "unselected":
+        unselected = next(obj for obj in env.cfg.background if obj.uid != "platform")
+        unselected.init_pos = [1, 2, 3]
+    elif change == "uids":
+        env.cfg.background.pop()
+    else:
+        env.cfg.target_control_frequency = 123
+    old_adapter = env._task_program_adapter
+    with pytest.raises(ValueError, match="cannot change|preserve"):
+        _apply_asset_deployment(env, replacement.artifact)
+    env.sim.replace_rigid_objects.assert_not_called()
+    assert env._task_program_adapter is old_adapter
+    assert replacement.adapters == []
+
+
+def test_prepared_replacement_propagates_native_failure_without_installing_new_binding(
+    replacement,
+):
+    from embodichain.lab.gym.envs._asset_replacement import _apply_asset_deployment
+
+    old = replacement.env._task_program_adapter
+    failure = RuntimeError("native prepare failed")
+    replacement.env.sim.replace_rigid_objects.side_effect = failure
+    with pytest.raises(RuntimeError) as caught:
+        _apply_asset_deployment(replacement.env, replacement.artifact)
+    assert caught.value is failure
+    assert replacement.env._task_program_adapter is old
+    assert not hasattr(replacement.env, "_asset_generalization_manifest")
+
+
+def test_prepared_replacement_refreshes_provenance_without_restarting_recorders(
+    replacement,
+):
+    from types import SimpleNamespace
+    from embodichain.lab.gym.envs._asset_replacement import _apply_asset_deployment
+    from embodichain.data_pipeline.recording import stable_config_hash
+
+    env = replacement.env
+    env._recording_provenance = {"config_hash": "stale"}
+    env._recording_run_uuid = "same-session"
+    recorder = SimpleNamespace(
+        _recording_provenance={"config_hash": "stale"}, curr_episode=5
+    )
+    env.dataset_manager = SimpleNamespace(
+        _mode_functor_cfgs={"save": [SimpleNamespace(func=recorder)]}
+    )
+    _apply_asset_deployment(env, replacement.artifact)
+    expected = stable_config_hash(env.cfg)
+    assert env._recording_provenance["config_hash"] == expected
+    assert env._demo_episode_metadata[0]["config_hash"] == expected
+    assert recorder._recording_provenance["config_hash"] == expected
+    assert env._recording_run_uuid == "same-session" and recorder.curr_episode == 5
+
+
+@pytest.mark.parametrize("replacement", [True], indirect=True)
+def test_prepared_replacement_rebinds_independent_objective_without_changing_criteria(
+    replacement,
+):
+    from embodichain.lab.gym.envs._asset_replacement import _apply_asset_deployment
+    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+
+    env = replacement.env
+    EmbodiedEnv._initialize_physical_objective(env)
+    objective = env.physical_objective
+    old_body = env._physical_objective_object
+    _apply_asset_deployment(env, replacement.artifact)
+    assert env.physical_objective is objective
+    assert env._physical_objective_object is env.sim.get_rigid_object("cube")
+    assert env._physical_objective_object is not old_body
+    EmbodiedEnv._update_physical_objective(env)
+
+
+def test_affected_cached_event_rebinds_in_same_manager(replacement):
+    from types import SimpleNamespace
+    from embodichain.lab.gym.envs._asset_replacement import _refresh_manager_bindings
+    from embodichain.lab.gym.envs.managers import Functor
+    from embodichain.lab.gym.envs.managers.cfg import EventCfg, SceneEntityCfg
+    from embodichain.lab.gym.envs.managers.event_manager import EventManager
+
+    class CachedEvent(Functor):
+        def __init__(self, cfg, env):
+            super().__init__(cfg, env)
+            self.body = env.sim.get_rigid_object(cfg.params["entity_cfg"].uid)
+
+        def __call__(self, env, env_ids, entity_cfg):
+            env.observed_body = self.body
+
+    env = replacement.env
+    declaration = {
+        "cached": EventCfg(
+            func=CachedEvent, params={"entity_cfg": SceneEntityCfg(uid="cube")}
+        )
+    }
+    manager = EventManager(declaration, env)
+    env.event_manager = manager
+    current = manager.get_functor_cfg("cached")
+    old_term = current.func
+    env.sim.replace_rigid_objects([env.cfg.rigid_object[0]])
+    _refresh_manager_bindings(env, SimpleNamespace(events=declaration), {"cube"})
+    assert manager.get_functor_cfg("cached") is current
+    assert current.func is not old_term
+    manager.apply("reset", env_ids=[0])
+    assert env.observed_body is env.sim.get_rigid_object("cube")
+    assert env.observed_body is not old_term.body
+
+
+@pytest.mark.parametrize(
+    "active", ["_scene_expansion_attempt_active", "_traj_steps", "_demo_steps"]
+)
+def test_prepared_replacement_requires_cleared_episode(replacement, active):
+    import torch
+    from embodichain.lab.gym.envs._asset_replacement import _apply_asset_deployment
+
+    setattr(
+        replacement.env, active, True if active.endswith("active") else torch.ones(1)
+    )
+    with pytest.raises(RuntimeError, match="episode"):
+        _apply_asset_deployment(replacement.env, replacement.artifact)
+    replacement.env.sim.replace_rigid_objects.assert_not_called()
+
+
+def test_prepared_replacement_tampering_prevents_native_mutation(replacement):
+    from embodichain.lab.gym.envs._asset_replacement import _apply_asset_deployment
+
+    replacement.artifact.deployment_path.write_text("changed")
+    with pytest.raises(ValueError, match="changed"):
+        _apply_asset_deployment(replacement.env, replacement.artifact)
+    replacement.env.sim.replace_rigid_objects.assert_not_called()

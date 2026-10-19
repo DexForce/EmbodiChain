@@ -128,6 +128,9 @@ class _Env:
         if self.reset_error is not None and "commit_env_ids" in options:
             raise self.reset_error
         self._demo_episode_metadata = [{}]
+        prepare = options.get("scene_expansion_prepare")
+        if prepare is not None:
+            prepare()
 
     def close(self, *, exit_process):
         assert exit_process is False
@@ -166,13 +169,40 @@ def ports(monkeypatch):
             accepted=accepted, to_metadata=lambda: {"accepted": accepted}
         )
 
+    class ReplacementEvents:
+        def __init__(self, terms, env):
+            self.term = terms["replace_assets"]
+            assert self.term.func is module.replace_assets_from_group
+            self.env = env
+
+        def get_functor_cfg(self, name):
+            assert name == "replace_assets"
+            return self.term
+
+        def set_seed(self, seed):
+            self.seed = seed
+
+        def apply(self, mode, env_ids):
+            assert mode == "reset" and env_ids == [0]
+            deployment = self.term.params["deployment"]
+            events.append(("replace", deployment.asset_set_id, self.seed))
+            self.env.name = deployment.asset_set_id
+            self.env._asset_generalization_manifest = json.loads(
+                deployment.manifest_path.read_text()
+            )
+            self.env._asset_generalization_replacement = {
+                "replaced_uids": ["source"],
+                "robot_preserved": True,
+            }
+
+    monkeypatch.setattr(module, "EventManager", ReplacementEvents)
     monkeypatch.setattr(module, "SimulationSceneExpansionHost", Host)
     monkeypatch.setattr(module, "execute_scene_variant", execute)
     monkeypatch.setattr(module, "_flush_cleanup", lambda: events.append(("flush",)))
     return SimpleNamespace(events=events, envs=envs, factory=factory)
 
 
-def test_batches_close_and_flush_before_next_and_reset_before_repeat(tmp_path, ports):
+def test_batches_share_one_environment_and_finalize_once(tmp_path, ports):
     deployments = tuple(_artifact(tmp_path, f"batch_{i}") for i in range(2))
     outcomes = module.collect_asset_batches(
         deployments,
@@ -187,29 +217,26 @@ def test_batches_close_and_flush_before_next_and_reset_before_repeat(tmp_path, p
         ep.accepted and ep.reset_submitted for item in outcomes for ep in item.episodes
     )
     names = [event[0] for event in ports.events]
-    assert (
-        names
-        == [
-            "create",
-            "reset",
-            "host",
-            "execute",
-            "reset",
-            "execute",
-            "reset",
-            "close",
-            "flush",
-        ]
-        * 2
-    )
-    assert [event[2] for event in ports.events if event[0] == "create"] == [17, 18]
-    for env in ports.envs:
-        for snapshot in env.snapshots[1:]:
-            assert (
-                snapshot["asset_generalization"]["manifest"]["asset_set_id"] == env.name
-            )
+    assert names == ["create"] + [
+        "reset",
+        "replace",
+        "host",
+        "execute",
+        "reset",
+        "execute",
+        "reset",
+    ] * 2 + ["close", "flush"]
+    assert len(ports.envs) == 1
+    assert [event[2] for event in ports.events if event[0] == "replace"] == [17, 18]
+    saved = [
+        snapshot["asset_generalization"]["manifest"]["asset_set_id"]
+        for snapshot in ports.envs[0].snapshots
+        if "asset_generalization" in snapshot
+    ]
+    assert saved == [item.asset_set_id for item in deployments for _ in range(2)]
     report = json.loads((tmp_path / "report.json").read_text())
     assert report["status"] == "completed"
+    assert report["environment_constructions"] == 1
     assert report["batches"][0]["episodes"][1]["reset_submitted"] is True
 
 
@@ -326,7 +353,7 @@ def test_reset_submission_failure_does_not_become_persistence_success(tmp_path, 
     assert ("flush",) not in ports.events
 
 
-def test_close_failure_propagates_and_stops_next_batch(tmp_path, ports):
+def test_final_close_failure_propagates_after_shared_batches(tmp_path, ports):
     failure = RuntimeError("durability failed")
 
     def factory(deployment, *, seed):

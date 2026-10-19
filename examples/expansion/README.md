@@ -37,18 +37,23 @@ The PourWater example measures rigid pouring motion, not liquid transfer.
 
 ## Asset preparation and functor lifecycle
 
-The current asset-generalization API operates before environment construction:
-Provider snapshots → semantic matching → verified deployment → fresh environment
-per asset batch → acceptance → recorder finalization. Selecting a different mesh
-also changes collision geometry, bindings and geometry-dependent calibration.
+Asset preparation runs before collection: Provider snapshots → semantic matching
+→ verified deployments. Collection constructs one environment, then applies each
+prepared combination through the existing `replace_assets_from_group` event.
+The event calls `SimulationManager.replace_rigid_objects()` once for the selected
+bodies and installs the deployment's adapted Task Program binding. Robot,
+unselected bodies, sensors and recorder instances remain in the environment.
+Each batch creates a fresh scene-acceptance snapshot and each Task Program bridge
+builds fresh live providers and a planner collision world.
 
-Existing manager functors receive an already constructed environment. Even
-`startup` events run after `BaseEnv` prepares the native scene. Reset/interval
-events are appropriate for supported pose, material and physical-property
-randomization on existing entities. The current asset pipeline rebuilds the
-environment between asset batches rather than replacing meshes inside reset.
+The existing `entity_cfg` / `folder_path` mode continues to sample directory
+meshes. The new `deployment` mode consumes the artifacts returned by
+`prepare_asset_batches`; matching and Provider I/O are not reset-time work.
+`collect_asset_batches` dispatches the event at a cleared B=1 batch boundary,
+after old recording buffers have been consumed and before new recording state
+is seeded. Unsupported changes to the robot, backend, control layout or
+unselected objects are rejected before native mutation. Native preparation
+failures stop collection because the backend does not provide rollback.
 
-A configuration-driven pre-build or batch-stage functor adapter is not currently
-implemented. Such an adapter would wrap the existing Provider/matcher/materializer
-APIs at their construction boundary; it would not belong in an ordinary reset
-event or run Provider I/O during Task Program compilation.
+The primitive Cube baseline remains a separate, direct-configuration example.
+Its primitive shapes do not require asset catalogs.

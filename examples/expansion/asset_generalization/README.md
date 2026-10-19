@@ -145,11 +145,36 @@ canonical program completion, phase validators and settling checks. Metadata
 explicitly records `fluid_transfer_measured: false`: this scene has no fluid
 simulation and does not certify water volume transferred.
 
-Preparation writes batch configurations and immutable asset manifests. Execution
-writes `report.json`, per-episode `pour-diagnostics-*.json`, and accepted `.pt`
-trajectories beneath separate
-`recordings/run_*` directories. Trajectories retain asset-set provenance and pour
-measurement summaries. Rejected or unverified episodes are discarded. Acceptance,
+Preparation writes batch configurations and immutable asset manifests.
+PourWater execution constructs one environment and retains its robot, primitive
+table and recorders across all asset combinations. The existing
+`replace_assets_from_group` event jointly replaces bottle/cup through
+`replace_rigid_objects`, then installs the adapted Task Program binding.
+The next batch captures a new initial scene state; its bridge builds fresh
+planning geometry. Asset Provider I/O and matching remain in preparation.
+
+The event has two mutually exclusive inputs:
+
+- Existing `entity_cfg` and `folder_path`: directory-sampled mesh replacement,
+  with the original signature and behavior.
+- `deployment`: a `MaterializedAssetDeployment` returned by
+  `prepare_asset_batches`, applied at a cleared B=1 episode boundary. The event
+  preserves unrelated object declarations and validates files before mutation.
+
+`collect_asset_batches` invokes a custom environment factory once, for the first
+deployment. Custom observers should read the current
+`env._asset_generalization_manifest` when starting a batch, as the PourWater
+observer does. Existing stateful managers remain attached to the environment.
+
+Execution writes `report.json`, per-episode `pour-diagnostics-*.json`, and accepted
+`.pt` trajectories beneath one fresh `recordings/run_*` directory per collection
+invocation, beside the first deployment. Recorder counters continue across
+batches. Trajectories retain each batch's asset-set provenance, replacement
+summary and pour measurements. The report records `environment_constructions: 1`;
+PourWater diagnostics also record unchanged environment/robot/table instance IDs
+and new bottle/cup instance IDs. All batches report finalization only after the
+shared environment closes at the end of collection. Rejected or unverified
+episodes are discarded. Acceptance,
 returned reset requests and recorder finalization are separate reported facts;
 they are not interchangeable with per-episode persistence receipts.
 
