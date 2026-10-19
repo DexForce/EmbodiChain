@@ -27,7 +27,7 @@ from .config import SuiteCfg
 
 __all__ = ["write_markdown_report"]
 
-TIME_COLUMNS = (
+_TIME_COLUMNS = (
     "track",
     "algorithm",
     "algorithm_role",
@@ -55,83 +55,6 @@ TIME_COLUMNS = (
     "timing_is_solved",
     "trajectory_duration_s",
     "trajectory_waypoints",
-)
-
-METRIC_COLUMNS = (
-    "track",
-    "scenario",
-    "algorithm",
-    "algorithm_role",
-    "robot",
-    "skill",
-    "object",
-    "task_difficulty",
-    "primary_success",
-    "batch_size",
-    "waypoint_count",
-    "path_shape",
-    "start_state_bin",
-    "cases",
-    "n_valid",
-    "coverage_rate",
-    "success_rate",
-    "planning_success_rate",
-    "motion_valid_rate",
-    "execution_success_rate",
-    "task_success_rate",
-    "physical_skill_success_rate",
-    "end_to_end_success_rate",
-    "evaluation_protocols",
-    "physical_evaluation_coverage_rate",
-    "ordered_waypoint_success_rate",
-    "waypoint_completion_rate",
-    "final_pos_err_mm",
-    "final_rot_err_deg",
-    "waypoint_pos_err_mm_p95",
-    "waypoint_rot_err_deg_p95",
-    "joint_violation_rate",
-    "velocity_violation_rate",
-    "acceleration_violation_rate",
-    "jerk_violation_rate",
-    "velocity_utilization",
-    "acceleration_utilization",
-    "jerk_utilization",
-    "dynamic_measurement_status",
-    "max_joint_velocity_rad_s",
-    "max_joint_acceleration_rad_s2",
-    "max_joint_jerk_rad_s3",
-    "joint_path_length_rad",
-    "cartesian_path_length_m",
-    "path_efficiency",
-    "task_completion_time_s",
-    "joint_tracking_rmse_rad",
-    "object_lift_delta_m",
-    "articulation_joint_delta",
-    "articulation_joint_peak_signed_delta",
-    "replan_count",
-    "stage_success_rates",
-    "stage_counts",
-    "top_failure",
-)
-
-LEADERBOARD_COLUMNS = (
-    "rank",
-    "track",
-    "algorithm",
-    "algorithm_role",
-    "model_revision",
-    "planner_config_hash",
-    "eligible",
-    "attributed_cases",
-    "bypassed_cases",
-    "coverage_rate",
-    "overall_success_rate",
-    "planning_success_rate",
-    "motion_valid_rate",
-    "execution_success_rate",
-    "task_success_rate",
-    "latency_p95_ms",
-    "peak_gpu_mb",
 )
 
 
@@ -283,47 +206,12 @@ def write_markdown_report(
         "Dynamic peaks and violations are diagnostic measurements, including nominal clocks; they are not timed success scores.",
         "",
     ]
-    views = aggregates.get("report_views", [])
-    if not views:
-        # Legacy callers still identify a view from the suite's explicit scenario,
-        # never from skill names or friendly scenario ids in the artifacts.
-        track_scenarios = {
-            track.id: track.scenario for track in suite.evaluation_tracks()
-        }
-        views = [
-            {
-                "view": view,
-                "title": title,
-                "tracks": sorted(
-                    track
-                    for track, owner in track_scenarios.items()
-                    if owner == scenario
-                ),
-            }
-            for scenario, view, title in (
-                ("free_space", "motion_planning", "Motion Planning"),
-                ("atomic_skill", "atomic_skills", "Atomic Skills"),
-            )
-            if scenario in track_scenarios.values()
-        ]
-    if not views:
-        views = [
-            {
-                "view": "unclassified",
-                "title": "Unclassified scenario",
-                "tracks": sorted(
-                    {str(row["track"]) for row in aggregates["leaderboard"]}
-                ),
-            }
-        ]
-    for descriptor in views:
+    if "report_views" not in aggregates:
+        raise ValueError("Benchmark reports require scenario-owned report_views.")
+    for descriptor in aggregates["report_views"]:
         view = str(descriptor["view"])
-        tracks = set(descriptor["tracks"])
         rows = {
-            key: aggregates.get(
-                f"{view}_{key}",
-                [row for row in aggregates[key] if row["track"] in tracks],
-            )
+            key: aggregates[f"{view}_{key}"]
             for key in ("time_and_memory", "success_and_metrics", "leaderboard")
         }
         lines.extend([f"## {descriptor['title']}", ""])
@@ -338,7 +226,7 @@ def write_markdown_report(
             )
             time_columns = tuple(
                 column
-                for column in TIME_COLUMNS
+                for column in _TIME_COLUMNS
                 if column
                 not in {
                     "warm_plan_ms_p50",
@@ -364,7 +252,7 @@ def write_markdown_report(
             )
             time_columns = tuple(
                 column
-                for column in TIME_COLUMNS
+                for column in _TIME_COLUMNS
                 if column
                 not in {
                     "skill",
@@ -381,9 +269,7 @@ def write_markdown_report(
         lines.extend(_format_table(rows["success_and_metrics"], metric_columns))
         lines.extend(["", "### Leaderboard", ""])
         leaderboard = rows["leaderboard"] + (
-            aggregates.get("motion_timing_leaderboard", [])
-            if view == "motion_planning"
-            else []
+            aggregates["motion_timing_leaderboard"] if view == "motion_planning" else []
         )
         lines.extend(_format_table(leaderboard, _VIEW_LEADERBOARD_COLUMNS))
         lines.append("")

@@ -617,7 +617,6 @@ x-skill-pick-up: &skill_pick_up
   hand_interp_steps: 12
   pre_grasp_distance_m: 0.15
   lift_height_m: 0.16
-  minimum_object_lift_m: 0.04
   approach_direction: [0.0, 0.0, -1.0]
   pre_pick_height_m: 0.36
   pre_action_settle_steps: 50
@@ -638,7 +637,6 @@ x-skill-move-held-object: &skill_move_held_object
   lift_height_m: 0.16
   hand_interp_steps: 12
   pre_action_settle_steps: 50
-  object_position_threshold_m: 0.04
   cases:
     - name: spatial_cube_transport
       object: cube_50mm
@@ -656,7 +654,6 @@ x-skill-place: &skill_place
   lift_height_m: 0.16
   hand_interp_steps: 12
   pre_action_settle_steps: 50
-  object_position_threshold_m: 0.05
   cases:
     - name: spatial_cube_place
       object: cube_50mm
@@ -672,7 +669,6 @@ x-skill-press: &skill_press
   target_link: button_link
   target_joint: button_joint
   effect_joint_sign: 1.0
-  minimum_joint_delta_m: 0.004
   geometry_seed: 11
   cases:
     - name: spatial_microwave_start_button
@@ -693,7 +689,6 @@ x-skill-slide: &skill_slide
   target_link: large_handle_bar
   target_joint: cabinet_to_drawer
   effect_joint_sign: 1.0
-  minimum_joint_delta_m: 0.12
   geometry_seed: 11
   cases:
     - name: spatial_drawer_pull
@@ -710,7 +705,6 @@ x-skill-twist: &skill_twist
   target_link: knob_link
   target_joint: knob_joint
   effect_joint_sign: 1.0
-  minimum_joint_delta_rad: 0.5
   geometry_seed: 11
   cases:
     - name: spatial_microwave_power_knob
@@ -730,7 +724,6 @@ x-skill-open-door: &skill_open_door
   grasp_sample_count: 10000
   grasp_max_candidates: 128
   grasp_alignment_max_angle_deg: 10.0
-  hinge_angle_tolerance_rad: 0.0873
   cases:
     - name: spatial_microwave_door_30deg
       task_difficulty: simple
@@ -755,8 +748,6 @@ x-skill-pour: &skill_pour
   grasp_sample_count: 10000
   grasp_max_candidates: 128
   grasp_alignment_max_angle_deg: 10.0
-  pour_angle_tolerance_rad: 0.0873
-  minimum_object_lift_m: 0.04
   cases:
     - name: spatial_cube_pour_30deg
       object: cube_50mm
@@ -784,8 +775,6 @@ x-skill-axis-align: &skill_axis_align
   grasp_sample_count: 10000
   grasp_max_candidates: 128
   grasp_alignment_max_angle_deg: 10.0
-  axis_angle_tolerance_rad: 0.0873
-  minimum_object_lift_m: 0.04
   cases:
     - name: spatial_cube_upright
       object: cube_50mm
@@ -804,8 +793,6 @@ x-skill-push-object: &skill_push_object
   retract_height_m: 0.10
   push_overshoot_m: 0.0
   object_contact_offset_m: [0.0, 0.0, -0.01]
-  object_position_threshold_m: 0.01
-  object_tilt_threshold_rad: 0.0873
   cases:
     - name: spatial_cube_push_lateral_10cm
       object: cube_50mm

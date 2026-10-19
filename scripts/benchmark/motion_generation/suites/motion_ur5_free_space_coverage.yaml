@@ -42,7 +42,7 @@ planners:
     adapter: nmg_onnx
     role: candidate
     enabled: false
-    config:
+    config: &nmg_policy
       # Supply the external UR5 policy with --nmg-onnx-path; otherwise NMG is skipped.
       onnx_model_path: null
       num_waypoints: 5
@@ -56,25 +56,13 @@ planners:
       pos_eps: 0.01
       rot_eps: 0.1
       joint_eps: 0.01
-  # Identical policy and inputs, with shared-limit retiming.
+  # Same policy and inputs, with shared-limit retiming.
   - id: nmg_retimed
     adapter: nmg_onnx
     role: candidate
     enabled: false
     config:
-      # Supply the external UR5 policy with --nmg-onnx-path; otherwise NMG is skipped.
-      onnx_model_path: null
-      num_waypoints: 5
-      steps_per_waypoint: 30
-      max_steps: 150
-      action_scale: 0.2
-      num_arm_joints: 6
-      joint_periodic_features: true
-      use_relative_obs: true
-      intermediate_orientation: true
-      pos_eps: 0.01
-      rot_eps: 0.1
-      joint_eps: 0.01
+      <<: *nmg_policy
       retime: true
 
 protocol:

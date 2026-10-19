@@ -78,8 +78,6 @@ from .atomic_evaluation import (
     gripper_released,
     merge_stage_evidence_batches,
     minimum_height_above_initial_support,
-    motion_valid_mask,
-    object_pose_success,
     replay_trace,
     signed_rotation_about_axis,
     stage_evidence_batch,
@@ -94,7 +92,6 @@ if TYPE_CHECKING:
 
 __all__: list[str] = []
 
-_TASK_ROTATION_TOLERANCE_RAD = math.radians(5.0)
 _TASK_POSITION_TOLERANCE_M = 0.01
 
 
@@ -803,11 +800,6 @@ class _OpenDoorCases(AtomicSkillCaseProvider):
                 "open_angle_rad": open_angle,
                 "open_fraction": open_fraction,
                 "target_joint_position": target_position,
-                "hinge_angle_tolerance_rad": float(
-                    config.get(
-                        "hinge_angle_tolerance_rad", _TASK_ROTATION_TOLERANCE_RAD
-                    )
-                ),
                 "articulation_initial_pose": articulation_initial_pose.detach()
                 .cpu()
                 .tolist(),
@@ -830,7 +822,6 @@ class _OpenDoorCases(AtomicSkillCaseProvider):
                 "target_joint": target_joint,
                 "target_entity_id": f"{handle.entity.uid}:{target_link}",
                 "effect_joint_sign": float(opening_direction),
-                "task_success_scope": "physical_hinge_angle_at_open_end",
                 "randomization": randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },
@@ -905,7 +896,7 @@ class _OpenDoorCases(AtomicSkillCaseProvider):
         }
 
     def articulation_effect_segment(self, case: BenchmarkCase) -> str:
-        """Score the hinge at the end of the segment that rotates the door."""
+        """Select the opening segment for hinge-displacement diagnostics."""
         del case
         return "open"
 
@@ -934,30 +925,6 @@ class _OpenDoorCases(AtomicSkillCaseProvider):
     def physical_evaluator(self) -> _OpenDoorEvaluator:
         """Return the v1 OpenDoor evaluator."""
         return _OpenDoorEvaluator()
-
-    def task_result(
-        self,
-        scenario: "AtomicSkillScenario",
-        case: BenchmarkCase,
-        compiled: CompiledTrajectory,
-        observation: ExecutionObservation,
-        motion_outcomes: tuple[CaseOutcome, ...],
-    ) -> tuple[torch.Tensor, str]:
-        del scenario, compiled
-        hinge = observation.articulation_joint_effect_end
-        if hinge is None:
-            return torch.zeros_like(observation.execution_success), (
-                "articulation_effect_miss"
-            )
-        error = (hinge - float(case.case_parameters["target_joint_position"])).abs()
-        tolerance = float(case.case_parameters["hinge_angle_tolerance_rad"])
-        return (
-            observation.execution_success
-            & motion_valid_mask(motion_outcomes, device=hinge.device)
-            & torch.isfinite(error)
-            & (error <= tolerance),
-            "articulation_effect_miss",
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -1116,13 +1083,6 @@ class _PourCases(AtomicSkillCaseProvider):
                 "rotate_angle_rad": rotate_angle,
                 "object_rotation_axis": internal_axis.detach().cpu().tolist(),
                 "object_rotation_sign": 1.0 if rotate_angle > 0.0 else -1.0,
-                "pour_angle_tolerance_rad": float(
-                    config.get("pour_angle_tolerance_rad", _TASK_ROTATION_TOLERANCE_RAD)
-                ),
-                "minimum_object_lift_m": float(
-                    config.get("minimum_object_lift_m", 0.04)
-                ),
-                "task_success_scope": "physical_peak_object_rotation_while_held",
                 "randomization": randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },
@@ -1226,31 +1186,6 @@ class _PourCases(AtomicSkillCaseProvider):
     def physical_evaluator(self) -> _PourEvaluator:
         """Return the v1 Pour evaluator."""
         return _PourEvaluator()
-
-    def task_result(
-        self,
-        scenario: "AtomicSkillScenario",
-        case: BenchmarkCase,
-        compiled: CompiledTrajectory,
-        observation: ExecutionObservation,
-        motion_outcomes: tuple[CaseOutcome, ...],
-    ) -> tuple[torch.Tensor, str]:
-        del scenario, compiled
-        peak = observation.object_rotation_peak_signed_rad
-        lift = observation.object_lift_delta_m
-        if peak is None or lift is None:
-            return torch.zeros_like(observation.execution_success), (
-                "object_rotation_miss"
-            )
-        error = (peak - float(case.case_parameters["rotate_angle_rad"])).abs()
-        return (
-            observation.execution_success
-            & motion_valid_mask(motion_outcomes, device=peak.device)
-            & torch.isfinite(error)
-            & (error <= float(case.case_parameters["pour_angle_tolerance_rad"]))
-            & (lift >= float(case.case_parameters["minimum_object_lift_m"])),
-            "object_rotation_miss",
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -1496,13 +1431,6 @@ class _AxisAlignCases(AtomicSkillCaseProvider):
                 "object_config": dict(handle.config),
                 "internal_axis": internal_axis.detach().cpu().tolist(),
                 "target_axis": target_axis.detach().cpu().tolist(),
-                "axis_angle_tolerance_rad": float(
-                    config.get("axis_angle_tolerance_rad", _TASK_ROTATION_TOLERANCE_RAD)
-                ),
-                "minimum_object_lift_m": float(
-                    config.get("minimum_object_lift_m", 0.04)
-                ),
-                "task_success_scope": "physical_object_axis_while_held",
                 "randomization": randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },
@@ -1587,43 +1515,6 @@ class _AxisAlignCases(AtomicSkillCaseProvider):
     def physical_evaluator(self) -> _AxisAlignEvaluator:
         """Return the v1 AxisAlign evaluator."""
         return _AxisAlignEvaluator()
-
-    def task_result(
-        self,
-        scenario: "AtomicSkillScenario",
-        case: BenchmarkCase,
-        compiled: CompiledTrajectory,
-        observation: ExecutionObservation,
-        motion_outcomes: tuple[CaseOutcome, ...],
-    ) -> tuple[torch.Tensor, str]:
-        del scenario, compiled
-        final_pose = observation.final_object_pose
-        lift = observation.object_lift_delta_m
-        if final_pose is None or lift is None:
-            return torch.zeros_like(observation.execution_success), (
-                "axis_alignment_miss"
-            )
-        parameters = case.case_parameters
-        internal = torch.tensor(
-            parameters["internal_axis"],
-            dtype=final_pose.dtype,
-            device=final_pose.device,
-        )
-        target = torch.tensor(
-            parameters["target_axis"], dtype=final_pose.dtype, device=final_pose.device
-        )
-        world_axis = torch.nn.functional.normalize(
-            torch.matmul(final_pose[:, :3, :3], internal), dim=1
-        )
-        error = torch.arccos(torch.clamp(world_axis @ target, -1.0, 1.0))
-        return (
-            observation.execution_success
-            & motion_valid_mask(motion_outcomes, device=final_pose.device)
-            & torch.isfinite(error)
-            & (error <= float(parameters["axis_angle_tolerance_rad"]))
-            & (lift >= float(parameters["minimum_object_lift_m"])),
-            "axis_alignment_miss",
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -1891,23 +1782,12 @@ class _PushObjectCases(AtomicSkillCaseProvider):
                 "object_initial_pose": object_pose.detach().cpu().tolist(),
                 "target_object_pose": target_pose.detach().cpu().tolist(),
                 "object_config": dict(handle.config),
-                "object_position_threshold_m": float(
-                    config.get(
-                        "object_position_threshold_m", _TASK_POSITION_TOLERANCE_M
-                    )
-                ),
-                "object_tilt_threshold_rad": float(
-                    config.get(
-                        "object_tilt_threshold_rad", _TASK_ROTATION_TOLERANCE_RAD
-                    )
-                ),
                 "contact_motion_threshold_m": float(
                     config.get("contact_motion_threshold_m", 1.0e-5)
                 ),
                 "support_plane_tolerance_m": float(
                     config.get("support_plane_tolerance_m", _TASK_POSITION_TOLERANCE_M)
                 ),
-                "task_success_scope": "physical_object_pose_after_push",
                 "randomization": randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },
@@ -1985,20 +1865,6 @@ class _PushObjectCases(AtomicSkillCaseProvider):
     def physical_evaluator(self) -> _PushObjectEvaluator:
         """Return the v1 PushObject evaluator."""
         return _PushObjectEvaluator()
-
-    def task_result(
-        self,
-        scenario: "AtomicSkillScenario",
-        case: BenchmarkCase,
-        compiled: CompiledTrajectory,
-        observation: ExecutionObservation,
-        motion_outcomes: tuple[CaseOutcome, ...],
-    ) -> tuple[torch.Tensor, str]:
-        del compiled
-        return (
-            object_pose_success(scenario, case, observation, motion_outcomes),
-            "object_goal_miss",
-        )
 
 
 register_atomic_skill_provider("open_door", _OpenDoorCases)

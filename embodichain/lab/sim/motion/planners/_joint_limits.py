@@ -82,12 +82,21 @@ def _fill_asset_velocity_limits(robot: Robot, limits: torch.Tensor) -> torch.Ten
     return torch.where(torch.isfinite(limits), limits, caps)
 
 
-def _joint_velocity_limits(robot: Robot) -> torch.Tensor:
-    """Read runtime speeds in state order and apply mimic follower caps."""
+def _joint_velocity_limits(
+    robot: Robot,
+    *,
+    device: torch.device | str = "cpu",
+    dtype: torch.dtype = torch.float64,
+) -> torch.Tensor:
+    """Resolve state-order runtime/asset speeds and mimic caps on the target device.
+
+    CPU timing/export callers use float64 by default. Device-resident trajectory
+    consumers pass their own device and dtype to avoid a host round trip.
+    """
     limits = (
         robot.get_qvel_limits(joint_ids=list(range(len(robot.joint_names))))
         .detach()
-        .to(device="cpu", dtype=torch.float64)
+        .to(device=device, dtype=dtype)
     )
     if limits.ndim != 2 or limits.shape[1] != len(robot.joint_names):
         raise ValueError("Robot velocity limits must have shape (B, robot DOF).")
@@ -95,21 +104,35 @@ def _joint_velocity_limits(robot: Robot) -> torch.Tensor:
         torch.isfinite(limits) & (limits >= 0) & (limits < 1e9), limits, torch.inf
     )
     limits = _fill_asset_velocity_limits(robot, limits)
+    mimic_ids = tuple(getattr(robot, "mimic_ids", ()))
+    mimic_parents = tuple(getattr(robot, "mimic_parents", ()))
+    mimic_multipliers = tuple(getattr(robot, "mimic_multipliers", ()))
+    if not (len(mimic_ids) == len(mimic_parents) == len(mimic_multipliers)):
+        raise ValueError("Robot mimic metadata lengths must match.")
     mimics = dict(
         zip(
-            robot.mimic_ids,
-            zip(robot.mimic_parents, robot.mimic_multipliers, strict=True),
+            mimic_ids,
+            zip(mimic_parents, mimic_multipliers, strict=True),
             strict=True,
         )
     )
     for child in mimics:
+        if not isinstance(child, int):
+            raise ValueError("Mimic child indices must be integers.")
         bound = limits[:, child].clone()
         visited = {child}
         while child in mimics:
             parent, multiplier = mimics[child]
-            if not math.isfinite(multiplier) or parent in visited:
+            if (
+                not isinstance(parent, int)
+                or isinstance(multiplier, bool)
+                or not isinstance(multiplier, (int, float))
+                or not math.isfinite(multiplier)
+                or parent in visited
+            ):
                 raise ValueError(
-                    "Mimic multipliers must be finite and relations acyclic."
+                    "Mimic relations require finite multipliers and an "
+                    "acyclic integer parent mapping."
                 )
             if multiplier == 0:
                 break

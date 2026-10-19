@@ -787,9 +787,13 @@ def test_nominal_timing_planner_reports_no_comparable_duration():
         algorithm_role=AlgorithmRole.CANDIDATE,
         trajectory_duration_s=1.5,
     )
-    row = aggregate_results([trial], metadata, [case], measured_trials=1)[
-        "time_and_memory"
-    ][0]
+    row = aggregate_results(
+        [trial],
+        metadata,
+        [case],
+        measured_trials=1,
+        track_scenarios={case.track: "free_space"},
+    )["motion_planning_time_and_memory"][0]
     assert row["timing_is_solved"] is False
     assert row["trajectory_duration_s"] is None
 
@@ -814,9 +818,13 @@ def test_unset_dynamic_limit_aggregates_to_none_not_a_zero_violation_rate():
             ),
         )
     )
-    row = aggregate_results([trial], metadata, [case], measured_trials=1)[
-        "success_and_metrics"
-    ][0]
+    row = aggregate_results(
+        [trial],
+        metadata,
+        [case],
+        measured_trials=1,
+        track_scenarios={case.track: "free_space"},
+    )["motion_planning_success_and_metrics"][0]
     assert row["velocity_violation_rate"] == pytest.approx(1.0)
     # An unconfigured acceleration limit must not read as a clean result.
     assert row["acceleration_violation_rate"] is None
@@ -854,9 +862,13 @@ def test_an_unbounded_peak_is_not_averaged_away():
     )
     round_tripped = replace(trial, outcomes=_json_round_tripped_outcomes(trial))
     for record in (trial, round_tripped):
-        row = aggregate_results([record], metadata, [case], measured_trials=1)[
-            "success_and_metrics"
-        ][0]
+        row = aggregate_results(
+            [record],
+            metadata,
+            [case],
+            measured_trials=1,
+            track_scenarios={case.track: "free_space"},
+        )["motion_planning_success_and_metrics"][0]
         assert row["max_joint_velocity_rad_s"] == math.inf
         assert row["velocity_utilization"] == math.inf
         assert row["dynamic_measurement_status"] == "unbounded"
@@ -887,9 +899,13 @@ def test_json_round_trip_keeps_unbounded_peak_without_a_configured_limit():
     )
     round_tripped = replace(trial, outcomes=_json_round_tripped_outcomes(trial))
 
-    row = aggregate_results([round_tripped], metadata, [case], measured_trials=1)[
-        "success_and_metrics"
-    ][0]
+    row = aggregate_results(
+        [round_tripped],
+        metadata,
+        [case],
+        measured_trials=1,
+        track_scenarios={case.track: "free_space"},
+    )["motion_planning_success_and_metrics"][0]
 
     assert row["max_joint_velocity_rad_s"] == math.inf
     assert row["velocity_utilization"] is None
@@ -970,9 +986,13 @@ def test_motion_valid_ignores_planner_reported_failure_in_outcomes_and_aggregate
         cost_time_ms=10.0,
         outcomes=outcomes,
     )
-    row = aggregate_results([measured], metadata, [case], measured_trials=1)[
-        "success_and_metrics"
-    ][0]
+    row = aggregate_results(
+        [measured],
+        metadata,
+        [case],
+        measured_trials=1,
+        track_scenarios={case.track: "free_space"},
+    )["motion_planning_success_and_metrics"][0]
     assert row["success_rate"] == pytest.approx(1.0)
     assert row["planning_success_rate"] == pytest.approx(0.0)
     assert row["top_failure"] is None
@@ -2176,9 +2196,13 @@ def test_success_metrics_are_stratified_by_start_state_bin():
         ),
     ]
 
-    rows = aggregate_results(records, metadata, cases, measured_trials=1)[
-        "success_and_metrics"
-    ]
+    rows = aggregate_results(
+        records,
+        metadata,
+        cases,
+        measured_trials=1,
+        track_scenarios={case.track: "free_space" for case in cases},
+    )["motion_planning_success_and_metrics"]
     by_bin = {row["start_state_bin"]: row for row in rows}
 
     assert set(by_bin) == {"nominal", "near_limit"}
@@ -2275,13 +2299,16 @@ def test_aggregation_excludes_warmup_and_keeps_unavailable_algorithm():
         metadata,
         [_case()],
         measured_trials=1,
+        track_scenarios={case.track: "free_space" for case in [_case()]},
     )
 
     perf = next(
-        row for row in aggregates["time_and_memory"] if row["algorithm"] == "curobo"
+        row
+        for row in aggregates["motion_planning_time_and_memory"]
+        if row["algorithm"] == "curobo"
     )
     assert perf["cost_time_ms"] == pytest.approx(10.0)
-    leaderboard = aggregates["leaderboard"]
+    leaderboard = aggregates["motion_planning_leaderboard"]
     assert {row["algorithm"] for row in leaderboard} == {"curobo", "nmg"}
     nmg = next(row for row in leaderboard if row["algorithm"] == "nmg")
     assert nmg["eligible"] is False
@@ -2392,9 +2419,13 @@ def test_leaderboard_uses_case_macro_average_not_env_micro_average():
         ),
     ]
 
-    row = aggregate_results(records, metadata, [small, large], measured_trials=1)[
-        "leaderboard"
-    ][0]
+    row = aggregate_results(
+        records,
+        metadata,
+        [small, large],
+        measured_trials=1,
+        track_scenarios={case.track: "free_space" for case in [small, large]},
+    )["motion_planning_leaderboard"][0]
 
     # Env micro-average would be 1/65 ≈ 0.015; case macro-average is 0.5.
     assert row["overall_success_rate"] == pytest.approx(0.5)
@@ -2477,9 +2508,13 @@ def test_leaderboard_latency_p95_uses_case_macro_not_trial_pool():
         _latency_record(fast, cost=10.0, repeat=index) for index in range(20)
     ] + [_latency_record(slow, cost=1000.0, repeat=0)]
 
-    row = aggregate_results(records, metadata, [fast, slow], measured_trials=1)[
-        "leaderboard"
-    ][0]
+    row = aggregate_results(
+        records,
+        metadata,
+        [fast, slow],
+        measured_trials=1,
+        track_scenarios={case.track: "free_space" for case in [fast, slow]},
+    )["motion_planning_leaderboard"][0]
 
     assert row["latency_p95_ms"] == pytest.approx(1000.0)
 
@@ -2586,9 +2621,13 @@ def test_cold_plan_ms_only_attaches_to_matching_waypoint_row():
         _measured(case_w5, 20.0),
     ]
 
-    rows = aggregate_results(records, metadata, [case_w1, case_w5], measured_trials=1)[
-        "time_and_memory"
-    ]
+    rows = aggregate_results(
+        records,
+        metadata,
+        [case_w1, case_w5],
+        measured_trials=1,
+        track_scenarios={case.track: "free_space" for case in [case_w1, case_w5]},
+    )["motion_planning_time_and_memory"]
     by_waypoints = {row["waypoint_count"]: row for row in rows}
 
     assert by_waypoints[1]["cold_plan_ms"] == pytest.approx(123.0)
@@ -2601,9 +2640,11 @@ def test_cold_plan_ms_only_attaches_to_matching_waypoint_row():
 def test_report_contains_exactly_three_markdown_tables(tmp_path):
     suite = load_suite("motion_panda_free_space_smoke")
     aggregates = {
-        "time_and_memory": [],
-        "success_and_metrics": [],
-        "leaderboard": [],
+        "report_views": [{"view": "motion_planning", "title": "Motion Planning"}],
+        "motion_timing_leaderboard": [],
+        "motion_planning_time_and_memory": [],
+        "motion_planning_success_and_metrics": [],
+        "motion_planning_leaderboard": [],
         "generalization": [
             {
                 "track": "pick",
@@ -2715,9 +2756,13 @@ def test_success_table_uses_case_macro_and_counts_cases_not_env_slots():
             outcomes=(_outcome(),),
         )
     ]
-    row = aggregate_results(records, metadata, [case_a, case_b], measured_trials=1)[
-        "success_and_metrics"
-    ][0]
+    row = aggregate_results(
+        records,
+        metadata,
+        [case_a, case_b],
+        measured_trials=1,
+        track_scenarios={case.track: "free_space" for case in [case_a, case_b]},
+    )["motion_planning_success_and_metrics"][0]
     assert row["cases"] == 2
     assert row["n_valid"] == 1
     # One measured success + one missing case (counts as 0) → macro 0.5.
@@ -2760,9 +2805,13 @@ def test_success_table_uses_case_macro_and_counts_cases_not_env_slots():
         cost_time_ms=40.0,
         outcomes=tuple(replace(failed, env_index=i) for i in range(64)),
     )
-    large_row = aggregate_results([large_record], metadata, [large], measured_trials=1)[
-        "success_and_metrics"
-    ][0]
+    large_row = aggregate_results(
+        [large_record],
+        metadata,
+        [large],
+        measured_trials=1,
+        track_scenarios={case.track: "free_space" for case in [large]},
+    )["motion_planning_success_and_metrics"][0]
     assert large_row["cases"] == 1
     assert large_row["n_valid"] == 0
     assert large_row["success_rate"] == pytest.approx(0.0)
@@ -2948,12 +2997,17 @@ def test_runner_capability_gate_and_fake_adapter_lifecycle(tmp_path):
             list(runner.metadata.values()),
             [case],
             suite.protocol.measured_trials,
+            track_scenarios={case.track: "free_space"},
         )
         capable = next(
-            row for row in aggregates["leaderboard"] if row["algorithm"] == "capable"
+            row
+            for row in aggregates["motion_planning_leaderboard"]
+            if row["algorithm"] == "capable"
         )
         incapable = next(
-            row for row in aggregates["leaderboard"] if row["algorithm"] == "incapable"
+            row
+            for row in aggregates["motion_planning_leaderboard"]
+            if row["algorithm"] == "incapable"
         )
         assert capable["eligible"] is True
         assert capable["overall_success_rate"] == pytest.approx(1.0)
@@ -3094,7 +3148,10 @@ def test_runner_preserves_case_attribution_across_lifecycle_failures(
             list(runner.metadata.values()),
             [attributed, bypassed],
             measured_trials=1,
-        )["leaderboard"][0]
+            track_scenarios={
+                case.track: "free_space" for case in [attributed, bypassed]
+            },
+        )["motion_planning_leaderboard"][0]
         assert leaderboard["attributed_cases"] == 1
         assert leaderboard["bypassed_cases"] == 1
     finally:

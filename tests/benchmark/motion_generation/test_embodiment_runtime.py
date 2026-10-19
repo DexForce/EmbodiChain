@@ -279,12 +279,16 @@ def test_official_ur5_component_uses_robot_catalog(monkeypatch, tmp_path: Path) 
     assert provider.gripper_config["grasp_qpos"] == [0.024]
 
 
-@pytest.mark.parametrize("conflicting_identity", [False, True])
-def test_component_suite_reaches_selected_planner_and_existing_report(
+@pytest.mark.parametrize("component_owned", [False, True])
+@pytest.mark.parametrize(
+    "case_identity", ["missing", "matching", "robot_mismatch", "embodiment_mismatch"]
+)
+def test_suite_validates_case_identity_before_planning_and_persistence(
     component: Path,
     tmp_path: Path,
-    monkeypatch,
-    conflicting_identity: bool,
+    monkeypatch: pytest.MonkeyPatch,
+    component_owned: bool,
+    case_identity: str,
 ) -> None:
     from scripts.benchmark.motion_generation import runner as runner_module
     from scripts.benchmark.motion_generation.metrics.trajectory import (
@@ -299,14 +303,21 @@ def test_component_suite_reaches_selected_planner_and_existing_report(
     from embodichain.lab.sim.motion.planners.utils import PlanResult
 
     observed = []
+    close_runtime = Mock()
+    expected_id = "custom_robot" if component_owned else "franka_panda"
+    expected_control_part = "custom_arm" if component_owned else "arm"
 
     class FakeScenario(ScenarioProvider):
         def batch_sizes(self, suite, track):
             return [1]
 
         def configure_runtime(self, simulation, robot, suite, track, control_part):
-            assert control_part == "custom_arm"
-            assert track.config["gripper"]["control_part"] == "jaw"
+            assert control_part == expected_control_part
+            if component_owned:
+                assert track.config["gripper"]["control_part"] == "jaw"
+
+        def close_runtime(self):
+            close_runtime()
 
         def generate_cases(self, suite, track, robot, control_part, batch_size):
             return [
@@ -323,8 +334,20 @@ def test_component_suite_reaches_selected_planner_and_existing_report(
                     start_qpos=torch.zeros(1, 2),
                     target_waypoints=torch.eye(4).reshape(1, 1, 4, 4),
                     reference_qpos=torch.zeros(1, 1, 2),
-                    robot_id=suite.robot.id,
-                    embodiment_id="other_robot" if conflicting_identity else None,
+                    robot_id=(
+                        "other_robot"
+                        if case_identity == "robot_mismatch"
+                        else expected_id
+                    ),
+                    embodiment_id=(
+                        None
+                        if case_identity == "missing"
+                        else (
+                            "other_embodiment"
+                            if case_identity == "embodiment_mismatch"
+                            else expected_id
+                        )
+                    ),
                 )
             ]
 
@@ -349,12 +372,22 @@ def test_component_suite_reaches_selected_planner_and_existing_report(
                 dt=torch.tensor([[0.0, 0.1]]),
             )
 
-    suite = SuiteCfg.from_dict(_suite_data(str(component)))
+    data = _suite_data(str(component))
+    if not component_owned:
+        data.pop("embodiment")
+        data["robot"] = {"id": expected_id, "provider": "franka_panda"}
+    suite = SuiteCfg.from_dict(data)
     robot = Mock(uid="component_robot")
     sim = Mock()
     sim.add_robot.return_value = robot
     factory = Mock(return_value=sim)
     monkeypatch.setattr(runner_module, "SimulationManager", factory)
+    if not component_owned:
+        robot_provider = Mock(control_part=expected_control_part)
+        robot_provider.add_robot.return_value = robot
+        monkeypatch.setattr(
+            runner_module, "create_robot_provider", lambda spec: robot_provider
+        )
     monkeypatch.setattr(
         runner_module, "create_scenario_provider", lambda name: FakeScenario()
     )
@@ -365,27 +398,36 @@ def test_component_suite_reaches_selected_planner_and_existing_report(
     )
 
     runner = BenchmarkRunner(suite, suite.planners, device="cpu", output_root=tmp_path)
-    if conflicting_identity:
+    if case_identity in {"robot_mismatch", "embodiment_mismatch"}:
         with pytest.raises(ValueError, match="conflicts with suite embodiment"):
             runner.run()
         assert not observed
+        assert runner.cases == []
+        assert runner.records == []
+        assert not list(tmp_path.rglob("case_manifest.json"))
+        close_runtime.assert_called_once_with()
         sim.destroy.assert_called_once_with(exit_process=False)
+        factory.flush_cleanup_queue.assert_called_once()
         return
     result = runner.run()
 
-    assert observed == [("selected", "component_robot", "custom_arm")]
+    assert observed == [("selected", "component_robot", expected_control_part)]
     rows = [json.loads(line) for line in result.trials_path.read_text().splitlines()]
-    assert {row["embodiment_id"] for row in rows} == {"custom_robot"}
-    assert {row["robot_id"] for row in rows} == {"custom_robot"}
+    assert {row["embodiment_id"] for row in rows} == {expected_id}
+    assert {row["robot_id"] for row in rows} == {expected_id}
     assert {row["algorithm_id"] for row in rows} == {"selected"}
     manifest = json.loads((result.run_dir / "case_manifest.json").read_text())
-    assert manifest["resolved_embodiment"]["embodiment_id"] == "custom_robot"
-    assert (
-        manifest["resolved_embodiment"]["endpoint_bindings"]["primary"]["motion"]
-        == "custom_arm"
-    )
+    assert manifest["resolved_embodiment"]["embodiment_id"] == expected_id
+    assert {case["embodiment_id"] for case in manifest["cases"]} == {expected_id}
+    assert {case["robot_id"] for case in manifest["cases"]} == {expected_id}
+    if component_owned:
+        assert (
+            manifest["resolved_embodiment"]["endpoint_bindings"]["primary"]["motion"]
+            == "custom_arm"
+        )
     assert (result.run_dir / "aggregates.json").is_file()
     assert "Leaderboard" in result.report_path.read_text()
+    close_runtime.assert_called_once_with()
     sim.destroy.assert_called_once_with(exit_process=False)
     factory.flush_cleanup_queue.assert_called_once()
 

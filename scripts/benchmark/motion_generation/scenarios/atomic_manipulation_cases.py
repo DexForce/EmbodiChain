@@ -39,16 +39,14 @@ from embodichain.lab.sim.atomic_actions import (
 from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory
 
 from ..atomic_skill import AtomicSkillCaseProvider, register_atomic_skill_provider
-from ..contracts import ExecutionObservation, ReplayObservationWindow
+from ..contracts import ReplayObservationWindow
 from ..config import SuiteCfg, TrackCfg
-from ..models import BenchmarkCase, CaseOutcome
+from ..models import BenchmarkCase
 from .atomic_objects import AtomicObjectHandle
 from .atomic_evaluation import (
     MoveHeldObjectEvaluator,
     PickUpEvaluator,
     PlaceEvaluator,
-    object_lift_success,
-    object_pose_success,
 )
 from .atomic_case_utils import (
     TOP_DOWN_ROTATION,
@@ -230,9 +228,6 @@ class PickUpCases(AtomicSkillCaseProvider):
                 "approach_direction": approach.detach().cpu().tolist(),
                 "pre_grasp_distance_m": pre_grasp_distance,
                 "lift_height_m": lift_height,
-                "minimum_object_lift_m": float(
-                    config.get("minimum_object_lift_m", 0.04)
-                ),
                 "pre_action_settle_steps": raw_settle_steps,
                 "grasp_pose": grasp_pose.detach().cpu().tolist(),
                 "object_initial_pose": object_pose.detach().cpu().tolist(),
@@ -334,20 +329,6 @@ class PickUpCases(AtomicSkillCaseProvider):
     def physical_evaluator(self) -> PickUpEvaluator:
         """Return the v1 PickUp evaluator."""
         return PickUpEvaluator()
-
-    def task_result(
-        self,
-        scenario: "AtomicSkillScenario",
-        case: BenchmarkCase,
-        compiled: CompiledTrajectory,
-        observation: ExecutionObservation,
-        motion_outcomes: tuple[CaseOutcome, ...],
-    ) -> tuple[torch.Tensor, str]:
-        del scenario, compiled
-        return (
-            object_lift_success(case, observation, motion_outcomes),
-            "object_not_lifted",
-        )
 
 
 class HeldObjectCases(AtomicSkillCaseProvider):
@@ -624,21 +605,6 @@ class MoveHeldObjectCases(HeldObjectCases):
                     config.get("pre_action_settle_steps", 50)
                 ),
                 "target_object_pose": target_object.detach().cpu().tolist(),
-                "object_position_threshold_m": float(
-                    config.get("object_position_threshold_m", 0.04)
-                ),
-                "object_tilt_threshold_rad": float(
-                    config.get(
-                        "object_tilt_threshold_rad",
-                        suite.protocol.rotation_threshold_rad,
-                    )
-                ),
-                "object_rotation_threshold_rad": float(
-                    config.get(
-                        "object_rotation_threshold_rad",
-                        suite.protocol.rotation_threshold_rad,
-                    )
-                ),
                 "randomization": randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },
@@ -694,20 +660,6 @@ class MoveHeldObjectCases(HeldObjectCases):
     def physical_evaluator(self) -> MoveHeldObjectEvaluator:
         """Return the v1 MoveHeldObject evaluator."""
         return MoveHeldObjectEvaluator()
-
-    def task_result(
-        self,
-        scenario: "AtomicSkillScenario",
-        case: BenchmarkCase,
-        compiled: CompiledTrajectory,
-        observation: ExecutionObservation,
-        motion_outcomes: tuple[CaseOutcome, ...],
-    ) -> tuple[torch.Tensor, str]:
-        del compiled
-        return (
-            object_pose_success(scenario, case, observation, motion_outcomes),
-            "object_goal_miss",
-        )
 
 
 class PlaceCases(HeldObjectCases):
@@ -830,15 +782,6 @@ class PlaceCases(HeldObjectCases):
                 ),
                 "hand_interp_steps": int(config.get("hand_interp_steps", 12)),
                 "retract_height_m": lift_height,
-                "object_position_threshold_m": float(
-                    config.get("object_position_threshold_m", 0.05)
-                ),
-                "object_tilt_threshold_rad": float(
-                    config.get(
-                        "object_tilt_threshold_rad",
-                        suite.protocol.rotation_threshold_rad,
-                    )
-                ),
                 "object_rotation_threshold_rad": float(
                     config.get(
                         "object_rotation_threshold_rad",
@@ -901,20 +844,6 @@ class PlaceCases(HeldObjectCases):
     def physical_evaluator(self) -> PlaceEvaluator:
         """Return the v1 Place evaluator."""
         return PlaceEvaluator()
-
-    def task_result(
-        self,
-        scenario: "AtomicSkillScenario",
-        case: BenchmarkCase,
-        compiled: CompiledTrajectory,
-        observation: ExecutionObservation,
-        motion_outcomes: tuple[CaseOutcome, ...],
-    ) -> tuple[torch.Tensor, str]:
-        del compiled
-        return (
-            object_pose_success(scenario, case, observation, motion_outcomes),
-            "object_not_placed",
-        )
 
 
 register_atomic_skill_provider("move_held_object", MoveHeldObjectCases)

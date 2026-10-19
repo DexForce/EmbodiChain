@@ -142,7 +142,6 @@ tracks:
           hand_interp_steps: 12
           pre_grasp_distance_m: 0.15
           lift_height_m: 0.16
-          minimum_object_lift_m: 0.04
           approach_direction: [0.0, 0.0, -1.0]
           pre_pick_height_m: 0.36
           pre_action_settle_steps: 50
@@ -167,7 +166,6 @@ tracks:
           lift_height_m: 0.16
           hand_interp_steps: 12
           pre_action_settle_steps: 50
-          object_position_threshold_m: 0.04
           cases:
             - name: pose_batch_cube_transport
               object: cube_50mm
@@ -188,7 +186,6 @@ tracks:
           lift_height_m: 0.16
           hand_interp_steps: 12
           pre_action_settle_steps: 50
-          object_position_threshold_m: 0.05
           cases:
             - name: pose_batch_cube_place
               object: cube_50mm
@@ -209,7 +206,6 @@ tracks:
           target_joint: button_joint
           articulation_position_jitter_m: [0.03, 0.03, 0.02]
           effect_joint_sign: 1.0
-          minimum_joint_delta_m: 0.004
           geometry_seed: 11
           cases:
             - name: microwave_start_button
@@ -234,7 +230,6 @@ tracks:
           target_joint: cabinet_to_drawer
           articulation_position_jitter_m: [0.03, 0.03, 0.02]
           effect_joint_sign: 1.0
-          minimum_joint_delta_m: 0.12
           geometry_seed: 11
           cases:
             - name: drawer_pull
@@ -256,7 +251,6 @@ tracks:
           target_joint: knob_joint
           articulation_position_jitter_m: [0.03, 0.03, 0.02]
           effect_joint_sign: 1.0
-          minimum_joint_delta_rad: 0.5
           geometry_seed: 11
           cases:
             - name: microwave_power_knob

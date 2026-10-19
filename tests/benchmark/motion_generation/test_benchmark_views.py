@@ -260,13 +260,17 @@ def test_effective_algorithm_preserves_each_source_population(
         track_scenarios={case.track: "atomic_skill"},
     )
     row = next(
-        row for row in result["success_and_metrics"] if row["algorithm"] == "exact_ik"
+        row
+        for row in result["atomic_skills_success_and_metrics"]
+        if row["algorithm"] == "exact_ik"
     )
     domain = next(
         row for row in result["generalization"] if row["algorithm"] == "exact_ik"
     )
     rank = next(
-        row for row in result["atomic_leaderboard"] if row["algorithm"] == "exact_ik"
+        row
+        for row in result["atomic_skills_leaderboard"]
+        if row["algorithm"] == "exact_ik"
     )
     expected = 1.0 if unsupported else 0.5
     assert (
@@ -279,6 +283,125 @@ def test_effective_algorithm_preserves_each_source_population(
     assert row["timed_motion_valid_rate"] == pytest.approx(expected)
 
 
+@pytest.mark.parametrize("atomic", [False, True])
+def test_unsupported_algorithm_has_no_rates_or_rank_and_renders_na(
+    tmp_path, atomic: bool
+) -> None:
+    """Unsupported results remain distinct from measured zero-success results."""
+    case = _case(atomic=atomic)
+    unsupported = replace(
+        _record(case, "unsupported"),
+        phase=TrialPhase.AVAILABILITY,
+        status="unsupported",
+        failure_code="unsupported_capability",
+        outcomes=(),
+    )
+    failure = _record(
+        case, "failed", outcome=make_failure_outcomes(1, "planning_failed")[0]
+    )
+    success = _record(case, "solved", outcome=_outcome(physical=atomic))
+    result = aggregate_results(
+        [unsupported, failure, success],
+        [_metadata(name) for name in ("unsupported", "failed", "solved")],
+        [case],
+        1,
+        track_scenarios={case.track: "atomic_skill" if atomic else "free_space"},
+    )
+    view = "atomic_skills" if atomic else "motion_planning"
+    row = next(
+        row
+        for row in result[f"{view}_success_and_metrics"]
+        if row["algorithm"] == "unsupported"
+    )
+    assert row["coverage_rate"] == 0.0
+    for field in (
+        "success_rate",
+        "planning_success_rate",
+        "geometry_valid_rate",
+        "timed_motion_valid_rate",
+        "motion_valid_rate",
+        "ordered_waypoint_success_rate",
+        "joint_violation_rate",
+        "physical_skill_success_rate",
+    ):
+        assert row[field] is None, field
+
+    rows = result[f"{view}_leaderboard"]
+    assert [row["algorithm"] for row in rows] == [
+        "solved",
+        "failed",
+        "unsupported",
+    ]
+    assert [row["overall_success_rate"] for row in rows] == [1.0, 0.0, None]
+    assert [row["rank"] for row in rows] == [1, 2, None]
+    assert rows[-1]["eligible"] is False
+    assert rows[-1]["planning_success_rate"] is None
+
+    report = write_markdown_report(
+        tmp_path / "report.md", SuiteCfg(), result
+    ).read_text()
+    headers: list[str] = []
+    checked_tables = 0
+    for line in report.splitlines():
+        if line.startswith("| "):
+            cells = [cell.strip() for cell in line.strip("|").split("|")]
+            if "algorithm" in cells:
+                headers = cells
+            elif "unsupported" in cells and "success_rate" in headers:
+                rendered = dict(zip(headers, cells))
+                assert rendered["success_rate"] == "N/A"
+                assert rendered["planning_success_rate"] == "N/A"
+                assert rendered["geometry_valid_rate"] == "N/A"
+                assert rendered["coverage_rate"] == "0.00%"
+                checked_tables += 1
+    assert checked_tables == 1
+
+
+@pytest.mark.parametrize(
+    ("failure_code", "expected_success"),
+    [
+        ("unsupported_capability", 1.0),
+        ("unsupported_capacity", 1.0),
+        ("runtime_unavailable", 0.5),
+        ("prepare_failed", 0.5),
+        (None, 0.5),
+    ],
+)
+def test_only_explicitly_unsupported_cases_leave_success_denominator(
+    failure_code: str | None, expected_success: float
+) -> None:
+    """Missing cases and runtime errors retain their weight beside successes."""
+    supported = _case()
+    absent = replace(supported, case_id="absent-case")
+    records = [_record(supported)]
+    if failure_code is not None:
+        prepare_failed = failure_code == "prepare_failed"
+        records.append(
+            replace(
+                _record(absent),
+                phase=TrialPhase.PREPARE if prepare_failed else TrialPhase.AVAILABILITY,
+                status="error" if prepare_failed else "unsupported",
+                failure_code=failure_code,
+                outcomes=(),
+            )
+        )
+    result = aggregate_results(
+        records,
+        [_metadata("solved")],
+        [supported, absent],
+        1,
+        track_scenarios={supported.track: "free_space"},
+    )
+    for table, success_field in (
+        ("motion_planning_success_and_metrics", "success_rate"),
+        ("motion_planning_leaderboard", "overall_success_rate"),
+    ):
+        row = result[table][0]
+        assert row[success_field] == pytest.approx(expected_success)
+        assert row["planning_success_rate"] == pytest.approx(expected_success)
+        assert row["coverage_rate"] == pytest.approx(0.5)
+
+
 def test_explicit_scenario_mapping_separates_scopes_and_mixed_reports(tmp_path) -> None:
     motion = _case("looks_atomic")
     atomic = _case("looks_free_space", atomic=True)
@@ -289,6 +412,17 @@ def test_explicit_scenario_mapping_separates_scopes_and_mixed_reports(tmp_path) 
         1,
         track_scenarios={motion.track: "free_space", atomic.track: "atomic_skill"},
     )
+    assert set(result) == {
+        "report_views",
+        "generalization",
+        "motion_timing_leaderboard",
+        "motion_planning_time_and_memory",
+        "motion_planning_success_and_metrics",
+        "motion_planning_leaderboard",
+        "atomic_skills_time_and_memory",
+        "atomic_skills_success_and_metrics",
+        "atomic_skills_leaderboard",
+    }
     planning_time = result["motion_planning_time_and_memory"][0]
     atomic_time = result["atomic_skills_time_and_memory"][0]
     assert (
@@ -304,8 +438,8 @@ def test_explicit_scenario_mapping_separates_scopes_and_mixed_reports(tmp_path) 
         atomic_time["execution_time_ms"] == 8.0
         and atomic_time["end_to_end_time_ms"] == 12.0
     )
-    assert result["atomic_leaderboard"][0]["latency_p95_ms"] is None
-    assert result["atomic_leaderboard"][0]["compile_latency_p95_ms"] == 4.0
+    assert result["atomic_skills_leaderboard"][0]["latency_p95_ms"] is None
+    assert result["atomic_skills_leaderboard"][0]["compile_latency_p95_ms"] == 4.0
     report = write_markdown_report(
         tmp_path / "report.md", SuiteCfg(), result
     ).read_text()
@@ -314,10 +448,30 @@ def test_explicit_scenario_mapping_separates_scopes_and_mixed_reports(tmp_path) 
     assert "nominal" in report.lower()
 
 
-def test_missing_scenario_mapping_does_not_guess_from_skill_or_track() -> None:
+@pytest.mark.parametrize(
+    ("mapping", "message"),
+    [
+        ({}, "Missing report scenario"),
+        ({"atomic_skill": "custom"}, "Unsupported report scenarios"),
+    ],
+)
+def test_report_scenario_mapping_is_explicit(
+    mapping: dict[str, str], message: str
+) -> None:
     case = _case("atomic_skill")
-    result = aggregate_results([_record(case)], [_metadata("solved")], [case], 1)
-    assert "report_views" not in result
+    with pytest.raises(ValueError, match=message):
+        aggregate_results(
+            [_record(case)],
+            [_metadata("solved")],
+            [case],
+            1,
+            track_scenarios=mapping,
+        )
+
+
+def test_report_rejects_unclassified_aggregate_payload(tmp_path) -> None:
+    with pytest.raises(ValueError, match="scenario-owned report_views"):
+        write_markdown_report(tmp_path / "report.md", SuiteCfg(), {})
 
 
 def test_effective_solved_clock_failure_without_measured_rows_is_zero() -> None:
@@ -341,7 +495,9 @@ def test_effective_solved_clock_failure_without_measured_rows_is_zero() -> None:
         track_scenarios={case.track: "atomic_skill"},
     )
     row = next(
-        row for row in result["success_and_metrics"] if row["algorithm"] == "exact_ik"
+        row
+        for row in result["atomic_skills_success_and_metrics"]
+        if row["algorithm"] == "exact_ik"
     )
     assert row["timed_motion_valid_rate"] == 0.0
 

@@ -22,6 +22,7 @@ import math
 from collections import defaultdict
 from collections.abc import Iterable
 
+from ._aggregation_policy import _source_unsupported, _unsupported_case_ids
 from .contracts import EvaluationDomain
 from .models import BenchmarkCase, PlannerMetadata, TrialPhase, TrialRecord
 
@@ -38,30 +39,6 @@ def _track_group(case: BenchmarkCase) -> str:
 def _domain_key(domain: EvaluationDomain) -> tuple[str, str, str]:
     """Return a deterministic domain identity tuple."""
     return domain.id, domain.version, domain.kind
-
-
-def _unsupported_case_ids(records: Iterable[TrialRecord]) -> set[str]:
-    """Return cases excluded from success denominators by capability gates."""
-    sources: dict[str, dict[str, list[TrialRecord]]] = defaultdict(
-        lambda: defaultdict(list)
-    )
-    for record in records:
-        sources[record.case_id][record.algorithm_id].append(record)
-    return {
-        case_id
-        for case_id, by_source in sources.items()
-        if all(_source_unsupported(rows) for rows in by_source.values())
-    }
-
-
-def _source_unsupported(records: list[TrialRecord]) -> bool:
-    """Return a source-level gate, never overriding another source's evidence."""
-    return not any(record.phase is TrialPhase.MEASURED for record in records) and any(
-        record.phase is TrialPhase.AVAILABILITY
-        and record.status == "unsupported"
-        and record.failure_code in {"unsupported_capability", "unsupported_capacity"}
-        for record in records
-    )
 
 
 def _case_success(
@@ -257,9 +234,6 @@ def _population_row(
         "domain_worst_success_rate": None,
         "domain_success_variance": None,
         "domain_retention": None,
-        "domain_mean": None,
-        "domain_worst": None,
-        "domain_variance": None,
         "generalization_eligible": False,
     }
 
@@ -278,6 +252,10 @@ def aggregate_generalization(
     algorithm. Runtime errors and ordinary planner failures remain applicable
     cases and therefore count as failures. The returned rows are sufficient
     to recompute the domain summary from raw trial records.
+
+    Generalization eligibility requires complete nominal and non-nominal
+    populations for the same track and attributed algorithm. Retention is
+    unavailable until the nominal baseline is complete and nonzero.
 
     Args:
         records: Raw lifecycle and measured trial records.
@@ -417,30 +395,39 @@ def aggregate_generalization(
         ].append(row)
     for population_rows in by_summary_group.values():
         mean, worst, variance, retention = _population_stats(population_rows)
+        nominal_rows = [
+            row for row in population_rows if row["domain_kind"] == "nominal"
+        ]
         nominal_rates = [
             float(row["success_rate"])
-            for row in population_rows
-            if row["domain_kind"] == "nominal" and row["success_rate"] is not None
+            for row in nominal_rows
+            if row["success_rate"] is not None
         ]
         nominal_rate = (
             sum(nominal_rates) / len(nominal_rates) if nominal_rates else None
         )
+        nominal_complete = bool(nominal_rows) and all(
+            row["success_rate"] is not None
+            and float(row["coverage_rate"]) >= 1.0 - 1.0e-12
+            for row in nominal_rows
+        )
         has_non_nominal = any(
             row["domain_kind"] != "nominal" for row in population_rows
         )
-        eligible = has_non_nominal and all(
-            float(row["coverage_rate"]) >= 1.0 - 1.0e-12
-            for row in population_rows
-            if row["domain_kind"] != "nominal"
+        eligible = (
+            nominal_complete
+            and has_non_nominal
+            and all(
+                float(row["coverage_rate"]) >= 1.0 - 1.0e-12
+                for row in population_rows
+                if row["domain_kind"] != "nominal"
+            )
         )
         for row in population_rows:
             row["nominal_success_rate"] = nominal_rate
             row["domain_mean_success_rate"] = mean
             row["domain_worst_success_rate"] = worst
             row["domain_success_variance"] = variance
-            row["domain_retention"] = retention
-            row["domain_mean"] = mean
-            row["domain_worst"] = worst
-            row["domain_variance"] = variance
+            row["domain_retention"] = retention if nominal_complete else None
             row["generalization_eligible"] = eligible
     return rows

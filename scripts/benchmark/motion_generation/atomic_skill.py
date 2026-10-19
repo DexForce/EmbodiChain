@@ -87,7 +87,7 @@ class AtomicSkillCaseProvider(ABC):
         return None
 
     def articulation_effect_segment(self, case: BenchmarkCase) -> str | None:
-        """Return the segment whose live articulation displacement is scored."""
+        """Return the segment that starts the articulation-displacement diagnostic."""
         del case
         return None
 
@@ -165,7 +165,7 @@ class AtomicSkillCaseProvider(ABC):
         return ()
 
     def physical_evaluator(self) -> PhysicalStageEvaluator | None:
-        """Return a measured-stage evaluator, or use legacy task_result.
+        """Return a measured-stage evaluator, or delegate to ``task_result``.
 
         Returns:
             An evaluator that receives no compiled planning state.
@@ -180,10 +180,8 @@ class AtomicSkillCaseProvider(ABC):
         observation: ExecutionObservation,
         motion_outcomes: tuple[CaseOutcome, ...],
     ) -> tuple[torch.Tensor, str]:
-        """Return legacy task success until this provider supplies an evaluator."""
-        raise NotImplementedError(
-            "Provide physical_evaluator() or legacy task_result()."
-        )
+        """Evaluate a custom provider that does not supply a stage evaluator."""
+        raise NotImplementedError("Provide physical_evaluator() or task_result().")
 
 
 AtomicSkillProviderType = type[AtomicSkillCaseProvider]

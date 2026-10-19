@@ -239,7 +239,7 @@ class PlannerAdapter(ABC):
     def require_motion_generator(self) -> "MotionGenerator":
         """Return the adapter-owned MotionGenerator or fail clearly.
 
-        Atomic-task scenarios use this boundary instead of reaching into a
+        Atomic Skill scenarios use this boundary instead of reaching into a
         backend implementation.  Every planner that opts into the
         ``atomic_action`` capability must expose its generator here.
         """

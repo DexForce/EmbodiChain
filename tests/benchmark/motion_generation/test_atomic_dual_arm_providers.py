@@ -125,10 +125,24 @@ def _observation(**values: object) -> ExecutionObservation:
     )
 
 
-def test_hand_over_physical_evaluator_uses_phase_local_observations() -> None:
+@pytest.mark.parametrize(
+    ("xy_offset", "z_offset", "success"),
+    [
+        (0.02, -0.05, True),
+        (0.05, -0.05, False),
+        (0.0, -0.15, False),
+        (0.0, 0.05, False),
+    ],
+)
+def test_hand_over_physical_evaluator_uses_phase_local_observations(
+    xy_offset: float, z_offset: float, success: bool
+) -> None:
     target = _pose(0.2, -0.1, 0.1).unsqueeze(0)
     initial = _pose(0.0).unsqueeze(0)
     object_trace = torch.stack((target, target))
+    settle_trace = object_trace.clone()
+    settle_trace[:, :, 0, 3] += xy_offset
+    settle_trace[:, :, 2, 3] += z_offset
     case = _case(
         "hand_over",
         control_parts={
@@ -162,7 +176,7 @@ def test_hand_over_physical_evaluator_uses_phase_local_observations() -> None:
                 gripper_qpos={"left_hand": released, "right_hand": holding},
             ),
             "handover_settle": ReplayObservationTrace(
-                object_pose=object_trace,
+                object_pose=settle_trace,
                 gripper_qpos={"left_hand": released, "right_hand": released},
             ),
         },
@@ -172,7 +186,9 @@ def test_hand_over_physical_evaluator_uses_phase_local_observations() -> None:
     assert evaluator is not None
     result = evaluator.evaluate(case, observation, (_outcome(),))[0]
 
-    assert result.task_success
+    assert result.task_success is success
+    if not success:
+        assert result.failure_stage == "placed"
     assert [stage.stage_id for stage in result.stages] == [
         "grasped",
         "transferred",
@@ -237,12 +253,35 @@ def test_hand_over_requires_receiver_release_at_terminal_target() -> None:
     assert result.failure_stage == "receiver_released"
 
 
-def test_coordinated_pickment_evaluator_uses_all_four_physical_stages() -> None:
+@pytest.mark.parametrize(
+    ("offset", "yaw", "left_qpos", "right_qpos", "failure_stage"),
+    [
+        (0.005, 0.0, 0.02, 0.02, None),
+        (0.02, 0.0, 0.02, 0.02, "moved"),
+        (0.0, math.pi / 2, 0.02, 0.02, "moved"),
+        (0.0, 0.0, 0.02, 0.026, "dual_grasped"),
+        (0.0, 0.0, 0.0255, 0.02, "dual_grasped"),
+        (0.0, 0.0, 0.0, 0.02, "dual_grasped"),
+        (0.0, 0.0, None, 0.02, "dual_grasped"),
+    ],
+)
+def test_coordinated_pickment_evaluator_uses_all_physical_stages(
+    offset: float,
+    yaw: float,
+    left_qpos: float | None,
+    right_qpos: float,
+    failure_stage: str | None,
+) -> None:
     initial = _pose(0.0).unsqueeze(0)
     target = _pose(0.1, 0.0, 0.1).unsqueeze(0)
     lift = torch.stack((initial, _pose(0.0, 0.0, 0.05).unsqueeze(0)))
-    move = torch.stack((lift[-1], target))
-    holding = torch.full((2, 1, 1), 0.5)
+    final = target.clone()
+    final[:, 0, 3] += offset
+    final[:, :3, :3] = axis_angle_to_rotation_matrix(torch.tensor([0.0, 0.0, yaw]))
+    move = torch.stack((lift[-1], final))
+    grippers = {"right_hand": torch.full((2, 1, 1), right_qpos)}
+    if left_qpos is not None:
+        grippers["left_hand"] = torch.full((2, 1, 1), left_qpos)
     case = _case(
         "coordinated_pickment",
         control_parts={
@@ -258,18 +297,16 @@ def test_coordinated_pickment_evaluator_uses_all_four_physical_stages() -> None:
             "right_hand": torch.tensor([0.0]),
         },
         gripper_grasp_qpos={
-            "left_hand": torch.tensor([1.0]),
-            "right_hand": torch.tensor([1.0]),
+            "left_hand": torch.tensor([0.026]),
+            "right_hand": torch.tensor([0.026]),
         },
         replay_traces={
-            "dual_pick_grasp": ReplayObservationTrace(
-                gripper_qpos={"left_hand": holding, "right_hand": holding}
-            ),
+            "dual_pick_grasp": ReplayObservationTrace(gripper_qpos=grippers),
             "dual_pick_lift": ReplayObservationTrace(object_pose=lift),
             "dual_pick_move": ReplayObservationTrace(object_pose=move),
             "dual_pick_settle": ReplayObservationTrace(
-                object_pose=target.unsqueeze(0).repeat(2, 1, 1, 1),
-                gripper_qpos={"left_hand": holding, "right_hand": holding},
+                object_pose=final.unsqueeze(0).repeat(2, 1, 1, 1),
+                gripper_qpos=grippers,
             ),
         },
     )
@@ -280,7 +317,8 @@ def test_coordinated_pickment_evaluator_uses_all_four_physical_stages() -> None:
     assert evaluator is not None
     result = evaluator.evaluate(case, observation, (_outcome(),))[0]
 
-    assert result.task_success
+    assert result.task_success is (failure_stage is None)
+    assert result.failure_stage == failure_stage
     assert [stage.stage_id for stage in result.stages] == [
         "dual_grasped",
         "lifted",
@@ -338,9 +376,35 @@ def test_coordinated_pickment_rechecks_target_after_settle() -> None:
     assert result.failure_stage == "settled"
 
 
-def test_coordinated_placement_evaluator_uses_named_support_pose_trace() -> None:
-    pose = _pose(0.0).unsqueeze(0)
-    pose_trace = pose.unsqueeze(0).repeat(2, 1, 1, 1)
+@pytest.mark.parametrize(
+    ("position_offset", "rotation", "support_present", "failure_stage"),
+    [
+        (0.0, (0.0, 0.0, 0.0), True, None),
+        (-0.1, (0.0, 0.0, 0.0), True, "aligned"),
+        (0.0, (0.3, 0.0, 0.0), True, "aligned"),
+        (0.0, (0.0, 0.0, 0.3), True, "aligned"),
+        (0.0, (0.0, 0.0, 0.0), False, "aligned"),
+    ],
+)
+def test_coordinated_placement_evaluator_uses_named_support_pose_trace(
+    position_offset: float,
+    rotation: tuple[float, float, float],
+    support_present: bool,
+    failure_stage: str | None,
+) -> None:
+    support = _pose(0.5, 0.2, 0.7)
+    support[:3, :3] = axis_angle_to_rotation_matrix(torch.tensor([0.0, 0.0, 0.4]))
+    relative = _pose(0.04, -0.1, 0.1)
+    pose = (support @ relative).unsqueeze(0)
+    actual = relative.clone()
+    actual[2, 3] += position_offset
+    actual[:3, :3] = axis_angle_to_rotation_matrix(torch.tensor(rotation))
+    pose_trace = (support @ actual).reshape(1, 1, 4, 4).repeat(2, 1, 1, 1)
+    support_traces = (
+        {"support": support.reshape(1, 1, 4, 4).repeat(2, 1, 1, 1)}
+        if support_present
+        else {}
+    )
     placing_released = torch.zeros(2, 1, 1)
     support_held = torch.full((2, 1, 1), 0.5)
     case = _case(
@@ -352,10 +416,10 @@ def test_coordinated_placement_evaluator_uses_named_support_pose_trace() -> None
         support_object_id="support",
         object_initial_pose=pose.tolist(),
         placing_target_pose=pose.tolist(),
-        support_target_pose=pose.tolist(),
+        support_target_pose=support.unsqueeze(0).tolist(),
         placing_height_offset_m=0.0,
         support_height_offset_m=0.0,
-        placing_relative_target_pose=pose.tolist(),
+        placing_relative_target_pose=relative.unsqueeze(0).tolist(),
     )
     observation = _observation(
         gripper_open_qpos={
@@ -369,7 +433,7 @@ def test_coordinated_placement_evaluator_uses_named_support_pose_trace() -> None
         replay_traces={
             "coordinated_place_alignment": ReplayObservationTrace(
                 object_pose=pose_trace,
-                scene_object_poses={"support": pose_trace},
+                scene_object_poses=support_traces,
             ),
             "coordinated_place_release": ReplayObservationTrace(
                 gripper_qpos={
@@ -379,7 +443,7 @@ def test_coordinated_placement_evaluator_uses_named_support_pose_trace() -> None
             ),
             "coordinated_place_settle": ReplayObservationTrace(
                 object_pose=pose_trace,
-                scene_object_poses={"support": pose_trace},
+                scene_object_poses=support_traces,
             ),
         },
     )
@@ -390,11 +454,15 @@ def test_coordinated_placement_evaluator_uses_named_support_pose_trace() -> None
     assert evaluator is not None
     result = evaluator.evaluate(case, observation, (_outcome(),))[0]
 
-    assert result.task_success
-    assert result.stages[1].measurements == {
-        "placing_release_established": True,
-        "support_retained": True,
-    }
+    assert result.task_success is (failure_stage is None)
+    assert result.failure_stage == failure_stage
+    if failure_stage is None:
+        assert result.stages[1].measurements == {
+            "placing_release_established": True,
+            "support_retained": True,
+        }
+    elif not support_present:
+        assert result.failure_code == "evidence_unavailable"
 
 
 def test_coordinated_placement_alignment_uses_world_height_offsets() -> None:
@@ -1123,165 +1191,6 @@ def test_reset_case_restores_every_row_of_a_frozen_placement_scene():
     torch.testing.assert_close(
         support.entity.set_local_pose.call_args.args[0], support_pose
     )
-
-
-def test_hand_over_scores_delivery_within_the_derived_budget():
-    provider = create_atomic_skill_provider("hand_over")
-    case = _case(
-        "hand_over",
-        target_object_pose=_pose(0.0, -0.2, 0.6).unsqueeze(0).tolist(),
-        delivery_tolerance_m=0.03,
-        delivery_height_tolerance_m=0.10,
-    )
-
-    def result(final: torch.Tensor) -> bool:
-        success, code = provider.task_result(
-            Mock(),
-            case,
-            Mock(),
-            _observation(final_object_pose=final.unsqueeze(0)),
-            (_outcome(),),
-        )
-        assert code == "object_goal_miss"
-        return bool(success.item())
-
-    assert result(_pose(0.02, -0.2, 0.55))
-    assert not result(_pose(0.05, -0.2, 0.55))
-    assert not result(_pose(0.0, -0.2, 0.45))
-    assert not result(_pose(0.0, -0.2, 0.65))
-
-
-def _scenario_with_grippers(grasp_qpos: float) -> AtomicSkillScenario:
-    scenario = AtomicSkillScenario()
-    scenario._gripper_states = {
-        part: (torch.tensor([0.0]), torch.tensor([grasp_qpos]))
-        for part in ("left_eef", "right_eef")
-    }
-    return scenario
-
-
-def _pickment_case() -> BenchmarkCase:
-    return _case(
-        "coordinated_pickment",
-        target_object_pose=_pose(0.0, 0.0, 0.7).unsqueeze(0).tolist(),
-        object_position_threshold_m=0.01,
-        object_rotation_threshold_rad=0.0873,
-        gripper_hold_gap=0.001,
-        control_parts=dual._control_parts({}, ("left", "right")),
-    )
-
-
-def test_coordinated_pickment_scores_the_object_pose_while_held():
-    provider = create_atomic_skill_provider("coordinated_pickment")
-    assert provider.samples_grasps
-    case = _pickment_case()
-    scenario = _scenario_with_grippers(0.026)
-
-    def result(final: torch.Tensor) -> bool:
-        success, code = provider.task_result(
-            scenario,
-            case,
-            Mock(),
-            _observation(
-                final_object_pose=final.unsqueeze(0),
-                final_gripper_qpos={
-                    "left_eef": torch.tensor([[0.02]]),
-                    "right_eef": torch.tensor([[0.02]]),
-                },
-            ),
-            (_outcome(),),
-        )
-        assert code == "object_goal_miss"
-        return bool(success.item())
-
-    assert result(_pose(0.005, 0.0, 0.7))
-    assert not result(_pose(0.02, 0.0, 0.7))
-    # Upright but facing the wrong way: a tilt-only check would accept it.
-    turned = _pose(0.0, 0.0, 0.7)
-    turned[:3, :3] = axis_angle_to_rotation_matrix(
-        torch.tensor([0.0, 0.0, math.pi / 2])
-    )
-    assert not result(turned)
-
-
-@pytest.mark.parametrize(
-    ("left", "right", "held"),
-    [
-        (0.02, 0.02, True),
-        (0.02, 0.026, False),
-        (0.0255, 0.02, False),
-        (0.0, 0.02, False),
-        (None, 0.02, False),
-    ],
-)
-def test_coordinated_pickment_requires_both_grippers_to_hold(
-    left: float | None, right: float, held: bool
-):
-    provider = create_atomic_skill_provider("coordinated_pickment")
-    grippers = {"right_eef": torch.tensor([[right]])}
-    if left is not None:
-        grippers["left_eef"] = torch.tensor([[left]])
-
-    success, _ = provider.task_result(
-        _scenario_with_grippers(0.026),
-        _pickment_case(),
-        Mock(),
-        _observation(
-            final_object_pose=_pose(0.0, 0.0, 0.7).unsqueeze(0),
-            final_gripper_qpos=grippers,
-        ),
-        (_outcome(),),
-    )
-
-    assert success.tolist() == [held]
-
-
-def test_coordinated_placement_scores_the_object_relative_to_its_support():
-    provider = create_atomic_skill_provider("coordinated_placement")
-    relative = _pose(0.04, -0.1, 0.1)
-    case = _case(
-        "coordinated_placement",
-        support_object_id="pan",
-        placing_relative_target_pose=relative.unsqueeze(0).tolist(),
-        placement_position_tolerance_m=0.01,
-        placement_rotation_tolerance_rad=0.0873,
-    )
-    support = _pose(0.5, 0.2, 0.7)
-    support[:3, :3] = axis_angle_to_rotation_matrix(torch.tensor([0.0, 0.0, 0.4]))
-
-    def result(placing: torch.Tensor) -> bool:
-        success, _ = provider.task_result(
-            Mock(),
-            case,
-            Mock(),
-            _observation(
-                final_object_pose=placing.unsqueeze(0),
-                scene_object_final_poses={"pan": support.unsqueeze(0)},
-            ),
-            (_outcome(),),
-        )
-        return bool(success.item())
-
-    assert result(support @ relative)
-    assert not result(support @ _pose(0.04, -0.1, 0.0))
-    tilted = support @ relative
-    tilted[:3, :3] = tilted[:3, :3] @ axis_angle_to_rotation_matrix(
-        torch.tensor([0.3, 0.0, 0.0])
-    )
-    assert not result(tilted)
-    turned = support @ relative
-    turned[:3, :3] = turned[:3, :3] @ axis_angle_to_rotation_matrix(
-        torch.tensor([0.0, 0.0, 0.3])
-    )
-    assert not result(turned)
-    missing, _ = provider.task_result(
-        Mock(),
-        case,
-        Mock(),
-        _observation(final_object_pose=support.unsqueeze(0)),
-        (_outcome(),),
-    )
-    assert missing.tolist() == [False]
 
 
 def test_dual_arm_provider_builds_both_arms_and_grippers():

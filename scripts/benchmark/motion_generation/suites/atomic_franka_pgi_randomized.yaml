@@ -114,7 +114,6 @@ tracks:
           hand_interp_steps: 12
           pre_grasp_distance_m: 0.15
           lift_height_m: 0.16
-          minimum_object_lift_m: 0.04
           approach_direction: [0.0, 0.0, -1.0]
           pre_pick_height_m: 0.36
           object_position_jitter_m: [0.05, 0.05, 0.0]
@@ -135,7 +134,6 @@ tracks:
           target_object_offset_jitter_m: [0.04, 0.04, 0.02]
           object_position_jitter_m: [0.04, 0.04, 0.0]
           object_yaw_jitter_rad: 0.40
-          object_position_threshold_m: 0.04
           cases:
             - name: randomized_cube_transport
               object: cube_50mm
@@ -153,7 +151,6 @@ tracks:
           object_yaw_jitter_rad: 0.40
           retract_height_m: 0.10
           hand_interp_steps: 12
-          object_position_threshold_m: 0.05
           cases:
             - name: randomized_cube_place
               object: cube_50mm
@@ -171,7 +168,6 @@ tracks:
           target_joint: button_joint
           articulation_position_jitter_m: [0.03, 0.03, 0.015]
           effect_joint_sign: 1.0
-          minimum_joint_delta_m: 0.004
           geometry_seed: 11
           start_qpos_jitter_rad: [0.15, 0.15, 0.15, 0.12, 0.15, 0.12, 0.15]
           cases:

@@ -88,8 +88,6 @@ tracks:
           lift_height_m: 0.15
           hand_interp_steps: 10
           grasp_sample_count: 10000
-          delivery_tolerance_m: 0.03
-          delivery_height_tolerance_m: 0.10
           pre_action_settle_steps: 500
           cases:
             - name: soda_can_left_to_right

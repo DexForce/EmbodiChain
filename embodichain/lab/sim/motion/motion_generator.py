@@ -59,17 +59,15 @@ from embodichain.utils.math import (
     quat_error_magnitude,
     quat_from_matrix,
 )
+from .planners._joint_limits import _joint_velocity_limits, _plan_joint_ids
 from .planners.utils import (
     MoveType,
     PlanResult,
     PlanState,
     TrajectorySampleMethod,
-    normalize_success_mask,
-)
-from .planners.utils import (
     calculate_point_allocations,
-    interpolate_xpos,
     interpolate_xpos_batched,
+    normalize_success_mask,
 )
 
 __all__ = ["MotionGenerator", "MotionGenCfg", "MotionGenOptions"]
@@ -524,87 +522,18 @@ class MotionGenerator:
     ) -> torch.Tensor:
         """Intersect one scalar request with effective ordered Robot speed caps.
 
-        Runtime joint-speed metadata is reduced across the participating batch,
-        and mimic follower caps are projected back to their active parents.
-        Missing or unbounded metadata uses the historical finite fallback only
-        for the affected joint.
+        Shared planner resolution fills missing runtime caps from the assembled
+        asset and projects mimic follower caps before selecting control joints.
+        Requests can only tighten known caps; joints still lacking metadata use
+        the request or the default interpolation budget.
         """
         joint_names = getattr(self.robot, "joint_names", None)
         use_full_limits = isinstance(joint_names, (list, tuple)) and bool(joint_names)
         if use_full_limits:
-            joint_count = len(joint_names)
-            limits = (
-                self.robot.get_qvel_limits(joint_ids=list(range(joint_count)))
-                .detach()
-                .clone()
+            joint_ids = _plan_joint_ids(self.robot, control_part, dof)
+            limits = _joint_velocity_limits(
+                self.robot, device=reference.device, dtype=reference.dtype
             )
-            if limits.ndim != 2 or limits.shape[1] != joint_count:
-                raise ValueError(
-                    "Robot velocity limits must have shape (B, robot DOF)."
-                )
-            limits = torch.where(
-                torch.isfinite(limits) & (limits >= 0.0) & (limits < 1.0e9),
-                limits,
-                torch.inf,
-            )
-            mimic_ids = tuple(getattr(self.robot, "mimic_ids", ()))
-            mimic_parents = tuple(getattr(self.robot, "mimic_parents", ()))
-            mimic_multipliers = tuple(getattr(self.robot, "mimic_multipliers", ()))
-            if not (len(mimic_ids) == len(mimic_parents) == len(mimic_multipliers)):
-                raise ValueError("Robot mimic metadata lengths must match.")
-            mimics = dict(
-                zip(
-                    mimic_ids,
-                    zip(mimic_parents, mimic_multipliers, strict=True),
-                    strict=True,
-                )
-            )
-            for original_child in mimics:
-                if not isinstance(original_child, int):
-                    raise ValueError("Mimic child indices must be integers.")
-                child = original_child
-                bound = limits[:, child].clone()
-                visited = {child}
-                while child in mimics:
-                    parent, multiplier = mimics[child]
-                    if (
-                        not isinstance(parent, int)
-                        or isinstance(multiplier, bool)
-                        or not isinstance(multiplier, (int, float))
-                        or not math.isfinite(multiplier)
-                        or parent in visited
-                    ):
-                        raise ValueError(
-                            "Mimic relations require finite multipliers and an "
-                            "acyclic integer parent mapping."
-                        )
-                    if multiplier == 0.0:
-                        break
-                    bound = bound / abs(multiplier)
-                    limits[:, parent] = torch.minimum(limits[:, parent], bound)
-                    visited.add(parent)
-                    child = parent
-            if control_part is None and dof != joint_count:
-                matches = [
-                    name
-                    for name in (self.robot.control_parts or {})
-                    if len(self.robot.get_joint_ids(name)) == dof
-                ]
-                if len(matches) != 1:
-                    raise ValueError(
-                        "Set control_part to map interpolated joints to Robot "
-                        "velocity limits."
-                    )
-                control_part = matches[0]
-            joint_ids = (
-                list(range(dof))
-                if control_part is None
-                else self.robot.get_joint_ids(control_part)
-            )
-            if len(joint_ids) != dof:
-                raise ValueError(
-                    "control_part joint count does not match interpolation DOF."
-                )
             limits = limits[:, joint_ids]
         else:
             limits = self.robot.get_qvel_limits(name=control_part).detach().clone()
@@ -612,6 +541,11 @@ class MotionGenerator:
                 raise ValueError(
                     "Robot velocity limits must have shape (B, interpolation DOF)."
                 )
+            limits = torch.where(
+                torch.isfinite(limits) & (limits >= 0.0) & (limits < 1.0e9),
+                limits,
+                torch.inf,
+            )
         if limits.shape[0] < batch_size:
             raise ValueError(
                 "Robot velocity limits do not cover the interpolation batch."
@@ -619,11 +553,6 @@ class MotionGenerator:
         limits = limits[:batch_size].to(
             device=reference.device,
             dtype=reference.dtype,
-        )
-        limits = torch.where(
-            torch.isfinite(limits) & (limits >= 0.0) & (limits < 1.0e9),
-            limits,
-            torch.inf,
         )
         caps = limits.amin(dim=0)
         if requested is None:

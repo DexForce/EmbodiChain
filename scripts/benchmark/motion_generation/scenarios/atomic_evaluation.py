@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 import torch
 
@@ -31,16 +31,9 @@ from ..evaluation import TOLERANCES, StageEvidence, evaluate_skill_stage_batch
 from ..models import BenchmarkCase, CaseOutcome
 from .atomic_case_utils import case_pose
 
-if TYPE_CHECKING:
-    from .atomic_skill import AtomicSkillScenario
-
 __all__ = [
     "signed_rotation_about_axis",
     "motion_valid_mask",
-    "articulation_effect_success",
-    "object_lift_success",
-    "object_pose_success",
-    "executed_final_pose_success",
     "executed_final_pose_errors",
     "stage_evidence_batch",
     "trace_validity",
@@ -97,110 +90,6 @@ def motion_valid_mask(
     )
 
 
-def articulation_effect_success(
-    case: BenchmarkCase,
-    observation: ExecutionObservation,
-    motion_outcomes: tuple[CaseOutcome, ...],
-) -> torch.Tensor:
-    """Gate task success on a real target-joint displacement during contact."""
-    peak = observation.articulation_joint_peak_signed_delta
-    if peak is None:
-        return torch.zeros_like(observation.execution_success)
-    threshold = float(case.case_parameters["minimum_articulation_joint_delta"])
-    return (
-        observation.execution_success
-        & motion_valid_mask(motion_outcomes, device=peak.device)
-        & torch.isfinite(peak)
-        & (peak >= threshold)
-    )
-
-
-def object_lift_success(
-    case: BenchmarkCase,
-    observation: ExecutionObservation,
-    motion_outcomes: tuple[CaseOutcome, ...],
-) -> torch.Tensor:
-    """Gate PickUp success on the object's measured post-replay lift."""
-    lift = observation.object_lift_delta_m
-    if lift is None:
-        return torch.zeros_like(observation.execution_success)
-    threshold = float(case.case_parameters["minimum_object_lift_m"])
-    return (
-        observation.execution_success
-        & motion_valid_mask(motion_outcomes, device=lift.device)
-        & torch.isfinite(lift)
-        & (lift >= threshold)
-    )
-
-
-def object_pose_success(
-    scenario: "AtomicSkillScenario",
-    case: BenchmarkCase,
-    observation: ExecutionObservation,
-    motion_outcomes: tuple[CaseOutcome, ...],
-) -> torch.Tensor:
-    """Gate object transport/place success on its configured pose metric."""
-    if scenario.suite is None:
-        raise RuntimeError("Atomic Skill suite is not configured.")
-    final_pose = observation.final_object_pose
-    if final_pose is None:
-        return torch.zeros_like(observation.execution_success)
-    target = case_pose(
-        case,
-        "target_object_pose",
-        device=final_pose.device,
-    ).to(dtype=final_pose.dtype)
-    translation = torch.linalg.vector_norm(
-        final_pose[:, :3, 3] - target[:, :3, 3], dim=-1
-    )
-    rotation_threshold = case.case_parameters.get("object_rotation_threshold_rad")
-    if rotation_threshold is None:
-        target_up = target[:, :3, 2]
-        final_up = final_pose[:, :3, 2]
-        rotation = torch.arccos(
-            torch.clamp((target_up * final_up).sum(dim=-1), -1.0, 1.0)
-        )
-        rotation_threshold = case.case_parameters.get(
-            "object_tilt_threshold_rad",
-            scenario.suite.protocol.rotation_threshold_rad,
-        )
-    else:
-        relative = target[:, :3, :3].transpose(-1, -2) @ final_pose[:, :3, :3]
-        trace = torch.diagonal(relative, dim1=-2, dim2=-1).sum(dim=-1)
-        rotation = torch.arccos(torch.clamp((trace - 1.0) * 0.5, -1.0, 1.0))
-    position_threshold = float(case.case_parameters["object_position_threshold_m"])
-    rotation_threshold = float(rotation_threshold)
-    return (
-        observation.execution_success
-        & motion_valid_mask(motion_outcomes, device=translation.device)
-        & torch.isfinite(translation)
-        & torch.isfinite(rotation)
-        & (translation <= position_threshold)
-        & (rotation <= rotation_threshold)
-    )
-
-
-def executed_final_pose_success(
-    scenario: "AtomicSkillScenario",
-    case: BenchmarkCase,
-    observation: ExecutionObservation,
-    motion_outcomes: tuple[CaseOutcome, ...],
-) -> torch.Tensor:
-    """Validate the executed TCP against a case's final frozen waypoint."""
-    if scenario.suite is None:
-        raise RuntimeError("Atomic Skill suite is not configured.")
-    translation, rotation = executed_final_pose_errors(
-        case,
-        observation.final_tcp_pose,
-    )
-    return (
-        observation.execution_success
-        & motion_valid_mask(motion_outcomes, device=translation.device)
-        & (translation <= scenario.suite.protocol.position_threshold_m)
-        & (rotation <= scenario.suite.protocol.rotation_threshold_rad)
-    )
-
-
 def executed_final_pose_errors(
     case: BenchmarkCase,
     final_tcp_pose: torch.Tensor,
@@ -210,24 +99,12 @@ def executed_final_pose_errors(
     translation = torch.linalg.vector_norm(
         final_tcp_pose[:, :3, 3] - target[:, :3, 3], dim=-1
     )
-    relative = target[:, :3, :3].transpose(-1, -2) @ final_tcp_pose[:, :3, :3]
-    trace = torch.diagonal(relative, dim1=-2, dim2=-1).sum(dim=-1)
-    rotation = torch.arccos(torch.clamp((trace - 1.0) * 0.5, -1.0, 1.0))
+    rotation = pose_rotation_error(final_tcp_pose, target)
     rotation_symmetry = case.case_parameters.get("waypoint_rotation_symmetry")
     if rotation_symmetry == "half_turn_about_z":
         symmetric_target = target.clone()
         symmetric_target[:, :3, :2] = -symmetric_target[:, :3, :2]
-        symmetric_relative = (
-            symmetric_target[:, :3, :3].transpose(-1, -2) @ final_tcp_pose[:, :3, :3]
-        )
-        symmetric_trace = torch.diagonal(
-            symmetric_relative,
-            dim1=-2,
-            dim2=-1,
-        ).sum(dim=-1)
-        symmetric_rotation = torch.arccos(
-            torch.clamp((symmetric_trace - 1.0) * 0.5, -1.0, 1.0)
-        )
+        symmetric_rotation = pose_rotation_error(final_tcp_pose, symmetric_target)
         rotation = torch.minimum(rotation, symmetric_rotation)
     elif rotation_symmetry is not None:
         raise ValueError(

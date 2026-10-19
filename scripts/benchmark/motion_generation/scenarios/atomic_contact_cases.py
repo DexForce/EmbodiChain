@@ -40,14 +40,13 @@ from embodichain.lab.sim.atomic_actions import (
 from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory
 
 from ..atomic_skill import AtomicSkillCaseProvider, register_atomic_skill_provider
-from ..contracts import ExecutionObservation, ReplayObservationWindow
+from ..contracts import ReplayObservationWindow
 from ..config import SuiteCfg, TrackCfg
-from ..models import BenchmarkCase, CaseOutcome
+from ..models import BenchmarkCase
 from .atomic_evaluation import (
     PressEvaluator,
     SlideEvaluator,
     TwistEvaluator,
-    articulation_effect_success,
 )
 from .atomic_case_utils import (
     atomic_case_id,
@@ -221,11 +220,7 @@ class PressCases(AtomicSkillCaseProvider):
                 "contact_minimum_joint_delta": float(
                     config.get("contact_minimum_joint_delta", 1.0e-5)
                 ),
-                "minimum_articulation_joint_delta": float(
-                    config.get("minimum_joint_delta_m", 0.004)
-                ),
                 "waypoint_rotation_symmetry": "half_turn_about_z",
-                "task_success_scope": "physical_articulation_peak_displacement",
                 "randomization": randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },
@@ -281,7 +276,7 @@ class PressCases(AtomicSkillCaseProvider):
         )
 
     def articulation_effect_segment(self, case: BenchmarkCase) -> str:
-        """Score button displacement only while the tool travels into it."""
+        """Start button-displacement diagnostics at the pressing segment."""
         del case
         return "press"
 
@@ -303,20 +298,6 @@ class PressCases(AtomicSkillCaseProvider):
     def physical_evaluator(self) -> PressEvaluator:
         """Return the v1 press-stage evaluator."""
         return PressEvaluator()
-
-    def task_result(
-        self,
-        scenario: "AtomicSkillScenario",
-        case: BenchmarkCase,
-        compiled: CompiledTrajectory,
-        observation: ExecutionObservation,
-        motion_outcomes: tuple[CaseOutcome, ...],
-    ) -> tuple[torch.Tensor, str]:
-        del scenario, compiled
-        return (
-            articulation_effect_success(case, observation, motion_outcomes),
-            "articulation_effect_miss",
-        )
 
 
 class SlideCases(AtomicSkillCaseProvider):
@@ -486,10 +467,6 @@ class SlideCases(AtomicSkillCaseProvider):
                 "target_joint": target_joint,
                 "target_entity_id": f"{handle.entity.uid}:{target_link}",
                 "effect_joint_sign": float(config.get("effect_joint_sign", 1.0)),
-                "minimum_articulation_joint_delta": float(
-                    config.get("minimum_joint_delta_m", 0.12)
-                ),
-                "task_success_scope": "physical_articulation_peak_displacement",
                 "randomization": randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },
@@ -559,7 +536,7 @@ class SlideCases(AtomicSkillCaseProvider):
         )
 
     def articulation_effect_segment(self, case: BenchmarkCase) -> str:
-        """Score displacement while the primitive pulls or pushes the drawer."""
+        """Start drawer-displacement diagnostics at the pull or push segment."""
         return slide_direction(case.case_parameters["direction"])
 
     def replay_observation_windows(
@@ -588,20 +565,6 @@ class SlideCases(AtomicSkillCaseProvider):
     def physical_evaluator(self) -> SlideEvaluator:
         """Return the v1 slide-stage evaluator."""
         return SlideEvaluator()
-
-    def task_result(
-        self,
-        scenario: "AtomicSkillScenario",
-        case: BenchmarkCase,
-        compiled: CompiledTrajectory,
-        observation: ExecutionObservation,
-        motion_outcomes: tuple[CaseOutcome, ...],
-    ) -> tuple[torch.Tensor, str]:
-        del scenario, compiled
-        return (
-            articulation_effect_success(case, observation, motion_outcomes),
-            "articulation_effect_miss",
-        )
 
 
 class TwistCases(AtomicSkillCaseProvider):
@@ -761,11 +724,7 @@ class TwistCases(AtomicSkillCaseProvider):
                 "target_joint": target_joint,
                 "target_entity_id": f"{handle.entity.uid}:{target_link}",
                 "effect_joint_sign": float(config.get("effect_joint_sign", 1.0)),
-                "minimum_articulation_joint_delta": float(
-                    config.get("minimum_joint_delta_rad", 0.5)
-                ),
                 "waypoint_rotation_symmetry": "half_turn_about_z",
-                "task_success_scope": "physical_articulation_peak_displacement",
                 "randomization": randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },
@@ -823,7 +782,7 @@ class TwistCases(AtomicSkillCaseProvider):
         )
 
     def articulation_effect_segment(self, case: BenchmarkCase) -> str:
-        """Score knob displacement only during the rotational segment."""
+        """Start knob-displacement diagnostics at the rotational segment."""
         del case
         return "twist"
 
@@ -852,20 +811,6 @@ class TwistCases(AtomicSkillCaseProvider):
     def physical_evaluator(self) -> TwistEvaluator:
         """Return the v1 twist-stage evaluator."""
         return TwistEvaluator()
-
-    def task_result(
-        self,
-        scenario: "AtomicSkillScenario",
-        case: BenchmarkCase,
-        compiled: CompiledTrajectory,
-        observation: ExecutionObservation,
-        motion_outcomes: tuple[CaseOutcome, ...],
-    ) -> tuple[torch.Tensor, str]:
-        del scenario, compiled
-        return (
-            articulation_effect_success(case, observation, motion_outcomes),
-            "articulation_effect_miss",
-        )
 
 
 register_atomic_skill_provider("press", PressCases)

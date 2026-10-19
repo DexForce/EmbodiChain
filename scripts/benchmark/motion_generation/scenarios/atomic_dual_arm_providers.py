@@ -27,7 +27,6 @@ without a fixed seed are frozen from the same reference compile.
 
 from __future__ import annotations
 
-import math
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -49,7 +48,6 @@ from embodichain.lab.sim.atomic_actions import (
     MotionPolicy,
     ObjectSemantics,
     PickUpOptions,
-    TaskState,
     create_simulation_atomic_action_engine,
 )
 from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory
@@ -81,11 +79,12 @@ from .atomic_evaluation import (
     gripper_released,
     merge_stage_evidence_batches,
     minimum_height_above_initial_support,
-    motion_valid_mask,
+    pose_rotation_error,
     replay_trace,
     stage_evidence_batch,
     trace_validity,
 )
+from .atomic_grasps import parallel_jaw_sampler
 from .atomic_policy import with_plan_options
 from ..atomic_skill import register_atomic_skill_provider
 
@@ -96,8 +95,6 @@ if TYPE_CHECKING:
 
 __all__: list[str] = []
 
-_TASK_POSITION_TOLERANCE_M = 0.01
-_TASK_ROTATION_TOLERANCE_RAD = math.radians(5.0)
 # A parallel-jaw gripper closing on an object stops at the object's width; one
 # that misses runs to its grasp command.  The tutorial PGI holding the plastic
 # tray stops about 3.4 mm short of its 0.026 command and reaches the command
@@ -234,46 +231,6 @@ class _HandOverEvaluator:
         return evaluate_skill_stage_batch("hand_over", evidence)
 
 
-def _rotation_error(actual: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-    """Return the angle of the rotation between two ``(B, 4, 4)`` poses."""
-    relative = target[:, :3, :3].transpose(-1, -2) @ actual[:, :3, :3]
-    trace = torch.diagonal(relative, dim1=-2, dim2=-1).sum(dim=-1)
-    return torch.arccos(torch.clamp((trace - 1.0) * 0.5, -1.0, 1.0))
-
-
-def _grippers_holding(
-    scenario: "AtomicSkillScenario",
-    grasp_parts: Sequence[str],
-    observation: ExecutionObservation,
-    *,
-    gap: float,
-) -> torch.Tensor:
-    """Return rows where every gripper closed on something.
-
-    Measured along the closing direction, each final gripper joint must have
-    moved at least ``gap`` from open and stopped at least ``gap`` short of the
-    grasp command: a gripper that misses runs to the command, and one that
-    never closed stays open.  A gripper without a measured final state counts
-    as not holding.
-    """
-    commands = scenario._configured_grippers()
-    held = torch.ones_like(observation.execution_success)
-    for part in grasp_parts:
-        qpos = observation.final_gripper_qpos.get(part)
-        if qpos is None or part not in commands:
-            return torch.zeros_like(observation.execution_success)
-        open_state, grasp_state = (
-            state.to(device=qpos.device, dtype=qpos.dtype) for state in commands[part]
-        )
-        direction = torch.sign(grasp_state - open_state)
-        closed = (qpos - open_state) * direction
-        remaining = (grasp_state - qpos) * direction
-        held = held & ((closed >= gap) & (remaining >= gap)).all(dim=-1).to(
-            device=held.device
-        )
-    return held
-
-
 class _CoordinatedPickmentEvaluator:
     """Evaluate dual grasp, lift, synchronized move, and retention."""
 
@@ -348,7 +305,7 @@ class _CoordinatedPickmentEvaluator:
                             "position_error_m": torch.linalg.vector_norm(
                                 final[:, :3, 3] - target[:, :3, 3], dim=-1
                             ),
-                            "rotation_error_rad": _rotation_error(final, target),
+                            "rotation_error_rad": pose_rotation_error(final, target),
                             "min_height_above_support_m": min_height,
                         },
                         method="object_move_trace",
@@ -376,7 +333,7 @@ class _CoordinatedPickmentEvaluator:
                             "position_error_m": torch.linalg.vector_norm(
                                 final[:, :3, 3] - target[:, :3, 3], dim=-1
                             ),
-                            "rotation_error_rad": _rotation_error(final, target),
+                            "rotation_error_rad": pose_rotation_error(final, target),
                             "min_height_above_support_m": min_height,
                         },
                         method="terminal_object_pose_trace",
@@ -469,7 +426,7 @@ class _CoordinatedPlacementEvaluator:
                                 relative[:, :3, 3] - alignment_target[:, :3, 3],
                                 dim=-1,
                             ),
-                            "relative_rotation_error_rad": _rotation_error(
+                            "relative_rotation_error_rad": pose_rotation_error(
                                 relative, alignment_target
                             ),
                             "min_height_above_support_m": min_height,
@@ -522,19 +479,16 @@ class _CoordinatedPlacementEvaluator:
                                 final_relative[:, :3, 3] - local_target[:, :3, 3],
                                 dim=-1,
                             ),
-                            "relative_rotation_error_rad": _rotation_error(
+                            "relative_rotation_error_rad": pose_rotation_error(
                                 final_relative, local_target
                             ),
                             "position_drift_m": torch.linalg.vector_norm(
                                 relative[:, :, :3, 3] - relative_start[:, :, :3, 3],
                                 dim=-1,
                             ).amax(dim=0),
-                            "rotation_drift_rad": _rotation_error(
-                                relative.flatten(0, 1),
-                                relative_start.flatten(0, 1),
-                            )
-                            .reshape(relative.shape[:2])
-                            .amax(dim=0),
+                            "rotation_drift_rad": pose_rotation_error(
+                                relative, relative_start
+                            ).amax(dim=0),
                             "min_height_above_support_m": min_height,
                         },
                         method="relative_object_settle_drift_trace",
@@ -678,17 +632,6 @@ def _compile_reference(
     with _record_requests(scenario, plan):
         plan.compiled = engine.compile(invocations, context=context)
     return plan
-
-
-def _parallel_jaw_generator(n_sample: int) -> GraspPoseGenerator:
-    """Return the tutorial parallel-jaw grasp generator."""
-    from scripts.tutorials.atomic_action.tutorial_utils import (
-        create_parallel_jaw_grasp_pose_generator,
-    )
-
-    return create_parallel_jaw_grasp_pose_generator(
-        n_sample=n_sample, force_refresh=False
-    )
 
 
 def _antipodal_semantics(handle: AtomicObjectHandle) -> ObjectSemantics:
@@ -971,7 +914,7 @@ class _HandOverCases(AtomicSkillCaseProvider):
             "control_parts": parts,
         }
         grasp_parts = [values["grasp"] for values in parts.values()]
-        sampler = _parallel_jaw_generator(int(config.get("grasp_sample_count", 10_000)))
+        sampler = parallel_jaw_sampler(int(config.get("grasp_sample_count", 10_000)))
         semantics = _antipodal_semantics(handle)
         reference = _compile_reference(
             scenario,
@@ -1027,13 +970,6 @@ class _HandOverCases(AtomicSkillCaseProvider):
                 "frozen_grasps": frozen,
                 "arm_waypoints": other_arms,
                 "reference_plan_success": reference.compiled.plan_success.tolist(),
-                "delivery_tolerance_m": float(
-                    config.get("delivery_tolerance_m", 3 * _TASK_POSITION_TOLERANCE_M)
-                ),
-                "delivery_height_tolerance_m": float(
-                    config.get("delivery_height_tolerance_m", 0.10)
-                ),
-                "task_success_scope": "physical_object_delivery_after_hand_over",
             },
         )
 
@@ -1117,34 +1053,6 @@ class _HandOverCases(AtomicSkillCaseProvider):
     def physical_evaluator(self) -> _HandOverEvaluator:
         """Return the v1 HandOver evaluator."""
         return _HandOverEvaluator()
-
-    def task_result(
-        self,
-        scenario: "AtomicSkillScenario",
-        case: BenchmarkCase,
-        compiled: CompiledTrajectory,
-        observation: ExecutionObservation,
-        motion_outcomes: tuple[CaseOutcome, ...],
-    ) -> tuple[torch.Tensor, str]:
-        del scenario, compiled
-        final_pose = observation.final_object_pose
-        if final_pose is None:
-            return torch.zeros_like(observation.execution_success), "object_goal_miss"
-        target = case_pose(case, "target_object_pose", device=final_pose.device)
-        xy_error = torch.linalg.vector_norm(
-            final_pose[:, :2, 3] - target[:, :2, 3], dim=-1
-        )
-        height_error = final_pose[:, 2, 3] - target[:, 2, 3]
-        tolerance = float(case.case_parameters["delivery_tolerance_m"])
-        settle = float(case.case_parameters["delivery_height_tolerance_m"])
-        return (
-            observation.execution_success
-            & motion_valid_mask(motion_outcomes, device=final_pose.device)
-            & (xy_error <= tolerance)
-            & (height_error >= -settle)
-            & (height_error <= tolerance),
-            "object_goal_miss",
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -1237,7 +1145,7 @@ class _CoordinatedPickmentCases(AtomicSkillCaseProvider):
             "left_to_right_arm_direction": _left_to_right_direction(scenario, parts),
             "control_parts": parts,
         }
-        sampler = _parallel_jaw_generator(int(parameters["grasp_sample_count"]))
+        sampler = parallel_jaw_sampler(int(parameters["grasp_sample_count"]))
         semantics = _antipodal_semantics(handle)
         reference = _compile_reference(
             scenario,
@@ -1283,20 +1191,6 @@ class _CoordinatedPickmentCases(AtomicSkillCaseProvider):
                 "target_object_pose": target_pose.detach().cpu().tolist(),
                 "arm_waypoints": other_arms,
                 "reference_plan_success": reference.compiled.plan_success.tolist(),
-                "object_position_threshold_m": float(
-                    config.get(
-                        "object_position_threshold_m", _TASK_POSITION_TOLERANCE_M
-                    )
-                ),
-                "object_rotation_threshold_rad": float(
-                    config.get(
-                        "object_rotation_threshold_rad", _TASK_ROTATION_TOLERANCE_RAD
-                    )
-                ),
-                "gripper_hold_gap": float(
-                    config.get("gripper_hold_gap", _GRIPPER_HOLD_GAP)
-                ),
-                "task_success_scope": "physical_object_pose_while_held_by_both",
             },
         )
 
@@ -1366,43 +1260,6 @@ class _CoordinatedPickmentCases(AtomicSkillCaseProvider):
     def physical_evaluator(self) -> _CoordinatedPickmentEvaluator:
         """Return the v1 CoordinatedPickment evaluator."""
         return _CoordinatedPickmentEvaluator()
-
-    def task_result(
-        self,
-        scenario: "AtomicSkillScenario",
-        case: BenchmarkCase,
-        compiled: CompiledTrajectory,
-        observation: ExecutionObservation,
-        motion_outcomes: tuple[CaseOutcome, ...],
-    ) -> tuple[torch.Tensor, str]:
-        del compiled
-        final_pose = observation.final_object_pose
-        if final_pose is None:
-            return torch.zeros_like(observation.execution_success), "object_goal_miss"
-        target = case_pose(case, "target_object_pose", device=final_pose.device).to(
-            dtype=final_pose.dtype
-        )
-        position_error = torch.linalg.vector_norm(
-            final_pose[:, :3, 3] - target[:, :3, 3], dim=-1
-        )
-        parameters = case.case_parameters
-        held = _grippers_holding(
-            scenario,
-            [values["grasp"] for values in dict(parameters["control_parts"]).values()],
-            observation,
-            gap=float(parameters["gripper_hold_gap"]),
-        )
-        return (
-            observation.execution_success
-            & motion_valid_mask(motion_outcomes, device=final_pose.device)
-            & held
-            & (position_error <= float(parameters["object_position_threshold_m"]))
-            & (
-                _rotation_error(final_pose, target)
-                <= float(parameters["object_rotation_threshold_rad"])
-            ),
-            "object_goal_miss",
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -1748,18 +1605,6 @@ class _CoordinatedPlacementCases(AtomicSkillCaseProvider):
                 "placing_relative_target_pose": relative_target.detach().cpu().tolist(),
                 "arm_waypoints": other_arms,
                 "reference_plan_success": reference.compiled.plan_success.tolist(),
-                "placement_position_tolerance_m": float(
-                    config.get(
-                        "placement_position_tolerance_m", _TASK_POSITION_TOLERANCE_M
-                    )
-                ),
-                "placement_rotation_tolerance_rad": float(
-                    config.get(
-                        "placement_rotation_tolerance_rad",
-                        _TASK_ROTATION_TOLERANCE_RAD,
-                    )
-                ),
-                "task_success_scope": "physical_object_pose_relative_to_support",
             },
         )
 
@@ -1854,40 +1699,6 @@ class _CoordinatedPlacementCases(AtomicSkillCaseProvider):
     def physical_evaluator(self) -> _CoordinatedPlacementEvaluator:
         """Return the v1 CoordinatedPlacement evaluator."""
         return _CoordinatedPlacementEvaluator()
-
-    def task_result(
-        self,
-        scenario: "AtomicSkillScenario",
-        case: BenchmarkCase,
-        compiled: CompiledTrajectory,
-        observation: ExecutionObservation,
-        motion_outcomes: tuple[CaseOutcome, ...],
-    ) -> tuple[torch.Tensor, str]:
-        del scenario, compiled
-        placing = observation.final_object_pose
-        support = observation.scene_object_final_poses.get(
-            str(case.case_parameters["support_object_id"])
-        )
-        if placing is None or support is None:
-            return torch.zeros_like(observation.execution_success), "object_goal_miss"
-        relative = torch.bmm(pose_inv(support), placing)
-        target = case_pose(
-            case, "placing_relative_target_pose", device=placing.device
-        ).to(dtype=relative.dtype)
-        position_error = torch.linalg.vector_norm(
-            relative[:, :3, 3] - target[:, :3, 3], dim=-1
-        )
-        parameters = case.case_parameters
-        return (
-            observation.execution_success
-            & motion_valid_mask(motion_outcomes, device=placing.device)
-            & (position_error <= float(parameters["placement_position_tolerance_m"]))
-            & (
-                _rotation_error(relative, target)
-                <= float(parameters["placement_rotation_tolerance_rad"])
-            ),
-            "object_goal_miss",
-        )
 
 
 register_atomic_skill_provider("hand_over", _HandOverCases)

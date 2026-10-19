@@ -147,7 +147,7 @@ def test_open_door_physical_evaluator_uses_hinge_and_release_windows() -> None:
         gripper_grasp_qpos={"hand": torch.tensor([1.0])},
         replay_traces={
             "door_actuation": ReplayObservationTrace(
-                articulation_joint=torch.tensor([[0.0, 0.0], [0.5, 0.3]])
+                articulation_joint=torch.tensor([[0.0, 0.0], [0.5, 0.5], [0.5, 0.3]])
             ),
             "door_release": ReplayObservationTrace(
                 gripper_qpos={"hand": torch.tensor([[[1.0], [1.0]], [[0.0], [0.0]]])}
@@ -161,22 +161,25 @@ def test_open_door_physical_evaluator_uses_hinge_and_release_windows() -> None:
 
     assert [result.task_success for result in results] == [True, False]
     assert results[1].failure_stage == "opened"
+    missing = evaluator.evaluate(case, _observation(2), _outcomes(2))
+    assert all(result.failure_code == "evidence_unavailable" for result in missing)
 
 
-def test_pour_physical_evaluator_uses_object_pose_interval() -> None:
+@pytest.mark.parametrize("sign", [1.0, -1.0])
+def test_pour_physical_evaluator_uses_object_pose_interval(sign: float) -> None:
     initial = torch.eye(4).repeat(2, 1, 1)
     poses = torch.eye(4).repeat(3, 2, 1, 1)
     poses[:, :, 2, 3] = 0.1
     poses[1, :, :3, :3] = axis_angle_to_rotation_matrix(
-        torch.tensor([[0.0, 0.0, 0.5], [0.0, 0.0, 0.2]])
+        torch.tensor([[0.0, 0.0, 0.5 * sign], [0.0, 0.0, 0.2 * sign]])
     )
     case = _case(
         "pour",
         2,
         object_initial_pose=initial.tolist(),
         object_rotation_axis=[0.0, 0.0, 1.0],
-        object_rotation_sign=1.0,
-        rotate_angle_rad=0.5,
+        object_rotation_sign=sign,
+        rotate_angle_rad=0.5 * sign,
     )
     settle = poses[-1:].repeat(2, 1, 1, 1)
     observation = _observation(
@@ -616,117 +619,6 @@ def test_push_poses_place_the_tcp_behind_the_object_and_push_to_target() -> None
             contact_frame_to_eef=torch.eye(4),
             object_contact_offset=torch.zeros(3),
         )
-
-
-def test_open_door_scores_the_hinge_at_the_end_of_the_opening_segment() -> None:
-    provider = create_atomic_skill_provider("open_door")
-    case = _case(
-        "open_door",
-        3,
-        target_joint_position=1.0,
-        hinge_angle_tolerance_rad=0.05,
-    )
-    observation = _observation(
-        3,
-        articulation_joint_effect_end=torch.tensor([0.98, 0.9, 1.0]),
-        articulation_joint_peak_signed_delta=torch.tensor([1.0, 1.0, 1.0]),
-    )
-    outcomes = _outcomes(3)
-    outcomes = (*outcomes[:2], replace(outcomes[2], motion_valid=False))
-
-    success, failure_code = provider.task_result(
-        Mock(), case, Mock(), observation, outcomes
-    )
-
-    assert success.tolist() == [True, False, False]
-    assert failure_code == "articulation_effect_miss"
-    missing, _ = provider.task_result(
-        Mock(), case, Mock(), _observation(3), _outcomes(3)
-    )
-    assert missing.tolist() == [False, False, False]
-
-
-def test_pour_requires_the_commanded_rotation_while_still_holding() -> None:
-    provider = create_atomic_skill_provider("pour")
-    case = _case(
-        "pour",
-        3,
-        rotate_angle_rad=-0.8,
-        pour_angle_tolerance_rad=0.05,
-        minimum_object_lift_m=0.04,
-    )
-    observation = _observation(
-        3,
-        object_rotation_peak_signed_rad=torch.tensor([-0.78, -0.6, -0.8]),
-        object_lift_delta_m=torch.tensor([0.16, 0.16, 0.01]),
-    )
-
-    success, failure_code = provider.task_result(
-        Mock(), case, Mock(), observation, _outcomes(3)
-    )
-
-    assert success.tolist() == [True, False, False]
-    assert failure_code == "object_rotation_miss"
-
-
-def test_axis_align_requires_the_aligned_axis_while_still_holding() -> None:
-    provider = create_atomic_skill_provider("axis_align")
-    case = _case(
-        "axis_align",
-        3,
-        internal_axis=[1.0, 0.0, 0.0],
-        target_axis=[0.0, 0.0, 1.0],
-        axis_angle_tolerance_rad=0.0873,
-        minimum_object_lift_m=0.04,
-    )
-    upright = axis_angle_to_rotation_matrix(torch.tensor([0.0, -math.pi / 2, 0.0]))
-    final_pose = torch.eye(4).repeat(3, 1, 1)
-    final_pose[0, :3, :3] = upright
-    final_pose[2, :3, :3] = upright
-    observation = _observation(
-        3,
-        final_object_pose=final_pose,
-        object_lift_delta_m=torch.tensor([0.16, 0.16, 0.0]),
-    )
-
-    success, failure_code = provider.task_result(
-        Mock(), case, Mock(), observation, _outcomes(3)
-    )
-
-    assert torch.allclose(
-        upright @ torch.tensor([1.0, 0.0, 0.0]),
-        torch.tensor([0.0, 0.0, 1.0]),
-        atol=1e-6,
-    )
-    assert success.tolist() == [True, False, False]
-    assert failure_code == "axis_alignment_miss"
-
-
-def test_push_object_requires_the_measured_object_pose_at_the_target() -> None:
-    provider = create_atomic_skill_provider("push_object")
-    target = torch.eye(4).repeat(2, 1, 1)
-    final_pose = target.clone()
-    final_pose[1, 1, 3] += 0.02
-    case = _case(
-        "push_object",
-        2,
-        target_object_pose=target.tolist(),
-        object_position_threshold_m=0.01,
-        object_tilt_threshold_rad=0.0873,
-    )
-    scenario = AtomicSkillScenario()
-    scenario.suite = Mock(protocol=Mock(rotation_threshold_rad=0.1))
-
-    success, failure_code = provider.task_result(
-        scenario,
-        case,
-        Mock(),
-        _observation(2, final_object_pose=final_pose),
-        _outcomes(2),
-    )
-
-    assert success.tolist() == [True, False]
-    assert failure_code == "object_goal_miss"
 
 
 def test_signed_rotation_about_axis_recovers_both_directions() -> None:

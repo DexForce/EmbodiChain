@@ -68,7 +68,6 @@ tracks:
           hand_interp_steps: 12
           pre_grasp_distance_m: 0.15
           lift_height_m: 0.16
-          minimum_object_lift_m: 0.04
           approach_direction: [0.0, 0.0, -1.0]
           pre_pick_height_m: 0.36
           cases:

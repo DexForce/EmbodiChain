@@ -23,6 +23,7 @@ from collections import Counter, defaultdict
 from collections.abc import Iterable
 from dataclasses import replace
 
+from ._aggregation_policy import _source_unsupported, _unsupported_case_ids
 from .metrics.stats import nearest_rank_percentile
 from .generalization import aggregate_generalization
 from .models import BenchmarkCase, CaseOutcome, PlannerMetadata, TrialPhase, TrialRecord
@@ -124,19 +125,20 @@ def _case_macro_rate(
     *,
     measured_trials: int = 1,
     excluded_case_ids: frozenset[str] = frozenset(),
-) -> float:
+) -> float | None:
     """Macro-average a boolean outcome attribute equally across mandatory cases.
 
     Within each case, env rows (and measured repeats) are micro-averaged first.
     Cases then receive equal weight regardless of ``batch_size``, so a B=64
     case cannot dominate a B=1 case on the leaderboard. Missing cases
-    contribute ``0.0`` so selective skipping cannot inflate the rate.
+    contribute ``0.0`` so selective skipping cannot inflate the rate. A
+    population with no applicable cases has no rate and returns ``None``.
     """
     track_cases = [
         case for case in track_cases if case.case_id not in excluded_case_ids
     ]
     if not track_cases:
-        return 0.0
+        return None
 
     outcomes_by_case: dict[str, list[CaseOutcome]] = defaultdict(list)
     for record in measured:
@@ -293,13 +295,13 @@ def _case_macro_primary_rate(
     *,
     measured_trials: int = 1,
     excluded_case_ids: frozenset[str] = frozenset(),
-) -> float:
-    """Macro-average each case's explicitly declared primary success stage."""
+) -> float | None:
+    """Macro-average primary success, or return ``None`` with no applicable cases."""
     track_cases = [
         case for case in track_cases if case.case_id not in excluded_case_ids
     ]
     if not track_cases:
-        return 0.0
+        return None
     outcomes_by_case: dict[str, list[CaseOutcome]] = defaultdict(list)
     for record in measured:
         outcomes_by_case[record.case_id].extend(record.outcomes)
@@ -383,30 +385,6 @@ def _top_failure(outcomes: list[CaseOutcome]) -> str | None:
         outcome.failure_code for outcome in outcomes if outcome.failure_code
     )
     return failures.most_common(1)[0][0] if failures else None
-
-
-def _unsupported_case_ids(records: Iterable[TrialRecord]) -> frozenset[str]:
-    """Return capability-gated cases excluded from success denominators."""
-    by_case_source: dict[str, dict[str, list[TrialRecord]]] = defaultdict(
-        lambda: defaultdict(list)
-    )
-    for record in records:
-        by_case_source[record.case_id][record.algorithm_id].append(record)
-    return frozenset(
-        case_id
-        for case_id, sources in by_case_source.items()
-        if all(_source_unsupported(rows) for rows in sources.values())
-    )
-
-
-def _source_unsupported(records: list[TrialRecord]) -> bool:
-    """Return whether a source was explicitly gated without measured evidence."""
-    return not any(record.phase is TrialPhase.MEASURED for record in records) and any(
-        record.phase is TrialPhase.AVAILABILITY
-        and record.status == "unsupported"
-        and record.failure_code in {"unsupported_capability", "unsupported_capacity"}
-        for record in records
-    )
 
 
 def _rate_cases(
@@ -1163,131 +1141,6 @@ def _metric_rows(
     return rows
 
 
-def _leaderboard_rows(
-    records: list[TrialRecord],
-    metadata: list[PlannerMetadata],
-    cases: list[BenchmarkCase],
-    measured_trials: int,
-) -> list[dict[str, object]]:
-    """Build a complete success/coverage/latency ordered leaderboard per track.
-
-    Success rates are macro-averaged over mandatory cases (equal case weight).
-    ``latency_p95_ms`` uses the same case-equal weighting: per-case mean warm
-    latency, then nearest-rank p95 across cases. ``coverage_rate`` remains an
-    outcome-count completeness check used for eligibility. Cases explicitly
-    attributed to another motion algorithm are excluded from both ranking
-    numerators and denominators.
-    """
-    entries: list[dict[str, object]] = []
-    for track in _track_ids(records, cases):
-        all_track_cases = [case for case in cases if case.track == track]
-        track_entries: list[dict[str, object]] = []
-        for info in metadata:
-            bypassed_case_ids = _bypassed_case_ids(records, info.algorithm_id, track)
-            track_cases = [
-                case
-                for case in all_track_cases
-                if case.case_id not in bypassed_case_ids
-            ]
-            expected_outcomes = (
-                sum(case.batch_size for case in track_cases) * measured_trials
-            )
-            measured = [
-                record
-                for record in records
-                if record.algorithm_id == info.algorithm_id
-                and record.track == track
-                and record.phase is TrialPhase.MEASURED
-                and record.uses_selected_planner_backend
-            ]
-            outcomes = [outcome for record in measured for outcome in record.outcomes]
-            excluded_case_ids = frozenset(
-                record.case_id
-                for record in records
-                if record.algorithm_id == info.algorithm_id
-                and record.track == track
-                and record.phase is TrialPhase.AVAILABILITY
-                and record.status == "unsupported"
-                and record.failure_code
-                in {"unsupported_capability", "unsupported_capacity"}
-            )
-            coverage = min(1.0, len(outcomes) / max(expected_outcomes, 1))
-            motion_rate = _case_macro_rate(
-                measured,
-                track_cases,
-                "motion_valid",
-                excluded_case_ids=excluded_case_ids,
-                measured_trials=measured_trials,
-            )
-            planning_rate = _case_macro_rate(
-                measured,
-                track_cases,
-                "planning_success",
-                excluded_case_ids=excluded_case_ids,
-                measured_trials=measured_trials,
-            )
-            execution_rate = _case_macro_optional_rate(
-                measured,
-                track_cases,
-                "execution_success",
-                excluded_case_ids=excluded_case_ids,
-                measured_trials=measured_trials,
-            )
-            task_rate = _case_macro_optional_rate(
-                measured,
-                track_cases,
-                "task_success",
-                excluded_case_ids=excluded_case_ids,
-                measured_trials=measured_trials,
-            )
-            primary_rate = _case_macro_primary_rate(
-                measured,
-                track_cases,
-                excluded_case_ids=excluded_case_ids,
-                measured_trials=measured_trials,
-            )
-            latency_p95 = _case_macro_latency_p95(measured, track_cases)
-            peak_gpu = _peak_gpu(measured)
-            track_entries.append(
-                {
-                    "track": track,
-                    "algorithm": info.algorithm_id,
-                    "algorithm_role": info.algorithm_role.value,
-                    "model_revision": info.model_revision,
-                    "planner_config_hash": info.config_hash[:12],
-                    "eligible": bool(track_cases) and coverage >= 1.0 - 1.0e-12,
-                    "attributed_cases": len(track_cases),
-                    "bypassed_cases": len(all_track_cases) - len(track_cases),
-                    "coverage_rate": coverage,
-                    "overall_success_rate": primary_rate,
-                    "planning_success_rate": planning_rate,
-                    "motion_valid_rate": motion_rate,
-                    "execution_success_rate": execution_rate,
-                    "task_success_rate": task_rate,
-                    "latency_p95_ms": latency_p95,
-                    "peak_gpu_mb": peak_gpu,
-                }
-            )
-
-        track_entries.sort(
-            key=lambda row: (
-                not bool(row["eligible"]),
-                -float(row["overall_success_rate"]),
-                -float(row["coverage_rate"]),
-                (
-                    float(row["latency_p95_ms"])
-                    if row["latency_p95_ms"] is not None
-                    else math.inf
-                ),
-                str(row["algorithm"]),
-            )
-        )
-        entries.extend(
-            {"rank": rank, **entry} for rank, entry in enumerate(track_entries, start=1)
-        )
-    return entries
-
-
 def _view_leaderboard(
     records: list[TrialRecord],
     metadata: list[PlannerMetadata],
@@ -1612,25 +1465,27 @@ def aggregate_results(
     cases: list[BenchmarkCase],
     measured_trials: int,
     *,
-    track_scenarios: dict[str, str] | None = None,
+    track_scenarios: dict[str, str],
 ) -> dict[str, list[dict[str, object]]]:
-    """Build raw aggregates and scenario-owned report views with separate ranks.
+    """Build scenario-owned report tables with separate geometry and timed ranks.
 
-    ``track_scenarios`` is the suite's expanded track-to-scenario mapping.
-    Omitting it preserves legacy aggregates; it never infers a family from a
-    skill id, scenario display name, or track naming convention.
+    ``track_scenarios`` must explicitly assign every case and trial track to a
+    supported scenario family; report semantics are never inferred from names.
     """
+    missing_tracks = set(_track_ids(records, cases)) - track_scenarios.keys()
+    if missing_tracks:
+        raise ValueError(
+            f"Missing report scenario for tracks: {sorted(missing_tracks)}"
+        )
+    unknown = set(track_scenarios.values()) - {"free_space", "atomic_skill"}
+    if unknown:
+        raise ValueError(f"Unsupported report scenarios: {sorted(unknown)}")
     result = {
-        "time_and_memory": _performance_rows(records, metadata, cases),
-        "success_and_metrics": _metric_rows(records, metadata, cases, measured_trials),
-        "leaderboard": _leaderboard_rows(records, metadata, cases, measured_trials),
+        "report_views": [],
         "generalization": aggregate_generalization(
             records, metadata, cases, measured_trials
         ),
     }
-    if track_scenarios is None:
-        return result
-    result["report_views"] = []
     for scenario, view, title in (
         ("free_space", "motion_planning", "Motion Planning"),
         ("atomic_skill", "atomic_skills", "Atomic Skills"),
@@ -1663,8 +1518,7 @@ def aggregate_results(
                     else row["success_rate"]
                 ),
             }
-            for row in result["success_and_metrics"]
-            if row["track"] in tracks
+            for row in _metric_rows(view_records, metadata, view_cases, measured_trials)
         ]
         result[f"{view}_leaderboard"] = _view_leaderboard(
             view_records, metadata, view_cases, measured_trials, view=view
@@ -1678,7 +1532,4 @@ def aggregate_results(
                 view=view,
                 timing=True,
             )
-            result["motion_geometry_leaderboard"] = result[f"{view}_leaderboard"]
-        else:
-            result["atomic_leaderboard"] = result[f"{view}_leaderboard"]
     return result

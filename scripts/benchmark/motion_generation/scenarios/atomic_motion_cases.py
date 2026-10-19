@@ -30,17 +30,13 @@ from embodichain.lab.sim.atomic_actions import (
     MotionPolicy,
     MoveJointsOptions,
 )
-from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory
 
 from ..atomic_skill import AtomicSkillCaseProvider, register_atomic_skill_provider
-from ..contracts import ExecutionObservation
 from ..config import SuiteCfg, TrackCfg
-from ..models import BenchmarkCase, CaseOutcome
+from ..models import BenchmarkCase
 from .atomic_evaluation import (
     MoveEndEffectorEvaluator,
     MoveJointsEvaluator,
-    executed_final_pose_success,
-    motion_valid_mask,
 )
 from .atomic_case_utils import (
     atomic_case_id,
@@ -189,25 +185,6 @@ class MoveEndEffectorCases(AtomicSkillCaseProvider):
             ),
         )
 
-    def task_result(
-        self,
-        scenario: "AtomicSkillScenario",
-        case: BenchmarkCase,
-        compiled: CompiledTrajectory,
-        observation: ExecutionObservation,
-        motion_outcomes: tuple[CaseOutcome, ...],
-    ) -> tuple[torch.Tensor, str]:
-        del compiled
-        return (
-            executed_final_pose_success(
-                scenario,
-                case,
-                observation,
-                motion_outcomes,
-            ),
-            "task_goal_miss",
-        )
-
     def physical_evaluator(self) -> MoveEndEffectorEvaluator:
         """Evaluate the terminal measured TCP position under the v1 standard."""
         return MoveEndEffectorEvaluator()
@@ -321,8 +298,8 @@ class MoveJointsCases(AtomicSkillCaseProvider):
                 "sample_count": int(config.get("sample_count", 80)),
                 "target_offsets_rad": offsets,
                 "target_qpos": targets.detach().cpu().tolist(),
-                "joint_threshold_rad": float(config.get("joint_threshold_rad", 0.02)),
                 "motion_validity": "ordered_joint_waypoints",
+                "joint_threshold_rad": float(config.get("joint_threshold_rad", 0.02)),
                 "randomization": randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },
@@ -349,30 +326,6 @@ class MoveJointsCases(AtomicSkillCaseProvider):
             ),
             skill_options=MoveJointsOptions(),
         )
-
-    def task_result(
-        self,
-        scenario: "AtomicSkillScenario",
-        case: BenchmarkCase,
-        compiled: CompiledTrajectory,
-        observation: ExecutionObservation,
-        motion_outcomes: tuple[CaseOutcome, ...],
-    ) -> tuple[torch.Tensor, str]:
-        del scenario, compiled
-        if observation.final_arm_qpos is None:
-            return torch.zeros_like(observation.execution_success), "joint_goal_miss"
-        target = torch.tensor(
-            case.case_parameters["target_qpos"],
-            dtype=observation.final_arm_qpos.dtype,
-            device=observation.final_arm_qpos.device,
-        )[:, -1]
-        error = torch.amax(torch.abs(observation.final_arm_qpos - target), dim=-1)
-        success = (
-            observation.execution_success
-            & motion_valid_mask(motion_outcomes, device=error.device)
-            & (error <= float(case.case_parameters["joint_threshold_rad"]))
-        )
-        return success, "joint_goal_miss"
 
     def physical_evaluator(self) -> MoveJointsEvaluator:
         """Evaluate the terminal measured joint state under the v1 standard."""

@@ -150,7 +150,13 @@ def _aggregates(
             frozenset({"atomic_action"}),
         )
     ]
-    return aggregate_results(records, metadata, cases, repeats)
+    return aggregate_results(
+        records,
+        metadata,
+        cases,
+        repeats,
+        track_scenarios={case.track: "atomic_skill" for case in cases},
+    )
 
 
 @pytest.mark.parametrize(
@@ -411,7 +417,7 @@ def test_jsonl_and_report_preserve_layers_and_stage_denominators(
     assert payload["outcomes"][0]["end_to_end_success"] is True
     assert payload["outcomes"][1]["physical_failure_code"] == "evidence_unavailable"
     aggregates = _aggregates([case], [record])
-    metrics = aggregates["success_and_metrics"][0]
+    metrics = aggregates["atomic_skills_success_and_metrics"][0]
     assert metrics["physical_skill_success_rate"] == pytest.approx(1 / 3)
     assert metrics["stage_success_rates"]["reached"] == pytest.approx(1 / 2)
     assert metrics["stage_counts"]["reached"] == {
@@ -449,7 +455,9 @@ def test_unreached_stage_does_not_reduce_conditional_success() -> None:
             ),
         ),
     )
-    metrics = _aggregates([case], [_record(case, outcomes)])["success_and_metrics"][0]
+    metrics = _aggregates([case], [_record(case, outcomes)])[
+        "atomic_skills_success_and_metrics"
+    ][0]
     assert metrics["stage_success_rates"] == {"grasped": 0.5, "lifted": 1.0}
     assert metrics["stage_counts"]["lifted"]["reached"] == 1
 
@@ -457,7 +465,9 @@ def test_unreached_stage_does_not_reduce_conditional_success() -> None:
 def test_all_unreached_stage_rate_is_null() -> None:
     case = _case()
     outcome = replace(_outcome(), stages=(StageOutcome("lifted", "not_reached"),))
-    metrics = _aggregates([case], [_record(case, (outcome,))])["success_and_metrics"][0]
+    metrics = _aggregates([case], [_record(case, (outcome,))])[
+        "atomic_skills_success_and_metrics"
+    ][0]
     assert metrics["stage_success_rates"] == {"lifted": None}
 
 
@@ -467,7 +477,7 @@ def test_physical_rates_weight_cases_equally_and_penalize_missing_cases() -> Non
         _outcome(), _primitive(0.002), skill_id=small.skill_id
     )
     metrics = _aggregates([small, large], [_record(small, (passed,))])[
-        "success_and_metrics"
+        "atomic_skills_success_and_metrics"
     ]
     # Different B values have separate metric rows; the absent row is not a pass.
     assert metrics[0]["physical_skill_success_rate"] == 1.0
@@ -480,7 +490,7 @@ def test_physical_rates_weight_cases_equally_and_penalize_missing_cases() -> Non
         reference_qpos=small.reference_qpos,
     )
     metrics = _aggregates([small, large], [_record(small, (passed,))])[
-        "success_and_metrics"
+        "atomic_skills_success_and_metrics"
     ][0]
     assert metrics["physical_skill_success_rate"] == 0.5
     assert metrics["physical_evaluation_coverage_rate"] == 0.5
@@ -490,7 +500,7 @@ def test_legacy_results_cannot_be_advertised_as_standard_physical_success() -> N
     case = _case()
     metrics = _aggregates(
         [case], [_record(case, (replace(_outcome(), task_success=True),))]
-    )["success_and_metrics"][0]
+    )["atomic_skills_success_and_metrics"][0]
     assert metrics["physical_skill_success_rate"] is None
     assert metrics["end_to_end_success_rate"] is None
     assert metrics["evaluation_protocols"] == ["legacy/unversioned"]
@@ -522,11 +532,11 @@ def test_missing_repeat_lowers_physical_and_overall_success() -> None:
         _outcome(), _primitive(0.002), skill_id=case.skill_id
     )
     aggregates = _aggregates([case], [_record(case, (passed,))], repeats=2)
-    metrics = aggregates["success_and_metrics"][0]
+    metrics = aggregates["atomic_skills_success_and_metrics"][0]
     assert metrics["physical_skill_success_rate"] == 0.5
     assert metrics["end_to_end_success_rate"] == 0.5
     assert metrics["physical_evaluation_coverage_rate"] == 0.5
-    assert aggregates["leaderboard"][0]["overall_success_rate"] == 0.5
+    assert aggregates["atomic_skills_leaderboard"][0]["overall_success_rate"] == 0.5
 
 
 def test_suite_can_explicitly_rank_physical_success() -> None:
@@ -537,7 +547,7 @@ def test_suite_can_explicitly_rank_physical_success() -> None:
         skill_id=case.skill_id,
     )
     aggregates = _aggregates([case], [_record(case, (physical,))])
-    metrics = aggregates["success_and_metrics"][0]
+    metrics = aggregates["atomic_skills_success_and_metrics"][0]
     assert metrics["physical_skill_success_rate"] == 1.0
     assert metrics["end_to_end_success_rate"] == 0.0
-    assert aggregates["leaderboard"][0]["overall_success_rate"] == 1.0
+    assert aggregates["atomic_skills_leaderboard"][0]["overall_success_rate"] == 1.0

@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Literal
 from unittest.mock import Mock, patch
@@ -717,6 +718,149 @@ def test_ik_velocity_limits_apply_mimic_caps_in_control_part_order() -> None:
     )
 
     torch.testing.assert_close(resolved, torch.tensor([2.0, 0.05], dtype=torch.float64))
+
+
+def _write_velocity_urdf(tmp_path: Path, limits: dict[str, float]) -> Path:
+    """Write authored joint limits without loading a simulation asset."""
+    joints = "".join(
+        f'<link name="{name}_link"/>'
+        f'<joint name="{name}" type="revolute">'
+        f'<parent link="base"/><child link="{name}_link"/>'
+        f'<limit lower="-3" upper="3" effort="1" velocity="{limit}"/>'
+        "</joint>"
+        for name, limit in limits.items()
+    )
+    path = tmp_path / "velocity_limits.urdf"
+    path.write_text(
+        f'<robot name="velocity_limits"><link name="base"/>{joints}</robot>',
+        encoding="utf-8",
+    )
+    return path
+
+
+@pytest.mark.parametrize(
+    ("requested", "expected"),
+    [
+        pytest.param(None, [0.0, 0.15, 0.1, 0.2], id="omitted"),
+        pytest.param(0.05, [0.0, 0.05, 0.05, 0.05], id="stricter-request"),
+        pytest.param(1.0, [0.0, 0.15, 0.1, 1.0], id="looser-request"),
+    ],
+)
+def test_ik_velocity_limits_fill_only_missing_runtime_caps_from_urdf(
+    tmp_path: Path, requested: float | None, expected: list[float]
+) -> None:
+    """URDF caps fill placeholders; zero and other runtime caps remain authoritative."""
+    path = _write_velocity_urdf(
+        tmp_path, {"stationary": 0.1, "runtime": 0.1, "authored": 0.1, "unknown": 0.0}
+    )
+    limits = torch.tensor([[0.0, 0.15, 1.0e10, 1.0e10]], dtype=torch.float64)
+    generator = object.__new__(MotionGenerator)
+    generator.robot = SimpleNamespace(
+        cfg=SimpleNamespace(fpath=path),
+        joint_names=["stationary", "runtime", "authored", "unknown"],
+        mimic_ids=[],
+        mimic_parents=[],
+        mimic_multipliers=[],
+        get_qvel_limits=lambda *, joint_ids: limits[:, joint_ids],
+    )
+
+    resolved = generator._resolve_velocity_limits(
+        control_part=None,
+        batch_size=1,
+        dof=4,
+        requested=requested,
+        reference=torch.zeros(1, 4, dtype=torch.float64),
+    )
+
+    torch.testing.assert_close(resolved, torch.tensor(expected, dtype=torch.float64))
+
+
+def test_ik_velocity_limits_apply_urdf_mimic_cap_in_control_part_order(
+    tmp_path: Path,
+) -> None:
+    path = _write_velocity_urdf(tmp_path, {"follower": 0.1})
+    limits = torch.tensor([[1.2, 2.0, 1.0e10]], dtype=torch.float64)
+    generator = object.__new__(MotionGenerator)
+    generator.robot = SimpleNamespace(
+        cfg=SimpleNamespace(fpath=path),
+        joint_names=["parent", "other", "follower"],
+        mimic_ids=[2],
+        mimic_parents=[0],
+        mimic_multipliers=[-2.0],
+        control_parts={"arm": object()},
+        get_joint_ids=lambda name: [1, 0],
+        get_qvel_limits=lambda *, joint_ids: limits[:, joint_ids],
+    )
+
+    resolved = generator._resolve_velocity_limits(
+        control_part="arm",
+        batch_size=1,
+        dof=2,
+        requested=None,
+        reference=torch.zeros(1, 2, dtype=torch.float64),
+    )
+
+    # The follower moves twice as fast as its parent, with reversed sign.
+    torch.testing.assert_close(resolved, torch.tensor([2.0, 0.05], dtype=torch.float64))
+
+
+def test_ik_interpolation_respects_authored_velocity_cap(tmp_path: Path) -> None:
+    authored_limit = 0.1
+    path = _write_velocity_urdf(tmp_path, {"joint": authored_limit})
+    generator = object.__new__(MotionGenerator)
+    generator.robot = SimpleNamespace(
+        cfg=SimpleNamespace(fpath=path),
+        joint_names=["joint"],
+        mimic_ids=[],
+        mimic_parents=[],
+        mimic_multipliers=[],
+        get_qvel_limits=lambda *, joint_ids: torch.full((1, 1), 1.0e10),
+    )
+    keyframes = torch.tensor([[[0.0], [0.2]]], dtype=torch.float64)
+    interpolation_dt = 0.1
+
+    positions = generator._interpolate_ik_keyframes(
+        keyframes,
+        MotionGenOptions(
+            strategy="ik_interp",
+            sample_count=3,
+            interpolation_dt=interpolation_dt,
+            velocity_limit=1.0,
+            acceleration_limit=100.0,
+        ),
+    )
+
+    peak_velocity = (positions.diff(dim=1) / interpolation_dt).abs().amax()
+    assert peak_velocity <= authored_limit + 1.0e-6
+    torch.testing.assert_close(positions[:, 0], keyframes[:, 0])
+    torch.testing.assert_close(positions[:, -1], keyframes[:, -1])
+
+
+def test_ik_authored_velocity_limits_preserve_cuda_reference_type(
+    tmp_path: Path,
+) -> None:
+    path = _write_velocity_urdf(tmp_path, {"joint": 0.1})
+    limits = torch.full((1, 1), 1.0e10, device="cuda", dtype=torch.float32)
+    reference = torch.zeros(1, 1, device="cuda", dtype=torch.float64)
+    generator = object.__new__(MotionGenerator)
+    generator.robot = SimpleNamespace(
+        cfg=SimpleNamespace(fpath=path),
+        joint_names=["joint"],
+        mimic_ids=[],
+        mimic_parents=[],
+        mimic_multipliers=[],
+        get_qvel_limits=lambda *, joint_ids: limits[:, joint_ids],
+    )
+
+    resolved = generator._resolve_velocity_limits(
+        control_part=None,
+        batch_size=1,
+        dof=1,
+        requested=1.0,
+        reference=reference,
+    )
+
+    torch.testing.assert_close(resolved, reference.new_tensor([0.1]))
 
 
 def test_ik_interpolation_respects_robot_per_joint_velocity_caps() -> None:

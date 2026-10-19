@@ -91,8 +91,6 @@ tracks:
           hold_steps: 4
           middle_empty_ratio: 0.7
           grasp_sample_count: 10000
-          object_position_threshold_m: 0.01
-          object_rotation_threshold_rad: 0.0873
           pre_action_settle_steps: 300
           cases:
             - name: plastic_tray_lift_and_move

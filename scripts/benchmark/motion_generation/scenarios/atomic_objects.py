@@ -41,6 +41,8 @@ from embodichain.lab.sim.cfg import (
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg, MeshCollisionCfg
 from embodichain.utils.math import matrix_from_euler
 
+from .atomic_case_utils import float_vector
+
 if TYPE_CHECKING:
     from embodichain.lab.sim import SimulationManager
     from embodichain.lab.sim.objects import Articulation, RigidObject
@@ -154,22 +156,9 @@ def atomic_object_kind_names() -> tuple[str, ...]:
     return tuple(sorted(_ATOMIC_OBJECT_KINDS))
 
 
-def _vector(
-    value: object, *, name: str, length: int, default: Sequence[float]
-) -> list[float]:
-    """Validate and normalize a numeric vector from YAML configuration."""
-    resolved = default if value is None else value
-    if not isinstance(resolved, Sequence) or isinstance(resolved, (str, bytes)):
-        raise TypeError(f"{name} must be a sequence of {length} numbers.")
-    result = [float(item) for item in resolved]
-    if len(result) != length or not all(math.isfinite(item) for item in result):
-        raise ValueError(f"{name} must contain {length} finite values.")
-    return result
-
-
 def _cube_shape(config: Mapping[str, object]) -> CubeCfg:
     """Build a cube shape from its declarative size."""
-    size = _vector(
+    size = float_vector(
         config.get("size"), name="cube.size", length=3, default=(0.05, 0.05, 0.05)
     )
     if any(value <= 0.0 for value in size):
@@ -240,19 +229,19 @@ def create_atomic_object(
         ) from exc
 
     config = dict(object_config)
-    position = _vector(
+    position = float_vector(
         config.get("position"),
         name=f"objects[{object_id}].position",
         length=3,
         default=(-0.42, -0.08, 0.05),
     )
-    rotation = _vector(
+    rotation = float_vector(
         config.get("rotation_deg"),
         name=f"objects[{object_id}].rotation_deg",
         length=3,
         default=(0.0, 0.0, 0.0),
     )
-    scale = _vector(
+    scale = float_vector(
         config.get("scale"),
         name=f"objects[{object_id}].scale",
         length=3,
@@ -329,19 +318,19 @@ def create_atomic_articulation(
             f"Atomic articulation {object_id!r} must define a non-empty asset_path."
         )
     config = dict(articulation_config)
-    position = _vector(
+    position = float_vector(
         config.get("position"),
         name=f"articulations[{object_id}].position",
         length=3,
         default=(0.0, 0.0, 0.0),
     )
-    rotation = _vector(
+    rotation = float_vector(
         config.get("rotation_deg"),
         name=f"articulations[{object_id}].rotation_deg",
         length=3,
         default=(0.0, 0.0, 0.0),
     )
-    scale = _vector(
+    scale = float_vector(
         config.get("scale"),
         name=f"articulations[{object_id}].scale",
         length=3,

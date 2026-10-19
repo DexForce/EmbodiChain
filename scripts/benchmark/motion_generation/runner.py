@@ -720,7 +720,7 @@ class BenchmarkRunner:
                     track_group = track.group_id or track.id
                     resolved_cases = []
                     for case in cases:
-                        if self.suite.embodiment is not None and (
+                        if (
                             case.robot_id != self.suite.robot.id
                             or case.embodiment_id
                             not in (None, self.embodiment_resolution.embodiment_id)
@@ -824,32 +824,23 @@ class BenchmarkRunner:
             aggregates,
             notes=[
                 "CPU/GPU memory values are process/PyTorch allocator deltas around timed calls.",
-                "External position/rotation thresholds (default 0.01 m / 0.1 rad) are "
-                "feasibility gates for ordered_waypoints_reached / motion_valid. "
-                "Read final_*_err and waypoint_*_p95 for finer precision on the "
-                "geometry-valid subset.",
-                "Continuous error and path metrics (final_*_err, waypoint_*_p95, "
-                "path lengths, path_efficiency) average only geometry_valid outcomes "
-                "(success-conditioned / survivor-biased). Always read them with n_valid; "
-                "a high path_efficiency on n_valid=2 is not comparable to n_valid=200.",
+                "Ordered Cartesian matching uses position/rotation thresholds of "
+                f"{self.suite.protocol.position_threshold_m:g} m / "
+                f"{self.suite.protocol.rotation_threshold_rad:g} rad. Joint tasks "
+                "use ordered joint-waypoint error and keep Cartesian errors as diagnostics.",
+                "Continuous error and path metrics average only geometry_valid outcomes; "
+                "read these success-conditioned values alongside n_valid and success rates.",
                 *track_notes,
-                "Leaderboard and Success-table boolean rates "
-                "(overall_success_rate / success_rate / motion_valid_rate / "
-                "planning_success_rate / ordered_waypoint_success_rate) are macro averages "
-                "over mandatory cases (equal case weight after within-case env/repeat "
-                "micro-average). Missing cases contribute 0.0. coverage_rate remains "
-                "outcome-count completeness.",
-                "Leaderboard latency_p95_ms is a case-macro tiebreaker: mean warm "
-                "cost_time_ms within each case, then nearest-rank p95 across cases "
-                "(equal case weight; missing cases omitted). Stratified absolute latency "
-                "stays in Time & Memory (warm_plan_ms_p50/p95 by batch_size/waypoint_count).",
-                "cold_plan_ms is reported only on the Time & Memory row whose waypoint_count "
-                "matches the first real case measured for that batch; other waypoint rows "
-                "show N/A. planner_construct_ms / backend_prepare_ms are one-time batch costs.",
-                "Cartesian tasks use the same threshold-greedy pose matching for "
-                "continuous errors and motion validity. Joint tasks use ordered joint "
-                "waypoint error for motion validity and retain Cartesian errors as "
-                "auxiliary diagnostics.",
+                "Success rates give each mandatory case equal weight after averaging its "
+                "environment/repeat outcomes. Unsupported cases are N/A; missing supported "
+                "results count as failures. coverage_rate measures outcome completeness.",
+                "Ranking latency uses nearest-rank p95 of per-case mean warm cost_time_ms, "
+                "omitting missing cases: latency_p95_ms for Motion Planning and "
+                "compile_latency_p95_ms for Atomic Skills. Time & Memory retains trial-level "
+                "latency by batch_size/waypoint_count.",
+                "planner_construct_ms / backend_prepare_ms are one-time batch costs. "
+                "cold_plan_ms appears only on the row matching that batch's first measured "
+                "case; other waypoint rows show N/A.",
                 *self.notes,
             ],
         )

@@ -262,7 +262,7 @@ def resolve_embodiment(
     *,
     base_dir: Path | None = None,
 ) -> EmbodimentResolution:
-    """Resolve official component metadata or legacy robot-provider metadata."""
+    """Resolve metadata from an embodiment component or a registered robot provider."""
     if not isinstance(robot, RobotSpecCfg):
         raise TypeError("robot must be a RobotSpecCfg.")
     if spec is None:

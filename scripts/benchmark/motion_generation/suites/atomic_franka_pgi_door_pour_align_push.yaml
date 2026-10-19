@@ -120,7 +120,6 @@ tracks:
           grasp_sample_count: 10000
           grasp_max_candidates: 128
           grasp_alignment_max_angle_deg: 10.0
-          hinge_angle_tolerance_rad: 0.0873
           cases:
             - name: microwave_door_30deg
               task_difficulty: simple
@@ -143,8 +142,6 @@ tracks:
           grasp_sample_count: 10000
           grasp_max_candidates: 128
           grasp_alignment_max_angle_deg: 10.0
-          pour_angle_tolerance_rad: 0.0873
-          minimum_object_lift_m: 0.04
           cases:
             - name: cube_pour_30deg
               object: cube_50mm
@@ -170,8 +167,6 @@ tracks:
           grasp_sample_count: 10000
           grasp_max_candidates: 128
           grasp_alignment_max_angle_deg: 10.0
-          axis_angle_tolerance_rad: 0.0873
-          minimum_object_lift_m: 0.04
           cases:
             - name: cube_upright
               object: cube_50mm
@@ -189,8 +184,6 @@ tracks:
           push_overshoot_m: 0.0
           # Push 1 cm below the cube centre so the closed fingers do not tip it.
           object_contact_offset_m: [0.0, 0.0, -0.01]
-          object_position_threshold_m: 0.01
-          object_tilt_threshold_rad: 0.0873
           # contact_distance_m is the cube half-size plus the distance from the
           # TCP to the closed PGI finger face at the push height, measured on
           # this asset (about 15 mm for the lateral push and 24 mm for the push

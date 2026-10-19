@@ -212,6 +212,116 @@ def test_generalization_counts_missing_repeats_as_failures() -> None:
     assert rows[0]["domain_worst_success_rate"] == pytest.approx(0.5)
 
 
+@pytest.mark.parametrize("effective_algorithm", [False, True])
+@pytest.mark.parametrize(
+    "nominal_state",
+    ["absent", "missing", "partial", "unsupported", "failed", "complete"],
+)
+def test_generalization_requires_a_complete_nominal_baseline(
+    nominal_state: str, effective_algorithm: bool
+) -> None:
+    """A complete OOD run cannot borrow eligibility from an incomplete baseline."""
+    nominal = _case(
+        "nominal", EvaluationDomain(id="nominal", kind="nominal", version="v1")
+    )
+    held_out = _case(
+        "objects", EvaluationDomain(id="objects", kind="held_out", version="v1")
+    )
+    cases = [held_out]
+    records = [replace(_record(held_out, _outcome(True)), repeat=i) for i in range(2)]
+    if nominal_state != "absent":
+        cases.append(nominal)
+    if nominal_state in {"partial", "failed", "complete"}:
+        repeats = 1 if nominal_state == "partial" else 2
+        records.extend(
+            replace(_record(nominal, _outcome(nominal_state != "failed")), repeat=i)
+            for i in range(repeats)
+        )
+    elif nominal_state == "unsupported":
+        records.append(
+            replace(
+                _record(nominal, _outcome(False)),
+                phase=TrialPhase.AVAILABILITY,
+                status="unsupported",
+                failure_code="unsupported_capability",
+                outcomes=(),
+            )
+        )
+    algorithm = "baseline"
+    if effective_algorithm:
+        algorithm = "sequential_ik_interpolation"
+        records = [
+            replace(
+                record,
+                metadata={
+                    "selected_planner_backend_used": False,
+                    "effective_motion_algorithm": algorithm,
+                },
+            )
+            for record in records
+        ]
+    metadata = [
+        PlannerMetadata(
+            algorithm_id="baseline",
+            algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+            adapter="ik_interpolate",
+            config_hash="abc",
+            capabilities=frozenset({"eef_waypoint"}),
+        )
+    ]
+
+    rows = aggregate_generalization(records, metadata, cases, measured_trials=2)
+    row = next(
+        row
+        for row in rows
+        if row["algorithm"] == algorithm and row["domain_kind"] == "held_out"
+    )
+
+    assert row["coverage_rate"] == pytest.approx(1.0)
+    assert row["success_rate"] == pytest.approx(1.0)
+    assert row["generalization_eligible"] is (nominal_state in {"failed", "complete"})
+    if nominal_state == "complete":
+        assert row["domain_retention"] == pytest.approx(1.0)
+    else:
+        # Missing baseline evidence must not inflate retention; a measured zero
+        # baseline is valid for eligibility but cannot be used as a divisor.
+        assert row["domain_retention"] is None
+
+
+@pytest.mark.parametrize("held_out_repeats", [None, 0, 1])
+def test_nominal_results_alone_do_not_qualify_for_generalization(
+    held_out_repeats: int | None,
+) -> None:
+    """OOD populations must exist and complete their expected measured repeats."""
+    nominal = _case(
+        "nominal", EvaluationDomain(id="nominal", kind="nominal", version="v1")
+    )
+    held_out = _case(
+        "objects", EvaluationDomain(id="objects", kind="held_out", version="v1")
+    )
+    cases = [nominal]
+    records = [replace(_record(nominal, _outcome(True)), repeat=i) for i in range(2)]
+    if held_out_repeats is not None:
+        cases.append(held_out)
+        records.extend(
+            replace(_record(held_out, _outcome(True)), repeat=i)
+            for i in range(held_out_repeats)
+        )
+    metadata = [
+        PlannerMetadata(
+            algorithm_id="baseline",
+            algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+            adapter="ik_interpolate",
+            config_hash="abc",
+            capabilities=frozenset({"eef_waypoint"}),
+        )
+    ]
+
+    rows = aggregate_generalization(records, metadata, cases, measured_trials=2)
+
+    assert all(row["generalization_eligible"] is False for row in rows)
+
+
 def test_generalization_reports_row_level_spatial_bucket_rates() -> None:
     """Near/mid/far shell rows retain independent success summaries."""
     domain = EvaluationDomain(id="workspace_shell", version="v1", kind="robustness")
@@ -286,6 +396,9 @@ def test_generalization_reports_bypassed_cases_under_effective_algorithm() -> No
         metadata,
         [attributed_case, bypassed_case],
         measured_trials=1,
+        track_scenarios={
+            case.track: "atomic_skill" for case in [attributed_case, bypassed_case]
+        },
     )
     rows = aggregates["generalization"]
 
@@ -310,14 +423,17 @@ def test_generalization_reports_bypassed_cases_under_effective_algorithm() -> No
     assert effective_row["spatial_bucket_counts"] == {"near": 1}
     effective_metrics = next(
         row
-        for row in aggregates["success_and_metrics"]
+        for row in aggregates["atomic_skills_success_and_metrics"]
         if row["algorithm"] == "sequential_ik_interpolation"
     )
     assert effective_metrics["algorithm_role"] == "effective_motion_algorithm"
     assert effective_metrics["skill"] == "pick_up"
     assert effective_metrics["success_rate"] == pytest.approx(1.0)
-    leaderboard = aggregates["leaderboard"][0]
-    assert leaderboard["algorithm"] == "baseline"
+    leaderboard = next(
+        row
+        for row in aggregates["atomic_skills_leaderboard"]
+        if row["algorithm"] == "baseline"
+    )
     assert leaderboard["attributed_cases"] == 1
     assert leaderboard["bypassed_cases"] == 1
     bypassed_rows = aggregate_generalization(
@@ -340,7 +456,7 @@ def test_generalization_reports_bypassed_cases_under_effective_algorithm() -> No
         if row["algorithm"] == "sequential_ik_interpolation"
     )
     assert bypassed_effective_row["success_rate"] == pytest.approx(1.0)
-    assert bypassed_effective_row["generalization_eligible"] is True
+    assert bypassed_effective_row["generalization_eligible"] is False
 
 
 def test_effective_algorithm_combines_source_planners_once() -> None:
@@ -380,7 +496,11 @@ def test_effective_algorithm_combines_source_planners_once() -> None:
     ]
 
     aggregates = aggregate_results(
-        [baseline_record, candidate_record], metadata, [case], measured_trials=1
+        [baseline_record, candidate_record],
+        metadata,
+        [case],
+        measured_trials=1,
+        track_scenarios={case.track: "atomic_skill"},
     )
 
     effective_rows = [
@@ -395,7 +515,7 @@ def test_effective_algorithm_combines_source_planners_once() -> None:
     assert effective_rows[0]["spatial_bucket_counts"] == {"near": 2}
     effective_metrics = [
         row
-        for row in aggregates["success_and_metrics"]
+        for row in aggregates["atomic_skills_success_and_metrics"]
         if row["algorithm"] == "sequential_ik_interpolation"
     ]
     assert len(effective_metrics) == 1

@@ -34,6 +34,7 @@ from embodichain.lab.sim.atomic_actions import (
     MotionPolicy,
 )
 from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory, TimedTrajectory
+from embodichain.lab.sim.motion.planners.utils import PlanResult
 from embodichain.utils.math import axis_angle_to_rotation_matrix
 from scripts.benchmark.motion_generation.aggregation import aggregate_results
 from scripts.benchmark.motion_generation.artifacts import (
@@ -42,6 +43,7 @@ from scripts.benchmark.motion_generation.artifacts import (
 )
 from scripts.benchmark.motion_generation.config import load_suite
 from scripts.benchmark.motion_generation.contracts import ReplayObservationTrace
+from scripts.benchmark.motion_generation.metrics.trajectory import compute_case_outcomes
 from scripts.benchmark.motion_generation.models import (
     AlgorithmRole,
     BenchmarkCase,
@@ -71,9 +73,6 @@ from scripts.benchmark.motion_generation.scenarios.atomic_case_utils import (
     randomization_parameters,
     seeded_jitter,
     snapshot_case_qpos,
-)
-from scripts.benchmark.motion_generation.scenarios.atomic_evaluation import (
-    articulation_effect_success,
 )
 from scripts.benchmark.motion_generation.scenarios.atomic_policy import (
     benchmark_motion_attribution,
@@ -625,7 +624,7 @@ def test_place_rejects_wrong_terminal_height_and_orientation() -> None:
     assert [result.failure_stage for result in results] == ["placed", "placed"]
 
 
-def test_press_provider_scores_only_the_requested_actuation_trace() -> None:
+def test_press_provider_scores_peak_stroke_within_actuation_trace() -> None:
     case = replace(
         _atomic_case(),
         batch_size=2,
@@ -645,7 +644,7 @@ def test_press_provider_scores_only_the_requested_actuation_trace() -> None:
         replay_traces={
             "press_actuation": ReplayObservationTrace(
                 articulation_joint=torch.tensor(
-                    [[0.0, 0.0], [0.003, 0.003], [0.005, 0.004]]
+                    [[0.0, 0.0], [0.005, 0.004], [0.0, 0.0]]
                 )
             )
         },
@@ -1261,7 +1260,6 @@ def test_atomic_cube_uses_current_rigid_object_physics_api():
                 "articulation": "microwave",
                 "target_link": "button_link",
                 "target_joint": "button_joint",
-                "minimum_joint_delta_m": 0.004,
             },
             "prismatic",
             4,
@@ -1278,7 +1276,6 @@ def test_atomic_cube_uses_current_rigid_object_physics_api():
                 "articulation": "drawer",
                 "target_link": "large_handle_bar",
                 "target_joint": "cabinet_to_drawer",
-                "minimum_joint_delta_m": 0.12,
             },
             "prismatic",
             3,
@@ -1295,7 +1292,6 @@ def test_atomic_cube_uses_current_rigid_object_physics_api():
                 "articulation": "microwave",
                 "target_link": "knob_link",
                 "target_joint": "knob_joint",
-                "minimum_joint_delta_rad": 0.5,
             },
             "revolute",
             11,
@@ -1587,114 +1583,12 @@ def test_execute_masks_failed_plan_rows_from_execution_success() -> None:
     assert observation.execution_success.tolist() == [True, False]
 
 
-def test_articulation_effect_uses_peak_displacement_when_joint_rebounds():
-    case = replace(
-        _atomic_case(),
-        case_parameters={"minimum_articulation_joint_delta": 0.004},
-    )
-    observation = ExecutionObservation(
-        execution_success=torch.tensor([True]),
-        final_tcp_pose=torch.eye(4).unsqueeze(0),
-        joint_tracking_rmse_rad=torch.zeros(1),
-        execution_time_ms=1.0,
-        task_completion_time_s=0.1,
-        articulation_joint_initial=torch.tensor([0.0]),
-        articulation_joint_final=torch.tensor([0.0]),
-        articulation_joint_peak_signed_delta=torch.tensor([0.005]),
-    )
-
-    success = articulation_effect_success(
-        case,
-        observation,
-        (_atomic_outcome(),),
-    )
-
-    assert observation.articulation_joint_final.item() == pytest.approx(
-        observation.articulation_joint_initial.item()
-    )
-    assert success.tolist() == [True]
-
-
-def test_pick_up_requires_measured_object_lift() -> None:
-    provider = create_atomic_skill_provider("pick_up")
-    case = replace(
-        _atomic_case(),
-        batch_size=2,
-        skill_id="pick_up",
-        case_parameters={"minimum_object_lift_m": 0.04},
-    )
-    observation = ExecutionObservation(
-        execution_success=torch.ones(2, dtype=torch.bool),
-        final_tcp_pose=torch.eye(4).repeat(2, 1, 1),
-        joint_tracking_rmse_rad=torch.zeros(2),
-        execution_time_ms=1.0,
-        task_completion_time_s=0.1,
-        object_lift_delta_m=torch.tensor([0.05, 0.01]),
-    )
-    outcomes = tuple(replace(_atomic_outcome(), env_index=index) for index in range(2))
-
-    success, failure_code = provider.task_result(
-        Mock(), case, Mock(), observation, outcomes
-    )
-
-    assert success.tolist() == [True, False]
-    assert failure_code == "object_not_lifted"
-
-
-@pytest.mark.parametrize(
-    ("skill_id", "failure_code"),
-    [
-        ("move_held_object", "object_goal_miss"),
-        ("place", "object_not_placed"),
-    ],
-)
-def test_object_motion_requires_measured_target_pose(
-    skill_id: str, failure_code: str
-) -> None:
-    provider = create_atomic_skill_provider(skill_id)
-    target_pose = torch.eye(4).repeat(3, 1, 1)
-    final_pose = target_pose.clone()
-    final_pose[1, 0, 3] = 0.20
-    angle = torch.tensor(0.20)
-    final_pose[2, 1, 1] = torch.cos(angle)
-    final_pose[2, 1, 2] = -torch.sin(angle)
-    final_pose[2, 2, 1] = torch.sin(angle)
-    final_pose[2, 2, 2] = torch.cos(angle)
-    case = replace(
-        _atomic_case(),
-        batch_size=3,
-        skill_id=skill_id,
-        case_parameters={
-            "target_object_pose": target_pose.tolist(),
-            "object_position_threshold_m": 0.05,
-            "object_tilt_threshold_rad": 0.10,
-        },
-    )
-    observation = ExecutionObservation(
-        execution_success=torch.ones(3, dtype=torch.bool),
-        final_tcp_pose=torch.eye(4).repeat(3, 1, 1),
-        joint_tracking_rmse_rad=torch.zeros(3),
-        execution_time_ms=1.0,
-        task_completion_time_s=0.1,
-        final_object_pose=final_pose,
-    )
-    scenario = AtomicSkillScenario()
-    scenario.suite = Mock(protocol=Mock(rotation_threshold_rad=0.10))
-    outcomes = tuple(replace(_atomic_outcome(), env_index=index) for index in range(3))
-
-    success, actual_failure_code = provider.task_result(
-        scenario, case, Mock(), observation, outcomes
-    )
-
-    assert success.tolist() == [True, False, False]
-    assert actual_failure_code == failure_code
-
-
 @pytest.mark.parametrize("skill_id", ["move_held_object", "place"])
 def test_target_yaw_domain_requires_measured_full_rotation(skill_id: str) -> None:
     """A target-yaw case rejects a yaw miss even when object tilt is zero."""
     provider = create_atomic_skill_provider(skill_id)
     target_pose = torch.eye(4).repeat(2, 1, 1)
+    target_pose[:, 2, 3] = 0.1
     final_pose = target_pose.clone()
     yaw = torch.tensor(0.20)
     final_pose[1, 0, 0] = torch.cos(yaw)
@@ -1706,10 +1600,9 @@ def test_target_yaw_domain_requires_measured_full_rotation(skill_id: str) -> Non
         batch_size=2,
         skill_id=skill_id,
         case_parameters={
+            "object_initial_pose": torch.eye(4).repeat(2, 1, 1).tolist(),
             "target_object_pose": target_pose.tolist(),
-            "object_position_threshold_m": 0.05,
-            "object_tilt_threshold_rad": 0.10,
-            "object_rotation_threshold_rad": 0.10,
+            **({"object_rotation_threshold_rad": 0.10} if skill_id == "place" else {}),
         },
     )
     observation = ExecutionObservation(
@@ -1718,42 +1611,31 @@ def test_target_yaw_domain_requires_measured_full_rotation(skill_id: str) -> Non
         joint_tracking_rmse_rad=torch.zeros(2),
         execution_time_ms=1.0,
         task_completion_time_s=0.1,
-        final_object_pose=final_pose,
-    )
-    scenario = AtomicSkillScenario()
-    scenario.suite = Mock(protocol=Mock(rotation_threshold_rad=0.10))
-    outcomes = tuple(replace(_atomic_outcome(), env_index=index) for index in range(2))
-
-    success, _ = provider.task_result(scenario, case, Mock(), observation, outcomes)
-
-    assert success.tolist() == [True, False]
-
-
-@pytest.mark.parametrize("skill_id", ["press", "slide", "twist"])
-def test_articulation_tasks_require_measured_joint_displacement(skill_id: str) -> None:
-    provider = create_atomic_skill_provider(skill_id)
-    case = replace(
-        _atomic_case(),
-        batch_size=2,
-        skill_id=skill_id,
-        case_parameters={"minimum_articulation_joint_delta": 0.004},
-    )
-    observation = ExecutionObservation(
-        execution_success=torch.ones(2, dtype=torch.bool),
-        final_tcp_pose=torch.eye(4).repeat(2, 1, 1),
-        joint_tracking_rmse_rad=torch.zeros(2),
-        execution_time_ms=1.0,
-        task_completion_time_s=0.1,
-        articulation_joint_peak_signed_delta=torch.tensor([0.005, 0.003]),
+        gripper_open_qpos={"hand": torch.tensor([0.0])},
+        gripper_grasp_qpos={"hand": torch.tensor([1.0])},
+        replay_traces={
+            "held_object_transport": ReplayObservationTrace(
+                object_pose=target_pose.unsqueeze(0).repeat(2, 1, 1, 1)
+            ),
+            "held_object_settle": ReplayObservationTrace(
+                object_pose=final_pose.unsqueeze(0).repeat(2, 1, 1, 1),
+                gripper_qpos={"hand": torch.full((2, 2, 1), 0.5)},
+            ),
+            "place_release": ReplayObservationTrace(
+                gripper_qpos={"hand": torch.zeros(2, 2, 1)}
+            ),
+            "place_settle": ReplayObservationTrace(
+                object_pose=final_pose.unsqueeze(0).repeat(2, 1, 1, 1)
+            ),
+        },
     )
     outcomes = tuple(replace(_atomic_outcome(), env_index=index) for index in range(2))
 
-    success, failure_code = provider.task_result(
-        Mock(), case, Mock(), observation, outcomes
-    )
+    evaluator = provider.physical_evaluator()
+    assert evaluator is not None
+    results = evaluator.evaluate(case, observation, outcomes)
 
-    assert success.tolist() == [True, False]
-    assert failure_code == "articulation_effect_miss"
+    assert [result.task_success for result in results] == [True, False]
 
 
 def test_case_outcome_records_articulation_joint_measurements():
@@ -1805,10 +1687,16 @@ def test_atomic_primary_success_and_execution_efficiency_aggregate():
         outcomes=(_atomic_outcome(),),
     )
 
-    aggregates = aggregate_results([record], metadata, [case], measured_trials=1)
-    metrics = aggregates["success_and_metrics"][0]
-    performance = aggregates["time_and_memory"][0]
-    leaderboard = aggregates["leaderboard"][0]
+    aggregates = aggregate_results(
+        [record],
+        metadata,
+        [case],
+        measured_trials=1,
+        track_scenarios={case.track: "atomic_skill"},
+    )
+    metrics = aggregates["atomic_skills_success_and_metrics"][0]
+    performance = aggregates["atomic_skills_time_and_memory"][0]
+    leaderboard = aggregates["atomic_skills_leaderboard"][0]
 
     assert metrics["primary_success"] == "task_success"
     assert metrics["success_rate"] == pytest.approx(1.0)
@@ -1879,12 +1767,23 @@ def test_planner_aggregates_report_bypassed_cases_under_effective_algorithm():
         metadata,
         [selected_case, bypassed_case],
         measured_trials=1,
+        track_scenarios={
+            case.track: "atomic_skill" for case in [selected_case, bypassed_case]
+        },
     )
 
-    performance = aggregates["time_and_memory"]
-    metrics = aggregates["success_and_metrics"]
-    leaderboard = aggregates["leaderboard"][0]
-    assert [row["skill"] for row in performance] == ["move_end_effector"]
+    performance = aggregates["atomic_skills_time_and_memory"]
+    metrics = aggregates["atomic_skills_success_and_metrics"]
+    leaderboard = next(
+        row
+        for row in aggregates["atomic_skills_leaderboard"]
+        if row["algorithm"] == "curobo"
+    )
+    assert {row["skill"] for row in performance} == {"move_end_effector", "press"}
+    effective_performance = next(
+        row for row in performance if row["algorithm"] == "sequential_ik_interpolation"
+    )
+    assert effective_performance["compile_time_ms"] == pytest.approx(1.0)
     assert {row["skill"] for row in metrics} == {"move_end_effector", "press"}
     planner_metrics = next(row for row in metrics if row["algorithm"] == "curobo")
     assert planner_metrics["skill"] == "move_end_effector"
@@ -1900,13 +1799,22 @@ def test_planner_aggregates_report_bypassed_cases_under_effective_algorithm():
     assert leaderboard["bypassed_cases"] == 1
     assert leaderboard["coverage_rate"] == pytest.approx(1.0)
     assert leaderboard["overall_success_rate"] == pytest.approx(0.0)
-    assert leaderboard["latency_p95_ms"] == pytest.approx(20.0)
+    assert leaderboard["latency_p95_ms"] is None
+    assert leaderboard["compile_latency_p95_ms"] == pytest.approx(20.0)
 
     bypass_only = aggregate_results(
-        [bypassed_record], metadata, [bypassed_case], measured_trials=1
+        [bypassed_record],
+        metadata,
+        [bypassed_case],
+        measured_trials=1,
+        track_scenarios={case.track: "atomic_skill" for case in [bypassed_case]},
     )
-    bypass_leaderboard = bypass_only["leaderboard"][0]
-    bypass_metrics = bypass_only["success_and_metrics"]
+    bypass_leaderboard = next(
+        row
+        for row in bypass_only["atomic_skills_leaderboard"]
+        if row["algorithm"] == "curobo"
+    )
+    bypass_metrics = bypass_only["atomic_skills_success_and_metrics"]
     assert len(bypass_metrics) == 1
     assert bypass_metrics[0]["algorithm"] == "sequential_ik_interpolation"
     assert bypass_metrics[0]["skill"] == "press"
@@ -1915,7 +1823,8 @@ def test_planner_aggregates_report_bypassed_cases_under_effective_algorithm():
     assert bypass_leaderboard["attributed_cases"] == 0
     assert bypass_leaderboard["bypassed_cases"] == 1
     assert bypass_leaderboard["coverage_rate"] == pytest.approx(0.0)
-    assert bypass_leaderboard["overall_success_rate"] == pytest.approx(0.0)
+    assert bypass_leaderboard["overall_success_rate"] is None
+    assert bypass_leaderboard["rank"] is None
     assert bypass_leaderboard["latency_p95_ms"] is None
 
 
@@ -2344,7 +2253,13 @@ def test_case_snapshot_uses_one_read_and_runtime_joint_order() -> None:
     assert torch.equal(start, canonical_case_qpos(before)[:, [2, 0]])
 
 
-def test_ur5_atomic_move_joints_case_uses_six_controlled_joints() -> None:
+@pytest.mark.parametrize(
+    ("configured_threshold", "motion_valid"),
+    [(None, True), (0.01, False), (0.03, True)],
+)
+def test_atomic_move_joints_case_preserves_joint_motion_threshold(
+    configured_threshold: float | None, motion_valid: bool
+) -> None:
     suite = load_suite("atomic_ur5_pgi_randomized")
     track = suite.enabled_tracks()[0]
     # Keep provider coverage independent of the interaction-only randomized suite.
@@ -2353,11 +2268,17 @@ def test_ur5_atomic_move_joints_case_uses_six_controlled_joints() -> None:
         "target_offsets_rad": [[0.1, -0.1, 0.1, -0.1, 0.1, -0.1]],
         "sample_count": 80,
     }
+    if configured_threshold is not None:
+        config["joint_threshold_rad"] = configured_threshold
     robot = Mock(device=torch.device("cpu"))
     robot.get_qpos.return_value = torch.zeros(1, 8)  # Six arm and two hand joints.
     robot.get_joint_ids.return_value = list(range(6))
     robot.get_qpos_limits.return_value = torch.tensor([[[-6.28, 6.28]] * 6])
     robot.compute_fk.return_value = torch.eye(4).unsqueeze(0)
+    robot.get_qvel_limits.return_value = torch.full((1, 6), float("inf"))
+    robot.compute_batch_fk.side_effect = lambda qpos, **kwargs: torch.eye(4).repeat(
+        *qpos.shape[:2], 1, 1
+    )
     scenario = Mock(robot=robot, control_part="arm")
 
     case = create_atomic_skill_provider("move_joints").generate_case(
@@ -2370,6 +2291,28 @@ def test_ur5_atomic_move_joints_case_uses_six_controlled_joints() -> None:
     assert case.start_qpos.shape == (1, 6)
     assert case.full_start_qpos.shape == (1, 8)
     assert case.reference_qpos.shape == (1, 1, 6)
+
+    expected_threshold = 0.02 if configured_threshold is None else configured_threshold
+    assert case.case_parameters["joint_threshold_rad"] == expected_threshold
+    # The final joint error lies between the strict and default motion thresholds.
+    endpoint = case.reference_qpos[:, -1] - 0.015
+    result = PlanResult(
+        success=True,
+        positions=torch.stack((case.start_qpos, endpoint), dim=1),
+        dt=torch.tensor([[0.0, 1.0]]),
+    )
+    outcome = compute_case_outcomes(
+        result,
+        case,
+        robot,
+        "arm",
+        validation_samples=8,
+        position_threshold_m=0.003,
+        rotation_threshold_rad=0.08727,
+        joint_limit_tolerance_rad=1.0e-5,
+    )[0]
+    assert outcome.ordered_waypoints_reached is motion_valid
+    assert outcome.motion_valid is motion_valid
 
 
 def test_move_joints_case_uses_canonical_snapshot_for_targets(tmp_path: Path) -> None:
