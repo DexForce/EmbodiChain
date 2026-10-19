@@ -229,3 +229,18 @@ The independent evaluator loaded the retained trained model and succeeded on
 curves above are the earlier pilot. This host's native DexSim facade is currently
 inconsistent; real checks used the same existing compatible runtime overlay as
 the earlier experiments, without changing the global installation.
+
+On the validation host, use the `py311` environment and the already-existing
+compatible runtime overlay to repeat the native checks:
+
+```bash
+conda activate py311
+export PYTHONPATH="$PWD:$PWD/extensions:$PWD/extensions/embodichain_tasks:/tmp/ods-dexsim-runtime"
+```
+
+That temporary overlay is host-specific and is not shipped with this example;
+other installations need a matched DexSim runtime. Full Sphinx validation on
+this host remains blocked by the installed Open3D package's missing CPU module.
+The isolated official-task package test deliberately resets `PYTHONPATH` and
+also encounters the mismatched global DexSim facade. API coverage and focused
+context/documentation checks passed.
