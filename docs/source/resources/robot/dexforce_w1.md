@@ -32,7 +32,7 @@ cameras, and both arms for one robot version.
 - `hand_attach_xposes`: Optional hand-specific mounting transforms.
 
 ```python
-from embodichain.lab.sim.robots import DexforceW1Cfg
+from embodichain_robots import DexforceW1Cfg
 
 cfg = DexforceW1Cfg.from_dict(
     {
@@ -48,6 +48,23 @@ cfg = DexforceW1Cfg.from_dict(
 robot = sim.add_robot(cfg=cfg)
 print("DexforceW1 robot added to the simulation.")
 ```
+
+## Catalog Variants and Control DOFs
+
+`embodichain list-robot` advertises three body releases (`v021`, `v022`, and
+`v025`) with six hand profiles each, for 18 combinations. Dual BrainCo hands
+provide 32 independent control DOFs; every pairing of DH_PGC and DH_PGC_M
+grippers provides 22; `with_default_eef=False` provides 20. The default is body
+`v021` with two BrainCo hands. Dexterous-hand/two-finger-gripper mixtures are
+omitted from the advertised profiles.
+
+BrainCo PIP followers are passive joints outside the default hand control
+groups. They are listed as mimic joints while each `left_eef` / `right_eef`
+group contains six independent control joints. DH gripper groups each have
+one independent joint and one follower, displayed as `1+1m`.
+
+See {doc}`/guides/robot_catalog` for the complete hand-pairing table and
+examples of selecting these profiles through configuration fields.
 
 ## Arm Joint Design: Mirrored Configuration
 
@@ -137,7 +154,7 @@ and camera calibration must remain consistent.
 Robot and hand versions are independent. `DexforceW1Version` selects the W1
 body, arm assets, kinematics, and flange calibration. `DexforceW1HandVersion`
 selects an external hand or gripper asset from
-`embodichain/lab/sim/robots/dexforce_w1/hand_specs.py`.
+`embodichain_robots/dexforce_w1/hand_specs.py`.
 
 The currently released BrainCo hand and DH gripper registrations all use
 `DexforceW1HandVersion.V021`. Therefore W1 V021, V022, and V025 select hand V021
@@ -149,7 +166,7 @@ To add another W1 revision:
 
 1. Register the new `DexforceW1Version` value and dataset archive.
 2. Add one `W1VersionSpec` entry in
-   `embodichain/lab/sim/robots/dexforce_w1/specs.py`.
+   `embodichain_robots/dexforce_w1/specs.py`.
 3. Register component URDF paths and the full-robot URDF path.
 4. Set the arm kinematic parameters and
    `default_eef_attach_xpos` for both sides. Use identity only after confirming

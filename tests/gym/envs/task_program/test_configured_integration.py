@@ -67,7 +67,7 @@ from embodichain.lab.sim.atomic_actions.runtime_commands import (
     RuntimeCommandFrame,
 )
 from embodichain.lab.sim.sensors import CameraCfg
-from embodichain.lab.sim.robots import TianjiMarvinCfg
+from embodichain_robots import TianjiMarvinCfg
 from embodichain.lab.task_program.semantics import (
     RegisteredSemanticCall,
     SceneObjectRef,
@@ -955,7 +955,7 @@ def test_marvin_embodiment_grasp_defaults_compose_with_bimanual_task(
 ) -> None:
     """Both Marvin hands use source joint commands and toolkit policy defaults."""
     monkeypatch.setattr(
-        "embodichain.lab.sim.robots.tianji_marvin.get_data_path", lambda value: value
+        "embodichain_robots.tianji_marvin.get_data_path", lambda value: value
     )
     path = _config_path("hand_over")
     config = _gym_config("hand_over")

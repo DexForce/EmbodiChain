@@ -25,11 +25,19 @@ python -m scripts.benchmark.motion_generation.run_benchmark \
 python -m scripts.benchmark.motion_generation.run_benchmark \
   --suite atomic_franka_pgi_door_pour_align_push --device cuda
 python -m scripts.benchmark.motion_generation.run_benchmark \
+  --suite atomic_franka_pgi_spatial_generalization --device cuda
+python -m scripts.benchmark.motion_generation.run_benchmark \
   --suite atomic_dual_ur5_pgi_hand_over --device cpu
 python -m scripts.benchmark.motion_generation.run_benchmark \
   --suite atomic_dual_ur5_pgi_coordinated_pickment --device cpu
 python -m scripts.benchmark.motion_generation.run_benchmark \
   --suite atomic_dual_ur5_pgi_coordinated_placement --device cpu
+python -m scripts.benchmark.motion_generation.run_benchmark \
+  --suite atomic_dual_ur5_pgi_hand_over_spatial_generalization --device cpu
+python -m scripts.benchmark.motion_generation.run_benchmark \
+  --suite atomic_dual_ur5_pgi_coordinated_pickment_spatial_generalization --device cpu
+python -m scripts.benchmark.motion_generation.run_benchmark \
+  --suite atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization --device cpu
 python -m scripts.benchmark.motion_generation.run_benchmark \
   --extra-baselines ik_interpolate toppra
 ```
@@ -71,6 +79,20 @@ in that run's `videos/` directory.
   read from the replayed scene: the hinge angle at the end of the opening
   segment, the held object's peak rotation about its own axis while pouring,
   the held object's axis after alignment, and the pushed object's final pose.
+- `atomic_franka_pgi_spatial_generalization_v5` is the strict spatial
+  generalization baseline for all ten task-level Franka skills: `PickUp`,
+  `MoveHeldObject`, `Place`, `Press`, `Slide`, `Twist`, `OpenDoor`, `Pour`,
+  `AxisAlign`, and `PushObject`. Tracks group only skills with the same spatial
+  contract, so object-only skills are never mislabeled as target-shift tests.
+  Its isolated robustness domains cover object translation and orientation,
+  plus target translation and orientation for skills with a Cartesian goal.
+  Fixed-base articulations additionally vary root height and roll/pitch;
+  held-object goals additionally vary target height and roll/pitch. Each domain
+  keeps assets, physics, robot, and task semantics fixed and contains eight
+  deterministic samples per seed.
+  Domain overrides
+  select `B=1` for nominal cases and `B=8` for shifted cases; generated poses
+  are frozen in the case manifest and restored before every planner replay.
 - Dual-arm slice on the tutorial dual UR5 + PGI robot (`dual_arm` robot
   provider): `HandOver`, `CoordinatedPickment`, and `CoordinatedPlacement`,
   one suite each, reusing each tutorial's robot settings and scene. These
@@ -85,8 +107,30 @@ in that run's `videos/` directory.
   in one track cannot change each other's grasps. It succeeds only when both
   grippers end at least `gripper_hold_gap` past open and short of their grasp
   command (a gripper that misses closes to the command) and the object is
-  within its position and full-rotation tolerance. `CoordinatedPlacement` compares the placed
-  object's full rotation relative to its support.
+  within its position and full-rotation tolerance. `CoordinatedPlacement`
+  compares the placed object's full rotation relative to its support. All
+  three providers consume the shared pose-batch object/target translation
+  ranges. Placement randomizes both objects on independent deterministic
+  streams and additionally accepts
+  `support_object_position_jitter_m` and `support_object_yaw_jitter_rad`
+  overrides; its grasp and target transforms are rebuilt per environment row.
+  The corresponding `*_spatial_generalization` suites add three-seed nominal,
+  object-XY, object-yaw, and target-relative-position populations. Coordinated
+  Pickment varies target height, yaw, and roll/pitch. Coordinated Placement
+  varies target height/yaw, separately varies the support object's XY/yaw, and
+  applies shared task-frame XY/yaw transforms to both objects while preserving
+  their relative layout.
+
+  | Atomic Skill | Subject XY | Subject Z | Subject yaw | Subject roll/pitch | Target XY | Target Z | Target yaw | Target roll/pitch | Support XY/yaw | Task-frame XY/yaw |
+  | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+  | `PickUp`, `Pour`, `AxisAlign` | ✓ |  | ✓ |  |  |  |  |  |  |  |
+  | `MoveHeldObject` | ✓ |  | ✓ |  | ✓ | ✓ | ✓ | ✓ |  |  |
+  | `Place` | ✓ |  | ✓ |  | ✓ |  | ✓ |  |  |  |
+  | `PushObject` | ✓ |  | ✓ |  | ✓ |  |  |  |  |  |
+  | `Press`, `Twist`, `Slide`, `OpenDoor` | ✓ | ✓ | ✓ | ✓ |  |  |  |  |  |  |
+  | `HandOver` | ✓ |  | ✓ |  | ✓ |  |  |  |  |  |
+  | `CoordinatedPickment` | ✓ |  | ✓ |  | ✓ | ✓ | ✓ | ✓ |  |  |
+  | `CoordinatedPlacement` | ✓ |  | ✓ |  | ✓ | ✓ | ✓ |  | ✓ | ✓ |
 - Track configs may declare `grippers` (one entry per gripper) instead of
   `gripper`, `fixtures` (static tables and slabs that are never parked), and
   cases may keep extra objects in the scene through `scene_object_poses`.
@@ -136,7 +180,7 @@ scenes. Use `--no-headless` instead to open the live simulator viewer.
   geometry-sampled antipodal candidate selection remains `B=1`; the supplied
   articulated `Slide` case instead shares one target-local candidate across
   translation-only rows.
-- The supplied pose-batch suite covers only Franka + PGI and cuRobo
+- The supplied single-arm pose-batch suites cover only Franka + PGI
 - The v3 suite's Microwave and Drawer are physical simulation articulations,
   but cuRobo still receives an empty external collision world. Contact replay
   validates target-joint actuation; it does not guarantee collision safety
@@ -208,9 +252,11 @@ population; later populations extend the manifest.
 ### Provider and evaluator interfaces
 
 `atomic_skill.py` owns `AtomicSkillCaseProvider`; the previous import from
-`scenarios.atomic_task` remains available. Existing providers continue to use
-`task_result()`. A migrated provider overrides `physical_evaluator()` to return
-an implementation of `contracts.PhysicalStageEvaluator`:
+`scenarios.atomic_task` remains available. All 15 registered Atomic Skills use
+v1 physical evaluators. Terminal skills score settled replay state; staged
+skills declare compiled-coordinate replay windows and score the resulting raw
+simulator traces. Providers override `physical_evaluator()` to return an
+implementation of `contracts.PhysicalStageEvaluator`:
 
 ```python
 def evaluate(
@@ -224,13 +270,14 @@ def evaluate(
 
 The evaluator receives frozen task inputs, measured replay observations, and
 motion-validation results. It receives neither the scenario/engine nor a
-`CompiledTrajectory` or `projected_context`. `ExecutionObservation` currently
-contains the existing measured replay summary, plus the target joint at the end
-of the declared articulation segment, the held object's peak signed rotation
-in a provider-declared window, and each configured gripper's final joint
-positions. Missing optional measurements
-mean unavailable evidence; the follow-up evaluation work must extend observation
-collection before claiming grasp/release/retention or intermediate-stage success.
+`CompiledTrajectory` or `projected_context`. A provider instead implements
+`replay_observation_windows()` while it still has the compiled segment map. Each
+window selects raw TCP pose, active-object pose, named scene-object poses,
+articulation-joint, or gripper-joint channels and may include terminal settle.
+`ExecutionObservation` carries the sampled traces plus configured gripper
+commands; missing optional measurements remain unavailable evidence rather than
+successful effects. Push contact uses an explicitly labeled measured object-
+motion proxy; it is not reported as contact-sensor evidence.
 
 ### Atomic Action runtime evidence
 
@@ -270,9 +317,9 @@ variance, retention, and eligibility.
 - **Embodiment and case integration:** build against `AtomicSkillCaseProvider`,
   reuse official component loading, and keep case generation independent of
   planner outcomes. Do not duplicate the runner lifecycle or artifact writers.
-- **Physical evaluation:** extend `ExecutionObservation` with measured segment
-  and contact evidence, implement evaluators and counterexample tests, then opt
-  providers into `physical_evaluator()` individually.
+- **Physical evaluation:** add provider-declared replay windows and measured
+  contact evidence when a new stage needs them, implement counterexample tests,
+  then opt the provider into `physical_evaluator()` individually.
 - **Framework and statistics:** add domain generators, physical observation
   collection, and richer confidence intervals on top of the current domain
   identity and aggregation contracts.

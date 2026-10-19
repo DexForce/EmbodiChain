@@ -838,7 +838,7 @@ def run_all_benchmarks(output: Path, profiles: list[str]) -> None:
     from embodichain.data import get_data_path
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
     from embodichain.lab.sim.cfg import DefaultPhysicsCfg, RenderCfg
-    from embodichain.lab.sim.robots import CobotMagicCfg
+    from embodichain_robots import CobotMagicCfg
 
     audit = _audit_urdf(
         Path(get_data_path("CobotMagicArm/CobotMagicWithGripperV100.urdf"))

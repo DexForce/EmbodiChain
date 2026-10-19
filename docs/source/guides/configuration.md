@@ -423,10 +423,13 @@ it validates.
 
 ### Robot Preset Configs
 
-Use `class_type` to select a `RobotCfg` subclass from
-`embodichain.lab.sim.robots`. Subclass-specific fields remain in the robot
-configuration and are passed to its `from_dict()` method. For example, this
-selects the canonical UR preset and then specifies the UR5 variant:
+Use `class_type` to select a registered `RobotCfg` subclass through
+`embodichain.robot_registry`. Official concrete presets live in
+`embodichain_robots`; generic dual-arm composition remains in the core.
+Run `embodichain list-robot` to discover IDs and control summaries.
+Subclass-specific fields remain in the robot configuration and are passed to
+its `from_dict()` method. For example, this selects the canonical UR preset
+and then specifies the UR5 variant:
 
 ```json
 {

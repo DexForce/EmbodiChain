@@ -14,15 +14,17 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 import numpy as np
 
 from dataclasses import dataclass, field
-from embodichain.lab.sim.robots.dexforce_w1.types import (
+from embodichain_robots.dexforce_w1.types import (
     DexforceW1ArmSide,
     DexforceW1Version,
 )
-from embodichain.lab.sim.robots.dexforce_w1.specs import get_w1_version_spec
+from embodichain_robots.dexforce_w1.specs import get_w1_version_spec
 
 
 @dataclass
@@ -196,3 +198,6 @@ class W1ArmKineParams:
                 self.rotation_directions, dtype=dtype, device=dev
             ),
         }
+
+
+__all__ = ["W1ArmKineParams"]

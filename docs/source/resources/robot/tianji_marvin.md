@@ -26,7 +26,7 @@ arm control parts with optional parallel-jaw grippers.
 | Parameter | Description |
 | --- | --- |
 | Arm DOF | 7 per arm, 14 total |
-| Gripper variant | `with_gripper=True` adds `left_hand` and `right_hand`; the default is `True` |
+| Gripper variant | `with_gripper=True` adds `left_eef` and `right_eef`; the default is `True` |
 | Gripper joints | Two finger joints per hand; finger 2 mimics finger 1 |
 | Arm root links | `left_arm_base` and `right_arm_base` |
 | Gripper asset | `TianjiMarvin/robot_with_ee_acd.urdf` |
@@ -37,14 +37,18 @@ The two variants expose the following control parts:
 
 | Setting | Control parts |
 | --- | --- |
-| `True` (default) | `left_arm`, `right_arm`, `left_hand`, `right_hand` |
+| `True` (default) | `left_arm`, `right_arm`, `left_eef`, `right_eef` |
 | `False` | `left_arm`, `right_arm` |
+
+The default catalog summary reports 16 independent control DOFs. Each gripper
+appears as `1+1m`, so its follower is excluded from the independent count.
+The arm-only configuration has 14 control DOFs.
 
 ## Quick Initialization Example
 
 ```python
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.robots import TianjiMarvinCfg
+from embodichain_robots import TianjiMarvinCfg
 
 config = SimulationManagerCfg(headless=False, device="cpu", num_envs=1)
 sim = SimulationManager(config)
@@ -115,7 +119,7 @@ source end-link poses, override both arm TCP transforms with identity matrices:
 
 ```python
 import numpy as np
-from embodichain.lab.sim.robots import TianjiMarvinCfg
+from embodichain_robots import TianjiMarvinCfg
 
 cfg = TianjiMarvinCfg.from_dict(
     {
@@ -133,8 +137,8 @@ cfg = TianjiMarvinCfg.from_dict(
 Run the preview and FK/IK smoke check in the project environment:
 
 ```bash
-conda run -n embodichain python -m embodichain.lab.sim.robots.tianji_marvin --headless
-conda run -n embodichain python -m embodichain.lab.sim.robots.tianji_marvin --headless --no-with-gripper
+conda run -n embodichain python -m embodichain_robots.tianji_marvin --headless
+conda run -n embodichain python -m embodichain_robots.tianji_marvin --headless --no-with-gripper
 ```
 
 Omit `--headless` to open the simulation window and an interactive session.

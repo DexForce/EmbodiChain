@@ -33,6 +33,7 @@ THIS_DIR = Path(__file__).resolve().parent
 CORE_PACKAGE_PATTERNS = ["embodichain", "embodichain.*"]
 TASKS_PROJECT_DIR = THIS_DIR / "embodichain_tasks"
 TASKS_PACKAGE_PATTERNS = ["embodichain_tasks", "embodichain_tasks.*"]
+ROBOTS_PACKAGE_PATTERNS = ["embodichain_robots", "embodichain_robots.*"]
 
 # Defer importing torch until it's actually needed (when building extensions).
 # This prevents `setup.py` from failing at import time in environments where
@@ -82,14 +83,26 @@ class CleanCommand(Command):
 
 
 def get_packages() -> list[str]:
-    """Return the core and official-task packages shipped in the main wheel."""
+    """Return core, task, and robot packages shipped in the main wheel."""
     core_packages = find_namespace_packages(
         where=str(THIS_DIR), include=CORE_PACKAGE_PATTERNS
     )
     task_packages = find_namespace_packages(
         where=str(TASKS_PROJECT_DIR), include=TASKS_PACKAGE_PATTERNS
     )
-    return sorted(set([*core_packages, *task_packages, "embodichain_tasks.configs"]))
+    robot_packages = find_namespace_packages(
+        where=str(THIS_DIR), include=ROBOTS_PACKAGE_PATTERNS
+    )
+    return sorted(
+        set(
+            [
+                *core_packages,
+                *task_packages,
+                *robot_packages,
+                "embodichain_tasks.configs",
+            ]
+        )
+    )
 
 
 def get_package_dir() -> dict[str, str]:
@@ -132,6 +145,7 @@ def main():
         package_data={
             "embodichain": ["VERSION"],
             "embodichain.gen_sim.simready_pipeline.configs": ["*.json"],
+            "embodichain.lab.scripts._atomic_action": ["README.md"],
             "embodichain_tasks.configs": [
                 "**/*.json",
                 "**/*.yaml",

@@ -39,6 +39,10 @@ from embodichain.lab.sim.motion.planners import MoveType, ToppraPlanOptions
 from embodichain.lab.sim.motion.planners.utils import TrajectorySampleMethod
 from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
 from scripts.benchmark.motion_generation.config import PlannerSpecCfg, load_suite
+from scripts.benchmark.motion_generation.contracts import (
+    ReplayObservationTrace,
+    ReplayObservationWindow,
+)
 from scripts.benchmark.motion_generation.models import (
     AlgorithmRole,
     BenchmarkCase,
@@ -125,6 +129,258 @@ def _observation(batch_size: int, **values: object) -> _ExecutionObservation:
 
 def _rotation_z(angle: float) -> torch.Tensor:
     return axis_angle_to_rotation_matrix(torch.tensor([0.0, 0.0, angle]))
+
+
+def test_open_door_physical_evaluator_uses_hinge_and_release_windows() -> None:
+    case = _case("open_door", 2, target_joint_position=0.5)
+    observation = _observation(
+        2,
+        gripper_open_qpos={"hand": torch.tensor([0.0])},
+        gripper_grasp_qpos={"hand": torch.tensor([1.0])},
+        replay_traces={
+            "door_actuation": ReplayObservationTrace(
+                articulation_joint=torch.tensor([[0.0, 0.0], [0.5, 0.3]])
+            ),
+            "door_release": ReplayObservationTrace(
+                gripper_qpos={"hand": torch.tensor([[[1.0], [1.0]], [[0.0], [0.0]]])}
+            ),
+        },
+    )
+
+    evaluator = create_atomic_skill_provider("open_door").physical_evaluator()
+    assert evaluator is not None
+    results = evaluator.evaluate(case, observation, _outcomes(2))
+
+    assert [result.task_success for result in results] == [True, False]
+    assert results[1].failure_stage == "opened"
+
+
+def test_pour_physical_evaluator_uses_object_pose_interval() -> None:
+    initial = torch.eye(4).repeat(2, 1, 1)
+    poses = torch.eye(4).repeat(3, 2, 1, 1)
+    poses[:, :, 2, 3] = 0.1
+    poses[1, :, :3, :3] = axis_angle_to_rotation_matrix(
+        torch.tensor([[0.0, 0.0, 0.5], [0.0, 0.0, 0.2]])
+    )
+    case = _case(
+        "pour",
+        2,
+        object_initial_pose=initial.tolist(),
+        object_rotation_axis=[0.0, 0.0, 1.0],
+        object_rotation_sign=1.0,
+        rotate_angle_rad=0.5,
+    )
+    settle = poses[-1:].repeat(2, 1, 1, 1)
+    observation = _observation(
+        2,
+        gripper_open_qpos={"hand": torch.tensor([0.0])},
+        gripper_grasp_qpos={"hand": torch.tensor([1.0])},
+        replay_traces={
+            "pour_actuation": ReplayObservationTrace(object_pose=poses),
+            "pour_settle": ReplayObservationTrace(
+                object_pose=settle,
+                gripper_qpos={"hand": torch.full((2, 2, 1), 0.5)},
+            ),
+        },
+    )
+
+    evaluator = create_atomic_skill_provider("pour").physical_evaluator()
+    assert evaluator is not None
+    results = evaluator.evaluate(case, observation, _outcomes(2))
+
+    assert [result.task_success for result in results] == [True, False]
+    assert results[0].stages[0].measurements[
+        "peak_signed_axis_angle_error_rad"
+    ] == pytest.approx(0.0, abs=1.0e-6)
+
+
+def test_pour_requires_terminal_lift_and_retention() -> None:
+    initial = torch.eye(4).repeat(2, 1, 1)
+    actuation = torch.eye(4).repeat(3, 2, 1, 1)
+    actuation[:, :, 2, 3] = 0.1
+    actuation[1, :, :3, :3] = axis_angle_to_rotation_matrix(
+        torch.tensor([[0.0, 0.0, 0.5], [0.0, 0.0, 0.5]])
+    )
+    settle = torch.eye(4).repeat(2, 2, 1, 1)
+    settle[:, 1, 2, 3] = 0.1
+    terminal_gripper = torch.full((2, 2, 1), 0.5)
+    terminal_gripper[:, 1] = 1.0
+    case = _case(
+        "pour",
+        2,
+        object_initial_pose=initial.tolist(),
+        object_rotation_axis=[0.0, 0.0, 1.0],
+        object_rotation_sign=1.0,
+        rotate_angle_rad=0.5,
+    )
+    observation = _observation(
+        2,
+        gripper_open_qpos={"hand": torch.tensor([0.0])},
+        gripper_grasp_qpos={"hand": torch.tensor([1.0])},
+        replay_traces={
+            "pour_actuation": ReplayObservationTrace(object_pose=actuation),
+            "pour_settle": ReplayObservationTrace(
+                object_pose=settle,
+                gripper_qpos={"hand": terminal_gripper},
+            ),
+        },
+    )
+
+    evaluator = create_atomic_skill_provider("pour").physical_evaluator()
+    assert evaluator is not None
+    results = evaluator.evaluate(case, observation, _outcomes(2))
+
+    assert [result.failure_stage for result in results] == ["settled", "held"]
+
+
+def test_axis_align_physical_evaluator_keeps_terminal_retention_separate() -> None:
+    initial = torch.eye(4).repeat(2, 1, 1)
+    actuation = torch.eye(4).repeat(2, 2, 1, 1)
+    actuation[:, :, 2, 3] = 0.1
+    actuation[-1, :, :3, :3] = axis_angle_to_rotation_matrix(
+        torch.tensor([[0.0, 0.0, math.pi / 2], [0.0, 0.0, math.pi / 4]])
+    )
+    settle = actuation[-1:].clone().repeat(2, 1, 1, 1)
+    case = _case(
+        "axis_align",
+        2,
+        object_initial_pose=initial.tolist(),
+        internal_axis=[1.0, 0.0, 0.0],
+        target_axis=[0.0, 1.0, 0.0],
+    )
+    observation = _observation(
+        2,
+        gripper_open_qpos={"hand": torch.tensor([0.0])},
+        gripper_grasp_qpos={"hand": torch.tensor([1.0])},
+        replay_traces={
+            "axis_align_grasp": ReplayObservationTrace(
+                gripper_qpos={"hand": torch.full((2, 2, 1), 0.5)},
+            ),
+            "axis_align_actuation": ReplayObservationTrace(object_pose=actuation),
+            "axis_align_settle": ReplayObservationTrace(
+                object_pose=settle,
+                gripper_qpos={"hand": torch.full((2, 2, 1), 0.5)},
+            ),
+        },
+    )
+
+    evaluator = create_atomic_skill_provider("axis_align").physical_evaluator()
+    assert evaluator is not None
+    results = evaluator.evaluate(case, observation, _outcomes(2))
+
+    assert [result.task_success for result in results] == [True, False]
+    assert results[0].stages[-1].stage_id == "held"
+    assert results[1].failure_stage == "aligned"
+
+
+def test_axis_align_requires_lift_and_terminal_alignment() -> None:
+    initial = torch.eye(4).repeat(2, 1, 1)
+    actuation = torch.eye(4).repeat(2, 2, 1, 1)
+    actuation[-1, :, :3, :3] = axis_angle_to_rotation_matrix(
+        torch.tensor([[0.0, 0.0, math.pi / 2], [0.0, 0.0, math.pi / 2]])
+    )
+    actuation[:, 1, 2, 3] = 0.1
+    settle = actuation[-1:].repeat(2, 1, 1, 1)
+    settle[:, 1, :3, :3] = torch.eye(3)
+    case = _case(
+        "axis_align",
+        2,
+        object_initial_pose=initial.tolist(),
+        internal_axis=[1.0, 0.0, 0.0],
+        target_axis=[0.0, 1.0, 0.0],
+    )
+    observation = _observation(
+        2,
+        gripper_open_qpos={"hand": torch.tensor([0.0])},
+        gripper_grasp_qpos={"hand": torch.tensor([1.0])},
+        replay_traces={
+            "axis_align_grasp": ReplayObservationTrace(
+                gripper_qpos={"hand": torch.full((2, 2, 1), 0.5)},
+            ),
+            "axis_align_actuation": ReplayObservationTrace(object_pose=actuation),
+            "axis_align_settle": ReplayObservationTrace(
+                object_pose=settle,
+                gripper_qpos={"hand": torch.full((2, 2, 1), 0.5)},
+            ),
+        },
+    )
+
+    evaluator = create_atomic_skill_provider("axis_align").physical_evaluator()
+    assert evaluator is not None
+    results = evaluator.evaluate(case, observation, _outcomes(2))
+
+    assert [result.failure_stage for result in results] == ["aligned", "settled"]
+
+
+def test_push_object_physical_evaluator_uses_contact_and_support_windows() -> None:
+    initial = torch.eye(4).repeat(2, 1, 1)
+    target = initial.clone()
+    target[:, 1, 3] = 0.1
+    contact = initial.unsqueeze(0).repeat(2, 1, 1, 1)
+    contact[-1, 0, 1, 3] = 0.001
+    actuation = initial.unsqueeze(0).repeat(2, 1, 1, 1)
+    actuation[-1] = target
+    settle = target.unsqueeze(0).repeat(2, 1, 1, 1)
+    case = _case(
+        "push_object",
+        2,
+        object_initial_pose=initial.tolist(),
+        target_object_pose=target.tolist(),
+        contact_motion_threshold_m=1.0e-5,
+        support_plane_tolerance_m=0.01,
+    )
+    observation = _observation(
+        2,
+        replay_traces={
+            "push_contact": ReplayObservationTrace(object_pose=contact),
+            "push_actuation": ReplayObservationTrace(object_pose=actuation),
+            "push_settle": ReplayObservationTrace(object_pose=settle),
+        },
+    )
+
+    evaluator = create_atomic_skill_provider("push_object").physical_evaluator()
+    assert evaluator is not None
+    results = evaluator.evaluate(case, observation, _outcomes(2))
+
+    assert [result.task_success for result in results] == [True, False]
+    assert results[0].stages[0].evidence_source == (
+        "measured_proxy:object_motion_during_contact"
+    )
+    assert results[1].failure_stage == "contacted"
+
+
+def test_push_object_rechecks_in_plane_goal_after_settle() -> None:
+    initial = torch.eye(4).reshape(1, 4, 4)
+    target = initial.clone()
+    target[:, 1, 3] = 0.1
+    contact = initial.unsqueeze(0).repeat(2, 1, 1, 1)
+    contact[-1, :, 1, 3] = 0.001
+    actuation = torch.stack((initial, target))
+    settle = target.unsqueeze(0).repeat(2, 1, 1, 1)
+    settle[:, :, 0, 3] = 0.05
+    case = _case(
+        "push_object",
+        1,
+        object_initial_pose=initial.tolist(),
+        target_object_pose=target.tolist(),
+        contact_motion_threshold_m=1.0e-5,
+        support_plane_tolerance_m=0.01,
+    )
+    observation = _observation(
+        1,
+        replay_traces={
+            "push_contact": ReplayObservationTrace(object_pose=contact),
+            "push_actuation": ReplayObservationTrace(object_pose=actuation),
+            "push_settle": ReplayObservationTrace(object_pose=settle),
+        },
+    )
+
+    evaluator = create_atomic_skill_provider("push_object").physical_evaluator()
+    assert evaluator is not None
+    result = evaluator.evaluate(case, observation, _outcomes(1))[0]
+
+    assert not result.task_success
+    assert result.failure_stage == "on_support_plane"
 
 
 def _door_affordance() -> OpenDoorAffordance:
@@ -614,6 +870,9 @@ def test_replay_measures_hinge_at_segment_end_and_peak_object_rotation() -> None
     provider = Mock()
     provider.lift_segment_start.return_value = None
     provider.object_rotation_segment.return_value = (1, 3)
+    provider.replay_observation_windows.return_value = (
+        ReplayObservationWindow("pour_trace", 1, 3, frozenset({"object_pose"})),
+    )
     case = _case(
         "pour",
         1,
@@ -627,6 +886,7 @@ def test_replay_measures_hinge_at_segment_end_and_peak_object_rotation() -> None
     assert metrics.object_rotation_peak_signed_rad.item() == pytest.approx(
         -0.2, abs=1e-5
     )
+    assert metrics.replay_traces["pour_trace"].object_pose.shape == (3, 1, 4, 4)
 
     state["step"] = 0
     articulation = Mock()
@@ -637,6 +897,7 @@ def test_replay_measures_hinge_at_segment_end_and_peak_object_rotation() -> None
     scenario._articulations = {"microwave": articulation}
     compiled.segment = Mock(return_value=SimpleNamespace(start=1, stop=3))
     provider.articulation_effect_segment.return_value = "open"
+    provider.replay_observation_windows.return_value = ()
     door_case = replace(
         _case("open_door", 1, target_joint="door_hinge"), object_id="microwave"
     )
@@ -666,3 +927,71 @@ def test_door_pour_align_push_suite_declares_the_four_skills() -> None:
     assert all(
         "fit_type" not in spec.config.get("auto_gen", {}) for spec in suite.planners
     )
+
+
+def test_axis_align_accepts_already_aligned_measured_grasp() -> None:
+    """A correctly grasped/lifted object need not rotate to be aligned."""
+    initial = torch.eye(4).reshape(1, 4, 4)
+    lifted = initial.clone()
+    lifted[:, 2, 3] = 0.1
+    poses = lifted.unsqueeze(0).repeat(2, 1, 1, 1)
+    holding = torch.full((2, 1, 1), 0.5)
+    case = _case(
+        "axis_align",
+        1,
+        object_initial_pose=initial.tolist(),
+        internal_axis=[1.0, 0.0, 0.0],
+        target_axis=[1.0, 0.0, 0.0],
+    )
+    observation = _observation(
+        1,
+        gripper_open_qpos={"hand": torch.tensor([0.0])},
+        gripper_grasp_qpos={"hand": torch.tensor([1.0])},
+        replay_traces={
+            "axis_align_grasp": ReplayObservationTrace(gripper_qpos={"hand": holding}),
+            "axis_align_actuation": ReplayObservationTrace(object_pose=poses),
+            "axis_align_settle": ReplayObservationTrace(
+                object_pose=poses, gripper_qpos={"hand": holding}
+            ),
+        },
+    )
+    result = (
+        create_atomic_skill_provider("axis_align")
+        .physical_evaluator()
+        .evaluate(case, observation, ())[0]
+    )
+    assert result.task_success
+    assert result.stages[0].measurements["grasp_established"] is True
+
+
+def test_push_succeeds_when_contact_starts_during_planar_motion() -> None:
+    """The clearance/descent prefix can leave the object stationary."""
+    initial = torch.eye(4).reshape(1, 4, 4)
+    target = initial.clone()
+    target[:, 1, 3] = 0.1
+    case = _case(
+        "push_object",
+        1,
+        object_initial_pose=initial.tolist(),
+        target_object_pose=target.tolist(),
+    )
+    observation = _observation(
+        1,
+        replay_traces={
+            "push_contact": ReplayObservationTrace(
+                object_pose=torch.stack((initial, initial, target))
+            ),
+            "push_actuation": ReplayObservationTrace(
+                object_pose=torch.stack((initial, target))
+            ),
+            "push_settle": ReplayObservationTrace(
+                object_pose=torch.stack((target, target))
+            ),
+        },
+    )
+    result = (
+        create_atomic_skill_provider("push_object")
+        .physical_evaluator()
+        .evaluate(case, observation, ())[0]
+    )
+    assert result.task_success

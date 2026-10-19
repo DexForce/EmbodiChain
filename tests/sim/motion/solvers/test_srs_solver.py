@@ -29,10 +29,10 @@ from embodichain.data import get_data_path
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import RobotCfg
 from embodichain.lab.sim.objects import Robot
-from embodichain.lab.sim.robots.dexforce_w1.params import (
+from embodichain_robots.dexforce_w1.params import (
     W1ArmKineParams,
 )
-from embodichain.lab.sim.robots.dexforce_w1.types import (
+from embodichain_robots.dexforce_w1.types import (
     DexforceW1ArmSide,
     DexforceW1Version,
 )
