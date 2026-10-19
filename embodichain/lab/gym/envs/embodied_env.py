@@ -31,7 +31,7 @@ import torch
 import numpy as np
 import gymnasium as gym
 
-from dataclasses import MISSING
+from dataclasses import MISSING, fields
 from typing import (
     TYPE_CHECKING,
     Dict,
@@ -86,6 +86,7 @@ from embodichain.lab.gym.envs.managers import (
 )
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.lab.gym.utils.gym_utils import (
+    _collect_sensor_cfgs,
     build_trajectory_buffer,
     init_rollout_buffer_from_gym_space,
 )
@@ -134,8 +135,8 @@ class EmbodiedEnvCfg(EnvCfg):
         `None`, all controllable joints are used.
     - **active_joint_ids**: List[int] — explicit joint indices to use for
         control (alternative to `control_parts`).
-    - **sensor**: List[`SensorCfg`] — sensors attached to the robot or scene
-        (cameras, depth, segmentation, force sensors, ...).
+    - **sensor**: List[`SensorCfg`] — independent sensors. Mounted cameras
+        declared by `robot.sensors` are included in the effective sensor suite.
     - **light**: `EnvLightCfg` — lighting configuration (direct lights now,
         indirect/IBL planned for future releases).
     - **background**, **rigid_object**, **rigid_object_group**, **articulation**:
@@ -180,15 +181,25 @@ class EmbodiedEnvCfg(EnvCfg):
     """
 
     sensor: List[SensorCfg] = []
+    """Independent sensors, combined with the robot's mounted sensor suite."""
     enable_sensor: bool = True
     """Whether configured sensors are instantiated and sampled.
 
-    Embodiment components may declare a reusable sensor suite even when a
-    deployment only needs proprioception. Set this to ``False`` to skip
+    Independent declarations and robot-mounted defaults remain available when
+    a deployment only needs proprioception. Set this to ``False`` to skip all
     sensor creation, including camera-group allocation and image fetching.
     """
 
     light: EnvLightCfg = EnvLightCfg()
+
+    ground_plane_visible: bool | None = None
+    """Native rendering visibility of the default ground plane.
+
+    ``None`` hides the ground when an active HDR indirect-lighting randomizer
+    is configured, and shows it otherwise. Explicit booleans override that
+    default. Visibility affects native windows and cameras without changing
+    ground collisions or the Viser grid.
+    """
 
     background: List[RigidObjectCfg] = []
 
@@ -782,9 +793,7 @@ class EmbodiedEnv(BaseEnv):
         )
 
         sensor_enabled = getattr(self.cfg, "enable_sensor", True)
-        sensor_uids = {
-            cfg.uid for cfg in getattr(self.cfg, "sensor", []) if cfg.uid is not None
-        }
+        sensor_uids = {cfg.uid for cfg in self._sensor_configs() if cfg.uid is not None}
 
         def uses_disabled_sensor(value: object, field_name: str | None = None) -> bool:
             """Return whether nested functor params reference a disabled sensor."""
@@ -893,7 +902,32 @@ class EmbodiedEnv(BaseEnv):
     def _setup_scene(self, **kwargs) -> None:
         """Filter configuration independently of the overridable demand hook."""
         self._apply_functor_filter()
+        self.cfg.ground_plane_visible = self._resolve_ground_plane_visibility()
         super()._setup_scene(**kwargs)
+
+    def _resolve_ground_plane_visibility(self) -> bool:
+        """Resolve the native ground default from filtered event configuration."""
+        visible = self.cfg.ground_plane_visible
+        if visible is not None:
+            if type(visible) is not bool:
+                raise TypeError("ground_plane_visible must be a bool or None.")
+            return visible
+
+        from embodichain.lab.gym.envs.managers.randomization.visual import (
+            randomize_indirect_lighting,
+        )
+
+        for collection, _, term in self._iter_configured_functors():
+            if collection is not self.cfg.events:
+                continue
+            func = self._configured_functor_callable(term)
+            if (
+                isinstance(func, type)
+                and issubclass(func, randomize_indirect_lighting)
+                and term.params.get("path") is not None
+            ):
+                return False
+        return True
 
     def _requires_native_renderer(self) -> bool:
         """Predict cameras from the already-filtered manager configuration."""
@@ -906,7 +940,7 @@ class EmbodiedEnv(BaseEnv):
         if super()._requires_native_renderer():
             return True
         if self.cfg.enable_sensor:
-            for sensor_cfg in self.cfg.sensor:
+            for sensor_cfg in self._sensor_configs():
                 sensor_factory = SimulationManager.SUPPORTED_SENSOR_TYPES.get(
                     sensor_cfg.sensor_type
                 )
@@ -1049,6 +1083,7 @@ class EmbodiedEnv(BaseEnv):
         return rewards
 
     def _prepare_scene(self, **kwargs) -> None:
+        self.sim.set_ground_plane_visibility(self.cfg.ground_plane_visible)
         self._setup_background()
         self._setup_interactive_objects()
         self._setup_lights()
@@ -2319,10 +2354,8 @@ class EmbodiedEnv(BaseEnv):
         Override this method in subclass to define task-specific logic for RL tasks.
 
         Returns:
-            Tuple of (success, fail, metrics):
-                - success: Boolean tensor of shape (num_envs,)
-                - fail: Boolean tensor of shape (num_envs,)
-                - metrics: Dict of metric tensors
+            tuple[torch.Tensor, torch.Tensor, dict[str, Any]]: Success and failure
+            masks of shape ``(num_envs,)``, followed by the metric tensor mapping.
         """
         success = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         fail = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
@@ -2591,7 +2624,22 @@ class EmbodiedEnv(BaseEnv):
         del kwargs
         if self.cfg.robot is None:
             logger.log_error("Robot configuration is not provided.")
-        return self.sim.add_robot(self.cfg.robot)
+        robot_cfg = copy.deepcopy(self.cfg.robot)
+        if isinstance(robot_cfg, RobotPresetCfg):
+            for item in fields(robot_cfg):
+                candidate = getattr(robot_cfg, item.name)
+                if isinstance(candidate, RobotCfg):
+                    candidate.enable_sensor = self.cfg.enable_sensor
+            selected_cfg = robot_cfg.resolve(
+                self.sim.sim_config.physics_cfg,
+                newton_solver_type=self.sim._active_newton_solver_type,
+            )
+        else:
+            robot_cfg.enable_sensor = self.cfg.enable_sensor
+            selected_cfg = robot_cfg
+        _collect_sensor_cfgs(selected_cfg, self.cfg.sensor)
+        self._robot_sensor_cfgs = selected_cfg.sensors
+        return self.sim.add_robot(robot_cfg)
 
     def _setup_robot(self, **kwargs) -> Robot:
         """Configure the finalized robot interface for the environment.
@@ -2648,6 +2696,18 @@ class EmbodiedEnv(BaseEnv):
         )
         return robot
 
+    def _sensor_configs(self) -> list[SensorCfg]:
+        """Return independent and selected robot sensor declarations."""
+        robot_cfg = getattr(self.cfg, "robot", None)
+        if hasattr(self, "_robot_sensor_cfgs"):
+            return _collect_sensor_cfgs(
+                None, [*getattr(self.cfg, "sensor", []), *self._robot_sensor_cfgs]
+            )
+        if isinstance(robot_cfg, RobotPresetCfg):
+            # Filtering and render-demand prediction run before World creation.
+            robot_cfg = robot_cfg.resolve(self.sim_cfg.physics_cfg)
+        return _collect_sensor_cfgs(robot_cfg, getattr(self.cfg, "sensor", []))
+
     def _setup_sensors(self, **kwargs) -> Dict[str, BaseSensor]:
         """Setup the sensors in the environment.
 
@@ -2655,7 +2715,6 @@ class EmbodiedEnv(BaseEnv):
             Dict[str, BaseSensor]: A dictionary mapping sensor UIDs to sensor instances.
         """
 
-        # TODO: support sensor attachment to the robot.
         if not self.cfg.enable_sensor:
             logger.log_info(
                 "Sensor acquisition is disabled; configured sensors will not be instantiated."
@@ -2665,6 +2724,11 @@ class EmbodiedEnv(BaseEnv):
         sensors = {}
         for cfg in self.cfg.sensor:
             sensor = self.sim.add_sensor(cfg)
+            sensors[cfg.uid] = sensor
+        for cfg in getattr(self, "_robot_sensor_cfgs", []):
+            sensor = self.sim.get_sensor(cfg.uid)
+            if sensor is None:
+                raise RuntimeError(f"Mounted sensor {cfg.uid!r} was not initialized.")
             sensors[cfg.uid] = sensor
         return sensors
 

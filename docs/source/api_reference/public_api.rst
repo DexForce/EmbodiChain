@@ -735,10 +735,10 @@ preview with managed control-part Gizmos and optional joint controls.
 .. autofunction:: main
 
 
-embodichain.lab.scripts.run_env
+embodichain.lab.scripts.run_task
 -------------------------------
 
-.. currentmodule:: embodichain.lab.scripts.run_env
+.. currentmodule:: embodichain.lab.scripts.run_task
 
 .. autosummary::
 
@@ -2170,28 +2170,28 @@ Row-wise action-adjoint clipping and its rollout-level diagnostics.
    BatchedGradientNormStats
    clip_batched_gradient_norm
 
-embodichain.learning.rl.models.actor_critic
--------------------------------------------
+embodichain.learning.rl.policies.actor_critic
+---------------------------------------------
 
-.. currentmodule:: embodichain.learning.rl.models.actor_critic
+.. currentmodule:: embodichain.learning.rl.policies.actor_critic
 
 .. autosummary::
 
    ActorCritic
 
-embodichain.learning.rl.models.actor_only
------------------------------------------
+embodichain.learning.rl.policies.actor_only
+-------------------------------------------
 
-.. currentmodule:: embodichain.learning.rl.models.actor_only
+.. currentmodule:: embodichain.learning.rl.policies.actor_only
 
 .. autosummary::
 
    ActorOnly
 
-embodichain.learning.rl.models.policy
--------------------------------------
+embodichain.learning.rl.policies.policy
+---------------------------------------
 
-.. currentmodule:: embodichain.learning.rl.models.policy
+.. currentmodule:: embodichain.learning.rl.policies.policy
 
 .. autosummary::
 
@@ -2416,15 +2416,6 @@ joint-position action variants.
 .. autosummary::
 
 
-embodichain_tasks.manipulation.tableware.blocks_ranking_rgb
------------------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.manipulation.tableware.blocks_ranking_rgb
-
-.. autosummary::
-
-   BlocksRankingRGBEnv
-
 embodichain_tasks.manipulation.tableware.blocks_ranking_size
 ------------------------------------------------------------
 
@@ -2452,24 +2443,6 @@ embodichain_tasks.manipulation.tableware.place_object_drawer
 
    PlaceObjectDrawerEnv
 
-embodichain_tasks.manipulation.tableware.scoop_ice
---------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.manipulation.tableware.scoop_ice
-
-.. autosummary::
-
-   ScoopIce
-
-embodichain_tasks.manipulation.tableware.stack_blocks_two
----------------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.manipulation.tableware.stack_blocks_two
-
-.. autosummary::
-
-   StackBlocksTwoEnv
-
 embodichain_tasks.manipulation.tableware.stack_cups
 ---------------------------------------------------
 
@@ -2490,33 +2463,6 @@ kinematics route used by analytic policy-gradient experiments.
 .. autosummary::
 
    FrankaReachApgEnv
-
-embodichain_tasks.special.simple_task
--------------------------------------
-
-.. currentmodule:: embodichain_tasks.special.simple_task
-
-.. autosummary::
-
-   SimpleTaskEnv
-
-embodichain_tasks.special.stay_still_save
------------------------------------------
-
-.. currentmodule:: embodichain_tasks.special.stay_still_save
-
-.. autosummary::
-
-   StayStillSaveEnv
-
-embodichain_tasks.special.stay_still_save_3cam
-----------------------------------------------
-
-.. currentmodule:: embodichain_tasks.special.stay_still_save_3cam
-
-.. autosummary::
-
-   StayStillSave3CamEnv
 
 embodichain_tasks.utils.importer
 --------------------------------
@@ -2555,3 +2501,38 @@ kernel policy; callers log and apply that seed to their own generators.
    :hidden:
 
    object_asset_bundles
+
+
+embodichain.lab.sim.cfg.robot
+-----------------------------
+
+Robot construction and complete backend alternatives
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Robot configurations include optional mounted camera declarations.
+Standalone simulation initializes them only when ``enable_sensor`` is true;
+Gym uses its environment-wide sensor switch, which defaults to enabled.
+
+.. currentmodule:: embodichain.lab.sim.cfg.robot
+
+.. autosummary::
+   :nosignatures:
+
+   RobotCfg
+   RobotPresetCfg
+
+.. autoclass:: RobotCfg
+   :members: sensors, enable_sensor
+   :noindex:
+
+.. autoclass:: RobotPresetCfg
+   :noindex:
+
+
+Asset generalization contracts
+------------------------------
+
+.. toctree::
+   :maxdepth: 2
+
+   asset_generalization

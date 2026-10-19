@@ -9,11 +9,11 @@
 | Standalone evaluation | `embodichain/learning/rl/policy_evaluation/cli.py`; local RUN/checkpoint, pretrained bundle or external Profile |
 | Programmatic training | `embodichain/learning/rl/train.py` → `train_from_config()` |
 | Algorithm registry | `embodichain/learning/rl/algo/__init__.py` |
-| Policy registry | `embodichain/learning/rl/models/__init__.py` |
+| Policy registry | `embodichain/learning/rl/policies/registry.py` |
 | Lightweight env registry | `embodichain/learning/rl/env.py` |
 | Standard trainer | `embodichain/learning/rl/utils/trainer.py` → `Trainer` |
 | Differentiable trainer | `embodichain/learning/rl/differentiable_trainer.py` |
-| Official configs | `embodichain_tasks/configs/tasks/<domain>/<task>/agents/` |
+| Official configs | `extensions/embodichain_tasks/configs/tasks/<domain>/<task>/agents/` |
 
 The compatibility module entry point is:
 
@@ -103,7 +103,7 @@ but currently rejects distributed training and environment profiling.
 
 ### Native locomotion tasks
 
-Official velocity tasks live in `embodichain_tasks/embodichain_tasks/locomotion/velocity/`;
+Official velocity tasks live in `extensions/embodichain_tasks/embodichain_tasks/locomotion/velocity/`;
 Humanoid Run lives under `classic_control/humanoid/`. Matching task config
 directories own default/Newton environment and PPO files. The package init hook
 registers locomotion observations and rewards; joint actions and root-velocity
@@ -168,10 +168,11 @@ the complete-rollout safety and normalization contracts.
 | PPO, GRPO, APG implementations | `algo/ppo.py`, `algo/grpo.py`, `algo/apg.py` |
 | Standard rollout storage and views | `buffer/` |
 | Standard and differentiable collection | `collector/` |
-| Policy interface, actor-critic, actor-only, MLP builder | `models/` |
+| Policy interface, actor-critic, actor-only, policy builder | `learning/rl/policies/` |
+| Shared MLP and network builder | `learning/models/mlp.py` |
 | Running observation statistics | `normalization.py` |
 | Batched action-adjoint stabilization | `gradients.py` |
-| Actor and critic observation statistics | `models/normalizer.py` |
+| Actor and critic observation statistics | `learning/models/normalizer.py` |
 | Standard collect/update loop | `utils/trainer.py` |
 | Differentiable TBPTT/update loop | `differentiable_trainer.py` |
 | Shared completed-episode evaluation | `evaluation.py` |
@@ -221,6 +222,14 @@ pose immediately after an update can still return the preceding rendered pose.
 Validate changes with `tests/learning/rl/policy_evaluation/test_viewer.py` and
 an actual native Viewer run. User controls and recording are described in the
 [policy evaluation guide](../../../docs/source/guides/policy_evaluation.md).
+
+General Torch layers and models live beside `rl` under `learning/layers` and
+`learning/models`. RL-specific Policy, ActorOnly, ActorCritic and the policy
+registry remain in `learning/rl/policies`; their consumers import from
+`embodichain.learning.rl.policies`. Shared MLPs, normalization and MLP construction
+import from `embodichain.learning.models`. See [learning layers](../learning-layers/learning-layers.md)
+for differentiable IK ownership. Root exports load on demand; importing a
+lightweight APG component must not eagerly load the simulator-backed Trainer.
 
 ## Invariants
 

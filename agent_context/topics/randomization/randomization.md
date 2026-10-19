@@ -63,6 +63,9 @@ randomization remains active. See the owning
 - Camera extrinsics auto-detect the representation and frame: if `extrinsics.eye` is set → look-at mode (eye/target/up perturbation via `look_at`); otherwise → pose mode (pos/euler perturbation via `set_local_pose`), with `extrinsics.parent` selecting parent-relative pose and `parent=None` selecting arena-frame pose.
 - `set_rigid_object_visual_material` is deterministic (not random) but uses the same functor mechanism for fixed material assignment at reset.
 - Light randomization applies the **same values across all envs** (documented limitation).
+- HDR indirect-lighting events inform the environment's automatic native-ground
+  visibility; emissive mode does not. See the deployment-owned
+  [ground visibility configuration](../env-framework/configuration.md#reusable-gym-deployment-components).
 - ``position_range`` is ignored for global scene lights (``"sun"``, ``"direction"``). Use ``direction_range`` instead.
 - ``direction_range`` is only applicable for directional light types (``"sun"``, ``"direction"``, ``"spot"``, ``"rect"``, ``"mesh"``).
 - Global lights (``"sun"``, ``"direction"``) have ``num_instances == 1``; all other types are batched per environment.

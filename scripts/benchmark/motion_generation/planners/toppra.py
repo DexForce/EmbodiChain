@@ -18,8 +18,6 @@
 
 from __future__ import annotations
 
-import importlib.util
-
 from embodichain.lab.sim.motion.motion_generator import (
     MotionGenCfg,
     MotionGenOptions,
@@ -51,9 +49,7 @@ class ToppraAdapter(PlannerAdapter):
         self.motion_generator: MotionGenerator | None = None
 
     def availability(self) -> tuple[bool, str | None]:
-        """Report whether the optional TOPPRA package is installed."""
-        if importlib.util.find_spec("toppra") is None:
-            return False, "TOPPRA is not installed."
+        """The in-tree TOPPRA implementation needs no optional external package."""
         return True, None
 
     def build(self) -> None:
@@ -90,7 +86,7 @@ class ToppraAdapter(PlannerAdapter):
         )
 
     def close(self) -> None:
-        """Release TOPPRA worker pools and drop the motion generator."""
+        """Drop the motion generator through the common planner lifecycle."""
         self._close_motion_generator()
 
 

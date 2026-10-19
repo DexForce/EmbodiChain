@@ -657,7 +657,7 @@ def test_control_mode_scrubs_to_recorded_state(tmp_path):
 
 def test_control_loop_uses_single_keys_and_auto_can_be_interrupted():
     """Single-key commands act immediately and interrupt auto playback."""
-    from embodichain.lab.scripts.run_env import _run_replay_control_loop
+    from embodichain.lab.scripts.run_task import _run_replay_control_loop
 
     class FakeControlInput:
         single_key = True
@@ -693,9 +693,9 @@ def test_control_loop_uses_single_keys_and_auto_can_be_interrupted():
     assert control_input.timeouts == [0.04, 0.04]
 
 
-def test_run_env_replay_function(tmp_path):
-    """run_env.replay() drives the full trajectory without error (kinematic + dynamic)."""
-    from embodichain.lab.scripts.run_env import replay
+def test_run_task_replay_function(tmp_path):
+    """run_task.replay() drives the full trajectory without error (kinematic + dynamic)."""
+    from embodichain.lab.scripts.run_task import replay
 
     # record
     env = ReplayTestEnv(record_trajectory=True, num_envs=1, device="cpu")

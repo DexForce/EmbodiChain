@@ -65,6 +65,37 @@ def test_manual_docs_build_trusts_checkout_before_architecture_generation() -> N
     )
 
 
+@pytest.mark.parametrize("job_name", ["deploy-from-artifact", "deploy-manual-build"])
+def test_pages_paths_merge_under_deployment_lock_and_verify_versions(
+    job_name: str,
+) -> None:
+    workflow = _load_workflow("docs-pages.yml")
+    assert "'github-pages'" in workflow["concurrency"]["group"]
+    assert workflow["concurrency"]["cancel-in-progress"] == "false"
+    steps = workflow["jobs"][job_name]["steps"]
+    names = [step.get("name", "") for step in steps]
+    prepare = names.index("Preserve currently published versions")
+    upload = names.index("Upload Pages artifact")
+    publish = names.index("Deploy GitHub Pages")
+    verify = names.index("Verify deployed artifact")
+    assert prepare < upload < publish < verify
+    assert "prepare_docs_deployment.py prepare" in steps[prepare]["run"]
+    assert "prepare_docs_deployment.py verify" in steps[verify]["run"]
+    assert steps[upload]["with"]["retention-days"] == "90"
+    checkout = next(
+        step for step in steps if step.get("uses", "").startswith("actions/checkout@")
+    )
+    assert checkout["with"]["ref"] == "${{ github.workflow_sha }}"
+
+
+def test_release_dispatch_reports_child_without_timing_out_while_queued() -> None:
+    steps = _load_workflow("docs-pages.yml")["jobs"]["redispatch-release"]["steps"]
+    command = steps[0]["run"]
+    assert "gh workflow run docs-pages.yml" in command
+    assert "gh run watch" not in command
+    assert "GITHUB_STEP_SUMMARY" in command
+
+
 def test_test_package_install_uses_explicit_public_index_and_private_sources() -> None:
     steps = _load_workflow("main.yml")["jobs"]["test"]["steps"]
     install = next(step for step in steps if step.get("name") == "Install test package")
@@ -77,6 +108,28 @@ def test_test_package_install_uses_explicit_public_index_and_private_sources() -
     assert "--extra-index-url http://pyp.open3dv.site:2345/simple/" in package_install
     assert "--trusted-host pyp.open3dv.site" in package_install
     assert "--extra-index-url https://download.blender.org/pypi/" in package_install
+
+
+def test_simulator_test_job_installs_node_before_workflow_contract_tests() -> None:
+    steps = _load_workflow("main.yml")["jobs"]["test"]["steps"]
+    setup_index = next(
+        i
+        for i, step in enumerate(steps)
+        if step.get("uses", "").startswith("actions/setup-node@")
+    )
+    tests_index = next(
+        i for i, step in enumerate(steps) if step.get("name") == "Run selected tests"
+    )
+    assert steps[setup_index]["with"]["node-version"] == "22"
+    assert setup_index < tests_index
+    capture_index = next(
+        i
+        for i, step in enumerate(steps)
+        if step.get("name") == "Preserve Node path for login shells"
+    )
+    assert setup_index < capture_index < tests_index
+    assert "GITHUB_ENV" in steps[capture_index]["run"]
+    assert 'export PATH="${CI_NODE_BIN_DIR}:${PATH}"' in steps[tests_index]["run"]
 
 
 @pytest.mark.parametrize(
@@ -104,7 +157,7 @@ def test_release_guard_validates_bundled_robot_catalog(
     task_config = (
         "embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml"
     )
-    source = tmp_path / task_config
+    source = tmp_path / "extensions" / task_config
     source.parent.mkdir(parents=True)
     source.write_text("physics: default\n")
     entry_points = (

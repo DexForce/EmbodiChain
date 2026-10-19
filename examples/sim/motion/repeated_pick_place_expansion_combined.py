@@ -49,7 +49,7 @@ from embodichain.utils.utility import load_config
 
 _DEFAULT_TASK_CONFIG = (
     _REPOSITORY_ROOT
-    / "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
+    / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
 )
 _DEFAULT_OUTPUT_DIR = (
     _REPOSITORY_ROOT / "output" / "repeated_pick_place_expansion_combined"
@@ -132,7 +132,7 @@ def _record(recipe: CandidateRecipe) -> dict[str, object]:
 def main(argv: list[str] | None = None) -> None:
     args = _parser().parse_args(argv)
     if args.expansion_profile is None:
-        from embodichain.lab.scripts.run_env import (
+        from embodichain.lab.scripts.run_task import (
             _resolve_expansion_request,
         )
 

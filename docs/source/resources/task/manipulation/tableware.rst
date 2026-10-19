@@ -17,7 +17,7 @@ catalog.
    * - Blocks Ranking RGB
      - ``BlocksRankingRGB-v1``
      - CobotMagic
-     - Environment only
+     - Task Program expert demo
    * - Blocks Ranking Size
      - ``BlocksRankingSize-v1``
      - CobotMagic
@@ -34,14 +34,10 @@ catalog.
      - ``PourWater-v1``
      - CobotMagic
      - Task Program expert demo
-   * - Scoop Ice
-     - ``ScoopIce-v1``
-     - Dexforce W1
-     - Environment only
    * - Stack Two Blocks
      - ``StackBlocksTwo-v1``
      - CobotMagic
-     - Environment only
+     - Task Program expert demo
    * - Stack Cups
      - ``StackCups-v1``
      - CobotMagic
@@ -55,5 +51,5 @@ For example, launch Pour Water through its Task Program deployment:
 
 .. code-block:: bash
 
-   embodichain run-env \
+   embodichain run-task \
        --gym_config embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml

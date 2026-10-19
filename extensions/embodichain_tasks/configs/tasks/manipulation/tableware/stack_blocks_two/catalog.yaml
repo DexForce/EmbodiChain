@@ -1,0 +1,12 @@
+task_key: stack_blocks_two
+title: Stack Two Blocks
+summary: Grasp and stack two blocks with measured lift, placement, and stability checks.
+tags:
+- tableware
+- stacking
+- task_program
+- expert_trajectory
+default_deployment: default
+deployments:
+  default:
+    config: task.cobotmagic.yaml

@@ -37,7 +37,7 @@ import time
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager, nullcontext
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -56,7 +56,10 @@ from embodichain.lab.sim.motion.planners.base_planner import (
     PlanOptions,
     validate_plan_options,
 )
-from embodichain.lab.sim.motion.planners.curobo.curobo_yaml import _named_rigid_objects
+from embodichain.lab.sim.motion.planners.curobo.curobo_yaml import (
+    _curobo_joint_limits,
+    _named_rigid_objects,
+)
 from embodichain.lab.sim.motion.planners.utils import MoveType, PlanResult, PlanState
 
 if TYPE_CHECKING:
@@ -353,6 +356,12 @@ class CuroboPlannerCfg(BasePlannerCfg):
     """
 
     planner_type: str = "curobo"
+
+    max_acceleration: float | None = field(default=None, kw_only=True)
+    """Planning acceleration budget [rad/s^2 or m/s^2].
+
+    ``None`` preserves cuRobo's default budget of 15.0.
+    """
 
     log_level: str = "error"
     """Log level for cuRobo's Python logger.
@@ -1309,8 +1318,15 @@ class CuroboPlanner(BasePlanner):
         """Return a cached in-process backend for one goal-buffer shape."""
         multi_env = bool(self.cfg.world.multi_env)
         key = (control_part, int(batch_size), multi_env, planning_mode)
-        if key in self._backend_cache:
-            return self._backend_cache[key]
+        limits_key = self._robot_yaml_cache_key(
+            self.robot.cfg.fpath, control_part, None, self.cfg.auto_gen
+        )
+        cached = self._backend_cache.get(key)
+        if cached is not None:
+            if cached.motion_limits_key == limits_key:
+                return cached
+            self._close_planner(cached.planner)
+            del self._backend_cache[key]
 
         profile = self._materialize_profile(control_part)
         sim_joint_names = self._resolve_sim_joint_names(control_part)
@@ -1399,6 +1415,7 @@ class CuroboPlanner(BasePlanner):
                         f"cuRobo capture coordinator release failed: {exc}"
                     )
 
+        backend.motion_limits_key = limits_key
         self._backend_cache[key] = backend
         logger.log_info(
             f"cuRobo in-process backend ready for '{control_part}' "
@@ -1799,7 +1816,12 @@ class CuroboPlanner(BasePlanner):
             urdf_path, control_part, tool_frame, auto
         )
         cache_path = os.path.join(cache_dir, f"{cache_key}.yml")
-        if not auto.force and os.path.exists(cache_path):
+        motion_urdf_path = os.path.splitext(cache_path)[0] + ".motion.urdf"
+        if (
+            not auto.force
+            and os.path.exists(cache_path)
+            and os.path.exists(motion_urdf_path)
+        ):
             logger.log_info(f"cuRobo robot YAML cache hit: {cache_path}")
             return cache_path
         logger.log_info(
@@ -1816,6 +1838,7 @@ class CuroboPlanner(BasePlanner):
             surface_radius=auto.surface_radius,
             iterations=auto.iterations,
             collision_sphere_buffer=auto.collision_sphere_buffer,
+            max_acceleration=self.cfg.max_acceleration,
             device=str(self._curobo_device),
         )
 
@@ -1828,6 +1851,7 @@ class CuroboPlanner(BasePlanner):
     ) -> str:
         """Hash the URDF path/content and fit parameters into a stable cache key."""
         hasher = hashlib.md5()
+        hasher.update(b"absolute-motion-limits-v1")
         hasher.update(urdf_path.encode("utf-8"))
         try:
             with open(urdf_path, "rb") as urdf_file:
@@ -1841,6 +1865,13 @@ class CuroboPlanner(BasePlanner):
         hasher.update(str(auto.surface_radius).encode("utf-8"))
         hasher.update(str(auto.iterations).encode("utf-8"))
         hasher.update(str(auto.collision_sphere_buffer).encode("utf-8"))
+        hasher.update(
+            repr(
+                _curobo_joint_limits(
+                    self.robot, max_acceleration=self.cfg.max_acceleration
+                )
+            ).encode("utf-8")
+        )
         return hasher.hexdigest()
 
     def _auto_generate_world_scene(self, world_cfg: CuroboWorldCfg) -> "Any":
@@ -2818,6 +2849,7 @@ class _CuroboBackend:
     batch_size: int
     use_cuda_graph: bool
     planning_mode: MoveType
+    motion_limits_key: str | None = None
     collision_checker: "Any | None" = None
     # Lazily-built device-tensor caches for the shared post-processing. The
     # cuRobo joint order and the profile's fixed transforms are stable for a

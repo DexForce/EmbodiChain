@@ -56,6 +56,72 @@ from embodichain.utils import configclass
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 
 
+def test_mounted_sensor_config_roundtrip_and_instance_isolation() -> None:
+    from embodichain.lab.sim.sensors import CameraCfg, StereoCameraCfg
+
+    cfg = RobotCfg.from_dict(
+        {
+            "enable_sensor": True,
+            "sensors": [
+                {
+                    "sensor_type": "StereoCamera",
+                    "uid": "wrist",
+                    "width": 32,
+                    "extrinsics": {"parent": "tool", "pos": [0.1, 0.0, 0.0]},
+                }
+            ],
+        }
+    )
+    restored = RobotCfg.from_dict(cfg.to_dict())
+    assert restored.enable_sensor is True
+    assert isinstance(restored.sensors[0], StereoCameraCfg)
+    assert restored.sensors[0].extrinsics.parent == "tool"
+    assert restored.sensors[0].width == 32
+    restored.sensors[0].extrinsics.parent = "changed"
+    assert cfg.sensors[0].extrinsics.parent == "tool"
+
+    first, second = RobotCfg(), RobotCfg()
+    first.sensors.append(CameraCfg(uid="camera"))
+    assert second.sensors == []
+    assert second.enable_sensor is False
+
+
+def test_cobotmagic_mounted_defaults_replace_and_clear(monkeypatch) -> None:
+    from embodichain_robots import CobotMagicCfg
+
+    monkeypatch.setattr(
+        "embodichain_robots.cobotmagic.get_data_path", lambda value: value
+    )
+    cfg = CobotMagicCfg.from_dict({})
+    assert cfg.enable_sensor is False
+    assert [camera.uid for camera in cfg.sensors] == [
+        "cam_right_wrist",
+        "cam_left_wrist",
+    ]
+    assert [camera.extrinsics.parent for camera in cfg.sensors] == [
+        "right_link6",
+        "left_link6",
+    ]
+    assert all(camera.enable_mask for camera in cfg.sensors)
+    assert CobotMagicCfg.from_dict({"sensors": []}).sensors == []
+    restored = CobotMagicCfg.from_dict(cfg.to_dict())
+    assert restored.to_dict()["sensors"] == cfg.to_dict()["sensors"]
+    replacement = CobotMagicCfg.from_dict(
+        {
+            "sensors": [
+                {
+                    "sensor_type": "Camera",
+                    "uid": "custom",
+                    "extrinsics": {"parent": "left_link6"},
+                }
+            ]
+        }
+    )
+    assert [camera.uid for camera in replacement.sensors] == ["custom"]
+    replacement.sensors[0].extrinsics.parent = "changed"
+    assert CobotMagicCfg.from_dict({}).sensors[0].extrinsics.parent == "right_link6"
+
+
 def _mock_w1_asset_paths(monkeypatch, tmp_path):
     import embodichain.lab.sim.cfg as sim_cfg
     from embodichain_robots.dexforce_w1 import utils as w1_utils
@@ -603,6 +669,43 @@ def test_aloha_mini_pk_chains_follow_overridden_asset(tmp_path):
     assert pose[0, 2, 3].item() == pytest.approx(0.25)
 
 
+@pytest.mark.no_sim
+@pytest.mark.parametrize("with_gripper", [True, False])
+def test_tianji_marvin_preserves_source_inertials_without_overlays(with_gripper):
+    """Selecting the robot alone does not assert unverified source units."""
+    cfg = TianjiMarvinCfg.from_dict({"with_gripper": with_gripper})
+    assert cfg.link_attrs == {}
+    assert cfg.attrs.mass_props is None
+
+
+@pytest.mark.no_sim
+def test_tianji_marvin_custom_asset_does_not_inherit_demo_inertials(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        "embodichain_robots.tianji_marvin.get_data_path", lambda value: value
+    )
+    asset = tmp_path / "custom.urdf"
+    asset.write_text('<robot name="custom"/>')
+    cfg = TianjiMarvinCfg.from_dict({"fpath": str(asset)})
+    assert cfg.fpath == str(asset)
+    assert cfg.link_attrs == {}
+    custom = TianjiMarvinCfg.from_dict(
+        {
+            "fpath": str(asset),
+            "link_attrs": {
+                "custom_base": {
+                    "link_names_expr": ["custom_base"],
+                    "attrs": {"mass_props": {"mass": 2.0}},
+                }
+            },
+        }
+    )
+    assert set(custom.link_attrs) == {"custom_base"}
+    assert custom.link_attrs["custom_base"].attrs.mass_props.mass == 2.0
+    assert TianjiMarvinCfg.from_dict(custom.to_dict()).to_dict() == custom.to_dict()
+
+
 @pytest.mark.parametrize("with_gripper", [True, False])
 def test_tianji_marvin_control_parts_match_source_joints(with_gripper):
     cfg = TianjiMarvinCfg.from_dict({"with_gripper": with_gripper})
@@ -654,6 +757,109 @@ def test_tianji_marvin_overrides_and_roundtrip(with_gripper):
     assert cfg.solver_cfg["right_arm"].num_samples == 30
     assert cfg.root_props.fixed_base
     assert TianjiMarvinCfg.from_dict(cfg.to_dict()).to_dict() == cfg.to_dict()
+
+
+@pytest.mark.parametrize("with_gripper", [True, False])
+def test_tianji_marvin_ready_pose_has_lowered_elbows_and_joint_margin(with_gripper):
+    cfg = TianjiMarvinCfg.from_dict({"with_gripper": with_gripper})
+    assert len(cfg.init_qpos) == (18 if with_gripper else 14)
+    assert cfg.init_qpos[14:] == ([0.0] * 4 if with_gripper else [])
+    chains = cfg.build_pk_serial_chain()
+    root_rotation = np.array([[0, -1, 0], [1, 0, 0], [0, 0, 1]])
+    for index, (side, label, sign) in enumerate((("left", "l", 1), ("right", "r", -1))):
+        chain = chains[f"{side}_arm"]
+        qpos = np.asarray(cfg.init_qpos[:14][index::2])
+        lower, upper = np.asarray(chain.get_joint_limits())
+        assert np.min(np.minimum(qpos - lower, upper - qpos)) >= 0.19
+        frames = chain.forward_kinematics(
+            torch.tensor(qpos, dtype=torch.float32)[None], end_only=False
+        )
+        elbow = (
+            root_rotation
+            @ frames[f"elbow_pitch_{label}_j3_link"].get_matrix()[0, :3, 3].numpy()
+        )
+        np.testing.assert_allclose(elbow, [0.0045, sign * 0.3188, 0.8510], atol=0.002)
+
+
+@pytest.mark.parametrize("with_gripper", [True, False])
+def test_tianji_marvin_ready_pose_can_be_overridden_without_shared_state(with_gripper):
+    cfg = TianjiMarvinCfg.from_dict({"with_gripper": with_gripper})
+    original = cfg.init_qpos.copy()
+    cfg.init_qpos[0] = 0.0
+    assert (
+        TianjiMarvinCfg.from_dict({"with_gripper": with_gripper}).init_qpos == original
+    )
+    custom = [0.0] * len(original)
+    replaced = TianjiMarvinCfg.from_dict(
+        {"with_gripper": with_gripper, "init_qpos": custom}
+    )
+    assert replaced.init_qpos == custom
+    assert TianjiMarvinCfg.from_dict(replaced.to_dict()).init_qpos == custom
+
+
+@pytest.mark.parametrize("with_gripper", [True, False])
+def test_tianji_marvin_wrist_cameras_match_variant_and_mounts(with_gripper):
+    cfg = TianjiMarvinCfg.from_dict({"with_gripper": with_gripper})
+    assert cfg.enable_sensor is False
+    if not with_gripper:
+        assert cfg.sensors == []
+        return
+    links = {link.get("name") for link in ET.parse(cfg.fpath).getroot().findall("link")}
+    assert [camera.uid for camera in cfg.sensors] == [
+        "cam_left_wrist",
+        "cam_right_wrist",
+    ]
+    for side, camera in zip(("left", "right"), cfg.sensors, strict=True):
+        assert camera.extrinsics.parent == f"{side}_hand_base_link"
+        assert camera.extrinsics.parent in links
+        assert camera.enable_color and camera.enable_depth
+        assert not any(
+            (camera.enable_mask, camera.enable_position, camera.enable_normal)
+        )
+        assert (camera.width, camera.height) == (640, 360)
+        fx, fy, cx, cy = camera.intrinsics
+        # Validate the optics against the nominal hardware FOV, not copied K values.
+        assert np.rad2deg(2 * np.arctan(camera.width / (2 * fx))) == pytest.approx(87)
+        assert np.rad2deg(2 * np.arctan(camera.height / (2 * fy))) == pytest.approx(58)
+        assert (cx, cy) == (camera.width / 2, camera.height / 2)
+        pose = camera.extrinsics.transformation.numpy()
+        np.testing.assert_allclose(pose[:3, :3].T @ pose[:3, :3], np.eye(3), atol=1e-6)
+        np.testing.assert_allclose(
+            -pose[:3, 2],
+            [0, -np.sin(np.deg2rad(12)), np.cos(np.deg2rad(12))],
+            atol=1e-6,
+        )
+        # The mounting estimate clears the model's front lens plane by 1 mm.
+        lens_plane_distance = 0.0473065
+        assert pose[:3, 3] @ -pose[:3, 2] - lens_plane_distance == pytest.approx(
+            0.001, abs=2e-6
+        )
+
+
+def test_tianji_marvin_camera_overrides_are_isolated_and_roundtrip():
+    cfg = TianjiMarvinCfg.from_dict({"enable_sensor": True})
+    assert cfg.enable_sensor
+    assert TianjiMarvinCfg.from_dict(cfg.to_dict()).to_dict() == cfg.to_dict()
+    cfg.sensors[0].extrinsics.parent = "changed"
+    assert (
+        TianjiMarvinCfg.from_dict({}).sensors[0].extrinsics.parent
+        == "left_hand_base_link"
+    )
+    assert TianjiMarvinCfg.from_dict({"sensors": []}).sensors == []
+    custom = TianjiMarvinCfg.from_dict(
+        {
+            "sensors": [
+                {
+                    "sensor_type": "Camera",
+                    "uid": "custom",
+                    "extrinsics": {"parent": "base_link"},
+                }
+            ]
+        }
+    )
+    assert [camera.uid for camera in custom.sensors] == ["custom"]
+    assert custom.sensors[0].extrinsics.parent == "base_link"
+    assert TianjiMarvinCfg.from_dict(custom.to_dict()).to_dict() == custom.to_dict()
 
 
 @pytest.mark.parametrize("with_gripper", [True, False])

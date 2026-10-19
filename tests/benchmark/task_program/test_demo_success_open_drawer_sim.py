@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 import subprocess
 import sys
@@ -31,7 +32,7 @@ from scripts.benchmark.task_program.demo_success import (
 )
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-_TASK_CONFIG_ROOT = _REPOSITORY_ROOT / "embodichain_tasks/configs"
+_TASK_CONFIG_ROOT = _REPOSITORY_ROOT / "extensions/embodichain_tasks/configs"
 _OPEN_DRAWER_GYM_CONFIG = (
     _TASK_CONFIG_ROOT / "tasks/manipulation/open_drawer/task.ur5.yaml"
 )
@@ -50,17 +51,19 @@ _RUN_PUBLIC_MAIN = (
 
 def _write_headless_cpu_gym_config(tmp_path: Path) -> Path:
     """Write a deterministic copy of the canonical live-physics config."""
+    from embodichain.lab.gym.utils._component_composition import (
+        _resolve_environment_component,
+    )
+
     payload = load_config(_OPEN_DRAWER_GYM_CONFIG)
     if type(payload) is not dict:
         raise TypeError("The packaged OpenDrawer Gym config must be a mapping.")
-    environment_selection = payload["environment"]
-    assert type(environment_selection) is dict
-    environment_path = (
-        _OPEN_DRAWER_GYM_CONFIG.parent / environment_selection["component"]
-    ).resolve()
-    environment = load_config(environment_path)
-    assert type(environment) is dict
-    env_config = environment.get("env")
+    payload = _resolve_environment_component(
+        payload,
+        base_dir=_OPEN_DRAWER_GYM_CONFIG.parent,
+        selected_backend="default",
+    )
+    env_config = payload.get("env")
     if type(env_config) is not dict:
         raise TypeError("The packaged OpenDrawer env config must be a mapping.")
 
@@ -73,9 +76,11 @@ def _write_headless_cpu_gym_config(tmp_path: Path) -> Path:
         task_program[field_name] = str(
             (_OPEN_DRAWER_GYM_CONFIG.parent / task_program[field_name]).resolve()
         )
-    environment_output = tmp_path / "env.yaml"
-    save_config(environment_output, environment)
-    environment_selection["component"] = str(environment_output)
+    expansion = payload["expansion"]
+    assert type(expansion) is dict
+    expansion["config"] = str(
+        (_OPEN_DRAWER_GYM_CONFIG.parent / expansion["config"]).resolve()
+    )
     embodiment = payload["embodiment"]
     assert type(embodiment) is dict
     embodiment["component"] = str(
@@ -85,6 +90,41 @@ def _write_headless_cpu_gym_config(tmp_path: Path) -> Path:
     output = tmp_path / "open_drawer_headless_cpu.yaml"
     save_config(output, payload)
     return output
+
+
+@pytest.mark.no_sim
+def test_headless_cpu_gym_config_decodes_outside_task_directory(tmp_path: Path) -> None:
+    """Catch stale component schemas and relocated resources before live CI."""
+    from embodichain.lab.gym.utils.gym_utils import (
+        add_env_launcher_args_to_parser,
+        build_env_cfg_from_args,
+    )
+    from embodichain.lab.sim.cfg import DefaultPhysicsCfg
+
+    gym_config_path = _write_headless_cpu_gym_config(tmp_path)
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser, require_gym_config=True)
+    args = parser.parse_args(
+        [
+            "--gym_config",
+            str(gym_config_path),
+            "--headless",
+            "--device",
+            "cpu",
+            "--num_envs",
+            "1",
+            "--filter_dataset_saving",
+        ]
+    )
+    cfg, gym_config, action_config = build_env_cfg_from_args(args)
+
+    assert isinstance(cfg.sim_cfg.physics_config, DefaultPhysicsCfg)
+    assert cfg.sim_cfg.device == "cpu"
+    assert cfg.num_envs == 1
+    assert cfg.task_program is not None
+    assert gym_config["id"] == "TaskProgramOpenDrawer-v1"
+    assert Path(gym_config["expansion"]["config"]).is_file()
+    assert not action_config
 
 
 @pytest.mark.requires_sim

@@ -2211,14 +2211,12 @@ class SimulationManager:
     def set_default_global_lighting(self) -> None:
         """Set default global lighting for the scene.
 
-        Configures both the environment emission (ambient) light and a
-        directional light to provide default scene illumination. The
-        directional light is a global scene light (infinite distance)
-        pointing downward along the -Z axis.
+        Initialize environment emission without creating direct lights or
+        changing existing scene lights. Add direct lights explicitly through
+        :meth:`add_light` or the task's lighting configuration.
         """
         self._require_native_renderer("Default global lighting")
-        # Environment emission light
-        self.set_emission_light([1.0, 1.0, 1.0], 100.0)
+        self.set_emission_light([0.92, 0.95, 1.0], 80.0)
 
     def set_default_background(self) -> None:
         """Set default background."""
@@ -2244,13 +2242,17 @@ class SimulationManager:
         self._visual_materials[mat_name] = mat
 
     def set_ground_plane_visibility(self, visible: bool) -> None:
-        """_summary_
+        """Set native ground rendering visibility while preserving collisions.
+
+        Applies to native windows and cameras. The setting is retained until
+        the ground is materialized, and does not control the Viser grid.
+        NoRender stores the setting without accessing native visual resources.
 
         Args:
-            visible (bool): _description_
+            visible: Whether the default ground plane is rendered.
         """
         self._spawn_default_plane_visibility = bool(visible)
-        if self._default_plane is None:
+        if self._default_plane is None or not self.has_native_renderer:
             return
         self._default_plane.set_visible(bool(visible))
 
@@ -3216,7 +3218,8 @@ class SimulationManager:
         Args:
             cfg: A concrete robot configuration or a replace-only backend
                 preset. Presets are resolved from ``physics_cfg`` before the
-                robot is declared.
+                robot is declared. Mounted cameras are created only when
+                ``cfg.enable_sensor`` is True and attach during preparation.
 
         Returns:
             Robot | None: The added robot instance handle, or None if failed.
@@ -3257,11 +3260,37 @@ class SimulationManager:
             logger.log_error(f"Robot {uid} already exists.")
             return self._robots[uid]
 
+        mounted_sensors = []
+        if cfg.enable_sensor:
+            sensor_uids = set(self._sensors)
+            for sensor_cfg in cfg.sensors:
+                if not isinstance(sensor_cfg, CameraCfg):
+                    raise TypeError("RobotCfg.sensors supports mounted cameras only.")
+                if not isinstance(sensor_cfg.uid, str) or not sensor_cfg.uid.strip():
+                    raise ValueError("Mounted sensors require a non-empty uid.")
+                if sensor_cfg.uid in sensor_uids:
+                    raise ValueError(f"Sensor {sensor_cfg.uid!r} already exists.")
+                sensor_uids.add(sensor_cfg.uid)
+                parent = sensor_cfg.extrinsics.parent
+                if not isinstance(parent, str) or not parent.strip():
+                    raise ValueError("Mounted sensors require a parent link.")
+                link_name = parent.removeprefix(f"{uid}/")
+                if not link_name or "/" in link_name:
+                    raise ValueError(
+                        f"Mounted sensor {sensor_cfg.uid!r} must refer to a "
+                        f"local link on robot {uid!r}."
+                    )
+                bound_cfg = deepcopy(sensor_cfg)
+                bound_cfg.extrinsics.parent = f"{uid}/{link_name}"
+                mounted_sensors.append(bound_cfg)
+
         was_materialized = self.spawn_result is not None
         robot = self._declare_spawn_articulation(cfg, Robot)
         self._robots[uid] = robot
         if was_materialized:
             self.prepare()
+        for sensor_cfg in mounted_sensors:
+            self.add_sensor(sensor_cfg)
         return robot
 
     def _declare_spawn_articulation(
@@ -3878,7 +3907,8 @@ class SimulationManager:
         """Remove an asset by its UID.
 
         Native render lights are not removed by this method. Sensors and
-        Spawn-owned physical assets are supported.
+        Spawn-owned physical assets are supported. Removing a robot also
+        destroys its automatically initialized mounted cameras.
 
         Args:
             uid (str): The UID of the asset.
@@ -3899,12 +3929,22 @@ class SimulationManager:
         if uid == "default_plane":
             raise ValueError("The Spawn-owned default plane cannot be removed.")
 
+        robot = self._robots.get(uid)
+        if robot is not None and robot.cfg.enable_sensor:
+            for sensor_cfg in robot.cfg.sensors:
+                sensor = self._sensors.get(sensor_cfg.uid)
+                if (
+                    isinstance(sensor, Camera)
+                    and sensor.cfg.extrinsics.parent is not None
+                    and sensor.cfg.extrinsics.parent.startswith(f"{uid}/")
+                ):
+                    self.remove_asset(sensor_cfg.uid)
+
         was_materialized = scene.builder.is_finalized
         scene.remove(uid)
         if was_materialized:
             self.prepare()
 
-        robot = self._robots.get(uid)
         if robot is not None:
             for key, gizmo in self.get_gizmo_items():
                 if gizmo.target is robot:

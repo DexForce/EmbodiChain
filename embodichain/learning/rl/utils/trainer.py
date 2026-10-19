@@ -90,7 +90,7 @@ class Trainer:
 
         if event_cfg is not None:
             self.event_manager = EventManager(event_cfg, env=self.env)
-        if eval_event_cfg is not None:
+        if self.eval_env is not None and eval_event_cfg is not None:
             self.eval_event_manager = EventManager(eval_event_cfg, env=self.eval_env)
 
         self.device = self.algorithm.device

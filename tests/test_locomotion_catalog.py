@@ -26,7 +26,9 @@ import yaml
 from embodichain.cli import _task_catalog as catalog
 from embodichain.cli.show_task import main as show_task
 
-_CONFIG_ROOT = Path(__file__).resolve().parents[1] / "embodichain_tasks/configs/tasks"
+_CONFIG_ROOT = (
+    Path(__file__).resolve().parents[1] / "extensions/embodichain_tasks/configs/tasks"
+)
 _TASK_PATHS = (
     "locomotion/velocity/g1_flat",
     "locomotion/velocity/h1_2_flat",
@@ -54,7 +56,7 @@ def test_locomotion_deployments_resolve_matching_ppo(
     assert {deployment.name for deployment in task.deployments} == {"default", "newton"}
     for deployment in task.deployments:
         suffix = ".newton" if deployment.name == "newton" else ""
-        prefix = f"embodichain_tasks/configs/tasks/{task_path}"
+        prefix = f"extensions/embodichain_tasks/configs/tasks/{task_path}"
         env_path = _CONFIG_ROOT / task_path / f"env{suffix}.yaml"
         env = yaml.safe_load(env_path.read_text())
         agent = yaml.safe_load(

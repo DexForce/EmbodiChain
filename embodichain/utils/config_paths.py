@@ -30,7 +30,8 @@ def resolve_config_path(
 
     Existing, absolute, and ordinary relative paths preserve their normal
     filesystem meaning. Repository-style paths below
-    ``embodichain_tasks/configs`` are redirected to the packaged task-config
+    ``extensions/embodichain_tasks/configs`` (or the legacy
+    ``embodichain_tasks/configs`` prefix) are redirected to the packaged task-config
     resource so the same configuration reference works from an installed
     wheel.
 
@@ -55,8 +56,19 @@ def resolve_config_path(
     if resolved_path.is_absolute() or (base_dir is None and resolved_path.exists()):
         return resolved_path
 
-    task_prefix = ("embodichain_tasks", "configs")
-    if resolved_path.parts[: len(task_prefix)] != task_prefix:
+    task_prefixes = (
+        ("extensions", "embodichain_tasks", "configs"),
+        ("embodichain_tasks", "configs"),
+    )
+    task_prefix = next(
+        (
+            prefix
+            for prefix in task_prefixes
+            if resolved_path.parts[: len(prefix)] == prefix
+        ),
+        None,
+    )
+    if task_prefix is None:
         return (
             resolved_path
             if base_dir is None
@@ -70,10 +82,14 @@ def resolve_config_path(
     # Prefer configs co-located with the imported core package. This keeps a
     # source worktree self-contained even when another checkout is installed
     # in editable mode, and resolves to the same location in a wheel install.
-    colocated_root = Path(__file__).resolve().parents[2] / Path(*task_prefix)
-    colocated_path = colocated_root / relative_path
-    if colocated_path.exists() or (base_dir is not None and colocated_root.is_dir()):
-        return colocated_path
+    sdk_root = Path(__file__).resolve().parents[2]
+    for prefix in task_prefixes:
+        colocated_root = sdk_root / Path(*prefix)
+        colocated_path = colocated_root / relative_path
+        if colocated_path.exists() or (
+            base_dir is not None and colocated_root.is_dir()
+        ):
+            return colocated_path
 
     from embodichain_tasks.configs import get_config_path
 

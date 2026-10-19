@@ -2419,3 +2419,26 @@ def test_bridge_uses_program_instruction_for_unannotated_segment() -> None:
     segment = next(bridge.iter_segments())
     assert segment.instruction == "Program task"
     assert segment.instruction_source == "task_fallback"
+
+
+def test_validator_baseline_is_captured_lazily_before_runtime_start() -> None:
+    """A lift baseline belongs to execution start, after the preceding segment."""
+    baselines: list[tuple[object, torch.Tensor | None]] = []
+
+    class _LifecycleValidatorPort(_ValidatorPort):
+        def begin_segment(
+            self, *, segment: object, active_mask: torch.Tensor | None
+        ) -> None:
+            assert runtime.result.status is SemanticExecutionStatus.IDLE
+            baselines.append((segment, active_mask))
+
+    declaration = _FakeSegment(validators=(object(),))
+    port = _LifecycleValidatorPort(torch.ones(BATCH_SIZE, dtype=torch.bool))
+    bridge, runtime, _ = _bridge(
+        duration=STEP_DT, segment=declaration, validator_port=port
+    )
+    demo_segment = next(bridge.iter_segments())
+    assert baselines == []
+    tuple(demo_segment.actions)
+    assert baselines == [(declaration, None)]
+    assert demo_segment.validator().all()

@@ -84,7 +84,7 @@ class TestLoadConfig:
         monkeypatch.chdir(tmp_path)
 
         loaded = load_config(
-            "embodichain_tasks/configs/tasks/manipulation/tableware/"
+            "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/"
             "pour_water/task.cobotmagic.yaml"
         )
 

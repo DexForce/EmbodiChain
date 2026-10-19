@@ -75,6 +75,30 @@ def test_only_linked_deployment_acquires_rl(task_root: Path) -> None:
     assert a.embodiments == ("Arm",)
 
 
+@pytest.mark.parametrize(
+    "prefix", ["embodichain_tasks/configs", "extensions/embodichain_tasks/configs"]
+)
+def test_official_agent_references_match_outside_checkout(
+    task_root: Path, monkeypatch: pytest.MonkeyPatch, prefix: str
+) -> None:
+    """Both config prefixes retain RL discovery without matching CWD files."""
+    monkeypatch.chdir(task_root)
+    write(
+        task_root / "manipulation/pick/agents/ppo.json",
+        {"trainer": {"gym_config": f"{prefix}/tasks/manipulation/pick/task.a.yaml"}},
+    )
+    (task,) = catalog._load_catalog({"embodichain_tasks": task_root})
+    deployment = task.deployments[0]
+    assert (
+        deployment.config_ref
+        == "extensions/embodichain_tasks/configs/tasks/manipulation/pick/task.a.yaml"
+    )
+    assert catalog._RL in deployment.capabilities
+    assert deployment.agent_refs == (
+        "extensions/embodichain_tasks/configs/tasks/manipulation/pick/agents/ppo.json",
+    )
+
+
 def test_legacy_config_and_lightweight_rl_are_preserved(task_root: Path) -> None:
     (task_root / "manipulation/pick/catalog.yaml").unlink()
     write(
@@ -135,7 +159,7 @@ def test_show_and_filtered_gallery_use_static_records(
     main(["show-task", "demo:pick", "--config-root", f"demo={task_root}"])
     detail = capsys.readouterr().out
     assert "Pick <cube>" in detail
-    assert "embodichain run-env --gym_config" in detail
+    assert "embodichain run-task --gym_config" in detail
     assert "Qualification: unavailable" in detail
     main(
         [
@@ -220,7 +244,10 @@ def test_runtime_only_and_registered_capabilities_are_preserved(
 
 
 def test_official_catalogs_resolve_real_deployments() -> None:
-    root = Path(__file__).resolve().parents[1] / "embodichain_tasks/configs/tasks"
+    root = (
+        Path(__file__).resolve().parents[1]
+        / "extensions/embodichain_tasks/configs/tasks"
+    )
     tasks = catalog._load_catalog({"embodichain_tasks": root})
     pick = catalog._select_task(tasks, "repeated_pick_place")
     assert {d.name for d in pick.deployments} >= {
@@ -288,7 +315,10 @@ def test_official_discovery_prefers_core_colocated_worktree(
     monkeypatch.setattr(
         catalog.importlib.resources, "files", lambda name: stale_package
     )
-    expected = Path(__file__).resolve().parents[1] / "embodichain_tasks/configs/tasks"
+    expected = (
+        Path(__file__).resolve().parents[1]
+        / "extensions/embodichain_tasks/configs/tasks"
+    )
     assert catalog._task_config_roots(("embodichain_tasks",)) == (expected,)
 
 

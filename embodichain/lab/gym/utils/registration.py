@@ -376,9 +376,9 @@ def _import_task_package(ep: importlib.metadata.EntryPoint):
 
     Legacy editable installs from before official tasks were bundled in the
     main distribution can expose two editable projects from the same checkout.
-    The repository-level ``embodichain_tasks/`` container may then be picked up
-    as a namespace package that shadows the real
-    ``embodichain_tasks/embodichain_tasks/`` package.
+    The ``extensions/embodichain_tasks/`` source container may then be picked
+    up as a namespace package that shadows the real
+    ``extensions/embodichain_tasks/embodichain_tasks/`` package.
 
     A namespace package never executes ``__init__.py``, so the package's
     ``import_packages()`` call -- which triggers every ``@register_env`` --

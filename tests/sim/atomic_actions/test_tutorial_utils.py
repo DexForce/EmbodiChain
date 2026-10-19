@@ -550,10 +550,13 @@ def test_ur5_and_franka_configs_share_place_binding_contract() -> None:
     assert all(set(cfg.control_parts) == {"arm", "eef"} for cfg in configs)
     assert all(set(cfg.solver_cfg) == {"arm"} for cfg in configs)
     assert configs[0].control_parts["eef"] == configs[1].control_parts["eef"]
-    assert all(
-        torch.allclose(torch.as_tensor(cfg.solver_cfg["arm"].tcp), PGI_TUTORIAL_TCP)
-        for cfg in configs
-    )
+    from embodichain.lab.scripts._atomic_action.tcp_presets import sample_tool_tcp
+
+    for robot_type, cfg in zip(("ur5", "franka"), configs, strict=True):
+        assert torch.allclose(
+            torch.as_tensor(cfg.solver_cfg["arm"].tcp),
+            torch.as_tensor(sample_tool_tcp(robot_type)),
+        )
 
 
 def test_ur10_robotiq_config_matches_six_active_hand_joints_and_tcp() -> None:
@@ -616,7 +619,7 @@ def test_ur_tutorial_solver_limits_skip_noop_hard_limit_warning(factory) -> None
     ("robot_type", "arm_dof", "solver_name", "hand_pattern", "expected_tcp"),
     (
         ("ur5", 6, "URSolverCfg", "gripper_finger1_joint_1", None),
-        ("franka", 7, "PytorchSolverCfg", "gripper_finger1_joint_1", None),
+        ("franka", 7, "FEPSolverCfg", "gripper_finger1_joint_1", None),
         (
             "ur10",
             6,

@@ -343,7 +343,7 @@ class TestOnlineDataEngine:
         )
 
         def make_environment(*, id: str, cfg: object) -> MagicMock:
-            assert id == "SimpleTask-v1"
+            assert id == "TaskProgramRepeatedPickPlace-Franka-v1"
             assert cfg is env_cfg
             assert task_packages_registered
             return env
@@ -367,7 +367,10 @@ class TestOnlineDataEngine:
 
         engine_module._run_sim_worker(
             OnlineDataEngineCfg(
-                gym_config={"id": "SimpleTask-v1", "num_envs": 1},
+                gym_config={
+                    "id": "TaskProgramRepeatedPickPlace-Franka-v1",
+                    "num_envs": 1,
+                },
             ),
             TensorDict({}, batch_size=[1, 1]),
             context.Array("i", [0, 1]),

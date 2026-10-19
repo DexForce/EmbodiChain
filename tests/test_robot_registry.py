@@ -443,6 +443,44 @@ def test_gym_decodes_external_robot_through_catalog(external_robot):
     assert config == original
 
 
+def test_external_robot_mounted_defaults_reach_gym_and_online_buffers(external_robot):
+    from embodichain.lab.gym.utils.gym_utils import (
+        config_to_cfg,
+        init_rollout_buffer_from_config,
+    )
+    from embodichain.lab.sim.sensors import CameraCfg
+
+    cfg_cls, spec = external_robot
+    spec["defaults"]["sensors"] = [
+        {
+            "sensor_type": "Camera",
+            "uid": "vendor_wrist",
+            "width": 16,
+            "height": 12,
+            "extrinsics": {"parent": "tip"},
+        }
+    ]
+    original = deepcopy(spec)
+    config = {
+        "id": "EmbodiedEnv-v1",
+        "physics": "default",
+        "env": {},
+        "robot": {"class_type": "vendor.arm"},
+    }
+    cfg = config_to_cfg(config)
+    buffer = init_rollout_buffer_from_config(
+        config, max_episode_steps=1, batch_size=1, state_dim=1
+    )
+
+    assert isinstance(cfg.robot, cfg_cls)
+    assert cfg.robot.enable_sensor is True
+    assert isinstance(cfg.robot.sensors[0], CameraCfg)
+    assert cfg.robot.sensors[0].extrinsics.parent == "tip"
+    assert set(buffer["obs", "sensor"].keys()) == {"vendor_wrist"}
+    assert buffer["obs", "sensor", "vendor_wrist", "color"].shape == (1, 1, 12, 16, 4)
+    assert spec == original
+
+
 def test_workspace_cli_accepts_and_builds_external_robot(external_robot):
     from embodichain.lab.scripts import analyze_workspace
 

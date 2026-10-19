@@ -63,7 +63,7 @@ jobs:
             docs:
               - 'docs/**'
               - 'embodichain/**'
-              - 'embodichain_tasks/**'
+              - 'extensions/**'
               - 'examples/**'
               - 'README.md'
               - 'pyproject.toml'
@@ -346,6 +346,12 @@ jobs:
     container: *container_template
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # Workflow contract tests execute JavaScript; the simulator image has no node.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Preserve Node path for login shells
+        run: echo "CI_NODE_BIN_DIR=$(dirname "$(command -v node)")" >> "$GITHUB_ENV"
       - uses: ./.github/actions/activate-conda
       - name: Download test plan
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -390,6 +396,9 @@ jobs:
         shell: bash -l {0}
         run: |
           source activate py311
+          # The image's login profile can reset the PATH set by setup-node.
+          export PATH="${CI_NODE_BIN_DIR}:${PATH}"
+          node --version
           # Run GPU processes before the long DexSim lane.  Native Vulkan/CUDA
           # teardown can briefly retain allocations after the sim subprocess;
           # this order prevents the GPU lane from inheriting that pressure.
@@ -560,8 +569,8 @@ jobs:
                   )
 
           source_task_configs = {
-              path.as_posix()
-              for path in Path("embodichain_tasks/configs").rglob("*")
+              path.relative_to("extensions").as_posix()
+              for path in Path("extensions/embodichain_tasks/configs").rglob("*")
               if path.suffix in {".json", ".yaml", ".yml"}
           }
           wheel_task_configs = {

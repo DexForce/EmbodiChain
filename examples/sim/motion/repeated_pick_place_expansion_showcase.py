@@ -56,7 +56,7 @@ from embodichain.utils.config_paths import resolve_config_path
 
 _TASK_ROOT = (
     _REPOSITORY_ROOT
-    / "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place"
+    / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place"
 )
 _DEFAULT_TASK_CONFIG = _TASK_ROOT / "task.ur5.yaml"
 _DEFAULT_GENERATION_PROFILE = None
@@ -331,7 +331,7 @@ def main(argv: list[str] | None = None) -> None:
     """Run selected candidates through the configured Task Program environment."""
     args = _create_parser().parse_args(argv)
     if args.expansion_profile is None:
-        from embodichain.lab.scripts.run_env import _resolve_expansion_request
+        from embodichain.lab.scripts.run_task import _resolve_expansion_request
         from embodichain.utils.config_paths import resolve_config_path
         from embodichain.utils.utility import load_config
 

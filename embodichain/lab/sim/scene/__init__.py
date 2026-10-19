@@ -61,6 +61,8 @@ __all__ = [
     "validate_scene",
     "compare_states",
     "settle_scene",
+    "RobotSceneWorkspace",
+    "SceneWorkspaceCandidate",
 ]
 
 _EXPORT_MODULES = {
@@ -98,6 +100,8 @@ _EXPORT_MODULES = {
     "validate_scene": "validation",
     "compare_states": "validation",
     "settle_scene": "validation",
+    "RobotSceneWorkspace": "workspace",
+    "SceneWorkspaceCandidate": "workspace",
 }
 
 

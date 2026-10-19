@@ -105,7 +105,7 @@ _CUBE_RUNTIME_PRESET_ID = "trajectory"
 _REPOSITORY_ROOT = Path(__file__).parents[4]
 _CUBE_ENV_PATH = (
     _REPOSITORY_ROOT
-    / "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place"
+    / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place"
     / "task.ur5.yaml"
 )
 

@@ -35,7 +35,7 @@ BACKENDS = {
 }
 TASK_DIR = (
     Path(__file__).resolve().parents[3]
-    / "embodichain_tasks/configs/tasks/locomotion/velocity/g1_flat"
+    / "extensions/embodichain_tasks/configs/tasks/locomotion/velocity/g1_flat"
 )
 
 

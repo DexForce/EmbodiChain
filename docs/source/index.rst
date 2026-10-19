@@ -26,6 +26,7 @@ Table of Contents
    :glob:
 
    quick_start/install.md
+   quick_start/task_environments
    tutorial/index
    guides/index
 
@@ -38,7 +39,7 @@ Table of Contents
    overview/sim/index
    overview/task_program/index
    overview/gym/index
-   overview/rl/index
+   overview/learning/index
 
 .. toctree::
    :maxdepth: 1

@@ -45,7 +45,8 @@ EXPECTED_COMMANDS = {
     "preview-asset",
     "preview-robot",
     "preview_lerobot_data",
-    "run-env",
+    "run-task",
+    "run-atomic-action",
     "scene-engine",
     "simready",
     "train-rl",
@@ -111,10 +112,10 @@ def test_dispatch_forwards_subcommand_arguments(
     assert received == ["--asset_path", "robot.urdf", "--headless"]
 
 
-def test_run_task_alias_dispatches_to_run_env(
+def test_run_task_dispatches_to_task_launcher(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Run-task forwards to the canonical run-env handler unchanged."""
+    """Run-task forwards arguments to the task launcher unchanged."""
     loaded_targets: list[str] = []
     received: list[str] = []
 
@@ -129,8 +130,48 @@ def test_run_task_alias_dispatches_to_run_env(
 
     cli.main(["run-task", "--gym_config", "task.yaml", "--headless"])
 
-    assert loaded_targets == ["embodichain.lab.scripts.run_env:cli"]
+    assert loaded_targets == ["embodichain.lab.scripts.run_task:cli"]
     assert received == ["--gym_config", "task.yaml", "--headless"]
+
+
+def test_run_env_is_rejected_without_loading_a_handler(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The removed command fails before importing the launcher."""
+
+    def fail_if_loaded(_: str) -> None:
+        raise AssertionError("Removed command loaded a handler")
+
+    monkeypatch.setattr(cli, "_load_handler", fail_if_loaded)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["run-env", "--gym_config", "task.yaml"])
+
+    assert exc_info.value.code == 2
+    assert "invalid choice: 'run-env'" in capsys.readouterr().err
+
+
+def test_root_help_lists_only_the_task_launcher() -> None:
+    """Public help advertises the single task execution command."""
+    help_text = cli.build_parser().format_help()
+
+    assert "run-task" in help_text
+    assert "run-env" not in help_text
+
+
+def test_run_task_help_uses_canonical_name(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Dispatch reaches the task launcher's complete argument parser."""
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["run-task", "--help"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "usage: embodichain run-task" in output
+    assert "--gym_config" in output
+    assert "run-env" not in output
 
 
 def test_list_task_table_matches_startup_summary_style(
@@ -264,9 +305,9 @@ def test_list_task_discovers_and_prints_task_tree(
             list_task._EnvironmentListEntry(
                 "BlocksRankingRGB-v1",
                 ("manipulation", "tableware", "blocks_ranking_rgb"),
-                {list_task._HANDWRITTEN_DEMO},
+                {list_task._TASK_PROGRAM},
                 {"cobotmagic"},
-                {"env.json"},
+                {"task.cobotmagic.yaml"},
             ),
             list_task._EnvironmentListEntry(
                 "StackCups-v1",
@@ -317,7 +358,7 @@ def test_list_task_discovers_and_prints_task_tree(
     ):
         assert value in environment_column
     for value in (
-        "Expert Demo: Handwritten Trajectory",
+        "Expert Demo: Task Program",
         "Environment Only",
     ):
         assert re.sub(r"\s+", "", value) in re.sub(r"\s+", "", capability_column)
@@ -424,9 +465,13 @@ def test_handwritten_demo_detection_uses_environment_hooks() -> None:
     from embodichain_tasks.manipulation.tableware.blocks_ranking_size import (
         BlocksRankingSizeEnv,
     )
-    from embodichain_tasks.special.simple_task import SimpleTaskEnv
+    from embodichain.lab.gym.envs import EmbodiedEnv
 
-    assert list_task._implements_handwritten_demo(SimpleTaskEnv)
+    class HandwrittenDemoEnv(EmbodiedEnv):
+        def create_demo_segments(self, **kwargs: object) -> tuple[()]:
+            return ()
+
+    assert list_task._implements_handwritten_demo(HandwrittenDemoEnv)
     assert not list_task._implements_handwritten_demo(BlocksRankingSizeEnv)
 
 
