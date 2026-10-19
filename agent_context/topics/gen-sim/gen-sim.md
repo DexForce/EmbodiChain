@@ -183,8 +183,9 @@ additional complete paths share the existing four-recovery budget. Extra depths
 reuse the original geometric pools, branch keys and IK random states rather than
 regenerating approach proposals or advancing unrelated random streams. Ordinary
 Pick checks its already-required open-hand endpoint scene clearance before accepting a
-depth; this introduces no new scene gate for Pour. Constraints, explicit grasps,
-handover end regions and owned Cartesian routes retain their original depth.
+depth; this introduces no new scene gate for Pour. Constraints and explicit grasps
+retain their original depth. Handover end regions and owned Cartesian routes also
+retain it unless the native8 source contract described below is explicitly enabled.
 These opt-ins do not replace native acquisition, retention or final path checks.
 Revision 7 also screens the fixed-arm nominal pre-contact closure against the scene
 for ordinary native B1/env0 Picks, both during candidate choice and on emitted
@@ -237,6 +238,31 @@ remains separately owned; the existing robot/articulation/proxy checks remain.
 The scene snapshot is invocation-local and read-only. Emitted and transformed
 closing plans repeat this qualification; it does not predict post-contact
 dynamics or certify a physical grip. Revisions 1--7 retain their existing checks.
+
+Per-call `pick_contact_revisions` also accepts revision 8 for generated E4
+handover-source registered Picks. The lowerer's `ends` contract opts these calls
+into the same open/precontact and emitted/transformed closing-scene checks.
+Bounded depth search reuses the selected `supported_end` candidate pools and
+shares the existing four-path budget, including owned Cartesian source routes;
+it does not switch to ordinary center proposals or relax receiver selection.
+Other registered calls, legacy E4 without this opt-in, Pour, and shared PickUp
+defaults are unchanged. Geometry qualification still requires physical
+acquisition, holding and subsequent HandOver verification during execution.
+Regenerating an expanded E4 graph preserves its declared MoveHeldObject transfer
+poses; upright landing refinement must not lower or rotate those transfer targets.
+
+Explicit `post_handover_places` permissions bind only adjacent sequential
+HandOver-to-relative-on Place calls with the same rigid object and exact receiver.
+On real-held planning failure, the declared Place may reuse the existing
+goal-conditioned waypoint branch with its observed `ends` grasp and preserved
+release orientation. The normal attempt and successful plans remain unchanged;
+the single recovery solve retains every shared Place phase keyframe, timing,
+release effect and final FK/velocity/scene-envelope checks. Its fixed phase grids
+allocate at least the original joint-limit-derived interval requirement to each
+keyframe edge; insufficient phase duration fails closed rather than extending
+time or dropping a required pose. Ordinary branch allocation is unchanged. This permission does
+not enable ordinary recovery globally, change yaw or targets, or certify a
+physical release. Absent permissions preserve existing behavior.
 
 `generate_task_program_bundle(verify_pick_phases=True)` explicitly enables
 registered Pick acquisition/lift verification through its fingerprinted lowerer

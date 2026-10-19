@@ -118,3 +118,25 @@ def test_unowned_place_retains_existing_success_path(monkeypatch):
     assert calls == [1]
     unused.assert_not_called()
     assert motion._PLACE_IK_RECOVERY.get() is None
+
+
+@pytest.mark.parametrize("success", [False, True])
+def test_post_handover_recovery_runs_only_after_original_failure(monkeypatch, success):
+    action = actions.GenSimPlace()
+    first = SimpleNamespace(plan_success=torch.tensor([success]))
+    replacement = object()
+    request, context = object(), object()
+    monkeypatch.setattr(action, "_plan_without_yaw", lambda *args: first)
+    monkeypatch.setattr(place_branch, "owns_post_handover", lambda *args: True)
+    bounded = Mock(return_value=replacement)
+    monkeypatch.setattr(place_branch, "plan", bounded)
+    monkeypatch.setattr(action, "_with_contact_monitor_boundary", lambda value: value)
+    monkeypatch.setattr(
+        actions.GenSimStateHandoff,
+        "from_request",
+        lambda *a, **kw: SimpleNamespace(resource="left"),
+    )
+    monkeypatch.setattr(actions, "require_release_effect", lambda value, key: value)
+    result = action._plan(request, context)
+    assert result is (first if success else replacement)
+    assert bounded.call_count == int(not success)

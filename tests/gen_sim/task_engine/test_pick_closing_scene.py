@@ -110,6 +110,8 @@ class Plan:
         (6, "ordinary", True),
         (7, "pour", True),
         (8, "pour", True),
+        (7, "ends", True),
+        (8, "ends", False),
     ],
 )
 def test_final_closure_cannot_bypass_revision_seven_scene_check(
@@ -117,7 +119,16 @@ def test_final_closure_cannot_bypass_revision_seven_scene_check(
 ):
     action = actions.GenSimPickUp()
     action.pick_purposes = {"pick": purpose}
-    request = SimpleNamespace(invocation_id="pick")
+    request = SimpleNamespace(
+        invocation_id="pick",
+        goal=SimpleNamespace(
+            semantics=SimpleNamespace(
+                affordance=SimpleNamespace(
+                    get_custom_config=lambda key: "ends" if purpose == "ends" else None
+                )
+            )
+        ),
+    )
     screen = SimpleNamespace(revision=revision, report=lambda: {"revision": revision})
     selection = actions._PickSelection(request=request, closing_geometry=screen)
     plan = Plan(

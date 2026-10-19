@@ -26,13 +26,17 @@ from typing import Any
 
 import torch
 
-from embodichain.compute.trajectory import interpolate_with_distance
+from embodichain.compute.trajectory import (
+    interpolate_with_distance,
+    interpolate_with_nums,
+)
 from embodichain.lab.sim.atomic_actions import JointPositionTarget
 from embodichain.lab.sim.atomic_actions.goals import SceneEntityPose, resolve_pose_goal
 from embodichain.lab.sim.atomic_actions.plans import ActionPlan, TimedTrajectory
 from embodichain.lab.sim.atomic_actions.primitives.place import PlaceGoal
 from embodichain.lab.task_program.semantics import (
     Pick,
+    HandOver,
     Place,
     RegisteredSemanticCall,
     SceneAffordanceRef,
@@ -42,7 +46,7 @@ from embodichain.utils.math import quat_error_magnitude, quat_from_matrix
 
 from .adaptive_grasp import ADAPTIVE_GRASP
 from .held_alignment_recovery import _RandomState, _cuda_devices
-from .motion import _CARTESIAN_APPROACH
+from .motion import _CARTESIAN_APPROACH, _joint_velocity_limits
 from .pick_path import _pose_path_valid
 from .pick_safety import _PICK_GRASP_RULE
 from . import place_recovery
@@ -55,6 +59,7 @@ class _Scope:
     action: Any
     request: Any
     context: Any
+    velocity_phase_allocation: bool = False
     groups: list[torch.Tensor] = field(default_factory=list)
     qposes: torch.Tensor | None = None
     solves: int = 0
@@ -62,6 +67,108 @@ class _Scope:
 
 
 _SCOPE: ContextVar[_Scope | None] = ContextVar("gen_sim_place_branch", default=None)
+
+
+def handover_place_declarations(value: object) -> tuple[str, ...]:
+    """Validate unique explicit invocation permissions without changing defaults."""
+    if (
+        type(value) not in (list, tuple)
+        or any(
+            type(name) is not str or not name or name != name.strip() for name in value
+        )
+        or len(set(value)) != len(value)
+    ):
+        raise ValueError("Post-handover Place requires unique exact segment names.")
+    return tuple(value)
+
+
+def bind_handover_places(value: object, program: Any, scene_binding: Any) -> tuple:
+    """Bind only an adjacent exact receiver's rigid on-release after HandOver."""
+    remaining = set(handover_place_declarations(value))
+    if not remaining:
+        return ()
+    rigid = {item.entity_id for item in scene_binding.rigid_objects}
+    segments, result = tuple(program.iter_segments()), []
+    for index, segment in enumerate(segments):
+        if segment.name not in remaining:
+            continue
+        if index == 0:
+            raise ValueError("Post-handover Place has no preceding HandOver.")
+        previous = segments[index - 1]
+        if any(
+            len(s.calls) != 1 or s.parallel_block is not None
+            for s in (previous, segment)
+        ):
+            raise ValueError("Post-handover Place requires adjacent sequential calls.")
+        transfer, place = previous.calls[0].call, segment.calls[0].call
+        if (
+            type(transfer) is not HandOver
+            or transfer.final_target is not None
+            or set(transfer.resources) != {"source", "destination"}
+            or transfer.resources["source"] == transfer.resources["destination"]
+            or type(place) is not RegisteredSemanticCall
+            or place.call_id != "simulation.place_relative"
+            or set(place.arguments) != {"object", "reference", "relation"}
+            or place.arguments["relation"] != "on"
+            or place.arguments["object"] != transfer.object.entity_id
+            or dict(place.resources) != {"primary": transfer.resources["destination"]}
+            or transfer.object.entity_id not in rigid
+            or place.arguments["reference"] not in rigid
+            or place.arguments["reference"] == transfer.object.entity_id
+        ):
+            raise ValueError(
+                "Post-handover Place must preserve object, receiver and rigid support."
+            )
+        identity = f"{program.program_id}/{segment.segment_id}:{segment.calls[0].segment_call_index}"
+        result.append(
+            (
+                identity,
+                transfer.object.entity_id,
+                transfer.resources["destination"],
+                place.arguments["reference"],
+            )
+        )
+        remaining.remove(segment.name)
+    if remaining:
+        raise ValueError("Post-handover Place references a missing segment.")
+    return tuple(result)
+
+
+def owns_post_handover(action: Any, request: Any, context: Any) -> bool:
+    """Retain the receiver's actual end grip and observed orientation at release."""
+    route = (getattr(action, "post_handover_places", None) or {}).get(
+        getattr(request, "invocation_id", None)
+    )
+    if route is None or not action.is_bound:
+        return False
+    goal, options = request.goal, request.skill_options
+    if (
+        _SCOPE.get() is not None
+        or context.batch_size != 1
+        or context.env_ids.tolist() != [0]
+        or _CARTESIAN_APPROACH.get()
+        or not isinstance(goal, PlaceGoal)
+        or not isinstance(goal.xpos, SceneEntityPose)
+        or goal.tcp_symmetry != "none"
+        or not options.preserve_current_object_orientation
+        or options.max_approach_retract_z is not None
+        or request.motion_policy.strategy != "ik_interp"
+        or request.motion_policy.dynamic_collision_mode != "off"
+        or getattr(action.motion_generator, "direct_place_planning", False)
+    ):
+        return False
+    subject, resource, reference = route
+    endpoint = request.binding.endpoint("primary", "motion")
+    if endpoint.task_state_key != resource or goal.xpos.entity_id != reference:
+        return False
+    held = context.get_held_object(resource)
+    affordance = getattr(getattr(held, "semantics", None), "affordance", None)
+    return bool(
+        affordance is not None
+        and held.semantics.entity_id == subject
+        and affordance.get_custom_config(ADAPTIVE_GRASP) == "ends"
+        and affordance.get_custom_config(_PICK_GRASP_RULE) is None
+    )
 
 
 def bind_on_invocations(
@@ -355,6 +462,39 @@ def solve_waypoints(
     )
 
 
+def _velocity_phase(
+    keys: torch.Tensor, samples: int, limits: torch.Tensor, dt: float
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Allocate a fixed phase grid by each edge's slowest controlled joint."""
+    if (
+        keys.ndim != 3
+        or keys.shape[0] != 1
+        or keys.shape[1] < 2
+        or limits.shape != (1, keys.shape[-1])
+        or not torch.isfinite(keys).all()
+        or not torch.isfinite(limits).all()
+        or (limits <= 0).any()
+        or not math.isfinite(dt)
+        or dt <= 0
+    ):
+        raise ValueError("Place phase requires finite single-row keys, limits and dt.")
+    intervals = (
+        torch.ceil(
+            ((keys[:, 1:] - keys[:, :-1]).abs() / (limits[:, None] * dt)).amax(-1)[0]
+        )
+        .to(torch.int64)
+        .clamp_min(1)
+    )
+    spare = samples - 1 - int(intervals.sum())
+    if spare < 0:
+        raise ValueError("Place phase cannot fit the original duration at its limits.")
+    intervals += spare // intervals.numel()
+    intervals[: spare % intervals.numel()] += 1
+    values = interpolate_with_nums(keys, intervals, device=keys.device)
+    values[:, intervals.cumsum(0)] = keys[:, 1:]
+    return values, intervals
+
+
 def _rebuild(scope: _Scope, original: ActionPlan) -> ActionPlan:
     if scope.solves != 1 or scope.qposes is None or not original.plan_success.all():
         raise ValueError("Place shared builder did not qualify every required pose.")
@@ -368,13 +508,28 @@ def _rebuild(scope: _Scope, original: ActionPlan) -> ActionPlan:
     down, back = scope.qposes[:, :n_down], scope.qposes[:, n_down:]
     anchor = down[:, -1:]
     full = original.joint_trajectory.positions.clone()
+    if scope.velocity_phase_allocation:
+        steps = original.joint_trajectory.dt[:, 1:]
+        if (
+            not steps.numel()
+            or not (steps > 0).all()
+            or not (steps == steps[0, 0]).all()
+        ):
+            raise ValueError("Post-handover Place requires its uniform control grid.")
+        limits = _joint_velocity_limits(action.robot, None).to(full)[:, ids]
+        step = float(steps[0, 0])
+        scope.receipt["velocity_phase_intervals"] = {}
     for segment, keys in (
         (approach, torch.cat((context.robot.qpos[:, None, ids], down), 1)),
         (retract, torch.cat((anchor, back), 1)),
     ):
-        full[:, segment.start : segment.stop, ids] = interpolate_with_distance(
-            keys, segment.stop - segment.start, device=full.device
-        )
+        samples = segment.stop - segment.start
+        if scope.velocity_phase_allocation:
+            values, intervals = _velocity_phase(keys, samples, limits, step)
+            scope.receipt["velocity_phase_intervals"][segment.name] = intervals.tolist()
+        else:
+            values = interpolate_with_distance(keys, samples, device=full.device)
+        full[:, segment.start : segment.stop, ids] = values
     full[:, release.start : release.stop, ids] = anchor
     candidate = action.build_plan(
         request,
@@ -436,9 +591,12 @@ def plan(
     build: Callable[[Any, Any], ActionPlan],
 ) -> ActionPlan:
     """Build one shared Place plan and qualify it without fallback or dispatch."""
-    if not owns(action, request, context):
-        raise ValueError("Place branch requires a bound ordinary on invocation.")
-    scope = _Scope(action, request, context)
+    post_handover = owns_post_handover(action, request, context)
+    if not (owns(action, request, context) or post_handover):
+        raise ValueError(
+            "Place branch requires a bound ordinary on or post-handover invocation."
+        )
+    scope = _Scope(action, request, context, velocity_phase_allocation=post_handover)
     state = _RandomState.capture(
         _cuda_devices(action.robot.device, context.robot.qpos.device)
     )

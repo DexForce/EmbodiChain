@@ -61,6 +61,36 @@ def test_contact_revisions_reject_invalid_values(bad):
         contact_revision_declarations({"selected": bad})
 
 
+@pytest.mark.parametrize(
+    "call_id,revision,accepted",
+    [
+        ("gen_sim.pick.handover_source", 8, True),
+        ("gen_sim.pick.handover_horizontal_source.spoon", 8, True),
+        ("gen_sim.pick.handover_source", 7, False),
+        ("gen_sim.pick.other", 8, False),
+        ("gen_sim.pick.handover_horizontal_source", 8, False),
+    ],
+)
+def test_contact_revision_binds_only_native8_handover_source(
+    call_id, revision, accepted
+):
+    from embodichain.gen_sim.task_engine._task_program.adaptive_grasp import (
+        bind_contact_revisions,
+    )
+    from embodichain.lab.task_program.semantics import RegisteredSemanticCall
+
+    call = SimpleNamespace(call=RegisteredSemanticCall(call_id), segment_call_index=0)
+    segment = SimpleNamespace(name="source", segment_id="segment", calls=(call,))
+    program = SimpleNamespace(program_id="p", iter_segments=lambda: iter((segment,)))
+    if accepted:
+        assert bind_contact_revisions({"source": revision}, program) == (
+            ("p/segment:0", 8),
+        )
+    else:
+        with pytest.raises(ValueError):
+            bind_contact_revisions({"source": revision}, program)
+
+
 @pytest.mark.parametrize("axis", [(1.0, 0.0, 0.0), (-1.0, 0.0, 0.0), (0.0, 1.0, 0.0)])
 def test_horizontal_grasp_tracks_the_arm_not_axis_sign(axis):
     axis = torch.tensor([axis]).repeat(2, 1)

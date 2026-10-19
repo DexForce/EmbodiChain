@@ -96,6 +96,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
     _pick_continuations: tuple = ()
     _pick_contact_revisions: tuple[tuple[str, int], ...] = ()
     _world_yaw_free_places: tuple[str, ...] = ()
+    _post_handover_places: tuple = ()
 
     def __init__(
         self,
@@ -124,6 +125,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         pick_contact_revision: int | None = None,
         pick_contact_revisions: tuple[tuple[str, int], ...] = (),
         world_yaw_free_places: tuple[str, ...] = (),
+        post_handover_places: tuple = (),
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -148,6 +150,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         self._pick_contact_revision = pick_contact_revision
         self._pick_contact_revisions = pick_contact_revisions
         self._world_yaw_free_places = world_yaw_free_places
+        self._post_handover_places = post_handover_places
         self._task_post_port = TaskStabilityPort(
             self.segment_policy_port,
             self._simulation,
@@ -338,6 +341,10 @@ class _TaskFactory(SimulationTaskProgramFactory):
         engine.register(transport, replace=True)
         place = GenSimPlace()
         place.recovery_scene_vertices = meshes
+        place.post_handover_places = {
+            identity: (subject, resource, reference)
+            for identity, subject, resource, reference in self._post_handover_places
+        }
         from .place_branch import bind_on_invocations
 
         place.ordinary_on_invocations = bind_on_invocations(
@@ -518,6 +525,7 @@ class TaskAdapterFactory:
     pick_contact_revision: int | None = None
     pick_contact_revisions: tuple[tuple[str, int], ...] = ()
     world_yaw_free_places: tuple[str, ...] = ()
+    post_handover_places: tuple = ()
     pour_return_calls: tuple[str, ...] = ()
     held_command_sources: tuple = ()
     upright_container_picks: tuple = ()
@@ -757,6 +765,7 @@ class TaskAdapterFactory:
             pick_contact_revision=self.pick_contact_revision,
             pick_contact_revisions=self.pick_contact_revisions,
             world_yaw_free_places=self.world_yaw_free_places,
+            post_handover_places=self.post_handover_places,
         )
         support = [
             cfg
@@ -823,6 +832,7 @@ def load_deployment(
             "pick_contact_revision",
             "pick_contact_revisions",
             "world_yaw_free_places",
+            "post_handover_places",
         }
         or payload["schema_version"] != "gen_sim_task_constraints/v1"
     ):
@@ -1037,6 +1047,11 @@ def load_deployment(
 
     world_yaw_free_places = bind_yaw_calls(
         payload.get("world_yaw_free_places", []), compiled
+    )
+    from .place_branch import bind_handover_places
+
+    post_handover_places = bind_handover_places(
+        payload.get("post_handover_places", []), compiled, registration.scene_binding
     )
     if world_yaw_free_places and not adaptive_pick:
         raise ValueError("World yaw freedom requires ordinary Pick/Place binding.")
@@ -1274,6 +1289,7 @@ def load_deployment(
         pick_contact_revision=pick_contact_revision,
         pick_contact_revisions=pick_contact_revisions,
         world_yaw_free_places=world_yaw_free_places,
+        post_handover_places=post_handover_places,
     )
     integration = replace(
         base.integration,

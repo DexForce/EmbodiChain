@@ -185,6 +185,18 @@ class GenSimPickUp(PickUp):
     pour_region_geometries: dict | None = None
     pour_gravity_world: tuple[float, float, float] | None = None
 
+    @staticmethod
+    def _native_handover_source(request: Any, screen: Any) -> bool:
+        """Opt in the lowerer's end-grasp contract, never an ordinary/Pour alias."""
+        if screen is None or screen.revision != 8:
+            return False
+        semantics = getattr(getattr(request, "goal", None), "semantics", None)
+        affordance = getattr(semantics, "affordance", None)
+        return (
+            affordance is not None
+            and affordance.get_custom_config(ADAPTIVE_GRASP) == "ends"
+        )
+
     def _approach_alignment_mask(self, grasp_poses, options, approach_direction):
         aligned = super()._approach_alignment_mask(
             grasp_poses, options, approach_direction
@@ -332,7 +344,10 @@ class GenSimPickUp(PickUp):
         if (
             valid
             and screen.revision == 8
-            and (self.pick_purposes or {}).get(request.invocation_id) == "ordinary"
+            and (
+                (self.pick_purposes or {}).get(request.invocation_id) == "ordinary"
+                or self._native_handover_source(request, screen)
+            )
         ):
             scene = self._inspect_closing_scene(
                 request,
@@ -361,7 +376,10 @@ class GenSimPickUp(PickUp):
         if (
             acceptance["valid"]
             and screen.revision in (7, 8)
-            and (self.pick_purposes or {}).get(request.invocation_id) == "ordinary"
+            and (
+                (self.pick_purposes or {}).get(request.invocation_id) == "ordinary"
+                or self._native_handover_source(request, screen)
+            )
             and "closing_scene" not in acceptance
         ):
             close = next(s for s in plan.segments if s.name == "close")
@@ -1706,13 +1724,19 @@ class GenSimPickUp(PickUp):
         candidate_ids = torch.full_like(strategies, -1)
         full, lengths = None, None
         attempts = []
+        native_source = self._native_handover_source(
+            request, selection.closing_geometry
+        )
         depth_enabled = (
             selection.closing_geometry is not None
             and selection.closing_geometry.revision in (6, 7, 8)
             and context.batch_size == 1
             and not selection.constrained
-            and axis_region_policy == "mesh_extent"
-            and request.invocation_id not in self.path_excluded_invocations
+            and (axis_region_policy == "mesh_extent" or native_source)
+            and (
+                request.invocation_id not in self.path_excluded_invocations
+                or native_source
+            )
         )
         depths = selection.closing_geometry.depth_offsets() if depth_enabled else (0.0,)
         alternatives = ((choice, depth) for depth in depths for choice in choices)
@@ -1854,7 +1878,10 @@ class GenSimPickUp(PickUp):
             if (
                 depth_enabled
                 and bool(accepted.any())
-                and (self.pick_purposes or {}).get(request.invocation_id) == "ordinary"
+                and (
+                    (self.pick_purposes or {}).get(request.invocation_id) == "ordinary"
+                    or native_source
+                )
             ):
                 clear = self._native_pick_endpoint_clear(
                     request, context, candidate_path, candidate_lengths
@@ -2425,6 +2452,7 @@ class GenSimPlace(Place):
     ordinary_on_invocations: frozenset[str] = frozenset()
     world_yaw_free_routes: dict | None = None
     world_yaw_simulation: Any = None
+    post_handover_places: dict[str, tuple[str, str, str]] | None = None
 
     def _translation_keyframes(
         self,
@@ -2455,6 +2483,26 @@ class GenSimPlace(Place):
 
     def _plan(self, request, context):
         first = self._plan_without_yaw(request, context)
+        from . import place_branch
+
+        if (
+            place_branch.owns_post_handover(self, request, context)
+            and not first.plan_success.any()
+        ):
+            candidate = place_branch.plan(
+                self,
+                request,
+                context,
+                lambda selected, current: super(GenSimPlace, self)._plan(
+                    selected, current
+                ),
+            )
+            handoff = GenSimStateHandoff.from_request(
+                request, context, participant="GenSim Place"
+            )
+            return require_release_effect(
+                self._with_contact_monitor_boundary(candidate), handoff.resource
+            )
         if not self.world_yaw_free_routes:
             return first
         from .place_yaw import recover

@@ -199,6 +199,7 @@ def generate_task_program_bundle(
     pick_contact_revision: int | None = None,
     pick_contact_revisions: Mapping[str, int] | None = None,
     world_yaw_free_places: Sequence[str] | None = None,
+    post_handover_places: Sequence[str] | None = None,
     verify_pick_phases: bool = False,
     pour_geometry_revision: int | None = None,
     pour_proxy_position_tolerance_m: float | None = None,
@@ -255,10 +256,13 @@ def generate_task_program_bundle(
             position budget for revision 2, shared with its pose-proxy observer.
             Forbidden for other revisions; no tolerance is invented implicitly.
         pick_contact_revisions: Explicit Pick node IDs mapped to native closing
-            revisions. Unlisted calls retain ``pick_contact_revision`` or legacy behavior.
+            revisions; registered handover-source Picks require revision 8.
+            Unlisted calls retain ``pick_contact_revision`` or legacy behavior.
         world_yaw_free_places: Explicit ordinary inside Place node IDs whose object
             heading may change on real-held planning failure. Omitted preserves
             legacy behavior; hypothetical Pick previews never use this recovery.
+        post_handover_places: Explicit receiver relative-on Place node IDs granted
+            failure-only goal-conditioned recovery. Targets and grasp stay fixed.
         upright_container_picks: Explicit E3 Pick node IDs mapped to maximum pad-axis
             tilt above the Z-up horizontal plane, in degrees. Omitted preserves
             legacy behavior. The caller declares these as upright-container Picks.
@@ -705,6 +709,7 @@ def generate_task_program_bundle(
         pick_contact_revision=pick_contact_revision,
         pick_contact_revisions=pick_contact_revisions,
         world_yaw_free_places=world_yaw_free_places,
+        post_handover_places=post_handover_places,
         upright_container_picks=upright_container_picks,
     )
     drawer_targets = {route.affordance for route in drawers}
@@ -969,6 +974,7 @@ def _task_stability_payload(
     pick_contact_revision: int | None = None,
     pick_contact_revisions: Mapping[str, int] | None = None,
     world_yaw_free_places: Sequence[str] | None = None,
+    post_handover_places: Sequence[str] | None = None,
     upright_container_picks: Mapping[str, float] | None = None,
 ) -> dict[str, Any]:
     """Declare task conditions without adding public validator or runtime types."""
@@ -1283,17 +1289,29 @@ def _task_stability_payload(
     if pick_contact_revision is not None:
         result["pick_contact_revision"] = pick_contact_revision
     if pick_contact_revisions is not None:
-        from ._task_program.adaptive_grasp import contact_revision_declarations
+        from ._task_program.adaptive_grasp import (
+            contact_revision_declarations,
+            is_handover_source_call_id,
+        )
 
         if not isinstance(pick_contact_revisions, Mapping):
             raise ValueError("Pick contact revisions must be an explicit mapping.")
         revisions = contact_revision_declarations(dict(pick_contact_revisions))
         nodes = {n["id"]: n for n in graph["nodes"]}
         if any(
-            name not in nodes or nodes[name]["call"]["kind"] != "pick"
-            for name in revisions
+            name not in nodes
+            or not (
+                nodes[name]["call"]["kind"] == "pick"
+                or revision == 8
+                and nodes[name]["task_type"] == "E4"
+                and nodes[name]["call"]["kind"] == "registered"
+                and is_handover_source_call_id(nodes[name]["call"].get("call_id"))
+            )
+            for name, revision in revisions.items()
         ):
-            raise ValueError("Pick contact revision must name explicit Pick nodes.")
+            raise ValueError(
+                "Pick contact revision must name explicit Pick nodes or native8 E4 source Picks."
+            )
         if revisions:
             result["pick_contact_revisions"] = revisions
     if world_yaw_free_places is not None:
@@ -1310,6 +1328,12 @@ def _task_stability_payload(
             raise ValueError("World yaw freedom must name explicit inside Place nodes.")
         if names:
             result["world_yaw_free_places"] = list(names)
+    if post_handover_places is not None:
+        from ._task_program.place_branch import handover_place_declarations
+
+        names = handover_place_declarations(post_handover_places)
+        if names:
+            result["post_handover_places"] = list(names)
     if upright_container_picks is not None:
         from ._task_program.pick_closure_quality import declarations
 
@@ -4227,8 +4251,34 @@ def _refine_upright_targets(
     target_routes: dict[str, tuple[str, str]] = {}
     target_heights: dict[str, float] = {}
     upright_staging_targets: set[str] = set()
+    transfer_sources = {
+        (
+            node["task_instance_id"],
+            node["depends_on"][0],
+            node["call"]["object"],
+            node["call"]["resources"]["source"],
+        )
+        for node in selected["nodes"]
+        if node["task_type"] == "E4"
+        and node["call"]["kind"] == "hand_over"
+        and len(node["depends_on"]) == 1
+    }
     for node in selected["nodes"]:
         call = node["call"]
+        # A transfer pose is not an upright landing target, including when an
+        # already expanded E4 graph is regenerated with a new Pick policy.
+        if (
+            node.get("task_type") == "E4"
+            and call.get("call_id") == _MOVE_HELD_OBJECT_CALL_ID
+            and (
+                node["task_instance_id"],
+                node["id"],
+                call.get("arguments", {}).get("object"),
+                call.get("resources", {}).get("primary"),
+            )
+            in transfer_sources
+        ):
+            continue
         if (
             node.get("task_type") not in {"E1", "E2", "E4"}
             or call.get("kind") != "registered"

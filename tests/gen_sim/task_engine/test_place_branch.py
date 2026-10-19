@@ -63,6 +63,40 @@ def _poses(values):
     return result
 
 
+def test_velocity_phase_fits_slow_joint_without_extending_original_duration():
+    keys = torch.tensor([[[0.0, 0.0], [0.52, 0.0], [0.52, 1.4], [0.56, 1.4]]])
+    limits = torch.tensor([[1.0, 10.0]])
+    result, intervals = route._velocity_phase(keys, 22, limits, 0.04)
+    assert result.shape == (1, 22, 2)
+    assert intervals.sum() == 21
+    assert bool(
+        ((result[:, 1:] - result[:, :-1]).abs() <= limits[:, None] * 0.04 + 1e-6).all()
+    )
+    ends = intervals.cumsum(0)
+    assert torch.equal(result[:, ends], keys[:, 1:])
+    assert torch.equal(result[:, :1], keys[:, :1])
+
+
+@pytest.mark.parametrize(
+    "damage", ["too_few", "zero_limit", "nonfinite", "bad_dt", "batch"]
+)
+def test_velocity_phase_fails_closed_without_enough_time_or_valid_limits(damage):
+    keys = torch.tensor([[[0.0], [0.52], [0.7]]])
+    limits, samples, dt = torch.tensor([[1.0]]), 22, 0.04
+    if damage == "too_few":
+        samples = 10
+    elif damage == "zero_limit":
+        limits.zero_()
+    elif damage == "nonfinite":
+        keys[0, 1, 0] = float("nan")
+    elif damage == "bad_dt":
+        dt = 0.0
+    elif damage == "batch":
+        keys = keys.expand(2, -1, -1)
+    with pytest.raises(ValueError):
+        route._velocity_phase(keys, samples, limits, dt)
+
+
 def _fixture(monkeypatch):
     down, back = _poses([0.13, 0.23, 0.4, 0.5]), _poses([0.62, 0.7])
     start = torch.tensor([[0.0, 0.9, 0.8]])
@@ -216,6 +250,129 @@ def _fixture(monkeypatch):
         inspection,
         built,
     )
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        None,
+        "missing",
+        "object",
+        "receiver",
+        "parallel",
+        "other_call",
+        "inside",
+        "duplicate",
+    ],
+)
+def test_explicit_post_handover_place_binding_is_adjacent_and_exact(damage):
+    from embodichain.lab.task_program.semantics import (
+        HandOver,
+        RegisteredSemanticCall,
+        SceneObjectRef,
+    )
+
+    handover = HandOver(
+        SceneObjectRef("spoon"), resources={"source": "right", "destination": "left"}
+    )
+    place = RegisteredSemanticCall(
+        "simulation.place_relative",
+        {"object": "spoon", "reference": "mat", "relation": "on"},
+        resources={"primary": "left"},
+    )
+    segments = [
+        NS(
+            name="exchange",
+            segment_id="s0",
+            calls=(NS(call=handover, segment_call_index=0),),
+            parallel_block=None,
+        ),
+        NS(
+            name="place",
+            segment_id="s1",
+            calls=(NS(call=place, segment_call_index=0),),
+            parallel_block=None,
+        ),
+    ]
+    names = ["place"]
+    if damage == "missing":
+        names = ["absent"]
+    elif damage == "object":
+        segments[0].calls[0].call = replace(handover, object=SceneObjectRef("other"))
+    elif damage == "receiver":
+        segments[0].calls[0].call = replace(
+            handover, resources={"source": "left", "destination": "right"}
+        )
+    elif damage == "parallel":
+        segments[0].parallel_block = "parallel"
+    elif damage == "other_call":
+        segments[0].calls[0].call = place
+    elif damage == "inside":
+        segments[1].calls[0].call = replace(
+            place, arguments={**place.arguments, "relation": "inside"}
+        )
+    elif damage == "duplicate":
+        names *= 2
+    program = NS(program_id="p", iter_segments=lambda: iter(segments))
+    bindings = NS(rigid_objects=(NS(entity_id="spoon"), NS(entity_id="mat")))
+    if damage is None:
+        assert route.bind_handover_places(names, program, bindings) == (
+            ("p/s1:0", "spoon", "left", "mat"),
+        )
+        assert route.bind_handover_places([], program, bindings) == ()
+    else:
+        with pytest.raises(ValueError):
+            route.bind_handover_places(names, program, bindings)
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [None, "unlisted", "object", "resource", "reference", "pour", "orientation"],
+)
+def test_post_handover_branch_requires_exact_live_hold(monkeypatch, damage):
+    action, request, context, build, old, down, back, rules, _, _ = _fixture(
+        monkeypatch
+    )
+    action.ordinary_on_invocations = frozenset()
+    monkeypatch.setattr(
+        route, "_joint_velocity_limits", lambda *_: torch.full((1, 3), 4.0)
+    )
+    action.post_handover_places = {
+        request.invocation_id: ("item", "left", "support_target")
+    }
+    context.get_held_object("left").semantics.entity_id = "item"
+    rules[ADAPTIVE_GRASP] = "ends"
+    request.skill_options = replace(
+        request.skill_options, preserve_current_object_orientation=True
+    )
+    if damage == "unlisted":
+        action.post_handover_places = {}
+    elif damage == "object":
+        context.get_held_object("left").semantics.entity_id = "other"
+    elif damage == "resource":
+        action.post_handover_places[request.invocation_id] = (
+            "item",
+            "right",
+            "support_target",
+        )
+    elif damage == "reference":
+        request.goal = PlaceGoal(SceneEntityPose("wrong"))
+    elif damage == "pour":
+        rules[ADAPTIVE_GRASP] = "pour"
+    elif damage == "orientation":
+        request.skill_options = replace(
+            request.skill_options, preserve_current_object_orientation=False
+        )
+    assert route.owns_post_handover(action, request, context) is (damage is None)
+    assert not route.owns(action, request, context)
+    if damage is None:
+        result = route.plan(action, request, context, build)
+        assert result.plan_success.all()
+        assert result.expected_effects is old.expected_effects
+        assert torch.equal(result.joint_trajectory.dt, old.joint_trajectory.dt)
+        assert result.diagnostics.metadata["gen_sim_place_branch"][
+            "emitted_mandatory_fk_valid"
+        ]
 
 
 def test_mandatory_phase_keyframes_survive_old_split_with_same_timing_and_effects(
