@@ -417,6 +417,7 @@ class ExecutionRunner:
         self._command_sink = command_sink
         self._clock = clock or MonotonicExecutionClock()
         self.cfg = cfg or ExecutionRunnerCfg()
+        self._passive_cycle_time = self._resolve_passive_cycle_time()
         self._physical_evidence_provider = physical_evidence_provider
         self._observation_revision = 0
         self._last_evidence: PhysicalEvidenceFrame | None = None
@@ -821,12 +822,21 @@ class ExecutionRunner:
 
         dispatches: list[CommandDispatch] = []
         if tick.command is not None:
-            self._remember_targets(tick.command.targets)
             operation = (
                 CommandOperation.SEND
                 if bool(tick.command.active_mask.any().item())
                 else CommandOperation.HOLD
             )
+            try:
+                interval = self._command_interval(tick.command)
+            except Exception as exc:
+                return self._fail(
+                    "Command interval validation failed: "
+                    f"{type(exc).__name__}: {exc}",
+                    context=context,
+                    tick=tick,
+                )
+            self._remember_targets(tick.command.targets)
             dispatch = self._dispatch(
                 operation,
                 command=(tick.command if operation is CommandOperation.SEND else None),
@@ -850,7 +860,6 @@ class ExecutionRunner:
                 )
             if operation is CommandOperation.SEND:
                 self._command_count += 1
-            interval = self._command_interval(tick.command)
             self._next_step_at = self._clock_now() + interval
         elif tick.hold_targets and (
             tick.pending_effect is None or self.cfg.hold_during_effect_verification
@@ -876,10 +885,10 @@ class ExecutionRunner:
                     tick=tick,
                     dispatches=dispatches,
                 )
-            self._next_step_at = self._clock_now() + self.cfg.minimum_cycle_time
+            self._next_step_at = self._clock_now() + self._passive_cycle_time
         elif tick.pending_effect is not None:
             self._remember_targets(tick.hold_targets)
-            self._next_step_at = self._clock_now() + self.cfg.minimum_cycle_time
+            self._next_step_at = self._clock_now() + self._passive_cycle_time
         else:
             self._next_step_at = self._clock_now()
 
@@ -1094,18 +1103,63 @@ class ExecutionRunner:
 
     def _command_interval(self, command: RuntimeCommandFrame) -> float:
         """Resolve a synchronized batch interval from per-environment durations."""
-        durations = (
-            command.hold_duration[command.active_mask]
-            if command.active_mask.any()
-            else command.hold_duration
-        )
-        requested = float(durations.max().item()) if durations.numel() else 0.0
-        return max(requested, self.cfg.minimum_cycle_time)
+        if not command.active_mask.any():
+            return self._passive_cycle_time
+        durations = command.hold_duration[command.active_mask]
+        positive = durations[durations > 0]
+        if not positive.numel():
+            return self._passive_cycle_time
+        requested = float(positive[0].item())
+        tolerance = max(1.0e-9, abs(requested) * 1.0e-6)
+        if not torch.allclose(
+            positive,
+            positive[:1].expand_as(positive),
+            rtol=1.0e-6,
+            atol=tolerance,
+        ):
+            raise ValueError(
+                "Active command rows must share one positive hold duration; "
+                "zero-duration terminal padding is the only allowed difference."
+            )
+        if requested + tolerance < self.cfg.minimum_cycle_time:
+            raise ValueError(
+                "Command hold duration is shorter than minimum_cycle_time; "
+                "the runtime may not silently slow a planned trajectory."
+            )
+        return requested
+
+    def _resolve_passive_cycle_time(self) -> float:
+        """Align passive polling to an optional clock sleep quantum."""
+        requested = self.cfg.minimum_cycle_time
+        if requested == 0.0:
+            return 0.0
+        quantum = getattr(self._clock, "sleep_quantum", None)
+        if quantum is None:
+            return requested
+        if isinstance(quantum, bool) or not isinstance(quantum, (int, float)):
+            raise TypeError("ExecutionClock.sleep_quantum must be a real number.")
+        quantum = float(quantum)
+        if not math.isfinite(quantum) or quantum <= 0.0:
+            raise ValueError(
+                "ExecutionClock.sleep_quantum must be finite and greater than zero."
+            )
+        ratio = requested / quantum
+        nearest = round(ratio)
+        if nearest >= 1 and math.isclose(
+            ratio,
+            nearest,
+            rel_tol=1.0e-6,
+            abs_tol=1.0e-9,
+        ):
+            step_count = nearest
+        else:
+            step_count = max(1, math.ceil(ratio))
+        return step_count * quantum
 
     def _remaining_wait(self, now: float) -> float:
         """Return scheduled wait while absorbing float32 timing roundoff."""
         remaining = self._next_step_at - now
-        tolerance = max(1.0e-9, self.cfg.minimum_cycle_time * 1.0e-6)
+        tolerance = max(1.0e-9, self._passive_cycle_time * 1.0e-6)
         return remaining if remaining > tolerance else 0.0
 
     def _dispatch(

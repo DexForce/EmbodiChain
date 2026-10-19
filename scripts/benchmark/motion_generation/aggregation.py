@@ -28,6 +28,8 @@ from .models import BenchmarkCase, CaseOutcome, PlannerMetadata, TrialPhase, Tri
 
 __all__ = ["aggregate_generalization", "aggregate_results"]
 
+_EFFECTIVE_MOTION_ALGORITHM_ROLE = "effective_motion_algorithm"
+
 
 def _mean(values: Iterable[float | None]) -> float | None:
     """Return the mean of finite values or ``None`` when unavailable."""
@@ -317,6 +319,19 @@ def _track_ids(records: list[TrialRecord], cases: list[BenchmarkCase]) -> list[s
     return sorted(tracks)
 
 
+def _bypassed_case_ids(
+    records: Iterable[TrialRecord], algorithm_id: str, track: str
+) -> frozenset[str]:
+    """Return cases whose scenario did not call the selected planner backend."""
+    return frozenset(
+        record.case_id
+        for record in records
+        if record.algorithm_id == algorithm_id
+        and record.track == track
+        and not record.uses_selected_planner_backend
+    )
+
+
 def _lifecycle_value(
     records: list[TrialRecord],
     track: str,
@@ -337,6 +352,7 @@ def _lifecycle_value(
             and record.algorithm_id == algorithm_id
             and record.batch_size == batch_size
             and record.phase is phase
+            and record.uses_selected_planner_backend
             and (waypoint_count is None or record.waypoint_count == waypoint_count)
         ):
             return record.cost_time_ms
@@ -348,13 +364,13 @@ def _performance_rows(
     metadata: list[PlannerMetadata],
     cases: list[BenchmarkCase],
 ) -> list[dict[str, object]]:
-    """Aggregate steady-state time and memory by track, algorithm, and input shape."""
+    """Aggregate planner-attributed time and memory by track and input shape."""
     measured_groups: dict[
         tuple[str, str, str, str, str | None, str | None, int, int],
         list[TrialRecord],
     ] = defaultdict(list)
     for record in records:
-        if record.phase is TrialPhase.MEASURED:
+        if record.phase is TrialPhase.MEASURED and record.uses_selected_planner_backend:
             measured_groups[
                 (
                     record.track,
@@ -518,12 +534,14 @@ def _metric_rows(
 
     Boolean success columns use the same case-level macro average as the
     leaderboard (missing cases contribute ``0.0``). Continuous quality metrics
-    remain conditioned on externally motion-valid outcomes.
+    remain conditioned on externally motion-valid outcomes. Cases whose
+    scenario bypasses the selected planner are excluded from planner metrics
+    and reported under the algorithm that actually produced their motion.
     """
     measured_by_key: dict[
         tuple[
             str,
-            str,
+            tuple[str, bool],
             str,
             str,
             str,
@@ -537,22 +555,41 @@ def _metric_rows(
         ],
         list[TrialRecord],
     ] = defaultdict(list)
-    unsupported_by_algorithm_track: dict[tuple[str, str], set[str]] = defaultdict(set)
+    unsupported_by_report_key_track: dict[tuple[tuple[str, bool], str], set[str]] = (
+        defaultdict(set)
+    )
+    bypassed_by_algorithm_track: dict[tuple[str, str], set[str]] = defaultdict(set)
+    effective_case_sources: dict[tuple[str, str, str], set[str]] = defaultdict(set)
+    effective_algorithms: set[str] = set()
     for record in records:
+        is_effective = not record.uses_selected_planner_backend
+        report_key = (record.effective_motion_algorithm, is_effective)
+        if is_effective:
+            bypassed_by_algorithm_track[(record.algorithm_id, record.track)].add(
+                record.case_id
+            )
+            effective_algorithms.add(record.effective_motion_algorithm)
+            effective_case_sources[
+                (
+                    record.effective_motion_algorithm,
+                    record.track,
+                    record.case_id,
+                )
+            ].add(record.algorithm_id)
         if (
             record.phase is TrialPhase.AVAILABILITY
             and record.status == "unsupported"
             and record.failure_code
             in {"unsupported_capability", "unsupported_capacity"}
         ):
-            unsupported_by_algorithm_track[(record.algorithm_id, record.track)].add(
+            unsupported_by_report_key_track[(report_key, record.track)].add(
                 record.case_id
             )
         if record.phase is not TrialPhase.MEASURED:
             continue
         key = (
             record.track,
-            record.algorithm_id,
+            report_key,
             record.scenario_id,
             record.robot_id,
             record.skill_id,
@@ -615,7 +652,15 @@ def _metric_rows(
         cases_by_group[key].append(case)
 
     rows: list[dict[str, object]] = []
-    for info in metadata:
+    report_algorithms = [
+        ((info.algorithm_id, False), info.algorithm_role.value) for info in metadata
+    ]
+    report_algorithms.extend(
+        ((algorithm_id, True), _EFFECTIVE_MOTION_ALGORITHM_ROLE)
+        for algorithm_id in sorted(effective_algorithms)
+    )
+    for report_key, algorithm_role in report_algorithms:
+        algorithm_id, is_effective = report_key
         for group_key in sorted(
             expected_by_group,
             key=lambda item: (
@@ -645,11 +690,25 @@ def _metric_rows(
                 path_shape,
                 start_state_bin,
             ) = group_key
-            group_cases = cases_by_group[group_key]
+            if is_effective:
+                group_cases = [
+                    case
+                    for case in cases_by_group[group_key]
+                    if effective_case_sources.get((algorithm_id, track, case.case_id))
+                ]
+            else:
+                bypassed_case_ids = bypassed_by_algorithm_track[(algorithm_id, track)]
+                group_cases = [
+                    case
+                    for case in cases_by_group[group_key]
+                    if case.case_id not in bypassed_case_ids
+                ]
+            if not group_cases:
+                continue
             measured = measured_by_key.get(
                 (
                     track,
-                    info.algorithm_id,
+                    report_key,
                     scenario_id,
                     robot_id,
                     skill_id,
@@ -664,17 +723,26 @@ def _metric_rows(
                 [],
             )
             excluded_case_ids = frozenset(
-                unsupported_by_algorithm_track[(info.algorithm_id, track)]
+                unsupported_by_report_key_track[(report_key, track)]
             )
             outcomes = [outcome for record in measured for outcome in record.outcomes]
             valid_outcomes = [outcome for outcome in outcomes if outcome.motion_valid]
-            expected = expected_by_group[group_key]
+            expected = sum(
+                case.batch_size
+                * measured_trials
+                * (
+                    len(effective_case_sources[(algorithm_id, track, case.case_id)])
+                    if is_effective
+                    else 1
+                )
+                for case in group_cases
+            )
             rows.append(
                 {
                     "track": track,
                     "scenario": scenario_id,
-                    "algorithm": info.algorithm_id,
-                    "algorithm_role": info.algorithm_role.value,
+                    "algorithm": algorithm_id,
+                    "algorithm_role": algorithm_role,
                     "robot": robot_id,
                     "skill": skill_id,
                     "object": object_id,
@@ -844,22 +912,31 @@ def _leaderboard_rows(
     Success rates are macro-averaged over mandatory cases (equal case weight).
     ``latency_p95_ms`` uses the same case-equal weighting: per-case mean warm
     latency, then nearest-rank p95 across cases. ``coverage_rate`` remains an
-    outcome-count completeness check used for eligibility.
+    outcome-count completeness check used for eligibility. Cases explicitly
+    attributed to another motion algorithm are excluded from both ranking
+    numerators and denominators.
     """
     entries: list[dict[str, object]] = []
     for track in _track_ids(records, cases):
-        track_cases = [case for case in cases if case.track == track]
-        expected_outcomes = (
-            sum(case.batch_size for case in track_cases) * measured_trials
-        )
+        all_track_cases = [case for case in cases if case.track == track]
         track_entries: list[dict[str, object]] = []
         for info in metadata:
+            bypassed_case_ids = _bypassed_case_ids(records, info.algorithm_id, track)
+            track_cases = [
+                case
+                for case in all_track_cases
+                if case.case_id not in bypassed_case_ids
+            ]
+            expected_outcomes = (
+                sum(case.batch_size for case in track_cases) * measured_trials
+            )
             measured = [
                 record
                 for record in records
                 if record.algorithm_id == info.algorithm_id
                 and record.track == track
                 and record.phase is TrialPhase.MEASURED
+                and record.uses_selected_planner_backend
             ]
             outcomes = [outcome for record in measured for outcome in record.outcomes]
             excluded_case_ids = frozenset(
@@ -916,7 +993,9 @@ def _leaderboard_rows(
                     "algorithm_role": info.algorithm_role.value,
                     "model_revision": info.model_revision,
                     "planner_config_hash": info.config_hash[:12],
-                    "eligible": coverage >= 1.0 - 1.0e-12,
+                    "eligible": bool(track_cases) and coverage >= 1.0 - 1.0e-12,
+                    "attributed_cases": len(track_cases),
+                    "bypassed_cases": len(all_track_cases) - len(track_cases),
                     "coverage_rate": coverage,
                     "overall_success_rate": primary_rate,
                     "planning_success_rate": planning_rate,

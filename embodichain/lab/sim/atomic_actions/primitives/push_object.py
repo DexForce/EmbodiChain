@@ -314,6 +314,11 @@ class PushObject(AtomicAction[PushObjectGoal, PushObjectOptions]):
         context: PlanningContext,
     ) -> ActionPlan:
         """Plan close, approach, contact, planar push, and retract segments."""
+        if request.motion_policy.strategy != "ik_interp":
+            raise ValueError(
+                "PushObject requires strategy='ik_interp' because its contact "
+                "and push phases must preserve every Cartesian path sample."
+            )
         goal = self.require_goal(request)
         options = request.skill_options
         interpolation_dt = context.require_control_dt()
@@ -491,10 +496,8 @@ class PushObject(AtomicAction[PushObjectGoal, PushObjectOptions]):
             n_approach,
             interpolation_dt=interpolation_dt,
         )
-        # ik_interp follows exact straight-line contact, push and retract
-        # samples.  motion_gen backends do not guarantee Cartesian samples, so
-        # they receive each segment endpoint instead.
-        linear_contact = request.motion_policy.strategy == "ik_interp"
+        # Contact, push, and retract remain explicit Cartesian samples.
+        linear_contact = True
         contact_keyframes = (
             axis_translation_keyframes(
                 approach_xpos,
@@ -645,8 +648,12 @@ class PushObject(AtomicAction[PushObjectGoal, PushObjectOptions]):
         )
         assert isinstance(result.success, torch.Tensor)
         assert result.positions is not None
+        assert result.dt is not None
         return result.success, resample_planned_trajectory(
-            result.positions, sample_count
+            result.positions,
+            sample_count,
+            dt=result.dt,
+            control_dt=interpolation_dt,
         )
 
 

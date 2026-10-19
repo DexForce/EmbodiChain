@@ -91,9 +91,11 @@ def test_invalid_tcp_update_preserves_numerical_solver_state(solver_type, tcp):
 
 def test_continuous_batch_ik_is_an_optional_solver_capability() -> None:
     # Capability discovery must not initialize kinematics or simulator resources.
-    ordinary = object.__new__(PytorchSolver)
+    ordinary = object.__new__(DifferentialSolver)
+    pytorch = object.__new__(PytorchSolver)
     opw = object.__new__(OPWSolver)
     assert not ordinary.supports_continuous_batch_ik
+    assert pytorch.supports_continuous_batch_ik
     assert opw.supports_continuous_batch_ik
     with pytest.raises(NotImplementedError, match="continuous batch IK"):
         ordinary._select_continuous_ik_path(

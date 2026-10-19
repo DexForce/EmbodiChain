@@ -55,10 +55,11 @@ transforms over those axes without materializing per-target copies.
 
 Concrete `get_ik()` APIs retain their own candidate and failure shapes. Pink
 returns `(N, 1, dof)`. Pytorch's normal nearest path retains a singleton
-candidate axis and its all-solutions path returns `(N, samples, dof)`, but its
-early all-targets-failed path returns `(N, dof)`. Do not squeeze blindly or
-assume all-solutions masks share one universal shape. Preserve batch size one;
-prefer the batch adapter when only the nearest solution is needed.
+candidate axis when successful and returns `(N, dof)` when every target fails.
+Its all-solutions path always returns validity `(N, samples)` and positions
+`(N, samples, dof)`, including the early all-targets-failed path. Do not squeeze
+blindly or assume all-solutions masks share one universal shape. Preserve batch
+size one; prefer the batch adapter when only the nearest solution is needed.
 
 ## Continuous batch IK
 
@@ -71,6 +72,10 @@ A supporting solver supplies all-candidate IK and `_select_continuous_ik_path`.
 The hook consumes candidates `(B, N, K, dof)`, validity `(B, N, K)` and initial
 seeds `(B, dof)`, returning validity `(B, N)` and a path `(B, N, dof)`.
 Candidate count `K` belongs to the solver; OPW implements this capability.
+Pytorch also implements it by choosing each valid multi-start candidate nearest
+to the preceding selected posture under `ik_nearest_weight`; this continuous
+path selection is independent of its ordinary per-target
+`ik_solution_selection` policy.
 
 ## Computation and state ownership
 

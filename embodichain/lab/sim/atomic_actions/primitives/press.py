@@ -169,6 +169,11 @@ class Press(AtomicAction[PressGoal, PressOptions]):
         context: PlanningContext,
     ) -> ActionPlan:
         """Plan close, approach, press, and retract without stepping simulation."""
+        if request.motion_policy.strategy != "ik_interp":
+            raise ValueError(
+                "Press requires strategy='ik_interp' because its contact and "
+                "press phases must preserve every Cartesian path sample."
+            )
         target = self.require_goal(request)
         affordance = self._require_press_affordance(target.semantics)
         options = request.skill_options
@@ -227,95 +232,70 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             hand_grasp_qpos,
             n_waypoints=options.hand_interp_steps,
         )
-        if request.motion_policy.strategy == "motion_gen":
-            targets = torch.stack(
-                (approach_xpos, contact_xpos, pressed_xpos, approach_xpos), dim=1
-            )
-            motion_options = request.motion_policy.to_motion_gen_options(
-                start_qpos=start_arm_qpos,
-                control_part=control_part,
-                interpolation_dt=interpolation_dt,
-            )
-            motion_options.sample_count = None
-            result = self.motion_generator.generate(
-                build_pose_plan_states(targets), options=motion_options
-            )
-            assert isinstance(result.success, torch.Tensor)
-            assert result.positions is not None
-            motion_phases = self._split_motion_path(
-                result.positions,
-                result.dt,
-                targets[:, :3],
-                control_part,
-                (n_approach, n_contact, n_press, n_retract),
-                interpolation_dt,
-            )
-            success = contact_sample.success & result.success
-        else:
-            approach_success, approach_phase = self._plan_pose_segment(
-                approach_xpos,
-                start_arm_qpos,
-                control_part,
-                request,
-                n_approach,
-                interpolation_dt=interpolation_dt,
-            )
-            approach_arm = approach_phase[0]
-            contact_keyframes = axis_translation_keyframes(
-                approach_xpos,
-                contact_xpos,
-                contact_xpos[:, :3, 2],
-                n_waypoints=n_contact - 1,
-            )
-            contact_success, contact_phase = self._plan_pose_segment(
-                contact_keyframes,
-                approach_arm[:, -1],
-                control_part,
-                request,
-                n_contact,
-                interpolation_dt=interpolation_dt,
-                cartesian_linear=True,
-            )
-            contact_arm = contact_phase[0]
-            press_keyframes = axis_translation_keyframes(
-                contact_xpos,
-                pressed_xpos,
-                contact_xpos[:, :3, 2],
-                n_waypoints=n_press - 1,
-            )
-            press_success, press_phase = self._plan_pose_segment(
-                press_keyframes,
-                contact_arm[:, -1],
-                control_part,
-                request,
-                n_press,
-                interpolation_dt=interpolation_dt,
-                cartesian_linear=True,
-            )
-            press_arm = press_phase[0]
-            retract_keyframes = axis_translation_keyframes(
-                pressed_xpos,
-                approach_xpos,
-                contact_xpos[:, :3, 2],
-                n_waypoints=n_retract - 1,
-            )
-            retract_success, retract_phase = self._plan_pose_segment(
-                retract_keyframes,
-                press_arm[:, -1],
-                control_part,
-                request,
-                n_retract,
-                interpolation_dt=interpolation_dt,
-                cartesian_linear=True,
-            )
-            success = (
-                contact_sample.success
-                & approach_success
-                & contact_success
-                & press_success
-                & retract_success
-            )
-            motion_phases = (approach_phase, contact_phase, press_phase, retract_phase)
+        approach_success, approach_phase = self._plan_pose_segment(
+            approach_xpos,
+            start_arm_qpos,
+            control_part,
+            request,
+            n_approach,
+            interpolation_dt=interpolation_dt,
+        )
+        approach_arm = approach_phase[0]
+        contact_keyframes = axis_translation_keyframes(
+            approach_xpos,
+            contact_xpos,
+            contact_xpos[:, :3, 2],
+            n_waypoints=n_contact - 1,
+        )
+        contact_success, contact_phase = self._plan_pose_segment(
+            contact_keyframes,
+            approach_arm[:, -1],
+            control_part,
+            request,
+            n_contact,
+            interpolation_dt=interpolation_dt,
+            cartesian_linear=True,
+        )
+        contact_arm = contact_phase[0]
+        press_keyframes = axis_translation_keyframes(
+            contact_xpos,
+            pressed_xpos,
+            contact_xpos[:, :3, 2],
+            n_waypoints=n_press - 1,
+        )
+        press_success, press_phase = self._plan_pose_segment(
+            press_keyframes,
+            contact_arm[:, -1],
+            control_part,
+            request,
+            n_press,
+            interpolation_dt=interpolation_dt,
+            cartesian_linear=True,
+        )
+        press_arm = press_phase[0]
+        retract_keyframes = axis_translation_keyframes(
+            pressed_xpos,
+            approach_xpos,
+            contact_xpos[:, :3, 2],
+            n_waypoints=n_retract - 1,
+        )
+        retract_success, retract_phase = self._plan_pose_segment(
+            retract_keyframes,
+            press_arm[:, -1],
+            control_part,
+            request,
+            n_retract,
+            interpolation_dt=interpolation_dt,
+            cartesian_linear=True,
+        )
+        success = (
+            contact_sample.success
+            & approach_success
+            & contact_success
+            & press_success
+            & retract_success
+        )
+        motion_phases = (approach_phase, contact_phase, press_phase, retract_phase)
 
         parts = (hand_close, *(phase[0] for phase in motion_phases))
         lengths = tuple(part.shape[1] for part in parts)
@@ -397,15 +377,6 @@ class Press(AtomicAction[PressGoal, PressOptions]):
                     ),
                 )
                 success = success & validity.all(dim=1)
-        elif (
-            request.motion_policy.strategy == "motion_gen"
-            and self.motion_generator.collision_world_info is not None
-        ):
-            raise ValueError(
-                "Press requires joint-trajectory validation when retiming a "
-                "collision-aware backend path."
-            )
-
         return self.build_plan(
             request,
             context,

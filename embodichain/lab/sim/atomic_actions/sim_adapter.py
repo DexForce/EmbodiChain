@@ -449,6 +449,18 @@ class SimulationExecutionAdapter:
         )
         if not math.isfinite(resolved_control_dt) or resolved_control_dt <= 0.0:
             raise ValueError("control_dt must be finite and greater than zero.")
+        control_ratio = resolved_control_dt / resolved_physics_dt
+        control_step_count = round(control_ratio)
+        if (
+            not math.isclose(
+                control_ratio,
+                control_step_count,
+                rel_tol=1.0e-6,
+                abs_tol=1.0e-9,
+            )
+            or control_step_count < 1
+        ):
+            raise ValueError("control_dt must be an integer multiple of physics_dt.")
         qpos = robot.get_qpos()
         if not isinstance(qpos, torch.Tensor) or qpos.dim() != 2:
             raise ValueError("robot.get_qpos() must return shape (B, robot_dof).")
@@ -491,8 +503,13 @@ class SimulationExecutionAdapter:
         """
         return self._elapsed_time
 
+    @property
+    def sleep_quantum(self) -> float:
+        """Return the smallest representable simulated sleep duration."""
+        return self.physics_dt
+
     def sleep(self, duration: float) -> None:
-        """Advance physics by at least the requested duration.
+        """Advance physics by exactly the requested grid-aligned duration.
 
         Args:
             duration: Requested simulated duration in seconds.
@@ -503,19 +520,14 @@ class SimulationExecutionAdapter:
             return
         step_ratio = duration / self.physics_dt
         nearest_step_count = round(step_ratio)
-        step_count = max(
-            1,
-            (
-                nearest_step_count
-                if math.isclose(
-                    step_ratio,
-                    nearest_step_count,
-                    rel_tol=1.0e-6,
-                    abs_tol=1.0e-9,
-                )
-                else math.ceil(step_ratio)
-            ),
-        )
+        if nearest_step_count < 1 or not math.isclose(
+            step_ratio,
+            nearest_step_count,
+            rel_tol=1.0e-6,
+            abs_tol=1.0e-9,
+        ):
+            raise ValueError("duration must be an integer multiple of physics_dt.")
+        step_count = nearest_step_count
         self.simulation.update(physics_dt=self.physics_dt, step=step_count)
         self._elapsed_time += step_count * self.physics_dt
 

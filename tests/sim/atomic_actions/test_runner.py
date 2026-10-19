@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import math
 from collections import deque
 from typing import ClassVar
 from unittest.mock import Mock
@@ -153,6 +154,21 @@ class FakeClock:
     def advance(self, duration: float) -> None:
         """Advance time outside the runner's blocking loop."""
         self.time += duration
+
+
+class QuantizedFakeClock(FakeClock):
+    """Clock that rejects sleeps outside its representable time grid."""
+
+    def __init__(self, sleep_quantum: float) -> None:
+        super().__init__()
+        self.sleep_quantum = sleep_quantum
+
+    def sleep(self, duration: float) -> None:
+        """Advance only by an integer number of clock quanta."""
+        ratio = duration / self.sleep_quantum
+        if not math.isclose(ratio, round(ratio), rel_tol=1.0e-6, abs_tol=1.0e-9):
+            raise ValueError("duration must align to the clock quantum")
+        super().sleep(duration)
 
 
 class FakeObservationProvider:
@@ -362,10 +378,12 @@ class TimedAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]):
         *,
         with_effect: bool = False,
         with_phase_gate: bool = False,
+        timing_fault: str | None = None,
     ) -> None:
         super().__init__()
         self.with_effect = with_effect
         self.with_phase_gate = with_phase_gate
+        self.timing_fault = timing_fault
         self.plan_count = 0
 
     def _plan(
@@ -385,8 +403,12 @@ class TimedAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]):
             [[0.0, FIRST_INTERVAL, SECOND_INTERVAL]],
             dtype=torch.float32,
         ).repeat(context.batch_size, 1)
-        if context.batch_size > 1:
-            dt[1, 1:] *= 2.0
+        if self.timing_fault == "first_mismatch":
+            dt[1, 1] *= 2.0
+        elif self.timing_fault == "later_mismatch":
+            dt[1, 2] *= 2.0
+        elif self.timing_fault == "later_short":
+            dt[:, 2] = MINIMUM_CYCLE_TIME / 2.0
         trajectory = TimedTrajectory.from_positions(
             positions,
             env_ids=context.env_ids,
@@ -438,6 +460,9 @@ def _make_runner(
     hold_on_completion: bool = True,
     hold_during_effect_verification: bool = True,
     physical_evidence_provider: PhysicalEvidenceProvider | None = None,
+    clock: FakeClock | None = None,
+    minimum_cycle_time: float = MINIMUM_CYCLE_TIME,
+    timing_fault: str | None = None,
 ) -> tuple[
     ExecutionRunner,
     FakeClock,
@@ -445,8 +470,8 @@ def _make_runner(
     FakeCommandSink,
     TimedAction,
 ]:
-    clock = FakeClock()
-    provider = FakeObservationProvider(clock, batch_size)
+    active_clock = FakeClock() if clock is None else clock
+    provider = FakeObservationProvider(active_clock, batch_size)
     sink = FakeCommandSink(provider)
     robot = Mock()
     robot.device = torch.device("cpu")
@@ -463,6 +488,7 @@ def _make_runner(
     action = TimedAction(
         with_effect=with_effect,
         with_phase_gate=with_phase_gate,
+        timing_fault=timing_fault,
     )
     engine = AtomicActionEngine(generator, tracking_runtime=tracking_runtime)
     engine.register(action)
@@ -496,15 +522,15 @@ def _make_runner(
         session,
         provider,
         sink,
-        clock=clock,
+        clock=active_clock,
         cfg=ExecutionRunnerCfg(
-            minimum_cycle_time=MINIMUM_CYCLE_TIME,
+            minimum_cycle_time=minimum_cycle_time,
             hold_on_completion=hold_on_completion,
             hold_during_effect_verification=hold_during_effect_verification,
         ),
         physical_evidence_provider=physical_evidence_provider,
     )
-    return runner, clock, provider, sink, action
+    return runner, active_clock, provider, sink, action
 
 
 def _successful_effect_result(
@@ -765,15 +791,50 @@ def test_session_active_commands_return_an_owned_endpoint_snapshot() -> None:
     assert torch.all(current_payload.positions >= 0.0)
 
 
-def test_runner_uses_the_longest_active_batch_interval_as_a_barrier() -> None:
-    runner, clock, _, _, _ = _make_runner(batch_size=2)
+def test_runner_rejects_mismatched_active_batch_intervals_before_dispatch() -> None:
+    runner, _, _, sink, _ = _make_runner(
+        batch_size=2,
+        timing_fault="first_mismatch",
+    )
+
+    failed = runner.step()
+
+    assert failed.status is RunnerStatus.FAILED
+    assert sink.sent == []
+    assert [item.operation for item in failed.dispatches] == [
+        CommandOperation.CANCEL,
+        CommandOperation.HOLD,
+    ]
+
+
+@pytest.mark.parametrize("timing_fault", ["later_mismatch", "later_short"])
+def test_runner_safely_stops_after_later_interval_validation_failure(
+    timing_fault: str,
+) -> None:
+    runner, clock, _, sink, _ = _make_runner(
+        batch_size=2,
+        timing_fault=timing_fault,
+    )
 
     first = runner.step()
-    clock.advance(2.0 * FIRST_INTERVAL)
-    second = runner.step()
+    clock.advance(FIRST_INTERVAL)
+    failed = runner.step()
+    repeated = runner.step()
 
-    assert first.wait_duration == pytest.approx(2.0 * FIRST_INTERVAL)
-    assert second.wait_duration == pytest.approx(2.0 * SECOND_INTERVAL)
+    assert first.status is RunnerStatus.RUNNING
+    assert failed.status is RunnerStatus.FAILED
+    assert failed.command_count == 1
+    assert len(sink.sent) == 1
+    assert [item.operation for item in failed.dispatches] == [
+        CommandOperation.CANCEL,
+        CommandOperation.HOLD,
+    ]
+    assert sink.cancel_count == 1
+    assert [target.target_id for target in sink.cancelled[0]] == ["arm"]
+    assert [target.target_id for target in sink.held[0][0]] == ["arm"]
+    assert repeated.status is RunnerStatus.FAILED
+    assert repeated.dispatches == ()
+    assert len(sink.sent) == 1
 
 
 def test_runner_completes_and_holds_after_last_command_settles() -> None:
@@ -1113,6 +1174,34 @@ def test_blocking_runner_verifies_effect_before_committing_task_state() -> None:
     assert completed.status is RunnerStatus.COMPLETED
     assert completed.tick is not None
     assert completed.tick.task_state.get_held_object("arm") is not None
+
+
+def test_blocking_runner_aligns_passive_polling_to_clock_quantum() -> None:
+    clock = QuantizedFakeClock(0.01)
+    runner, _, _, _, _ = _make_runner(
+        with_effect=True,
+        clock=clock,
+        minimum_cycle_time=0.001,
+    )
+
+    completed = runner.run_until_blocked(
+        effect_verifier=_successful_effect_result,
+    )
+
+    assert completed.status is RunnerStatus.COMPLETED
+    assert any(
+        math.isclose(duration, 0.01, rel_tol=1.0e-6, abs_tol=1.0e-9)
+        for duration in clock.sleeps
+    )
+    assert all(
+        math.isclose(
+            duration / clock.sleep_quantum,
+            round(duration / clock.sleep_quantum),
+            rel_tol=1.0e-6,
+            abs_tol=1.0e-9,
+        )
+        for duration in clock.sleeps
+    )
 
 
 def test_blocking_runner_resumes_a_stored_effect_verification_boundary() -> None:
