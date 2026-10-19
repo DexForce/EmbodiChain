@@ -118,6 +118,45 @@ def _hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _resource_digest(inventory: Mapping[str, str]) -> str:
+    return hashlib.sha256(
+        json.dumps(dict(inventory), sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _resource_files(root: Path, model: Path) -> set[Path]:
+    from embodichain.data.asset_catalog.local import _check_dependencies, _dependency
+
+    files: set[Path] = set()
+    pending = [model.resolve()]
+    while pending:
+        path = pending.pop()
+        if path in files:
+            continue
+        files.update(_check_dependencies(root, path))
+        if path.suffix.lower() not in {".urdf", ".xml"}:
+            continue
+        document = ET.parse(path)
+        compiler = document.find("compiler")
+        directories = {} if compiler is None else compiler.attrib
+        for element in document.iter():
+            locator = element.get("filename", element.get("file"))
+            if locator is None:
+                continue
+            directory = ""
+            if "file" in element.attrib and element.tag in {
+                "mesh",
+                "texture",
+                "hfield",
+                "skin",
+            }:
+                key = "meshdir" if element.tag in {"mesh", "skin"} else "texturedir"
+                directory = directories.get(key, directories.get("assetdir", ""))
+            dependency = _dependency(root, path.parent / directory, locator)
+            pending.append(dependency)
+    return files
+
+
 def _dump(path: Path, payload: dict) -> None:
     path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
 
@@ -130,7 +169,8 @@ def _preflight(path: Path) -> None:
 
 def validate_materialized_deployment(deployment: MaterializedAssetDeployment) -> None:
     """Verify file digests and asset identity before environment construction."""
-    from embodichain.data.asset_catalog import PreparedAsset
+    from embodichain.data.asset_catalog import PreparedAsset, verify_prepared_asset
+    from embodichain.data.asset_catalog.local import _inventory
     from embodichain.lab.task_program.semantics.asset_matching import ResolvedAssetSet
 
     if (
@@ -183,13 +223,73 @@ def validate_materialized_deployment(deployment: MaterializedAssetDeployment) ->
             or _hash(path) != expected
         ):
             raise ValueError(f"Materialized file changed: {relative}")
+    asset_roots = []
+    for asset in reconstructed.assets.values():
+        package = root / "assets" / asset.content_sha256
+        provenance = dict(asset.provenance)
+        original_root = Path(provenance["package_root"])
+        visual = package / Path(asset.visual_path).relative_to(original_root)
+        collision = package / Path(asset.collision_path).relative_to(original_root)
+        provenance["package_root"] = str(package)
+        copied = PreparedAsset(
+            asset.descriptor,
+            str(visual),
+            str(collision),
+            asset.content_sha256,
+            provenance,
+        )
+        verify_prepared_asset(copied)
+        for relative, expected in provenance["files"].items():
+            bundled = (package / relative).relative_to(root).as_posix()
+            if files.get(bundled) != expected:
+                raise ValueError(
+                    f"Materialized manifest is missing asset inventory: {bundled}"
+                )
+        asset_roots.append(package)
+    checked_resources = set()
+    for filename in required_files:
+        document = _read(root / filename)
+        if filename == "task.yaml" and "objective" in document:
+            required = document["objective"]["component"]
+            if required not in files:
+                raise ValueError("Materialized manifest is missing the objective")
+        for node in _walk(document):
+            for key in ("fpath", "urdf_path", "xml_path"):
+                value = node.get(key)
+                if not isinstance(value, str) or not value.startswith(("./", "../")):
+                    continue
+                path = (root / value).resolve()
+                if (
+                    not path.is_relative_to(root)
+                    or path.relative_to(root).as_posix() not in files
+                ):
+                    raise ValueError(
+                        f"Materialized manifest is missing local resource: {value}"
+                    )
+                if any(path.is_relative_to(package) for package in asset_roots):
+                    continue
+                relative = path.relative_to(root)
+                if len(relative.parts) < 3 or relative.parts[0] != "resources":
+                    raise ValueError(
+                        f"Local resource is outside a bundled package: {value}"
+                    )
+                package = root / "resources" / relative.parts[1]
+                if package in checked_resources:
+                    continue
+                inventory = _inventory(package)
+                if _resource_digest(inventory) != package.name or any(
+                    files.get((package / name).relative_to(root).as_posix()) != digest
+                    for name, digest in inventory.items()
+                ):
+                    raise ValueError(
+                        f"Materialized resource inventory changed: {value}"
+                    )
+                checked_resources.add(package)
 
 
 def _bundle_local_paths(payload: dict, owner: Path, output: Path) -> None:
     # Packaged data IDs stay package-resolved. Explicit local resources are copied
     # with sibling sidecars so OBJ materials/textures retain their relative paths.
-    from embodichain.data.asset_catalog.local import _check_dependencies, _dependency
-
     for node in _walk(payload):
         for key in ("fpath", "urdf_path", "xml_path"):
             value = node.get(key)
@@ -205,20 +305,22 @@ def _bundle_local_paths(payload: dict, owner: Path, output: Path) -> None:
             if path.resolve().is_relative_to(output):
                 node[key] = "./" + str(path.resolve().relative_to(output))
                 continue
-            if path.suffix.lower() in {".urdf", ".xml"}:
-                for element in ET.parse(path).iter():
-                    if "filename" in element.attrib:
-                        dependency = _dependency(
-                            path.parent, path.parent, element.attrib["filename"]
-                        )
-                        _check_dependencies(path.parent, dependency)
-            else:
-                _check_dependencies(path.parent, path)
-            token = hashlib.sha256(str(path.parent.resolve()).encode()).hexdigest()[:12]
-            destination = output / "resources" / token
-            if output.is_relative_to(path.parent.resolve()):
+            package_root = path.parent.resolve()
+            if output.is_relative_to(package_root):
                 raise ValueError("Output must not be nested inside a resource package")
-            shutil.copytree(path.parent, destination, dirs_exist_ok=True)
+            inventory = {
+                item.relative_to(package_root).as_posix(): _hash(item)
+                for item in _resource_files(package_root, path)
+            }
+            destination = output / "resources" / _resource_digest(inventory)
+            for relative, expected in inventory.items():
+                target = destination / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(package_root / relative, target)
+                if _hash(target) != expected:
+                    raise ValueError(
+                        f"Local resource changed during bundling: {relative}"
+                    )
             node[key] = "./" + str((destination / path.name).relative_to(output))
 
 
@@ -301,7 +403,8 @@ def materialize_asset_deployment(
     config = physical.config
     for group in ("rigid_object", "background"):
         for obj in config.get(group, []):
-            dynamic = obj.get("body_type", "dynamic") == "dynamic"
+            default_body_type = "dynamic" if group == "rigid_object" else "static"
+            dynamic = obj.get("body_type", default_body_type) == "dynamic"
             if dynamic != (group == "rigid_object"):
                 raise ValueError(
                     "Dynamic objects belong in rigid_object; static/kinematic objects belong in background"
@@ -402,10 +505,8 @@ def materialize_asset_deployment(
             )
             obj["shape"] = {
                 "shape_type": "Mesh",
-                "fpath": "./"
-                + str(
-                    (destination / visual.relative_to(package_root)).relative_to(output)
-                ),
+                # Retain the output owner until bundling makes paths relative.
+                "fpath": str(copied_path),
             }
             if collision is not None:
                 obj["shape"]["collision"] = deepcopy(collision)
@@ -559,6 +660,19 @@ def materialize_asset_deployment(
             "integration": "integration.yaml",
             "execution_policy": "policy.yaml",
         }
+        integration["asset_requirements"] = requirements.to_dict()
+        for document, owner in (
+            (config, source),
+            (embodiment, embodiment_path),
+            (policy, policy_path),
+        ):
+            _bundle_local_paths(document, owner, output)
+        objective = None
+        if "objective" in config:
+            objective_path = _path(config["objective"]["component"], source)
+            objective = _read(objective_path)
+            shutil.copy2(objective_path, output / "objective.yaml")
+            config["objective"]["component"] = "objective.yaml"
         # Include all source configuration and adaptation content in identity;
         # the same assets used by a changed task cannot reuse registry IDs.
         identity = hashlib.sha256(
@@ -570,9 +684,11 @@ def materialize_asset_deployment(
                     "policy": policy,
                     "embodiment": embodiment,
                     "assets": resolved_assets.set_id,
+                    "objective": objective,
                 },
                 sort_keys=True,
-                default=str,
+                separators=(",", ":"),
+                allow_nan=False,
             ).encode()
         ).hexdigest()[:16]
         logical_id = raw["id"]
@@ -584,17 +700,6 @@ def materialize_asset_deployment(
         )
         integration["integration_id"] += f"_assets_{identity}"
         scene["registry_id"] += f"_assets_{identity}"
-        integration["asset_requirements"] = requirements.to_dict()
-        for document, owner in (
-            (config, source),
-            (embodiment, embodiment_path),
-            (policy, policy_path),
-        ):
-            _bundle_local_paths(document, owner, output)
-        if "objective" in config:
-            objective_path = _path(config["objective"]["component"], source)
-            shutil.copy2(objective_path, output / "objective.yaml")
-            config["objective"]["component"] = "objective.yaml"
         for name, document in (
             ("task", config),
             ("integration", integration),

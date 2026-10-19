@@ -183,7 +183,8 @@ def _dependency(root: Path, parent: Path, locator: str, *, uri: bool = True) -> 
     return _relative_file(root, os.path.relpath(target, root))
 
 
-def _check_dependencies(root: Path, model: Path) -> None:
+def _check_dependencies(root: Path, model: Path) -> set[Path]:
+    files = {model.resolve()}
     suffix = model.suffix.lower()
     if suffix in (".glb", ".gltf"):
         document = _json_chunk(model)
@@ -191,13 +192,14 @@ def _check_dependencies(root: Path, model: Path) -> None:
             for item in document.get(field, []):
                 uri = item.get("uri")
                 if uri is not None and not uri.startswith("data:"):
-                    _dependency(root, model.parent, uri)
+                    files.add(_dependency(root, model.parent, uri))
     elif suffix == ".obj":
         for line in model.read_text(encoding="utf-8").splitlines():
             tokens = shlex.split(line, comments=True)
             if tokens and tokens[0].lower() == "mtllib":
                 for locator in tokens[1:]:
                     material = _dependency(root, model.parent, locator, uri=False)
+                    files.add(material)
                     for material_line in material.read_text(
                         encoding="utf-8"
                     ).splitlines():
@@ -211,7 +213,12 @@ def _check_dependencies(root: Path, model: Path) -> None:
                                 raise ValueError(
                                     f"Missing texture reference in {material}"
                                 )
-                            _dependency(root, material.parent, values[-1], uri=False)
+                            files.add(
+                                _dependency(
+                                    root, material.parent, values[-1], uri=False
+                                )
+                            )
+    return files
 
 
 def _check_geometry(descriptor: AssetDescriptor, visual: Path, collision: Path) -> None:

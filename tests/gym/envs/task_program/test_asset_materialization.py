@@ -547,3 +547,173 @@ def test_packaged_asset_id_is_not_shadowed_during_bundling(
     )
     config = yaml.safe_load(result.deployment_path.read_text())
     assert config["background"][1]["shape"]["fpath"] == "Dataset/mesh.obj"
+
+
+def test_generated_asset_path_cannot_be_shadowed_by_the_template(deployment, tmp_path):
+    source, requirements, resolved = deployment
+    asset = resolved.assets["source"]
+    shadow = source.parent / "assets" / asset.content_sha256 / "model.obj"
+    shadow.parent.mkdir(parents=True)
+    trimesh.creation.box(extents=(0.02, 0.02, 0.02)).export(shadow)
+    result = materialize_asset_deployment(
+        source, requirements, resolved, output_dir=tmp_path / "out"
+    )
+    config = _resolve_gym_components(
+        yaml.safe_load(result.deployment_path.read_text()),
+        base_dir=result.deployment_path.parent,
+    ).config
+    consumed = Path(config["rigid_object"][0]["shape"]["fpath"])
+    assert consumed.read_bytes() == Path(asset.visual_path).read_bytes()
+    validate_materialized_deployment(result)
+
+
+def _local_backdrop(source, folder):
+    folder.mkdir()
+    mesh = folder / "model.obj"
+    trimesh.creation.box(extents=(0.2, 0.2, 0.2)).export(mesh)
+    env_path = source.parent / "env.yaml"
+    env = yaml.safe_load(env_path.read_text())
+    env["simulation"]["background"].append(
+        {
+            "uid": "backdrop",
+            "body_type": "static",
+            "shape": {"shape_type": "Mesh", "fpath": str(mesh)},
+        }
+    )
+    _write(env_path, env)
+    return mesh
+
+
+def test_local_resource_content_changes_the_deployment_identity(deployment, tmp_path):
+    source, requirements, resolved = deployment
+    mesh = _local_backdrop(source, tmp_path / "resource")
+    before = materialize_asset_deployment(
+        source, requirements, resolved, output_dir=tmp_path / "before"
+    )
+    trimesh.creation.box(extents=(0.4, 0.4, 0.4)).export(mesh)
+    after = materialize_asset_deployment(
+        source, requirements, resolved, output_dir=tmp_path / "after"
+    )
+    identities = []
+    for artifact in (before, after):
+        task = yaml.safe_load(artifact.deployment_path.read_text())
+        integration = yaml.safe_load(
+            (artifact.deployment_path.parent / "integration.yaml").read_text()
+        )
+        identities.append(
+            (
+                task["id"],
+                integration["integration_id"],
+                integration["scene_binding"]["registry_id"],
+            )
+        )
+    assert all(left != right for left, right in zip(*identities))
+
+
+def test_local_mesh_bundles_only_dependencies_and_has_a_portable_identity(
+    deployment, tmp_path
+):
+    source, requirements, resolved = deployment
+    mesh = _local_backdrop(source, tmp_path / "resource")
+    mesh.write_text("mtllib material.mtl\n" + mesh.read_text())
+    (mesh.parent / "material.mtl").write_text("newmtl paint\nmap_Kd paint.png\n")
+    (mesh.parent / "paint.png").write_bytes(b"texture bytes")
+    (mesh.parent / "unrelated.bin").write_bytes(b"not part of the model")
+    before = materialize_asset_deployment(
+        source, requirements, resolved, output_dir=tmp_path / "before"
+    )
+    resources = before.deployment_path.parent / "resources"
+    assert {path.name for path in resources.rglob("*") if path.is_file()} == {
+        "model.obj",
+        "material.mtl",
+        "paint.png",
+    }
+    relocated = tmp_path / "relocated_resource"
+    shutil.copytree(mesh.parent, relocated)
+    env_path = source.parent / "env.yaml"
+    env = yaml.safe_load(env_path.read_text())
+    env["simulation"]["background"][-1]["shape"]["fpath"] = str(relocated / mesh.name)
+    _write(env_path, env)
+    after = materialize_asset_deployment(
+        source, requirements, resolved, output_dir=tmp_path / "after"
+    )
+    assert (
+        yaml.safe_load(before.deployment_path.read_text())["id"]
+        == yaml.safe_load(after.deployment_path.read_text())["id"]
+    )
+
+
+def test_background_body_type_uses_the_production_static_default(deployment, tmp_path):
+    source, requirements, resolved = deployment
+    env_path = source.parent / "env.yaml"
+    env = yaml.safe_load(env_path.read_text())
+    env["simulation"]["background"][0].pop("body_type")
+    _write(env_path, env)
+    result = materialize_asset_deployment(
+        source, requirements, resolved, output_dir=tmp_path / "out"
+    )
+    validate_materialized_deployment(result)
+
+
+@pytest.mark.parametrize("missing", ["asset", "local_resource", "texture"])
+def test_digest_free_validation_requires_the_complete_resource_inventory(
+    deployment, tmp_path, missing
+):
+    source, requirements, resolved = deployment
+    mesh = _local_backdrop(source, tmp_path / "resource")
+    mesh.write_text("mtllib material.mtl\n" + mesh.read_text())
+    (mesh.parent / "material.mtl").write_text("newmtl paint\nmap_Kd paint.png\n")
+    (mesh.parent / "paint.png").write_bytes(b"texture bytes")
+    result = materialize_asset_deployment(
+        source, requirements, resolved, output_dir=tmp_path / "out"
+    )
+    manifest = json.loads(result.manifest_path.read_text())
+    if missing == "asset":
+        relative = f"assets/{resolved.assets['source'].content_sha256}/model.obj"
+    else:
+        name = "model.obj" if missing == "local_resource" else "paint.png"
+        relative = next(
+            key
+            for key in manifest["files"]
+            if key.startswith("resources/") and key.endswith("/" + name)
+        )
+    manifest["files"].pop(relative)
+    result.manifest_path.write_text(json.dumps(manifest))
+    restored = MaterializedAssetDeployment(
+        result.deployment_path, result.asset_set_id, result.manifest_path
+    )
+    with pytest.raises(ValueError):
+        validate_materialized_deployment(restored)
+
+
+def test_local_robot_bundling_preserves_nested_dependencies_only(tmp_path):
+    from embodichain.lab.task_program.integrations.asset_materialization import (
+        _bundle_local_paths,
+    )
+
+    package = tmp_path / "robot"
+    (package / "meshes").mkdir(parents=True)
+    (package / "textures").mkdir()
+    (package / "robot.urdf").write_text(
+        '<robot name="local"><link name="base"><visual><geometry>'
+        '<mesh filename="meshes/model.obj"/>'
+        "</geometry></visual></link></robot>"
+    )
+    (package / "meshes/model.obj").write_text("mtllib ../textures/material.mtl\n")
+    (package / "textures/material.mtl").write_text("newmtl paint\nmap_Kd paint.png\n")
+    (package / "textures/paint.png").write_bytes(b"texture bytes")
+    (package / "unrelated.bin").write_bytes(b"not a dependency")
+    output = tmp_path / "out"
+    config = {"urdf_path": str(package / "robot.urdf")}
+    _bundle_local_paths(config, tmp_path / "task.yaml", output)
+    bundled = output / Path(config["urdf_path"]).parent
+    assert {
+        path.relative_to(bundled).as_posix()
+        for path in bundled.rglob("*")
+        if path.is_file()
+    } == {
+        "robot.urdf",
+        "meshes/model.obj",
+        "textures/material.mtl",
+        "textures/paint.png",
+    }

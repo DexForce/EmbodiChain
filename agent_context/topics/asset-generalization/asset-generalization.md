@@ -63,7 +63,12 @@ not rewritten to make a candidate pass. Container collision must preserve its
 annotated cavity; a default convex hull does not qualify.
 
 The materialized manifest binds assets and configuration bytes. Validate it
-before constructing environments. Packaged robot/data IDs still require the
-installed SDK and its normal asset cache; local selected asset files are bundled.
+before constructing environments, including when restoring an artifact without
+the optional manifest digest: selected package inventories and referenced local
+resources must remain complete. Generated asset paths retain their output owner.
+Local resources bundle only their dependency closure under a content digest;
+their bytes contribute to deployment identity without source/output path dependence.
+Packaged robot/data IDs still require the installed SDK and its normal asset
+cache; local selected asset files are bundled.
 Focused tests use the production loader in
 `tests/gym/envs/task_program/test_asset_materialization.py`.
