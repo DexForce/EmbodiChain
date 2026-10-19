@@ -28,6 +28,8 @@ from .models import BenchmarkCase, CaseOutcome, PlannerMetadata, TrialPhase, Tri
 
 __all__ = ["aggregate_generalization", "aggregate_results"]
 
+_EFFECTIVE_MOTION_ALGORITHM_ROLE = "effective_motion_algorithm"
+
 
 def _mean(values: Iterable[float | None]) -> float | None:
     """Return the mean of finite values or ``None`` when unavailable."""
@@ -533,12 +535,13 @@ def _metric_rows(
     Boolean success columns use the same case-level macro average as the
     leaderboard (missing cases contribute ``0.0``). Continuous quality metrics
     remain conditioned on externally motion-valid outcomes. Cases whose
-    scenario bypasses the selected planner are excluded from planner metrics.
+    scenario bypasses the selected planner are excluded from planner metrics
+    and reported under the algorithm that actually produced their motion.
     """
     measured_by_key: dict[
         tuple[
             str,
-            str,
+            tuple[str, bool],
             str,
             str,
             str,
@@ -552,30 +555,41 @@ def _metric_rows(
         ],
         list[TrialRecord],
     ] = defaultdict(list)
-    unsupported_by_algorithm_track: dict[tuple[str, str], set[str]] = defaultdict(set)
+    unsupported_by_report_key_track: dict[tuple[tuple[str, bool], str], set[str]] = (
+        defaultdict(set)
+    )
     bypassed_by_algorithm_track: dict[tuple[str, str], set[str]] = defaultdict(set)
+    effective_case_sources: dict[tuple[str, str, str], set[str]] = defaultdict(set)
+    effective_algorithms: set[str] = set()
     for record in records:
-        if not record.uses_selected_planner_backend:
+        is_effective = not record.uses_selected_planner_backend
+        report_key = (record.effective_motion_algorithm, is_effective)
+        if is_effective:
             bypassed_by_algorithm_track[(record.algorithm_id, record.track)].add(
                 record.case_id
             )
+            effective_algorithms.add(record.effective_motion_algorithm)
+            effective_case_sources[
+                (
+                    record.effective_motion_algorithm,
+                    record.track,
+                    record.case_id,
+                )
+            ].add(record.algorithm_id)
         if (
             record.phase is TrialPhase.AVAILABILITY
             and record.status == "unsupported"
             and record.failure_code
             in {"unsupported_capability", "unsupported_capacity"}
         ):
-            unsupported_by_algorithm_track[(record.algorithm_id, record.track)].add(
+            unsupported_by_report_key_track[(report_key, record.track)].add(
                 record.case_id
             )
-        if (
-            record.phase is not TrialPhase.MEASURED
-            or not record.uses_selected_planner_backend
-        ):
+        if record.phase is not TrialPhase.MEASURED:
             continue
         key = (
             record.track,
-            record.algorithm_id,
+            report_key,
             record.scenario_id,
             record.robot_id,
             record.skill_id,
@@ -638,7 +652,15 @@ def _metric_rows(
         cases_by_group[key].append(case)
 
     rows: list[dict[str, object]] = []
-    for info in metadata:
+    report_algorithms = [
+        ((info.algorithm_id, False), info.algorithm_role.value) for info in metadata
+    ]
+    report_algorithms.extend(
+        ((algorithm_id, True), _EFFECTIVE_MOTION_ALGORITHM_ROLE)
+        for algorithm_id in sorted(effective_algorithms)
+    )
+    for report_key, algorithm_role in report_algorithms:
+        algorithm_id, is_effective = report_key
         for group_key in sorted(
             expected_by_group,
             key=lambda item: (
@@ -668,18 +690,25 @@ def _metric_rows(
                 path_shape,
                 start_state_bin,
             ) = group_key
-            bypassed_case_ids = bypassed_by_algorithm_track[(info.algorithm_id, track)]
-            group_cases = [
-                case
-                for case in cases_by_group[group_key]
-                if case.case_id not in bypassed_case_ids
-            ]
+            if is_effective:
+                group_cases = [
+                    case
+                    for case in cases_by_group[group_key]
+                    if effective_case_sources.get((algorithm_id, track, case.case_id))
+                ]
+            else:
+                bypassed_case_ids = bypassed_by_algorithm_track[(algorithm_id, track)]
+                group_cases = [
+                    case
+                    for case in cases_by_group[group_key]
+                    if case.case_id not in bypassed_case_ids
+                ]
             if not group_cases:
                 continue
             measured = measured_by_key.get(
                 (
                     track,
-                    info.algorithm_id,
+                    report_key,
                     scenario_id,
                     robot_id,
                     skill_id,
@@ -694,17 +723,26 @@ def _metric_rows(
                 [],
             )
             excluded_case_ids = frozenset(
-                unsupported_by_algorithm_track[(info.algorithm_id, track)]
+                unsupported_by_report_key_track[(report_key, track)]
             )
             outcomes = [outcome for record in measured for outcome in record.outcomes]
             valid_outcomes = [outcome for outcome in outcomes if outcome.motion_valid]
-            expected = sum(case.batch_size for case in group_cases) * measured_trials
+            expected = sum(
+                case.batch_size
+                * measured_trials
+                * (
+                    len(effective_case_sources[(algorithm_id, track, case.case_id)])
+                    if is_effective
+                    else 1
+                )
+                for case in group_cases
+            )
             rows.append(
                 {
                     "track": track,
                     "scenario": scenario_id,
-                    "algorithm": info.algorithm_id,
-                    "algorithm_role": info.algorithm_role.value,
+                    "algorithm": algorithm_id,
+                    "algorithm_role": algorithm_role,
                     "robot": robot_id,
                     "skill": skill_id,
                     "object": object_id,

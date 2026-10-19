@@ -209,8 +209,8 @@ def write_markdown_report(
                 "Domain statistics are computed from the raw trial records. "
                 "Unsupported capability cases lower coverage and are excluded "
                 "from success denominators. Cases that bypassed the selected "
-                "planner backend are reported separately and excluded from "
-                "planner attribution.",
+                "planner backend are reported under their effective motion "
+                "algorithm and excluded from planner attribution.",
                 "",
             ]
         )

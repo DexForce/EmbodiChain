@@ -1813,7 +1813,7 @@ def test_atomic_primary_success_and_execution_efficiency_aggregate():
     assert leaderboard["task_success_rate"] == pytest.approx(1.0)
 
 
-def test_planner_aggregates_exclude_atomic_cases_that_bypass_backend():
+def test_planner_aggregates_report_bypassed_cases_under_effective_algorithm():
     selected_case = _atomic_case()
     bypassed_case = replace(
         selected_case,
@@ -1876,7 +1876,17 @@ def test_planner_aggregates_exclude_atomic_cases_that_bypass_backend():
     metrics = aggregates["success_and_metrics"]
     leaderboard = aggregates["leaderboard"][0]
     assert [row["skill"] for row in performance] == ["move_end_effector"]
-    assert [row["skill"] for row in metrics] == ["move_end_effector"]
+    assert {row["skill"] for row in metrics} == {"move_end_effector", "press"}
+    planner_metrics = next(row for row in metrics if row["algorithm"] == "curobo")
+    assert planner_metrics["skill"] == "move_end_effector"
+    assert planner_metrics["success_rate"] == pytest.approx(0.0)
+    effective_metrics = next(
+        row for row in metrics if row["algorithm"] == "sequential_ik_interpolation"
+    )
+    assert effective_metrics["algorithm_role"] == "effective_motion_algorithm"
+    assert effective_metrics["skill"] == "press"
+    assert effective_metrics["coverage_rate"] == pytest.approx(1.0)
+    assert effective_metrics["success_rate"] == pytest.approx(1.0)
     assert leaderboard["attributed_cases"] == 1
     assert leaderboard["bypassed_cases"] == 1
     assert leaderboard["coverage_rate"] == pytest.approx(1.0)
@@ -1887,7 +1897,11 @@ def test_planner_aggregates_exclude_atomic_cases_that_bypass_backend():
         [bypassed_record], metadata, [bypassed_case], measured_trials=1
     )
     bypass_leaderboard = bypass_only["leaderboard"][0]
-    assert bypass_only["success_and_metrics"] == []
+    bypass_metrics = bypass_only["success_and_metrics"]
+    assert len(bypass_metrics) == 1
+    assert bypass_metrics[0]["algorithm"] == "sequential_ik_interpolation"
+    assert bypass_metrics[0]["skill"] == "press"
+    assert bypass_metrics[0]["success_rate"] == pytest.approx(1.0)
     assert bypass_leaderboard["eligible"] is False
     assert bypass_leaderboard["attributed_cases"] == 0
     assert bypass_leaderboard["bypassed_cases"] == 1

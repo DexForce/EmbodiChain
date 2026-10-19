@@ -271,6 +271,21 @@ class TrialRecord:
         """
         return self.metadata.get("selected_planner_backend_used") is not False
 
+    @property
+    def effective_motion_algorithm(self) -> str:
+        """Return the algorithm that actually produced this trial's motion.
+
+        Planner-attributed trials retain their configured planner identity.
+        Scenario-defined motion uses its explicit metadata identity, with a
+        stable fallback for malformed or older non-planner artifacts.
+        """
+        if self.uses_selected_planner_backend:
+            return self.algorithm_id
+        value = self.metadata.get("effective_motion_algorithm")
+        if isinstance(value, str) and value.strip():
+            return value
+        return "unattributed_motion"
+
     def to_dict(self) -> dict[str, object]:
         """Return a JSON-serializable mapping while retaining numeric values."""
         payload = cast(dict[str, object], _json_value(asdict(self)))
