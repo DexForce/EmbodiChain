@@ -60,7 +60,7 @@ from embodichain.lab.task_program.integrations.simulation.asset_pouring import (
 from embodichain.utils.config_paths import resolve_config_path
 
 CONFIGS = Path(__file__).resolve().parents[3] / "extensions/embodichain_tasks/configs"
-TASK = CONFIGS / "tasks/manipulation/tableware/pour_water"
+TASK = Path(__file__).resolve().parent / "configs/pour_water"
 
 
 def _yaml(path: Path) -> dict[str, Any]:
@@ -158,7 +158,7 @@ def _prepare_catalogs(output: Path) -> tuple[Path, Path]:
 
 def _template(output: Path) -> Path:
     output.mkdir(parents=True)
-    source = TASK / "task.cobotmagic.asset_generalization.yaml"
+    source = TASK / "task.cobotmagic.yaml"
     task = _yaml(source)
     env = _yaml(
         resolve_config_path(task["environment"]["component"], base_dir=source.parent)

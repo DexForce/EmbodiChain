@@ -40,8 +40,7 @@ from embodichain.lab.task_program.integrations.simulation.scene_expansion import
     SimulationSceneExpansionHost,
 )
 
-CONFIGS = Path(__file__).resolve().parents[3] / "extensions/embodichain_tasks/configs"
-TASK = CONFIGS / "tasks/manipulation/cube_platform_pick_place"
+TASK = Path(__file__).resolve().parent / "configs/cube_platform_pick_place"
 
 
 def _write_yaml(path: Path, value: dict[str, Any]) -> None:

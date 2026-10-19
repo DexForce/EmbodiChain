@@ -26,7 +26,7 @@ packages. A package declares normalized geometry and usable regions; existing
 SimReady `asset.json` can supply category/source evidence through an explicit
 adapter field, but does not establish task capabilities or units. Unknown raw
 files require annotations before preparation. The example manifest lives in
-`examples/data/asset_catalog/README.md`.
+`examples/expansion/asset_catalog/README.md`.
 
 Preparation checks real mesh bounds and file dependencies, then hashes and copies
 the complete package into an immutable snapshot. `verify_prepared_asset` is the
@@ -98,21 +98,26 @@ acceptance, returned reset requests and close finalization; none substitutes
 for a per-episode persistence receipt. Normal configuration loading does not
 select providers or enable generation.
 
-Examples: `examples/gym/asset_generalization/run.py` uses direct Cube primitives
+Examples: `examples/expansion/asset_generalization/run.py` uses direct Cube primitives
 for the UR5 Pick/Place baseline, without asset catalogs.
-`examples/gym/asset_generalization/pour_water.py` exercises actual bottle/cup
+`examples/expansion/asset_generalization/pour_water.py` exercises actual bottle/cup
 asset replacement and calibrated CobotMagic pouring-motion acceptance.
 Host tests live in `tests/gym/envs/test_asset_generalization.py`; existing scene
 expansion tests remain authoritative for canonical execution and reject gates.
 
-The acceptance examples read packaged, configuration-defined tasks. The primitive
-baseline lives under `configs/tasks/manipulation/cube_platform_pick_place/`;
-PourWater selects `task.cobotmagic.asset_generalization.yaml` and
-`env.asset_generalization.yaml` under `configs/tasks/manipulation/tableware/pour_water/`.
-Programs and scene bindings stay in each task's `task_program/` directory.
-PourWater's integration owns its asset-role requirements. The example host only
-prepares variants and supplies the additional measured acceptance; ordinary
-`run-task --gym-config` loading does not select assets or invoke Providers.
+Acceptance configurations live beside the examples under
+`examples/expansion/asset_generalization/configs/`, with separate primitive
+cube/platform and bottle/cup cases. They reuse SDK embodiments/policies without
+adding official task deployments. Programs, bindings, asset requirements and
+physical environment files remain separate. Ordinary `run-task --gym-config`
+loading does not select assets or invoke Providers.
+
+Asset replacement currently belongs to pre-build preparation and batch
+collection, not a manager-bound Event functor. `BaseEnv` prepares native topology
+before `EmbodiedEnv._init_sim_state` constructs managers and dispatches startup
+events. Switching prepared meshes therefore constructs a fresh environment and
+binding snapshot. Same-topology pose/material randomization remains event-owned;
+there is no pre-build or batch-stage functor adapter for asset preparation yet.
 
 
 ## Calibrated bottle/cup pouring

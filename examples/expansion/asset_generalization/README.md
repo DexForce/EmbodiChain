@@ -10,24 +10,26 @@ installed. Every invocation requires a new output directory.
 
 ## Task Program and environment configurations
 
-Both examples read checked-in task configurations rather than building their
-programs and scenes in Python. The configuration ownership is:
+Both examples read example-local task configurations rather than building their
+programs and scenes in Python. These configurations are not installed as official
+SDK tasks or listed in the official task catalog; they reuse the SDK's embodiment
+and execution-policy components. The configuration ownership is:
 
 | File | Owns |
 | --- | --- |
 | `task.<variant>.yaml` | Runnable ID, environment/embodiment/policy selections and collection target |
-| `env.yaml` or `env.asset_generalization.yaml` | Physics backend, geometry, initial state and manager settings |
+| `env.yaml` | Physics backend, geometry, initial state and manager settings |
 | `task_program/program.yaml` | Semantic Calls, segments, post-policies and validators |
 | `task_program/integration.yaml` | Scene bindings, affordances, calibration and optional asset-role requirements |
 
 The primitive task is in
-[`cube_platform_pick_place`](../../../extensions/embodichain_tasks/configs/tasks/manipulation/cube_platform_pick_place/README.md).
+[`cube_platform_pick_place`](configs/cube_platform_pick_place/README.md).
 Its default environment contains a 4 cm Cube and a Cube platform. `run.py` reads
 these files, changes the cube size and corresponding placement height per batch,
 and keeps the program unchanged.
 
 The pouring template is
-[`task.cobotmagic.asset_generalization.yaml`](../../../extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.asset_generalization.yaml).
+[`task.cobotmagic.yaml`](configs/pour_water/task.cobotmagic.yaml).
 It selects the primitive-table environment and the existing four-segment program.
 The integration declares the bottle/cup `asset_requirements`, including category,
 `open_top`, capabilities, size bounds and the `pours_into` relation. `pour_water.py`
@@ -38,10 +40,10 @@ Run the authored configurations through the ordinary task launcher:
 
 ```bash
 embodichain run-task --gym-config \
-  extensions/embodichain_tasks/configs/tasks/manipulation/cube_platform_pick_place/task.ur5.yaml
+  examples/expansion/asset_generalization/configs/cube_platform_pick_place/task.ur5.yaml
 
 embodichain run-task --gym-config \
-  extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.asset_generalization.yaml \
+  examples/expansion/asset_generalization/configs/pour_water/task.cobotmagic.yaml \
   --record_trajectory
 ```
 
@@ -53,7 +55,7 @@ retain the extra footprint/pouring checks described in this README.
 ## Primitive cube/platform baseline
 
 ```bash
-PYTHONPATH="$PWD" python examples/gym/asset_generalization/run.py \
+PYTHONPATH="$PWD" python examples/expansion/asset_generalization/run.py \
   --output /tmp/primitive-baseline --batches 2 --seed 7
 ```
 
@@ -71,10 +73,10 @@ It is a primitive parameter-variation baseline, not a file-asset retrieval test.
 ## Replace bottle and cup in PourWater
 
 ```bash
-PYTHONPATH="$PWD" python examples/gym/asset_generalization/pour_water.py \
+PYTHONPATH="$PWD" python examples/expansion/asset_generalization/pour_water.py \
   --output /tmp/pour-assets --seed 1 --batches 2
 
-PYTHONPATH="$PWD" python examples/gym/asset_generalization/pour_water.py \
+PYTHONPATH="$PWD" python examples/expansion/asset_generalization/pour_water.py \
   --output /tmp/pour-assets-executed --seed 1 --batches 2 --execute
 ```
 
@@ -95,12 +97,12 @@ provide unique combinations.
 Use authored alternatives without editing the program:
 
 ```bash
-PYTHONPATH="$PWD" python examples/gym/asset_generalization/pour_water.py \
+PYTHONPATH="$PWD" python examples/expansion/asset_generalization/pour_water.py \
   --output /tmp/custom-pour --bottle-catalog /absolute/bottles \
   --cup-catalog /absolute/cups --execute
 ```
 
-Each package follows `examples/data/asset_catalog/README.md`. The integration
+Each package follows `examples/expansion/asset_catalog/README.md`. The integration
 requires category `bottle` or `cup`, `open_top: true`, bottle capabilities
 `antipodal_grasp` and `pour_source`, and cup capability `container`. The
 `pours_into` relation checks an evidenced mouth radius plus task clearance

@@ -4,7 +4,7 @@ Run the PickUp → Place task scene with one nominal execution and several
 trajectory variants:
 
 ```bash
-python examples/sim/motion/task_environment_augmentation_showcase.py \
+python examples/expansion/trajectory/task_environment_augmentation_showcase.py \
   --output-dir /tmp/embodichain-task-augmentation \
   --num_envs 4 \
   --device cuda \

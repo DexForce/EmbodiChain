@@ -1,8 +1,8 @@
-# Cube Platform Pick and Place
+# Primitive Cube/Platform configuration
 
-This configuration-defined UR5 task picks a 4 cm native Cube and places it on a
-16 cm square native Cube platform. Loading its deployment registers the common
-`EmbodiedEnv`; no task-specific Python environment is required.
+This example-local UR5 configuration picks a 4 cm native Cube and places it on a
+16 cm square native Cube platform. Loading it explicitly registers the common
+`EmbodiedEnv`; it is not an installed SDK task.
 
 | Configuration | Responsibility |
 | --- | --- |
@@ -15,14 +15,14 @@ From the repository root, with the SDK and its dependencies installed:
 
 ```bash
 embodichain run-task --gym-config \
-  extensions/embodichain_tasks/configs/tasks/manipulation/cube_platform_pick_place/task.ur5.yaml
+  examples/expansion/asset_generalization/configs/cube_platform_pick_place/task.ur5.yaml
 ```
 
 The default support frame is 0.047 m above the platform origin: 0.025 m platform
 half-height + 0.020 m cube half-height + 0.002 m release clearance.
 
-`examples/gym/asset_generalization/run.py` reads these same files and produces
+`examples/expansion/asset_generalization/run.py` reads these same files and produces
 4 cm/5 cm batches with the matching placement height and fresh deployment IDs.
 Its measured acceptance additionally checks the full transformed cube footprint
 and bottom-to-platform contact height before saving a trajectory. See
-`examples/gym/asset_generalization/README.md` for that collection workflow.
+`examples/expansion/asset_generalization/README.md` for that collection workflow.

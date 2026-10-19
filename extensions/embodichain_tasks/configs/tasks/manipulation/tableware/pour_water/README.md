@@ -271,22 +271,3 @@ Fault injection with a 1 N right-gripper budget stops with
 `segment_validation_failed` before `simulation.pour`; the cup is untouched.
 The force budget is calibrated for these simulated checks and is not a measured
 real-device payload rating.
-## Asset-generalization configuration
-
-`task.cobotmagic.asset_generalization.yaml` selects
-`env.asset_generalization.yaml`, whose 0.7 m Cube tabletop clears the arm mounts.
-It reuses `task_program/program.yaml` and `task_program/integration.yaml`.
-The integration's optional `asset_requirements` declares the bottle/cup categories,
-open-top properties, required capabilities, size bounds and `pours_into` relation.
-The environment remains the owner of physics, mesh paths and initial poses.
-
-```bash
-embodichain run-task --gym-config \
-  extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.asset_generalization.yaml \
-  --record_trajectory
-```
-
-This ordinary launch runs the declared source meshes. Offline replacement and
-the additional sampled pouring-motion acceptance are exercised by
-`examples/gym/asset_generalization/pour_water.py`; see the adjacent example README.
-Asset Providers are never invoked by ordinary configuration loading.

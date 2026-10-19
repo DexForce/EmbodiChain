@@ -121,7 +121,7 @@ grasp-frame TCPs and gripper evidence, not task-local object IDs.
 
 The task-local configured expansion example is bound through the deployment's
 shared expansion policy; its README routes to
-`examples/sim/motion/repeated_pick_place_expansion_showcase.py`. That showcase
+`examples/expansion/trajectory/repeated_pick_place_expansion_showcase.py`. That showcase
 reports projected completion and candidate provenance, not measured physical
 success or receipt-confirmed coverage.
 

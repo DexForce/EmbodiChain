@@ -1,8 +1,0 @@
-task_key: cube_platform_pick_place
-title: Cube Platform Pick and Place
-summary: Pick a primitive cube and place it on a primitive support platform.
-tags: [pick_place, primitive, task_program]
-default_deployment: ur5
-deployments:
-  ur5:
-    config: task.ur5.yaml

@@ -210,7 +210,7 @@ topics:
     tests/sim/motion/test_motion_generator.py,
     tests/sim/motion/test_motion_generator_batched.py, embodichain/lab/sim/motion/planners/, embodichain/lab/sim/motion/expansion/,
     tests/sim/motion/expansion/, embodichain/lab/sim/utility/action_utils.py, embodichain/compute/trajectory/,
-    tests/sim/motion/planners/, tests/compute/]
+    tests/sim/motion/planners/, tests/compute/, examples/expansion/trajectory/, examples/expansion/README.md]
   related_topics: [simulation-system, robot-system, ik-solvers, atomic-actions]
   status: active
 - id: scene-services
@@ -478,6 +478,6 @@ topics:
   - embodichain/lab/gym/envs/asset_generalization.py
   - embodichain/lab/task_program/integrations/_asset_pouring.py
   - embodichain/lab/task_program/integrations/simulation/asset_pouring.py
-  watch_paths: [embodichain/data/asset_catalog/, tests/data/asset_catalog/, embodichain/lab/task_program/semantics/asset_requirements.py, tests/lab/task_program/semantics/test_asset_requirements.py, embodichain/lab/task_program/semantics/asset_matching.py, tests/lab/task_program/semantics/test_asset_matching.py, embodichain/lab/task_program/integrations/asset_materialization.py, tests/gym/envs/task_program/test_asset_materialization.py, embodichain/lab/gym/envs/asset_generalization.py, tests/gym/envs/test_asset_generalization.py, examples/gym/asset_generalization/]
+  watch_paths: [embodichain/data/asset_catalog/, tests/data/asset_catalog/, embodichain/lab/task_program/semantics/asset_requirements.py, tests/lab/task_program/semantics/test_asset_requirements.py, embodichain/lab/task_program/semantics/asset_matching.py, tests/lab/task_program/semantics/test_asset_matching.py, embodichain/lab/task_program/integrations/asset_materialization.py, tests/gym/envs/task_program/test_asset_materialization.py, embodichain/lab/gym/envs/asset_generalization.py, tests/gym/envs/test_asset_generalization.py, examples/expansion/asset_generalization/, examples/expansion/asset_catalog/, examples/expansion/README.md]
   related_topics: [data-assets, task-programs, gen-sim, scene-services]
   status: active
