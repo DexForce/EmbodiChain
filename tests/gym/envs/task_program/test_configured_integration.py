@@ -1561,8 +1561,9 @@ def test_trapezoidal_motion_options_reach_the_runtime_policy() -> None:
     assert options.plan_opts.blend_tolerance == 0.001
     assert options.plan_opts.collinearity_tolerance == 0.0001
     assert options.plan_opts.sample_interval == options.sample_count == 120
-    assert options.plan_opts.constraints["velocity"] == 0.2
-    assert options.plan_opts.constraints["acceleration"] == 0.5
+    # Resolve robot speed caps and the planner acceleration default at planning time.
+    assert options.plan_opts.constraints["velocity"] is None
+    assert options.plan_opts.constraints["acceleration"] is None
 
 
 @pytest.mark.parametrize(
