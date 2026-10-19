@@ -2423,6 +2423,8 @@ class GenSimPlace(Place):
     binding_contract = Place.binding_contract
     recovery_scene_vertices: dict | None = None
     ordinary_on_invocations: frozenset[str] = frozenset()
+    world_yaw_free_routes: dict | None = None
+    world_yaw_simulation: Any = None
 
     def _translation_keyframes(
         self,
@@ -2452,6 +2454,14 @@ class GenSimPlace(Place):
         return replace(plan, scene_dependency_monitor_until=monitor_until)
 
     def _plan(self, request, context):
+        first = self._plan_without_yaw(request, context)
+        if not self.world_yaw_free_routes:
+            return first
+        from .place_yaw import recover
+
+        return recover(self, request, context, first, self._plan_without_yaw)
+
+    def _plan_without_yaw(self, request, context):
         handoff = GenSimStateHandoff.from_request(
             request, context, participant="GenSim Place"
         )
@@ -2484,6 +2494,29 @@ class GenSimPlace(Place):
                 self._with_contact_monitor_boundary(plan), handoff.resource
             )
 
+        from .place_recovery import preflight
+
+        keyframes = (
+            preflight(self, request, context) if self.recovery_scene_vertices else None
+        )
+        if keyframes is not None and not keyframes["valid"]:
+            failed = self.failed_plan(
+                request,
+                context,
+                message="Required ordinary Place waypoints were not IK-qualified.",
+                failure_code="gen_sim_place_keyframes_unqualified",
+                retryable=False,
+            )
+            return replace(
+                failed,
+                diagnostics=replace(
+                    failed.diagnostics,
+                    metadata={
+                        **failed.diagnostics.metadata,
+                        "gen_sim_place_keyframe_preflight": keyframes,
+                    },
+                ),
+            )
         early = bool(self.recovery_scene_vertices) and eligible(self, request, context)
         before = (
             _RandomState.capture(
@@ -2544,9 +2577,21 @@ class GenSimPlace(Place):
                 and tuple(measured[k] for k in keys) > tuple(earlier[k] for k in keys)
             ):
                 plan = early_fallback
-        return require_release_effect(
+        plan = require_release_effect(
             self._with_contact_monitor_boundary(plan), handoff.resource
         )
+        if keyframes is not None:
+            plan = replace(
+                plan,
+                diagnostics=replace(
+                    plan.diagnostics,
+                    metadata={
+                        **plan.diagnostics.metadata,
+                        "gen_sim_place_keyframe_preflight": keyframes,
+                    },
+                ),
+            )
+        return plan
 
     def _retry_place_routes(
         self, request: Any, context: Any, first: ActionPlan

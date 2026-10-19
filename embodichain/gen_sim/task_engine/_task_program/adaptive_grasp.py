@@ -35,6 +35,44 @@ ADAPTIVE_GRASP_REVISION = 4
 HANDOVER_END_REGION_REVISION = 1
 
 
+def contact_revision_declarations(value: object) -> dict[str, int]:
+    """Validate explicit Pick-segment overrides without changing other calls."""
+    if type(value) is not dict or any(
+        type(name) is not str
+        or not name
+        or type(revision) is not int
+        or revision not in range(1, 9)
+        for name, revision in value.items()
+    ):
+        raise ValueError(
+            "Pick contact revisions must map segment names to revisions 1-8."
+        )
+    return dict(value)
+
+
+def bind_contact_revisions(value: object, program: Any) -> tuple[tuple[str, int], ...]:
+    """Bind only explicitly named single Pick calls to their invocation IDs."""
+    from embodichain.lab.task_program.semantics import Pick
+
+    remaining = contact_revision_declarations(value)
+    routes = []
+    for segment in program.iter_segments():
+        if segment.name not in remaining:
+            continue
+        if len(segment.calls) != 1 or type(segment.calls[0].call) is not Pick:
+            raise ValueError("Pick contact revision requires one exact Pick segment.")
+        call = segment.calls[0]
+        routes.append(
+            (
+                f"{program.program_id}/{segment.segment_id}:{call.segment_call_index}",
+                remaining.pop(segment.name),
+            )
+        )
+    if remaining:
+        raise ValueError("Pick contact revision references a missing Pick segment.")
+    return tuple(routes)
+
+
 def bind_pick_purposes(
     declarations: object, program: Any
 ) -> tuple[tuple[str, str], ...]:

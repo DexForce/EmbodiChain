@@ -462,12 +462,42 @@ class GenSimActionEngine(AtomicActionEngine):
         *,
         plan_transform: PlanTransform | None = None,
     ) -> Any:
-        from ._search_cost import measure_search, search_cost_scope
+        from ._search_cost import (
+            _COST,
+            PlanningBudgetExceeded,
+            measure_search,
+            search_cost_scope,
+        )
 
-        with search_cost_scope() as cost:
-            with measure_search("complete_plan_request"):
-                plan = self._plan_request_impl(
-                    request, context, plan_transform=plan_transform
+        previews = {}
+        if request.skill_id in {"pick_up", "place"}:
+            previews = (
+                getattr(self.actions.get("pick_up"), "continuation_previews", None)
+                or {}
+            )
+        paired = request.invocation_id in previews or any(
+            request.invocation_id == preview.route.place_id
+            for preview in previews.values()
+        )
+        if paired and context is None:
+            context = self.initial_context()
+        paired = paired and getattr(context, "batch_size", None) == 1
+        parent = _COST.get()
+        with search_cost_scope(wall_seconds=60.0 if paired else None) as cost:
+            try:
+                with measure_search("complete_plan_request"):
+                    plan = self._plan_request_impl(
+                        request, context, plan_transform=plan_transform
+                    )
+            except PlanningBudgetExceeded as error:
+                if parent is not None:
+                    raise
+                plan = self.actions[request.skill_id].failed_plan(
+                    request,
+                    context,
+                    message=str(error),
+                    failure_code="gen_sim_planning_wall_budget_exhausted",
+                    retryable=False,
                 )
             return replace(
                 plan,

@@ -1140,7 +1140,10 @@ def test_relative_place_waits_then_validates_live_relation() -> None:
     ]
 
 
-def test_upright_target_uses_the_normalized_mesh_origin_offset(tmp_path: Path) -> None:
+@pytest.mark.parametrize("body_scale", [[1.0, 1.0, 1.0], [0.7, 1.3, 0.4]])
+def test_upright_target_uses_the_normalized_mesh_origin_offset(
+    tmp_path: Path, body_scale: list[float]
+) -> None:
     mesh = trimesh.creation.box(extents=[0.06, 0.24, 0.06])
     mesh.apply_translation([0.0, 0.12, 0.0])
     mesh_path = tmp_path / "bottle.glb"
@@ -1239,6 +1242,7 @@ def test_upright_target_uses_the_normalized_mesh_origin_offset(tmp_path: Path) -
                 "role": "rigid_object",
                 "shape": {"shape_type": "Mesh", "fpath": str(mesh_path)},
                 "init_rot": [90.0, 0.0, 0.0],
+                "body_scale": body_scale,
             },
             {
                 "runtime_uid": "table",
@@ -1259,7 +1263,28 @@ def test_upright_target_uses_the_normalized_mesh_origin_offset(tmp_path: Path) -
     assert refined["targets"]["step_upright_target"]["values"][0][
         "position"
     ] == pytest.approx([0.1, 0.2, 0.73])
-    assert refined["targets"]["step_upright_staging_target"]["values"][0][
+    from scipy.spatial.transform import Rotation
+
+    vertices = (
+        np.column_stack(
+            (mesh.vertices[:, 0], -mesh.vertices[:, 2], mesh.vertices[:, 1])
+        )
+        * body_scale
+    )
+    stage = refined["targets"]["step_upright_staging_target"]["values"][0]["position"]
+    assert stage[:2] == pytest.approx([0.1, 0.2])
+    for angles in ((0, 0, 0), (90, 0, 0), (180, 0, 0), (35, 70, 125)):
+        rotated = (
+            vertices @ Rotation.from_euler("XYZ", angles, degrees=True).as_matrix().T
+        )
+        assert float(rotated[:, 2].min()) + stage[2] >= 0.72 + 0.02 - 1e-7
+
+    legacy = deepcopy(graph)
+    for node in legacy["nodes"]:
+        node["task_type"] = "E4"
+    legacy["task_groups"][0]["task_type"] = "E4"
+    legacy = _refine_upright_targets(legacy, scene)
+    assert legacy["targets"]["step_upright_staging_target"]["values"][0][
         "position"
     ] == pytest.approx([0.1, 0.2, 0.93])
 
@@ -1282,9 +1307,7 @@ def test_upright_target_uses_the_normalized_mesh_origin_offset(tmp_path: Path) -
     route = lowerer["routes"][0]
     assert route["grasp_region"] == "upper_half"
     assert "approach_axis_weight" not in route
-    assert release_safe_options["approach_direction"] == pytest.approx(
-        [0.0, 2**-0.5, -(2**-0.5)]
-    )
+    assert release_safe_options["approach_direction"] == pytest.approx([0.0, 0.0, -1.0])
     assert "required_object_target_poses" not in route
     assert route["release_clearance_object_pose"]["position"] == pytest.approx(
         [0.1, 0.2, 0.73]
@@ -1377,9 +1400,10 @@ def test_task_gripper_opening_respects_pad_clearance_and_stricter_models() -> No
     assert generators["other"]["model"]["max_opening_width"] == 0.2
 
 
-def test_task_pick_directions_are_declared_per_policy_not_injected_by_lowerers() -> (
-    None
-):
+@pytest.mark.parametrize("task_type", ["E2", "E4"])
+def test_task_pick_directions_are_declared_per_policy_not_injected_by_lowerers(
+    task_type: str,
+) -> None:
     graph = _graph()
     graph["targets"] = {
         name: {
@@ -1393,7 +1417,7 @@ def test_task_pick_directions_are_declared_per_policy_not_injected_by_lowerers()
     graph["nodes"] = [
         {
             "id": name,
-            "task_type": "E2",
+            "task_type": task_type,
             "call": {
                 "kind": "registered",
                 "call_id": f"gen_sim.pick.{name}",
@@ -1429,10 +1453,10 @@ def test_task_pick_directions_are_declared_per_policy_not_injected_by_lowerers()
         intervals = options[key]["hand_interp_steps"] - 1
         assert 0.7 / (intervals * 0.04) <= 2.0
     assert options["gen_sim.pick.one"]["approach_direction"] == pytest.approx(
-        [0.0, 2**-0.5, -(2**-0.5)]
+        [0.0, 0.0, -1.0] if task_type == "E2" else [0.0, 2**-0.5, -(2**-0.5)]
     )
     assert options["gen_sim.pick.two"]["approach_direction"] == pytest.approx(
-        [0.0, -(2**-0.5), -(2**-0.5)]
+        [0.0, 0.0, -1.0] if task_type == "E2" else [0.0, -(2**-0.5), -(2**-0.5)]
     )
     factories = integration["runtime_services"]["registered_semantic_lowerers"]
     assert {f["call_id"] for f in factories if f["kind"] == "pick"} == {

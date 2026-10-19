@@ -774,9 +774,10 @@ def test_native_builder_keeps_float32_relative_poses_exactly_homogeneous(
     )
 
 
-@pytest.mark.parametrize("revision", [None, 1, 2, 3, 4])
-def test_engine_factory_passes_live_opening_context_only_for_revisions_three_four(
-    monkeypatch, revision
+@pytest.mark.parametrize("revision", [None, 1, 2, 3, 4, 5, 6, 7, 8])
+@pytest.mark.parametrize("per_call", [False, True])
+def test_engine_factory_scopes_contact_revision_and_live_opening_context(
+    monkeypatch, revision, per_call
 ) -> None:
     from embodichain.gen_sim.task_engine._task_program import (
         assembly,
@@ -819,6 +820,7 @@ def test_engine_factory_passes_live_opening_context_only_for_revisions_three_fou
     factory._coordinated_motion = False
     factory._staging_contract = StagingContract.empty()
     factory._pick_contact_revision = revision
+    factory._pick_contact_revisions = (("pick", 2),) if per_call else ()
     factory._pick_purposes = (("pick", "ordinary"),)
     factory._upright_container_picks = {}
     engine, screen = Mock(), object()
@@ -832,7 +834,7 @@ def test_engine_factory_passes_live_opening_context_only_for_revisions_three_fou
         for call in engine.register.call_args_list
         if isinstance(call.args[0], GenSimPickUp)
     )
-    if revision is None:
+    if revision is None and not per_call:
         assert pick.closing_geometry_factory is None
         build.assert_not_called()
         return
@@ -840,7 +842,23 @@ def test_engine_factory_passes_live_opening_context_only_for_revisions_three_fou
     context, preview = object(), object()
     pick.continuation_previews = {"pick": preview}
     assert pick.closing_geometry_factory(request, context) is screen
-    kwargs = {"revision": revision}
-    if revision in (3, 4):
+    effective_revision = 2 if per_call else revision
+    kwargs = {"revision": effective_revision}
+    if effective_revision in (3, 4, 5, 6, 7, 8):
         kwargs.update(context=context, preview=preview, purpose="ordinary")
     build.assert_called_once_with(robot, simulation, binding, request, **kwargs)
+    if per_call and revision is None:
+        assert (
+            pick.closing_geometry_factory(
+                SimpleNamespace(invocation_id="other"), context
+            )
+            is None
+        )
+        assert build.call_count == 1
+    elif per_call:
+        other = SimpleNamespace(invocation_id="other")
+        assert pick.closing_geometry_factory(other, context) is screen
+        fallback = {"revision": revision}
+        if revision in (3, 4, 5, 6, 7, 8):
+            fallback.update(context=context, preview=None, purpose=None)
+        build.assert_called_with(robot, simulation, binding, other, **fallback)

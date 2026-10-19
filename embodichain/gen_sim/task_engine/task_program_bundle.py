@@ -197,6 +197,8 @@ def generate_task_program_bundle(
     twist_mass_source: bool = False,
     support_contract_revision: int | None = None,
     pick_contact_revision: int | None = None,
+    pick_contact_revisions: Mapping[str, int] | None = None,
+    world_yaw_free_places: Sequence[str] | None = None,
     verify_pick_phases: bool = False,
     pour_geometry_revision: int | None = None,
     pour_proxy_position_tolerance_m: float | None = None,
@@ -252,6 +254,11 @@ def generate_task_program_bundle(
         pour_proxy_position_tolerance_m: Required positive receiver-relative pivot
             position budget for revision 2, shared with its pose-proxy observer.
             Forbidden for other revisions; no tolerance is invented implicitly.
+        pick_contact_revisions: Explicit Pick node IDs mapped to native closing
+            revisions. Unlisted calls retain ``pick_contact_revision`` or legacy behavior.
+        world_yaw_free_places: Explicit ordinary inside Place node IDs whose object
+            heading may change on real-held planning failure. Omitted preserves
+            legacy behavior; hypothetical Pick previews never use this recovery.
         upright_container_picks: Explicit E3 Pick node IDs mapped to maximum pad-axis
             tilt above the Z-up horizontal plane, in degrees. Omitted preserves
             legacy behavior. The caller declares these as upright-container Picks.
@@ -696,6 +703,8 @@ def generate_task_program_bundle(
         embodiment_payload,
         support_contract_revision=support_contract_revision,
         pick_contact_revision=pick_contact_revision,
+        pick_contact_revisions=pick_contact_revisions,
+        world_yaw_free_places=world_yaw_free_places,
         upright_container_picks=upright_container_picks,
     )
     drawer_targets = {route.affordance for route in drawers}
@@ -958,6 +967,8 @@ def _task_stability_payload(
     *,
     support_contract_revision: int | None = None,
     pick_contact_revision: int | None = None,
+    pick_contact_revisions: Mapping[str, int] | None = None,
+    world_yaw_free_places: Sequence[str] | None = None,
     upright_container_picks: Mapping[str, float] | None = None,
 ) -> dict[str, Any]:
     """Declare task conditions without adding public validator or runtime types."""
@@ -1271,6 +1282,34 @@ def _task_stability_payload(
         result["support_contract_revision"] = support_contract_revision
     if pick_contact_revision is not None:
         result["pick_contact_revision"] = pick_contact_revision
+    if pick_contact_revisions is not None:
+        from ._task_program.adaptive_grasp import contact_revision_declarations
+
+        if not isinstance(pick_contact_revisions, Mapping):
+            raise ValueError("Pick contact revisions must be an explicit mapping.")
+        revisions = contact_revision_declarations(dict(pick_contact_revisions))
+        nodes = {n["id"]: n for n in graph["nodes"]}
+        if any(
+            name not in nodes or nodes[name]["call"]["kind"] != "pick"
+            for name in revisions
+        ):
+            raise ValueError("Pick contact revision must name explicit Pick nodes.")
+        if revisions:
+            result["pick_contact_revisions"] = revisions
+    if world_yaw_free_places is not None:
+        from ._task_program.place_yaw import declarations
+
+        names = declarations(world_yaw_free_places)
+        nodes = {n["id"]: n for n in graph["nodes"]}
+        if any(
+            name not in nodes
+            or nodes[name]["call"]["kind"] != "place"
+            or not nodes[name]["call"].get("inside")
+            for name in names
+        ):
+            raise ValueError("World yaw freedom must name explicit inside Place nodes.")
+        if names:
+            result["world_yaw_free_places"] = list(names)
     if upright_container_picks is not None:
         from ._task_program.pick_closure_quality import declarations
 
@@ -1983,9 +2022,12 @@ def _integration_payload(
             approach = (
                 np.array([0.0, 0.0, -1.0]) if length <= 1e-6 else approach / length
             )
-            if node.get("task_instance_id") in supported_upright_groups:
-                # A top-down regrasp becomes a side grasp after uprighting,
-                # avoiding an end-directed approach into the rim at release.
+            if (
+                node.get("task_type") == "E2"
+                or node.get("task_instance_id") in supported_upright_groups
+            ):
+                # Uprighting does not require an axial entry. A vertical grasp
+                # becomes a side grasp after rotation; keep the release filter.
                 approach = np.array([0.0, 0.0, -1.0])
             options = {
                 "kind": "pick_up",
@@ -4184,6 +4226,7 @@ def _refine_upright_targets(
             support_heights[node["task_instance_id"]] = _position(support)[2] + top
     target_routes: dict[str, tuple[str, str]] = {}
     target_heights: dict[str, float] = {}
+    upright_staging_targets: set[str] = set()
     for node in selected["nodes"]:
         call = node["call"]
         if (
@@ -4203,6 +4246,8 @@ def _refine_upright_targets(
         target_id = str(arguments.get("target", ""))
         resource = str(call.get("resources", {}).get("primary", ""))
         target_routes[target_id] = (object_id, resource)
+        if node.get("task_type") == "E2":
+            upright_staging_targets.add(target_id)
         support_height = support_heights.get(node["task_instance_id"], table_top)
         target_heights[target_id] = support_height
         # Place owns the final descent; its release target still needs the
@@ -4231,7 +4276,16 @@ def _refine_upright_targets(
         clearance = _upright_release_clearance(source)
         position[2] = target_heights[target_id] + clearance - local_minimum
         if target_id.endswith("_upright_staging_target"):
-            position[2] += _UPRIGHT_STAGING_CLEARANCE
+            if target_id in upright_staging_targets:
+                # Bound every rotated vertex above the support instead of
+                # imposing a fixed lift that can overextend an otherwise valid grasp.
+                radius = float(np.linalg.norm(_mesh_vertices(source), axis=1).max())
+                position[2] = max(
+                    position[2],
+                    target_heights[target_id] + radius + _E2_RELEASE_SAFETY_MARGIN,
+                )
+            else:
+                position[2] += _UPRIGHT_STAGING_CLEARANCE
         values[0]["quaternion_xyzw"] = _upright_target_quaternion(
             source,
             axis,

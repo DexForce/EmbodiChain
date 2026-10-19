@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import math
 from typing import Any
 
 import torch
@@ -33,6 +34,83 @@ from .adaptive_grasp import ADAPTIVE_GRASP
 from .scene_geometry import capture_scene_vertices, scene_components, world_bounds
 
 __all__: list[str] = []
+
+_SCENE_CLEARANCE_M = 0.002
+_DISTANCE_TOLERANCE_M = 1e-6
+
+
+def _convex_clearance(
+    vertices: torch.Tensor,
+    poses: torch.Tensor,
+    other_vertices: torch.Tensor,
+    other_pose: torch.Tensor,
+    frames: torch.Tensor,
+) -> dict[str, Any]:
+    """Refine overlapping AABBs with conservative solid covers of the same inputs."""
+    import fcl
+    import numpy as np
+    import trimesh
+
+    def solid(points: torch.Tensor) -> Any:
+        if (
+            points.ndim != 3
+            or points.shape[0] != 1
+            or points.shape[-1] != 3
+            or not torch.isfinite(points).all()
+        ):
+            raise ValueError("Convex clearance requires complete finite vertices.")
+        points = points[0].detach().cpu().double().numpy()
+        if len(points) < 4 or np.linalg.matrix_rank(points - points[0]) != 3:
+            raise ValueError("Convex clearance requires a nondegenerate solid.")
+        hull = trimesh.convex.convex_hull(points)
+        if not hull.is_volume or not hull.is_convex:
+            raise ValueError("Convex clearance requires a nondegenerate solid.")
+        offsets = np.einsum("ij,ij->i", hull.face_normals, hull.triangles[:, 0])
+        if np.max(points @ hull.face_normals.T - offsets) > 1e-8:
+            raise ValueError("Convex cover does not contain every source vertex.")
+        faces = np.column_stack((np.full(len(hull.faces), 3), hull.faces)).ravel()
+        return fcl.Convex(hull.vertices, len(hull.faces), faces)
+
+    def transform(pose: torch.Tensor) -> Any:
+        pose = pose.detach().cpu().double().numpy()
+        if (
+            pose.shape != (4, 4)
+            or not np.isfinite(pose).all()
+            or not np.allclose(pose[3], (0, 0, 0, 1), atol=1e-7, rtol=0)
+            or not np.allclose(pose[:3, :3].T @ pose[:3, :3], np.eye(3), atol=2e-5)
+            or not np.isclose(np.linalg.det(pose[:3, :3]), 1.0, atol=2e-5)
+        ):
+            raise ValueError("Convex clearance requires rigid observed poses.")
+        return fcl.Transform(pose[:3, :3], pose[:3, 3])
+
+    payload = solid(vertices)
+    obstacle = fcl.CollisionObject(solid(other_vertices), transform(other_pose[0]))
+    result: dict[str, Any] = {
+        "valid": True,
+        "scope": "discrete_source_convex_solids_not_native_contact",
+        "required_clearance_m": _SCENE_CLEARANCE_M,
+        "numerical_allowance_m": _DISTANCE_TOLERANCE_M,
+        "minimum_distance_m": None,
+        "checked_frames": 0,
+    }
+    for frame in frames.tolist():
+        moving = fcl.CollisionObject(payload, transform(poses[0, frame]))
+        # Convex solids, unlike triangle soups, also reject complete containment.
+        distance = (
+            0.0
+            if fcl.collide(moving, obstacle)
+            else float(fcl.distance(moving, obstacle))
+        )
+        if not math.isfinite(distance):
+            raise ValueError("Convex solid distance is unavailable.")
+        previous = result["minimum_distance_m"]
+        result["minimum_distance_m"] = (
+            distance if previous is None else min(previous, distance)
+        )
+        result["checked_frames"] += 1
+        if distance <= _SCENE_CLEARANCE_M + _DISTANCE_TOLERANCE_M:
+            return {**result, "valid": False, "frame": frame}
+    return result
 
 
 def scene_vertices(simulation: Any, bindings: Any) -> dict[str, torch.Tensor]:
@@ -88,31 +166,41 @@ def inspect(action: Any, request: Any, context: Any, plan: Any) -> dict[str, Any
     ]
     poses = fk @ pose_inv(held.object_to_eef)[:, None]
     vertices = meshes[held.semantics.entity_id].to(poses)
+    if not torch.isfinite(poses).all() or not torch.isfinite(vertices).all():
+        return {"valid": False, "reason": "held_object_scene_geometry_unavailable"}
     world = (
         torch.einsum("btij,bvj->btvi", poses[:, :, :3, :3], vertices)
         + poses[:, :, None, :3, 3]
     )
     lower, upper = world.amin(2), world.amax(2)
     minimum_gap = None
+    convex_checks = []
     try:
         for uid, component, mesh, pose in scene_components(
             meshes, context, excluded_owner=held.semantics.entity_id
         ):
             other_lower, other_upper = world_bounds(mesh, pose.to(poses))
+            margin = _SCENE_CLEARANCE_M + _DISTANCE_TOLERANCE_M
             overlap = (
-                (upper > other_lower[:, None] - 0.002)
-                & (lower < other_upper[:, None] + 0.002)
+                (upper >= other_lower[:, None] - margin)
+                & (lower <= other_upper[:, None] + margin)
             ).all(-1)
             if overlap.any():
-                return {
-                    "valid": False,
-                    "reason": "held_object_scene_envelope_rejected",
-                    "entity": uid,
-                    "component": component,
-                }
+                checked = _convex_clearance(
+                    vertices, poses, mesh, pose, overlap[0].nonzero().flatten()
+                )
+                convex_checks.append({"entity": uid, "component": component, **checked})
+                if not checked["valid"]:
+                    return {
+                        "valid": False,
+                        "reason": "held_object_scene_envelope_rejected",
+                        "entity": uid,
+                        "component": component,
+                        "convex_clearance": convex_checks,
+                    }
             if uid == "table":
                 minimum_gap = float((lower[:, :, 2] - other_upper[:, None, 2]).min())
-    except (ValueError, TypeError, AttributeError) as error:
+    except (ImportError, ValueError, TypeError, AttributeError, RuntimeError) as error:
         return {
             "valid": False,
             "reason": "scene_geometry_unavailable",
@@ -127,6 +215,7 @@ def inspect(action: Any, request: Any, context: Any, plan: Any) -> dict[str, Any
         "rotation_max_rad": rotation_max,
         "rotation_path_rad": rotation_path,
         "orientation_preserved": rotation_max <= rot_eps,
+        "convex_clearance": convex_checks,
     }
 
 
@@ -155,6 +244,90 @@ def eligible(action: Any, request: Any, context: Any) -> bool:
     }:
         return False
     return True
+
+
+def preflight(action: Any, request: Any, context: Any) -> dict[str, Any] | None:
+    """Screen ordinary required poses before expanding an expensive path.
+
+    This is a finite IK qualification, not proof of global unreachability. It
+    neither changes a target nor consumes the caller's random stream.
+    """
+    from embodichain.lab.sim.atomic_actions.primitives.place import Place, PlaceGoal
+    from .pick_path import _pose_path_valid
+    from ._search_cost import measure_search
+
+    if (
+        not eligible(action, request, context)
+        or not isinstance(getattr(request, "goal", None), PlaceGoal)
+        or request.goal.tcp_symmetry != "none"
+    ):
+        return None
+    endpoint = request.binding.endpoint("primary", "motion")
+    arm = endpoint.require_target(JointPositionTarget)
+    target, _ = action._resolve_place_xpos(
+        request.goal, context, endpoint.task_state_key, request=request
+    )
+    if target.ndim == 4:
+        if target.shape[1] != 1:
+            return None
+        target = target[:, 0]
+    if target.shape != (1, 4, 4):
+        return None
+    start_qpos = context.robot.qpos[:, list(arm.joint_ids)]
+    start = action.robot.compute_fk(
+        qpos=start_qpos, name=arm.control_part, to_matrix=True
+    )
+    lifted = Place._lifted_pose(action, target, request.skill_options)
+    poses = torch.cat(
+        (
+            Place._translation_keyframes(
+                action, start, torch.stack((lifted, target), 1), request.skill_options
+            ),
+            Place._translation_keyframes(
+                action, target, lifted[:, None], request.skill_options
+            ),
+        ),
+        1,
+    )
+    state = _RandomState.capture(
+        _cuda_devices(action.robot.device, context.robot.qpos.device)
+    )
+    record: dict[str, Any] = {
+        "valid": False,
+        "scope": "finite_required_waypoint_ik_not_global_unreachability",
+        "physical_evidence": False,
+        "required_keyframes": poses.shape[1],
+        "full_plans": 0,
+        "required_poses": poses.detach().cpu().tolist(),
+    }
+    try:
+        with measure_search("place_keyframe_preflight"):
+            ok, qpos = action.robot.compute_batch_ik(
+                pose=poses,
+                name=arm.control_part,
+                joint_seed=start_qpos[:, None].expand(-1, poses.shape[1], -1).clone(),
+            )
+            bounds = action.robot.get_qpos_limits(name=arm.control_part).to(qpos)
+            record["ik_valid"] = bool(ok.all())
+            record["joint_limits_valid"] = bool(
+                torch.isfinite(qpos).all()
+                and (qpos >= bounds[:, None, :, 0]).all()
+                and (qpos <= bounds[:, None, :, 1]).all()
+            )
+            if record["ik_valid"] and record["joint_limits_valid"]:
+                fk = action.robot.compute_batch_fk(
+                    qpos=qpos, name=arm.control_part, to_matrix=True
+                )
+                params = action.robot.get_solver(
+                    arm.control_part
+                ).get_iteration_params()
+                record["fk_valid"] = _pose_path_valid(
+                    fk, poses, params["pos_eps"], params["rot_eps"]
+                )
+                record["valid"] = record["fk_valid"]
+    finally:
+        state.restore()
+    return record
 
 
 def recover(action: Any, request: Any, context: Any, first: Any, build: Any) -> Any:

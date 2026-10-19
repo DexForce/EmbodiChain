@@ -607,3 +607,121 @@ def test_raw_waypoint_evidence_precedes_gen_sim_velocity_mask(
     assert not result.success.any()
     assert evidence[0].tolist() == [ik_success]
     assert raw.success.tolist() == [ik_success]
+
+
+def _nearby_obstacle(action, context, vertices, translation):
+    action.recovery_scene_vertices["obstacle"] = vertices
+    pose = torch.eye(4)[None]
+    pose[0, :3, 3] = torch.tensor(translation)
+    context.scene.entities["obstacle"] = SimpleNamespace(pose=pose)
+
+
+def test_place_convex_separation_does_not_treat_overlapping_aabbs_as_collision(
+    monkeypatch,
+):
+    action, request, context, plan = _fixture(monkeypatch)
+    vertices = torch.tensor(
+        trimesh.creation.icosphere(subdivisions=1, radius=0.04).vertices,
+        dtype=torch.float32,
+    )[None]
+    action.recovery_scene_vertices["item"] = vertices
+    _nearby_obstacle(action, context, vertices, (0.06, 0.06, 0.3))
+    result = gate.inspect(action, request, context, plan)
+    assert result["valid"] is True
+    assert result["convex_clearance"][0]["minimum_distance_m"] > 0.002
+
+
+@pytest.mark.parametrize("gap", [-0.01, 0.0, 0.0019, 0.002, 0.0021])
+def test_place_convex_clearance_preserves_two_millimetre_margin(monkeypatch, gap):
+    action, request, context, plan = _fixture(monkeypatch)
+    _nearby_obstacle(
+        action, context, action.recovery_scene_vertices["item"], (0.08 + gap, 0, 0.3)
+    )
+    assert gate.inspect(action, request, context, plan)["valid"] is (gap > 0.002)
+
+
+def test_place_convex_solid_rejects_complete_containment(monkeypatch):
+    action, request, context, plan = _fixture(monkeypatch)
+    _nearby_obstacle(
+        action, context, action.recovery_scene_vertices["item"] * 4, (0, 0, 0.3)
+    )
+    assert gate.inspect(action, request, context, plan)["valid"] is False
+
+
+def test_place_convex_clearance_checks_later_frames_and_articulated_parts(monkeypatch):
+    from embodichain.gen_sim.task_engine._task_program.scene_geometry import (
+        SceneComponent,
+        SceneVertices,
+    )
+
+    action, request, context, plan = _fixture(monkeypatch)
+    vertices = action.recovery_scene_vertices["item"]
+    action.recovery_scene_vertices = SceneVertices(
+        action.recovery_scene_vertices,
+        components=(SceneComponent("cabinet", "door", "panel", vertices),),
+    )
+    pose = torch.eye(4)[None]
+    pose[0, :3, 3] = torch.tensor([0.2, 0, 0.3])
+    context.scene.entities["door"] = SimpleNamespace(pose=pose)
+    original = action.robot.compute_batch_fk
+
+    def fk(**kwargs):
+        value = original(**kwargs)
+        value[:, 1, 0, 3] = 0.2
+        return value
+
+    action.robot.compute_batch_fk = fk
+    result = gate.inspect(action, request, context, plan)
+    assert result["valid"] is False
+    assert result["entity"] == "cabinet"
+    assert result["component"] == "panel"
+    assert result["convex_clearance"][-1]["frame"] == 1
+
+
+@pytest.mark.parametrize("damage", ["nan_payload", "degenerate", "query", "pose"])
+def test_place_convex_clearance_unavailable_is_not_accepted(monkeypatch, damage):
+    action, request, context, plan = _fixture(monkeypatch)
+    vertices = action.recovery_scene_vertices["item"].clone()
+    _nearby_obstacle(action, context, vertices, (0, 0, 0.3))
+    if damage == "nan_payload":
+        action.recovery_scene_vertices["item"][0, 0, 0] = float("nan")
+    elif damage == "degenerate":
+        action.recovery_scene_vertices["obstacle"][:, :, 2] = 0
+    elif damage == "pose":
+        context.scene.entities["obstacle"].pose[0, 0, 0] = 0
+    else:
+        import fcl
+
+        monkeypatch.setattr(fcl, "distance", lambda *_a, **_kw: float("nan"))
+        monkeypatch.setattr(fcl, "collide", lambda *_a, **_kw: 0)
+    assert gate.inspect(action, request, context, plan)["valid"] is False
+
+
+def test_place_convex_clearance_is_rigid_frame_invariant(monkeypatch):
+    from embodichain.utils.math import matrix_from_euler
+
+    action, request, context, plan = _fixture(monkeypatch)
+    vertices = torch.tensor(
+        trimesh.creation.icosphere(subdivisions=1, radius=0.04).vertices,
+        dtype=torch.float32,
+    )[None]
+    action.recovery_scene_vertices["item"] = vertices
+    _nearby_obstacle(action, context, vertices, (0.06, 0.06, 0.3))
+    before = gate.inspect(action, request, context, plan)
+    frame = torch.eye(4)[None]
+    frame[0, :3, :3] = matrix_from_euler(torch.tensor([0.3, 0.5, 0.7]), "XYZ")
+    frame[0, :3, 3] = torch.tensor([0.7, -0.3, 1.2])
+    for entity in context.scene.entities.values():
+        entity.pose = frame @ entity.pose
+    original = action.robot.compute_batch_fk
+    action.robot.compute_batch_fk = lambda **kw: frame[:, None] @ original(**kw)
+    after = gate.inspect(action, request, context, plan)
+    assert before["valid"] and after["valid"]
+
+
+def test_place_separated_aabbs_keep_the_existing_fast_path(monkeypatch):
+    action, request, context, plan = _fixture(monkeypatch)
+    monkeypatch.setattr(
+        gate, "_convex_clearance", lambda *_a: pytest.fail("No narrow phase needed")
+    )
+    assert gate.inspect(action, request, context, plan)["valid"] is True

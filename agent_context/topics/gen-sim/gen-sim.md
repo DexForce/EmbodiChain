@@ -107,6 +107,23 @@ single-thread setting afterward. Candidate poses, seeds and counts are unchanged
 GPU and multi-environment execution retain their existing thread policy. This
 reduces small-tensor thread-pool overhead; it does not change physics, solver
 tolerances, motion timing or recovery budgets.
+Ordinary single-environment Place with preserved target orientation screens its
+unchanged required keyframes with finite IK/FK before dense path planning.
+An unqualified screen is not a proof of global unreachability; explicit height
+caps, multi-waypoint goals and protected Cartesian/pour routes keep their prior
+path. Owned adjacent Pick/Place calls share one 60-second cooperative wall ledger
+across nested previews and recovery. It rejects overdue planning at instrumented
+boundaries, not by preempting a native operation, so elapsed time may exceed that
+deadline until the next check. These search receipts neither prove acquisition
+or release nor replace final TaskSpec qualification.
+Explicit `world_yaw_free_places` names ordinary rigid-inside Place nodes whose
+object heading may vary. It is absent by default and fingerprints with the task
+constraints. Only failed actual-held calls try the existing bounded world-Z yaw
+order; hypothetical Pick previews, explicit orientations and Cartesian routes
+keep their original behavior. The qualified route retains 0.12 m release clearance,
+0.05 m approach lift, the shared budget, landing-footprint screening and final
+Place inspection. It does not claim continuous collision or physical success;
+the ordinary runner and complete release/stability/TaskSpec gates remain required.
 Supported E1 placement allows up to 50 mm positive floor clearance while retaining
 the 10 mm penetration limit. Full-footprint coverage, exact released-state receipts
 and the other physical gates remain required; execution evidence records both limits.
@@ -269,7 +286,10 @@ searches fail or produce worse waypoint plans; 45 degrees is a scheduling
 criterion, not a safety threshold or rejection of the large-turn fallback.
 Every required waypoint and the exact release pose remain unchanged. Acceptance
 checks final emitted velocity/joint limits, discrete robot meshes, and the held
-object's conservative scene envelopes through approach. Explicit Cartesian
+object's conservative scene envelopes through approach. Overlapping AABBs are
+refined with convex-solid covers of the same complete source vertices, retaining
+the 2 mm separation requirement. Containment, unavailable geometry and unresolved
+distance reject; this is not native contact or continuous collision certification. Explicit Cartesian
 routes, dynamic collision policies, drawer routes and E2 z caps are not overridden.
 Missing bound rigid geometry or bound articulation obstacles disable this fallback.
 Motion validation revision 13 separately owns positively bound ordinary on-Place

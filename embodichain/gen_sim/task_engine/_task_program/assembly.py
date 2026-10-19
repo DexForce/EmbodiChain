@@ -94,6 +94,8 @@ class _TaskFactory(SimulationTaskProgramFactory):
     """Select task-owned observation services, not a different executor."""
 
     _pick_continuations: tuple = ()
+    _pick_contact_revisions: tuple[tuple[str, int], ...] = ()
+    _world_yaw_free_places: tuple[str, ...] = ()
 
     def __init__(
         self,
@@ -120,6 +122,8 @@ class _TaskFactory(SimulationTaskProgramFactory):
         pour_continuations: tuple = (),
         twist_routes: tuple = (),
         pick_contact_revision: int | None = None,
+        pick_contact_revisions: tuple[tuple[str, int], ...] = (),
+        world_yaw_free_places: tuple[str, ...] = (),
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -142,6 +146,8 @@ class _TaskFactory(SimulationTaskProgramFactory):
         self._pour_continuations = pour_continuations
         self._twist_routes = twist_routes
         self._pick_contact_revision = pick_contact_revision
+        self._pick_contact_revisions = pick_contact_revisions
+        self._world_yaw_free_places = world_yaw_free_places
         self._task_post_port = TaskStabilityPort(
             self.segment_policy_port,
             self._simulation,
@@ -254,12 +260,18 @@ class _TaskFactory(SimulationTaskProgramFactory):
         pick.pick_purposes = dict(self._pick_purposes)
         pick.path_simulation = getattr(self, "_simulation", None)
         pick.path_excluded_invocations = frozenset(self._cartesian_calls)
-        if self._pick_contact_revision in (1, 2, 3, 4, 5, 6, 7, 8):
+        contact_revisions = dict(self._pick_contact_revisions)
+        if self._pick_contact_revision in (1, 2, 3, 4, 5, 6, 7, 8) or contact_revisions:
             from .pick_contact import build_closing_contact_screen
 
             def closing_geometry(request: Any, context: Any) -> Any:
+                revision = contact_revisions.get(
+                    request.invocation_id, self._pick_contact_revision
+                )
+                if revision is None:
+                    return None
                 opening = {}
-                if self._pick_contact_revision in (3, 4, 5, 6, 7, 8):
+                if revision in (3, 4, 5, 6, 7, 8):
                     opening = {
                         "context": context,
                         "preview": (pick.continuation_previews or {}).get(
@@ -274,7 +286,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
                     self._simulation,
                     self.task_program_registration.scene_binding,
                     request,
-                    revision=self._pick_contact_revision,
+                    revision=revision,
                     **opening,
                 )
                 quality = self._upright_container_picks.get(request.invocation_id)
@@ -333,6 +345,11 @@ class _TaskFactory(SimulationTaskProgramFactory):
             self._pick_purposes,
             self.task_program_registration.scene_binding,
         )
+        if self._world_yaw_free_places:
+            from .place_yaw import bind_routes
+
+            place.world_yaw_free_routes = bind_routes(self)
+            place.world_yaw_simulation = self._simulation
         engine.register(place, replace=True)
         engine.register(pour, replace=True)
         if self._coordinated_motion:
@@ -499,6 +516,8 @@ class TaskAdapterFactory:
     twist_routes: tuple = ()
     support_contract_revision: int | None = None
     pick_contact_revision: int | None = None
+    pick_contact_revisions: tuple[tuple[str, int], ...] = ()
+    world_yaw_free_places: tuple[str, ...] = ()
     pour_return_calls: tuple[str, ...] = ()
     held_command_sources: tuple = ()
     upright_container_picks: tuple = ()
@@ -736,6 +755,8 @@ class TaskAdapterFactory:
             pour_continuations=pour_continuations,
             twist_routes=self.twist_routes,
             pick_contact_revision=self.pick_contact_revision,
+            pick_contact_revisions=self.pick_contact_revisions,
+            world_yaw_free_places=self.world_yaw_free_places,
         )
         support = [
             cfg
@@ -800,6 +821,8 @@ def load_deployment(
             "held_command_sources",
             "held_command_revision",
             "pick_contact_revision",
+            "pick_contact_revisions",
+            "world_yaw_free_places",
         }
         or payload["schema_version"] != "gen_sim_task_constraints/v1"
     ):
@@ -1005,6 +1028,18 @@ def load_deployment(
         )
     )
     pick_purposes = bind_pick_purposes(payload.get("pick_purposes", {}), compiled)
+    from .adaptive_grasp import bind_contact_revisions
+
+    pick_contact_revisions = bind_contact_revisions(
+        payload.get("pick_contact_revisions", {}), compiled
+    )
+    from .place_yaw import bind_calls as bind_yaw_calls
+
+    world_yaw_free_places = bind_yaw_calls(
+        payload.get("world_yaw_free_places", []), compiled
+    )
+    if world_yaw_free_places and not adaptive_pick:
+        raise ValueError("World yaw freedom requires ordinary Pick/Place binding.")
     from .pick_closure_quality import bind_policies
 
     upright_container_picks = bind_policies(
@@ -1237,6 +1272,8 @@ def load_deployment(
         twist_routes=twist_routes,
         support_contract_revision=support_revision,
         pick_contact_revision=pick_contact_revision,
+        pick_contact_revisions=pick_contact_revisions,
+        world_yaw_free_places=world_yaw_free_places,
     )
     integration = replace(
         base.integration,

@@ -30,6 +30,37 @@ from embodichain.gen_sim.task_engine._task_program.adaptive_grasp import (
 )
 
 
+def test_contact_revisions_bind_only_the_declared_pick():
+    from embodichain.gen_sim.task_engine._task_program.adaptive_grasp import (
+        bind_contact_revisions,
+    )
+    from embodichain.lab.task_program.semantics import Pick, SceneObjectRef
+
+    call = SimpleNamespace(call=Pick(SceneObjectRef("item")), segment_call_index=0)
+    segments = [
+        SimpleNamespace(name=n, segment_id=n, calls=(call,))
+        for n in ("selected", "other")
+    ]
+    program = SimpleNamespace(program_id="p", iter_segments=lambda: iter(segments))
+    assert bind_contact_revisions({}, program) == ()
+    assert bind_contact_revisions({"selected": 2}, program) == (("p/selected:0", 2),)
+    with pytest.raises(ValueError, match="missing"):
+        bind_contact_revisions({"missing": 2}, program)
+    segments[0].calls = (SimpleNamespace(call=object(), segment_call_index=0),)
+    with pytest.raises(ValueError, match="exact Pick"):
+        bind_contact_revisions({"selected": 2}, program)
+
+
+@pytest.mark.parametrize("bad", [True, False, 0, 9, 2.0, "2", None])
+def test_contact_revisions_reject_invalid_values(bad):
+    from embodichain.gen_sim.task_engine._task_program.adaptive_grasp import (
+        contact_revision_declarations,
+    )
+
+    with pytest.raises(ValueError):
+        contact_revision_declarations({"selected": bad})
+
+
 @pytest.mark.parametrize("axis", [(1.0, 0.0, 0.0), (-1.0, 0.0, 0.0), (0.0, 1.0, 0.0)])
 def test_horizontal_grasp_tracks_the_arm_not_axis_sign(axis):
     axis = torch.tensor([axis]).repeat(2, 1)

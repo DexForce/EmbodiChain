@@ -352,7 +352,83 @@ def test_pick_contact_contract_is_explicit_and_independent_of_support(
     )
 
 
-@pytest.mark.parametrize("revision", [True, False, 0, 5, 3.0, 4.0, "3", "4"])
+def test_explicit_inside_yaw_survives_production_bundle_loading(
+    support_scene: PreparedScene, tmp_path: Path
+) -> None:
+    # Source meshes are Y-up; provide a horizontal floor large enough for this bottle.
+    trimesh.creation.box(extents=(0.5, 0.02, 0.5)).export(
+        support_scene.rigid_objects[-1]["shape"]["fpath"]
+    )
+    graph = _placement_graph(inside=True, reference="tray")
+    _, paths = bundle.generate_task_program_bundle(
+        graph,
+        support_scene,
+        tmp_path / "yaw",
+        robot_profile="dual_franka",
+        world_yaw_free_places=["place"],
+    )
+    constraints = load_config(paths.root / "task_program/constraints.json")
+    assert constraints["world_yaw_free_places"] == ["place"]
+    loaded = _load_bundle(paths).integration.adapter_factory
+    assert len(loaded.world_yaw_free_places) == 1
+    assert loaded.world_yaw_free_places[0].endswith(":0")
+    defaults = []
+    for label, selection in (("legacy", None), ("empty", [])):
+        _, default_paths = bundle.generate_task_program_bundle(
+            graph,
+            support_scene,
+            tmp_path / label,
+            robot_profile="dual_franka",
+            world_yaw_free_places=selection,
+        )
+        raw = load_config(default_paths.root / "task_program/constraints.json")
+        assert "world_yaw_free_places" not in raw
+        default = _load_bundle(default_paths).integration
+        assert default.adapter_factory.world_yaw_free_places == ()
+        defaults.append(default.integration_fingerprint)
+    assert defaults[0] == defaults[1]
+    assert defaults[0] != _load_bundle(paths).integration.integration_fingerprint
+    for invalid in (["pick"], ["missing"], ["place", "place"], "place"):
+        with pytest.raises(ValueError, match="yaw"):
+            bundle.generate_task_program_bundle(
+                graph,
+                support_scene,
+                tmp_path / f"invalid_{repr(invalid)}",
+                robot_profile="dual_franka",
+                world_yaw_free_places=invalid,
+            )
+
+
+def test_per_call_contact_revision_survives_strict_bundle_loading(
+    support_scene: PreparedScene, tmp_path: Path
+) -> None:
+    _, paths = bundle.generate_task_program_bundle(
+        _placement_graph(reference="tray"),
+        support_scene,
+        tmp_path / "per_call",
+        robot_profile="dual_franka",
+        pick_contact_revisions={"pick": 2},
+    )
+    constraints = load_config(paths.root / "task_program/constraints.json")
+    assert constraints["pick_contact_revisions"] == {"pick": 2}
+    assert "pick_contact_revision" not in constraints
+    loaded = _load_bundle(paths).integration.adapter_factory
+    assert loaded.pick_contact_revision is None
+    assert len(loaded.pick_contact_revisions) == 1
+    assert loaded.pick_contact_revisions[0][0].endswith(":0")
+    assert loaded.pick_contact_revisions[0][1] == 2
+    for name in ("place", "missing"):
+        with pytest.raises(ValueError, match="explicit Pick"):
+            bundle.generate_task_program_bundle(
+                _placement_graph(reference="tray"),
+                support_scene,
+                tmp_path / name,
+                robot_profile="dual_franka",
+                pick_contact_revisions={name: 2},
+            )
+
+
+@pytest.mark.parametrize("revision", [True, False, 0, 9, 3.0, 4.0, "3", "4"])
 def test_pick_contact_contract_rejects_unknown_revisions(
     support_scene: PreparedScene, tmp_path: Path, revision: object
 ) -> None:
