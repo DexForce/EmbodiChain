@@ -4,11 +4,18 @@
 Dexforce W1 is a dual-arm humanoid robot developed by DexForce Technology Co., Ltd.
 
 <div style="display: flex; justify-content: center; align-items: flex-start; gap: 20px; flex-wrap: wrap;">
-  <figure style="text-align: center; margin: 10px;">
-    <img src="../../_static/robots/dexforcew1.jpg" alt="Dexforce W1" style="height: 400px; width: auto;"/>
-    <figcaption><b>Dexforce W1</b></figcaption>
+  <figure style="text-align: center; margin: 0; flex: 1 1 320px; max-width: 540px;">
+    <img src="../../_static/robots/dexforcew1.jpg" alt="Earlier Dexforce W1 rendering with attached hands" style="display: block; width: 100%; height: auto;"/>
+    <figcaption><b>Earlier W1 with hands</b></figcaption>
+  </figure>
+  <figure style="text-align: center; margin: 0; flex: 1 1 320px; max-width: 540px;">
+    <img src="../../_static/robots/dexforcew1_v030.jpg" alt="Dexforce W1 V030 standard bare-body simulation render" style="display: block; width: 100%; height: auto;"/>
+    <figcaption><b>W1 V030 — standard bare body (20 DOF)</b></figcaption>
   </figure>
 </div>
+
+The V030 image uses the registered `v030/bare` asset in a bent-elbow display
+pose. Its physical wrist flanges are shown without detachable end effectors.
 
 ## Key Features
 
