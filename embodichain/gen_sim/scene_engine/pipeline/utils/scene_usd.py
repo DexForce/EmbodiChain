@@ -974,6 +974,14 @@ def _export_material_without_texture(
     )
     _set_safe_material_input(
         source_material=source_material,
+        getter_name="get_metallic",
+        shader=shader,
+        input_name="metallic",
+        value_type=Sdf.ValueTypeNames.Float,
+        converter=float,
+    )
+    _set_safe_material_input(
+        source_material=source_material,
         getter_name="get_ior",
         shader=shader,
         input_name="ior",
@@ -995,7 +1003,14 @@ def _set_safe_material_input(
     """Set a scalar material input without making USD export fragile."""
     try:
         value = getattr(source_material, getter_name)()
-    except (MemoryError, SystemError, RuntimeError, TypeError, ValueError):
+    except (
+        AttributeError,
+        MemoryError,
+        SystemError,
+        RuntimeError,
+        TypeError,
+        ValueError,
+    ):
         return
     if value is not None:
         shader.CreateInput(input_name, value_type).Set(converter(value))
@@ -1252,13 +1267,28 @@ def _bind_gltf_material_textures(
     st_reader.CreateIdAttr("UsdPrimvarReader_float2")
     st_reader.CreateInput("varname", Sdf.ValueTypeNames.Token).Set("st")
 
+    # DexSim exports the native glTF UVs unchanged. glTF samples images from
+    # the upper left, while UsdUVTexture samples from the lower left. Convert
+    # at this glTF texture-binding boundary, including every PBR channel, so
+    # USD-sourced materials and shared mesh primvars retain their conventions.
+    st_transform = UsdShade.Shader.Define(
+        stage, material_path.AppendChild("gltfTextureCoordinates")
+    )
+    st_transform.CreateIdAttr("UsdTransform2d")
+    st_transform.CreateInput("in", Sdf.ValueTypeNames.Float2).ConnectToSource(
+        st_reader.ConnectableAPI(), "result"
+    )
+    st_transform.CreateInput("scale", Sdf.ValueTypeNames.Float2).Set((1.0, -1.0))
+    st_transform.CreateInput("translation", Sdf.ValueTypeNames.Float2).Set((0.0, 1.0))
+    st_transform.CreateOutput("result", Sdf.ValueTypeNames.Float2)
+
     for channel, relative_texture in relative_textures.items():
         texture = _usd_texture_shader(
             stage=stage,
             material_path=material_path,
             channel=channel,
             relative_texture=relative_texture,
-            st_reader=st_reader,
+            st_reader=st_transform,
         )
         if channel == "base_color":
             _connect_usd_texture(
@@ -1331,7 +1361,7 @@ def _usd_texture_shader(
     relative_texture: str,
     st_reader: object,
 ) -> object:
-    """Define one USD UV texture node with a shared ``st`` reader."""
+    """Define one USD UV texture node with a shared coordinate source."""
     from pxr import Sdf, UsdShade
 
     texture = UsdShade.Shader.Define(
