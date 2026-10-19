@@ -262,6 +262,11 @@ run = save_scene_variants(result, "/tmp/shared-layouts", storage="packed")
 loaded = load_scene_variants(run, scene_input=source)
 ```
 
+Use `group_xy_offset_bounds_m={"tray": [[-0.04, -0.03], [0.04, 0.03]]}`
+to restrict a selected group root to offsets from its authored pose in arena XY
+coordinates. Equal lower and upper bounds fix an axis; omitted roots use the
+full feasible support region. Member XY/yaw bounds use the parent support frame.
+
 Geometry is extracted once; candidate sampling and selected-row application do
 not load meshes or advance physics. Source and variant identities exclude arena
 replication offsets. The application result lists the host caches requiring

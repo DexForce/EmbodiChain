@@ -188,6 +188,47 @@ def test_group_only_and_intra_only() -> None:
             )
 
 
+@pytest.mark.parametrize(
+    "bounds",
+    [
+        [[-0.04, -0.03], [0.04, 0.03]],
+        [[0.0, -0.03], [0.0, 0.03]],
+        [[0.0, 0.0], [0.0, 0.0]],
+    ],
+)
+def test_root_offset_bounds_preserve_batch_prefix_and_saved_poses(
+    bounds: list[list[float]], tmp_path
+) -> None:
+    source = make_source()
+    results = [
+        generate_scene_variants(
+            prepare_scene_randomization(
+                source,
+                make_policy(batch_size=size, group_xy_offset_bounds_m={"tray": bounds}),
+            ),
+            seed=17,
+            candidate_count=5,
+            max_attempts=100,
+        )
+        for size in (1, 37)
+    ]
+    assert all(result.status == "completed" for result in results)
+    assert results[0].attempts == results[1].attempts
+    assert tuple(results[0].variants) == tuple(results[1].variants)
+    for variant in results[0].variants:
+        poses = {
+            change.entity_uid: change.arena_pose for change in variant.pose_changes
+        }
+        delta = (
+            np.asarray(poses.get("tray", source.poses["tray"]))[:2, 3]
+            - np.asarray(source.poses["tray"])[:2, 3]
+        )
+        assert np.all(delta >= np.asarray(bounds)[0] - 1e-10)
+        assert np.all(delta <= np.asarray(bounds)[1] + 1e-10)
+    run = save_scene_variants(results[0], tmp_path / "run")
+    assert tuple(load_scene_variants(run).variants) == tuple(results[0].variants)
+
+
 def test_fixed_descendant_permission_is_not_implicitly_relaxed() -> None:
     source = replace(make_source(), movable_entity_ids=("tray",))
     with pytest.raises(ValueError, match="fixed"):
