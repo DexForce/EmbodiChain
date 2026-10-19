@@ -1381,6 +1381,43 @@ def test_seed_override_adds_missing_atomic_track_seeds():
     assert atomic_track.config["seeds"] == [104]
 
 
+def test_free_space_overrides_reach_each_configured_track():
+    from scripts.benchmark.motion_generation.config import SuiteCfg
+
+    suite = SuiteCfg.from_dict(
+        {
+            "planners": [{"id": "baseline", "adapter": "ik_interpolate"}],
+            "tracks": [
+                {
+                    "id": "small",
+                    "scenario": "free_space",
+                    "config": {
+                        "batch_sizes": [1],
+                        "path_shapes": ["direct"],
+                    },
+                },
+                {
+                    "id": "large",
+                    "scenario": "free_space",
+                    "config": {
+                        "batch_sizes": [8],
+                        "path_shapes": ["s_curve"],
+                    },
+                },
+            ],
+        }
+    )
+
+    _apply_overrides(suite, batch_sizes=[2], seeds=[104])
+
+    assert [track.config["batch_sizes"] for track in suite.tracks] == [[2], [2]]
+    assert [track.config["seeds"] for track in suite.tracks] == [[104], [104]]
+    assert [track.config["path_shapes"] for track in suite.tracks] == [
+        ["direct"],
+        ["s_curve"],
+    ]
+
+
 def test_atomic_skill_antipodal_grasp_uses_standalone_generator(monkeypatch):
     from scripts.tutorials.atomic_action import tutorial_utils
 

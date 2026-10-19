@@ -206,8 +206,23 @@ def _apply_overrides(
         suite.free_space.start_state_bins = start_state_bins
     if seeds is not None:
         suite.free_space.seeds = seeds
+    free_space_overrides = {
+        key: value
+        for key, value in {
+            "batch_sizes": batch_sizes,
+            "waypoint_counts": num_waypoints,
+            "path_shapes": path_shapes,
+            "start_state_bins": start_state_bins,
+            "seeds": seeds,
+        }.items()
+        if value is not None
+    }
+    if free_space_overrides:
         for track in suite.tracks:
-            if track.scenario == "atomic_skill":
+            if track.scenario == "free_space":
+                for key, value in free_space_overrides.items():
+                    track.config[key] = list(value)
+            elif track.scenario == "atomic_skill" and seeds is not None:
                 track.config["seeds"] = list(seeds)
     if num_trials is not None:
         suite.protocol.measured_trials = num_trials

@@ -364,7 +364,7 @@ class SuiteCfg:
             if track.scenario == _FREE_SPACE_SCENARIO and track.enabled
         ]
         for track in self.tracks:
-            if track.scenario == _FREE_SPACE_SCENARIO:
+            if track.scenario == _FREE_SPACE_SCENARIO and track.enabled:
                 track.id = track.id or _FREE_SPACE_TRACK_ID
                 if len(free_space_tracks) == 1:
                     track.config = asdict(self.free_space)
@@ -560,7 +560,9 @@ def _resolve_tracks_and_free_space(
                 values["domains"] = resolved_domains
             tracks.append(TrackCfg(**values))
         free_space_tracks = [
-            track for track in tracks if track.scenario == _FREE_SPACE_SCENARIO
+            track
+            for track in tracks
+            if track.scenario == _FREE_SPACE_SCENARIO and track.enabled
         ]
         if len(free_space_tracks) == 1 and free_space_tracks[0].config:
             free_space_data = {**free_space_data, **dict(free_space_tracks[0].config)}

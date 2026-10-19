@@ -232,6 +232,30 @@ def test_suite_preserves_multiple_free_space_track_configs() -> None:
     assert [track.config["batch_sizes"] for track in suite.tracks] == [[1], [8]]
 
 
+def test_suite_ignores_disabled_free_space_tracks_when_syncing_defaults() -> None:
+    suite = SuiteCfg.from_dict(
+        {
+            "planners": [{"id": "baseline", "adapter": "ik_interpolate"}],
+            "tracks": [
+                {
+                    "id": "enabled",
+                    "scenario": "free_space",
+                    "config": {"batch_sizes": [8]},
+                },
+                {
+                    "id": "disabled",
+                    "scenario": "free_space",
+                    "enabled": False,
+                },
+            ],
+        }
+    )
+
+    assert suite.free_space.batch_sizes == [8]
+    assert suite.tracks[0].config["batch_sizes"] == [8]
+    assert [track.id for track in suite.evaluation_tracks()] == ["enabled"]
+
+
 def test_generalization_excludes_unsupported_cases_but_reports_coverage() -> None:
     nominal = EvaluationDomain(id="nominal", version="v1", kind="nominal")
     held_out = EvaluationDomain(id="objects", version="v1", kind="held_out")
