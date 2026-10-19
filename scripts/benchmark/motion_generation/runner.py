@@ -227,6 +227,20 @@ class BenchmarkRunner:
         self.notes.append(note)
         print(f"SKIPPED: {note}")
 
+    @staticmethod
+    def _trial_metadata(
+        provider: ScenarioProvider,
+        case: BenchmarkCase,
+        metadata: PlannerMetadata,
+    ) -> dict[str, object]:
+        """Record timing provenance for the path that actually owns motion."""
+        values = dict(provider.trial_metadata(case))
+        values.setdefault("timing_is_solved", metadata.timing_is_solved)
+        limits = metadata.parameters.get("resolved_motion_limits")
+        if limits is not None:
+            values["resolved_motion_limits"] = deepcopy(limits)
+        return values
+
     def _record_timed_lifecycle(
         self,
         writer: TrialJsonlWriter,
@@ -302,7 +316,7 @@ class BenchmarkRunner:
         repeat: int,
     ) -> None:
         """Time one plan, validate outside timing, and persist the record."""
-        record_metadata = dict(provider.trial_metadata(case))
+        record_metadata = self._trial_metadata(provider, case, metadata)
         provider.reset_case(sim, robot, case, self.control_part)
         measured = timed_call(
             lambda: _capture(lambda: provider.plan_case(adapter, case))
@@ -335,7 +349,7 @@ class BenchmarkRunner:
                     self.control_part,
                     self.suite,
                     planning_time_ms=measured.cost_time_ms,
-                    timing_is_solved=metadata.native_timing,
+                    timing_is_solved=bool(record_metadata["timing_is_solved"]),
                 )
                 conflicts = {
                     key: (record_metadata[key], value)
@@ -355,6 +369,17 @@ class BenchmarkRunner:
                 failure_code = "metric_evaluation_error"
                 failure_message = str(exc)
                 outcomes = provider.failure_outcomes(case, failure_code)
+
+        if status == "error":
+            outcomes = tuple(
+                replace(
+                    outcome,
+                    timed_motion_valid=(
+                        False if record_metadata["timing_is_solved"] else None
+                    ),
+                )
+                for outcome in outcomes
+            )
 
         video_path = self._maybe_record_replay(
             provider, result, case, evaluation, metadata.algorithm_id, phase
@@ -406,7 +431,7 @@ class BenchmarkRunner:
         algorithm_id: str,
         phase: TrialPhase,
     ) -> Path | None:
-        """Record one measured Atomic Task replay outside planner timing."""
+        """Record one measured Atomic Skill replay outside planner timing."""
         if phase is not TrialPhase.MEASURED or not self.video.enabled:
             return None
         success = bool(
@@ -478,7 +503,7 @@ class BenchmarkRunner:
                     "missing required capabilities: "
                     + ", ".join(missing_case_capabilities),
                     failure_code="unsupported_capability",
-                    record_metadata=provider.trial_metadata(case),
+                    record_metadata=self._trial_metadata(provider, case, metadata),
                 )
                 continue
             motion_capability, modality_reason = _case_motion_capability(case)
@@ -493,7 +518,7 @@ class BenchmarkRunner:
                     modality_reason
                     or f"case requires planner capability {motion_capability!r}",
                     failure_code="unsupported_capability",
-                    record_metadata=provider.trial_metadata(case),
+                    record_metadata=self._trial_metadata(provider, case, metadata),
                 )
                 continue
             supported, reason = adapter.supports_case(case)
@@ -506,13 +531,13 @@ class BenchmarkRunner:
                 case,
                 reason or "case is outside planner capacity",
                 failure_code="unsupported_capacity",
-                record_metadata=provider.trial_metadata(case),
+                record_metadata=self._trial_metadata(provider, case, metadata),
             )
         if not supported_cases:
             return
         first_case = supported_cases[0]
         lifecycle_metadata = {
-            case.case_id: dict(provider.trial_metadata(case))
+            case.case_id: self._trial_metadata(provider, case, metadata)
             for case in supported_cases
         }
         available, reason = adapter.availability()
@@ -548,6 +573,14 @@ class BenchmarkRunner:
             )
             adapter.close()
             return
+        # Adapters resolve robot-owned limits during construction. Persist the
+        # actual per-batch budgets rather than only the unresolved suite request.
+        metadata = adapter.metadata
+        self.metadata[metadata.algorithm_id] = metadata
+        lifecycle_metadata = {
+            case.case_id: self._trial_metadata(provider, case, metadata)
+            for case in supported_cases
+        }
         scenario_prepared = False
         try:
             if adapter.separate_prepare:
@@ -756,6 +789,7 @@ class BenchmarkRunner:
             metadata,
             self.cases,
             self.suite.protocol.measured_trials,
+            track_scenarios={track.id: track.scenario for track in enabled_tracks},
         )
         write_json(
             run_dir / "aggregates.json",
@@ -768,16 +802,17 @@ class BenchmarkRunner:
         track_notes: list[str] = []
         if "free_space" in enabled_scenarios:
             track_notes.append(
-                "Collision, dynamic, execution, and task metrics are N/A in "
-                "free-space-common v1."
+                "Motion Planning validates geometry and reports sampled dynamics "
+                "separately for solved timing. Collision, physical execution, and "
+                "task completion are not evaluated by free_space."
             )
-        if "atomic_task" in enabled_scenarios:
+        if "atomic_skill" in enabled_scenarios:
             track_notes.extend(
                 [
-                    "Atomic Task cost_time_ms measures AtomicActionEngine.compile only; "
+                    "Atomic Skill cost_time_ms measures AtomicActionEngine.compile only; "
                     "execution_time_ms is common physics-replay wall time and "
                     "end_to_end_time_ms is their sum.",
-                    "trajectory_duration_s is planner-native nominal duration; "
+                    "trajectory_duration_s is available only for solved trajectory timing; "
                     "task_completion_time_s is simulated replay time through the "
                     "stability hold for successful tasks.",
                 ]
@@ -792,9 +827,9 @@ class BenchmarkRunner:
                 "External position/rotation thresholds (default 0.01 m / 0.1 rad) are "
                 "feasibility gates for ordered_waypoints_reached / motion_valid. "
                 "Read final_*_err and waypoint_*_p95 for finer precision on the "
-                "motion-valid subset.",
+                "geometry-valid subset.",
                 "Continuous error and path metrics (final_*_err, waypoint_*_p95, "
-                "path lengths, path_efficiency) average only motion_valid outcomes "
+                "path lengths, path_efficiency) average only geometry_valid outcomes "
                 "(success-conditioned / survivor-biased). Always read them with n_valid; "
                 "a high path_efficiency on n_valid=2 is not comparable to n_valid=200.",
                 *track_notes,

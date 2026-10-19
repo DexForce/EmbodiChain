@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     )
     from .models import BenchmarkCase, CaseOutcome
     from .planners.base import PlannerAdapter
-    from .scenarios.atomic_task import AtomicTaskScenario
+    from .scenarios.atomic_skill import AtomicSkillScenario
 
 __all__ = ["AtomicSkillCaseProvider"]
 
@@ -54,7 +54,7 @@ class AtomicSkillCaseProvider(ABC):
     @abstractmethod
     def generate_case(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         suite: SuiteCfg,
         track: TrackCfg,
         config: Mapping[str, object],
@@ -67,7 +67,7 @@ class AtomicSkillCaseProvider(ABC):
     @abstractmethod
     def build_invocation(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
     ) -> ActionInvocation:
@@ -87,14 +87,14 @@ class AtomicSkillCaseProvider(ABC):
         return None
 
     def initial_task_state(
-        self, scenario: "AtomicTaskScenario", case: BenchmarkCase
+        self, scenario: "AtomicSkillScenario", case: BenchmarkCase
     ) -> TaskState | None:
         """Return an optional symbolic precondition for isolated action testing."""
         del scenario, case
         return None
 
     def prefix_invocations(
-        self, scenario: "AtomicTaskScenario", case: BenchmarkCase
+        self, scenario: "AtomicSkillScenario", case: BenchmarkCase
     ) -> tuple[ActionInvocation, ...]:
         """Return actions compiled before this skill to establish its precondition.
 
@@ -108,7 +108,7 @@ class AtomicSkillCaseProvider(ABC):
         return ()
 
     def initial_scene(
-        self, scenario: "AtomicTaskScenario", case: BenchmarkCase
+        self, scenario: "AtomicSkillScenario", case: BenchmarkCase
     ) -> SceneSnapshot | None:
         """Return explicit scene observations the skill plans against.
 
@@ -120,7 +120,7 @@ class AtomicSkillCaseProvider(ABC):
         return None
 
     def frozen_grasps(
-        self, scenario: "AtomicTaskScenario", case: BenchmarkCase
+        self, scenario: "AtomicSkillScenario", case: BenchmarkCase
     ) -> Mapping[str, tuple[torch.Tensor, torch.Tensor]]:
         """Return the grasps a self-sampling skill must use, by gripper part.
 
@@ -169,7 +169,7 @@ class AtomicSkillCaseProvider(ABC):
 
     def task_result(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         compiled: CompiledTrajectory,
         observation: ExecutionObservation,

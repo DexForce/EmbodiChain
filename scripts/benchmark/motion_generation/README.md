@@ -1,27 +1,53 @@
-# Planner Motion Generation & Atomic Skill Benchmark
+# Motion Planning & Atomic Skills Benchmark
 
-Shared planner benchmark framework for fixed motion-generation cases and
-physics-backed Atomic Actions. All Atomic Actions call the selected planner
-through the adapter-owned `MotionGenerator`.
+One benchmark framework provides two independently evaluated families: Motion
+Planning (`scenario: free_space`) and Atomic Skills (`scenario: atomic_skill`).
+They share robot configuration, planner adapters, resolved motion limits,
+trajectory validation, and raw artifacts. Atomic Skills additionally compile
+skills, replay them in physics, and evaluate measured physical stages.
+
+Planner-backed skills use the adapter-owned `MotionGenerator`. Exact Cartesian
+skills may instead use `ik_interp`, and coordinated skills may own their IK
+path. Records identify the effective motion source; these results do not count
+as evidence that the selected planner backend produced the trajectory.
 
 Design background and roadmap: see [`BENCHMARK_DESIGN.md`](./BENCHMARK_DESIGN.md).
 
 ## Run
 
+`motion-generation` selects this benchmark; `--suite` selects its Motion
+Planning or Atomic Skills workload. Other benchmark commands select separate
+domains:
+
+| Command | Workload |
+| --- | --- |
+| `embodichain benchmark motion-generation --suite motion_panda_free_space_smoke` | Motion Planning |
+| `embodichain benchmark motion-generation --suite atomic_franka_pgi_smoke` | Atomic Skills |
+| `embodichain benchmark atomic-action --smoke` | Individual action profiling over object and position presets |
+| `embodichain benchmark rl` | RL training and evaluation |
+| `embodichain benchmark robotics-kinematic-solver` | FK/IK accuracy and speed |
+| `embodichain benchmark grasp-pose-generator` | Grasp sampling and pose selection |
+| `embodichain benchmark workspace-analyzer` | Workspace analysis |
+| `embodichain benchmark rendering` | Offscreen rendering and denoising |
+
+Run from a source checkout with the domain command above or its Python module:
+
 ```bash
-python -m scripts.benchmark.motion_generation.run_benchmark --suite smoke
-python -m scripts.benchmark.motion_generation.run_benchmark --suite coverage
 python -m scripts.benchmark.motion_generation.run_benchmark \
-  --suite atomic_franka_pgi_curobo --device cuda
+  --suite motion_panda_free_space_smoke
 python -m scripts.benchmark.motion_generation.run_benchmark \
-  --suite atomic_franka_pgi_curobo --device cuda \
+  --suite motion_panda_free_space_coverage
+python -m scripts.benchmark.motion_generation.run_benchmark \
+  --suite atomic_franka_pgi_smoke --device cuda
+python -m scripts.benchmark.motion_generation.run_benchmark \
+  --suite atomic_franka_pgi_smoke --device cuda \
   --record-video --video-case-limit 0
 python -m scripts.benchmark.motion_generation.run_benchmark \
-  --suite atomic_franka_pgi_curobo --device cuda --no-headless
+  --suite atomic_franka_pgi_smoke --device cuda --no-headless
 python -m scripts.benchmark.motion_generation.run_benchmark \
-  --suite atomic_franka_pgi_curobo_randomized --device cuda
+  --suite atomic_franka_pgi_randomized --device cuda
 python -m scripts.benchmark.motion_generation.run_benchmark \
-  --suite atomic_franka_pgi_curobo_pose_batch --device cuda
+  --suite atomic_franka_pgi_pose_batch --device cuda
 python -m scripts.benchmark.motion_generation.run_benchmark \
   --suite atomic_franka_pgi_door_pour_align_push --device cuda
 python -m scripts.benchmark.motion_generation.run_benchmark \
@@ -39,38 +65,106 @@ python -m scripts.benchmark.motion_generation.run_benchmark \
 python -m scripts.benchmark.motion_generation.run_benchmark \
   --suite atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization --device cpu
 python -m scripts.benchmark.motion_generation.run_benchmark \
-  --extra-baselines ik_interpolate toppra
+  --suite motion_panda_free_space_smoke --algorithms curobo toppra ik_interpolate nmg nmg_retimed \
+  --nmg-onnx-path /path/to/policy.onnx
 ```
 
 Artifacts land under `outputs/benchmarks/<suite-name>/<timestamp>/`
 (`resolved_suite.yaml`, `case_manifest.json`, `trials.jsonl`, `aggregates.json`,
-`report.md` with exactly three tables). Atomic Task videos, when enabled, land
-in that run's `videos/` directory. `aggregates.json` and `report.md` record the
+`report.md`). The report contains three tables per represented family: Time &
+Memory, Success & Other Metrics, and Leaderboard. A single-family run has three
+tables; a mixed Motion Planning / Atomic Skills run has six. Atomic Skill videos,
+when enabled, land in that run's `videos/` directory. `aggregates.json` and `report.md` record the
 independent `report_schema_version` used to interpret their fields.
+
+## Evaluation contract
+
+Family selection comes from `TrackCfg.scenario`; there is no second family
+configuration to keep in sync.
+Each family ranks its tracks independently, with no combined overall score.
+
+| Family | Population | Timed operation | Success views |
+| --- | --- | --- | --- |
+| Motion Planning | Joint/EEF targets, waypoints, batches, path shapes and start bins | `planner_call`, exposed as `planning_time_ms` | `geometry_valid_rate`; separate `timed_motion_valid_rate` and ranking |
+| Atomic Skills | Representative motion integration cases plus interaction and generalization cases | `atomic_action_compile`, exposed as `compile_time_ms` | Physical stages, `physical_skill_success_rate`, execution and end-to-end success |
+
+Geometry validity checks finite joint positions, ordered targets, and joint
+position limits. Solved-time validity additionally requires valid timing and
+applicable dynamic limits. Raw NMG and fixed-clock IK interpolation can rank for
+geometry, but their nominal clocks have no timed-success score or timed rank.
+NMG with retiming, TOPPRA and cuRobo participate in the solved-time view when the
+recorded output has a solved clock. Dynamic measurements from nominal clocks
+remain diagnostics. Continuous trajectory quality uses geometry-valid outcomes
+consistently across methods; missing expected outcomes reduce success/coverage.
+
+Planning and validation resolve one motion budget: effective robot velocity
+caps, intersected with any explicit suite velocity request; acceleration is a
+suite-owned budget. An explicit budget can replace an unavailable robot limit,
+but cannot enlarge a usable robot limit. Shipped Motion Planning suites use
+robot velocity caps, `10 rad/s²` acceleration, and no jerk limit. The acceleration
+value is an evaluation policy, not a hardware specification. Timing adapters
+reject unavailable required limits or conflicting adapter-local limits. Missing
+runtime caps fall back to positive limits in the robot's assembled URDF before
+considering a suite request.
+
+Scenario-owned IK uses scalar `MotionPolicy` limits, so a per-joint suite budget
+is conservatively reduced to its minimum and recorded in `policy_motion_limits`.
+Planner backends receive the full per-joint vector. `CoordinatedPickment` uses
+its own IK projection with a fixed sample clock and remains nominal in timing
+reports.
+
+The three Motion Planning suites (`motion_panda_free_space_smoke`,
+`motion_panda_free_space_coverage`, `motion_ur5_free_space_coverage`) use
+version 2 populations with `target_types: [eef, joint]` and
+`joint_threshold_rad: 0.02`. EEF and joint cases share reachable reference inputs
+but have distinct identities and goal validation. Configurations that omit
+`target_types` retain the legacy EEF-only population and case identities.
+`reference_qpos` is diagnostic for EEF cases and the actual ordered target for
+joint cases; adapters must not use it to substitute a supplied EEF goal.
+
+All three suites enable cuRobo, TOPPRA and IK interpolation. Raw/retimed NMG rows
+are configured as an optional pair: select them with `--algorithms` and supply
+`--nmg-onnx-path` (or set `enabled` and the model path in YAML). Smoke uses one
+warmup and three measured repeats; Panda coverage and UR5 coverage use three
+warmups and twenty repeats. UR5 now covers batches 1, 8 and 64.
+
+Atomic smoke retains one `MoveEndEffector` and one `MoveJoints` case to validate
+skill compilation, parameter forwarding and replay. Repeated primitive scans
+are removed from the Franka randomized/pose-batch and UR5 randomized suites;
+all their interaction skill populations remain. Full planning scans belong to
+Motion Planning. Existing specialized spatial and dual-arm suites retain their
+physical-task role.
+
+Report schema 3 adds family-specific views in `aggregates.json` while retaining
+raw trial and legacy aggregate fields. Geometry and timed leaderboard rows are
+labeled by `ranking`; Atomic latency is compile latency, with execution and
+end-to-end time reported separately. New runs require report schema `3`; custom
+suites explicitly selecting an older version must migrate before running. Existing
+artifacts keep their original version and must not be relabeled.
 
 ## Implemented
 
 - Extensible planner, scenario, robot, Atomic Action, and object registries
 - `free-space-common` track with fixed manifests and start-state bins
-- `atomic-task` track with frozen robot/object/task manifests and common physics replay
-- Single-arm Atomic Task slice: Franka + PGI with `MoveEndEffector`,
+- `atomic-skill` track with frozen robot/object/task manifests and common physics replay
+- Single-arm Atomic Skill slice: Franka + PGI with `MoveEndEffector`,
   `MoveJoints`, `PickUp`, `MoveHeldObject`, `Place`, `Press`, `Slide`, and `Twist`
-- `atomic_franka_pgi_curobo_smoke_v3` uses the Microwave articulation for
+- `atomic_franka_pgi_smoke_v4` uses the Microwave articulation for
   `Press`/`Twist` and the Drawer articulation for `Slide`; contact targets are
-  the actual `button_cap`, `cap_1`, and `large_handle_bar` links
-- Contact-skill replay records peak signed target-joint displacement as a
-  diagnostic. `task_success` follows the common motion/execution result and
-  does not gate on the object's final articulation state.
-- Deterministic 16-seed generalization sweep for the original six-skill subset,
+  the actual `button_link`, `knob_link`, and `large_handle_bar` links
+- Contact-skill replay records target-joint traces and peak signed displacement.
+  Physical evaluators score the declared stage evidence; legacy `task_success`
+  combines physical success with valid motion and successful execution.
+- Deterministic 16-seed generalization sweep for four interaction skills,
   with bounded robot-start, target, held-object, and object-pose randomization
-- Translation-only pose-batch coverage suite (`atomic_franka_pgi_curobo_pose_batch`):
+- Translation-only pose-batch coverage suite (`atomic_franka_pgi_pose_batch`):
   one simulator environment row per independently perturbed object/target pose
   sample. Each action in a case is planned over all eight rows in one batched
   Atomic Action goal and planner call (one benchmark case). Configure
   `randomization.pose_batch_size` together with a matching single-value
   `batch_sizes: [K]` and the
   `*_translation_jitter_m` bounds in the suite YAML. The shipped track covers
-  all eight skills: cube actions use fixed grasps, while the per-skill
+  six interaction skills: cube actions use fixed grasps, while the per-skill
   `articulation_position_jitter_m` bounds translate the actual Microwave/Drawer
   roots for `Press`, `Slide`, and `Twist`. `Slide` samples one PGI grasp in
   target-local coordinates and screens the translated batch together.
@@ -176,31 +270,34 @@ independent `report_schema_version` used to interpret their fields.
 - Track configs may declare `grippers` (one entry per gripper) instead of
   `gripper`, `fixtures` (static tables and slabs that are never parked), and
   cases may keep extra objects in the scene through `scene_object_poses`.
-- Default matrix: cuRobo (`primary_baseline`); IK / TOPPRA optional diagnostics.
-  TOPPRA also serves Atomic Skills and joint-space cases; Atomic Skill calls
-  that leave planner options unset receive the suite's TOPPRA limits and
-  sample count.
-- Direct, batched NMG ONNX adapter (`candidate`, enabled when a model path is supplied)
+- Motion Planning defaults: cuRobo (`primary_baseline`), IK interpolation and
+  TOPPRA (`diagnostic_baseline`), with optional paired NMG candidates. Atomic
+  suites retain their own planner selections. Adapter-backed Atomic motion
+  consumes the shared resolved suite limits and configured sample count.
+- Direct, batched NMG ONNX adapter (`candidate`, requiring an explicit model
+  path and algorithm selection)
 - Lifecycle timing: construct / prepare / cold / warm
 - Distinct planning, motion-valid, execution, task-success, and physical-effect
   diagnostic stages
 - Planning latency, execution wall time, end-to-end time, nominal trajectory
   duration, simulated task-completion time, controller tracking RMSE, and
   task-specific object lift/articulation-joint displacement
-- One Markdown report: Time & Memory, Success & Other Metrics, Leaderboard
-- Optional Atomic Task headless replay videos after measured evaluation
+- One Markdown report with Time & Memory, Success & Other Metrics, and
+  Leaderboard tables for each represented family
+- Optional Atomic Skill headless replay videos after measured evaluation
   (`--record-video`, `--record-failed-video`)
 
 For visual inspection, `--record-video --video-case-limit 0` records every
-successful measured Atomic Task case. The limit is global for the run, so
+successful measured Atomic Skill case. The limit is global for the run, so
 `--video-case-limit 1` intentionally emits at most one video, not one video per
 skill. Add `--record-failed-video` to capture failed cases as static debug
 scenes. Use `--no-headless` instead to open the live simulator viewer.
 
 ## Extend
 
-- Planner: register a `PlannerAdapter`, expose its `MotionGenerator`, and
-  declare the `atomic_action` capability.
+- Planner: register a `PlannerAdapter` and declare its target capabilities.
+  To support Atomic Skills, also expose its `MotionGenerator` and declare
+  `atomic_action`. Free-space checks EEF/joint support per case.
 - Robot: register a `RobotProvider` and select it under `robot`; gripper-action
   suites also declare the gripper control part and open/grasp qpos under `gripper`.
 - Object: add another `objects` entry for built-in `cube`/`mesh`, or register a
@@ -217,7 +314,7 @@ scenes. Use `--no-headless` instead to open the live simulator viewer.
 ## Current limits
 
 - `collision-deployment` and obstacle-aware common-input tracks
-- Atomic Task pose-batch execution uses one configured simulator batch per
+- Atomic Skill pose-batch execution uses one configured simulator batch per
   track (the supplied pose-batch suite uses `B=8`). General per-row
   geometry-sampled antipodal candidate selection remains `B=1`; the supplied
   articulated `Slide` case instead shares one target-local candidate across
@@ -236,10 +333,8 @@ scenes. Use `--no-headless` instead to open the live simulator viewer.
 
 This migration layer provides shared contracts, versioned domain populations,
 capability-aware denominators, and recomputable generalization statistics while
-preserving existing skill scoring. Provider-specific physical evaluation remains
-a separate migration. The three existing report tables remain
-unchanged; domain summaries are rendered as report metadata so the table count
-stays stable.
+supporting provider-owned physical evaluation. Domain summaries remain report
+metadata; each represented family keeps its own three report tables.
 
 Suites can select an official embodiment instead of the legacy `robot` provider:
 
@@ -280,7 +375,7 @@ fields; retain the track's existing `config`:
 ```yaml
 tracks:
   - id: atomic-nominal
-    scenario: atomic_task
+    scenario: atomic_skill
     domains:
       - id: nominal
         version: v1
@@ -309,8 +404,8 @@ population; later populations extend the manifest.
 
 ### Provider and evaluator interfaces
 
-`atomic_skill.py` owns `AtomicSkillCaseProvider`; the previous import from
-`scenarios.atomic_task` remains available. All 15 registered Atomic Skills use
+`atomic_skill.py` owns `AtomicSkillCaseProvider`; `scenarios/atomic_skill.py`
+owns `AtomicSkillScenario`. All 15 registered Atomic Skills use
 v1 physical evaluators. Terminal skills score settled replay state; staged
 skills declare compiled-coordinate replay windows and score the resulting raw
 simulator traces. Providers override `physical_evaluator()` to return an
@@ -364,7 +459,9 @@ by the existing runner as `metric_evaluation_error`.
 
 Task success requires at least one applicable stage and every applicable stage
 to pass. An all-inapplicable or incomplete result cannot establish success.
-Physical success also remains gated by motion validity and execution success.
+`physical_skill_success` remains an independent measured result. The legacy
+`task_success` / `end_to_end_success` additionally requires valid motion and
+successful execution.
 Raw outcomes retain `stages` and `failure_stage`; legacy outcomes have empty
 stages. Measured reports now include chained stage rates when evaluators provide
 stages, while domain summaries expose coverage, nominal success, mean, worst,

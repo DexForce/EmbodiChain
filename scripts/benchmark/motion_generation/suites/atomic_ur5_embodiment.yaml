@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_ur5_embodiment
-suite_version: atomic_ur5_embodiment_v1
+suite_version: atomic_ur5_embodiment_v2
 profile: smoke
 
 embodiment:
@@ -20,6 +20,10 @@ planners:
       warmup_iterations: 1
 
 protocol:
+  report_schema_version: "3"
+  # Explicitly retain the previous cuRobo default acceleration budget.
+  joint_velocity_limit_rad_s: null
+  joint_acceleration_limit_rad_s2: 15.0
   warmup_trials: 0
   measured_trials: 1
   sample_interval: 80
@@ -28,7 +32,7 @@ protocol:
 
 tracks:
   - id: pickup
-    scenario: atomic_task
+    scenario: atomic_skill
     domains:
       - id: nominal
         version: v1

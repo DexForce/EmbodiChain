@@ -59,7 +59,10 @@ an inferred asset or physics limit. Partial-joint trajectories require an
 explicit control part when their column mapping is ambiguous. Explicit zero
 runtime speeds hold those joints; moving them must fail planning. Imported
 nonpositive speeds follow DexSim's unspecified-limit semantics, and unavailable
-runtime caps use planner fallbacks.
+runtime caps first use positive authored speeds from the assembled `cfg.fpath`
+URDF, mapped by joint name, before planner fallbacks. Valid runtime values,
+including zero, remain authoritative. The asset lookup is cached by path and
+file revision; mimic projection applies after fallback.
 
 A finite backend value does not prove that a speed was authored in the asset:
 DexSim's legacy URDF reader substitutes a positive default when the field is
@@ -71,11 +74,13 @@ cuRobo writes absolute speed caps into a cache-owned URDF copy and acceleration
 caps into YAML in active cspace order, excluding mimic followers. Keep velocity
 scales at one so loading and cloning preserve these caps. Mesh paths retain the
 source asset root. cuRobo rejects controlled zero-speed joints before loading;
-it cannot represent zero-width velocity intervals. `CuroboPlannerCfg.max_acceleration`
-sets its acceleration budget, preserving the existing 15.0 default; CPU timing
-planners retain their 0.5 default. Its YAML and backend caches include effective
-speeds and the configured acceleration budget; changing robot limits closes and rebuilds the
-affected backend. Neural policy rollout retains its configured timing. The
+it cannot represent zero-width velocity intervals. `CuroboPlannerCfg.max_velocity`
+optionally tightens effective Robot speeds; a request cannot loosen a valid cap.
+Both it and `max_acceleration` accept a scalar or a vector in `active_joint_ids`
+order. The default acceleration budget remains 15.0; CPU timing planners retain
+their 0.5 default. Its YAML and backend caches include resolved speed and
+acceleration vectors; changing either a request or robot limits closes and
+rebuilds the affected backend. Neural policy rollout retains its configured timing. The
 `ik_interp` path resolves robot speed caps and generic motion limits in the
 facade independently of the selected planner backend.
 

@@ -29,6 +29,7 @@ from embodichain.lab.sim.motion.planners.utils import PlanResult
 
 from ..config import PlannerSpecCfg, stable_hash
 from ..models import AlgorithmRole, BenchmarkCase, PlannerMetadata
+from ..limits import resolve_dynamic_limit, resolve_robot_velocity_limits
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
@@ -68,7 +69,7 @@ class PlannerContext:
     sample_interval: int
     robot_id: str = "unknown"
     joint_velocity_limit_rad_s: float | Sequence[float] | None = None
-    """The suite's velocity limit override, or ``None`` to use the asset's."""
+    """Suite speed budget intersected with effective Robot caps."""
     joint_acceleration_limit_rad_s2: float | Sequence[float] | None = None
     """The suite's acceleration limit, or ``None`` when it states none.
 
@@ -88,7 +89,7 @@ class PlannerAdapter(ABC):
     model_revision: str = "N/A"
     separate_prepare: bool = False
     """Whether this backend exposes a distinct lazy preparation phase."""
-    native_timing: bool = False
+    timing_is_solved: bool = False
     """Whether this backend solves trajectory timing instead of assuming it.
 
     Defaults to nominal, so a backend that has not declared otherwise is not
@@ -100,6 +101,7 @@ class PlannerAdapter(ABC):
     def __init__(self, spec: PlannerSpecCfg, context: PlannerContext) -> None:
         self.spec = spec
         self.context = context
+        self._motion_limits: dict[str, object] | None = None
 
     @property
     def metadata(self) -> PlannerMetadata:
@@ -111,10 +113,89 @@ class PlannerAdapter(ABC):
             config_hash=stable_hash(self.spec.config),
             capabilities=self.capabilities,
             model_revision=self._resolved_model_revision(),
-            native_timing=self.native_timing,
+            timing_is_solved=self.timing_is_solved,
             supported_robots=(self.context.robot_id,),
-            parameters=dict(self.spec.config),
+            parameters={
+                **self.spec.config,
+                **(
+                    {"resolved_motion_limits": dict(self._motion_limits)}
+                    if self._motion_limits is not None
+                    else {}
+                ),
+            },
         )
+
+    def resolve_motion_limits(
+        self, *, require_timing: bool = False
+    ) -> dict[str, object]:
+        """Freeze common budgets outside timing; expose them in run metadata.
+
+        Backend-specific limit overrides must equal the common resolved budget.
+        A stricter private budget changes the experiment and must be moved to
+        the suite protocol instead of silently using a different comparison.
+        """
+        if self._motion_limits is None:
+            reference = torch.empty(0, dtype=torch.float64)
+            caps = self.context.robot.get_qvel_limits(name=self.context.control_part)
+            if not isinstance(caps, torch.Tensor):
+                raise ValueError("Robot must provide tensor joint velocity limits.")
+            dof = caps.shape[-1]
+            velocity = resolve_robot_velocity_limits(
+                self.context.robot,
+                self.context.control_part,
+                self.context.joint_velocity_limit_rad_s,
+                reference,
+                dof=dof,
+            )
+            acceleration = resolve_dynamic_limit(
+                self.context.joint_acceleration_limit_rad_s2, dof, reference
+            )
+            jerk = resolve_dynamic_limit(
+                self.context.joint_jerk_limit_rad_s3, dof, reference
+            )
+            resolved = {
+                "velocity": velocity,
+                "acceleration": acceleration,
+                "jerk": jerk,
+            }
+            for key, actual in resolved.items():
+                if key not in self.spec.config:
+                    continue
+                legacy = (
+                    resolve_robot_velocity_limits(
+                        self.context.robot,
+                        self.context.control_part,
+                        self.spec.config[key],
+                        reference,
+                        dof=dof,
+                    )
+                    if key == "velocity"
+                    else resolve_dynamic_limit(self.spec.config[key], dof, reference)
+                )
+                if (
+                    actual is None
+                    or legacy is None
+                    or not torch.allclose(legacy, actual)
+                ):
+                    raise ValueError(
+                        f"Planner config.{key} differs from the suite motion budget; "
+                        "configure protocol motion limits for all planners instead."
+                    )
+            self._motion_limits = {
+                key: value.tolist() if value is not None else None
+                for key, value in resolved.items()
+            }
+        if require_timing:
+            if self._motion_limits["velocity"] is None:
+                raise ValueError(
+                    "No usable joint velocity limit; configure "
+                    "protocol.joint_velocity_limit_rad_s for placeholder asset limits."
+                )
+            if self._motion_limits["acceleration"] is None:
+                raise ValueError(
+                    "Timed planning requires protocol.joint_acceleration_limit_rad_s2."
+                )
+        return dict(self._motion_limits)
 
     def _resolved_model_revision(self) -> str:
         """Resolve the recorded model identity for this planner instance."""

@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Atomic Task case providers for HandOver and the coordinated dual-arm skills.
+"""Atomic Skill case providers for HandOver and the coordinated dual-arm skills.
 
 Coordinated skills derive their key poses internally: the handover point,
 the receiving grasp, the shared lift.  While the case manifest is built, each
@@ -63,7 +63,7 @@ from ..config import SuiteCfg, TrackCfg
 from ..contracts import PhysicalEvaluation, ReplayObservationWindow
 from ..evaluation import StageEvidence, evaluate_skill_stage_batch
 from ..models import BenchmarkCase, CaseOutcome
-from .atomic_task import (
+from .atomic_skill import (
     _ExecutionObservation,
     _apply_task_frame_randomization,
     _apply_target_rotation_randomization,
@@ -90,7 +90,7 @@ from .atomic_task import (
 if TYPE_CHECKING:
     from ..planners.base import PlannerAdapter
     from .atomic_objects import AtomicObjectHandle
-    from .atomic_task import AtomicTaskScenario
+    from .atomic_skill import AtomicSkillScenario
 
 __all__: list[str] = []
 
@@ -240,7 +240,7 @@ def _rotation_error(actual: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
 
 
 def _grippers_holding(
-    scenario: "AtomicTaskScenario",
+    scenario: "AtomicSkillScenario",
     grasp_parts: Sequence[str],
     observation: _ExecutionObservation,
     *,
@@ -600,7 +600,7 @@ class _ReferencePlan:
 
 
 @contextmanager
-def _record_requests(scenario: "AtomicTaskScenario", plan: _ReferencePlan):
+def _record_requests(scenario: "AtomicSkillScenario", plan: _ReferencePlan):
     """Record generator targets and stand-alone IK targets during a compile."""
     generator = scenario.reference_motion_generator()
     robot = scenario.robot
@@ -640,7 +640,7 @@ def _record_requests(scenario: "AtomicTaskScenario", plan: _ReferencePlan):
 
 
 def _compile_reference(
-    scenario: "AtomicTaskScenario",
+    scenario: "AtomicSkillScenario",
     build: Callable[[AtomicActionEngine], tuple[ActionInvocation, ...]],
     *,
     scene_entities: Sequence[object],
@@ -649,7 +649,7 @@ def _compile_reference(
 ) -> _ReferencePlan:
     """Compile a skill once and record the poses it requests for each arm."""
     if scenario.simulation is None or scenario.suite is None:
-        raise RuntimeError("Atomic Task runtime is not configured.")
+        raise RuntimeError("Atomic Skill runtime is not configured.")
     plan = _ReferencePlan(compiled=None)  # type: ignore[arg-type]
     generators = dict(grasp_generators or {})
     for part in record_grasp_parts:
@@ -719,7 +719,7 @@ def _control_parts(config: Mapping[str, object], slots: Sequence[str]) -> dict:
 
 
 def _arm_waypoints(
-    scenario: "AtomicTaskScenario", plan: _ReferencePlan, arms: Sequence[str]
+    scenario: "AtomicSkillScenario", plan: _ReferencePlan, arms: Sequence[str]
 ) -> tuple[torch.Tensor, dict[str, list]]:
     """Split recorded poses into the primary arm and every other arm."""
     if scenario.control_part not in arms:
@@ -736,7 +736,7 @@ def _arm_waypoints(
 
 
 def _settled_pose(
-    scenario: "AtomicTaskScenario",
+    scenario: "AtomicSkillScenario",
     handle: AtomicObjectHandle,
     config: Mapping[str, object],
     *,
@@ -828,7 +828,7 @@ def _support_randomization_config(
 
 
 def _settled_placement_poses(
-    scenario: "AtomicTaskScenario",
+    scenario: "AtomicSkillScenario",
     placing: AtomicObjectHandle,
     support: AtomicObjectHandle,
     config: Mapping[str, object],
@@ -860,7 +860,7 @@ def _settled_placement_poses(
 
 def _case(
     provider: AtomicSkillCaseProvider,
-    scenario: "AtomicTaskScenario",
+    scenario: "AtomicSkillScenario",
     suite: SuiteCfg,
     track: TrackCfg,
     config: Mapping[str, object],
@@ -932,7 +932,7 @@ class _HandOverCases(AtomicSkillCaseProvider):
 
     def generate_case(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         suite: SuiteCfg,
         track: TrackCfg,
         config: Mapping[str, object],
@@ -1039,7 +1039,7 @@ class _HandOverCases(AtomicSkillCaseProvider):
 
     def build_invocation(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
     ) -> ActionInvocation:
@@ -1062,7 +1062,7 @@ class _HandOverCases(AtomicSkillCaseProvider):
         )
 
     def frozen_grasps(
-        self, scenario: "AtomicTaskScenario", case: BenchmarkCase
+        self, scenario: "AtomicSkillScenario", case: BenchmarkCase
     ) -> dict[str, tuple[torch.Tensor, torch.Tensor]]:
         """Replay the reference compile's pickup and receiving grasps."""
         del scenario
@@ -1120,7 +1120,7 @@ class _HandOverCases(AtomicSkillCaseProvider):
 
     def task_result(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         compiled: CompiledTrajectory,
         observation: _ExecutionObservation,
@@ -1152,7 +1152,7 @@ class _HandOverCases(AtomicSkillCaseProvider):
 # ---------------------------------------------------------------------------
 
 
-def _left_to_right_direction(scenario: "AtomicTaskScenario", parts: Mapping) -> list:
+def _left_to_right_direction(scenario: "AtomicSkillScenario", parts: Mapping) -> list:
     """Return the world direction from the left arm base to the right one."""
     robot = scenario.robot
     left = robot.cfg.solver_cfg[parts["left"]["motion"]].root_link_name
@@ -1196,7 +1196,7 @@ class _CoordinatedPickmentCases(AtomicSkillCaseProvider):
 
     def generate_case(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         suite: SuiteCfg,
         track: TrackCfg,
         config: Mapping[str, object],
@@ -1302,7 +1302,7 @@ class _CoordinatedPickmentCases(AtomicSkillCaseProvider):
 
     def build_invocation(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
     ) -> ActionInvocation:
@@ -1371,7 +1371,7 @@ class _CoordinatedPickmentCases(AtomicSkillCaseProvider):
 
     def task_result(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         compiled: CompiledTrajectory,
         observation: _ExecutionObservation,
@@ -1628,7 +1628,7 @@ class _CoordinatedPlacementCases(AtomicSkillCaseProvider):
 
     def generate_case(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         suite: SuiteCfg,
         track: TrackCfg,
         config: Mapping[str, object],
@@ -1766,7 +1766,7 @@ class _CoordinatedPlacementCases(AtomicSkillCaseProvider):
         )
 
     def prefix_invocations(
-        self, scenario: "AtomicTaskScenario", case: BenchmarkCase
+        self, scenario: "AtomicSkillScenario", case: BenchmarkCase
     ) -> tuple[ActionInvocation, ...]:
         """Load each arm with the frozen explicit-grasp PickUp."""
         device = scenario.robot.device
@@ -1801,7 +1801,7 @@ class _CoordinatedPlacementCases(AtomicSkillCaseProvider):
 
     def build_invocation(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
     ) -> ActionInvocation:
@@ -1859,7 +1859,7 @@ class _CoordinatedPlacementCases(AtomicSkillCaseProvider):
 
     def task_result(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         compiled: CompiledTrajectory,
         observation: _ExecutionObservation,

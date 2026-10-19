@@ -24,9 +24,9 @@ from .atomic_objects import (
     create_atomic_object,
     register_atomic_object_kind,
 )
-from .atomic_task import (
+from .atomic_skill import (
     AtomicSkillCaseProvider,
-    AtomicTaskScenario,
+    AtomicSkillScenario,
     atomic_skill_provider_names,
     create_atomic_skill_provider,
     register_atomic_skill_provider,
@@ -39,7 +39,7 @@ from .free_space import FreeSpaceScenario
 __all__ = [
     "AtomicObjectHandle",
     "AtomicSkillCaseProvider",
-    "AtomicTaskScenario",
+    "AtomicSkillScenario",
     "atomic_object_kind_names",
     "atomic_skill_provider_names",
     "create_atomic_object",

@@ -162,7 +162,7 @@ class EmbodimentRobotProvider(RobotProvider):
         Args:
             track: Effective track, including any selected domain overrides.
         """
-        if track.scenario != "atomic_task" or self.gripper_config is None:
+        if track.scenario != "atomic_skill" or self.gripper_config is None:
             return
         declared = track.config.get("gripper")
         if declared is not None and declared != self.gripper_config:

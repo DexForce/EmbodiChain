@@ -35,12 +35,15 @@ __all__ = ["IkInterpolateAdapter"]
 class IkInterpolateAdapter(PlannerAdapter):
     """Use the robot IK solver followed by fixed-count joint interpolation."""
 
-    capabilities = frozenset({"eef_waypoint", "batched", "empty_world"})
+    capabilities = frozenset(
+        {"eef_waypoint", "joint_waypoint", "batched", "empty_world"}
+    )
     # Timing stays nominal (the base default): every interpolated step is
     # assigned the configured `interpolation_dt`, which no limit informs.
 
     def build(self) -> None:
-        """No planner object is required beyond the benchmark robot."""
+        """Freeze shared limits; no planner object is required."""
+        self.resolve_motion_limits()
 
     def plan(self, case: BenchmarkCase) -> PlanResult:
         """Solve each waypoint sequentially while retaining per-env failures."""
@@ -58,21 +61,38 @@ class IkInterpolateAdapter(PlannerAdapter):
         seed = case.start_qpos
         alive = torch.ones(case.batch_size, dtype=torch.bool, device=robot.device)
         targets = [seed]
-        for waypoint_index in range(case.num_waypoints):
-            success, solved = robot.compute_ik(
-                pose=case.target_waypoints[:, waypoint_index],
-                name=self.context.control_part,
-                joint_seed=seed,
-            )
-            success_tensor = torch.as_tensor(
-                success, dtype=torch.bool, device=robot.device
-            ).flatten()
-            if success_tensor.numel() == 1 and case.batch_size > 1:
-                success_tensor = success_tensor.expand(case.batch_size)
-            alive &= success_tensor
-            solved = torch.as_tensor(solved, device=robot.device, dtype=seed.dtype)
-            seed = torch.where(success_tensor[:, None], solved, seed)
-            targets.append(seed)
+        validity = case.case_parameters.get(
+            "motion_validity", "ordered_cartesian_waypoints"
+        )
+        if validity == "ordered_joint_waypoints":
+            if case.reference_qpos.shape != (
+                case.batch_size,
+                case.num_waypoints,
+                seed.shape[-1],
+            ):
+                raise ValueError(
+                    "Joint cases require one frozen reference configuration per waypoint."
+                )
+            alive &= torch.isfinite(case.reference_qpos).all(dim=(1, 2))
+            targets.extend(case.reference_qpos.unbind(dim=1))
+        elif validity == "ordered_cartesian_waypoints":
+            for waypoint_index in range(case.num_waypoints):
+                success, solved = robot.compute_ik(
+                    pose=case.target_waypoints[:, waypoint_index],
+                    name=self.context.control_part,
+                    joint_seed=seed,
+                )
+                success_tensor = torch.as_tensor(
+                    success, dtype=torch.bool, device=robot.device
+                ).flatten()
+                if success_tensor.numel() == 1 and case.batch_size > 1:
+                    success_tensor = success_tensor.expand(case.batch_size)
+                alive &= success_tensor
+                solved = torch.as_tensor(solved, device=robot.device, dtype=seed.dtype)
+                seed = torch.where(success_tensor[:, None], solved, seed)
+                targets.append(seed)
+        else:
+            raise ValueError(f"Unsupported motion_validity mode {validity!r}.")
 
         sparse_path = torch.stack(targets, dim=1)
         positions = interpolate_with_distance(

@@ -1,6 +1,6 @@
 schema_version: 1
-name: atomic_skill_franka_pgi_spatial_generalization
-suite_version: atomic_franka_pgi_spatial_generalization_v8
+name: atomic_franka_pgi_spatial_generalization
+suite_version: atomic_franka_pgi_spatial_generalization_v9
 profile: coverage
 
 # Reusable strict-spatial domain definitions. Every track below selects only
@@ -858,11 +858,13 @@ planners:
     adapter: toppra
     role: diagnostic_baseline
     enabled: true
-    config:
-      velocity: 0.2
-      acceleration: 0.5
+    config: {}
 
 protocol:
+  report_schema_version: "3"
+  # Preserve the existing Atomic motion budget for every timed planner.
+  joint_velocity_limit_rad_s: 0.2
+  joint_acceleration_limit_rad_s2: 0.5
   warmup_trials: 1
   measured_trials: 1
   sample_interval: 80
@@ -873,7 +875,7 @@ protocol:
 
 tracks:
   - id: spatial-rigid-object
-    scenario: atomic_task
+    scenario: atomic_skill
     enabled: true
     domains:
       - <<: *domain_nominal
@@ -903,7 +905,7 @@ tracks:
       skills: [*skill_pick_up, *skill_pour, *skill_axis_align]
 
   - id: spatial-rigid-object-held-pose-target
-    scenario: atomic_task
+    scenario: atomic_skill
     enabled: true
     domains:
       - <<: *domain_nominal
@@ -945,7 +947,7 @@ tracks:
       skills: [*skill_move_held_object]
 
   - id: spatial-rigid-object-place-target
-    scenario: atomic_task
+    scenario: atomic_skill
     enabled: true
     domains:
       - <<: *domain_nominal
@@ -981,7 +983,7 @@ tracks:
       skills: [*skill_place]
 
   - id: spatial-rigid-object-position-target
-    scenario: atomic_task
+    scenario: atomic_skill
     enabled: true
     domains:
       - <<: *domain_nominal
@@ -1016,7 +1018,7 @@ tracks:
   # Primitive tracks keep their own nominal population so parameterized geometry
   # summaries are not mixed with the position and orientation domains above.
   - id: primitive-cube-rigid-object
-    scenario: atomic_task
+    scenario: atomic_skill
     enabled: true
     domains:
       - <<: *domain_cube_nominal
@@ -1046,7 +1048,7 @@ tracks:
       skills: [*skill_pick_up, *skill_pour, *skill_axis_align]
 
   - id: primitive-cube-held-pose-target
-    scenario: atomic_task
+    scenario: atomic_skill
     enabled: true
     domains:
       - <<: *domain_cube_nominal
@@ -1076,7 +1078,7 @@ tracks:
       skills: [*skill_move_held_object]
 
   - id: primitive-cube-place-target
-    scenario: atomic_task
+    scenario: atomic_skill
     enabled: true
     domains:
       - <<: *domain_cube_nominal
@@ -1106,7 +1108,7 @@ tracks:
       skills: [*skill_place]
 
   - id: primitive-cube-position-target
-    scenario: atomic_task
+    scenario: atomic_skill
     enabled: true
     domains:
       - <<: *domain_cube_nominal
@@ -1136,7 +1138,7 @@ tracks:
       skills: [*skill_push_object]
 
   - id: spatial-microwave-controls
-    scenario: atomic_task
+    scenario: atomic_skill
     enabled: true
     domains:
       - <<: *domain_nominal
@@ -1172,7 +1174,7 @@ tracks:
       skills: [*skill_press, *skill_twist]
 
   - id: spatial-drawer
-    scenario: atomic_task
+    scenario: atomic_skill
     enabled: true
     domains:
       - <<: *domain_nominal
@@ -1208,7 +1210,7 @@ tracks:
       skills: [*skill_slide]
 
   - id: spatial-door
-    scenario: atomic_task
+    scenario: atomic_skill
     enabled: true
     domains:
       - <<: *domain_nominal

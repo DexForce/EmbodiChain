@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Physics-backed Atomic Task track shared by planner adapters."""
+"""Physics-backed Atomic Skill track shared by planner adapters."""
 
 from __future__ import annotations
 
@@ -76,6 +76,7 @@ from ..contracts import (
 )
 from ..evaluation import TOLERANCES, StageEvidence, evaluate_skill_stage_batch
 from ..config import (
+    ProtocolCfg,
     SuiteCfg,
     TrackCfg,
     resolve_atomic_batch_sizes,
@@ -101,7 +102,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AtomicSkillCaseProvider",
-    "AtomicTaskScenario",
+    "AtomicSkillScenario",
     "atomic_skill_provider_names",
     "create_atomic_skill_provider",
     "register_atomic_skill_provider",
@@ -157,6 +158,15 @@ def _benchmark_motion_policy(skill_id: str, sample_count: int) -> MotionPolicy:
 def _benchmark_motion_attribution(skill_id: str) -> dict[str, object]:
     """Describe whether the selected planner backend produced the motion."""
     strategy = _benchmark_motion_policy_strategy(skill_id)
+    if skill_id == "coordinated_pickment":
+        # This primitive owns IK projection and samples on the fixed control
+        # clock; its requested strategy does not call the selected backend.
+        return {
+            "motion_policy_strategy": strategy,
+            "selected_planner_backend_used": False,
+            "effective_motion_algorithm": "coordinated_ik_projection",
+            "timing_is_solved": False,
+        }
     selected_backend_used = strategy == "motion_gen"
     return {
         "motion_policy_strategy": strategy,
@@ -290,12 +300,12 @@ def _atomic_case_id(
     batch_size: int,
     seed: int,
 ) -> str:
-    """Return an Atomic Task identity that distinguishes simulator batches."""
+    """Return an Atomic Skill identity that distinguishes simulator batches."""
     return f"{track_id}:{skill_id}:{name}:b{batch_size}:s{seed}"
 
 
 def _difficulty(config: Mapping[str, object]) -> str:
-    """Resolve the explicit, frozen Atomic Task difficulty label."""
+    """Resolve the explicit, frozen Atomic Skill difficulty label."""
     difficulty = str(config.get("task_difficulty", "simple"))
     if difficulty not in _TASK_DIFFICULTIES:
         raise ValueError(
@@ -979,14 +989,14 @@ def _object_lift_success(
 
 
 def _object_pose_success(
-    scenario: "AtomicTaskScenario",
+    scenario: "AtomicSkillScenario",
     case: BenchmarkCase,
     observation: _ExecutionObservation,
     motion_outcomes: tuple[CaseOutcome, ...],
 ) -> torch.Tensor:
     """Gate object transport/place success on its configured pose metric."""
     if scenario.suite is None:
-        raise RuntimeError("Atomic Task suite is not configured.")
+        raise RuntimeError("Atomic Skill suite is not configured.")
     final_pose = observation.final_object_pose
     if final_pose is None:
         return torch.zeros_like(observation.execution_success)
@@ -1026,14 +1036,14 @@ def _object_pose_success(
 
 
 def _executed_final_pose_success(
-    scenario: "AtomicTaskScenario",
+    scenario: "AtomicSkillScenario",
     case: BenchmarkCase,
     observation: _ExecutionObservation,
     motion_outcomes: tuple[CaseOutcome, ...],
 ) -> torch.Tensor:
     """Validate the executed TCP against a case's final frozen waypoint."""
     if scenario.suite is None:
-        raise RuntimeError("Atomic Task suite is not configured.")
+        raise RuntimeError("Atomic Skill suite is not configured.")
     translation, rotation = _executed_final_pose_errors(
         case,
         observation.final_tcp_pose,
@@ -1795,7 +1805,7 @@ def _case_pose(case: BenchmarkCase, name: str, *, device: torch.device) -> torch
 
 
 def _held_object_state(
-    scenario: "AtomicTaskScenario", case: BenchmarkCase
+    scenario: "AtomicSkillScenario", case: BenchmarkCase
 ) -> HeldObjectState:
     """Reconstruct the frozen held-object relation for an isolated case."""
     handle = scenario.object_handle(case.object_id)
@@ -2219,6 +2229,47 @@ class _CaseSampleCountGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         return self._sampler.get_dual_arm_valid_grasp_poses(**kwargs)
 
 
+def _policy_motion_budget(protocol: ProtocolCfg) -> dict[str, float]:
+    """Map suite requests to the scalar interface of scenario-owned motion."""
+    values: dict[str, float] = {}
+    for source, target in (
+        ("joint_velocity_limit_rad_s", "velocity_limit"),
+        ("joint_acceleration_limit_rad_s2", "acceleration_limit"),
+    ):
+        requested = getattr(protocol, source)
+        if requested is not None:
+            values[target] = (
+                float(requested)
+                if isinstance(requested, (int, float))
+                else min(float(value) for value in requested)
+            )
+    return values
+
+
+def _with_motion_budget(
+    invocation: ActionInvocation, protocol: ProtocolCfg
+) -> ActionInvocation:
+    """Apply shared scalar budgets to IK paths without overriding backend vectors.
+
+    MotionPolicy accepts scalars. Per-joint suite requests use their minimum
+    for these scenario-owned paths, conservatively satisfying every request;
+    the robot still caps each joint separately. Omitted requests retain the
+    invocation defaults. Selected backends receive the full vector through
+    their existing planner options.
+    """
+    if (
+        invocation.motion_policy.strategy != "ik_interp"
+        and invocation.skill_id != "coordinated_pickment"
+    ):
+        return invocation
+    values = _policy_motion_budget(protocol)
+    if not values:
+        return invocation
+    return replace(
+        invocation, motion_policy=replace(invocation.motion_policy, **values)
+    )
+
+
 def _with_plan_options(
     invocation: ActionInvocation, plan_opts: object
 ) -> ActionInvocation:
@@ -2298,7 +2349,7 @@ class _MoveEndEffectorCases(AtomicSkillCaseProvider):
 
     def generate_case(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         suite: SuiteCfg,
         track: TrackCfg,
         config: Mapping[str, object],
@@ -2408,7 +2459,7 @@ class _MoveEndEffectorCases(AtomicSkillCaseProvider):
 
     def build_invocation(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
     ) -> ActionInvocation:
@@ -2424,7 +2475,7 @@ class _MoveEndEffectorCases(AtomicSkillCaseProvider):
 
     def task_result(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         compiled: CompiledTrajectory,
         observation: _ExecutionObservation,
@@ -2454,7 +2505,7 @@ class _PickUpCases(AtomicSkillCaseProvider):
 
     def generate_case(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         suite: SuiteCfg,
         track: TrackCfg,
         config: Mapping[str, object],
@@ -2619,7 +2670,7 @@ class _PickUpCases(AtomicSkillCaseProvider):
 
     def build_invocation(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
     ) -> ActionInvocation:
@@ -2712,7 +2763,7 @@ class _PickUpCases(AtomicSkillCaseProvider):
 
     def task_result(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         compiled: CompiledTrajectory,
         observation: _ExecutionObservation,
@@ -2732,7 +2783,7 @@ class _MoveJointsCases(AtomicSkillCaseProvider):
 
     def generate_case(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         suite: SuiteCfg,
         track: TrackCfg,
         config: Mapping[str, object],
@@ -2842,7 +2893,7 @@ class _MoveJointsCases(AtomicSkillCaseProvider):
 
     def build_invocation(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
     ) -> ActionInvocation:
@@ -2864,7 +2915,7 @@ class _MoveJointsCases(AtomicSkillCaseProvider):
 
     def task_result(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         compiled: CompiledTrajectory,
         observation: _ExecutionObservation,
@@ -2910,7 +2961,7 @@ class _HeldObjectCases(AtomicSkillCaseProvider):
 
     def _prepare_start(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         config: Mapping[str, object],
         *,
         seed: int,
@@ -3023,7 +3074,7 @@ class _HeldObjectCases(AtomicSkillCaseProvider):
         return handle, object_pose, grasp_pose, object_to_eef, table_object_pose
 
     def initial_task_state(
-        self, scenario: "AtomicTaskScenario", case: BenchmarkCase
+        self, scenario: "AtomicSkillScenario", case: BenchmarkCase
     ) -> TaskState:
         return TaskState(
             batch_size=case.batch_size,
@@ -3053,7 +3104,7 @@ class _MoveHeldObjectCases(_HeldObjectCases):
 
     def generate_case(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         suite: SuiteCfg,
         track: TrackCfg,
         config: Mapping[str, object],
@@ -3187,7 +3238,7 @@ class _MoveHeldObjectCases(_HeldObjectCases):
 
     def build_invocation(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
     ) -> ActionInvocation:
@@ -3238,7 +3289,7 @@ class _MoveHeldObjectCases(_HeldObjectCases):
 
     def task_result(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         compiled: CompiledTrajectory,
         observation: _ExecutionObservation,
@@ -3258,7 +3309,7 @@ class _PlaceCases(_HeldObjectCases):
 
     def generate_case(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         suite: SuiteCfg,
         track: TrackCfg,
         config: Mapping[str, object],
@@ -3393,7 +3444,7 @@ class _PlaceCases(_HeldObjectCases):
 
     def build_invocation(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
     ) -> ActionInvocation:
@@ -3445,7 +3496,7 @@ class _PlaceCases(_HeldObjectCases):
 
     def task_result(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         compiled: CompiledTrajectory,
         observation: _ExecutionObservation,
@@ -3466,7 +3517,7 @@ class _PressCases(AtomicSkillCaseProvider):
 
     def generate_case(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         suite: SuiteCfg,
         track: TrackCfg,
         config: Mapping[str, object],
@@ -3623,7 +3674,7 @@ class _PressCases(AtomicSkillCaseProvider):
 
     def build_invocation(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
     ) -> ActionInvocation:
@@ -3696,7 +3747,7 @@ class _PressCases(AtomicSkillCaseProvider):
 
     def task_result(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         compiled: CompiledTrajectory,
         observation: _ExecutionObservation,
@@ -3717,7 +3768,7 @@ class _SlideCases(AtomicSkillCaseProvider):
 
     def generate_case(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         suite: SuiteCfg,
         track: TrackCfg,
         config: Mapping[str, object],
@@ -3887,7 +3938,7 @@ class _SlideCases(AtomicSkillCaseProvider):
 
     def build_invocation(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
     ) -> ActionInvocation:
@@ -3981,7 +4032,7 @@ class _SlideCases(AtomicSkillCaseProvider):
 
     def task_result(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         compiled: CompiledTrajectory,
         observation: _ExecutionObservation,
@@ -4002,7 +4053,7 @@ class _TwistCases(AtomicSkillCaseProvider):
 
     def generate_case(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         suite: SuiteCfg,
         track: TrackCfg,
         config: Mapping[str, object],
@@ -4163,7 +4214,7 @@ class _TwistCases(AtomicSkillCaseProvider):
 
     def build_invocation(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
     ) -> ActionInvocation:
@@ -4245,7 +4296,7 @@ class _TwistCases(AtomicSkillCaseProvider):
 
     def task_result(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         compiled: CompiledTrajectory,
         observation: _ExecutionObservation,
@@ -4258,7 +4309,7 @@ class _TwistCases(AtomicSkillCaseProvider):
         )
 
 
-class AtomicTaskScenario(ScenarioProvider):
+class AtomicSkillScenario(ScenarioProvider):
     """Run fixed Atomic Actions through an adapter-owned MotionGenerator."""
 
     required_capabilities = frozenset(
@@ -4297,7 +4348,21 @@ class AtomicTaskScenario(ScenarioProvider):
 
     def trial_metadata(self, case: BenchmarkCase) -> dict[str, object]:
         """Expose planner attribution before planning or evaluation can fail."""
-        return _benchmark_motion_attribution(case.skill_id)
+        attribution = _benchmark_motion_attribution(case.skill_id)
+        values = {"timing_scope": "atomic_action_compile", **attribution}
+        if not attribution["selected_planner_backend_used"]:
+            # These skills solve their own constrained IK interpolation. Their
+            # clock must not inherit an unused adapter's nominal timing flag.
+            values.setdefault("timing_is_solved", True)
+            if self.suite is not None:
+                values["policy_motion_limits"] = {
+                    "velocity_limit": None,
+                    "acceleration_limit": MotionPolicy().acceleration_limit,
+                    **_policy_motion_budget(self.suite.protocol),
+                    "per_joint_reduction": "minimum",
+                    "velocity_cap_source": "effective_robot_limits",
+                }
+        return values
 
     def create_runtime_entities(
         self,
@@ -4308,14 +4373,14 @@ class AtomicTaskScenario(ScenarioProvider):
         """Add every rigid/articulated asset before GPU physics initialization."""
         del suite
         if self._runtime_entities_created:
-            raise RuntimeError("Atomic Task runtime entities are already configured.")
+            raise RuntimeError("Atomic Skill runtime entities are already configured.")
         self.simulation = simulation
         articulation_values = track.config.get("articulations", [])
         if not isinstance(articulation_values, list):
-            raise TypeError("atomic-task articulations must be a list of mappings.")
+            raise TypeError("atomic-skill articulations must be a list of mappings.")
         for value in articulation_values:
             if not isinstance(value, Mapping):
-                raise TypeError("Every atomic-task articulation must be a mapping.")
+                raise TypeError("Every atomic-skill articulation must be a mapping.")
             handle = create_atomic_articulation(
                 simulation,
                 value,
@@ -4329,10 +4394,10 @@ class AtomicTaskScenario(ScenarioProvider):
 
         fixture_values = track.config.get("fixtures", [])
         if not isinstance(fixture_values, list):
-            raise TypeError("atomic-task fixtures must be a list of mappings.")
+            raise TypeError("atomic-skill fixtures must be a list of mappings.")
         for value in fixture_values:
             if not isinstance(value, Mapping):
-                raise TypeError("Every atomic-task fixture must be a mapping.")
+                raise TypeError("Every atomic-skill fixture must be a mapping.")
             # Fixtures such as tables and support slabs stay at their declared
             # pose for every case; they are never parked or reset.
             handle = create_atomic_object(
@@ -4346,10 +4411,10 @@ class AtomicTaskScenario(ScenarioProvider):
 
         object_values = track.config.get("objects", [])
         if not isinstance(object_values, list):
-            raise TypeError("atomic-task objects must be a list of mappings.")
+            raise TypeError("atomic-skill objects must be a list of mappings.")
         for value in object_values:
             if not isinstance(value, Mapping):
-                raise TypeError("Every atomic-task object must be a mapping.")
+                raise TypeError("Every atomic-skill object must be a mapping.")
             handle = create_atomic_object(simulation, value, initialize=False)
             if (
                 handle.object_id in self._objects
@@ -4371,7 +4436,7 @@ class AtomicTaskScenario(ScenarioProvider):
         """Finalize the pre-created object pool and cache robot command states."""
         if not self._runtime_entities_created or self.simulation is not simulation:
             raise RuntimeError(
-                "Atomic Task entities must be created before the first physics update."
+                "Atomic Skill entities must be created before the first physics update."
             )
         self.simulation = simulation
         self.robot = robot
@@ -4462,25 +4527,25 @@ class AtomicTaskScenario(ScenarioProvider):
         control_part: str,
         batch_size: int,
     ) -> list[BenchmarkCase]:
-        """Generate the algorithm-independent Atomic Task case manifest."""
+        """Generate the algorithm-independent Atomic Skill case manifest."""
         if robot is not self.robot or control_part != self.control_part:
             raise RuntimeError(
-                "AtomicTaskScenario must be configured before generation."
+                "AtomicSkillScenario must be configured before generation."
             )
         skill_values = track.config.get("skills", [])
         if not isinstance(skill_values, list) or not skill_values:
-            raise ValueError("atomic-task skills must be a non-empty list.")
+            raise ValueError("atomic-skill skills must be a non-empty list.")
         seeds = [int(value) for value in track.config.get("seeds", [11])]
         if not seeds:
-            raise ValueError("atomic-task seeds must not be empty.")
+            raise ValueError("atomic-skill seeds must not be empty.")
 
         cases: list[BenchmarkCase] = []
         for skill_index, skill_value in enumerate(skill_values):
             if not isinstance(skill_value, Mapping):
-                raise TypeError("Every atomic-task skill entry must be a mapping.")
+                raise TypeError("Every atomic-skill skill entry must be a mapping.")
             skill_id = skill_value.get("id")
             if not isinstance(skill_id, str) or not skill_id:
-                raise ValueError("Every atomic-task skill entry must define an id.")
+                raise ValueError("Every atomic-skill skill entry must define an id.")
             raw_cases = skill_value.get("cases", [])
             if not isinstance(raw_cases, list) or not raw_cases:
                 raise ValueError(f"Atomic skill {skill_id!r} needs at least one case.")
@@ -4523,7 +4588,7 @@ class AtomicTaskScenario(ScenarioProvider):
                         )
                     if case.case_id in self._case_providers:
                         raise ValueError(
-                            f"Duplicate Atomic Task case {case.case_id!r}."
+                            f"Duplicate Atomic Skill case {case.case_id!r}."
                         )
                     self._case_providers[case.case_id] = provider
                     self._cases_by_id[case.case_id] = case
@@ -4552,14 +4617,14 @@ class AtomicTaskScenario(ScenarioProvider):
         control_parts = track.config.get("control_parts")
         if control_parts is not None:
             if not isinstance(control_parts, Mapping):
-                raise TypeError("atomic-task control_parts must be a mapping.")
+                raise TypeError("atomic-skill control_parts must be a mapping.")
             config["control_parts"] = {
                 str(slot): dict(parts)
                 for slot, parts in control_parts.items()
                 if isinstance(parts, Mapping)
             }
             if len(config["control_parts"]) != len(control_parts):
-                raise TypeError("atomic-task control_parts entries must be mappings.")
+                raise TypeError("atomic-skill control_parts entries must be mappings.")
 
         randomization = resolve_atomic_pose_randomization(track)
         if randomization.enabled:
@@ -4732,7 +4797,7 @@ class AtomicTaskScenario(ScenarioProvider):
     def require_engine(self) -> AtomicActionEngine:
         """Return the prepared Atomic Action engine."""
         if self._engine is None:
-            raise RuntimeError("Atomic Task planner resources were not prepared.")
+            raise RuntimeError("Atomic Skill planner resources were not prepared.")
         return self._engine
 
     def reset_case(
@@ -4745,7 +4810,7 @@ class AtomicTaskScenario(ScenarioProvider):
         """Restore full robot and object state before every planner call."""
         del control_part
         if case.full_start_qpos is None:
-            raise ValueError("Atomic Task cases require full_start_qpos.")
+            raise ValueError("Atomic Skill cases require full_start_qpos.")
         for target in (False, True):
             robot.set_qpos(case.full_start_qpos, target=target)
         robot.clear_dynamics()
@@ -4840,19 +4905,19 @@ class AtomicTaskScenario(ScenarioProvider):
         """Compile one Atomic Action with an explicitly pinned motion backend."""
         engine = self.require_engine()
         if self.simulation is None:
-            raise RuntimeError("Atomic Task simulation is not configured.")
+            raise RuntimeError("Atomic Skill simulation is not configured.")
         provider = self._case_providers[case.case_id]
         invocation = provider.build_invocation(self, case, adapter)
         policy = invocation.motion_policy
         expected_strategy = _benchmark_motion_policy_strategy(case.skill_id)
         if policy.strategy != expected_strategy:
             raise RuntimeError(
-                f"Atomic Task skill {case.skill_id!r} requires strategy "
+                f"Atomic Skill skill {case.skill_id!r} requires strategy "
                 f"{expected_strategy!r}, got {policy.strategy!r}."
             )
         if engine.motion_generator is not adapter.require_motion_generator():
             raise RuntimeError(
-                "Atomic Task engine must own the selected adapter's MotionGenerator."
+                "Atomic Skill engine must own the selected adapter's MotionGenerator."
             )
         task = provider.initial_task_state(self, case)
         invocations: tuple[ActionInvocation, ...] = (invocation,)
@@ -4907,6 +4972,10 @@ class AtomicTaskScenario(ScenarioProvider):
             prefix = provider.prefix_invocations(self, case)
             if prefix:
                 invocations = (*prefix, invocation)
+        if self.suite is not None:
+            invocations = tuple(
+                _with_motion_budget(item, self.suite.protocol) for item in invocations
+            )
         plan_opts = adapter.atomic_plan_options()
         if plan_opts is not None:
             invocations = tuple(
@@ -4968,6 +5037,9 @@ class AtomicTaskScenario(ScenarioProvider):
         """Validate motion, replay physics, and evaluate physical task success."""
         if not isinstance(result, CompiledTrajectory):
             raise TypeError(self.plan_contract_error(result))
+        timing_is_solved = bool(
+            self.trial_metadata(case).get("timing_is_solved", timing_is_solved)
+        )
         arm_joint_ids = list(robot.get_joint_ids(name=control_part))
         arm_positions = result.trajectory.positions[:, :, arm_joint_ids]
         motion_outcomes = compute_case_outcomes(
@@ -4992,7 +5064,12 @@ class AtomicTaskScenario(ScenarioProvider):
             timing_is_solved=timing_is_solved,
         )
         motion_outcomes = self._with_other_arm_validity(
-            result, case, robot, suite, motion_outcomes
+            result,
+            case,
+            robot,
+            suite,
+            motion_outcomes,
+            timing_is_solved=timing_is_solved,
         )
         provider = self._case_providers[case.case_id]
         observation = self._execute(result, case, provider)
@@ -5186,6 +5263,8 @@ class AtomicTaskScenario(ScenarioProvider):
         robot: Robot,
         suite: SuiteCfg,
         motion_outcomes: tuple[CaseOutcome, ...],
+        *,
+        timing_is_solved: bool = True,
     ) -> tuple[CaseOutcome, ...]:
         """Also require every other declared arm to pass its ordered waypoints.
 
@@ -5199,6 +5278,17 @@ class AtomicTaskScenario(ScenarioProvider):
             return motion_outcomes
         if case.full_start_qpos is None:
             raise ValueError("Multi-arm cases require full_start_qpos.")
+
+        def all_applicable(*values: bool | None) -> bool | None:
+            if False in values:
+                return False
+            return True if all(value is True for value in values) else None
+
+        def any_applicable(*values: bool | None) -> bool | None:
+            if True in values:
+                return True
+            return False if all(value is False for value in values) else None
+
         merged = list(motion_outcomes)
         for part, waypoints in dict(arm_waypoints).items():
             joint_ids = list(robot.get_joint_ids(name=part))
@@ -5233,21 +5323,66 @@ class AtomicTaskScenario(ScenarioProvider):
                 position_threshold_m=suite.protocol.position_threshold_m,
                 rotation_threshold_rad=suite.protocol.rotation_threshold_rad,
                 joint_limit_tolerance_rad=suite.protocol.joint_limit_tolerance_rad,
+                joint_velocity_limit_rad_s=suite.protocol.joint_velocity_limit_rad_s,
+                joint_acceleration_limit_rad_s2=suite.protocol.joint_acceleration_limit_rad_s2,
+                joint_jerk_limit_rad_s3=suite.protocol.joint_jerk_limit_rad_s3,
+                dynamic_limit_tolerance=suite.protocol.dynamic_limit_tolerance,
+                timing_is_solved=timing_is_solved,
             )
             for index, (outcome, other) in enumerate(
                 zip(merged, part_outcomes, strict=True)
             ):
+                dynamic_fields = {}
+                for name in (
+                    "max_joint_velocity_rad_s",
+                    "velocity_utilization",
+                    "max_joint_acceleration_rad_s2",
+                    "acceleration_utilization",
+                    "max_joint_jerk_rad_s3",
+                    "jerk_utilization",
+                ):
+                    values = [
+                        value
+                        for value in (getattr(outcome, name), getattr(other, name))
+                        if value is not None
+                    ]
+                    dynamic_fields[name] = max(values) if values else None
+                for name in (
+                    "velocity_limit_violation",
+                    "acceleration_limit_violation",
+                    "jerk_limit_violation",
+                ):
+                    dynamic_fields[name] = any_applicable(
+                        getattr(outcome, name), getattr(other, name)
+                    )
+                statuses = {
+                    outcome.dynamic_measurement_status,
+                    other.dynamic_measurement_status,
+                }
+                dynamic_fields["dynamic_measurement_status"] = (
+                    "unbounded"
+                    if "unbounded" in statuses
+                    else "finite" if "finite" in statuses else "unavailable"
+                )
                 merged[index] = replace(
                     outcome,
+                    finite=outcome.finite and other.finite,
                     ordered_waypoints_reached=(
                         outcome.ordered_waypoints_reached
                         and other.ordered_waypoints_reached
                     ),
                     motion_valid=outcome.motion_valid and other.motion_valid,
+                    timed_motion_valid=all_applicable(
+                        outcome.timed_motion_valid, other.timed_motion_valid
+                    ),
+                    dynamic_limits_satisfied=all_applicable(
+                        outcome.dynamic_limits_satisfied, other.dynamic_limits_satisfied
+                    ),
                     joint_limit_violation=(
                         outcome.joint_limit_violation or other.joint_limit_violation
                     ),
                     failure_code=outcome.failure_code or other.failure_code,
+                    **dynamic_fields,
                 )
         return tuple(merged)
 
@@ -5289,7 +5424,7 @@ class AtomicTaskScenario(ScenarioProvider):
     ) -> _ExecutionObservation | None:
         """Replay a finite full-robot trajectory under common physics."""
         if self.simulation is None or self.robot is None or self.track is None:
-            raise RuntimeError("Atomic Task runtime is not configured.")
+            raise RuntimeError("Atomic Skill runtime is not configured.")
         if not self._is_replayable(compiled):
             return None
         object_handle = self._objects.get(case.object_id or "")
@@ -5307,7 +5442,7 @@ class AtomicTaskScenario(ScenarioProvider):
         self._synchronize()
         elapsed_ms = (time.perf_counter() - started) * 1000.0
         if replay_metrics is None:
-            raise RuntimeError("Timed Atomic Task replay did not return metrics.")
+            raise RuntimeError("Timed Atomic Skill replay did not return metrics.")
         observed = self.robot.get_qpos()
         tracking = torch.sqrt(
             replay_metrics.squared_tracking_error
@@ -5383,7 +5518,7 @@ class AtomicTaskScenario(ScenarioProvider):
     def _physics_settings(self) -> _PhysicsReplaySettings:
         """Resolve and validate the common physics-replay step counts."""
         if self.track is None:
-            raise RuntimeError("Atomic Task runtime is not configured.")
+            raise RuntimeError("Atomic Skill runtime is not configured.")
         physics = dict(self.track.config.get("physics", {}))
         settings = _PhysicsReplaySettings(
             steps_per_waypoint=int(physics.get("steps_per_waypoint", 4)),
@@ -5398,7 +5533,7 @@ class AtomicTaskScenario(ScenarioProvider):
             or settings.hold_steps < 0
             or settings.hold_sim_steps < 1
         ):
-            raise ValueError("Atomic Task physics step counts are invalid.")
+            raise ValueError("Atomic Skill physics step counts are invalid.")
         return settings
 
     @staticmethod
@@ -5431,7 +5566,7 @@ class AtomicTaskScenario(ScenarioProvider):
         if not accumulators:
             return
         if self.robot is None:
-            raise RuntimeError("Atomic Task runtime is not configured.")
+            raise RuntimeError("Atomic Skill runtime is not configured.")
         channels = frozenset(
             channel
             for accumulator in accumulators
@@ -5500,7 +5635,7 @@ class AtomicTaskScenario(ScenarioProvider):
     ) -> _ReplayMetrics | None:
         """Replay one compiled trajectory with the evaluation physics contract."""
         if self.simulation is None or self.robot is None:
-            raise RuntimeError("Atomic Task runtime is not configured.")
+            raise RuntimeError("Atomic Skill runtime is not configured.")
         trajectory = compiled.trajectory.positions
         plan_success = compiled.plan_success.to(
             device=trajectory.device, dtype=torch.bool
@@ -5802,7 +5937,7 @@ class AtomicTaskScenario(ScenarioProvider):
     def _hold_static(self) -> None:
         """Hold the current scene so a failed-case debug video has frames."""
         if self.simulation is None:
-            raise RuntimeError("Atomic Task runtime is not configured.")
+            raise RuntimeError("Atomic Skill runtime is not configured.")
         settings = self._physics_settings()
         for _ in range(max(settings.hold_steps, 1)):
             self.simulation.update(step=settings.hold_sim_steps)
@@ -5812,7 +5947,7 @@ class AtomicTaskScenario(ScenarioProvider):
     ) -> torch.Tensor:
         """Build independent sequential-IK validity evidence for a case."""
         if self.robot is None:
-            raise RuntimeError("Atomic Task runtime is not configured.")
+            raise RuntimeError("Atomic Skill runtime is not configured.")
         seed = start_qpos
         references: list[torch.Tensor] = []
         for index in range(target_waypoints.shape[1]):
@@ -5913,7 +6048,7 @@ class AtomicTaskScenario(ScenarioProvider):
             RuntimeError: No candidate variant reaches every skill pose.
         """
         if self.robot is None:
-            raise RuntimeError("Atomic Task runtime is not configured.")
+            raise RuntimeError("Atomic Skill runtime is not configured.")
         if n_sample < 1 or max_candidates < 1:
             raise ValueError(
                 "Antipodal grasp sample/candidate counts must be positive."
@@ -6086,7 +6221,7 @@ class AtomicTaskScenario(ScenarioProvider):
             RuntimeError: No candidate variant reaches every skill pose.
         """
         if self.robot is None:
-            raise RuntimeError("Atomic Task runtime is not configured.")
+            raise RuntimeError("Atomic Skill runtime is not configured.")
         if target_pose.dim() != 3 or target_pose.shape[1:] != (4, 4):
             raise ValueError(
                 "Articulation grasp target poses must have shape (B, 4, 4)."
@@ -6162,7 +6297,7 @@ class AtomicTaskScenario(ScenarioProvider):
     def restore_base_robot(self) -> None:
         """Restore the robot state captured before scenario case generation."""
         if self.robot is None or self._base_full_qpos is None:
-            raise RuntimeError("Atomic Task runtime is not configured.")
+            raise RuntimeError("Atomic Skill runtime is not configured.")
         for target in (False, True):
             self.robot.set_qpos(self._base_full_qpos, target=target)
         self.robot.clear_dynamics()
@@ -6176,7 +6311,7 @@ class AtomicTaskScenario(ScenarioProvider):
     ) -> torch.Tensor:
         """Apply a deterministic, bounded perturbation to the arm start state."""
         if self.robot is None:
-            raise RuntimeError("Atomic Task runtime is not configured.")
+            raise RuntimeError("Atomic Skill runtime is not configured.")
         start = self.robot.get_qpos(name=self.control_part).clone()
         amplitude = _float_vector(
             config.get("start_qpos_jitter_rad"),
@@ -6377,7 +6512,7 @@ class AtomicTaskScenario(ScenarioProvider):
     ) -> None:
         """Install a manipulator start and optional gripper command."""
         if self.robot is None:
-            raise RuntimeError("Atomic Task runtime is not configured.")
+            raise RuntimeError("Atomic Skill runtime is not configured.")
         if open_gripper and grasp_gripper:
             raise ValueError("The gripper cannot start both open and grasping.")
         for target in (False, True):
@@ -6442,7 +6577,7 @@ class AtomicTaskScenario(ScenarioProvider):
     def object_handle(self, object_id: str | None) -> AtomicObjectHandle:
         """Resolve a configured object identifier with an actionable error."""
         if object_id is None:
-            raise ValueError("This Atomic Task case has no object id.")
+            raise ValueError("This Atomic Skill case has no object id.")
         try:
             return self._objects[object_id]
         except KeyError as exc:
@@ -6454,7 +6589,7 @@ class AtomicTaskScenario(ScenarioProvider):
     def articulation_handle(self, object_id: str | None) -> AtomicArticulationHandle:
         """Resolve one configured articulation identifier."""
         if object_id is None:
-            raise ValueError("This Atomic Task case has no articulation id.")
+            raise ValueError("This Atomic Skill case has no articulation id.")
         try:
             return self._articulations[object_id]
         except KeyError as exc:
@@ -6538,7 +6673,7 @@ class AtomicTaskScenario(ScenarioProvider):
         planner later being benchmarked.
         """
         if self.robot is None:
-            raise RuntimeError("Atomic Task runtime is not configured.")
+            raise RuntimeError("Atomic Skill runtime is not configured.")
         if self._reference_motion_generator is None:
             from embodichain.lab.sim.motion.motion_generator import (
                 MotionGenCfg,
@@ -6554,7 +6689,7 @@ class AtomicTaskScenario(ScenarioProvider):
     def open_grippers(self) -> None:
         """Command and set every configured gripper to its open state."""
         if self.robot is None:
-            raise RuntimeError("Atomic Task runtime is not configured.")
+            raise RuntimeError("Atomic Skill runtime is not configured.")
         batch_size = self.robot.get_qpos().shape[0]
         for part, (open_state, _) in self._configured_grippers().items():
             command = open_state.unsqueeze(0).expand(batch_size, -1)
@@ -6602,4 +6737,4 @@ register_atomic_skill_provider("place", _PlaceCases)
 register_atomic_skill_provider("press", _PressCases)
 register_atomic_skill_provider("slide", _SlideCases)
 register_atomic_skill_provider("twist", _TwistCases)
-register_scenario_provider("atomic_task", AtomicTaskScenario)
+register_scenario_provider("atomic_skill", AtomicSkillScenario)

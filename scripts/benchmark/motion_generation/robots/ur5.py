@@ -47,7 +47,7 @@ class UR5Provider(RobotProvider):
 
 
 class UR5PgiProvider(RobotProvider):
-    """Build the UR5 with the tutorial PGI gripper for Atomic Tasks."""
+    """Build the UR5 with the tutorial PGI gripper for Atomic Skills."""
 
     def build_cfg(self) -> RobotCfg:
         """Use the tutorial UR5 arm, gripper, and TCP configuration.

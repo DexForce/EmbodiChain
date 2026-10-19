@@ -1,6 +1,6 @@
 schema_version: 1
-name: atomic_skill_dual_ur5_pgi_hand_over_spatial_generalization
-suite_version: atomic_dual_ur5_pgi_hand_over_spatial_generalization_v3
+name: atomic_dual_ur5_pgi_hand_over_spatial_generalization
+suite_version: atomic_dual_ur5_pgi_hand_over_spatial_generalization_v4
 profile: coverage
 
 robot:
@@ -19,11 +19,13 @@ planners:
     adapter: toppra
     role: primary_baseline
     enabled: true
-    config:
-      velocity: 0.2
-      acceleration: 0.5
+    config: {}
 
 protocol:
+  report_schema_version: "3"
+  # Preserve the existing Atomic motion budget for every timed planner.
+  joint_velocity_limit_rad_s: 0.2
+  joint_acceleration_limit_rad_s2: 0.5
   warmup_trials: 1
   measured_trials: 1
   sample_interval: 80
@@ -34,7 +36,7 @@ protocol:
 
 tracks:
   - id: spatial-hand-over
-    scenario: atomic_task
+    scenario: atomic_skill
     enabled: true
     domains:
       - id: nominal

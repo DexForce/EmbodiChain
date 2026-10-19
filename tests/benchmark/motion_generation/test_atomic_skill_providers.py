@@ -53,8 +53,8 @@ from scripts.benchmark.motion_generation.planners.toppra import ToppraAdapter
 from scripts.benchmark.motion_generation.scenarios import (
     atomic_skill_providers as providers,
 )
-from scripts.benchmark.motion_generation.scenarios.atomic_task import (
-    AtomicTaskScenario,
+from scripts.benchmark.motion_generation.scenarios.atomic_skill import (
+    AtomicSkillScenario,
     _ActiveCaseGraspPoseGenerator,
     _ExecutionObservation,
     _signed_rotation_about_axis,
@@ -68,9 +68,9 @@ CPU = torch.device("cpu")
 def _case(skill_id: str, batch_size: int, **parameters: object) -> BenchmarkCase:
     return BenchmarkCase(
         suite_version="test_v1",
-        track="atomic-task",
+        track="atomic-skill",
         scenario_id=skill_id,
-        case_id=f"atomic-task:{skill_id}:case:b{batch_size}:s11",
+        case_id=f"atomic-skill:{skill_id}:case:b{batch_size}:s11",
         seed=11,
         batch_size=batch_size,
         num_waypoints=1,
@@ -412,6 +412,9 @@ def test_door_geometry_matches_the_open_door_primitive() -> None:
     grasp_pose[:, :3, 3] += torch.tensor([1.0, 0.0, 0.0])
     rotation = torch.tensor([math.pi / 6, math.pi / 3])
     action = SimpleNamespace(device=CPU)
+    action._opened_link_and_eef_poses_at_fractions = lambda *args: (
+        OpenDoor._opened_link_and_eef_poses_at_fractions(action, *args)
+    )
 
     expected_link, expected_eef = OpenDoor._opened_link_and_eef_poses(
         action,
@@ -703,7 +706,7 @@ def test_push_object_requires_the_measured_object_pose_at_the_target() -> None:
         object_position_threshold_m=0.01,
         object_tilt_threshold_rad=0.0873,
     )
-    scenario = AtomicTaskScenario()
+    scenario = AtomicSkillScenario()
     scenario.suite = Mock(protocol=Mock(rotation_threshold_rad=0.1))
 
     success, failure_code = provider.task_result(
@@ -810,15 +813,22 @@ def test_backend_plan_options_fill_only_unset_motion_generation_policies() -> No
 
 
 def test_toppra_adapter_serves_atomic_skills_and_joint_cases() -> None:
+    robot = Mock()
+    robot.get_qvel_limits.return_value = torch.ones(1, 7)
     adapter = ToppraAdapter(
         PlannerSpecCfg(
             id="toppra",
             adapter="toppra",
             role=AlgorithmRole.DIAGNOSTIC_BASELINE.value,
-            config={"velocity": 0.3, "acceleration": 0.6},
+            config={},
         ),
         PlannerContext(
-            robot=Mock(), control_part="arm", device=CPU, sample_interval=40
+            robot=robot,
+            control_part="arm",
+            device=CPU,
+            sample_interval=40,
+            joint_velocity_limit_rad_s=0.3,
+            joint_acceleration_limit_rad_s2=0.6,
         ),
     )
     adapter.motion_generator = Mock()
@@ -833,16 +843,19 @@ def test_toppra_adapter_serves_atomic_skills_and_joint_cases() -> None:
     assert {"atomic_action", "joint_waypoint"} <= adapter.capabilities
     assert targets[0].move_type is MoveType.JOINT_MOVE
     assert torch.equal(targets[0].qpos, case.reference_qpos[:, 0])
-    assert options.plan_opts.constraints == {"velocity": 0.3, "acceleration": 0.6}
+    assert options.plan_opts.constraints == {
+        "velocity": [0.3] * 7,
+        "acceleration": [0.6] * 7,
+    }
     atomic = adapter.atomic_plan_options()
     assert atomic.sample_method is TrajectorySampleMethod.QUANTITY
     assert atomic.sample_interval == 40
-    assert atomic.constraints == {"velocity": 0.3, "acceleration": 0.6}
+    assert atomic.constraints == {"velocity": [0.3] * 7, "acceleration": [0.6] * 7}
 
 
 def test_replay_measures_hinge_at_segment_end_and_peak_object_rotation() -> None:
     state = {"step": 0}
-    scenario = AtomicTaskScenario()
+    scenario = AtomicSkillScenario()
     scenario.simulation = Mock()
     scenario.simulation.update.side_effect = lambda step: state.update(
         step=state["step"] + step

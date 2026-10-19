@@ -14,14 +14,14 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Run the extensible planner motion-generation benchmark.
+"""Run Motion Planning and Atomic Skills suites through the shared benchmark.
 
 cuRobo is the default primary baseline. IK interpolation and TOPPRA are
 optional diagnostic baselines. NMG is loaded from a standalone ONNX policy.
 
-Run: ``python -m scripts.benchmark.motion_generation.run_benchmark --suite
-smoke`` or select the Franka + PGI Atomic Task slice with
-``--suite atomic_franka_pgi_curobo``.
+Run: ``embodichain benchmark motion-generation --suite
+motion_panda_free_space_smoke`` or select the Franka + PGI Atomic Skills suite
+with ``--suite atomic_franka_pgi_smoke``.
 """
 
 from __future__ import annotations
@@ -48,14 +48,14 @@ def add_parser_arguments(parser: argparse.ArgumentParser) -> None:
     """Add planner benchmark options to an existing argument parser."""
     parser.add_argument(
         "--suite",
-        default="smoke",
+        default="motion_panda_free_space_smoke",
         help=(
-            "Suite short name (smoke/coverage/atomic_franka_pgi_curobo, "
-            "atomic_franka_pgi_curobo_randomized, "
-            "atomic_franka_pgi_curobo_pose_batch, "
-            "atomic_franka_pgi_spatial_generalization, or any other "
-            "file stem under suites/) "
-            "or an explicit YAML path."
+            "Suite file stem or explicit YAML path. Motion Planning examples: "
+            "motion_panda_free_space_smoke, motion_panda_free_space_coverage, "
+            "motion_ur5_free_space_coverage. Atomic Skills examples: "
+            "atomic_franka_pgi_smoke, atomic_franka_pgi_randomized, "
+            "atomic_franka_pgi_pose_batch, atomic_ur5_pgi_randomized. "
+            "Default: motion_panda_free_space_smoke."
         ),
     )
     parser.add_argument(
@@ -117,7 +117,7 @@ def add_parser_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--record-video",
         action="store_true",
-        help="Record Atomic Task measured physics-replay videos after evaluation.",
+        help="Record Atomic Skills measured physics-replay videos after evaluation.",
     )
     parser.add_argument(
         "--record-failed-video",
@@ -207,7 +207,7 @@ def _apply_overrides(
     if seeds is not None:
         suite.free_space.seeds = seeds
         for track in suite.tracks:
-            if track.scenario == "atomic_task":
+            if track.scenario == "atomic_skill":
                 track.config["seeds"] = list(seeds)
     if num_trials is not None:
         suite.protocol.measured_trials = num_trials
@@ -243,7 +243,7 @@ def run_all_benchmarks(
     headless: bool = True,
     nmg_onnx_path: str | None = None,
     *,
-    suite_name: str = "smoke",
+    suite_name: str = "motion_panda_free_space_smoke",
     algorithms: list[str] | None = None,
     extra_baselines: list[str] | None = None,
     batch_sizes: list[int] | None = None,
@@ -323,7 +323,7 @@ def run_from_args(args: argparse.Namespace) -> BenchmarkRunResult:
 def _parse_args() -> argparse.Namespace:
     """Parse standalone module arguments using the unified option schema."""
     parser = argparse.ArgumentParser(
-        description="Benchmark planners on fixed motion and Atomic Task cases."
+        description="Compare planners with Motion Planning or Atomic Skills suites."
     )
     add_parser_arguments(parser)
     return parser.parse_args()

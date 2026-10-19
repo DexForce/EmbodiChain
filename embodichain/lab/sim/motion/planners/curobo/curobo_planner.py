@@ -357,10 +357,17 @@ class CuroboPlannerCfg(BasePlannerCfg):
 
     planner_type: str = "curobo"
 
-    max_acceleration: float | None = field(default=None, kw_only=True)
+    max_velocity: float | list[float] | None = field(default=None, kw_only=True)
+    """Optional speed request intersected with effective Robot velocity caps.
+
+    Lists follow ``robot.active_joint_ids`` order; ``None`` uses Robot caps.
+    """
+
+    max_acceleration: float | list[float] | None = field(default=None, kw_only=True)
     """Planning acceleration budget [rad/s^2 or m/s^2].
 
-    ``None`` preserves cuRobo's default budget of 15.0.
+    Lists follow ``robot.active_joint_ids`` order. ``None`` preserves cuRobo's
+    default budget of 15.0.
     """
 
     log_level: str = "error"
@@ -1838,6 +1845,7 @@ class CuroboPlanner(BasePlanner):
             surface_radius=auto.surface_radius,
             iterations=auto.iterations,
             collision_sphere_buffer=auto.collision_sphere_buffer,
+            max_velocity=self.cfg.max_velocity,
             max_acceleration=self.cfg.max_acceleration,
             device=str(self._curobo_device),
         )
@@ -1851,7 +1859,7 @@ class CuroboPlanner(BasePlanner):
     ) -> str:
         """Hash the URDF path/content and fit parameters into a stable cache key."""
         hasher = hashlib.md5()
-        hasher.update(b"absolute-motion-limits-v1")
+        hasher.update(b"absolute-motion-limits-v2")
         hasher.update(urdf_path.encode("utf-8"))
         try:
             with open(urdf_path, "rb") as urdf_file:
@@ -1868,7 +1876,9 @@ class CuroboPlanner(BasePlanner):
         hasher.update(
             repr(
                 _curobo_joint_limits(
-                    self.robot, max_acceleration=self.cfg.max_acceleration
+                    self.robot,
+                    max_velocity=self.cfg.max_velocity,
+                    max_acceleration=self.cfg.max_acceleration,
                 )
             ).encode("utf-8")
         )

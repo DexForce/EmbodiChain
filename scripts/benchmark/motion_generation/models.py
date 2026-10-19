@@ -85,12 +85,12 @@ class PlannerMetadata:
     capabilities: frozenset[str]
     model_revision: str = "N/A"
     inference_dtype: str = "fp32"
-    native_timing: bool = False
+    timing_is_solved: bool = False
     """Whether reported ``dt`` is solved rather than a nominal constant.
 
     ``PlanResult`` requires ``dt`` whenever it carries positions, so a planner
     with no time parameterization still reports intervals. Recording the
-    distinction here keeps native-timing comparisons from treating a nominal
+    distinction here keeps solved-timing comparisons from treating a nominal
     constant as a solved duration; report such rows as N/A.
     """
     supported_robots: tuple[str, ...] = ("franka_panda",)
@@ -199,6 +199,21 @@ class CaseOutcome:
     physical_skill_success: bool | None = None
     physical_failure_code: str | None = None
     evaluation_protocol: str | None = None
+    timed_motion_valid: bool | None = None
+    """Validity under solved timing; nominal or unknown clocks remain unavailable."""
+
+    geometry_valid: bool = False
+    """Derived path validity, also accepted when reading serialized outcomes."""
+
+    def __post_init__(self) -> None:
+        """Recompute geometry validity from its authoritative component checks."""
+        object.__setattr__(
+            self,
+            "geometry_valid",
+            self.finite
+            and self.ordered_waypoints_reached
+            and not self.joint_limit_violation,
+        )
 
     @property
     def end_to_end_success(self) -> bool | None:

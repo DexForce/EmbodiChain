@@ -153,8 +153,10 @@ def _build_case(
     start_state_bin: str,
     bin_index: int,
     track_id: str,
+    target_type: str = "eef",
+    joint_threshold_rad: float = 0.02,
 ) -> BenchmarkCase:
-    """Build one reachable env-batched case using FK reference targets.
+    """Build one reachable env-batched joint or Cartesian target case.
 
     Start postures depend only on ``(seed, start_state_bin, env_index)`` so the
     same env row keeps a shared start across path shapes and waypoint counts.
@@ -202,11 +204,28 @@ def _build_case(
         "path_shape": path_shape,
         "start_state_bin": start_state_bin,
     }
+    # Keep legacy Cartesian identifiers stable. Joint goals must have distinct
+    # identities even though both modalities share identical reachable inputs.
+    if target_type == "joint":
+        identity["target_type"] = target_type
+    case_parameters: dict[str, object] = {
+        "target_type": target_type,
+        "motion_validity": (
+            "ordered_joint_waypoints"
+            if target_type == "joint"
+            else "ordered_cartesian_waypoints"
+        ),
+    }
+    if target_type == "joint":
+        case_parameters["joint_threshold_rad"] = joint_threshold_rad
     case_id = f"free_space_{stable_hash(identity)[:16]}"
+    scenario_id = "waypoint_path" if num_waypoints > 1 else "reach"
+    if target_type == "joint":
+        scenario_id = f"joint_{scenario_id}"
     return BenchmarkCase(
         suite_version=suite.suite_version,
         track=track_id,
-        scenario_id="waypoint_path" if num_waypoints > 1 else "reach",
+        scenario_id=scenario_id,
         case_id=case_id,
         seed=seed,
         batch_size=batch_size,
@@ -217,11 +236,14 @@ def _build_case(
         target_waypoints=target_waypoints,
         reference_qpos=reference_qpos,
         robot_id=suite.robot.id,
+        primary_success="geometry_valid",
+        case_parameters=case_parameters,
     )
 
 
 class FreeSpaceScenario(ScenarioProvider):
-    required_capabilities = frozenset({"eef_waypoint", "batched", "empty_world"})
+    # Goal-specific support is checked per case by PlannerAdapter.supports_case.
+    required_capabilities = frozenset({"batched", "empty_world"})
 
     @staticmethod
     def _case_matrix(suite: SuiteCfg, track: TrackCfg) -> FreeSpaceTrackCfg:
@@ -249,20 +271,23 @@ class FreeSpaceScenario(ScenarioProvider):
                     for bin_index, start_state_bin in enumerate(
                         case_matrix.start_state_bins
                     ):
-                        cases.append(
-                            _build_case(
-                                suite,
-                                robot,
-                                control_part,
-                                seed=seed,
-                                batch_size=batch_size,
-                                num_waypoints=num_waypoints,
-                                path_shape=path_shape,
-                                start_state_bin=start_state_bin,
-                                bin_index=bin_index,
-                                track_id=track.id,
+                        for target_type in case_matrix.target_types:
+                            cases.append(
+                                _build_case(
+                                    suite,
+                                    robot,
+                                    control_part,
+                                    seed=seed,
+                                    batch_size=batch_size,
+                                    num_waypoints=num_waypoints,
+                                    path_shape=path_shape,
+                                    start_state_bin=start_state_bin,
+                                    bin_index=bin_index,
+                                    track_id=track.id,
+                                    target_type=target_type,
+                                    joint_threshold_rad=case_matrix.joint_threshold_rad,
+                                )
                             )
-                        )
         return cases
 
 

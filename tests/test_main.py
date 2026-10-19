@@ -529,3 +529,50 @@ def test_nested_benchmark_help_uses_suite_parser(
     assert "--tasks" in output
     assert "--algorithms" in output
     assert "--rebuild-report-only" in output
+
+
+def test_benchmark_help_distinguishes_benchmark_domains(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Benchmark categories remain discoverable at the shared command root."""
+    cli.main(["benchmark", "--help"])
+
+    output = " ".join(capsys.readouterr().out.split())
+    assert "motion-generation" in output
+    assert "Motion Planning or Atomic Skills suites" in output
+    assert "atomic-action" in output
+    assert "Profile individual atomic actions" in output
+    assert "robotics-kinematic-solver" in output
+    assert "rendering" in output
+
+
+@pytest.mark.parametrize(
+    ("suite_args", "expected_suite"),
+    [
+        ([], "motion_panda_free_space_smoke"),
+        (
+            ["--suite", "motion_ur5_free_space_coverage"],
+            "motion_ur5_free_space_coverage",
+        ),
+        (["--suite", "atomic_franka_pgi_smoke"], "atomic_franka_pgi_smoke"),
+    ],
+)
+def test_motion_generation_dispatch_selects_suite(
+    monkeypatch: pytest.MonkeyPatch,
+    suite_args: list[str],
+    expected_suite: str,
+) -> None:
+    """The domain command forwards either family and its canonical default."""
+    from scripts.benchmark.motion_generation import run_benchmark
+
+    received: dict[str, object] = {}
+
+    def fake_run_all_benchmarks(**kwargs: object) -> None:
+        received.update(kwargs)
+
+    monkeypatch.setattr(run_benchmark, "run_all_benchmarks", fake_run_all_benchmarks)
+
+    cli.main(["benchmark", "motion-generation", *suite_args, "--algorithms", "toppra"])
+
+    assert received["suite_name"] == expected_suite
+    assert received["algorithms"] == ["toppra"]

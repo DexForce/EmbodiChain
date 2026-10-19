@@ -95,7 +95,7 @@ def _suite_data(component: str) -> dict:
         "embodiment": {"component": component},
         "planners": [{"id": "selected", "adapter": "curobo", "enabled": True}],
         "protocol": {"warmup_trials": 0, "measured_trials": 1},
-        "tracks": [{"id": "atomic", "scenario": "atomic_task", "config": {}}],
+        "tracks": [{"id": "atomic", "scenario": "atomic_skill", "config": {}}],
     }
 
 

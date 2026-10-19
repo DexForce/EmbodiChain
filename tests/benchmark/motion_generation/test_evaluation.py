@@ -27,7 +27,7 @@ import torch
 
 from scripts.benchmark.motion_generation.aggregation import aggregate_results
 from scripts.benchmark.motion_generation.artifacts import TrialJsonlWriter
-from scripts.benchmark.motion_generation.config import SuiteCfg
+from scripts.benchmark.motion_generation.config import SuiteCfg, TrackCfg
 from scripts.benchmark.motion_generation.contracts import (
     PhysicalEvaluation,
     StageOutcome,
@@ -100,7 +100,7 @@ def _case(batch_size: int = 1, case_id: str = "case") -> BenchmarkCase:
     return BenchmarkCase(
         suite_version="standard_test_v1",
         track="primitive",
-        scenario_id="atomic_task",
+        scenario_id="atomic_skill",
         case_id=case_id,
         seed=11,
         batch_size=batch_size,
@@ -422,7 +422,8 @@ def test_jsonl_and_report_preserve_layers_and_stage_denominators(
         "not_applicable": 0,
         "unavailable": 1,
     }
-    report = write_markdown_report(tmp_path / "report.md", SuiteCfg(), aggregates)
+    suite = SuiteCfg(tracks=[TrackCfg(id=case.track, scenario="atomic_skill")])
+    report = write_markdown_report(tmp_path / "report.md", suite, aggregates)
     text = report.read_text()
     assert "physical_skill_success_rate" in text
     assert "stage_counts" in text

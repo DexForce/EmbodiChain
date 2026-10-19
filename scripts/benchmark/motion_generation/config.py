@@ -54,6 +54,7 @@ __all__ = [
 BENCHMARK_ROOT = Path(__file__).resolve().parent
 _FREE_SPACE_TRACK_ID = "free-space-common"
 _FREE_SPACE_SCENARIO = "free_space"
+_SUPPORTED_TARGET_TYPES = {"eef", "joint"}
 _SUPPORTED_PATH_SHAPES = {
     "direct",
     "l_turn",
@@ -71,7 +72,7 @@ _SUPPORTED_START_STATE_BINS = {
 
 @dataclass(frozen=True)
 class AtomicPoseRandomizationCfg:
-    """Normalized random-pose settings for an ``atomic_task`` track.
+    """Normalized random-pose settings for an ``atomic_skill`` track.
 
     The benchmark represents each random pose as one simulator environment
     row.  Consequently ``pose_batch_size`` is both the number of independently
@@ -130,27 +131,26 @@ class ProtocolCfg:
     rotation_threshold_rad: float = 0.1
     joint_limit_tolerance_rad: float = 1.0e-5
     confidence_level: float = 0.95
-    report_schema_version: str = "2"
+    report_schema_version: str = "3"
     seeds: list[int] = []
     joint_velocity_limit_rad_s: float | list[float] | None = None
-    """Per-joint or scalar velocity limit overriding the asset's.
+    """Optional per-joint or scalar speed budget, capped by effective robot limits.
 
-    The asset is the preferred source, but a backend that does not carry the
-    URDF's limits reports a placeholder instead, which would make the velocity
-    check vacuous. Stating the limit here restores it. FR3 publishes
-    2.62 / 2.62 / 2.62 / 2.62 / 5.26 / 4.18 / 5.26 rad/s.
+    Planning and validation use the same resolved limit. The explicit budget
+    also supplies a usable limit when a backend reports an unavailable asset
+    limit; it cannot increase a valid robot limit.
     """
     joint_acceleration_limit_rad_s2: float | list[float] | None = None
     """Per-joint or scalar acceleration limit, or ``None`` to report N/A.
 
     URDF carries no acceleration field and :class:`Robot` exposes no
     ``qacc_limits``, so this limit has no asset source and must be stated by the
-    suite. FR3 publishes 10 rad/s^2 uniformly across its seven joints.
+    suite as an evaluation budget.
     """
     joint_jerk_limit_rad_s3: float | list[float] | None = None
     """Per-joint or scalar jerk limit, or ``None`` to report N/A.
 
-    FR3 publishes 5000 rad/s^3 uniformly across its seven joints.
+    This is a suite-owned evaluation budget with no asset fallback.
     """
     dynamic_limit_tolerance: float = 1.0e-3
     """Relative slack on dynamic-limit utilization before a violation is flagged."""
@@ -186,6 +186,10 @@ class FreeSpaceTrackCfg:
     path_shapes: list[str] = ["direct", "l_turn", "s_curve"]
     start_state_bins: list[str] = ["nominal"]
     seeds: list[int] = [11]
+    target_types: list[str] = ["eef"]
+    """Target modalities; omission preserves the legacy Cartesian population."""
+    joint_threshold_rad: float = 0.02
+    """Maximum per-joint error when matching ordered joint targets."""
 
 
 @configclass
@@ -279,7 +283,7 @@ class SuiteCfg:
         if protocol.seeds:
             free_space.seeds = list(protocol.seeds)
             for track in tracks:
-                if track.scenario == "atomic_task" and "seeds" not in track.config:
+                if track.scenario == "atomic_skill" and "seeds" not in track.config:
                     track.config["seeds"] = list(protocol.seeds)
         suite = cls(
             schema_version=int(data.get("schema_version", 1)),
@@ -436,8 +440,12 @@ class SuiteCfg:
             raise ValueError("joint_limit_tolerance_rad must be >= 0.")
         if not 0.0 < self.protocol.confidence_level < 1.0:
             raise ValueError("confidence_level must be between 0 and 1.")
-        if not self.protocol.report_schema_version.strip():
-            raise ValueError("report_schema_version must be non-empty.")
+        if self.protocol.report_schema_version != "3":
+            raise ValueError(
+                "This runner writes report_schema_version '3'; migrate the suite "
+                "protocol to '3' before generating new reports. Existing artifacts "
+                "retain their original schema."
+            )
         if any(type(seed) is not int for seed in self.protocol.seeds):
             raise TypeError("protocol.seeds must contain integers.")
         if len(self.protocol.seeds) != len(set(self.protocol.seeds)):
@@ -472,8 +480,8 @@ class SuiteCfg:
         if any(track.scenario == _FREE_SPACE_SCENARIO for track in self.tracks):
             _validate_free_space(self.free_space)
         for track in self.tracks:
-            if track.scenario == "atomic_task":
-                _validate_atomic_task_track(track)
+            if track.scenario == "atomic_skill":
+                _validate_atomic_skill_track(track)
         for nmg in (spec for spec in self.planners if spec.adapter == "nmg_onnx"):
             for field, default in (
                 ("num_waypoints", 5),
@@ -552,6 +560,23 @@ def _merge_mappings(
 
 def _validate_free_space(free_space: FreeSpaceTrackCfg) -> None:
     """Validate free-space case-matrix fields."""
+    if not isinstance(free_space.target_types, (list, tuple)) or not all(
+        isinstance(value, str) for value in free_space.target_types
+    ):
+        raise TypeError("target_types must be a sequence of strings.")
+    if not free_space.target_types:
+        raise ValueError("target_types must not be empty.")
+    unknown_targets = set(free_space.target_types) - _SUPPORTED_TARGET_TYPES
+    if unknown_targets:
+        raise ValueError(f"Unsupported target_types: {sorted(unknown_targets)}.")
+    threshold = free_space.joint_threshold_rad
+    if (
+        not isinstance(threshold, (int, float))
+        or isinstance(threshold, bool)
+        or not math.isfinite(float(threshold))
+        or threshold <= 0.0
+    ):
+        raise ValueError("joint_threshold_rad must be finite and > 0.")
     if not free_space.batch_sizes or any(value < 1 for value in free_space.batch_sizes):
         raise ValueError("batch_sizes must contain positive integers.")
     if not free_space.waypoint_counts or any(
@@ -576,6 +601,7 @@ def _validate_free_space(free_space: FreeSpaceTrackCfg) -> None:
         ("path_shapes", free_space.path_shapes),
         ("start_state_bins", free_space.start_state_bins),
         ("seeds", free_space.seeds),
+        ("target_types", free_space.target_types),
     ):
         if len(values) != len(set(values)):
             raise ValueError(f"{name} must not contain duplicate values.")
@@ -645,7 +671,7 @@ def _integer(value: object, *, name: str) -> int:
 def resolve_atomic_pose_randomization(
     track: TrackCfg,
 ) -> AtomicPoseRandomizationCfg:
-    """Resolve shared random-pose controls from an Atomic Task track.
+    """Resolve shared random-pose controls from an Atomic Skill track.
 
     Accepted spellings are deliberately compatible with the existing
     skill-level randomization keys.  The canonical nested form is:
@@ -678,18 +704,18 @@ def resolve_atomic_pose_randomization(
     three-dimensional translation vectors use those radii while scalar and
     rotation ranges retain deterministic stratification.
     """
-    if track.scenario != "atomic_task":
+    if track.scenario != "atomic_skill":
         raise ValueError(
-            "resolve_atomic_pose_randomization expects an atomic_task track."
+            "resolve_atomic_pose_randomization expects an atomic_skill track."
         )
     config = track.config
     if not isinstance(config, Mapping):
-        raise TypeError("atomic-task track config must be a mapping.")
+        raise TypeError("atomic-skill track config must be a mapping.")
     raw_randomization = config.get("randomization", {})
     if raw_randomization is None:
         raw_randomization = {}
     if not isinstance(raw_randomization, Mapping):
-        raise TypeError("atomic-task randomization must be a mapping.")
+        raise TypeError("atomic-skill randomization must be a mapping.")
     randomization = dict(raw_randomization)
 
     batch_value = randomization.get("pose_batch_size")
@@ -701,7 +727,7 @@ def resolve_atomic_pose_randomization(
         batch_value = config.get("random_pose_count")
     pose_batch_size = _positive_int(
         batch_value,
-        name="atomic-task randomization.pose_batch_size",
+        name="atomic-skill randomization.pose_batch_size",
         default=1,
     )
 
@@ -710,7 +736,7 @@ def resolve_atomic_pose_randomization(
     )
     if mode not in {"translation", "planar_pose", "spatial_pose", "none"}:
         raise ValueError(
-            "atomic-task randomization.mode must be 'translation', "
+            "atomic-skill randomization.mode must be 'translation', "
             "'planar_pose', 'spatial_pose', or 'none'."
         )
 
@@ -722,7 +748,7 @@ def resolve_atomic_pose_randomization(
     )
     if sampling_pattern not in {"uniform", "stratified", "workspace_shell"}:
         raise ValueError(
-            "atomic-task randomization.sampling_pattern must be "
+            "atomic-skill randomization.sampling_pattern must be "
             "'uniform', 'stratified', or 'workspace_shell'."
         )
 
@@ -735,7 +761,7 @@ def resolve_atomic_pose_randomization(
         object_jitter_value = config.get("object_position_jitter_m")
     object_jitter = _finite_nonnegative_vector(
         object_jitter_value,
-        name="atomic-task randomization.object_translation_jitter_m",
+        name="atomic-skill randomization.object_translation_jitter_m",
         default=(0.0, 0.0, 0.0),
     )
 
@@ -744,7 +770,7 @@ def resolve_atomic_pose_randomization(
             "object_yaw_jitter_rad",
             config.get("object_yaw_jitter_rad"),
         ),
-        name="atomic-task randomization.object_yaw_jitter_rad",
+        name="atomic-skill randomization.object_yaw_jitter_rad",
         default=0.0,
     )
     object_roll_pitch_jitter = _finite_nonnegative_pair(
@@ -752,7 +778,7 @@ def resolve_atomic_pose_randomization(
             "object_roll_pitch_jitter_rad",
             config.get("object_roll_pitch_jitter_rad"),
         ),
-        name="atomic-task randomization.object_roll_pitch_jitter_rad",
+        name="atomic-skill randomization.object_roll_pitch_jitter_rad",
     )
 
     target_jitter_value = randomization.get("target_translation_jitter_m")
@@ -764,7 +790,7 @@ def resolve_atomic_pose_randomization(
         target_jitter_value = config.get("target_offset_jitter_m")
     target_jitter = _finite_nonnegative_vector(
         target_jitter_value,
-        name="atomic-task randomization.target_translation_jitter_m",
+        name="atomic-skill randomization.target_translation_jitter_m",
         default=(0.0, 0.0, 0.0),
     )
 
@@ -773,7 +799,7 @@ def resolve_atomic_pose_randomization(
             "target_yaw_jitter_rad",
             config.get("target_yaw_jitter_rad"),
         ),
-        name="atomic-task randomization.target_yaw_jitter_rad",
+        name="atomic-skill randomization.target_yaw_jitter_rad",
         default=0.0,
     )
     target_roll_pitch_jitter = _finite_nonnegative_pair(
@@ -781,7 +807,7 @@ def resolve_atomic_pose_randomization(
             "target_roll_pitch_jitter_rad",
             config.get("target_roll_pitch_jitter_rad"),
         ),
-        name="atomic-task randomization.target_roll_pitch_jitter_rad",
+        name="atomic-skill randomization.target_roll_pitch_jitter_rad",
     )
 
     support_jitter_value = randomization.get("support_object_translation_jitter_m")
@@ -793,7 +819,7 @@ def resolve_atomic_pose_randomization(
         support_jitter_value = config.get("support_object_position_jitter_m")
     support_jitter = _finite_nonnegative_vector(
         support_jitter_value,
-        name="atomic-task randomization.support_object_translation_jitter_m",
+        name="atomic-skill randomization.support_object_translation_jitter_m",
         default=(0.0, 0.0, 0.0),
     )
 
@@ -802,7 +828,7 @@ def resolve_atomic_pose_randomization(
             "support_object_yaw_jitter_rad",
             config.get("support_object_yaw_jitter_rad"),
         ),
-        name="atomic-task randomization.support_object_yaw_jitter_rad",
+        name="atomic-skill randomization.support_object_yaw_jitter_rad",
         default=0.0,
     )
     support_roll_pitch_jitter = _finite_nonnegative_pair(
@@ -810,7 +836,7 @@ def resolve_atomic_pose_randomization(
             "support_object_roll_pitch_jitter_rad",
             config.get("support_object_roll_pitch_jitter_rad"),
         ),
-        name="atomic-task randomization.support_object_roll_pitch_jitter_rad",
+        name="atomic-skill randomization.support_object_roll_pitch_jitter_rad",
     )
 
     task_frame_jitter_value = randomization.get("task_frame_translation_jitter_m")
@@ -818,7 +844,7 @@ def resolve_atomic_pose_randomization(
         task_frame_jitter_value = config.get("task_frame_translation_jitter_m")
     task_frame_jitter = _finite_nonnegative_vector(
         task_frame_jitter_value,
-        name="atomic-task randomization.task_frame_translation_jitter_m",
+        name="atomic-skill randomization.task_frame_translation_jitter_m",
         default=(0.0, 0.0, 0.0),
     )
 
@@ -827,7 +853,7 @@ def resolve_atomic_pose_randomization(
             "task_frame_yaw_jitter_rad",
             config.get("task_frame_yaw_jitter_rad"),
         ),
-        name="atomic-task randomization.task_frame_yaw_jitter_rad",
+        name="atomic-skill randomization.task_frame_yaw_jitter_rad",
         default=0.0,
     )
     task_frame_roll_pitch_jitter = _finite_nonnegative_pair(
@@ -835,7 +861,7 @@ def resolve_atomic_pose_randomization(
             "task_frame_roll_pitch_jitter_rad",
             config.get("task_frame_roll_pitch_jitter_rad"),
         ),
-        name="atomic-task randomization.task_frame_roll_pitch_jitter_rad",
+        name="atomic-skill randomization.task_frame_roll_pitch_jitter_rad",
     )
 
     if sampling_pattern == "workspace_shell":
@@ -852,7 +878,7 @@ def resolve_atomic_pose_randomization(
         ]
         if single_axis:
             raise ValueError(
-                "atomic-task workspace_shell requires both X and Y for "
+                "atomic-skill workspace_shell requires both X and Y for "
                 f"{', '.join(single_axis)}."
             )
         if not any(
@@ -860,13 +886,13 @@ def resolve_atomic_pose_randomization(
             for values in translation_jitters.values()
         ):
             raise ValueError(
-                "atomic-task workspace_shell requires at least one translation "
+                "atomic-skill workspace_shell requires at least one translation "
                 "jitter with positive X and Y ranges."
             )
 
     stride = _positive_int(
         randomization.get("seed_stride", config.get("randomization_seed_stride")),
-        name="atomic-task randomization.seed_stride",
+        name="atomic-skill randomization.seed_stride",
         default=1,
     )
     enabled_value = randomization.get("enabled")
@@ -891,7 +917,7 @@ def resolve_atomic_pose_randomization(
     elif isinstance(enabled_value, bool):
         enabled = enabled_value
     else:
-        raise TypeError("atomic-task randomization.enabled must be a boolean.")
+        raise TypeError("atomic-skill randomization.enabled must be a boolean.")
     if (
         mode == "none"
         and enabled
@@ -911,7 +937,7 @@ def resolve_atomic_pose_randomization(
         )
     ):
         raise ValueError(
-            "atomic-task randomization.mode='none' cannot specify non-zero jitter."
+            "atomic-skill randomization.mode='none' cannot specify non-zero jitter."
         )
     yaw_jitters = {
         "object_yaw_jitter_rad": object_yaw_jitter,
@@ -932,12 +958,12 @@ def resolve_atomic_pose_randomization(
     nonzero_rotation = [*nonzero_yaw, *nonzero_roll_pitch]
     if mode == "translation" and enabled and nonzero_rotation:
         raise ValueError(
-            "atomic-task randomization.mode='translation' cannot specify "
+            "atomic-skill randomization.mode='translation' cannot specify "
             f"{', '.join(nonzero_rotation)}."
         )
     if mode == "planar_pose" and enabled and nonzero_roll_pitch:
         raise ValueError(
-            "atomic-task randomization.mode='planar_pose' cannot specify "
+            "atomic-skill randomization.mode='planar_pose' cannot specify "
             f"{', '.join(nonzero_roll_pitch)}."
         )
     return AtomicPoseRandomizationCfg(
@@ -962,53 +988,53 @@ def resolve_atomic_pose_randomization(
 
 
 def resolve_atomic_batch_sizes(track: TrackCfg) -> list[int]:
-    """Return simulator batch sizes for an Atomic Task track.
+    """Return simulator batch sizes for an Atomic Skill track.
 
     Explicit ``batch_sizes`` remains authoritative.  When omitted, an enabled
     random-pose configuration uses its ``pose_batch_size`` as the single
     batch, allowing one planner call to evaluate all sampled poses.
     """
-    if track.scenario != "atomic_task":
-        raise ValueError("resolve_atomic_batch_sizes expects an atomic_task track.")
+    if track.scenario != "atomic_skill":
+        raise ValueError("resolve_atomic_batch_sizes expects an atomic_skill track.")
     randomization = resolve_atomic_pose_randomization(track)
     raw_values = track.config.get("batch_sizes")
     if raw_values is None:
         return [randomization.pose_batch_size if randomization.enabled else 1]
     if not isinstance(raw_values, Sequence) or isinstance(raw_values, (str, bytes)):
-        raise TypeError("atomic-task batch_sizes must be a sequence of integers.")
+        raise TypeError("atomic-skill batch_sizes must be a sequence of integers.")
     values = [
-        _positive_int(value, name="atomic-task batch_sizes", default=1)
+        _positive_int(value, name="atomic-skill batch_sizes", default=1)
         for value in raw_values
     ]
     if not values:
-        raise ValueError("atomic-task batch_sizes must not be empty.")
+        raise ValueError("atomic-skill batch_sizes must not be empty.")
     if len(values) != len(set(values)):
-        raise ValueError("atomic-task batch_sizes must not contain duplicates.")
+        raise ValueError("atomic-skill batch_sizes must not contain duplicates.")
     if randomization.enabled and values != [randomization.pose_batch_size]:
         # One randomized pose is assigned to each environment row, so its
         # declared pose batch and simulator batch must remain identical.
         raise ValueError(
-            "atomic-task randomization requires batch_sizes to contain exactly "
+            "atomic-skill randomization requires batch_sizes to contain exactly "
             f"[{randomization.pose_batch_size}] (one pose batch per case)."
         )
     return values
 
 
-def _validate_atomic_task_track(track: TrackCfg) -> None:
+def _validate_atomic_skill_track(track: TrackCfg) -> None:
     """Validate shared atomic-track matrix controls without touching skills."""
     resolve_atomic_pose_randomization(track)
     resolve_atomic_batch_sizes(track)
     values = track.config.get("seeds", [11])
     if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
-        raise TypeError("atomic-task seeds must be a sequence of integers.")
+        raise TypeError("atomic-skill seeds must be a sequence of integers.")
     if not values:
-        raise ValueError("atomic-task seeds must not be empty.")
-    seeds = [_integer(value, name="atomic-task seeds") for value in values]
+        raise ValueError("atomic-skill seeds must not be empty.")
+    seeds = [_integer(value, name="atomic-skill seeds") for value in values]
     if len(seeds) != len(set(seeds)):
-        raise ValueError("atomic-task seeds must not contain duplicate values.")
+        raise ValueError("atomic-skill seeds must not contain duplicate values.")
 
 
-def load_suite(name_or_path: str = "smoke") -> SuiteCfg:
+def load_suite(name_or_path: str = "motion_panda_free_space_smoke") -> SuiteCfg:
     """Load a suite by short name or explicit YAML path."""
     requested = Path(name_or_path)
     path = (

@@ -21,6 +21,7 @@ from __future__ import annotations
 import math
 from collections import Counter, defaultdict
 from collections.abc import Iterable
+from dataclasses import replace
 
 from .metrics.stats import nearest_rank_percentile
 from .generalization import aggregate_generalization
@@ -190,6 +191,51 @@ def _case_macro_rate_optional(
     return sum(case_rates) / len(case_rates) if case_rates else None
 
 
+def _timed_motion_rate(
+    measured: list[TrialRecord],
+    cases: list[BenchmarkCase],
+    *,
+    measured_trials: int,
+    fallback_timing: bool,
+    timing_records: list[TrialRecord] | None = None,
+    excluded_case_ids: frozenset[str] = frozenset(),
+) -> float | None:
+    """Score solved-clock cases against their full expected row/repeat population."""
+    by_case: dict[str, list[TrialRecord]] = defaultdict(list)
+    for record in measured:
+        by_case[record.case_id].append(record)
+    timing_by_case: dict[str, list[TrialRecord]] = defaultdict(list)
+    for record in measured if timing_records is None else timing_records:
+        timing_by_case[record.case_id].append(record)
+    rates = []
+    for case in cases:
+        if case.case_id in excluded_case_ids:
+            continue
+        rows = by_case.get(case.case_id, [])
+        solved = [
+            record
+            for record in rows
+            if record.metadata.get("timing_is_solved", fallback_timing) is True
+        ]
+        known = timing_by_case.get(case.case_id, [])
+        timing_applies = (
+            any(
+                record.metadata.get("timing_is_solved", fallback_timing) is True
+                for record in known
+            )
+            if known
+            else fallback_timing
+        )
+        if not timing_applies:
+            continue
+        outcomes = [outcome for record in solved for outcome in record.outcomes]
+        rates.append(
+            sum(outcome.timed_motion_valid is True for outcome in outcomes)
+            / max(len(outcomes), case.batch_size * measured_trials)
+        )
+    return sum(rates) / len(rates) if rates else None
+
+
 def _case_supports_attribute(case: BenchmarkCase, attribute: str) -> bool:
     """Return whether a staged outcome applies to one case protocol."""
     if attribute in {"task_success", "physical_skill_success", "end_to_end_success"}:
@@ -341,13 +387,53 @@ def _top_failure(outcomes: list[CaseOutcome]) -> str | None:
 
 def _unsupported_case_ids(records: Iterable[TrialRecord]) -> frozenset[str]:
     """Return capability-gated cases excluded from success denominators."""
+    by_case_source: dict[str, dict[str, list[TrialRecord]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    for record in records:
+        by_case_source[record.case_id][record.algorithm_id].append(record)
     return frozenset(
-        record.case_id
-        for record in records
-        if record.phase is TrialPhase.AVAILABILITY
+        case_id
+        for case_id, sources in by_case_source.items()
+        if all(_source_unsupported(rows) for rows in sources.values())
+    )
+
+
+def _source_unsupported(records: list[TrialRecord]) -> bool:
+    """Return whether a source was explicitly gated without measured evidence."""
+    return not any(record.phase is TrialPhase.MEASURED for record in records) and any(
+        record.phase is TrialPhase.AVAILABILITY
         and record.status == "unsupported"
         and record.failure_code in {"unsupported_capability", "unsupported_capacity"}
+        for record in records
     )
+
+
+def _rate_cases(
+    cases: list[BenchmarkCase], records: list[TrialRecord], *, effective: bool
+) -> list[BenchmarkCase]:
+    """Retain each case's weight while counting every applicable source repeat."""
+    if not effective:
+        return cases
+    by_case_source: dict[str, dict[str, list[TrialRecord]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    for record in records:
+        by_case_source[record.case_id][record.algorithm_id].append(record)
+    return [
+        replace(
+            case,
+            batch_size=case.batch_size
+            * max(
+                1,
+                sum(
+                    not _source_unsupported(rows)
+                    for rows in by_case_source[case.case_id].values()
+                ),
+            ),
+        )
+        for case in cases
+    ]
 
 
 def _stage_success_rates(
@@ -573,12 +659,12 @@ def _performance_rows(
                 "end_to_end_time_ms": _mean(
                     record.end_to_end_time_ms for record in group
                 ),
-                "native_timing": info.native_timing,
+                "timing_is_solved": info.timing_is_solved,
                 # A planner that never solves timing reports a nominal dt, so
                 # its duration is not comparable with a solved one.
                 "trajectory_duration_s": (
                     _mean(record.trajectory_duration_s for record in group)
-                    if info.native_timing
+                    if info.timing_is_solved
                     else None
                 ),
                 "trajectory_waypoints": _mean(
@@ -650,7 +736,7 @@ def _metric_rows(
 
     Boolean success columns use the same case-level macro average as the
     leaderboard (missing cases contribute ``0.0``). Continuous quality metrics
-    remain conditioned on externally motion-valid outcomes. Cases whose
+    remain conditioned on externally geometry-valid outcomes. Cases whose
     scenario bypasses the selected planner are excluded from planner metrics
     and reported under the algorithm that actually produced their motion.
     """
@@ -671,9 +757,6 @@ def _metric_rows(
         ],
         list[TrialRecord],
     ] = defaultdict(list)
-    unsupported_by_report_key_track: dict[tuple[tuple[str, bool], str], set[str]] = (
-        defaultdict(set)
-    )
     bypassed_by_algorithm_track: dict[tuple[str, str], set[str]] = defaultdict(set)
     effective_case_sources: dict[tuple[str, str, str], set[str]] = defaultdict(set)
     effective_algorithms: set[str] = set()
@@ -692,15 +775,6 @@ def _metric_rows(
                     record.case_id,
                 )
             ].add(record.algorithm_id)
-        if (
-            record.phase is TrialPhase.AVAILABILITY
-            and record.status == "unsupported"
-            and record.failure_code
-            in {"unsupported_capability", "unsupported_capacity"}
-        ):
-            unsupported_by_report_key_track[(report_key, record.track)].add(
-                record.case_id
-            )
         if record.phase is not TrialPhase.MEASURED:
             continue
         key = (
@@ -838,11 +912,22 @@ def _metric_rows(
                 ),
                 [],
             )
-            excluded_case_ids = frozenset(
-                unsupported_by_report_key_track[(report_key, track)]
+            population_records = [
+                record
+                for record in records
+                if record.track == track
+                and (
+                    record.effective_motion_algorithm,
+                    not record.uses_selected_planner_backend,
+                )
+                == report_key
+            ]
+            excluded_case_ids = _unsupported_case_ids(population_records)
+            rate_cases = _rate_cases(
+                group_cases, population_records, effective=is_effective
             )
             outcomes = [outcome for record in measured for outcome in record.outcomes]
-            valid_outcomes = [outcome for outcome in outcomes if outcome.motion_valid]
+            valid_outcomes = [outcome for outcome in outcomes if outcome.geometry_valid]
             expected = sum(
                 case.batch_size
                 * measured_trials
@@ -873,55 +958,77 @@ def _metric_rows(
                     "coverage_rate": min(1.0, len(outcomes) / max(expected, 1)),
                     "success_rate": _case_macro_primary_rate(
                         measured,
-                        group_cases,
+                        rate_cases,
                         excluded_case_ids=excluded_case_ids,
                         measured_trials=measured_trials,
                     ),
                     "planning_success_rate": _case_macro_rate(
                         measured,
-                        group_cases,
+                        rate_cases,
                         "planning_success",
                         excluded_case_ids=excluded_case_ids,
                         measured_trials=measured_trials,
                     ),
+                    "geometry_valid_rate": _case_macro_rate(
+                        measured,
+                        rate_cases,
+                        "geometry_valid",
+                        measured_trials=measured_trials,
+                        excluded_case_ids=excluded_case_ids,
+                    ),
+                    "timed_motion_valid_rate": _timed_motion_rate(
+                        measured,
+                        rate_cases,
+                        measured_trials=measured_trials,
+                        timing_records=population_records,
+                        fallback_timing=next(
+                            (
+                                info.timing_is_solved
+                                for info in metadata
+                                if info.algorithm_id == algorithm_id
+                            ),
+                            False,
+                        ),
+                        excluded_case_ids=excluded_case_ids,
+                    ),
                     "motion_valid_rate": _case_macro_rate(
                         measured,
-                        group_cases,
+                        rate_cases,
                         "motion_valid",
                         excluded_case_ids=excluded_case_ids,
                         measured_trials=measured_trials,
                     ),
                     "execution_success_rate": _case_macro_optional_rate(
                         measured,
-                        group_cases,
+                        rate_cases,
                         "execution_success",
                         excluded_case_ids=excluded_case_ids,
                         measured_trials=measured_trials,
                     ),
                     "task_success_rate": _case_macro_optional_rate(
                         measured,
-                        group_cases,
+                        rate_cases,
                         "task_success",
                         excluded_case_ids=excluded_case_ids,
                         measured_trials=measured_trials,
                     ),
                     "ordered_waypoint_success_rate": _case_macro_rate(
                         measured,
-                        group_cases,
+                        rate_cases,
                         "ordered_waypoints_reached",
                         excluded_case_ids=excluded_case_ids,
                         measured_trials=measured_trials,
                     ),
                     "physical_skill_success_rate": _case_macro_optional_rate(
                         measured,
-                        group_cases,
+                        rate_cases,
                         "physical_skill_success",
                         excluded_case_ids=excluded_case_ids,
                         measured_trials=measured_trials,
                     ),
                     "end_to_end_success_rate": _case_macro_optional_rate(
                         measured,
-                        group_cases,
+                        rate_cases,
                         "end_to_end_success",
                         excluded_case_ids=excluded_case_ids,
                         measured_trials=measured_trials,
@@ -941,12 +1048,12 @@ def _metric_rows(
                     ),
                     "stage_counts": _stage_counts(
                         measured,
-                        group_cases,
+                        rate_cases,
                         excluded_case_ids=excluded_case_ids,
                     ),
                     "waypoint_completion_rate": _case_macro_mean(
                         measured,
-                        group_cases,
+                        rate_cases,
                         "completed_waypoint_ratio",
                         excluded_case_ids=excluded_case_ids,
                     ),
@@ -966,7 +1073,7 @@ def _metric_rows(
                     ),
                     "joint_violation_rate": _case_macro_rate(
                         measured,
-                        group_cases,
+                        rate_cases,
                         "joint_limit_violation",
                         excluded_case_ids=excluded_case_ids,
                         measured_trials=measured_trials,
@@ -1047,7 +1154,7 @@ def _metric_rows(
                     ),
                     "stage_success_rates": _stage_success_rates(
                         measured,
-                        group_cases,
+                        rate_cases,
                         excluded_case_ids=excluded_case_ids,
                     ),
                     "top_failure": _top_failure(outcomes),
@@ -1181,14 +1288,339 @@ def _leaderboard_rows(
     return entries
 
 
+def _view_leaderboard(
+    records: list[TrialRecord],
+    metadata: list[PlannerMetadata],
+    cases: list[BenchmarkCase],
+    measured_trials: int,
+    *,
+    view: str,
+    timing: bool = False,
+) -> list[dict[str, object]]:
+    """Rank one explicit scenario family without mixing clocks or timing scopes."""
+    entries: list[dict[str, object]] = []
+    info_by_id = {info.algorithm_id: info for info in metadata}
+    identities = [(info.algorithm_id, False) for info in metadata]
+    identities += sorted(
+        {
+            (record.effective_motion_algorithm, True)
+            for record in records
+            if not record.uses_selected_planner_backend
+        }
+    )
+    for track in _track_ids(records, cases):
+        track_cases = [case for case in cases if case.track == track]
+        ranked = []
+        for algorithm, effective in identities:
+            population = [
+                record
+                for record in records
+                if record.track == track
+                and (
+                    record.effective_motion_algorithm,
+                    not record.uses_selected_planner_backend,
+                )
+                == (algorithm, effective)
+            ]
+            if effective:
+                attributed_cases = [
+                    case
+                    for case in track_cases
+                    if any(record.case_id == case.case_id for record in population)
+                ]
+            else:
+                bypassed = _bypassed_case_ids(records, algorithm, track)
+                attributed_cases = [
+                    case for case in track_cases if case.case_id not in bypassed
+                ]
+            if effective and not attributed_cases:
+                continue
+            rate_cases = _rate_cases(attributed_cases, population, effective=effective)
+            measured = [
+                record for record in population if record.phase is TrialPhase.MEASURED
+            ]
+            excluded = _unsupported_case_ids(population)
+            info = info_by_id.get(algorithm)
+            solved = False if effective or info is None else info.timing_is_solved
+            outcomes = [outcome for record in measured for outcome in record.outcomes]
+            expected = sum(
+                case.batch_size
+                * measured_trials
+                * (
+                    len(
+                        {
+                            record.algorithm_id
+                            for record in population
+                            if record.case_id == case.case_id
+                        }
+                    )
+                    if effective
+                    else 1
+                )
+                for case in attributed_cases
+            )
+            coverage = min(1.0, len(outcomes) / max(1, expected))
+            geometry = _case_macro_rate(
+                measured,
+                rate_cases,
+                "geometry_valid",
+                measured_trials=measured_trials,
+                excluded_case_ids=excluded,
+            )
+            timed = _timed_motion_rate(
+                measured,
+                rate_cases,
+                measured_trials=measured_trials,
+                fallback_timing=solved,
+                timing_records=population,
+                excluded_case_ids=excluded,
+            )
+            primary = _case_macro_primary_rate(
+                measured,
+                rate_cases,
+                measured_trials=measured_trials,
+                excluded_case_ids=excluded,
+            )
+            success = (
+                (timed if timing else geometry)
+                if view == "motion_planning"
+                else primary
+            )
+            if not any(case.case_id not in excluded for case in attributed_cases):
+                success = None
+            latency = _case_macro_latency_p95(measured, rate_cases)
+            row = {
+                "view": view,
+                "ranking": (
+                    "timed_motion"
+                    if timing
+                    else ("geometry" if view == "motion_planning" else "physical_skill")
+                ),
+                "track": track,
+                "algorithm": algorithm,
+                "algorithm_role": (
+                    _EFFECTIVE_MOTION_ALGORITHM_ROLE
+                    if effective
+                    else info.algorithm_role.value
+                ),
+                "model_revision": None if effective else info.model_revision,
+                "planner_config_hash": None if effective else info.config_hash[:12],
+                "eligible": bool(attributed_cases)
+                and coverage >= 1.0 - 1.0e-12
+                and success is not None,
+                "attributed_cases": len(attributed_cases),
+                "bypassed_cases": len(track_cases) - len(attributed_cases),
+                "coverage_rate": coverage,
+                "overall_success_rate": success,
+                "geometry_valid_rate": geometry,
+                "timed_motion_valid_rate": timed,
+                "planning_success_rate": _case_macro_rate(
+                    measured,
+                    rate_cases,
+                    "planning_success",
+                    measured_trials=measured_trials,
+                    excluded_case_ids=excluded,
+                ),
+                "latency_p95_ms": latency if view == "motion_planning" else None,
+                "compile_latency_p95_ms": latency if view == "atomic_skills" else None,
+                "peak_gpu_mb": _peak_gpu(measured),
+            }
+            for attribute in (
+                "motion_valid",
+                "execution_success",
+                "task_success",
+                "physical_skill_success",
+                "end_to_end_success",
+            ):
+                row[f"{attribute}_rate"] = _case_macro_optional_rate(
+                    measured,
+                    rate_cases,
+                    attribute,
+                    measured_trials=measured_trials,
+                    excluded_case_ids=excluded,
+                )
+            ranked.append(row)
+        ranked.sort(
+            key=lambda row: (
+                not row["eligible"],
+                -(
+                    float(row["overall_success_rate"])
+                    if row["overall_success_rate"] is not None
+                    else -1.0
+                ),
+                -float(row["coverage_rate"]),
+                float(
+                    row["latency_p95_ms"]
+                    if row["latency_p95_ms"] is not None
+                    else (
+                        row["compile_latency_p95_ms"]
+                        if row["compile_latency_p95_ms"] is not None
+                        else math.inf
+                    )
+                ),
+                str(row["algorithm"]),
+            )
+        )
+        rank = 0
+        for row in ranked:
+            if row["overall_success_rate"] is not None:
+                rank += 1
+                row["rank"] = rank
+            else:
+                row["rank"] = None
+            entries.append(row)
+    return entries
+
+
+def _view_performance(
+    records: list[TrialRecord],
+    metadata: list[PlannerMetadata],
+    cases: list[BenchmarkCase],
+    *,
+    view: str,
+) -> list[dict[str, object]]:
+    """Attribute measured costs to the actual algorithm and label their scope."""
+    metadata_by_id = {info.algorithm_id: info for info in metadata}
+    identities = [(info.algorithm_id, False) for info in metadata]
+    identities.extend(
+        sorted(
+            {
+                (record.effective_motion_algorithm, True)
+                for record in records
+                if not record.uses_selected_planner_backend
+            }
+        )
+    )
+    internal_ids = {
+        identity: f"report_identity_{index}"
+        for index, identity in enumerate(identities)
+    }
+    display_ids = {internal: identity for identity, internal in internal_ids.items()}
+    projected_metadata = []
+    for algorithm, effective in identities:
+        if effective:
+            source = next(
+                record
+                for record in records
+                if not record.uses_selected_planner_backend
+                and record.effective_motion_algorithm == algorithm
+            )
+            info = metadata_by_id[source.algorithm_id]
+            timing_is_solved = source.metadata.get("timing_is_solved") is True
+        else:
+            info = metadata_by_id[algorithm]
+            timing_is_solved = info.timing_is_solved
+        projected_metadata.append(
+            replace(
+                info,
+                algorithm_id=internal_ids[(algorithm, effective)],
+                timing_is_solved=timing_is_solved,
+            )
+        )
+
+    projected = []
+    for record in records:
+        # Construction and backend preparation belong to the configured
+        # adapter even when a later skill bypasses it. Do not charge these
+        # lifecycle costs to the effective scenario-owned motion algorithm.
+        identity = (
+            (record.algorithm_id, False)
+            if record.phase in (TrialPhase.CONSTRUCT, TrialPhase.PREPARE)
+            else (
+                record.effective_motion_algorithm,
+                not record.uses_selected_planner_backend,
+            )
+        )
+        projected.append(
+            replace(
+                record,
+                algorithm_id=internal_ids[identity],
+                metadata={**record.metadata, "selected_planner_backend_used": True},
+            )
+        )
+    rows = _performance_rows(projected, projected_metadata, cases)
+    for row in rows:
+        algorithm, effective = display_ids[row["algorithm"]]
+        row["algorithm"] = algorithm
+        row["view"] = view
+        group = [
+            record
+            for record in records
+            if record.phase is TrialPhase.MEASURED
+            and record.track == row["track"]
+            and (
+                record.effective_motion_algorithm,
+                not record.uses_selected_planner_backend,
+            )
+            == (algorithm, effective)
+            and record.robot_id == row["robot"]
+            and record.skill_id == row["skill"]
+            and record.object_id == row["object"]
+            and record.task_difficulty == row["task_difficulty"]
+            and record.batch_size == row["batch_size"]
+            and record.waypoint_count == row["waypoint_count"]
+        ]
+        if group:
+            solved = all(
+                record.metadata.get(
+                    "timing_is_solved",
+                    metadata_by_id[record.algorithm_id].timing_is_solved,
+                )
+                is True
+                for record in group
+            )
+            row["timing_is_solved"] = solved
+            row["trajectory_duration_s"] = (
+                _mean(record.trajectory_duration_s for record in group)
+                if solved
+                else None
+            )
+        if effective:
+            row["algorithm_role"] = _EFFECTIVE_MOTION_ALGORITHM_ROLE
+            row["planner_construct_ms"] = None
+            row["backend_prepare_ms"] = None
+        row["timing_scope"] = (
+            "atomic_action_compile" if view == "atomic_skills" else "planner_call"
+        )
+        row["planning_time_ms"] = (
+            row["cost_time_ms"] if view == "motion_planning" else None
+        )
+        row["compile_time_ms"] = (
+            row["cost_time_ms"] if view == "atomic_skills" else None
+        )
+        row["compile_time_ms_p50"] = (
+            row["warm_plan_ms_p50"] if view == "atomic_skills" else None
+        )
+        row["compile_time_ms_p95"] = (
+            row["warm_plan_ms_p95"] if view == "atomic_skills" else None
+        )
+        if view == "atomic_skills":
+            for name in (
+                "warm_plan_ms_p50",
+                "warm_plan_ms_p95",
+                "latency_per_env_ms",
+                "cost_time_per_waypoint_ms",
+                "trajectories_per_second",
+            ):
+                row[name] = None
+    return rows
+
+
 def aggregate_results(
     records: list[TrialRecord],
     metadata: list[PlannerMetadata],
     cases: list[BenchmarkCase],
     measured_trials: int,
+    *,
+    track_scenarios: dict[str, str] | None = None,
 ) -> dict[str, list[dict[str, object]]]:
-    """Build all three report datasets from raw numeric records."""
-    return {
+    """Build raw aggregates and scenario-owned report views with separate ranks.
+
+    ``track_scenarios`` is the suite's expanded track-to-scenario mapping.
+    Omitting it preserves legacy aggregates; it never infers a family from a
+    skill id, scenario display name, or track naming convention.
+    """
+    result = {
         "time_and_memory": _performance_rows(records, metadata, cases),
         "success_and_metrics": _metric_rows(records, metadata, cases, measured_trials),
         "leaderboard": _leaderboard_rows(records, metadata, cases, measured_trials),
@@ -1196,3 +1628,57 @@ def aggregate_results(
             records, metadata, cases, measured_trials
         ),
     }
+    if track_scenarios is None:
+        return result
+    result["report_views"] = []
+    for scenario, view, title in (
+        ("free_space", "motion_planning", "Motion Planning"),
+        ("atomic_skill", "atomic_skills", "Atomic Skills"),
+    ):
+        tracks = {
+            track for track, owner in track_scenarios.items() if owner == scenario
+        }
+        if not tracks:
+            continue
+        view_cases = [case for case in cases if case.track in tracks]
+        view_records = [record for record in records if record.track in tracks]
+        result["report_views"].append(
+            {
+                "view": view,
+                "title": title,
+                "tracks": sorted(tracks),
+                "schema_version": 3,
+            }
+        )
+        result[f"{view}_time_and_memory"] = _view_performance(
+            view_records, metadata, view_cases, view=view
+        )
+        result[f"{view}_success_and_metrics"] = [
+            {
+                **row,
+                "view": view,
+                "success_rate": (
+                    row["geometry_valid_rate"]
+                    if view == "motion_planning"
+                    else row["success_rate"]
+                ),
+            }
+            for row in result["success_and_metrics"]
+            if row["track"] in tracks
+        ]
+        result[f"{view}_leaderboard"] = _view_leaderboard(
+            view_records, metadata, view_cases, measured_trials, view=view
+        )
+        if view == "motion_planning":
+            result["motion_timing_leaderboard"] = _view_leaderboard(
+                view_records,
+                metadata,
+                view_cases,
+                measured_trials,
+                view=view,
+                timing=True,
+            )
+            result["motion_geometry_leaderboard"] = result[f"{view}_leaderboard"]
+        else:
+            result["atomic_leaderboard"] = result[f"{view}_leaderboard"]
+    return result

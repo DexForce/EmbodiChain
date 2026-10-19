@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Pure-logic tests for the planner-oriented Atomic Task benchmark track."""
+"""Pure-logic tests for the planner-oriented Atomic Skill benchmark track."""
 
 from __future__ import annotations
 
@@ -57,8 +57,8 @@ from scripts.benchmark.motion_generation.scenarios.atomic_objects import (
     atomic_object_kind_names,
     create_atomic_object,
 )
-from scripts.benchmark.motion_generation.scenarios.atomic_task import (
-    AtomicTaskScenario,
+from scripts.benchmark.motion_generation.scenarios.atomic_skill import (
+    AtomicSkillScenario,
     _ExecutionObservation,
     _atomic_case_id,
     _articulation_effect_success,
@@ -88,9 +88,9 @@ def _atomic_case() -> BenchmarkCase:
     target = torch.eye(4).reshape(1, 1, 4, 4)
     return BenchmarkCase(
         suite_version="atomic_test_v1",
-        track="atomic-task",
+        track="atomic-skill",
         scenario_id="move_end_effector",
-        case_id="atomic-task:move_end_effector:simple:s11",
+        case_id="atomic-skill:move_end_effector:simple:s11",
         seed=11,
         batch_size=1,
         num_waypoints=1,
@@ -142,11 +142,11 @@ def _atomic_outcome() -> CaseOutcome:
 
 
 def test_atomic_case_identity_includes_simulator_batch_size() -> None:
-    case_b1 = _atomic_case_id("atomic-task", "pick_up", "cube", batch_size=1, seed=11)
-    case_b8 = _atomic_case_id("atomic-task", "pick_up", "cube", batch_size=8, seed=11)
+    case_b1 = _atomic_case_id("atomic-skill", "pick_up", "cube", batch_size=1, seed=11)
+    case_b8 = _atomic_case_id("atomic-skill", "pick_up", "cube", batch_size=8, seed=11)
 
-    assert case_b1 == "atomic-task:pick_up:cube:b1:s11"
-    assert case_b8 == "atomic-task:pick_up:cube:b8:s11"
+    assert case_b1 == "atomic-skill:pick_up:cube:b1:s11"
+    assert case_b8 == "atomic-skill:pick_up:cube:b8:s11"
     assert case_b1 != case_b8
 
 
@@ -849,14 +849,14 @@ def _fake_articulation_geometry(*, joint_type: str) -> dict[str, torch.Tensor]:
 
 
 def test_atomic_suite_is_franka_pgi_and_curobo_only():
-    suite = load_suite("atomic_franka_pgi_curobo")
+    suite = load_suite("atomic_franka_pgi_smoke")
 
-    assert suite.suite_version == "atomic_franka_pgi_curobo_smoke_v3"
+    assert suite.suite_version == "atomic_franka_pgi_smoke_v4"
     assert suite.robot.id == "franka_pgi"
     assert suite.robot.provider == "franka_pgi"
     assert [spec.id for spec in suite.planners if spec.enabled] == ["curobo"]
     assert [(track.id, track.scenario) for track in suite.enabled_tracks()] == [
-        ("atomic-task", "atomic_task")
+        ("atomic-skill", "atomic_skill")
     ]
     skills = suite.enabled_tracks()[0].config["skills"]
     assert [item["id"] for item in skills] == [
@@ -978,16 +978,14 @@ def test_atomic_suite_is_franka_pgi_and_curobo_only():
     }
 
 
-def test_randomized_atomic_suite_covers_six_skills_with_fixed_seed_sweep():
-    suite = load_suite("atomic_franka_pgi_curobo_randomized")
+def test_randomized_atomic_suite_covers_four_interaction_skills_with_fixed_seed_sweep():
+    suite = load_suite("atomic_franka_pgi_randomized")
     track = suite.enabled_tracks()[0]
 
-    assert suite.suite_version == "atomic_franka_pgi_curobo_randomized_v1"
-    assert track.id == "atomic-task-randomized"
+    assert suite.suite_version == "atomic_franka_pgi_randomized_v2"
+    assert track.id == "atomic-skill-randomized"
     assert track.config["seeds"] == list(range(101, 117))
     assert [item["id"] for item in track.config["skills"]] == [
-        "move_end_effector",
-        "move_joints",
         "pick_up",
         "move_held_object",
         "place",
@@ -1012,17 +1010,15 @@ def test_randomized_atomic_suite_covers_six_skills_with_fixed_seed_sweep():
     assert press["articulation_position_jitter_m"] == [0.03, 0.03, 0.015]
 
 
-def test_ur5_atomic_suite_loads_nmg_and_six_skills():
-    suite = load_suite("ur5_atomic_randomized")
+def test_ur5_atomic_suite_loads_nmg_and_four_interaction_skills():
+    suite = load_suite("atomic_ur5_pgi_randomized")
     track = suite.enabled_tracks()[0]
 
     assert suite.robot.id == "ur5_pgi"
     assert suite.robot.provider == "ur5_pgi"
     assert [spec.id for spec in suite.planners if spec.enabled] == ["nmg"]
-    assert track.scenario == "atomic_task"
+    assert track.scenario == "atomic_skill"
     assert [item["id"] for item in track.config["skills"]] == [
-        "move_end_effector",
-        "move_joints",
         "pick_up",
         "move_held_object",
         "place",
@@ -1031,7 +1027,7 @@ def test_ur5_atomic_suite_loads_nmg_and_six_skills():
 
 
 def test_ur5_pgi_robot_provider_exposes_six_joint_arm_and_hand():
-    suite = load_suite("ur5_atomic_randomized")
+    suite = load_suite("atomic_ur5_pgi_randomized")
     cfg = create_robot_provider(suite.robot).build_cfg()
 
     assert cfg.uid == "benchmark_ur5_pgi"
@@ -1101,7 +1097,7 @@ def test_randomization_manifest_records_contract_and_seed():
 def test_franka_pgi_robot_provider_exposes_arm_hand_and_tcp():
     from embodichain_robots import FrankaPandaPgiCfg
 
-    suite = load_suite("atomic_franka_pgi_curobo")
+    suite = load_suite("atomic_franka_pgi_smoke")
     cfg = create_robot_provider(suite.robot).build_cfg()
 
     assert isinstance(cfg, FrankaPandaPgiCfg)
@@ -1149,10 +1145,9 @@ def test_contact_benchmarks_use_attributed_ik_interpolation(skill_id: str) -> No
         "effective_motion_algorithm": "sequential_ik_interpolation",
     }
     assert _benchmark_motion_attribution(skill_id) == expected
-    assert (
-        AtomicTaskScenario().trial_metadata(replace(_atomic_case(), skill_id=skill_id))
-        == expected
-    )
+    assert AtomicSkillScenario().trial_metadata(
+        replace(_atomic_case(), skill_id=skill_id)
+    ) == {**expected, "timing_scope": "atomic_action_compile", "timing_is_solved": True}
 
 
 def test_noncontact_benchmarks_retain_selected_planner_attribution() -> None:
@@ -1170,7 +1165,7 @@ def test_noncontact_benchmarks_retain_selected_planner_attribution() -> None:
 def test_atomic_scenario_accepts_required_contact_strategy(skill_id: str) -> None:
     case = replace(
         _atomic_case(),
-        case_id=f"atomic-task:{skill_id}:simple:s11",
+        case_id=f"atomic-skill:{skill_id}:simple:s11",
         scenario_id=skill_id,
         skill_id=skill_id,
     )
@@ -1190,7 +1185,7 @@ def test_atomic_scenario_accepts_required_contact_strategy(skill_id: str) -> Non
     compiled = object()
     engine = Mock(motion_generator=motion_generator)
     engine.compile.return_value = compiled
-    scenario = AtomicTaskScenario()
+    scenario = AtomicSkillScenario()
     scenario.simulation = SimpleNamespace(sim_config=SimpleNamespace(physics_dt=0.01))
     scenario.robot = SimpleNamespace(device=torch.device("cpu"))
     scenario._engine = engine
@@ -1348,7 +1343,7 @@ def test_new_atomic_skill_cases_freeze_reference_waypoints(
         robot=Mock(id="franka_pgi"),
         protocol=Mock(rotation_threshold_rad=0.1),
     )
-    track = Mock(id="atomic-task")
+    track = Mock(id="atomic-skill")
 
     case = create_atomic_skill_provider(skill_id).generate_case(
         scenario,
@@ -1360,7 +1355,7 @@ def test_new_atomic_skill_cases_freeze_reference_waypoints(
     )
 
     assert case.skill_id == skill_id
-    assert case.case_id == f"atomic-task:{skill_id}:{config['name']}:b8:s11"
+    assert case.case_id == f"atomic-skill:{skill_id}:{config['name']}:b8:s11"
     assert torch.equal(case.full_start_qpos, _canonical_case_qpos(raw_start))
     assert torch.equal(case.start_qpos, case.full_start_qpos[:, list(range(7))])
     assert not torch.equal(case.start_qpos, raw_start)
@@ -1429,7 +1424,7 @@ def test_fixed_held_object_case_keeps_pickup_and_transport_at_table_pose() -> No
         robot=Mock(id="franka_pgi"),
         protocol=Mock(rotation_threshold_rad=0.1),
     )
-    track = Mock(id="atomic-task")
+    track = Mock(id="atomic-skill")
     config = {
         "name": "fixed_table_pick",
         "object": "cube",
@@ -1493,8 +1488,10 @@ def _compiled_replay_batch(
 
 def test_partial_compiled_batch_is_replayable() -> None:
     """One successful row should not be blocked by another failed row."""
-    assert AtomicTaskScenario._is_replayable(_compiled_replay_batch([True, False]))
-    assert not AtomicTaskScenario._is_replayable(_compiled_replay_batch([False, False]))
+    assert AtomicSkillScenario._is_replayable(_compiled_replay_batch([True, False]))
+    assert not AtomicSkillScenario._is_replayable(
+        _compiled_replay_batch([False, False])
+    )
 
 
 def test_replay_holds_failed_rows_at_their_frozen_start() -> None:
@@ -1512,7 +1509,7 @@ def test_replay_holds_failed_rows_at_their_frozen_start() -> None:
         batch_size=2,
         full_start_qpos=start_qpos,
     )
-    scenario = AtomicTaskScenario()
+    scenario = AtomicSkillScenario()
     scenario.simulation = Mock()
     scenario.robot = Mock()
     scenario.track = Mock(
@@ -1538,7 +1535,7 @@ def test_replay_holds_failed_rows_at_their_frozen_start() -> None:
 def test_execute_masks_failed_plan_rows_from_execution_success() -> None:
     """Controller tracking cannot turn a planner-failed row into success."""
     batch_size = 2
-    scenario = AtomicTaskScenario()
+    scenario = AtomicSkillScenario()
     scenario.simulation = Mock(sim_config=Mock(physics_dt=0.01))
     scenario.robot = Mock(device=torch.device("cpu"))
     scenario.robot.get_qpos.side_effect = lambda name=None: torch.zeros(batch_size, 7)
@@ -1669,7 +1666,7 @@ def test_object_motion_requires_measured_target_pose(
         task_completion_time_s=0.1,
         final_object_pose=final_pose,
     )
-    scenario = AtomicTaskScenario()
+    scenario = AtomicSkillScenario()
     scenario.suite = Mock(protocol=Mock(rotation_threshold_rad=0.10))
     outcomes = tuple(replace(_atomic_outcome(), env_index=index) for index in range(3))
 
@@ -1711,7 +1708,7 @@ def test_target_yaw_domain_requires_measured_full_rotation(skill_id: str) -> Non
         task_completion_time_s=0.1,
         final_object_pose=final_pose,
     )
-    scenario = AtomicTaskScenario()
+    scenario = AtomicSkillScenario()
     scenario.suite = Mock(protocol=Mock(rotation_threshold_rad=0.10))
     outcomes = tuple(replace(_atomic_outcome(), env_index=index) for index in range(2))
 
@@ -1818,7 +1815,7 @@ def test_planner_aggregates_report_bypassed_cases_under_effective_algorithm():
     bypassed_case = replace(
         selected_case,
         scenario_id="press",
-        case_id="atomic-task:press:simple:s11",
+        case_id="atomic-skill:press:simple:s11",
         skill_id="press",
     )
     metadata = [
@@ -1914,7 +1911,7 @@ def test_runner_preserves_preplan_attribution_after_planner_error(tmp_path):
     case = replace(
         _atomic_case(),
         scenario_id="press",
-        case_id="atomic-task:press:simple:s11",
+        case_id="atomic-skill:press:simple:s11",
         skill_id="press",
     )
     provider = Mock(spec=ScenarioProvider)
@@ -1991,11 +1988,11 @@ def test_build_video_path_sanitizes_case_id(tmp_path):
         tmp_path,
         "curobo",
         "pick_up",
-        "atomic-task:pick_up:cube_top_center:s11",
+        "atomic-skill:pick_up:cube_top_center:s11",
     )
 
     assert path.parent == tmp_path
-    assert path.name == "curobo_pick_up_atomic-task_pick_up_cube_top_center_s11.mp4"
+    assert path.name == "curobo_pick_up_atomic-skill_pick_up_cube_top_center_s11.mp4"
     assert tmp_path.is_dir()
 
 
@@ -2015,7 +2012,7 @@ def test_default_scenario_record_replay_is_noop(tmp_path):
 
 
 def test_atomic_record_replay_without_runtime_returns_none(tmp_path):
-    scenario = AtomicTaskScenario()
+    scenario = AtomicSkillScenario()
     path = scenario.record_replay(
         None,
         _atomic_case(),
@@ -2046,7 +2043,7 @@ def test_record_with_window_swallows_exceptions_and_does_not_raise(tmp_path):
 
 
 def test_atomic_record_replay_swallows_recorder_errors(tmp_path):
-    scenario = AtomicTaskScenario()
+    scenario = AtomicSkillScenario()
     sim = Mock()
     sim.sim_config.width = 64
     sim.sim_config.height = 64
@@ -2070,7 +2067,7 @@ def test_atomic_record_replay_swallows_recorder_errors(tmp_path):
 
 
 def test_atomic_failed_plan_records_static_hold(tmp_path):
-    scenario = AtomicTaskScenario()
+    scenario = AtomicSkillScenario()
     sim = Mock()
     sim.sim_config.width = 64
     sim.sim_config.height = 64
@@ -2127,7 +2124,7 @@ def test_video_cfg_from_args_and_summary_notes():
 
 
 def test_runner_skips_video_outside_measured_phase(tmp_path):
-    suite = load_suite("atomic_franka_pgi_curobo")
+    suite = load_suite("atomic_franka_pgi_smoke")
     specs = [spec for spec in suite.planners if spec.enabled]
     runner = BenchmarkRunner(
         suite,
@@ -2161,7 +2158,7 @@ def test_physical_evaluator_dispatch_preserves_row_results_and_execution_gates(
 ) -> None:
     """Physical evidence stays row-local and cannot override failed execution."""
     from scripts.benchmark.motion_generation import contracts
-    from scripts.benchmark.motion_generation.scenarios import atomic_task
+    from scripts.benchmark.motion_generation.scenarios import atomic_skill
 
     case = replace(
         _atomic_case(), batch_size=2, target_waypoints=torch.eye(4).repeat(2, 1, 1, 1)
@@ -2175,7 +2172,7 @@ def test_physical_evaluator_dispatch_preserves_row_results_and_execution_gates(
         replace(_atomic_outcome(), env_index=1),
     )
     monkeypatch.setattr(
-        atomic_task, "compute_case_outcomes", lambda *args, **kwargs: motion
+        atomic_skill, "compute_case_outcomes", lambda *args, **kwargs: motion
     )
     observation = contracts.ExecutionObservation(
         execution_success=torch.tensor([execution_ok, True]),
@@ -2213,7 +2210,7 @@ def test_physical_evaluator_dispatch_preserves_row_results_and_execution_gates(
         raise AssertionError("A physical evaluator must bypass legacy task_result")
 
     monkeypatch.setattr(provider, "task_result", forbid_legacy)
-    scenario = AtomicTaskScenario()
+    scenario = AtomicSkillScenario()
     scenario._case_providers[case.case_id] = provider
     monkeypatch.setattr(scenario, "_execute", lambda *args: observation)
     robot = Mock(device=torch.device("cpu"))
@@ -2223,7 +2220,7 @@ def test_physical_evaluator_dispatch_preserves_row_results_and_execution_gates(
         case,
         robot,
         "arm",
-        load_suite("atomic_franka_pgi_curobo"),
+        load_suite("atomic_franka_pgi_smoke"),
         planning_time_ms=2.0,
     )
     assert [row.task_success for row in result.outcomes] == [
@@ -2246,7 +2243,7 @@ def test_runner_freezes_domain_manifest_before_each_planner(
     from scripts.benchmark.motion_generation import runner as runner_module
     from scripts.benchmark.motion_generation.config import DomainCfg
 
-    suite = load_suite("atomic_franka_pgi_curobo")
+    suite = load_suite("atomic_franka_pgi_smoke")
     suite.tracks = [suite.enabled_tracks()[0]]
     suite.tracks[0].domain = DomainCfg(id="nominal", version="v1", kind="nominal")
     specs = [suite.planners[0], replace(suite.planners[0], id="second")]
@@ -2302,8 +2299,8 @@ def test_runner_freezes_domain_manifest_before_each_planner(
     aggregate_payload = json.loads(
         (result.run_dir / "aggregates.json").read_text(encoding="utf-8")
     )
-    assert aggregate_payload["report_schema_version"] == "2"
-    assert "- report_schema_version: `2`" in result.report_path.read_text(
+    assert aggregate_payload["report_schema_version"] == "3"
+    assert "- report_schema_version: `3`" in result.report_path.read_text(
         encoding="utf-8"
     )
 
@@ -2331,12 +2328,13 @@ def test_case_snapshot_uses_one_read_and_runtime_joint_order() -> None:
 
 
 def test_ur5_atomic_move_joints_case_uses_six_controlled_joints() -> None:
-    suite = load_suite("ur5_atomic_randomized")
+    suite = load_suite("atomic_ur5_pgi_randomized")
     track = suite.enabled_tracks()[0]
-    skill = next(item for item in track.config["skills"] if item["id"] == "move_joints")
+    # Keep provider coverage independent of the interaction-only randomized suite.
     config = {
-        **{key: value for key, value in skill.items() if key not in {"id", "cases"}},
-        **skill["cases"][0],
+        "name": "joint_reach",
+        "target_offsets_rad": [[0.1, -0.1, 0.1, -0.1, 0.1, -0.1]],
+        "sample_count": 80,
     }
     robot = Mock(device=torch.device("cpu"))
     robot.get_qpos.return_value = torch.zeros(1, 8)  # Six arm and two hand joints.
@@ -2401,7 +2399,7 @@ def test_move_joints_case_uses_canonical_snapshot_for_targets(tmp_path: Path) ->
         case = create_atomic_skill_provider("move_joints").generate_case(
             scenario,
             Mock(suite_version="snapshot_test_v1", robot=Mock(id="franka_pgi")),
-            Mock(id="atomic-task"),
+            Mock(id="atomic-skill"),
             config,
             seed=103,
             batch_size=2,

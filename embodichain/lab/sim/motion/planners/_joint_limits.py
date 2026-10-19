@@ -19,6 +19,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from functools import lru_cache
+from pathlib import Path
+import xml.etree.ElementTree as ET
 import math
 from typing import TYPE_CHECKING
 
@@ -33,6 +36,52 @@ _DEFAULT_VELOCITY = 0.2
 _DEFAULT_ACCELERATION = 0.5
 
 
+@lru_cache(maxsize=128)
+def _asset_velocity_limits(path: str, modified_ns: int, size: int) -> dict[str, float]:
+    """Read positive authored speeds once per assembled URDF revision.
+
+    Zero-valued URDF speeds conventionally represent undeclared gripper limits;
+    explicit zero runtime caps retain their separate stationary-joint meaning.
+    """
+    try:
+        root = ET.parse(path).getroot()
+    except (OSError, ET.ParseError):
+        return {}
+    limits = {}
+    for joint in root.findall("joint"):
+        limit = joint.find("limit")
+        if limit is None:
+            continue
+        try:
+            velocity = float(limit.attrib.get("velocity", "nan"))
+        except ValueError:
+            continue
+        if math.isfinite(velocity) and 0 < velocity < 1e9:
+            limits[joint.attrib.get("name", "")] = velocity
+    return limits
+
+
+def _fill_asset_velocity_limits(robot: Robot, limits: torch.Tensor) -> torch.Tensor:
+    """Fill only absent runtime caps from the assembled robot's authored joints."""
+    if bool(torch.isfinite(limits).all()):
+        return limits
+    path = getattr(getattr(robot, "cfg", None), "fpath", None)
+    if not isinstance(path, (str, Path)):
+        return limits
+    try:
+        path = Path(path).expanduser().resolve()
+        stat = path.stat()
+    except OSError:
+        return limits
+    authored = _asset_velocity_limits(str(path), stat.st_mtime_ns, stat.st_size)
+    caps = torch.tensor(
+        [authored.get(name, math.inf) for name in robot.joint_names],
+        dtype=limits.dtype,
+        device=limits.device,
+    )
+    return torch.where(torch.isfinite(limits), limits, caps)
+
+
 def _joint_velocity_limits(robot: Robot) -> torch.Tensor:
     """Read runtime speeds in state order and apply mimic follower caps."""
     limits = (
@@ -45,6 +94,7 @@ def _joint_velocity_limits(robot: Robot) -> torch.Tensor:
     limits = torch.where(
         torch.isfinite(limits) & (limits >= 0) & (limits < 1e9), limits, torch.inf
     )
+    limits = _fill_asset_velocity_limits(robot, limits)
     mimics = dict(
         zip(
             robot.mimic_ids,
@@ -91,7 +141,9 @@ def _plan_joint_ids(robot: Robot, control_part: str | None, dof: int) -> list[in
     return ids
 
 
-def _merge_limit(value: object, caps: torch.Tensor, fallback: float) -> torch.Tensor:
+def _merge_limit(
+    value: object, caps: torch.Tensor, fallback: float, *, allow_zero: bool = False
+) -> torch.Tensor:
     """Intersect requests with robot caps, preserving signed TOPPRA bounds."""
     if value is None:
         return torch.where(torch.isfinite(caps), caps, fallback)
@@ -107,9 +159,11 @@ def _merge_limit(value: object, caps: torch.Tensor, fallback: float) -> torch.Te
         return requested.clamp(min=-caps[:, None], max=caps[:, None])
     if requested.ndim == 0:
         requested = requested.expand_as(caps)
-    if requested.shape != caps.shape or bool((requested <= 0).any()):
+    invalid = requested < 0 if allow_zero else requested <= 0
+    if requested.shape != caps.shape or bool(invalid.any()):
+        qualifier = "nonnegative" if allow_zero else "positive"
         raise ValueError(
-            f"Joint limits must be positive scalars or per-joint values ({len(caps)},)."
+            f"Joint limits must be {qualifier} scalars or per-joint values ({len(caps)},)."
         )
     return torch.minimum(requested, caps)
 
@@ -130,7 +184,7 @@ def _resolve_joint_constraints(
     resolved = dict(constraints)
     caps = limits[:batch_size, ids].amin(dim=0)
     resolved["velocity"] = _merge_limit(
-        constraints.get("velocity"), caps, _DEFAULT_VELOCITY
+        constraints.get("velocity"), caps, _DEFAULT_VELOCITY, allow_zero=True
     )
     resolved["acceleration"] = _merge_limit(
         constraints.get("acceleration"),

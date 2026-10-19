@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Atomic Task case providers for OpenDoor, Pour, AxisAlign and PushObject.
+"""Atomic Skill case providers for OpenDoor, Pour, AxisAlign and PushObject.
 
 Each provider freezes the scene, the grasp and the poses the skill passes
 through while the case manifest is built, so every planner is scored on the
@@ -59,7 +59,7 @@ from ..config import SuiteCfg, TrackCfg
 from ..contracts import PhysicalEvaluation, ReplayObservationWindow
 from ..evaluation import StageEvidence, evaluate_skill_stage_batch
 from ..models import BenchmarkCase, CaseOutcome
-from .atomic_task import (
+from .atomic_skill import (
     _TOP_DOWN_ROTATION,
     _ExecutionObservation,
     _atomic_case_id,
@@ -88,7 +88,7 @@ from .atomic_task import (
 if TYPE_CHECKING:
     from ..planners.base import PlannerAdapter
     from .atomic_objects import AtomicObjectHandle
-    from .atomic_task import AtomicTaskScenario
+    from .atomic_skill import AtomicSkillScenario
 
 __all__: list[str] = []
 
@@ -389,7 +389,7 @@ def _object_semantics(
     )
 
 
-def _primary_control_parts(scenario: "AtomicTaskScenario", skill: str) -> dict:
+def _primary_control_parts(scenario: "AtomicSkillScenario", skill: str) -> dict:
     """Bind the scenario arm and gripper to a single-arm skill slot."""
     if scenario.end_effector_part is None:
         raise RuntimeError(f"{skill} requires a configured end-effector control part.")
@@ -409,7 +409,7 @@ def _translate(pose: torch.Tensor, offset: torch.Tensor) -> torch.Tensor:
 
 
 def _settle_object_pose(
-    scenario: "AtomicTaskScenario",
+    scenario: "AtomicSkillScenario",
     handle: AtomicObjectHandle,
     config: Mapping[str, object],
     *,
@@ -433,7 +433,7 @@ def _settle_object_pose(
 
 
 def _set_pre_pick_start(
-    scenario: "AtomicTaskScenario",
+    scenario: "AtomicSkillScenario",
     object_pose: torch.Tensor,
     config: Mapping[str, object],
     *,
@@ -534,7 +534,7 @@ def _case_identity(
     seed: int,
     batch_size: int,
 ) -> str:
-    """Return the Atomic Task case id for one configured case."""
+    """Return the Atomic Skill case id for one configured case."""
     return _atomic_case_id(
         track.id,
         skill_id,
@@ -670,7 +670,7 @@ class _OpenDoorCases(AtomicSkillCaseProvider):
 
     def generate_case(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         suite: SuiteCfg,
         track: TrackCfg,
         config: Mapping[str, object],
@@ -836,7 +836,7 @@ class _OpenDoorCases(AtomicSkillCaseProvider):
 
     def build_invocation(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
     ) -> ActionInvocation:
@@ -868,7 +868,7 @@ class _OpenDoorCases(AtomicSkillCaseProvider):
         )
 
     def initial_scene(
-        self, scenario: "AtomicTaskScenario", case: BenchmarkCase
+        self, scenario: "AtomicSkillScenario", case: BenchmarkCase
     ) -> SceneSnapshot:
         """Observe the frozen hinge angle that OpenDoor plans its rotation from."""
         qpos = torch.tensor(
@@ -889,7 +889,7 @@ class _OpenDoorCases(AtomicSkillCaseProvider):
         )
 
     def frozen_grasps(
-        self, scenario: "AtomicTaskScenario", case: BenchmarkCase
+        self, scenario: "AtomicSkillScenario", case: BenchmarkCase
     ) -> dict[str, tuple[torch.Tensor, torch.Tensor]]:
         """Make OpenDoor sample the manifest handle grasp."""
         if scenario.end_effector_part is None:
@@ -935,7 +935,7 @@ class _OpenDoorCases(AtomicSkillCaseProvider):
 
     def task_result(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         compiled: CompiledTrajectory,
         observation: _ExecutionObservation,
@@ -995,7 +995,7 @@ class _PourCases(AtomicSkillCaseProvider):
 
     def generate_case(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         suite: SuiteCfg,
         track: TrackCfg,
         config: Mapping[str, object],
@@ -1127,7 +1127,7 @@ class _PourCases(AtomicSkillCaseProvider):
         )
 
     def prefix_invocations(
-        self, scenario: "AtomicTaskScenario", case: BenchmarkCase
+        self, scenario: "AtomicSkillScenario", case: BenchmarkCase
     ) -> tuple[ActionInvocation, ...]:
         """Acquire the object with the frozen grasp before pouring."""
         device = scenario.robot.device
@@ -1171,7 +1171,7 @@ class _PourCases(AtomicSkillCaseProvider):
 
     def build_invocation(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
     ) -> ActionInvocation:
@@ -1227,7 +1227,7 @@ class _PourCases(AtomicSkillCaseProvider):
 
     def task_result(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         compiled: CompiledTrajectory,
         observation: _ExecutionObservation,
@@ -1355,7 +1355,7 @@ class _AxisAlignCases(AtomicSkillCaseProvider):
 
     def generate_case(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         suite: SuiteCfg,
         track: TrackCfg,
         config: Mapping[str, object],
@@ -1508,7 +1508,7 @@ class _AxisAlignCases(AtomicSkillCaseProvider):
 
     def build_invocation(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
     ) -> ActionInvocation:
@@ -1588,7 +1588,7 @@ class _AxisAlignCases(AtomicSkillCaseProvider):
 
     def task_result(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         compiled: CompiledTrajectory,
         observation: _ExecutionObservation,
@@ -1782,7 +1782,7 @@ class _PushObjectCases(AtomicSkillCaseProvider):
 
     def generate_case(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         suite: SuiteCfg,
         track: TrackCfg,
         config: Mapping[str, object],
@@ -1913,7 +1913,7 @@ class _PushObjectCases(AtomicSkillCaseProvider):
 
     def build_invocation(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
     ) -> ActionInvocation:
@@ -1986,7 +1986,7 @@ class _PushObjectCases(AtomicSkillCaseProvider):
 
     def task_result(
         self,
-        scenario: "AtomicTaskScenario",
+        scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         compiled: CompiledTrajectory,
         observation: _ExecutionObservation,

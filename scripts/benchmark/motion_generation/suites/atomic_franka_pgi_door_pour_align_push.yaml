@@ -1,6 +1,6 @@
 schema_version: 1
-name: atomic_skill_franka_pgi_door_pour_align_push
-suite_version: atomic_franka_pgi_door_pour_align_push_v1
+name: atomic_franka_pgi_door_pour_align_push
+suite_version: atomic_franka_pgi_door_pour_align_push_v2
 profile: smoke
 
 # OpenDoor, Pour, AxisAlign and PushObject on the Franka + PGI embodiment.
@@ -47,11 +47,13 @@ planners:
     adapter: toppra
     role: diagnostic_baseline
     enabled: true
-    config:
-      velocity: 0.2
-      acceleration: 0.5
+    config: {}
 
 protocol:
+  report_schema_version: "3"
+  # Preserve the existing Atomic motion budget for every timed planner.
+  joint_velocity_limit_rad_s: 0.2
+  joint_acceleration_limit_rad_s2: 0.5
   warmup_trials: 1
   measured_trials: 1
   sample_interval: 80
@@ -61,8 +63,8 @@ protocol:
   joint_limit_tolerance_rad: 0.00001
 
 tracks:
-  - id: atomic-task
-    scenario: atomic_task
+  - id: atomic-skill
+    scenario: atomic_skill
     enabled: true
     config:
       batch_sizes: [1]

@@ -42,13 +42,26 @@ def _domain_key(domain: EvaluationDomain) -> tuple[str, str, str]:
 
 def _unsupported_case_ids(records: Iterable[TrialRecord]) -> set[str]:
     """Return cases excluded from success denominators by capability gates."""
+    sources: dict[str, dict[str, list[TrialRecord]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    for record in records:
+        sources[record.case_id][record.algorithm_id].append(record)
     return {
-        record.case_id
-        for record in records
-        if record.phase is TrialPhase.AVAILABILITY
+        case_id
+        for case_id, by_source in sources.items()
+        if all(_source_unsupported(rows) for rows in by_source.values())
+    }
+
+
+def _source_unsupported(records: list[TrialRecord]) -> bool:
+    """Return a source-level gate, never overriding another source's evidence."""
+    return not any(record.phase is TrialPhase.MEASURED for record in records) and any(
+        record.phase is TrialPhase.AVAILABILITY
         and record.status == "unsupported"
         and record.failure_code in {"unsupported_capability", "unsupported_capacity"}
-    }
+        for record in records
+    )
 
 
 def _case_success(
@@ -159,6 +172,17 @@ def _population_stats(
     return mean, worst, variance, retention
 
 
+def _applicable_repeats(records: list[TrialRecord], expected: int) -> int:
+    """Remove only explicitly unsupported sources from the success denominator."""
+    by_source: dict[str, list[TrialRecord]] = defaultdict(list)
+    for record in records:
+        by_source[record.algorithm_id].append(record)
+    if not by_source:
+        return expected
+    supported = sum(not _source_unsupported(rows) for rows in by_source.values())
+    return expected * supported // len(by_source)
+
+
 def _population_row(
     *,
     track: str,
@@ -192,7 +216,10 @@ def _population_row(
         _case_success(
             records_by_case.get(case.case_id, []),
             case,
-            expected_repeats_by_case.get(case.case_id, 0),
+            _applicable_repeats(
+                records_by_case.get(case.case_id, []),
+                expected_repeats_by_case.get(case.case_id, 0),
+            ),
         )[0]
         for case in applicable_cases
     ]
@@ -200,7 +227,13 @@ def _population_row(
     bucket_rates, bucket_counts, bucket_failures = _spatial_bucket_statistics(
         applicable_cases,
         records_by_case,
-        expected_repeats_by_case,
+        {
+            case.case_id: _applicable_repeats(
+                records_by_case.get(case.case_id, []),
+                expected_repeats_by_case.get(case.case_id, 0),
+            )
+            for case in applicable_cases
+        },
     )
     return {
         "track": track,

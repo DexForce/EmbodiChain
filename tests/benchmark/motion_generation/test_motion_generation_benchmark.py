@@ -72,8 +72,8 @@ from scripts.benchmark.motion_generation.reporting import (
 from scripts.benchmark.motion_generation.run_benchmark import (
     _apply_overrides,
 )
-from scripts.benchmark.motion_generation.scenarios.atomic_task import (
-    AtomicTaskScenario,
+from scripts.benchmark.motion_generation.scenarios.atomic_skill import (
+    AtomicSkillScenario,
     _FrozenArticulationGraspPoseGenerator,
     _executed_final_pose_errors,
     create_atomic_skill_provider,
@@ -631,8 +631,8 @@ def _nmg_adapter(**config):
 
 
 def test_nmg_rows_declare_timing_by_whether_they_retime():
-    assert _nmg_adapter().native_timing is False
-    assert _nmg_adapter(retime=True).native_timing is True
+    assert _nmg_adapter().timing_is_solved is False
+    assert _nmg_adapter(retime=True).timing_is_solved is True
 
 
 def test_nmg_retimes_against_the_same_limits_the_metrics_check():
@@ -643,14 +643,14 @@ def test_nmg_retimes_against_the_same_limits_the_metrics_check():
     assert constraints["velocity"] == pytest.approx(
         [2.62, 2.62, 2.62, 2.62, 5.26, 4.18, 5.26]
     )
-    assert constraints["acceleration"] == pytest.approx(10.0)
+    assert constraints["acceleration"] == pytest.approx([10.0] * 7)
 
 
 def test_nmg_retiming_refuses_a_placeholder_velocity_limit():
     # Retiming against float32 max would leave velocity unconstrained while
     # reporting the row as limit-respecting.
     adapter = _nmg_adapter(retime=True, placeholder_velocity=True)
-    with pytest.raises(ValueError, match="no usable joint velocity limit"):
+    with pytest.raises(ValueError, match="[Nn]o usable joint velocity limit"):
         adapter._retiming_constraints()
 
     stated = _nmg_adapter(
@@ -659,14 +659,12 @@ def test_nmg_retiming_refuses_a_placeholder_velocity_limit():
     assert stated._retiming_constraints()["velocity"] == pytest.approx([2.62] * 7)
 
 
-def test_nmg_retiming_requires_one_velocity_limit_for_every_environment():
-    # One set of retiming limits serves the whole batch, while the metrics
-    # check each environment against its own.
+def test_nmg_retiming_uses_the_strictest_velocity_limit_across_environments():
+    # Planning and metrics share the conservative limit for the whole batch.
     adapter = _nmg_adapter(retime=True)
     differing = torch.tensor([[2.62] * 7, [1.0] * 7])
     adapter.context.robot.get_qvel_limits = Mock(return_value=differing)
-    with pytest.raises(ValueError, match="differ across environments"):
-        adapter._retiming_constraints()
+    assert adapter._retiming_constraints()["velocity"] == pytest.approx([1.0] * 7)
 
     shared = _nmg_adapter(retime=True)
     shared.context.robot.get_qvel_limits = Mock(
@@ -674,10 +672,10 @@ def test_nmg_retiming_requires_one_velocity_limit_for_every_environment():
     )
     assert shared._retiming_constraints()["velocity"] == pytest.approx([2.62] * 7)
 
-    # A suite-stated limit applies to every environment alike.
+    # A suite budget cannot loosen a valid cap in any environment.
     stated = _nmg_adapter(retime=True, velocity_limit=[2.0] * 7)
     stated.context.robot.get_qvel_limits = Mock(return_value=differing)
-    assert stated._retiming_constraints()["velocity"] == pytest.approx([2.0] * 7)
+    assert stated._retiming_constraints()["velocity"] == pytest.approx([1.0] * 7)
 
 
 def test_nmg_retiming_requires_a_suite_acceleration_limit():
@@ -689,7 +687,9 @@ def test_nmg_retiming_requires_a_suite_acceleration_limit():
 def test_nmg_cli_overrides_reach_every_nmg_row():
     # A checkpoint supplied on the command line must reach the paired row too;
     # otherwise its availability check skips it and no comparison runs.
-    suite = load_suite("scripts/benchmark/motion_generation/suites/smoke.yaml")
+    suite = load_suite(
+        "scripts/benchmark/motion_generation/suites/motion_panda_free_space_smoke.yaml"
+    )
     _apply_overrides(suite, nmg_onnx_path="/tmp/policy.onnx", nmg_pos_eps=0.02)
     rows = {
         spec.id: (spec.config["onnx_model_path"], spec.config["pos_eps"])
@@ -700,7 +700,9 @@ def test_nmg_cli_overrides_reach_every_nmg_row():
     assert rows["nmg"] == rows["nmg_retimed"] == ("/tmp/policy.onnx", 0.02)
 
 
-@pytest.mark.parametrize("suite_name", ["coverage", "smoke"])
+@pytest.mark.parametrize(
+    "suite_name", ["motion_panda_free_space_coverage", "motion_panda_free_space_smoke"]
+)
 def test_free_space_suites_pair_a_nominal_and_a_retimed_nmg_row(suite_name):
     suite = load_suite(f"scripts/benchmark/motion_generation/suites/{suite_name}.yaml")
     rows = {
@@ -770,7 +772,7 @@ def test_nominal_timing_planner_reports_no_comparable_duration():
             adapter="nmg_onnx",
             config_hash="abc",
             capabilities=frozenset({"eef_waypoint"}),
-            native_timing=False,
+            timing_is_solved=False,
         )
     ]
     trial = replace(
@@ -782,7 +784,7 @@ def test_nominal_timing_planner_reports_no_comparable_duration():
     row = aggregate_results([trial], metadata, [case], measured_trials=1)[
         "time_and_memory"
     ][0]
-    assert row["native_timing"] is False
+    assert row["timing_is_solved"] is False
     assert row["trajectory_duration_s"] is None
 
 
@@ -824,7 +826,7 @@ def test_an_unbounded_peak_is_not_averaged_away():
             adapter="curobo",
             config_hash="abc",
             capabilities=frozenset({"eef_waypoint"}),
-            native_timing=True,
+            timing_is_solved=True,
         )
     ]
     trial = _dynamic_trial(
@@ -863,7 +865,7 @@ def test_json_round_trip_keeps_unbounded_peak_without_a_configured_limit():
             adapter="curobo",
             config_hash="abc",
             capabilities=frozenset({"eef_waypoint"}),
-            native_timing=True,
+            timing_is_solved=True,
         )
     ]
     trial = _dynamic_trial(
@@ -891,7 +893,7 @@ def test_json_round_trip_keeps_unbounded_peak_without_a_configured_limit():
 
 @pytest.mark.parametrize("tolerance", [math.nan, math.inf, -0.1])
 def test_dynamic_limit_tolerance_must_be_finite_and_non_negative(tolerance):
-    suite = load_suite("smoke")
+    suite = load_suite("motion_panda_free_space_smoke")
     suite.protocol.dynamic_limit_tolerance = tolerance
 
     with pytest.raises(ValueError, match="dynamic_limit_tolerance"):
@@ -907,14 +909,14 @@ def test_only_planners_that_solve_timing_declare_it():
     from scripts.benchmark.motion_generation.planners.toppra import ToppraAdapter
 
     # An adapter that declares nothing is not judged on an unsolved clock.
-    assert PlannerAdapter.native_timing is False
-    assert CuroboAdapter.native_timing is True
-    assert ToppraAdapter.native_timing is True
+    assert PlannerAdapter.timing_is_solved is False
+    assert CuroboAdapter.timing_is_solved is True
+    assert ToppraAdapter.timing_is_solved is True
     # Assigns a constant interval that no limit informs.
-    assert IkInterpolateAdapter.native_timing is False
+    assert IkInterpolateAdapter.timing_is_solved is False
     # NMG depends on its row: nominal unless `retime` solves the timing.
-    assert _nmg_adapter().native_timing is False
-    assert _nmg_adapter(retime=True).native_timing is True
+    assert _nmg_adapter().timing_is_solved is False
+    assert _nmg_adapter(retime=True).timing_is_solved is True
 
 
 def test_motion_valid_ignores_planner_reported_failure_in_outcomes_and_aggregates():
@@ -1059,7 +1061,7 @@ def test_non_finite_trajectory_skips_joint_limit_metrics():
 
 
 def test_nmg_precision_and_external_accuracy_are_independently_configurable():
-    suite = load_suite("smoke")
+    suite = load_suite("motion_panda_free_space_smoke")
     _apply_overrides(
         suite,
         position_threshold_m=0.02,
@@ -1335,7 +1337,7 @@ def test_nmg_rejects_unknown_motion_validity():
 
 
 def test_seed_override_applies_to_atomic_tracks():
-    suite = load_suite("atomic_franka_pgi_curobo_randomized")
+    suite = load_suite("atomic_franka_pgi_randomized")
 
     _apply_overrides(suite, seeds=[104])
 
@@ -1344,7 +1346,7 @@ def test_seed_override_applies_to_atomic_tracks():
 
 
 def test_seed_override_adds_missing_atomic_track_seeds():
-    suite = load_suite("atomic_franka_pgi_curobo_randomized")
+    suite = load_suite("atomic_franka_pgi_randomized")
     atomic_track = suite.enabled_tracks()[0]
     atomic_track.config.pop("seeds", None)
 
@@ -1353,7 +1355,7 @@ def test_seed_override_adds_missing_atomic_track_seeds():
     assert atomic_track.config["seeds"] == [104]
 
 
-def test_atomic_task_antipodal_grasp_uses_standalone_generator(monkeypatch):
+def test_atomic_skill_antipodal_grasp_uses_standalone_generator(monkeypatch):
     from scripts.tutorials.atomic_action import tutorial_utils
 
     vertices = torch.tensor(
@@ -1380,7 +1382,7 @@ def test_atomic_task_antipodal_grasp_uses_standalone_generator(monkeypatch):
         generator_factory,
     )
 
-    scenario = AtomicTaskScenario()
+    scenario = AtomicSkillScenario()
     scenario.robot = Mock(device=torch.device("cpu"))
     scenario.robot.compute_ik.return_value = (
         torch.tensor([True]),
@@ -1406,7 +1408,7 @@ def test_atomic_task_antipodal_grasp_uses_standalone_generator(monkeypatch):
     assert torch.equal(result, candidate.unsqueeze(0))
 
 
-def test_atomic_task_pickup_builds_engine_owned_endpoint_binding():
+def test_atomic_skill_pickup_builds_engine_owned_endpoint_binding():
     robot = Mock()
     robot.device = torch.device("cpu")
     robot.dof = 8
@@ -1428,7 +1430,7 @@ def test_atomic_task_pickup_builds_engine_owned_endpoint_binding():
         },
     )
     entity = Mock(uid="atomic_cube")
-    scenario = AtomicTaskScenario()
+    scenario = AtomicSkillScenario()
     scenario.robot = robot
     scenario.control_part = "arm"
     scenario.end_effector_part = "hand"
@@ -1437,9 +1439,9 @@ def test_atomic_task_pickup_builds_engine_owned_endpoint_binding():
     poses = torch.eye(4).reshape(1, 1, 4, 4).repeat(1, 3, 1, 1)
     case = BenchmarkCase(
         suite_version="test_v1",
-        track="atomic-task",
+        track="atomic-skill",
         scenario_id="pick_up",
-        case_id="atomic-task:pick_up:cube:s11",
+        case_id="atomic-skill:pick_up:cube:s11",
         seed=11,
         batch_size=1,
         num_waypoints=3,
@@ -1474,7 +1476,7 @@ def test_atomic_task_pickup_builds_engine_owned_endpoint_binding():
     }
 
 
-def test_atomic_task_prepare_planner_registers_benchmark_objects_in_scene():
+def test_atomic_skill_prepare_planner_registers_benchmark_objects_in_scene():
     robot = Mock()
     robot.device = torch.device("cpu")
     robot.dof = 7
@@ -1489,7 +1491,7 @@ def test_atomic_task_prepare_planner_registers_benchmark_objects_in_scene():
     object_pose = torch.eye(4).unsqueeze(0)
     entity = Mock(uid="atomic_cube")
     entity.get_local_pose.return_value = object_pose
-    scenario = AtomicTaskScenario()
+    scenario = AtomicSkillScenario()
     scenario._objects["cube"] = Mock(object_id="cube", entity=entity)
 
     scenario.prepare_planner(adapter, Mock())
@@ -1499,7 +1501,7 @@ def test_atomic_task_prepare_planner_registers_benchmark_objects_in_scene():
     assert torch.equal(scene.entities["atomic_cube"].pose, object_pose)
 
 
-def test_atomic_task_prepare_planner_installs_slide_grasp_service():
+def test_atomic_skill_prepare_planner_installs_slide_grasp_service():
     robot = Mock()
     robot.device = torch.device("cpu")
     robot.dof = 8
@@ -1513,7 +1515,7 @@ def test_atomic_task_prepare_planner_installs_slide_grasp_service():
     motion_generator.planner.cfg.planner_type = "stub"
     adapter = Mock()
     adapter.require_motion_generator.return_value = motion_generator
-    scenario = AtomicTaskScenario()
+    scenario = AtomicSkillScenario()
     scenario.end_effector_part = "hand"
     scenario._gripper_open = torch.zeros(1)
     scenario._gripper_grasp = torch.ones(1)
@@ -1608,7 +1610,7 @@ def test_frozen_articulation_grasp_generator_rejects_ambiguous_cases():
         )
 
 
-def test_atomic_task_press_invocation_uses_articulated_target_manifest():
+def test_atomic_skill_press_invocation_uses_articulated_target_manifest():
     robot = Mock()
     robot.device = torch.device("cpu")
     robot.dof = 8
@@ -1629,7 +1631,7 @@ def test_atomic_task_press_invocation_uses_articulated_target_manifest():
             )
         },
     )
-    scenario = AtomicTaskScenario()
+    scenario = AtomicSkillScenario()
     scenario.robot = robot
     scenario.control_part = "arm"
     scenario.end_effector_part = "hand"
@@ -1637,9 +1639,9 @@ def test_atomic_task_press_invocation_uses_articulated_target_manifest():
     target_pose = torch.eye(4).unsqueeze(0)
     case = BenchmarkCase(
         suite_version="test_v1",
-        track="atomic-task",
+        track="atomic-skill",
         scenario_id="press",
-        case_id="atomic-task:press:microwave_start_button:s11",
+        case_id="atomic-skill:press:microwave_start_button:s11",
         seed=11,
         batch_size=1,
         num_waypoints=4,
@@ -1678,7 +1680,7 @@ def test_atomic_task_press_invocation_uses_articulated_target_manifest():
     assert invocation.skill_options.press_distance == pytest.approx(0.03)
 
 
-def test_atomic_task_slide_invocation_uses_tutorial_options():
+def test_atomic_skill_slide_invocation_uses_tutorial_options():
     robot = Mock()
     robot.device = torch.device("cpu")
     robot.dof = 8
@@ -1699,7 +1701,7 @@ def test_atomic_task_slide_invocation_uses_tutorial_options():
             )
         },
     )
-    scenario = AtomicTaskScenario()
+    scenario = AtomicSkillScenario()
     scenario.robot = robot
     scenario.control_part = "arm"
     scenario.end_effector_part = "hand"
@@ -1707,9 +1709,9 @@ def test_atomic_task_slide_invocation_uses_tutorial_options():
     target_pose = torch.eye(4).unsqueeze(0)
     case = BenchmarkCase(
         suite_version="test_v1",
-        track="atomic-task",
+        track="atomic-skill",
         scenario_id="slide",
-        case_id="atomic-task:slide:linear_pull:s11",
+        case_id="atomic-skill:slide:linear_pull:s11",
         seed=11,
         batch_size=1,
         num_waypoints=3,
@@ -1760,7 +1762,7 @@ def test_atomic_task_slide_invocation_uses_tutorial_options():
     }
 
 
-def test_atomic_task_twist_invocation_uses_tutorial_options():
+def test_atomic_skill_twist_invocation_uses_tutorial_options():
     robot = Mock()
     robot.device = torch.device("cpu")
     robot.dof = 8
@@ -1781,7 +1783,7 @@ def test_atomic_task_twist_invocation_uses_tutorial_options():
             )
         },
     )
-    scenario = AtomicTaskScenario()
+    scenario = AtomicSkillScenario()
     scenario.robot = robot
     scenario.control_part = "arm"
     scenario.end_effector_part = "hand"
@@ -1789,9 +1791,9 @@ def test_atomic_task_twist_invocation_uses_tutorial_options():
     target_pose = torch.eye(4).unsqueeze(0)
     case = BenchmarkCase(
         suite_version="test_v1",
-        track="atomic-task",
+        track="atomic-skill",
         scenario_id="twist",
-        case_id="atomic-task:twist:quarter_turn:s11",
+        case_id="atomic-skill:twist:quarter_turn:s11",
         seed=11,
         batch_size=1,
         num_waypoints=11,
@@ -1837,7 +1839,7 @@ def test_atomic_task_twist_invocation_uses_tutorial_options():
     }
 
 
-def test_atomic_task_move_held_object_uses_current_options_contract():
+def test_atomic_skill_move_held_object_uses_current_options_contract():
     robot = Mock()
     robot.device = torch.device("cpu")
     robot.dof = 8
@@ -1858,7 +1860,7 @@ def test_atomic_task_move_held_object_uses_current_options_contract():
             )
         },
     )
-    scenario = AtomicTaskScenario()
+    scenario = AtomicSkillScenario()
     scenario.robot = robot
     scenario.control_part = "arm"
     scenario.end_effector_part = "hand"
@@ -1866,9 +1868,9 @@ def test_atomic_task_move_held_object_uses_current_options_contract():
     target_object_pose = torch.eye(4).unsqueeze(0)
     case = BenchmarkCase(
         suite_version="test_v1",
-        track="atomic-task",
+        track="atomic-skill",
         scenario_id="move_held_object",
-        case_id="atomic-task:move_held_object:cube:s11",
+        case_id="atomic-skill:move_held_object:cube:s11",
         seed=11,
         batch_size=1,
         num_waypoints=1,
@@ -1897,7 +1899,7 @@ def test_atomic_task_move_held_object_uses_current_options_contract():
 
 @pytest.mark.parametrize("override", [{"nmg_pos_eps": 0.0}, {"nmg_rot_eps": -0.1}])
 def test_nmg_precision_rejects_non_positive_values(override):
-    suite = load_suite("smoke")
+    suite = load_suite("motion_panda_free_space_smoke")
 
     with pytest.raises(ValueError, match="NMG"):
         _apply_overrides(suite, **override)
@@ -1914,7 +1916,7 @@ def test_nmg_precision_rejects_non_positive_values(override):
     ],
 )
 def test_nmg_rollout_budgets_must_be_positive_integers(field, value):
-    suite = load_suite("smoke")
+    suite = load_suite("motion_panda_free_space_smoke")
     nmg = next(spec for spec in suite.planners if spec.adapter == "nmg_onnx")
     nmg.id = "renamed_nmg_candidate"
     nmg.config[field] = value
@@ -1933,7 +1935,7 @@ class _FrankaLimitRobot(_MetricRobot):
 
 
 def test_suite_loads_tracks_and_keeps_mutable_free_space_config():
-    suite = load_suite("smoke")
+    suite = load_suite("motion_panda_free_space_smoke")
 
     assert [track.id for track in suite.enabled_tracks()] == ["free-space-common"]
     assert suite.enabled_tracks()[0].scenario == "free_space"
@@ -1947,7 +1949,8 @@ def test_suite_loads_tracks_and_keeps_mutable_free_space_config():
 
 
 def test_free_space_domain_overrides_change_the_generated_case_matrix():
-    suite = load_suite("smoke")
+    suite = load_suite("motion_panda_free_space_smoke")
+    suite.free_space.target_types = ["eef"]
     suite.enabled_tracks()[0].domains = [
         DomainCfg(
             id="shifted",
@@ -1984,10 +1987,10 @@ class _Ur5LimitRobot(_MetricRobot):
         return torch.tensor([[[-6.28, 6.28]] * 6])
 
 
-def test_ur5_free_space_suite_generates_six_joint_cases():
-    suite = load_suite("ur5_free_space")
+def test_motion_ur5_free_space_coverage_suite_generates_six_joint_cases():
+    suite = load_suite("motion_ur5_free_space_coverage")
     assert suite.robot.id == "ur5"
-    assert suite.free_space.batch_sizes == [8]
+    assert suite.free_space.batch_sizes == [1, 8, 64]
     suite.free_space.seeds = [11]
     suite.free_space.path_shapes = ["direct"]
     suite.free_space.waypoint_counts = [1]
@@ -2006,7 +2009,7 @@ def test_ur5_free_space_suite_generates_six_joint_cases():
 
 
 def test_free_space_manifest_is_seed_stable_and_algorithm_independent():
-    suite = load_suite("smoke")
+    suite = load_suite("motion_panda_free_space_smoke")
     robot = _FrankaLimitRobot()
     provider = create_scenario_provider("free_space")
     track = suite.enabled_tracks()[0]
@@ -2021,7 +2024,8 @@ def test_free_space_manifest_is_seed_stable_and_algorithm_independent():
 
 
 def test_free_space_cases_use_one_start_state_bin_each():
-    suite = load_suite("coverage")
+    suite = load_suite("motion_panda_free_space_coverage")
+    suite.free_space.target_types = ["eef"]
     suite.free_space.batch_sizes = [2]
     suite.free_space.waypoint_counts = [1]
     suite.free_space.path_shapes = ["direct"]
@@ -2038,7 +2042,8 @@ def test_free_space_cases_use_one_start_state_bin_each():
 
 def test_free_space_starts_align_across_path_shape_and_waypoint_count():
     """random_reachable starts must be shared across shapes/W for fair compares."""
-    suite = load_suite("smoke")
+    suite = load_suite("motion_panda_free_space_smoke")
+    suite.free_space.target_types = ["eef"]
     suite.free_space.batch_sizes = [2]
     suite.free_space.waypoint_counts = [1, 5]
     suite.free_space.path_shapes = ["direct", "s_curve"]
@@ -2588,7 +2593,7 @@ def test_cold_plan_ms_only_attaches_to_matching_waypoint_row():
 
 
 def test_report_contains_exactly_three_markdown_tables(tmp_path):
-    suite = load_suite("smoke")
+    suite = load_suite("motion_panda_free_space_smoke")
     aggregates = {
         "time_and_memory": [],
         "success_and_metrics": [],
@@ -2616,7 +2621,7 @@ def test_report_contains_exactly_three_markdown_tables(tmp_path):
     assert text.count("## Time & Memory") == 1
     assert text.count("## Success & Other Metrics") == 1
     assert text.count("## Leaderboard") == 1
-    assert "- report_schema_version: `2`" in text
+    assert "- report_schema_version: `3`" in text
     assert "motion-validity gate" in text
     assert "n_valid" in text
     assert 'spatial_bucket_success_rates={"far":0.0,"near":1.0}' in text

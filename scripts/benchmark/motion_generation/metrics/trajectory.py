@@ -26,6 +26,11 @@ from typing import TYPE_CHECKING
 import torch
 
 from ..models import BenchmarkCase, CaseOutcome
+from ..limits import (
+    resolve_dynamic_limit,
+    resolve_robot_velocity_limits,
+    resolve_velocity_limits,
+)
 from .stats import nearest_rank_percentile
 
 if TYPE_CHECKING:
@@ -383,64 +388,6 @@ def _joint_limit_metrics(
     return maximum > 0.0, maximum
 
 
-# No revolute arm joint runs anywhere near 1000 rad/s (about 9500 rpm), so a
-# reported limit at or above this is a backend placeholder -- commonly the
-# float32 maximum -- rather than the asset's real limit. Treating it as a limit
-# would make every velocity check pass regardless of the trajectory.
-_PLACEHOLDER_LIMIT_RAD_S = 1.0e3
-
-
-def resolve_velocity_limits(
-    asset_limits: torch.Tensor,
-    stated_limit: float | Sequence[float] | None,
-    reference: torch.Tensor,
-) -> torch.Tensor | None:
-    """Return usable per-joint velocity limits, or ``None`` when there are none.
-
-    A limit stated by the suite wins, since it is the deliberate answer to an
-    asset that does not carry its own. Otherwise the asset's limits are used
-    only when every entry is finite and below the placeholder threshold; a
-    backend that reports the float32 maximum has not supplied a limit, and
-    reporting it as satisfied would be worse than reporting nothing.
-
-    Args:
-        asset_limits: Per-joint limits from ``robot.get_qvel_limits()``.
-        stated_limit: The suite's override, or ``None``.
-        reference: Tensor whose dtype and device the result adopts.
-
-    Returns:
-        A ``(DOF,)`` limit tensor, or ``None`` when no usable limit exists.
-    """
-    if stated_limit is not None:
-        return resolve_dynamic_limit(stated_limit, asset_limits.shape[-1], reference)
-    usable = bool(
-        torch.isfinite(asset_limits).all()
-        and (asset_limits.abs() < _PLACEHOLDER_LIMIT_RAD_S).all()
-    )
-    return asset_limits.to(reference.dtype).to(reference.device) if usable else None
-
-
-def resolve_dynamic_limit(
-    limit: float | Sequence[float] | None,
-    dof: int,
-    reference: torch.Tensor,
-) -> torch.Tensor | None:
-    """Expand a scalar or per-joint dynamic limit to a ``(DOF,)`` tensor."""
-    if limit is None:
-        return None
-    values = (
-        [float(limit)] * dof
-        if isinstance(limit, (int, float)) and not isinstance(limit, bool)
-        else [float(value) for value in limit]
-    )
-    if len(values) != dof:
-        raise ValueError(
-            f"Dynamic limit has {len(values)} entries but the trajectory has {dof} "
-            "joints."
-        )
-    return torch.tensor(values, dtype=reference.dtype, device=reference.device)
-
-
 def _utilization(
     values: torch.Tensor | None,
     limits: torch.Tensor | None,
@@ -660,6 +607,7 @@ def make_failure_outcomes(
     *,
     planner_failure_code: str | None = None,
     planning_success: bool = False,
+    timing_is_solved: bool | None = None,
 ) -> tuple[CaseOutcome, ...]:
     """Create per-env outcomes when validation cannot produce a trajectory."""
     return tuple(
@@ -669,6 +617,7 @@ def make_failure_outcomes(
             finite=False,
             ordered_waypoints_reached=False,
             motion_valid=False,
+            timed_motion_valid=False if timing_is_solved else None,
             completed_waypoint_ratio=0.0,
             final_translation_err_mm=None,
             final_rotation_err_deg=None,
@@ -714,6 +663,7 @@ def compute_case_outcomes(
                 make_failure_outcomes(
                     1,
                     "non_finite_trajectory",
+                    timing_is_solved=timing_is_solved,
                     planning_success=bool(planning_success[env_index].item()),
                     planner_failure_code=(
                         None
@@ -734,7 +684,9 @@ def compute_case_outcomes(
         )
     limits = robot.get_qpos_limits(name=control_part)
     dof = positions.shape[-1]
-    asset_qvel_limits = robot.get_qvel_limits(name=control_part).to(positions.device)
+    qvel_limits = resolve_robot_velocity_limits(
+        robot, control_part, joint_velocity_limit_rad_s, positions, dof=dof
+    )
     qacc_limits = resolve_dynamic_limit(joint_acceleration_limit_rad_s2, dof, positions)
     qjerk_limits = resolve_dynamic_limit(joint_jerk_limit_rad_s3, dof, positions)
     sample_dt = None if result.dt is None else result.dt.to(positions.device)
@@ -818,11 +770,7 @@ def compute_case_outcomes(
             dynamic = _dynamic_limit_metrics(
                 native_qpos,
                 None if sample_dt is None else sample_dt[env_index],
-                resolve_velocity_limits(
-                    asset_qvel_limits[env_index],
-                    joint_velocity_limit_rad_s,
-                    positions,
-                ),
+                qvel_limits,
                 qacc_limits,
                 qjerk_limits,
                 dynamic_limit_tolerance,
@@ -857,11 +805,24 @@ def compute_case_outcomes(
         # valid even when a backend conservatively reports planning failure.
         # ``dynamic_limits_satisfied`` is ``None`` when no limit applies, which
         # leaves ``motion_valid`` unchanged rather than failing the trajectory.
+        geometry_valid = finite and ordered and not joint_violation
         motion_valid = (
-            finite
-            and ordered
-            and not joint_violation
-            and dynamic["dynamic_limits_satisfied"] is not False
+            geometry_valid and dynamic["dynamic_limits_satisfied"] is not False
+        )
+        timing_valid = (
+            sample_dt is not None
+            and bool(torch.isfinite(sample_dt[env_index]).all().item())
+            and bool((sample_dt[env_index] >= 0.0).all().item())
+            and not _moves_in_zero_time(native_qpos, sample_dt[env_index])
+        )
+        timed_motion_valid = (
+            bool(
+                geometry_valid
+                and timing_valid
+                and dynamic["dynamic_limits_satisfied"] is not False
+            )
+            if timing_is_solved
+            else None
         )
 
         if poses.shape[0] > 0:
@@ -909,6 +870,7 @@ def compute_case_outcomes(
                 finite=finite,
                 ordered_waypoints_reached=ordered,
                 motion_valid=motion_valid,
+                timed_motion_valid=timed_motion_valid,
                 completed_waypoint_ratio=float(
                     semantic_matching["completed_waypoint_ratio"]
                 ),

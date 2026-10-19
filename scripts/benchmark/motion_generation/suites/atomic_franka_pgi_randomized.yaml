@@ -1,41 +1,61 @@
 schema_version: 1
-name: atomic_skill_ur5_pgi_nmg_randomized
-suite_version: atomic_ur5_pgi_nmg_randomized_v1
+name: atomic_franka_pgi_randomized
+suite_version: atomic_franka_pgi_randomized_v2
 profile: coverage
 
 robot:
-  id: ur5_pgi
-  provider: ur5_pgi
+  id: franka_pgi
+  provider: franka_pgi
   config: {}
 
 planners:
   - id: nmg
     adapter: nmg_onnx
     role: candidate
-    enabled: true
+    enabled: false
     config:
-      # Supply the external UR5 policy with --nmg-onnx-path; otherwise NMG is skipped.
       onnx_model_path: null
       num_waypoints: 5
       steps_per_waypoint: 30
       max_steps: 150
       action_scale: 0.2
-      num_arm_joints: 6
-      joint_periodic_features: true
       use_relative_obs: true
       intermediate_orientation: true
       pos_eps: 0.01
       rot_eps: 0.1
       joint_eps: 0.01
-      # The UR5 policy uses ee_link; the tutorial PGI TCP is 0.17 m farther on Z.
-      runtime_tcp_from_policy_tcp:
-        - [1.0, 0.0, 0.0, 0.0]
-        - [0.0, 1.0, 0.0, 0.0]
-        - [0.0, 0.0, 1.0, -0.17]
+      policy_frame_from_world:
+        - [-1.0, 0.0, 0.0, 0.0]
+        - [0.0, -1.0, 0.0, 0.0]
+        - [0.0, 0.0, 1.0, 0.0]
         - [0.0, 0.0, 0.0, 1.0]
-
+      runtime_tcp_from_policy_tcp:
+        - [0.70710678, 0.70710678, 0.0, 0.0]
+        - [-0.70710678, 0.70710678, 0.0, 0.0]
+        - [0.0, 0.0, 1.0, -0.0466]
+        - [0.0, 0.0, 0.0, 1.0]
+  - id: curobo
+    adapter: curobo
+    role: primary_baseline
+    enabled: true
+    config:
+      max_attempts: 5
+      max_planning_time: null
+      interpolation_dt: 0.025
+      collision_activation_distance: 0.01
+      use_cuda_graph: true
+      cuda_graph_fallback: true
+      warmup_iterations: 1
+      preserve_plan_samples: false
+      world:
+        obstacle_representation: sphere
+        multi_env: false
+      auto_gen:
+        sphere_density: 0.1
+        collision_sphere_buffer: 0.0
 
 protocol:
+  report_schema_version: "3"
   warmup_trials: 0
   measured_trials: 1
   sample_interval: 80
@@ -43,10 +63,14 @@ protocol:
   position_threshold_m: 0.01
   rotation_threshold_rad: 0.1
   joint_limit_tolerance_rad: 0.00001
+  # Suite budgets; valid assembled Robot velocity caps remain authoritative.
+  joint_velocity_limit_rad_s: [2.62, 2.62, 2.62, 2.62, 5.26, 4.18, 5.26]
+  joint_acceleration_limit_rad_s2: 10.0
+  joint_jerk_limit_rad_s3: 5000.0
 
 tracks:
-  - id: atomic-task-randomized
-    scenario: atomic_task
+  - id: atomic-skill-randomized
+    scenario: atomic_skill
     enabled: true
     config:
       batch_sizes: [1]
@@ -84,36 +108,6 @@ tracks:
           rest_offset: 0.001
           settle_steps: 10
       skills:
-        - id: move_end_effector
-          sample_count: 80
-          start_qpos_jitter_rad: [0.15, 0.15, 0.15, 0.12, 0.15, 0.12]
-          target_offset_jitter_m: [0.03, 0.03, 0.02]
-          cases:
-            - name: randomized_two_waypoint
-              task_difficulty: medium
-              target_offsets_m:
-                - [-0.08, -0.08, 0.08]
-                - [0.04, 0.12, 0.04]
-              difficulty_factors:
-                waypoint_count: 2
-                randomized_start: true
-                randomized_targets: true
-        - id: move_joints
-          sample_count: 80
-          joint_limit_margin_rad: 0.05
-          joint_threshold_rad: 0.02
-          start_qpos_jitter_rad: [0.15, 0.15, 0.15, 0.12, 0.15, 0.12]
-          target_offset_jitter_rad: [0.05, 0.05, 0.05, 0.05, 0.05, 0.05]
-          cases:
-            - name: randomized_multi_joint
-              task_difficulty: medium
-              target_offsets_rad:
-                - [0.12, -0.08, 0.10, 0.12, -0.08, 0.10]
-              difficulty_factors:
-                waypoint_count: 1
-                active_joints: 6
-                randomized_start: true
-                randomized_target: true
         - id: pick_up
           sample_count: 120
           grasp_source: fixed
@@ -179,7 +173,7 @@ tracks:
           effect_joint_sign: 1.0
           minimum_joint_delta_m: 0.004
           geometry_seed: 11
-          start_qpos_jitter_rad: [0.15, 0.15, 0.15, 0.12, 0.15, 0.12]
+          start_qpos_jitter_rad: [0.15, 0.15, 0.15, 0.12, 0.15, 0.12, 0.15]
           cases:
             - name: randomized_vertical_press
               task_difficulty: medium

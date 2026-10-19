@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Config-driven scene objects for Atomic Task benchmark cases."""
+"""Config-driven scene objects for Atomic Skill benchmark cases."""
 
 from __future__ import annotations
 

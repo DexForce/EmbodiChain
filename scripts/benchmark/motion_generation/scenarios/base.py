@@ -104,7 +104,7 @@ class ScenarioProvider(ABC):
     def trial_metadata(self, case: "BenchmarkCase") -> dict[str, object]:
         """Return scenario attribution known before a planning call."""
         del case
-        return {}
+        return {"timing_scope": "planner_call"}
 
     def reset_case(
         self,
@@ -171,7 +171,7 @@ class ScenarioProvider(ABC):
             timing_is_solved=timing_is_solved,
         )
         # Only a solved parameterization has a duration worth publishing; a
-        # nominal clock is filtered out downstream by `native_timing`.
+        # nominal clock is filtered out downstream by `timing_is_solved`.
         duration = (
             float(result.dt.sum(dim=-1).mean().item())
             if result.dt is not None and result.dt.numel()

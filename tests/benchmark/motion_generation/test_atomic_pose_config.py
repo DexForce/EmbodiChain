@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Configuration tests for batched random-pose Atomic Task benchmarks."""
+"""Configuration tests for batched random-pose Atomic Skill benchmarks."""
 
 from __future__ import annotations
 
@@ -29,8 +29,8 @@ from scripts.benchmark.motion_generation.config import (
     resolve_atomic_batch_sizes,
     resolve_atomic_pose_randomization,
 )
-from scripts.benchmark.motion_generation.scenarios.atomic_task import (
-    AtomicTaskScenario,
+from scripts.benchmark.motion_generation.scenarios.atomic_skill import (
+    AtomicSkillScenario,
     _apply_target_rotation_randomization,
     _randomization_parameters,
     _randomized_vector_batch,
@@ -46,11 +46,11 @@ from scripts.benchmark.motion_generation.scenarios.atomic_dual_arm_providers imp
 
 def test_pose_batch_suite_declares_translation_only_batched_trials() -> None:
     """The shipped pose-batch suite maps one random pose to one env row."""
-    suite = load_suite("atomic_franka_pgi_curobo_pose_batch")
+    suite = load_suite("atomic_franka_pgi_pose_batch")
     track = suite.enabled_tracks()[0]
 
     settings = resolve_atomic_pose_randomization(track)
-    assert suite.suite_version == "atomic_franka_pgi_curobo_pose_batch_v3"
+    assert suite.suite_version == "atomic_franka_pgi_pose_batch_v4"
     assert settings.enabled is True
     assert settings.mode == "translation"
     assert settings.pose_batch_size == 8
@@ -60,8 +60,6 @@ def test_pose_batch_suite_declares_translation_only_batched_trials() -> None:
 
     skills = {entry["id"]: entry for entry in track.config["skills"]}
     assert set(skills) == {
-        "move_end_effector",
-        "move_joints",
         "pick_up",
         "move_held_object",
         "place",
@@ -79,11 +77,6 @@ def test_pose_batch_suite_declares_translation_only_batched_trials() -> None:
         for skill_id in ("press", "twist")
     } == {"press": (256, 12), "twist": (256, 20)}
     assert skills["pick_up"]["object_position_jitter_m"] == [0.03, 0.03, 0.0]
-    assert skills["move_end_effector"]["target_offset_jitter_m"] == [
-        0.03,
-        0.03,
-        0.02,
-    ]
     assert {
         entry["id"]: entry["asset_path"] for entry in track.config["articulations"]
     } == {
@@ -226,7 +219,7 @@ def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> N
         ),
     }
 
-    assert suite.suite_version == "atomic_franka_pgi_spatial_generalization_v8"
+    assert suite.suite_version == "atomic_franka_pgi_spatial_generalization_v9"
     assert len(suite.evaluation_tracks()) == 79
     assert set(expected) == {track.id for track in suite.tracks}
     for track in suite.tracks:
@@ -554,7 +547,7 @@ def test_dual_arm_mirror_domains_swap_spatial_roles() -> None:
             for track in load_suite(suite_name).evaluation_tracks()
             if track.domain.id == "bilateral_role_mirror"
         )
-        prepared = AtomicTaskScenario._prepare_pose_batch_config(
+        prepared = AtomicSkillScenario._prepare_pose_batch_config(
             {}, mirror, batch_size=1
         )
         assert prepared["control_parts"] == control_parts
@@ -564,8 +557,8 @@ def test_dual_arm_mirror_domains_swap_spatial_roles() -> None:
 def test_pose_batch_aliases_are_normalized() -> None:
     """Readable aliases work without changing the canonical manifest."""
     track = TrackCfg(
-        id="atomic-task",
-        scenario="atomic_task",
+        id="atomic-skill",
+        scenario="atomic_skill",
         config={
             "random_pose_count": 4,
             "randomization": {
@@ -587,8 +580,8 @@ def test_pose_batch_aliases_are_normalized() -> None:
 def test_planar_pose_mode_injects_all_strict_spatial_controls() -> None:
     """The planar-pose mode injects all normalized planar dimensions."""
     track = TrackCfg(
-        id="atomic-task",
-        scenario="atomic_task",
+        id="atomic-skill",
+        scenario="atomic_skill",
         config={
             "randomization": {
                 "mode": "planar_pose",
@@ -604,7 +597,7 @@ def test_planar_pose_mode_injects_all_strict_spatial_controls() -> None:
     )
 
     settings = resolve_atomic_pose_randomization(track)
-    prepared = AtomicTaskScenario._prepare_pose_batch_config({}, track, batch_size=4)
+    prepared = AtomicSkillScenario._prepare_pose_batch_config({}, track, batch_size=4)
 
     assert settings.enabled is True
     assert settings.object_yaw_jitter_rad == pytest.approx(0.5)
@@ -634,8 +627,8 @@ def test_planar_pose_mode_injects_all_strict_spatial_controls() -> None:
 def test_spatial_pose_mode_injects_all_roll_pitch_controls() -> None:
     """The spatial-pose mode exposes 3D orientation for every pose role."""
     track = TrackCfg(
-        id="atomic-task",
-        scenario="atomic_task",
+        id="atomic-skill",
+        scenario="atomic_skill",
         config={
             "randomization": {
                 "mode": "spatial_pose",
@@ -649,7 +642,7 @@ def test_spatial_pose_mode_injects_all_roll_pitch_controls() -> None:
     )
 
     settings = resolve_atomic_pose_randomization(track)
-    prepared = AtomicTaskScenario._prepare_pose_batch_config({}, track, batch_size=4)
+    prepared = AtomicSkillScenario._prepare_pose_batch_config({}, track, batch_size=4)
 
     assert settings.object_roll_pitch_jitter_rad == (0.1, 0.2)
     assert settings.target_roll_pitch_jitter_rad == (0.2, 0.3)
@@ -748,8 +741,8 @@ def test_workspace_shell_config_rejects_degenerate_xy_ranges(
 ) -> None:
     """Shell configs require paired XY ranges and at least one radial source."""
     track = TrackCfg(
-        id="atomic-task",
-        scenario="atomic_task",
+        id="atomic-skill",
+        scenario="atomic_skill",
         config={
             "randomization": {
                 "enabled": True,
@@ -768,8 +761,8 @@ def test_workspace_shell_config_rejects_degenerate_xy_ranges(
 def test_workspace_shell_config_allows_zero_irrelevant_ranges() -> None:
     """An inactive vector is valid when another translation defines the shell."""
     track = TrackCfg(
-        id="atomic-task",
-        scenario="atomic_task",
+        id="atomic-skill",
+        scenario="atomic_skill",
         config={
             "randomization": {
                 "enabled": True,
@@ -791,8 +784,8 @@ def test_workspace_shell_config_allows_zero_irrelevant_ranges() -> None:
 def test_pose_sampling_pattern_is_validated_and_injected() -> None:
     """The YAML sampling selector reaches runtime pose generation unchanged."""
     track = TrackCfg(
-        id="atomic-task",
-        scenario="atomic_task",
+        id="atomic-skill",
+        scenario="atomic_skill",
         config={
             "randomization": {
                 "enabled": True,
@@ -805,7 +798,7 @@ def test_pose_sampling_pattern_is_validated_and_injected() -> None:
     )
 
     settings = resolve_atomic_pose_randomization(track)
-    prepared = AtomicTaskScenario._prepare_pose_batch_config({}, track, batch_size=4)
+    prepared = AtomicSkillScenario._prepare_pose_batch_config({}, track, batch_size=4)
     assert settings.sampling_pattern == "stratified"
     assert prepared["_pose_batch_sampling_pattern"] == "stratified"
 
@@ -826,8 +819,8 @@ def test_pose_sampling_pattern_is_validated_and_injected() -> None:
 def test_translation_mode_rejects_yaw_fields(field: str) -> None:
     """A translation-only domain rejects every orientation control."""
     track = TrackCfg(
-        id="atomic-task",
-        scenario="atomic_task",
+        id="atomic-skill",
+        scenario="atomic_skill",
         config={
             "randomization": {
                 "enabled": True,
@@ -854,8 +847,8 @@ def test_translation_mode_rejects_yaw_fields(field: str) -> None:
 def test_non_spatial_modes_reject_roll_pitch_fields(field: str, mode: str) -> None:
     """Roll/pitch controls require the explicit spatial-pose mode."""
     track = TrackCfg(
-        id="atomic-task",
-        scenario="atomic_task",
+        id="atomic-skill",
+        scenario="atomic_skill",
         config={
             "randomization": {
                 "enabled": True,
@@ -871,7 +864,7 @@ def test_non_spatial_modes_reject_roll_pitch_fields(field: str, mode: str) -> No
 
 def test_atomic_pose_config_rejects_null_track_mapping() -> None:
     """Report malformed YAML track entries with a useful type error."""
-    track = TrackCfg(id="atomic-task", scenario="atomic_task", config=None)
+    track = TrackCfg(id="atomic-skill", scenario="atomic_skill", config=None)
     with pytest.raises(TypeError, match="track config must be a mapping"):
         resolve_atomic_pose_randomization(track)
 
@@ -917,8 +910,8 @@ def test_invalid_pose_randomization_is_rejected(
     """Reject malformed batch and translation perturbation controls early."""
     randomization = {field: value}
     track = TrackCfg(
-        id="atomic-task",
-        scenario="atomic_task",
+        id="atomic-skill",
+        scenario="atomic_skill",
         config={"randomization": randomization},
     )
 
@@ -929,8 +922,8 @@ def test_invalid_pose_randomization_is_rejected(
 def test_explicit_batch_sizes_must_match_random_pose_batch() -> None:
     """Avoid silently running a different batch size than the pose matrix."""
     track = TrackCfg(
-        id="atomic-task",
-        scenario="atomic_task",
+        id="atomic-skill",
+        scenario="atomic_skill",
         config={
             "batch_sizes": [1],
             "randomization": {"enabled": True, "pose_batch_size": 8},
@@ -944,8 +937,8 @@ def test_explicit_batch_sizes_must_match_random_pose_batch() -> None:
 def test_none_mode_can_batch_identical_poses_without_jitter() -> None:
     """``none`` disables perturbations but may still exercise a batched planner."""
     track = TrackCfg(
-        id="atomic-task",
-        scenario="atomic_task",
+        id="atomic-skill",
+        scenario="atomic_skill",
         config={
             "randomization": {
                 "mode": "none",
@@ -964,8 +957,8 @@ def test_none_mode_can_batch_identical_poses_without_jitter() -> None:
 def test_none_mode_rejects_nonzero_jitter_when_enabled() -> None:
     """A disabled perturbation mode must not silently ignore configured jitter."""
     track = TrackCfg(
-        id="atomic-task",
-        scenario="atomic_task",
+        id="atomic-skill",
+        scenario="atomic_skill",
         config={
             "randomization": {
                 "enabled": True,
@@ -994,7 +987,7 @@ def test_b1_offset_manifest_keeps_legacy_waypoint_shape() -> None:
     case = create_atomic_skill_provider("move_end_effector").generate_case(
         scenario,
         Mock(suite_version="test_v1", robot=Mock(id="franka_pgi")),
-        Mock(id="atomic-task"),
+        Mock(id="atomic-skill"),
         {
             "name": "legacy_shape",
             "target_offsets_m": [[0.1, 0.0, 0.0], [0.0, 0.1, 0.0]],
@@ -1033,7 +1026,7 @@ def test_pose_batch_moveeef_shares_translation_across_waypoints() -> None:
     case = create_atomic_skill_provider("move_end_effector").generate_case(
         scenario,
         Mock(suite_version="test_v1", robot=Mock(id="franka_pgi")),
-        Mock(id="atomic-task"),
+        Mock(id="atomic-skill"),
         config,
         seed=11,
         batch_size=batch_size,
@@ -1056,7 +1049,7 @@ def test_randomize_object_pose_returns_live_pose_after_optional_settle() -> None
     entity.get_local_pose.return_value = settled
     handle = Mock(initial_pose=pose, entity=entity)
     simulation = Mock()
-    scenario = AtomicTaskScenario()
+    scenario = AtomicSkillScenario()
     scenario.simulation = simulation
 
     result = scenario.randomize_object_pose(
@@ -1079,7 +1072,7 @@ def test_track_level_object_yaw_is_batched_and_deterministic() -> None:
     initial_pose = torch.eye(4).repeat(batch_size, 1, 1)
     initial_pose[:, :3, 3] = torch.tensor([-0.42, -0.08, 0.05])
     handle = Mock(initial_pose=initial_pose, entity=Mock())
-    scenario = AtomicTaskScenario()
+    scenario = AtomicSkillScenario()
     config = {
         "_pose_batch_object_yaw_jitter_rad": 0.5,
         "_pose_batch_seed_stride": 1,
@@ -1127,7 +1120,7 @@ def test_task_frame_transform_is_shared_by_scene_objects() -> None:
     second_pose[:, :3, 3] = torch.tensor([-0.1, 0.3, 0.1])
     first_handle = Mock(initial_pose=first_pose, entity=Mock())
     second_handle = Mock(initial_pose=second_pose, entity=Mock())
-    scenario = AtomicTaskScenario()
+    scenario = AtomicSkillScenario()
     config = {
         "_pose_batch_task_frame_translation_jitter_m": [0.03, 0.03, 0.0],
         "_pose_batch_task_frame_yaw_jitter_rad": 0.2,
@@ -1197,7 +1190,7 @@ def test_randomize_articulation_root_pose_is_deterministic() -> None:
         torch.testing.assert_close(qpos, initial_qpos)
 
     handle.reset.side_effect = reset
-    scenario = AtomicTaskScenario()
+    scenario = AtomicSkillScenario()
     scenario.simulation = Mock()
     config = {
         "articulation_position_jitter_m": [0.03, 0.02, 0.01],
@@ -1262,7 +1255,7 @@ def test_resolve_articulation_grasp_broadcasts_one_local_candidate_over_batch(
         torch.ones(batch_size, dtype=torch.bool),
         joint_seed.clone(),
     )
-    scenario = AtomicTaskScenario()
+    scenario = AtomicSkillScenario()
     scenario.robot = robot
     scenario.control_part = "arm"
 
@@ -1323,7 +1316,7 @@ def test_pickup_case_pins_settle_steps_in_pose_manifest() -> None:
     case = create_atomic_skill_provider("pick_up").generate_case(
         scenario,
         Mock(suite_version="test_v1", robot=Mock(id="franka_pgi")),
-        Mock(id="atomic-task"),
+        Mock(id="atomic-skill"),
         {
             "name": "settled_pick",
             "object": "cube",
@@ -1359,7 +1352,7 @@ def test_reset_case_reapplies_frozen_object_pose_after_settle() -> None:
     handle = Mock(object_id="cube", entity=entity)
     simulation = Mock()
     robot = Mock(device=torch.device("cpu"))
-    scenario = AtomicTaskScenario()
+    scenario = AtomicSkillScenario()
     scenario._objects = {"cube": handle}
 
     case = Mock(
@@ -1392,7 +1385,7 @@ def test_reset_case_restores_batched_articulation_root_and_joint_state() -> None
     )
     simulation = Mock()
     robot = Mock(device=torch.device("cpu"))
-    scenario = AtomicTaskScenario()
+    scenario = AtomicSkillScenario()
     scenario._articulations = {"microwave": handle}
     case = Mock(
         full_start_qpos=torch.zeros(batch_size, 8),

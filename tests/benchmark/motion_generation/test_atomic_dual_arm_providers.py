@@ -43,9 +43,9 @@ from scripts.benchmark.motion_generation.registry import create_robot_provider
 from scripts.benchmark.motion_generation.scenarios import (
     atomic_dual_arm_providers as dual,
 )
-from scripts.benchmark.motion_generation.scenarios import atomic_task
-from scripts.benchmark.motion_generation.scenarios.atomic_task import (
-    AtomicTaskScenario,
+from scripts.benchmark.motion_generation.scenarios import atomic_skill
+from scripts.benchmark.motion_generation.scenarios.atomic_skill import (
+    AtomicSkillScenario,
     _ActiveCaseGraspPoseGenerator,
     _CaseSampleCountGraspPoseGenerator,
     _ExecutionObservation,
@@ -64,9 +64,9 @@ def _pose(x: float, y: float = 0.0, z: float = 0.0) -> torch.Tensor:
 def _case(skill_id: str, **parameters: object) -> BenchmarkCase:
     return BenchmarkCase(
         suite_version="test_v1",
-        track="atomic-task",
+        track="atomic-skill",
         scenario_id=skill_id,
-        case_id=f"atomic-task:{skill_id}:case:b1:s11",
+        case_id=f"atomic-skill:{skill_id}:case:b1:s11",
         seed=11,
         batch_size=1,
         num_waypoints=1,
@@ -528,7 +528,7 @@ def test_coordinated_placement_rechecks_relative_target_after_release() -> None:
 
 def test_replay_collects_named_scene_object_poses_in_sync() -> None:
     state = {"step": 0}
-    scenario = AtomicTaskScenario()
+    scenario = AtomicSkillScenario()
     scenario.simulation = Mock()
     scenario.simulation.update.side_effect = lambda step: state.update(
         step=state["step"] + step
@@ -596,6 +596,7 @@ def _two_arm_robot() -> Mock:
         [0, 1, 2] if name == "left_arm" else [3, 4, 5]
     )
     robot.get_qpos_limits.side_effect = lambda name: torch.tensor([[[-5.0, 5.0]] * 3])
+    robot.get_qvel_limits.return_value = torch.full((1, 3), 2.0)
 
     def batch_fk(*, qpos: torch.Tensor, name: str, to_matrix: bool) -> torch.Tensor:
         del name, to_matrix
@@ -614,6 +615,10 @@ def _protocol_suite() -> Mock:
             position_threshold_m=0.01,
             rotation_threshold_rad=0.1,
             joint_limit_tolerance_rad=1.0e-5,
+            joint_velocity_limit_rad_s=None,
+            joint_acceleration_limit_rad_s2=None,
+            joint_jerk_limit_rad_s3=None,
+            dynamic_limit_tolerance=1.0e-5,
         )
     )
 
@@ -626,10 +631,12 @@ def test_other_arm_must_pass_its_own_frozen_waypoints(right_x: float, valid: boo
     positions[0, :, 3] = torch.linspace(0.0, right_x, 5)
     result = SimpleNamespace(
         plan_success=torch.tensor([True]),
-        trajectory=SimpleNamespace(positions=positions, dt=torch.zeros(1, 5)),
+        trajectory=SimpleNamespace(
+            positions=positions, dt=torch.tensor([[0.0, 0.1, 0.1, 0.1, 0.1]])
+        ),
     )
 
-    merged = AtomicTaskScenario._with_other_arm_validity(
+    merged = AtomicSkillScenario._with_other_arm_validity(
         result, case, _two_arm_robot(), _protocol_suite(), (_outcome(),)
     )
 
@@ -637,7 +644,7 @@ def test_other_arm_must_pass_its_own_frozen_waypoints(right_x: float, valid: boo
     assert merged[0].ordered_waypoints_reached is valid
     assert merged[0].failure_code == (None if valid else "waypoint_miss")
     single = replace(case, case_parameters={})
-    assert AtomicTaskScenario._with_other_arm_validity(
+    assert AtomicSkillScenario._with_other_arm_validity(
         result, single, _two_arm_robot(), _protocol_suite(), (_outcome(),)
     ) == (_outcome(),)
 
@@ -820,8 +827,8 @@ def test_coordinated_placement_transforms_fixed_targets_with_task_frame(monkeypa
     }
     placing_pose = nominal_placing_pose.clone()
     support_pose = nominal_support_pose.clone()
-    atomic_task._apply_task_frame_randomization(placing_pose, config, seed=11)
-    atomic_task._apply_task_frame_randomization(support_pose, config, seed=11)
+    atomic_skill._apply_task_frame_randomization(placing_pose, config, seed=11)
+    atomic_skill._apply_task_frame_randomization(support_pose, config, seed=11)
     placing_vertices = torch.tensor(
         [
             [-0.04, -0.03, -0.01],
@@ -854,7 +861,7 @@ def test_coordinated_placement_transforms_fixed_targets_with_task_frame(monkeypa
         Mock(), Mock(), nominal_placing_pose, nominal_support_pose, {}, seed=11
     )
     task_frame_pose = torch.eye(4).repeat(batch_size, 1, 1)
-    atomic_task._apply_task_frame_randomization(task_frame_pose, config, seed=11)
+    atomic_skill._apply_task_frame_randomization(task_frame_pose, config, seed=11)
     expected_placing = torch.bmm(task_frame_pose, nominal["placing_target_pose"])
     expected_support = torch.bmm(task_frame_pose, nominal["support_target_pose"])
 
@@ -887,7 +894,7 @@ def test_scenario_configures_every_gripper_and_freezes_each_hand_over_grasp():
         "right_eef": [13],
     }[name]
     simulation = Mock()
-    scenario = AtomicTaskScenario()
+    scenario = AtomicSkillScenario()
     scenario.simulation = simulation
     scenario._runtime_entities_created = True
     track = Mock(
@@ -951,7 +958,7 @@ class _CountingSampler(ParallelJawGraspPoseGenerator):
 
 
 def test_each_self_sampling_case_compiles_with_its_own_sample_count(monkeypatch):
-    monkeypatch.setattr(atomic_task, "_parallel_jaw_sampler", _CountingSampler)
+    monkeypatch.setattr(atomic_skill, "_parallel_jaw_sampler", _CountingSampler)
     robot = Mock(device=CPU)
     robot.control_parts = {"left_eef": object(), "right_eef": object()}
     robot.get_joint_ids.side_effect = lambda name: {
@@ -959,7 +966,7 @@ def test_each_self_sampling_case_compiles_with_its_own_sample_count(monkeypatch)
         "right_eef": [13],
     }[name]
     robot.get_qpos_limits.side_effect = lambda name: torch.tensor([[[0.0, 0.04]]])
-    scenario = AtomicTaskScenario()
+    scenario = AtomicSkillScenario()
     scenario.robot = robot
     scenario.simulation = Mock(sim_config=Mock(physics_dt=0.01))
     scenario._gripper_states = {
@@ -1011,7 +1018,7 @@ def test_each_self_sampling_case_compiles_with_its_own_sample_count(monkeypatch)
 def test_scenario_rejects_single_and_multiple_gripper_declarations_together():
     robot = Mock(device=CPU)
     robot.get_qpos.return_value = torch.zeros(1, 8)
-    scenario = AtomicTaskScenario()
+    scenario = AtomicSkillScenario()
     scenario.simulation = Mock()
     scenario._runtime_entities_created = True
     track = Mock(
@@ -1036,7 +1043,7 @@ def test_fixtures_are_static_and_scene_objects_stay_in_the_case():
         return entity
 
     simulation.add_rigid_object.side_effect = add_rigid_object
-    scenario = AtomicTaskScenario()
+    scenario = AtomicSkillScenario()
     track = Mock(
         config={
             "fixtures": [{"id": "table", "kind": "cube", "size": [1.0, 1.0, 0.02]}],
@@ -1089,7 +1096,7 @@ def test_reset_case_restores_every_row_of_a_frozen_placement_scene():
     support_pose[:, 1, 3] = torch.tensor([-0.1, -0.2, -0.3, -0.4])
     placing = Mock(object_id="bread", entity=Mock())
     support = Mock(object_id="pan", entity=Mock())
-    scenario = AtomicTaskScenario()
+    scenario = AtomicSkillScenario()
     scenario._objects = {"bread": placing, "pan": support}
     case = Mock(
         full_start_qpos=torch.zeros(batch_size, 12),
@@ -1137,8 +1144,8 @@ def test_hand_over_scores_delivery_within_the_derived_budget():
     assert not result(_pose(0.0, -0.2, 0.65))
 
 
-def _scenario_with_grippers(grasp_qpos: float) -> AtomicTaskScenario:
-    scenario = AtomicTaskScenario()
+def _scenario_with_grippers(grasp_qpos: float) -> AtomicSkillScenario:
+    scenario = AtomicSkillScenario()
     scenario._gripper_states = {
         part: (torch.tensor([0.0]), torch.tensor([grasp_qpos]))
         for part in ("left_eef", "right_eef")

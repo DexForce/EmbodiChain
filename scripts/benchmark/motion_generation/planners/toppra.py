@@ -52,7 +52,7 @@ class ToppraAdapter(PlannerAdapter):
     capabilities = frozenset(
         {"eef_waypoint", "joint_waypoint", "batched", "empty_world", "atomic_action"}
     )
-    native_timing = True
+    timing_is_solved = True
     """TOPPRA solves the time parameterization under velocity and acceleration
     limits."""
 
@@ -66,17 +66,18 @@ class ToppraAdapter(PlannerAdapter):
 
     def build(self) -> None:
         """Construct the TOPPRA MotionGenerator."""
+        self.resolve_motion_limits(require_timing=True)
         self.motion_generator = MotionGenerator(
             MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=self.context.robot.uid))
         )
 
     def _plan_options(self) -> ToppraPlanOptions:
         """Return the suite-configured TOPPRA limits and sample count."""
-        config = self.spec.config
+        limits = self.resolve_motion_limits(require_timing=True)
         return ToppraPlanOptions(
             constraints={
-                "velocity": float(config.get("velocity", 0.2)),
-                "acceleration": float(config.get("acceleration", 0.5)),
+                "velocity": limits["velocity"],
+                "acceleration": limits["acceleration"],
             },
             sample_method=TrajectorySampleMethod.QUANTITY,
             sample_interval=self.context.sample_interval,
@@ -113,7 +114,7 @@ class ToppraAdapter(PlannerAdapter):
                 start_qpos=case.start_qpos,
                 control_part=self.context.control_part,
                 is_interpolate=True,
-                is_linear=True,
+                is_linear=validity == "ordered_cartesian_waypoints",
                 plan_opts=self._plan_options(),
             ),
         )
