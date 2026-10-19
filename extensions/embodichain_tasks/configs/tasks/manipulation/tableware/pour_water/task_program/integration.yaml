@@ -91,3 +91,31 @@ runtime_services:
         - 1.0
     - kind: pour
       object_id: bottle
+
+# Offline asset preparation matches these roles before ordinary task loading.
+asset_requirements:
+  roles:
+    bottle:
+      entity_id: bottle
+      query:
+        category: bottle
+        attributes:
+          open_top: true
+        capabilities:
+        - antipodal_grasp
+        - pour_source
+      max_extent_m: 0.22
+    cup:
+      entity_id: cup
+      query:
+        category: cup
+        attributes:
+          open_top: true
+        capabilities:
+        - container
+      max_extent_m: 0.15
+  relations:
+  - kind: pours_into
+    object_role: bottle
+    target_role: cup
+    clearance_m: 0.002

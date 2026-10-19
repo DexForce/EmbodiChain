@@ -24,7 +24,6 @@ PourWaterAssets models; --bottle-catalog/--cup-catalog select authored alternati
 from __future__ import annotations
 
 import argparse
-from copy import deepcopy
 import json
 from pathlib import Path
 import shutil
@@ -39,7 +38,6 @@ import yaml
 from embodichain.data import get_data_path
 from embodichain.data.asset_catalog import (
     AssetDescriptor,
-    AssetQuery,
     Bounds3D,
     DirectoryAssetProvider,
 )
@@ -59,15 +57,10 @@ from embodichain.lab.task_program.integrations.asset_materialization import (
 from embodichain.lab.task_program.integrations.simulation.asset_pouring import (
     PouringAcceptanceMonitor,
 )
-from embodichain.lab.task_program.semantics.asset_requirements import (
-    AssetRelationRequirement,
-    AssetRequirements,
-    AssetRoleRequirement,
-)
+from embodichain.utils.config_paths import resolve_config_path
 
 CONFIGS = Path(__file__).resolve().parents[3] / "extensions/embodichain_tasks/configs"
 TASK = CONFIGS / "tasks/manipulation/tableware/pour_water"
-TABLE_TOP_M = 0.875
 
 
 def _yaml(path: Path) -> dict[str, Any]:
@@ -165,61 +158,51 @@ def _prepare_catalogs(output: Path) -> tuple[Path, Path]:
 
 def _template(output: Path) -> Path:
     output.mkdir(parents=True)
-    task = _yaml(TASK / "task.cobotmagic.yaml")
-    task.update(
-        id="AssetGeneralizationPourWater-v0",
-        headless=True,
-        renderer="no-render",
-        enable_sensor=False,
+    source = TASK / "task.cobotmagic.asset_generalization.yaml"
+    task = _yaml(source)
+    env = _yaml(
+        resolve_config_path(task["environment"]["component"], base_dir=source.parent)
+    )
+    integration = _yaml(
+        resolve_config_path(task["task_program"]["integration"], base_dir=source.parent)
+    )
+    program = _yaml(
+        resolve_config_path(task["task_program"]["program"], base_dir=source.parent)
     )
     task["environment"] = {"component": "env.yaml"}
     task["embodiment"]["component"] = str(
-        CONFIGS / "components/embodiments/cobotmagic.yaml"
+        resolve_config_path(
+            task["embodiment"]["component"], base_dir=source.parent
+        ).resolve()
+    )
+    policy = resolve_config_path(
+        task["task_program"]["execution_policy"], base_dir=source.parent
     )
     task["task_program"] = {
         "program": "program.yaml",
         "integration": "integration.yaml",
-        "execution_policy": str(
-            CONFIGS / "components/execution_policies/trajectory_open_loop_slow.yaml"
-        ),
+        "execution_policy": str(policy.resolve()),
     }
-    env = _yaml(TASK / "env.yaml")
-    env["env"]["dataset"] = {}
-    # Inscribe a simple box in the original round tabletop footprint so it
-    # clears the arm mounts at (0.233, +/-0.300, 0.7775). Only bottle and cup
-    # are asset variants.
-    table = env["simulation"]["background"][0]
-    table["shape"] = {"shape_type": "Cube", "size": [0.7, 0.7, 0.1]}
-    table["body_type"] = "static"
-    integration = _yaml(TASK / "task_program/integration.yaml")
-    requirements = AssetRequirements(
-        roles={
-            "bottle": AssetRoleRequirement(
-                "bottle",
-                AssetQuery(
-                    "bottle", {"open_top": True}, ("antipodal_grasp", "pour_source")
-                ),
-                max_extent_m=0.22,
-            ),
-            "cup": AssetRoleRequirement(
-                "cup",
-                AssetQuery("cup", {"open_top": True}, ("container",)),
-                max_extent_m=0.15,
-            ),
-        },
-        relations=(
-            AssetRelationRequirement("pours_into", "bottle", "cup", clearance_m=0.002),
-        ),
-    )
-    integration["asset_requirements"] = requirements.to_dict()
     for name, value in (
         ("task", task),
         ("env", env),
         ("integration", integration),
-        ("program", _yaml(TASK / "task_program/program.yaml")),
+        ("program", program),
     ):
         _write_yaml(output / f"{name}.yaml", value)
     return output / "task.yaml"
+
+
+def _table_top_m(background: list[dict[str, Any]]) -> float:
+    table = next(obj for obj in background if obj["uid"] == "table")
+    if (
+        table["shape"]["shape_type"] != "Cube"
+        or any(table.get("init_rot", [0, 0, 0]))
+        or table.get("init_local_pose") is not None
+        or any(value != 1 for value in table.get("body_scale", [1, 1, 1]))
+    ):
+        raise ValueError("Pour acceptance requires an upright, unscaled Cube table")
+    return float(table["init_pos"][2] + table["shape"]["size"][2] / 2)
 
 
 def _poses(env: Any) -> tuple[np.ndarray, np.ndarray]:
@@ -270,7 +253,9 @@ def _environment(
         bottle_mouth_radius_m=bottle["mouth_radius_m"],
         cup_opening_radius_m=cup["opening_radius_m"],
     )
+    table_top = _table_top_m(config["background"])
     env = build_env(config["id"], cfg)
+    env._pour_table_top_m = table_top
     env._pour_monitor = monitor
     env._pour_descriptors = descriptors
     env._asset_generalization_recording_root = str(run_root)
@@ -283,7 +268,7 @@ def _initial(env: Any) -> ValidationResult:
     checks = []
     for role, pose in (("bottle", bottle), ("cup", cup)):
         bottom = float(pose[2, 3] + env._pour_descriptors[role]["bounds_m"]["lower"][2])
-        gap = abs(bottom - TABLE_TOP_M)
+        gap = abs(bottom - env._pour_table_top_m)
         checks.append(
             ValidationCheck(
                 f"{role}_supported",
@@ -354,8 +339,12 @@ def main() -> None:
         episodes_per_batch=args.episodes,
         record_trajectory=True,
     )
+    template = _template(output / "template")
+    table_top = _table_top_m(
+        _yaml(template.parent / "env.yaml")["simulation"]["background"]
+    )
     deployments = prepare_asset_batches(
-        _template(output / "template"),
+        template,
         {
             "bottle": DirectoryAssetProvider(bottle_dir),
             "cup": DirectoryAssetProvider(cup_dir),
@@ -364,8 +353,8 @@ def main() -> None:
         output_dir=output / "batches",
         adaptations=AssetAdaptationCfg(
             initial_bottom_z_m={
-                "bottle": TABLE_TOP_M + 0.001,
-                "cup": TABLE_TOP_M + 0.002,
+                "bottle": table_top + 0.001,
+                "cup": table_top + 0.002,
             },
             pour=AssetPourAdaptationCfg(mouth_clearance_m=0.15),
         ),

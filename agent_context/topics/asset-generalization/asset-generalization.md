@@ -105,6 +105,15 @@ asset replacement and calibrated CobotMagic pouring-motion acceptance.
 Host tests live in `tests/gym/envs/test_asset_generalization.py`; existing scene
 expansion tests remain authoritative for canonical execution and reject gates.
 
+The acceptance examples read packaged, configuration-defined tasks. The primitive
+baseline lives under `configs/tasks/manipulation/cube_platform_pick_place/`;
+PourWater selects `task.cobotmagic.asset_generalization.yaml` and
+`env.asset_generalization.yaml` under `configs/tasks/manipulation/tableware/pour_water/`.
+Programs and scene bindings stay in each task's `task_program/` directory.
+PourWater's integration owns its asset-role requirements. The example host only
+prepares variants and supplies the additional measured acceptance; ordinary
+`run-task --gym-config` loading does not select assets or invoke Providers.
+
 
 ## Calibrated bottle/cup pouring
 

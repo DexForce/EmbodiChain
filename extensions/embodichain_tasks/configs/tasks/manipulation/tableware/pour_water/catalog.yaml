@@ -11,3 +11,5 @@ deployments:
     config: task.cobotmagic.yaml
   tianji_marvin:
     config: task.tianji_marvin.yaml
+  asset_generalization:
+    config: task.cobotmagic.asset_generalization.yaml

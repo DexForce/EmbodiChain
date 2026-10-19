@@ -8,6 +8,48 @@ Neither example calls an online generation service.
 Run from the repository root with the SDK and bundled task/robot extensions
 installed. Every invocation requires a new output directory.
 
+## Task Program and environment configurations
+
+Both examples read checked-in task configurations rather than building their
+programs and scenes in Python. The configuration ownership is:
+
+| File | Owns |
+| --- | --- |
+| `task.<variant>.yaml` | Runnable ID, environment/embodiment/policy selections and collection target |
+| `env.yaml` or `env.asset_generalization.yaml` | Physics backend, geometry, initial state and manager settings |
+| `task_program/program.yaml` | Semantic Calls, segments, post-policies and validators |
+| `task_program/integration.yaml` | Scene bindings, affordances, calibration and optional asset-role requirements |
+
+The primitive task is in
+[`cube_platform_pick_place`](../../../extensions/embodichain_tasks/configs/tasks/manipulation/cube_platform_pick_place/README.md).
+Its default environment contains a 4 cm Cube and a Cube platform. `run.py` reads
+these files, changes the cube size and corresponding placement height per batch,
+and keeps the program unchanged.
+
+The pouring template is
+[`task.cobotmagic.asset_generalization.yaml`](../../../extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.asset_generalization.yaml).
+It selects the primitive-table environment and the existing four-segment program.
+The integration declares the bottle/cup `asset_requirements`, including category,
+`open_top`, capabilities, size bounds and the `pours_into` relation. `pour_water.py`
+reads that contract during offline preparation; the table support height also
+comes from the selected environment configuration.
+
+Run the authored configurations through the ordinary task launcher:
+
+```bash
+embodichain run-task --gym-config \
+  extensions/embodichain_tasks/configs/tasks/manipulation/cube_platform_pick_place/task.ur5.yaml
+
+embodichain run-task --gym-config \
+  extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.asset_generalization.yaml \
+  --record_trajectory
+```
+
+Ordinary configuration loading uses the meshes declared in the environment and
+does not contact Providers. Use the batch commands below for asset replacement,
+independent measured acceptance and isolated recording directories. Those hosts
+retain the extra footprint/pouring checks described in this README.
+
 ## Primitive cube/platform baseline
 
 ```bash

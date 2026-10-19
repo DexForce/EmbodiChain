@@ -38,6 +38,9 @@ _SETUP_PATH = _REPOSITORY_ROOT / "setup.py"
 _CONFIG_PACKAGE = "embodichain_tasks.configs"
 _CONFIG_SOURCE = _REPOSITORY_ROOT / "extensions" / "embodichain_tasks" / "configs"
 _PROGRAMS = {
+    Path("tasks/manipulation/cube_platform_pick_place/task_program/program.yaml"): (
+        "cube_platform_pick_place"
+    ),
     Path("tasks/manipulation/repeated_pick_place/task_program/program.tabletop.yaml"): (
         "repeated_tabletop_cube_pick_place"
     ),
@@ -70,6 +73,18 @@ _PROGRAMS = {
     ): "pour_water_with_right_arm",
 }
 _DEPLOYMENTS = {
+    Path("tasks/manipulation/cube_platform_pick_place/task.ur5.yaml"): (
+        "cube_platform_pick_place",
+        "task_program_cube_platform_pick_place",
+        "ur5_dh_pgi_140_80",
+    ),
+    Path(
+        "tasks/manipulation/tableware/pour_water/task.cobotmagic.asset_generalization.yaml"
+    ): (
+        "pour_water_with_right_arm",
+        "task_program_pour_water",
+        "cobotmagic",
+    ),
     Path("tasks/manipulation/repeated_pick_place/task.tianji_marvin.yaml"): (
         "repeated_tabletop_cube_pick_place",
         "repeated_pick_place_tabletop",
@@ -171,6 +186,10 @@ _RESOURCE_PATHS = frozenset(
         Path("components/embodiments/franka_panda.yaml"),
         Path("components/embodiments/tianji_marvin.yaml"),
         Path("components/embodiments/ur5_dh_pgi_140_80.yaml"),
+        Path("tasks/manipulation/cube_platform_pick_place/env.yaml"),
+        Path(
+            "tasks/manipulation/cube_platform_pick_place/task_program/integration.yaml"
+        ),
         Path("tasks/manipulation/hand_over/env.yaml"),
         Path("tasks/manipulation/hand_over/README.md"),
         Path("tasks/manipulation/hand_over/envs/tabletop.default.yaml"),
@@ -197,6 +216,7 @@ _RESOURCE_PATHS = frozenset(
         Path("tasks/manipulation/rubiks_cube_pick_place/env.yaml"),
         Path("tasks/manipulation/rubiks_cube_pick_place/task_program/integration.yaml"),
         Path("tasks/manipulation/tableware/pour_water/env.yaml"),
+        Path("tasks/manipulation/tableware/pour_water/env.asset_generalization.yaml"),
         Path("tasks/manipulation/tableware/pour_water/env.tianji_marvin.yaml"),
         Path("tasks/manipulation/tableware/pour_water/README.md"),
         Path("tasks/manipulation/tableware/pour_water/task_program/integration.yaml"),

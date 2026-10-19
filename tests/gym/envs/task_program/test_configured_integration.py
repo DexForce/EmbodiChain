@@ -254,6 +254,72 @@ def registered_test_ids() -> Iterator[list[str]]:
 
 
 @pytest.mark.parametrize(
+    "relative_path,program_id,primitive_uid,primitive_size",
+    [
+        (
+            "cube_platform_pick_place/task.ur5.yaml",
+            "cube_platform_pick_place",
+            "platform",
+            (0.16, 0.16, 0.05),
+        ),
+        (
+            "tableware/pour_water/task.cobotmagic.asset_generalization.yaml",
+            "pour_water_with_right_arm",
+            "table",
+            (0.7, 0.7, 0.1),
+        ),
+    ],
+)
+def test_acceptance_deployments_load_without_task_specific_python(
+    relative_path: str,
+    program_id: str,
+    primitive_uid: str,
+    primitive_size: tuple[float, float, float],
+    registered_test_ids: list[str],
+) -> None:
+    path = _CONFIG_DIRECTORY / relative_path
+    config = load_config(path)
+    registered_test_ids.append(config["id"])
+    cfg = config_to_cfg(config, source_path=path)
+    assert REGISTERED_ENVS[config["id"]].cls is EmbodiedEnv
+    assert cfg.task_program.program_id == program_id
+    assert cfg.num_envs == 1
+    support = next(obj for obj in cfg.background if obj.uid == primitive_uid)
+    assert support.shape.shape_type == "Cube"
+    assert support.shape.size == pytest.approx(primitive_size)
+    assert _physical_components(path, config).config["physics"] == "default"
+
+
+def test_pouring_asset_semantics_are_declared_by_the_task_integration() -> None:
+    from embodichain.lab.task_program.integrations.asset_materialization import (
+        load_asset_requirements_from_deployment,
+    )
+
+    path = (
+        _TABLEWARE_CONFIG_DIRECTORY
+        / "pour_water/task.cobotmagic.asset_generalization.yaml"
+    )
+    requirements = load_asset_requirements_from_deployment(path)
+    assert set(requirements.roles) == {"bottle", "cup"}
+    for role in ("bottle", "cup"):
+        requirement = requirements.roles[role]
+        assert requirement.entity_id == role
+        assert requirement.query.category == role
+        assert requirement.query.attributes["open_top"] is True
+    assert set(requirements.roles["bottle"].query.capabilities) == {
+        "antipodal_grasp",
+        "pour_source",
+    }
+    assert requirements.roles["cup"].query.capabilities == ("container",)
+    (relation,) = requirements.relations
+    assert (relation.kind, relation.object_role, relation.target_role) == (
+        "pours_into",
+        "bottle",
+        "cup",
+    )
+
+
+@pytest.mark.parametrize(
     ("task_name", "expected_scene", "expected_profile", "expected_calls"),
     tuple(
         (task_name, scene_id, profile_id, calls)

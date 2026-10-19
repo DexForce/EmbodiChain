@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 import argparse
-from copy import deepcopy
 from itertools import product
 from tempfile import mkdtemp
 import json
@@ -29,6 +28,7 @@ from typing import Any
 import numpy as np
 import yaml
 
+from embodichain.utils.config_paths import resolve_config_path
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 from embodichain.lab.gym.utils.registration import build_env
 from embodichain.lab.sim.motion.expansion import ValidationCheck, ValidationResult
@@ -41,7 +41,7 @@ from embodichain.lab.task_program.integrations.simulation.scene_expansion import
 )
 
 CONFIGS = Path(__file__).resolve().parents[3] / "extensions/embodichain_tasks/configs"
-TASK = CONFIGS / "tasks/manipulation/repeated_pick_place"
+TASK = CONFIGS / "tasks/manipulation/cube_platform_pick_place"
 
 
 def _write_yaml(path: Path, value: dict[str, Any]) -> None:
@@ -50,99 +50,67 @@ def _write_yaml(path: Path, value: dict[str, Any]) -> None:
 
 def _template(root: Path, *, side: float, seed: int, batch_index: int) -> Path:
     root.mkdir(parents=True)
-    task = yaml.safe_load((TASK / "task.ur5.yaml").read_text())
-    task.pop("expansion", None)
-    task.update(
-        id=f"PrimitiveCubePlatform-{int(side * 1000)}mm-{seed}-{batch_index}-v0",
-        headless=True,
-        renderer="no-render",
-        enable_sensor=False,
+    source = TASK / "task.ur5.yaml"
+    task = yaml.safe_load(source.read_text())
+    environment = yaml.safe_load(
+        resolve_config_path(
+            task["environment"]["component"], base_dir=source.parent
+        ).read_text()
     )
+    integration = yaml.safe_load(
+        resolve_config_path(
+            task["task_program"]["integration"], base_dir=source.parent
+        ).read_text()
+    )
+    program = yaml.safe_load(
+        resolve_config_path(
+            task["task_program"]["program"], base_dir=source.parent
+        ).read_text()
+    )
+    stem, version = task["id"].rsplit("-v", 1)
+    task["id"] = f"{stem}-{int(side * 1000)}mm-{seed}-{batch_index}-v{version}"
     task["environment"] = {"component": "env.yaml"}
     task["embodiment"]["component"] = str(
-        CONFIGS / "components/embodiments/ur5_dh_pgi_140_80.yaml"
+        resolve_config_path(
+            task["embodiment"]["component"], base_dir=source.parent
+        ).resolve()
+    )
+    policy = resolve_config_path(
+        task["task_program"]["execution_policy"], base_dir=source.parent
     )
     task["task_program"] = {
         "program": "program.yaml",
         "integration": "integration.yaml",
-        "execution_policy": str(
-            CONFIGS / "components/execution_policies/trajectory_open_loop.yaml"
-        ),
+        "execution_policy": str(policy.resolve()),
     }
-    environment = yaml.safe_load((TASK / "envs/default.yaml").read_text())
-    environment["max_episode_steps"] = 2400
-    environment["env"]["dataset"] = {}
-    environment["env"].update(record_trajectory=True, trajectory_auto_save=True)
-    cube = environment["simulation"]["rigid_object"][0]
-    cube["shape"] = {"shape_type": "Cube", "size": [side, side, side]}
-    cube["init_pos"][2] = side / 2
-    platform = deepcopy(environment["simulation"]["rigid_object"][0])
-    platform.update(uid="platform", body_type="static", init_pos=[-0.42, 0.30, 0.025])
-    platform["shape"]["size"] = [0.16, 0.16, 0.05]
-    environment["simulation"]["background"].append(platform)
-    integration = yaml.safe_load((TASK / "task_program/integration.yaml").read_text())
+    cube = next(
+        obj for obj in environment["simulation"]["rigid_object"] if obj["uid"] == "cube"
+    )
+    bottom = cube["init_pos"][2] - cube["shape"]["size"][2] / 2
+    cube["shape"]["size"] = [side, side, side]
+    cube["init_pos"][2] = bottom + side / 2
+    platform = next(
+        obj
+        for obj in environment["simulation"]["background"]
+        if obj["uid"] == "platform"
+    )
     identity = f"primitive_{int(side * 1000)}mm_{seed}_{batch_index}"
     integration["integration_id"] += f"_{identity}"
     integration["scene_binding"]["registry_id"] += f"_{identity}"
-    target_pose = np.eye(4)
-    # Local platform top + half the source size + release clearance.
-    target_pose[2, 3] = 0.05 / 2 + side / 2 + 0.002
-    integration["scene_binding"]["rigid_objects"].append(
-        {
-            "entity_id": "platform",
-            "simulation_uid": "platform",
-            "dynamics": "static",
-            "semantic_type": "platform",
-            "affordances": [
-                {
-                    "kind": "support_surface",
-                    "entity_id": "platform_top",
-                    "native_name": "top",
-                    "object_target_frame": "parent",
-                    "object_target_pose": target_pose.reshape(-1).tolist(),
-                }
-            ],
-        }
+    platform_binding = next(
+        obj
+        for obj in integration["scene_binding"]["rigid_objects"]
+        if obj["entity_id"] == "platform"
     )
-    program = {
-        "program_id": integration["program_id"],
-        "instruction": "Pick up the cube and place it on the platform.",
-        "targets": {},
-        "program": {
-            "kind": "sequence",
-            "items": [
-                {
-                    "kind": "segment",
-                    "name": "pick",
-                    "steps": {
-                        "kind": "invoke",
-                        "call": {"kind": "pick", "object": "cube"},
-                    },
-                    "validators": [
-                        {
-                            "kind": "object_lifted",
-                            "object": "cube",
-                            "minimum_lift": 0.03,
-                        }
-                    ],
-                },
-                {
-                    "kind": "segment",
-                    "name": "place",
-                    "steps": {
-                        "kind": "invoke",
-                        "call": {
-                            "kind": "place",
-                            "object": "cube",
-                            "on": "platform_top",
-                        },
-                    },
-                    "post": [{"kind": "wait_stable", "entity": "cube"}],
-                    "validators": [{"kind": "object_upright", "object": "cube"}],
-                },
-            ],
-        },
-    }
+    support = next(
+        item
+        for item in platform_binding["affordances"]
+        if item["entity_id"] == "platform_top"
+    )
+    # Parent-relative platform top + half the current primitive + release clearance.
+    support["object_target_pose"][11] = (
+        platform["shape"]["size"][2] / 2 + side / 2 + 0.002
+    )
     for name, value in (
         ("task", task),
         ("env", environment),
