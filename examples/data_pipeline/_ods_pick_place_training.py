@@ -46,13 +46,9 @@ from embodichain.data_pipeline.engine.data import (
 from examples.data_pipeline._ods_pick_place_benchmark import (
     _content_manifest,
     EfficiencyTracker,
-    export_corpus,
-    load_corpus,
     resource_snapshot,
 )
 from examples.data_pipeline.ods_pick_place_showcase import (
-    GeometryRecurrentBC,
-    MLPBC,
     _evaluate_worker,
     _geometry_statistics,
     _receive,
@@ -303,7 +299,7 @@ def _snapshot(engine: OnlineDataEngine) -> dict[str, torch.Tensor]:
     ):
         raise ValueError("Offline episodes must be continuous within each valid span")
     return {
-        "observations": policy_observations(batch["obs"], "geometry"),
+        "observations": policy_observations(batch["obs"]),
         "actions": batch["actions"],
         "valid": batch["valid"],
         "frame_ids": torch.stack(
@@ -316,7 +312,6 @@ def _snapshot(engine: OnlineDataEngine) -> dict[str, torch.Tensor]:
 
 
 def _engine(config: dict[str, Any], args: argparse.Namespace) -> OnlineDataEngine:
-    pose = args.policy.endswith("pose")
     config = copy.deepcopy(config)
     config["num_envs"] = args.producer_envs
     config["seed"] = args.producer_seed
@@ -325,11 +320,9 @@ def _engine(config: dict[str, Any], args: argparse.Namespace) -> OnlineDataEngin
         OnlineDataEngineCfg(
             gym_config=config,
             state_dim=9,
-            action_dim=7 if pose else 8,
-            action_semantics="policy_request" if pose else "expert_controller_command",
-            action_contracts=(
-                ("eef_pose.relative@1", "gripper.parallel@1") if pose else None
-            ),
+            action_dim=7,
+            action_semantics="policy_request",
+            action_contracts=("eef_pose.relative@1", "gripper.parallel@1"),
             buffer_size=args.buffer_size,
             max_episode_steps=600,
             buffer_device="cpu",
@@ -362,7 +355,7 @@ def _engine(config: dict[str, Any], args: argparse.Namespace) -> OnlineDataEngin
     return engine
 
 
-def _schema(ready: dict[str, Any], pose: bool) -> dict[str, Any]:
+def _schema(ready: dict[str, Any]) -> dict[str, Any]:
     names = (
         [f"qpos_{i}" for i in range(9)]
         + [f"qvel_{i}" for i in range(9)]
@@ -380,12 +373,8 @@ def _schema(ready: dict[str, Any], pose: bool) -> dict[str, Any]:
             "rotation": "matrix_first_two_columns",
         },
         "action": {
-            "names": (
-                ["dx", "dy", "dz", "drx", "dry", "drz", "gripper"]
-                if pose
-                else ready["joints"]
-            ),
-            "semantics": "policy_request" if pose else "expert_controller_command",
+            "names": (["dx", "dy", "dz", "drx", "dry", "drz", "gripper"]),
+            "semantics": "policy_request",
             "terms": ready["action_terms"],
             "step_dt": 1 / 30,
         },
@@ -412,22 +401,12 @@ def _sample(
     engine: OnlineDataEngine,
     count: int,
     tracker: EfficiencyTracker,
-    history: bool = False,
-    chunk_horizon: int | None = None,
+    prediction_horizon: int,
 ) -> dict[str, torch.Tensor]:
-    started = tracker.elapsed_seconds()
     blocked = None
     while True:
         try:
-            batch = (
-                engine.sample_batch_with_context(count, 2, chunk_horizon)
-                if chunk_horizon is not None
-                else (
-                    engine.sample_batch_with_history(count, 24, start_probability=0.25)
-                    if history
-                    else engine.sample_batch(count, 1)
-                )
-            )
+            batch = engine.sample_batch_with_context(count, 2, prediction_horizon)
             break
         except RuntimeError as error:
             if engine.state is not OnlineDataEngineState.READY or (
@@ -438,25 +417,20 @@ def _sample(
             if blocked is None:
                 blocked = tracker.elapsed_seconds()
             if tracker.elapsed_seconds() - blocked >= 30:
-                raise TimeoutError("No eligible ODS frame for 30 seconds") from error
+                raise TimeoutError("No eligible ODS context for 30 seconds") from error
             time.sleep(0.02)
     ended = tracker.elapsed_seconds()
     tracker.record_interval("data_wait", ended if blocked is None else blocked, ended)
-    sequence = history or chunk_horizon is not None
-    selection = (slice(None), slice(None)) if sequence else (slice(None), 0)
     return {
-        "observations": policy_observations(batch["obs"], "geometry")[selection],
-        "actions": batch["actions"][selection],
+        "observations": policy_observations(batch["obs"]),
+        "actions": batch["actions"],
         "frame_ids": torch.stack(
             (batch["ods_run_id"], batch["ods_episode_id"], batch["ods_frame_index"]),
             dim=-1,
-        )[selection],
-        "generations": batch["ods_generation"][selection],
-        **(
-            {"valid": batch["valid"], "loss_mask": batch["loss_mask"]}
-            if sequence
-            else {}
         ),
+        "generations": batch["ods_generation"],
+        "valid": batch["valid"],
+        "loss_mask": batch["loss_mask"],
     }
 
 
@@ -467,25 +441,8 @@ def run(args: argparse.Namespace) -> None:
     torch.set_num_threads(1)
     if args.output.exists() and any(args.output.iterdir()):
         raise FileExistsError("Use a fresh output directory, including when resuming")
-    if args.mode == "offline-matched" and (
-        args.offline_data is None or args.batch_manifest is None
-    ):
-        raise ValueError("offline-matched requires --offline-data and --batch-manifest")
-    if args.batch_manifest and args.mode != "offline-matched":
-        raise ValueError("Batch manifests are consumed only by offline-matched")
-    if args.policy in {"gru-pose", "chunk-pose"} and (
-        args.record_batches or args.mode == "offline-matched"
-    ):
-        raise ValueError(
-            "Exact batch-manifest replay currently supports MLP frames; recurrent offline-full/frozen sampling is supported"
-        )
     args.output.mkdir(parents=True, exist_ok=True)
-    if getattr(args, "offline_storage", "pt") == "lerobot" or (
-        args.offline_data is not None and args.offline_data.is_dir()
-    ):
-        # Set before the first SDK/datasets import in this fresh CLI process.
-        # Keep generated Arrow caches within the measured run footprint.
-        os.environ["HF_DATASETS_CACHE"] = str((args.output / "dataset_cache").resolve())
+    os.environ["HF_DATASETS_CACHE"] = str((args.output / "dataset_cache").resolve())
     auto_report = getattr(args, "auto_configuration", None)
     auto_plan = None if auto_report is None else auto_report["configuration"]
     if auto_report is not None:
@@ -506,12 +463,7 @@ def run(args: argparse.Namespace) -> None:
         allocated_gpu_ids=physical_gpus,
         start_monotonic=started,
     )
-    pose = args.policy.endswith("pose")
-    recurrent = args.policy == "gru-pose"
-    chunked = args.policy == "chunk-pose"
-    config = load_task_config(
-        args.sim_device, "pose" if pose else "joint", args.pose_ik
-    )
+    config = load_task_config(args.sim_device, args.pose_ik)
     config["seed"] = args.seed
     (args.output / "task_config.json").write_text(json.dumps(config, indent=2))
     (args.output / "config.json").write_text(
@@ -714,6 +666,24 @@ def run(args: argparse.Namespace) -> None:
         usage.lifecycle(events)
         return events
 
+    def save_usage(report: dict[str, Any] | None = None) -> None:
+        if usage is None:
+            return
+        (args.output / "usage.json").write_text(
+            json.dumps(
+                {
+                    **(usage.summary() if report is None else report),
+                    "counter_backend": usage.counter_backend,
+                    "availability_scope": (
+                        "resident_corpus_load"
+                        if corpus is not None
+                        else "live_publication"
+                    ),
+                },
+                indent=2,
+            )
+        )
+
     recorded_refills: set[int] = set()
 
     def request_refill() -> int:
@@ -724,8 +694,6 @@ def run(args: argparse.Namespace) -> None:
             recorded_refills.add(generation)
         return generation
 
-    snapshots = []
-    batch_ids = []
     end_reason = "update_budget"
     generation_counts: dict[int, int] = {}
     resource_sampler = _ResourceSampler(
@@ -825,25 +793,21 @@ def run(args: argparse.Namespace) -> None:
                 f"Viser: http://127.0.0.1:{args.viser_port}\nTensorBoard: http://127.0.0.1:{args.tensorboard_port}",
                 flush=True,
             )
-        schema = _schema(ready, pose)
+        schema = _schema(ready)
         corpus = None
         if args.offline_data is not None:
             if args.mode not in {
                 "offline-full",
                 "offline-32",
-                "offline-matched",
                 "frozen",
             }:
                 raise ValueError("--offline-data requires an offline or frozen mode")
             load_started = tracker.elapsed_seconds()
-            if args.offline_data.is_dir():
-                from examples.data_pipeline._ods_pick_place_lerobot import (
-                    load_lerobot_corpus,
-                )
+            from examples.data_pipeline._ods_pick_place_lerobot import (
+                load_lerobot_corpus,
+            )
 
-                corpus = load_lerobot_corpus(args.offline_data, expected_schema=schema)
-            else:
-                corpus = load_corpus(args.offline_data, expected_schema=schema)
+            corpus = load_lerobot_corpus(args.offline_data, expected_schema=schema)
             tracker.record_interval(
                 "offline_load", load_started, tracker.elapsed_seconds()
             )
@@ -902,84 +866,48 @@ def run(args: argparse.Namespace) -> None:
             initial_actions = initial["actions"][initial["valid"]]
             initial_positions = initial["initial_positions"].tolist()
             source_run = engine.run_id
-            if (
-                args.mode in {"offline-full", "offline-32", "offline-matched"}
-                or args.export_data
-            ):
-                snapshots.append(initial)
             if args.mode in {"offline-full", "offline-32"}:
                 offline_episodes = getattr(args, "offline_episodes", None) or (
                     args.buffer_size * (1 if args.mode == "offline-32" else args.rounds)
                 )
-                if getattr(args, "offline_storage", "pt") == "lerobot":
-                    from examples.data_pipeline._ods_pick_place_collection import (
-                        collect_lerobot,
-                    )
-                    from examples.data_pipeline._ods_pick_place_lerobot import (
-                        load_lerobot_corpus,
-                    )
+                from examples.data_pipeline._ods_pick_place_collection import (
+                    collect_lerobot,
+                )
+                from examples.data_pipeline._ods_pick_place_lerobot import (
+                    load_lerobot_corpus,
+                )
 
-                    def collection_progress() -> None:
-                        drain_usage()
-                        _timeout(args, tracker)
-                        # Also checks process liveness when a hard exit has not
-                        # yet been reflected in the shared lifecycle state.
-                        engine.wait_for_generation(1, timeout=0.1)
+                def collection_progress() -> None:
+                    drain_usage()
+                    _timeout(args, tracker)
+                    # Also checks process liveness when a hard exit has not
+                    # yet been reflected in the shared lifecycle state.
+                    engine.wait_for_generation(1, timeout=0.1)
 
-                    path = args.output / "lerobot_dataset"
-                    collection_report = collect_lerobot(
-                        engine,
-                        initial,
-                        path,
-                        schema=schema,
-                        episodes=offline_episodes,
-                        snapshot=_snapshot,
-                        request_refill=request_refill,
-                        progress=collection_progress,
-                        clock=tracker.elapsed_seconds,
-                        record_interval=tracker.record_interval,
-                    )
-                    (args.output / "offline_collection.json").write_text(
-                        json.dumps(collection_report, indent=2)
-                    )
-                else:
-                    for _ in range(1, offline_episodes // args.buffer_size):
-                        generation = request_refill()
-                        _wait(engine, generation, args, tracker)
-                        drain_usage()
-                        snapshots.append(_snapshot(engine))
-                    path = args.export_data or args.output / "corpus.pt"
-                    export_corpus(
-                        path,
-                        **{
-                            key: torch.cat([item[key] for item in snapshots])
-                            for key in (
-                                "observations",
-                                "actions",
-                                "valid",
-                                "frame_ids",
-                                "generations",
-                            )
-                        },
-                        schema=schema,
-                        provenance={
-                            "seed": args.seed,
-                            "producer_stats": engine.get_stats(),
-                        },
-                    )
+                path = args.output / "lerobot_dataset"
+                collection_report = collect_lerobot(
+                    engine,
+                    initial,
+                    path,
+                    schema=schema,
+                    episodes=offline_episodes,
+                    snapshot=_snapshot,
+                    request_refill=request_refill,
+                    progress=collection_progress,
+                    clock=tracker.elapsed_seconds,
+                    record_interval=tracker.record_interval,
+                )
+                (args.output / "offline_collection.json").write_text(
+                    json.dumps(collection_report, indent=2)
+                )
                 stats = engine.get_stats()
                 resource_sampler.capture("before_offline_producer_shutdown")
                 engine.stop()
                 drain_usage()
                 engine = None
                 resource_sampler.capture("after_offline_producer_shutdown")
-                snapshots.clear()
                 before = tracker.elapsed_seconds()
-                corpus = (
-                    load_lerobot_corpus(path, expected_schema=schema)
-                    if getattr(args, "offline_storage", "pt") == "lerobot"
-                    else load_corpus(path, expected_schema=schema)
-                )
+                corpus = load_lerobot_corpus(path, expected_schema=schema)
                 tracker.record_interval(
                     "offline_load", before, tracker.elapsed_seconds()
                 )
@@ -1045,12 +973,11 @@ def run(args: argparse.Namespace) -> None:
         if initial_values.numel() == 0:
             raise RuntimeError("Initial data has no valid training observations")
         mean, std = _geometry_statistics(initial_values)
-        if chunked:
-            targets = pose_targets(initial_values, initial_actions)
-            target_mean = targets.mean(0)
-            target_std = targets.std(0, correction=0).clamp_min(0.05)
-            target_mean[3:], target_std[3:] = 0, 1
-            del targets
+        targets = pose_targets(initial_values, initial_actions)
+        target_mean = targets.mean(0)
+        target_std = targets.std(0, correction=0).clamp_min(0.05)
+        target_mean[3:], target_std[3:] = 0, 1
+        del targets
         del initial_values
         del initial_actions
         if "initial" in locals():
@@ -1058,7 +985,20 @@ def run(args: argparse.Namespace) -> None:
         # Data generation is a child process; reset the learner RNG so offline
         # and ODS runs start from the same parameter state.
         torch.manual_seed(args.seed)
-        if chunked:
+        state = None
+        if args.resume:
+            model, state = load_policy(str(args.resume), args.train_device)
+            if getattr(model, "schema", None) != schema:
+                raise ValueError(
+                    "Resume checkpoint lacks a matching observation/controller schema"
+                )
+            if (
+                model.prediction_horizon != args.prediction_horizon
+                or model.action_horizon != args.action_horizon
+                or model.observation_noise != args.observation_noise
+            ):
+                raise ValueError("Resume chunk policy configuration differs")
+        else:
             model = ChunkBC(
                 mean,
                 std,
@@ -1068,48 +1008,11 @@ def run(args: argparse.Namespace) -> None:
                 args.action_horizon,
                 args.observation_noise,
             ).to(args.train_device)
-        elif recurrent:
-            model = GeometryRecurrentBC(
-                mean, std, torch.tensor(ready["low"]), torch.tensor(ready["high"])
-            ).to(args.train_device)
-        else:
-            model = MLPBC(
-                mean,
-                std,
-                torch.tensor(ready["low"]),
-                torch.tensor(ready["high"]),
-                arm_command_mode="pose" if pose else "residual",
-            ).to(args.train_device)
-        optimizer_type = torch.optim.AdamW if chunked else torch.optim.Adam
-        optimizer_options = {"weight_decay": 1e-6} if chunked else {}
-        optimizer = optimizer_type(
-            model.parameters(), lr=args.learning_rate, **optimizer_options
+        optimizer = torch.optim.AdamW(
+            model.parameters(), lr=args.learning_rate, weight_decay=1e-6
         )
         step = 0
-        if args.resume:
-            model, state = load_policy(str(args.resume), args.train_device)
-            if (
-                not isinstance(model, (MLPBC, ChunkBC))
-                or isinstance(model, ChunkBC) != chunked
-                or isinstance(model, GeometryRecurrentBC) != recurrent
-                or model.arm_command_mode != ("pose" if pose else "residual")
-            ):
-                raise ValueError(
-                    "Resume policy/action schema does not match the requested task"
-                )
-            if getattr(model, "schema", None) != schema:
-                raise ValueError(
-                    "Resume checkpoint lacks a matching observation/controller schema"
-                )
-            if chunked and (
-                model.prediction_horizon != args.prediction_horizon
-                or model.action_horizon != args.action_horizon
-                or model.observation_noise != args.observation_noise
-            ):
-                raise ValueError("Resume chunk policy configuration differs")
-            optimizer = optimizer_type(
-                model.parameters(), lr=args.learning_rate, **optimizer_options
-            )
+        if state is not None:
             optimizer.load_state_dict(state["optimizer"])
             step = state["step"]
             torch.set_rng_state(state["torch_rng"])
@@ -1160,19 +1063,7 @@ def run(args: argparse.Namespace) -> None:
                 indent=2,
             )
         )
-        manifest = (
-            torch.load(args.batch_manifest, map_location="cpu", weights_only=True)
-            if args.batch_manifest
-            else None
-        )
         total_updates = args.rounds * args.updates_per_round
-        if manifest is not None and (
-            manifest.dtype != torch.int64
-            or manifest.shape != (total_updates, args.batch_size, 3)
-        ):
-            raise ValueError(
-                "Batch replay manifest must match update and batch budgets"
-            )
         dev_request = {
             "seeds": list(
                 range(args.dev_seed_base, args.dev_seed_base + args.dev_scenes)
@@ -1263,7 +1154,7 @@ def run(args: argparse.Namespace) -> None:
             if (
                 round_index
                 and engine is not None
-                and args.mode in {"online", "serial"}
+                and args.mode == "online"
                 and auto_plan is None
                 and (
                     args.max_generated_episodes is None
@@ -1397,62 +1288,27 @@ def run(args: argparse.Namespace) -> None:
                         tracker.record_interval(
                             "data_wait", before, tracker.elapsed_seconds()
                         )
-                    if args.export_data:
-                        snapshots.append(_snapshot(engine))
                 if (
                     args.wall_time_budget
                     and tracker.elapsed_seconds() >= args.wall_time_budget
                 ):
                     end_reason = "wall_time_budget"
                     break
-                if (
-                    corpus is not None
-                    and getattr(args, "offline_sample_budget", None) is not None
-                ):
-                    if (
-                        corpus.get_sampling_budget_snapshot()["remaining_chunks"]
-                        < args.batch_size
-                    ):
-                        end_reason = "usage_budget"
-                        break
                 service_started = tracker.elapsed_seconds()
                 try:
                     with sampling_rng.scope():
                         if corpus is not None:
                             before = tracker.elapsed_seconds()
-                            if chunked:
-                                batch = corpus.sample_context(
-                                    args.batch_size,
-                                    2,
-                                    args.prediction_horizon,
-                                    generations=(
-                                        [1]
-                                        if args.mode in {"frozen", "offline-32"}
-                                        else None
-                                    ),
-                                )
-                            elif recurrent:
-                                batch = corpus.sample_histories(
-                                    args.batch_size,
-                                    generations=(
-                                        [1]
-                                        if args.mode in {"frozen", "offline-32"}
-                                        else None
-                                    ),
-                                )
-                            else:
-                                batch = (
-                                    corpus.sample_frame_ids(manifest[train_steps])
-                                    if args.mode == "offline-matched"
-                                    else corpus.sample_frames(
-                                        args.batch_size,
-                                        generations=(
-                                            [1]
-                                            if args.mode in {"frozen", "offline-32"}
-                                            else None
-                                        ),
-                                    )
-                                )
+                            batch = corpus.sample_context(
+                                args.batch_size,
+                                2,
+                                args.prediction_horizon,
+                                generations=(
+                                    [1]
+                                    if args.mode in {"frozen", "offline-32"}
+                                    else None
+                                ),
+                            )
                             # Resident tensor indexing/copy is batch service, as in ODS.
                             # Actual storage loading is timed separately above.
                             now = tracker.elapsed_seconds()
@@ -1462,10 +1318,7 @@ def run(args: argparse.Namespace) -> None:
                                 engine,
                                 args.batch_size,
                                 tracker,
-                                history=recurrent,
-                                chunk_horizon=(
-                                    args.prediction_horizon if chunked else None
-                                ),
+                                prediction_horizon=(args.prediction_horizon),
                             )
                 except OnlineDataBudgetExhaustedError:
                     if corpus is None:
@@ -1482,21 +1335,11 @@ def run(args: argparse.Namespace) -> None:
                 arm, hand = model.loss(
                     obs,
                     actions,
-                    **(
-                        {
-                            "loss_mask": batch["loss_mask"].to(args.train_device),
-                            "valid_mask": batch["valid"].to(args.train_device),
-                        }
-                        if chunked
-                        else (
-                            {"loss_mask": batch["loss_mask"].to(args.train_device)}
-                            if recurrent
-                            else {}
-                        )
-                    ),
+                    loss_mask=batch["loss_mask"].to(args.train_device),
+                    valid_mask=batch["valid"].to(args.train_device),
                 )
                 optimizer.zero_grad(set_to_none=True)
-                arm_dims = 9 if chunked else actions.shape[-1] - 1
+                arm_dims = 9
                 ((arm * arm_dims + hand) / (arm_dims + 1)).backward()
                 torch.nn.utils.clip_grad_norm_(
                     model.parameters(), 1, error_if_nonfinite=True
@@ -1543,8 +1386,6 @@ def run(args: argparse.Namespace) -> None:
                 tracker.record_interval(
                     "training_loop", update_started, tracker.elapsed_seconds()
                 )
-                if args.record_batches:
-                    batch_ids.append(batch["frame_ids"].clone())
                 versions, counts = (
                     batch["generations"]
                     if target_mask is None
@@ -1642,58 +1483,11 @@ def run(args: argparse.Namespace) -> None:
         tracker.record_interval(
             "training_loop", loop_started, tracker.elapsed_seconds()
         )
-        export_complete = None
-        if args.export_data and engine is not None:
-            publication = engine.get_stats()
-            export_complete = (
-                publication["requested_generation"]
-                == publication["completed_generation"]
-            )
-            if not export_complete:
-                (args.output / "export_status.json").write_text(
-                    json.dumps(
-                        {
-                            "complete": False,
-                            "reason": "Stopped before refill publication; no replay corpus was exported",
-                            "publication": publication,
-                        },
-                        indent=2,
-                    )
-                )
-        if args.export_data and engine is not None and export_complete:
-            export_corpus(
-                args.export_data,
-                **{
-                    key: torch.cat([s[key] for s in snapshots])
-                    for key in (
-                        "observations",
-                        "actions",
-                        "valid",
-                        "frame_ids",
-                        "generations",
-                    )
-                },
-                schema=schema,
-                provenance={
-                    "seed": args.seed,
-                    "archival_variant": True,
-                    "producer_stats": engine.get_stats(),
-                },
-            )
         if pending_ids:
             if args.train_device.startswith("cuda:"):
                 torch.cuda.synchronize(args.train_device)
             for ids in pending_ids:
                 tracker.record_update(tracker.elapsed_seconds(), ids)
-        if args.record_batches:
-            torch.save(
-                (
-                    torch.stack(batch_ids)
-                    if batch_ids
-                    else torch.empty((0, args.batch_size, 3), dtype=torch.int64)
-                ),
-                args.output / "batch_ids.pt",
-            )
         if engine is not None:
             stats = engine.get_stats()
             if auto_plan is not None:
@@ -1726,20 +1520,7 @@ def run(args: argparse.Namespace) -> None:
                 (args.output / "flow_measurements.json").write_text(
                     json.dumps(flow, indent=2)
                 )
-            (args.output / "usage.json").write_text(
-                json.dumps(
-                    {
-                        **usage_report,
-                        "counter_backend": usage.counter_backend,
-                        "availability_scope": (
-                            "resident_corpus_load"
-                            if corpus is not None
-                            else "live_publication"
-                        ),
-                    },
-                    indent=2,
-                )
-            )
+            save_usage(usage_report)
         if args.defer_evaluation:
             if engine is not None:
                 # Snapshot live availability before env.close clears its final
@@ -1838,8 +1619,6 @@ def run(args: argparse.Namespace) -> None:
             path
             for path in (
                 args.offline_data,
-                args.export_data,
-                args.output / "corpus.pt",
                 args.output / "lerobot_dataset",
                 args.output / "dataset_cache",
             )
@@ -1859,20 +1638,10 @@ def run(args: argparse.Namespace) -> None:
             for child in (path.rglob("*") if path.is_dir() else [path])
             if child.is_file()
         }
-        data_files |= {
-            Path(str(path) + ".manifest.json")
-            for path in list(data_files)
-            if Path(str(path) + ".manifest.json").exists()
-        }
         efficiency["cost/data_disk_final_bytes"] = sum(
             path.stat().st_size for path in data_files
         )
-        efficiency["cost/data_disk_peak_bytes"] = (
-            None
-            if getattr(args, "offline_storage", "pt") == "lerobot"
-            or (args.offline_data is not None and args.offline_data.is_dir())
-            else efficiency["cost/data_disk_final_bytes"]
-        )
+        efficiency["cost/data_disk_peak_bytes"] = None
         efficiency["cost/data_disk_scope"] = (
             "Final explicit dataset and run-local SDK cache files; temporary write peak is unmeasured; model/evaluation logs excluded"
         )
@@ -1955,10 +1724,6 @@ def run(args: argparse.Namespace) -> None:
             and args.stage == "showcase"
         )
         summary = {
-            "export_complete": export_complete,
-            "batch_manifest_complete": (
-                train_steps == total_updates if args.record_batches else None
-            ),
             "policy": args.policy,
             "mode": args.mode,
             "stage": args.stage,
@@ -1987,11 +1752,6 @@ def run(args: argparse.Namespace) -> None:
             "efficiency": efficiency,
             "final_verification_seconds": time.monotonic() - test_started,
         }
-        summary["matching"] = (
-            "exact_corpus_batch_manifest"
-            if args.mode == "offline-matched"
-            else "unmatched_refresh_schedule" if args.mode == "serial" else None
-        )
         (args.output / "summary.json").write_text(json.dumps(summary, indent=2))
         print(json.dumps(summary, indent=2), flush=True)
     except _BudgetExpired:
@@ -2035,7 +1795,6 @@ def run(args: argparse.Namespace) -> None:
                         else None
                     ),
                     "efficiency": efficiency,
-                    "export_complete": False,
                 },
                 indent=2,
             )
@@ -2070,20 +1829,7 @@ def run(args: argparse.Namespace) -> None:
                 cleanup_error = error
         if usage is not None:
             drain_usage()
-            (args.output / "usage.json").write_text(
-                json.dumps(
-                    {
-                        **usage.summary(),
-                        "counter_backend": usage.counter_backend,
-                        "availability_scope": (
-                            "resident_corpus_load"
-                            if corpus is not None
-                            else "live_publication"
-                        ),
-                    },
-                    indent=2,
-                )
-            )
+            save_usage()
         if writer is not None:
             writer.close()
         if evaluator.pid is not None:

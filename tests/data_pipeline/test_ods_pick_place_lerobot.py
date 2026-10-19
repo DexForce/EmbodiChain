@@ -22,9 +22,12 @@ from pathlib import Path
 import pytest
 import torch
 
-from examples.data_pipeline._ods_pick_place_benchmark import export_corpus, load_corpus
+from examples.data_pipeline._ods_pick_place_benchmark import (
+    FrozenCorpus,
+    _content_manifest,
+)
 from examples.data_pipeline._ods_pick_place_lerobot import (
-    export_lerobot_corpus,
+    DirectLeRobotWriter,
     load_lerobot_corpus,
 )
 
@@ -37,45 +40,45 @@ _SCHEMA = {
 }
 
 
-def _make_corpus(path: Path, *, generations: bool = True) -> None:
-    # An empty padded row and a hole exercise preservation of source histories.
-    valid = torch.tensor([[True, True, False], [False] * 3, [True, False, True]])
-    observations = torch.arange(18, dtype=torch.float32).reshape(3, 3, 2)
-    actions = -torch.arange(18, dtype=torch.float32).reshape(3, 3, 2) - 1
-    ids = torch.zeros(3, 3, 3, dtype=torch.int64)
-    for row in range(3):
-        ids[row, :, 0] = 11
-        ids[row, :, 1] = row + 5
-        ids[row, :, 2] = torch.arange(3)
-    export_corpus(
-        path,
-        observations,
-        actions,
-        valid,
-        ids,
-        schema=_SCHEMA,
-        generations=(
-            torch.tensor([[1] * 3, [2] * 3, [3] * 3]) if generations else None
+def _make_corpus(destination: Path) -> FrozenCorpus:
+    valid = torch.tensor([[True, True, False], [True, False, True]])
+    ids = torch.stack(
+        (
+            torch.full((2, 3), 11),
+            torch.tensor([5, 7])[:, None].expand(2, 3),
+            torch.arange(3)[None].expand(2, 3),
         ),
-        provenance={"teacher": "qualified-v1"},
+        -1,
+    )
+    tensors = {
+        "observations": torch.arange(12).float().reshape(2, 3, 2),
+        "actions": -torch.arange(12).float().reshape(2, 3, 2) - 1,
+        "valid": valid,
+        "frame_ids": ids,
+        "generations": torch.tensor([[1] * 3, [3] * 3]),
+    }
+    for key in tensors.keys() - {"valid"}:
+        tensors[key][~valid] = 0
+    with DirectLeRobotWriter(
+        destination, schema=_SCHEMA, episode_count=2, max_episode_steps=3
+    ) as writer:
+        for row in range(2):
+            writer.submit({key: value[row] for key, value in tensors.items()})
+        writer.finalize()
+    return FrozenCorpus(
+        tensors, {"schema": _SCHEMA, **_content_manifest(tensors, _SCHEMA)}
     )
 
 
-@pytest.mark.parametrize("generations", [True, False])
 def test_official_lerobot_roundtrip_preserves_padded_numeric_corpus(
-    tmp_path: Path, generations: bool
+    tmp_path: Path,
 ) -> None:
-    source, destination = tmp_path / "source.pt", tmp_path / "lerobot"
-    _make_corpus(source, generations=generations)
-    export_lerobot_corpus(source, destination)
-    original = load_corpus(source, expected_schema=_SCHEMA)
+    destination = tmp_path / "lerobot"
+    original = _make_corpus(destination)
     restored = load_lerobot_corpus(destination, expected_schema=_SCHEMA)
     for field in ("observations", "actions", "valid", "frame_ids"):
         assert torch.equal(getattr(original, field), getattr(restored, field))
-    if generations:
-        assert torch.equal(original.generations, restored.generations)
-    else:
-        assert restored.generations is None
+    assert torch.equal(original.generations, restored.generations)
     assert restored.manifest["content_id"] == original.manifest["content_id"]
     assert restored.manifest["storage"]["per_minibatch_lerobot_io"] is False
     assert restored.manifest["storage"]["format"] == "lerobot"
@@ -84,33 +87,18 @@ def test_official_lerobot_roundtrip_preserves_padded_numeric_corpus(
     )
     assert len(direct) == 4
     assert torch.equal(direct[3]["ods.provenance"][:3], torch.tensor([11, 7, 2]))
-    selected = torch.tensor([[11, 5, 0], [11, 7, 2]])
-    assert torch.equal(
-        original.sample_frame_ids(selected)["actions"],
-        restored.sample_frame_ids(selected)["actions"],
-    )
-
-
-def test_lerobot_export_refuses_existing_destination(tmp_path: Path) -> None:
-    source, destination = tmp_path / "source.pt", tmp_path / "lerobot"
-    _make_corpus(source)
-    destination.mkdir()
-    with pytest.raises(FileExistsError):
-        export_lerobot_corpus(source, destination)
 
 
 def test_lerobot_export_rejects_wrong_control_frequency(tmp_path: Path) -> None:
-    source, destination = tmp_path / "source.pt", tmp_path / "lerobot"
-    _make_corpus(source)
+    destination = tmp_path / "lerobot"
     with pytest.raises(ValueError, match="fps must match"):
-        export_lerobot_corpus(source, destination, fps=20)
+        DirectLeRobotWriter(destination, schema=_SCHEMA, episode_count=2, fps=20)
     assert not destination.exists()
 
 
 def test_lerobot_reader_rejects_schema_and_content_hash_changes(tmp_path: Path) -> None:
-    source, destination = tmp_path / "source.pt", tmp_path / "lerobot"
-    _make_corpus(source)
-    export_lerobot_corpus(source, destination)
+    destination = tmp_path / "lerobot"
+    original = _make_corpus(destination)
     with pytest.raises(ValueError, match="schema mismatch"):
         load_lerobot_corpus(destination, expected_schema={})
     sidecar_path = destination / "meta/embodichain_ods_corpus.json"
@@ -125,10 +113,9 @@ def test_lerobot_reader_rejects_schema_and_content_hash_changes(tmp_path: Path) 
 def test_bulk_read_boundaries_preserve_holes_and_hashes(
     tmp_path: Path, read_batch_size: int
 ) -> None:
-    source, destination = tmp_path / "source.pt", tmp_path / "lerobot"
-    _make_corpus(source)
-    export_lerobot_corpus(source, destination)
-    expected = load_corpus(source, expected_schema=_SCHEMA)
+    destination = tmp_path / "lerobot"
+    original = _make_corpus(destination)
+    expected = original
     actual = load_lerobot_corpus(
         destination, expected_schema=_SCHEMA, read_batch_size=read_batch_size
     )
@@ -140,12 +127,11 @@ def test_bulk_read_boundaries_preserve_holes_and_hashes(
 
 
 def test_bulk_read_owns_cpu_device_even_with_non_cpu_default(tmp_path: Path) -> None:
-    source, destination = tmp_path / "source.pt", tmp_path / "lerobot"
-    _make_corpus(source)
-    export_lerobot_corpus(source, destination)
+    destination = tmp_path / "lerobot"
+    original = _make_corpus(destination)
     with torch.device("meta"):
         actual = load_lerobot_corpus(destination, expected_schema=_SCHEMA)
-    expected = load_corpus(source, expected_schema=_SCHEMA)
+    expected = original
     assert actual.manifest["tensors"] == expected.manifest["tensors"]
     for field in ("observations", "actions", "valid", "frame_ids", "generations"):
         assert getattr(actual, field).device.type == "cpu"
@@ -155,9 +141,8 @@ def test_bulk_read_owns_cpu_device_even_with_non_cpu_default(tmp_path: Path) -> 
 def test_scalar_fallback_only_for_absent_backing_api(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    source, destination = tmp_path / "source.pt", tmp_path / "lerobot"
-    _make_corpus(source)
-    export_lerobot_corpus(source, destination)
+    destination = tmp_path / "lerobot"
+    original = _make_corpus(destination)
     sdk_class = lerobot_module.LeRobotDataset
 
     class ScalarOnly:
@@ -176,10 +161,7 @@ def test_scalar_fallback_only_for_absent_backing_api(
 
     monkeypatch.setattr(lerobot_module, "LeRobotDataset", ScalarOnly)
     actual = load_lerobot_corpus(destination, expected_schema=_SCHEMA)
-    assert (
-        actual.manifest["tensors"]
-        == load_corpus(source, expected_schema=_SCHEMA).manifest["tensors"]
-    )
+    assert actual.manifest["tensors"] == original.manifest["tensors"]
     assert actual.manifest["storage"]["numeric_read_mode"] == "sdk_scalar_fallback"
     assert actual.manifest["storage"]["scalar_fallback_reason"]
 
@@ -188,9 +170,8 @@ def test_scalar_fallback_only_for_absent_backing_api(
 def test_bulk_integrity_errors_do_not_fall_back_to_scalar(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, corruption: str
 ) -> None:
-    source, destination = tmp_path / "source.pt", tmp_path / "lerobot"
-    _make_corpus(source)
-    export_lerobot_corpus(source, destination)
+    destination = tmp_path / "lerobot"
+    original = _make_corpus(destination)
     sdk_class = lerobot_module.LeRobotDataset
 
     class CorruptBacking:

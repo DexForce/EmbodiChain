@@ -479,3 +479,20 @@ def test_lifetime_counter_overflow_fails_without_partial_quota_spend() -> None:
     assert (
         engine.get_sampling_budget_snapshot()["total_delivered_chunks"] == (1 << 63) - 1
     )
+
+
+def test_shared_quota_draw_preserves_explicit_generator_and_global_rng() -> None:
+    from embodichain.data_pipeline.engine._sampling import _draw_budgeted_rows
+
+    rows = torch.tensor([4, 8])
+    remaining = torch.tensor([2, 3])
+    global_before = torch.get_rng_state()
+    first = torch.Generator().manual_seed(71)
+    second = torch.Generator().manual_seed(71)
+    result = _draw_budgeted_rows(rows, remaining, 5, generator=first)
+    assert sorted(result.tolist()) == [4, 4, 8, 8, 8]
+    assert torch.equal(
+        result, _draw_budgeted_rows(rows, remaining, 5, generator=second)
+    )
+    assert torch.equal(first.get_state(), second.get_state())
+    assert torch.equal(global_before, torch.get_rng_state())

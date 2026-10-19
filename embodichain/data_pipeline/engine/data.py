@@ -39,6 +39,7 @@ from tqdm import tqdm
 from embodichain.utils.logger import log_info, log_error
 from embodichain.utils import configclass
 from .language import SharedLanguageRegistry
+from ._sampling import _draw_budgeted_rows
 
 __all__ = [
     "OnlineDataEngine",
@@ -435,39 +436,6 @@ class _EpisodeSamplingBudget:
         for row, count in enumerate(counts):
             self.rows[row * 4 + 3] += count
         self.meta[1] += len(row_indices)
-
-
-def _draw_budgeted_rows(
-    candidate_rows: torch.Tensor, remaining: torch.Tensor, batch_size: int
-) -> torch.Tensor:
-    """Draw episode-uniform rows with depletion, using O(batch + cache) memory.
-
-    Vector proposals retain the normal uniform distribution; exhausted proposals
-    are rejected locally. Quotas are never expanded into one entry per credit.
-    The usual nondepleting batch uses one randint and bincount without a row loop.
-    """
-    available = remaining.tolist()
-    active = [index for index, count in enumerate(available) if count > 0]
-    selected: list[int] = []
-    while len(selected) < batch_size:
-        proposals = torch.randint(
-            len(active), (batch_size - len(selected),), device=candidate_rows.device
-        )
-        active_tensor = torch.tensor(
-            active, dtype=torch.long, device=candidate_rows.device
-        )
-        indices = active_tensor[proposals]
-        counts = torch.bincount(indices, minlength=len(available))
-        if not selected and bool((counts <= remaining).all()):
-            return candidate_rows[indices]
-        for index in indices.tolist():
-            if available[index] > 0:
-                selected.append(index)
-                available[index] -= 1
-        active = [index for index, count in enumerate(available) if count > 0]
-    return candidate_rows[
-        torch.tensor(selected, dtype=torch.long, device=candidate_rows.device)
-    ]
 
 
 class _LifecycleEvents:

@@ -139,3 +139,35 @@ def test_chunk_normalization_digest_includes_absolute_target_scales() -> None:
     original = _state_digest(_normalization_values(model))
     model.target_std[0] *= 2
     assert original != _state_digest(_normalization_values(model))
+
+
+def test_chunk_optimizer_reduces_deterministic_masked_training_loss() -> None:
+    torch.manual_seed(19)
+    model = _model().train()
+    observations = _observations(4, 5)
+    actions = torch.zeros(4, 5, 7)
+    valid = torch.ones(4, 5, dtype=torch.bool)
+    mask = valid.clone()
+    mask[:, 0] = False
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+
+    def objective() -> torch.Tensor:
+        arm, finger = model.loss(
+            observations, actions, loss_mask=mask, valid_mask=valid
+        )
+        return (9 * arm + finger) / 10
+
+    before = float(objective().detach())
+    for _ in range(10):
+        optimizer.zero_grad(set_to_none=True)
+        objective().backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1, error_if_nonfinite=True)
+        optimizer.step()
+    assert float(objective().detach()) < before
+
+
+def test_checkpoint_loader_rejects_retired_policy_types(tmp_path) -> None:
+    path = tmp_path / "retired.pt"
+    torch.save({"model": {}, "policy_config": {"type": "gru"}}, path)
+    with pytest.raises(ValueError, match="Only ChunkBC"):
+        load_policy(str(path), "cpu")

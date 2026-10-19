@@ -44,67 +44,36 @@ def _corpus() -> FrozenCorpus:
 
 
 def _sample(
-    corpus: FrozenCorpus,
-    mode: str,
-    count: int,
-    generator: torch.Generator | None = None,
+    corpus: FrozenCorpus, count: int, generator: torch.Generator | None = None
 ) -> dict[str, torch.Tensor]:
-    if mode == "frames":
-        return corpus.sample_frames(count, generator=generator)
-    if mode == "history":
-        return corpus.sample_histories(count, supervised_steps=2, generator=generator)
-    if mode == "context":
-        return corpus.sample_context(count, 2, 3, generator=generator)
-    return corpus.sample_frame_ids(torch.tensor([[12, 0, 0]] * count))
+    return corpus.sample_context(count, 2, 3, generator=generator)
 
 
-@pytest.mark.parametrize("mode", ["frames", "history", "context", "replay"])
-def test_all_sampling_routes_share_per_source_budget(mode: str) -> None:
+def test_context_draws_spend_each_source_allowance_once() -> None:
     corpus = _corpus()
     corpus.configure_sampling_budget(3, 5)
     for _ in range(3):
-        _sample(corpus, mode, 1)
+        _sample(corpus, 1)
     audit = corpus.get_sampling_budget_snapshot()
-    assert audit["total_delivered_chunks"] == 3
-    assert audit["remaining_chunks"] == 3
+    assert audit["total_delivered_chunks"] == audit["remaining_chunks"] == 3
     assert len(audit["rows"]) == 2
     assert all(0 <= row["delivered"] <= 3 for row in audit["rows"])
-    if mode == "replay":
-        with pytest.raises(OnlineDataBudgetExhaustedError):
-            _sample(corpus, mode, 1)
 
 
-@pytest.mark.parametrize("mode", ["frames", "history", "context"])
-def test_depletion_counts_duplicate_batch_rows_and_leaves_no_partial_spend(
-    mode: str,
-) -> None:
+def test_depletion_counts_duplicate_batch_rows_and_leaves_no_partial_spend() -> None:
     corpus = _corpus()
     corpus.configure_sampling_budget(3, 3)
-    _sample(corpus, mode, 5, torch.Generator().manual_seed(7))
+    _sample(corpus, 5, torch.Generator().manual_seed(7))
     before = corpus.get_sampling_budget_snapshot()
     assert sorted(row["delivered"] for row in before["rows"]) == [2, 3]
     with pytest.raises(OnlineDataBudgetExhaustedError):
-        _sample(corpus, mode, 2)
+        _sample(corpus, 2)
     assert corpus.get_sampling_budget_snapshot() == before
-    _sample(corpus, mode, 1)
+    _sample(corpus, 1)
     assert corpus.get_sampling_budget_snapshot()["remaining_chunks"] == 0
 
 
-def test_explicit_replay_cannot_overdraw_repeated_identity() -> None:
-    corpus = _corpus()
-    corpus.configure_sampling_budget(2, 3)
-    with pytest.raises(OnlineDataBudgetExhaustedError):
-        corpus.sample_frame_ids(torch.tensor([[12, 0, 0]] * 3))
-    assert corpus.get_sampling_budget_snapshot()["total_delivered_chunks"] == 0
-    corpus.sample_frame_ids(torch.tensor([[12, 0, 0], [12, 0, 1]]))
-    with pytest.raises(OnlineDataBudgetExhaustedError):
-        corpus.sample_frames(1, episode_subset=[0])
-    corpus.sample_frames(2, episode_subset=[1])
-    assert corpus.get_sampling_budget_snapshot()["total_delivered_chunks"] == 4
-
-
-@pytest.mark.parametrize("mode", ["frames", "history", "context", "replay"])
-def test_copy_failure_never_debits(mode: str, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_copy_failure_never_debits(monkeypatch: pytest.MonkeyPatch) -> None:
     corpus = _corpus()
     corpus.configure_sampling_budget(3, 3)
     before = corpus.get_sampling_budget_snapshot()
@@ -114,14 +83,11 @@ def test_copy_failure_never_debits(mode: str, monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setattr(corpus, "_select", fail)
     with pytest.raises(MemoryError):
-        _sample(corpus, mode, 2)
+        _sample(corpus, 2)
     assert corpus.get_sampling_budget_snapshot() == before
 
 
-@pytest.mark.parametrize("mode", ["history", "context"])
-def test_post_copy_failure_does_not_debit(
-    mode: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_post_copy_failure_does_not_debit(monkeypatch: pytest.MonkeyPatch) -> None:
     corpus = _corpus()
     corpus.configure_sampling_budget(3, 3)
     select = corpus._select
@@ -135,18 +101,16 @@ def test_post_copy_failure_does_not_debit(
 
     monkeypatch.setattr(corpus, "_select", invalid_shape)
     with pytest.raises(IndexError):
-        _sample(corpus, mode, 2)
+        _sample(corpus, 2)
     assert corpus.get_sampling_budget_snapshot()["total_delivered_chunks"] == 0
 
 
-@pytest.mark.parametrize("mode", ["frames", "history", "context"])
-def test_generous_budget_preserves_unlimited_rng_and_copied_results(mode: str) -> None:
+def test_generous_budget_preserves_unlimited_rng_and_copied_results() -> None:
     baseline, bounded = _corpus(), _corpus()
     bounded.configure_sampling_budget(1000, 1000)
     rng_a, rng_b = torch.Generator().manual_seed(31), torch.Generator().manual_seed(31)
     for _ in range(3):
-        first = _sample(baseline, mode, 7, rng_a)
-        second = _sample(bounded, mode, 7, rng_b)
+        first, second = _sample(baseline, 7, rng_a), _sample(bounded, 7, rng_b)
         assert first.keys() == second.keys()
         assert all(torch.equal(first[key], second[key]) for key in first)
         assert torch.equal(rng_a.get_state(), rng_b.get_state())
@@ -169,11 +133,11 @@ def test_invalid_budget_rejected_without_enabling(
 def test_budget_cannot_be_reset_or_enabled_after_unlimited_sampling() -> None:
     corpus = _corpus()
     corpus.configure_sampling_budget(2, 3)
-    corpus.sample_frames(1)
+    _sample(corpus, 1)
     with pytest.raises(RuntimeError, match="once"):
         corpus.configure_sampling_budget(3, 3)
     other = _corpus()
-    other.sample_frames(1)
+    _sample(other, 1)
     with pytest.raises(RuntimeError, match="before sampling"):
         other.configure_sampling_budget(2, 2)
 
@@ -195,23 +159,16 @@ def test_identity_mutation_after_assignment_rejected() -> None:
     corpus.configure_sampling_budget(2, 2)
     corpus.frame_ids[0, :, 1] = 8
     with pytest.raises(RuntimeError, match="identity changed"):
-        corpus.sample_frames(1, episode_subset=[0])
+        corpus.sample_context(1, 2, 3, generations=[1])
     assert corpus.get_sampling_budget_snapshot()["total_delivered_chunks"] == 0
 
 
-@pytest.mark.parametrize("mode", ["frames", "history", "context"])
-def test_generation_filter_does_not_borrow_other_source_budget(mode: str) -> None:
+def test_generation_filter_does_not_borrow_other_source_budget() -> None:
     corpus = _corpus()
     corpus.configure_sampling_budget(2, 2)
-    if mode == "frames":
-        sample = lambda n: corpus.sample_frames(n, generations=iter([1]))
-    elif mode == "history":
-        sample = lambda n: corpus.sample_histories(n, 2, generations=iter([1]))
-    else:
-        sample = lambda n: corpus.sample_context(n, 2, 3, generations=iter([1]))
-    sample(2)
+    corpus.sample_context(2, 2, 3, generations=iter([1]))
     with pytest.raises(OnlineDataBudgetExhaustedError):
-        sample(1)
+        corpus.sample_context(1, 2, 3, generations=iter([1]))
     assert corpus.get_sampling_budget_snapshot()["remaining_chunks"] == 2
 
 
@@ -221,68 +178,31 @@ def test_budgeted_sampler_rejects_other_thread_and_process(
     corpus = _corpus()
     corpus.configure_sampling_budget(2, 2)
     with ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(corpus.sample_frames, 1)
+        future = pool.submit(_sample, corpus, 1)
         with pytest.raises(RuntimeError, match="owner-process/thread"):
             future.result()
     monkeypatch.setattr(
         "examples.data_pipeline._ods_pick_place_benchmark.os.getpid", lambda: -1
     )
     with pytest.raises(RuntimeError, match="owner-process/thread"):
-        corpus.sample_frames(1)
+        _sample(corpus, 1)
     with pytest.raises(RuntimeError, match="owner-process/thread"):
         corpus.get_sampling_budget_snapshot()
 
 
-@pytest.mark.parametrize("mode", ["frames", "history", "context", "replay"])
-def test_cpu_sampling_survives_non_cpu_default_device(mode: str) -> None:
+def test_cpu_sampling_survives_non_cpu_default_device() -> None:
     corpus = _corpus()
     corpus.configure_sampling_budget(3, 3)
-    # Meta exercises accidental default-device allocation without requiring a GPU.
     with torch.device("meta"):
-        if mode == "replay":
-            batch = corpus.sample_frame_ids(torch.tensor([[12, 0, 0]], device="cpu"))
-        else:
-            batch = _sample(
-                corpus, mode, 2, torch.Generator(device="cpu").manual_seed(2)
-            )
+        batch = _sample(corpus, 2, torch.Generator(device="cpu").manual_seed(2))
     assert all(t.device.type == "cpu" for t in batch.values())
 
 
 def test_snapshot_is_detached_and_counts_large_limits_without_expansion() -> None:
     corpus = _corpus()
     corpus.configure_sampling_budget(2**62, 2**63 - 1)
-    corpus.sample_frames(256)
+    _sample(corpus, 256)
     audit = corpus.get_sampling_budget_snapshot()
-    assert audit["remaining_chunks"] == 2**63 - 256
-    audit["rows"][0]["delivered"] = 0
-    assert corpus.get_sampling_budget_snapshot()["total_delivered_chunks"] == 256
-
-
-def test_history_eligibility_cannot_spend_short_episode_credit() -> None:
-    corpus = _corpus()
-    corpus.configure_sampling_budget(2, 2)
-    corpus.sample_histories(2, supervised_steps=3)
-    with pytest.raises(OnlineDataBudgetExhaustedError):
-        corpus.sample_histories(1, supervised_steps=3)
-    corpus.sample_frames(2, episode_subset=[1])
-    assert corpus.get_sampling_budget_snapshot()["remaining_chunks"] == 0
-
-
-def test_identical_episode_numbers_in_distinct_runs_have_distinct_allowances() -> None:
-    corpus = _corpus()
-    corpus.frame_ids[1, :, 0] = 13
-    corpus.frame_ids[1, :, 1] = 0
-    corpus.configure_sampling_budget(1, 1)
-    batch = corpus.sample_frames(2)
-    assert set(batch["frame_ids"][:, 0].tolist()) == {12, 13}
-    assert corpus.get_sampling_budget_snapshot()["remaining_chunks"] == 0
-
-
-def test_generation_filter_is_cpu_explicit_under_non_cpu_default() -> None:
-    corpus = _corpus()
-    corpus.configure_sampling_budget(2, 2)
-    with torch.device("meta"):
-        result = corpus.sample_frames(
-            2, generations=iter([1]), episode_subset=iter([0])
-        )
-    assert result["frame_ids"][:, 1].tolist() == [0, 0]
+    assert audit["total_delivered_chunks"] == 256
+    audit["rows"][0]["delivered"] = -1
+    assert corpus.get_sampling_budget_snapshot()["rows"][0]["delivered"] >= 0

@@ -30,16 +30,15 @@ import os
 import threading
 import time
 from collections.abc import Iterable
-from pathlib import Path
 from typing import Any
 
 import torch
 
+from embodichain.data_pipeline.engine._sampling import _draw_budgeted_rows
+
 __all__ = [
     "FrozenCorpus",
     "EfficiencyTracker",
-    "export_corpus",
-    "load_corpus",
     "resource_snapshot",
 ]
 
@@ -156,78 +155,6 @@ def _content_manifest(
     }
 
 
-def export_corpus(
-    path: Path | str,
-    observations: torch.Tensor,
-    actions: torch.Tensor,
-    valid: torch.Tensor,
-    frame_ids: torch.Tensor,
-    *,
-    schema: dict[str, Any],
-    provenance: dict[str, Any] | None = None,
-    generations: torch.Tensor | None = None,
-) -> dict[str, Any]:
-    """Persist contiguous CPU tensors and an explicit schema/integrity manifest.
-
-    Invalid padded payloads are zeroed. Existing artifacts are never replaced.
-    The content ID compares policy supervision independently of ODS run IDs;
-    tensor hashes also validate every stored frame identity and padded mask.
-    """
-    path = Path(path)
-    manifest_path = Path(str(path) + ".manifest.json")
-    if path.exists() or manifest_path.exists():
-        raise FileExistsError(path)
-    tensors = {
-        key: value.detach().cpu().contiguous().clone()
-        for key, value in zip(
-            ("observations", "actions", "valid", "frame_ids"),
-            (observations, actions, valid, frame_ids),
-        )
-    }
-    if generations is not None:
-        tensors["generations"] = generations.detach().cpu().contiguous().clone()
-    _validate_tensors(tensors, schema)
-    for key in set(tensors) - {"valid"}:
-        tensors[key][~tensors["valid"]] = 0
-    manifest = {
-        "format": _FORMAT,
-        "schema": schema,
-        "provenance": provenance or {},
-        **_content_manifest(tensors, schema),
-    }
-    _json_bytes(manifest)  # Reject non-JSON provenance before writing an artifact.
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("xb") as stream:
-        torch.save(tensors, stream)
-    manifest["tensor_file_bytes"] = path.stat().st_size
-    serialized = json.dumps(manifest, indent=2, allow_nan=False)
-    with manifest_path.open("x") as stream:
-        stream.write(serialized + "\n")
-    return manifest
-
-
-def load_corpus(
-    path: Path | str, *, expected_schema: dict[str, Any], mmap: bool = True
-) -> FrozenCorpus:
-    """Load with restricted PyTorch deserialization and verify schema/content.
-
-    There is deliberately no unsafe pickle fallback. ``mmap=True`` requires a
-    PyTorch version supporting memory-mapped, ``weights_only`` tensor loading.
-    """
-    path = Path(path)
-    manifest = json.loads(Path(str(path) + ".manifest.json").read_text())
-    if manifest.get("format") != _FORMAT or manifest.get("schema") != expected_schema:
-        raise ValueError("Corpus format or observation/action schema mismatch")
-    tensors = torch.load(path, map_location="cpu", weights_only=True, mmap=mmap)
-    if not isinstance(tensors, dict):
-        raise ValueError("Corpus payload must be a numeric tensor mapping")
-    _validate_tensors(tensors, expected_schema)
-    actual = _content_manifest(tensors, expected_schema)
-    if any(manifest.get(key) != value for key, value in actual.items()):
-        raise ValueError("Corpus content/hash mismatch")
-    return FrozenCorpus(tensors, manifest)
-
-
 class FrozenCorpus:
     """Read-only-by-convention corpus with independent sampled tensor copies.
 
@@ -250,7 +177,6 @@ class FrozenCorpus:
         self._frames = {
             int(row): self.valid[row].nonzero().flatten() for row in self._rows
         }
-        self._id_lookup: dict[tuple[int, ...], tuple[int, int]] | None = None
         self._sampling_owner = (os.getpid(), threading.get_ident())
         self._sampling_started = False
         self._quota: dict[str, Any] | None = None
@@ -380,27 +306,7 @@ class FrozenCorpus:
         remaining = self._quota["budget"] - self._quota["delivered"][eligible]
         if sum(remaining.tolist()) < batch_size:
             self._budget_exhausted()
-        # O(batch + rows) memory: do not expand every available quota credit.
-        available = remaining.tolist()
-        active = [i for i, n in enumerate(available) if n > 0]
-        selected = []
-        while len(selected) < batch_size:
-            proposals = torch.randint(
-                len(active),
-                (batch_size - len(selected),),
-                generator=generator,
-                device="cpu",
-            )
-            indices = torch.tensor(active, dtype=torch.int64, device="cpu")[proposals]
-            counts = torch.bincount(indices, minlength=len(available))
-            if not selected and bool((counts <= remaining).all()):
-                return eligible[indices]
-            for index in indices.tolist():
-                if available[index] > 0:
-                    selected.append(index)
-                    available[index] -= 1
-            active = [i for i, n in enumerate(available) if n > 0]
-        return eligible[torch.tensor(selected, dtype=torch.int64, device="cpu")]
+        return _draw_budgeted_rows(eligible, remaining, batch_size, generator=generator)
 
     def _check_quota_rows(self, rows: torch.Tensor) -> torch.Tensor | None:
         if self._quota is None:
@@ -420,132 +326,15 @@ class FrozenCorpus:
         self._sampling_started = True
         return result
 
-    def sample_frames(
-        self,
-        batch_size: int,
-        *,
-        generator: torch.Generator | None = None,
-        episode_subset: Iterable[int] | None = None,
-        generations: Iterable[int] | None = None,
-    ) -> dict[str, torch.Tensor]:
-        """Choose episodes uniformly, then eligible frames uniformly per episode."""
-        if type(batch_size) is not int or batch_size < 1:
-            raise ValueError("batch_size must be a positive integer")
-        mask = self.valid
-        frames = self._frames
-        eligible = self._rows
-        if episode_subset is not None or generations is not None:
-            mask = self._filtered_valid(episode_subset, generations)
-            eligible = mask.any(1).nonzero().flatten()
-            frames = {int(row): mask[row].nonzero().flatten() for row in eligible}
-        if not len(eligible):
-            raise ValueError("No valid frames in the requested corpus subset")
-        rows = self._draw_rows(eligible, batch_size, generator)
-        times = torch.empty(batch_size, dtype=torch.int64, device="cpu")
-        for row in rows.unique():
-            chosen = rows == row
-            candidates = frames[int(row)]
-            times[chosen] = candidates[
-                torch.randint(
-                    len(candidates),
-                    (int(chosen.sum()),),
-                    generator=generator,
-                    device="cpu",
-                )
-            ]
-        return self._finish_sample(rows, self._select(rows, times))
-
-    def _filtered_valid(
-        self, episode_subset: Iterable[int] | None, generations: Iterable[int] | None
-    ) -> torch.Tensor:
-        if episode_subset is None and generations is None:
+    def _filtered_valid(self, generations: Iterable[int] | None) -> torch.Tensor:
+        if generations is None:
             return self.valid
-        mask = self.valid.clone()
-        if episode_subset is not None:
-            subset = list(episode_subset)
-            if any(type(row) is not int or not 0 <= row < len(mask) for row in subset):
-                raise ValueError("episode_subset must name existing episode rows")
-            allowed = torch.zeros(len(mask), dtype=torch.bool, device="cpu")
-            allowed[subset] = True
-            mask &= allowed[:, None]
-        if generations is not None:
-            if self.generations is None:
-                raise ValueError("Corpus has no generation metadata")
-            mask &= torch.isin(
-                self.generations,
-                torch.tensor(list(generations), dtype=torch.int64, device="cpu"),
-            )
-        return mask
-
-    def sample_histories(
-        self,
-        batch_size: int,
-        supervised_steps: int = 24,
-        start_probability: float = 0.25,
-        generator: torch.Generator | None = None,
-        *,
-        episode_subset: Iterable[int] | None = None,
-        generations: Iterable[int] | None = None,
-    ) -> dict[str, torch.Tensor]:
-        """Sample valid supervised windows with their entire causal prefixes.
-
-        Choose an eligible episode uniformly, then a valid window uniformly.
-        With ``start_probability``, choose step zero instead when it is eligible.
-        Prefixes start after the last invalid frame, never cross an episode row,
-        and exclude windows containing validity holes. Right padding has zero
-        observations/actions and -1 identities/generations. ``loss_mask`` selects
-        exactly ``supervised_steps`` valid targets per row.
-        ``episode_subset`` and ``generations`` intersect to restrict every
-        returned history frame, including its unsupervised prefix.
-
-        Each uninterrupted valid span must already be causal. This corpus does
-        not represent continuity IDs and cannot detect unrepresented state
-        restores; official accepted source episodes must have continuity zero.
-        No task labels or privileged demonstration annotations are returned.
-        """
-        if (
-            type(batch_size) is not int
-            or batch_size < 1
-            or type(supervised_steps) is not int
-            or not 1 <= supervised_steps <= self.valid.shape[1]
-            or not 0 <= start_probability <= 1
-        ):
-            raise ValueError(
-                "Invalid history batch size, supervised steps or start probability"
-            )
-        eligible_valid = self._filtered_valid(episode_subset, generations)
-        windows = eligible_valid.unfold(1, supervised_steps, 1).all(-1)
-        eligible = windows.any(1).nonzero().flatten()
-        if not len(eligible):
-            raise RuntimeError("No valid offline history window")
-        rows = self._draw_rows(eligible, batch_size, generator)
-        starts = torch.multinomial(
-            windows[rows].float(), 1, replacement=True, generator=generator
-        ).flatten()
-        use_start = (
-            torch.rand(batch_size, generator=generator, device="cpu")
-            < start_probability
-        ) & windows[rows, 0]
-        starts[use_start] = 0
-        steps = torch.arange(self.valid.shape[1], device="cpu")
-        invalid_prefix = (~eligible_valid[rows]) & (steps[None] < starts[:, None])
-        prefix_starts = torch.where(invalid_prefix, steps[None] + 1, 0).amax(-1)
-        prefix_lengths = starts - prefix_starts
-        lengths = prefix_lengths + supervised_steps
-        offsets = torch.arange(int(lengths.max()), device="cpu")
-        times = (prefix_starts[:, None] + offsets[None]).clamp_max(
-            self.valid.shape[1] - 1
+        if self.generations is None:
+            raise ValueError("Corpus has no generation metadata")
+        return self.valid & torch.isin(
+            self.generations,
+            torch.tensor(list(generations), dtype=torch.int64, device="cpu"),
         )
-        result = self._select(rows[:, None], times)
-        valid = offsets[None] < lengths[:, None]
-        for key in ("observations", "actions"):
-            result[key][~valid] = 0
-        result["frame_ids"][~valid] = -1
-        if "generations" in result:
-            result["generations"][~valid] = -1
-        result["valid"] = valid
-        result["loss_mask"] = valid & (offsets[None] >= prefix_lengths[:, None])
-        return self._finish_sample(rows, result)
 
     def sample_context(
         self,
@@ -566,7 +355,7 @@ class FrozenCorpus:
             for n in (batch_size, history_length, prediction_horizon)
         ):
             raise ValueError("Context lengths and batch size must be positive integers")
-        valid = self._filtered_valid(None, generations)
+        valid = self._filtered_valid(generations)
         eligible = valid.any(1).nonzero().flatten()
         if not len(eligible):
             raise RuntimeError("No valid offline context anchor")
@@ -618,33 +407,6 @@ class FrozenCorpus:
                     "Corpus source identity changed after quota assignment"
                 )
         return result
-
-    def sample_frame_ids(self, frame_ids: torch.Tensor) -> dict[str, torch.Tensor]:
-        """Replay an explicit ordered manifest, rejecting unknown/padded IDs."""
-        if (
-            frame_ids.dtype != torch.int64
-            or frame_ids.ndim != 2
-            or frame_ids.shape[1] != 3
-            or not len(frame_ids)
-        ):
-            raise ValueError("Replay identities must be nonempty int64 [batch, 3]")
-        if self._id_lookup is None:
-            self._id_lookup = {
-                tuple(self.frame_ids[row, step].tolist()): (row, step)
-                for row, step in self.valid.nonzero().tolist()
-            }
-        try:
-            indices = torch.tensor(
-                [self._id_lookup[tuple(value)] for value in frame_ids.cpu().tolist()],
-                device="cpu",
-            )
-        except KeyError as error:
-            raise ValueError(
-                f"Unknown or invalid corpus frame identity: {error}"
-            ) from error
-        rows = indices[:, 0]
-        self._check_quota_rows(rows)
-        return self._finish_sample(rows, self._select(rows, indices[:, 1]))
 
 
 def _union(intervals: Iterable[tuple[float, float]]) -> list[tuple[float, float]]:

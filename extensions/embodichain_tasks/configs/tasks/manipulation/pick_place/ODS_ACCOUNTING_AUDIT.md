@@ -53,7 +53,7 @@ implementation and its times have not been algebraically corrected.
   batch 256, history 2 and horizon 64, with matched CUDA completion boundaries.
 - The measured path includes resident sampling, preparation/H2D and training.
   SDK loading, production, simulation, evaluation and ResourceSampler are excluded.
-  The protected-offline quota-snapshot caller still needs full-path qualification.
+  Subsequent cleanup removed the protected-offline per-update full snapshot; whole-path checks and instrumentation still need qualification.
 
 These scoped results establish counter correctness and an implementation cost
 tradeoff. They do not qualify complete-pipeline instrumentation overhead or an

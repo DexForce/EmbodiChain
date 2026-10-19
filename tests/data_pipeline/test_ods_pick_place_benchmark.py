@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import copy
-import json
 import os
 import time
 from pathlib import Path
@@ -27,365 +26,92 @@ import torch
 
 from examples.data_pipeline._ods_pick_place_benchmark import (
     EfficiencyTracker,
-    export_corpus,
-    load_corpus,
+    FrozenCorpus,
+    _content_manifest,
+    _validate_tensors,
     resource_snapshot,
 )
 
 _SCHEMA = {
-    "observation": {"names": ["measured_joint", "cube_height"]},
-    "action": {"names": ["arm_request"]},
-    "version": 1,
+    "observation": {"names": ["joint", "height"]},
+    "action": {"names": ["request"]},
 }
 
 
-def _export(path: Path, *, run_id: int = 11) -> dict:
-    # Two unequal-length episodes plus one empty padded row.
+def _corpus() -> FrozenCorpus:
     valid = torch.tensor([[True, False, False], [True, True, True], [False] * 3])
-    observations = torch.arange(18, dtype=torch.float32).reshape(3, 3, 2)
-    actions = torch.arange(9, dtype=torch.float32).reshape(3, 3, 1)
-    ids = torch.zeros(3, 3, 3, dtype=torch.int64)
-    for row in range(3):
-        ids[row, :, 0] = run_id
-        ids[row, :, 1] = row
-        ids[row, :, 2] = torch.arange(3)
-    generations = torch.tensor([[1] * 3, [2] * 3, [3] * 3])
-    return export_corpus(
-        path,
-        observations,
-        actions,
-        valid,
-        ids,
-        schema=_SCHEMA,
-        generations=generations,
-        provenance={"teacher": "qualified-v1"},
+    ids = torch.stack(
+        (
+            torch.full((3, 3), 11),
+            torch.arange(3)[:, None].expand(3, 3),
+            torch.arange(3)[None].expand(3, 3),
+        ),
+        -1,
+    )
+    tensors = {
+        "observations": torch.arange(18).float().reshape(3, 3, 2),
+        "actions": torch.arange(9).float().reshape(3, 3, 1),
+        "valid": valid,
+        "frame_ids": ids,
+        "generations": torch.arange(1, 4)[:, None].expand(3, 3),
+    }
+    return FrozenCorpus(
+        tensors, {"schema": _SCHEMA, **_content_manifest(tensors, _SCHEMA)}
     )
 
 
-def test_cpu_mmap_corpus_preserves_schema_masks_and_frame_identity(
-    tmp_path: Path,
-) -> None:
-    path = tmp_path / "corpus.pt"
-    manifest = _export(path)
-    corpus = load_corpus(path, expected_schema=_SCHEMA)
-    assert corpus.observations.device.type == "cpu"
-    assert corpus.manifest["schema"] == _SCHEMA
-    assert corpus.valid.sum() == 4  # One frame in episode zero, three in episode one.
-    assert corpus.frame_ids[1, 2].tolist() == [11, 1, 2]
-    assert corpus.observations[~corpus.valid].count_nonzero() == 0
-    assert manifest["tensor_file_bytes"] == path.stat().st_size
-    with pytest.raises(FileExistsError):
-        _export(path)
-
-
-def test_offline_context_samples_short_episodes_and_excludes_padded_targets(
-    tmp_path: Path,
-) -> None:
-    path = tmp_path / "corpus.pt"
-    _export(path)
-    corpus = load_corpus(path, expected_schema=_SCHEMA)
-    batch = corpus.sample_context(256, 2, 5)
+def test_context_preserves_source_boundaries_and_masks_padding() -> None:
+    corpus = _corpus()
+    batch = corpus.sample_context(
+        256, 2, 5, generator=torch.Generator().manual_seed(18)
+    )
     assert batch["observations"].shape == (256, 6, 2)
     assert batch["valid"][:, 1].all()
     assert not batch["loss_mask"][:, 0].any()
     assert (batch["frame_ids"][~batch["valid"]] == -1).all()
     assert (batch["observations"][~batch["valid"]] == 0).all()
-    short = batch["frame_ids"][:, 1, 1] == 0
-    assert short.any()
-    assert (batch["loss_mask"][short].sum(1) == 1).all()
-    assert not batch["valid"][short, 0].any()
+    for ids, valid in zip(batch["frame_ids"], batch["valid"]):
+        assert len(ids[valid, :2].unique(dim=0)) == 1
+        assert (ids[valid, 2].diff() == 1).all()
+    batch["observations"].zero_()
+    assert corpus.observations.count_nonzero() > 0
 
 
-def test_corpus_content_identity_ignores_engine_run_id(tmp_path: Path) -> None:
-    first = _export(tmp_path / "first.pt", run_id=11)
-    second = _export(tmp_path / "second.pt", run_id=99)
-    assert first["content_id"] == second["content_id"]
-    assert (
-        first["tensors"]["frame_ids"]["sha256"]
-        != second["tensors"]["frame_ids"]["sha256"]
-    )
+def test_context_generation_filter_never_crosses_a_validity_gap() -> None:
+    corpus = _corpus()
+    corpus.valid[1] = torch.tensor([True, False, True])
+    batch = corpus.sample_context(64, 2, 5, generations=iter([2]))
+    assert batch["valid"].sum().item() == 64
+    assert (batch["generations"][batch["valid"]] == 2).all()
+    with pytest.raises(RuntimeError, match="No valid"):
+        corpus.sample_context(1, 2, 5, generations=[9])
 
 
-def test_corpus_rejects_changed_observation_action_schema(tmp_path: Path) -> None:
-    path = tmp_path / "corpus.pt"
-    _export(path)
-    incompatible = copy.deepcopy(_SCHEMA)
-    incompatible["action"]["names"] = ["different_control_contract"]
-    with pytest.raises(ValueError, match="schema mismatch"):
-        load_corpus(path, expected_schema=incompatible)
-
-
-def test_corpus_rejects_corrupt_tensor_content(tmp_path: Path) -> None:
-    path = tmp_path / "corpus.pt"
-    _export(path)
-    tensors = torch.load(path, weights_only=True)
-    tensors["actions"][1, 1] += 1
-    torch.save(tensors, path)
-    with pytest.raises(ValueError, match="hash mismatch"):
-        load_corpus(path, expected_schema=_SCHEMA)
-
-
-def test_corpus_rejects_corrupt_manifest_hash(tmp_path: Path) -> None:
-    path = tmp_path / "corpus.pt"
-    _export(path)
-    manifest_path = Path(str(path) + ".manifest.json")
-    manifest = json.loads(manifest_path.read_text())
-    manifest["schema_sha256"] = "invalid"
-    manifest_path.write_text(json.dumps(manifest))
-    with pytest.raises(ValueError, match="hash mismatch"):
-        load_corpus(path, expected_schema=_SCHEMA)
-
-
-def test_corpus_rejects_incorrect_within_episode_frame_ids(tmp_path: Path) -> None:
-    path = tmp_path / "corpus.pt"
-    _export(path)
-    tensors = torch.load(path, weights_only=True)
-    tensors["frame_ids"][1, 2, 2] = 0
-    with pytest.raises(ValueError, match="within-episode steps"):
-        export_corpus(
-            tmp_path / "bad.pt",
-            tensors["observations"],
-            tensors["actions"],
-            tensors["valid"],
-            tensors["frame_ids"],
-            schema=_SCHEMA,
-        )
-    assert not (tmp_path / "bad.pt").exists()
-
-
-def test_frame_sampler_is_episode_uniform_and_never_selects_padding(
-    tmp_path: Path,
-) -> None:
-    path = tmp_path / "corpus.pt"
-    _export(path)
-    corpus = load_corpus(path, expected_schema=_SCHEMA)
-    sample = corpus.sample_frames(4000, generator=torch.Generator().manual_seed(5))
-    assert sample["valid"].all()
-    assert (sample["frame_ids"][:, 0] == 11).all()
-    # Equal episode probability despite the threefold difference in length.
-    assert (sample["frame_ids"][:, 1] == 0).float().mean().item() == pytest.approx(
-        0.5, abs=0.03
-    )
-    assert (sample["frame_ids"][sample["frame_ids"][:, 1] == 0, 2] == 0).all()
-    sample["observations"].fill_(-100)
-    assert corpus.observations[corpus.valid].min() >= 0
-
-
-def test_sampler_filters_generations_and_explicit_episode_subsets(
-    tmp_path: Path,
-) -> None:
-    path = tmp_path / "corpus.pt"
-    _export(path)
-    corpus = load_corpus(path, expected_schema=_SCHEMA)
-    generated = corpus.sample_frames(20, generations=[2])
-    assert (generated["frame_ids"][:, 1] == 1).all()
-    assert (generated["generations"] == 2).all()
-    selected = corpus.sample_frames(20, episode_subset=[0])
-    assert (selected["frame_ids"][:, 1] == 0).all()
-    with pytest.raises(ValueError, match="No valid frames"):
-        corpus.sample_frames(1, episode_subset=[2])
-
-
-def test_explicit_frame_manifest_replays_order_and_repetitions(tmp_path: Path) -> None:
-    path = tmp_path / "corpus.pt"
-    _export(path)
-    corpus = load_corpus(path, expected_schema=_SCHEMA)
-    identities = torch.tensor([[11, 1, 2], [11, 0, 0], [11, 1, 2]])
-    sample = corpus.sample_frame_ids(identities)
-    torch.testing.assert_close(sample["frame_ids"], identities)
-    torch.testing.assert_close(sample["actions"][:, 0], torch.tensor([5.0, 0.0, 5.0]))
-    with pytest.raises(ValueError, match="Unknown or invalid"):
-        corpus.sample_frame_ids(torch.tensor([[11, 0, 1]]))
-
-
-def test_history_sampler_is_episode_uniform_with_exact_target_counts(
-    tmp_path: Path,
-) -> None:
-    path = tmp_path / "corpus.pt"
-    _export(path)
-    corpus = load_corpus(path, expected_schema=_SCHEMA)
-    sample = corpus.sample_histories(
-        4000,
-        supervised_steps=1,
-        start_probability=0,
-        generator=torch.Generator().manual_seed(5),
-    )
-    episode_ids = sample["frame_ids"][:, 0, 1]
-    assert (episode_ids == 0).float().mean().item() == pytest.approx(0.5, abs=0.03)
-    assert (sample["loss_mask"].sum(-1) == 1).all()
-    assert not (sample["loss_mask"] & ~sample["valid"]).any()
-    # A full prefix begins at episode step zero and never crosses another row.
-    for row in range(len(episode_ids)):
-        identities = sample["frame_ids"][row, sample["valid"][row]]
-        assert (identities[:, 1] == episode_ids[row]).all()
-        torch.testing.assert_close(identities[:, 2], torch.arange(len(identities)))
-
-
-def test_history_sampler_marks_padding_and_preserves_independent_copies(
-    tmp_path: Path,
-) -> None:
-    path = tmp_path / "corpus.pt"
-    _export(path)
-    corpus = load_corpus(path, expected_schema=_SCHEMA)
-    sample = corpus.sample_histories(
-        32,
-        supervised_steps=1,
-        start_probability=0,
-        generator=torch.Generator().manual_seed(7),
-    )
-    padding = ~sample["valid"]
-    assert padding.any()
-    assert sample["observations"][padding].count_nonzero() == 0
-    assert sample["actions"][padding].count_nonzero() == 0
-    assert (sample["frame_ids"][padding] == -1).all()
-    assert (sample["generations"][padding] == -1).all()
-    assert not sample["loss_mask"][padding].any()
-    assert set(sample) == {
-        "observations",
-        "actions",
-        "valid",
-        "frame_ids",
-        "generations",
-        "loss_mask",
+def test_corpus_schema_validation_rejects_misaligned_or_nonfinite_supervision() -> None:
+    corpus = _corpus()
+    values = {
+        key: getattr(corpus, key).clone()
+        for key in ("observations", "actions", "valid", "frame_ids", "generations")
     }
-    sample["observations"].fill_(-100)
-    assert corpus.observations[corpus.valid].min() >= 0
+    _validate_tensors(values, _SCHEMA)
+    values["actions"] = values["actions"].double()
+    with pytest.raises(ValueError):
+        _validate_tensors(values, _SCHEMA)
+    values["actions"] = values["actions"].float()
+    values["observations"][0, 0, 0] = float("nan")
+    with pytest.raises(ValueError):
+        _validate_tensors(values, _SCHEMA)
 
 
-def test_history_filters_keep_all_prefixes_and_targets_in_selected_generations(
-    tmp_path: Path,
-) -> None:
-    path = tmp_path / "four-episodes.pt"
-    # Four accepted episodes split across G1/G2, with five frames per episode.
-    valid = torch.ones(4, 5, dtype=torch.bool)
-    ids = torch.zeros(4, 5, 3, dtype=torch.int64)
-    ids[..., 0] = 11
-    ids[..., 1] = torch.arange(4)[:, None]
-    ids[..., 2] = torch.arange(5)[None]
-    generations = torch.tensor([1, 1, 2, 2])[:, None].expand(4, 5)
-    export_corpus(
-        path,
-        torch.zeros(4, 5, 2),
-        torch.zeros(4, 5, 1),
-        valid,
-        ids,
-        schema=_SCHEMA,
-        generations=generations,
-    )
-    corpus = load_corpus(path, expected_schema=_SCHEMA)
-    sample = corpus.sample_histories(
-        400,
-        supervised_steps=2,
-        generations=[1],
-        generator=torch.Generator().manual_seed(5),
-    )
-    assert sample["loss_mask"].sum() == 800  # 400 sampled rows, two targets each.
-    assert (sample["loss_mask"].sum(-1) == 2).all()
-    assert (sample["generations"][sample["valid"]] == 1).all()
-    assert (sample["frame_ids"][sample["valid"]][:, 1] < 2).all()
-    assert (sample["frame_ids"][:, 0, 1] == 0).float().mean().item() == pytest.approx(
-        0.5, abs=0.06
-    )
-    selected = corpus.sample_histories(
-        32, supervised_steps=2, episode_subset=[1, 2], generations=[1]
-    )
-    assert (selected["frame_ids"][selected["valid"]][:, 1] == 1).all()
-    with pytest.raises(RuntimeError, match="No valid offline history window"):
-        corpus.sample_histories(
-            1, supervised_steps=2, episode_subset=[0, 1], generations=[2]
-        )
-
-
-def test_history_sampler_can_supervise_first_actions_without_a_prefix(
-    tmp_path: Path,
-) -> None:
-    path = tmp_path / "corpus.pt"
-    _export(path)
-    corpus = load_corpus(path, expected_schema=_SCHEMA)
-    sample = corpus.sample_histories(
-        32,
-        supervised_steps=2,
-        start_probability=1,
-        generator=torch.Generator().manual_seed(2),
-    )
-    assert sample["valid"].shape == (32, 2)
-    assert sample["valid"].all()
-    assert sample["loss_mask"].all()
-    assert (
-        sample["frame_ids"][..., 1] == 1
-    ).all()  # Only the length-three episode qualifies.
-    assert (sample["frame_ids"][:, 0, 2] == 0).all()
-
-
-def test_history_sampler_stops_at_validity_holes_and_uses_only_intact_windows(
-    tmp_path: Path,
-) -> None:
-    path = tmp_path / "holes.pt"
-    # Two isolated valid frames precede a hole; only the final two-frame run qualifies.
-    valid = torch.tensor([[True, False, True, False, True, True]])
-    ids = torch.stack(
-        (torch.full((6,), 11), torch.zeros(6, dtype=torch.int64), torch.arange(6)), -1
-    )[None]
-    observations = torch.arange(12, dtype=torch.float32).reshape(1, 6, 2)
-    actions = torch.arange(6, dtype=torch.float32).reshape(1, 6, 1)
-    export_corpus(path, observations, actions, valid, ids, schema=_SCHEMA)
-    sample = load_corpus(path, expected_schema=_SCHEMA).sample_histories(
-        8, supervised_steps=2, generator=torch.Generator().manual_seed(2)
-    )
-    assert sample["valid"].shape == (8, 2)
-    assert sample["loss_mask"].all()
-    assert (sample["frame_ids"][..., 2] == torch.tensor([4, 5])).all()
-    assert "generations" not in sample
-    histories = load_corpus(path, expected_schema=_SCHEMA).sample_histories(
-        64,
-        supervised_steps=1,
-        start_probability=0,
-        generator=torch.Generator().manual_seed(3),
-    )
-    # When step five is supervised, its complete uninterrupted prefix is step four.
-    ends_at_five = (
-        histories["frame_ids"][..., 2].masked_fill(~histories["loss_mask"], -1).amax(-1)
-        == 5
-    )
-    assert ends_at_five.any()
-    assert (histories["frame_ids"][ends_at_five, :2, 2] == torch.tensor([4, 5])).all()
-
-
-def test_history_sampler_rejects_corpora_without_an_intact_window(
-    tmp_path: Path,
-) -> None:
-    path = tmp_path / "corpus.pt"
-    _export(path)
-    corpus = load_corpus(path, expected_schema=_SCHEMA)
-    corpus.valid[:, 1] = False  # Each remaining contiguous run contains one frame.
-    with pytest.raises(RuntimeError, match="No valid offline history window"):
-        corpus.sample_histories(1, supervised_steps=2)
-
-
-def test_corpus_does_not_silently_accept_unrepresented_continuity_fields(
-    tmp_path: Path,
-) -> None:
-    path = tmp_path / "corpus.pt"
-    _export(path)
-    tensors = torch.load(path, weights_only=True)
-    tensors["continuity_id"] = torch.zeros_like(tensors["valid"], dtype=torch.int64)
-    torch.save(tensors, path)
-    with pytest.raises(ValueError, match="four numeric tensor fields"):
-        load_corpus(path, expected_schema=_SCHEMA)
-
-
-@pytest.mark.parametrize(
-    "batch_size,steps,probability",
-    [(0, 1, 0), (1, 0, 0), (1, 4, 0), (1, 1, -0.1), (1, 1, 1.1)],
-)
-def test_history_sampler_rejects_invalid_counts_and_probabilities(
-    tmp_path: Path, batch_size: int, steps: int, probability: float
-) -> None:
-    path = tmp_path / "corpus.pt"
-    _export(path)
-    corpus = load_corpus(path, expected_schema=_SCHEMA)
-    with pytest.raises(ValueError, match="Invalid history"):
-        corpus.sample_histories(batch_size, steps, probability)
+def test_content_identity_is_independent_of_engine_run_id() -> None:
+    corpus = _corpus()
+    tensors = {
+        key: getattr(corpus, key).clone()
+        for key in ("observations", "actions", "valid", "frame_ids", "generations")
+    }
+    first = _content_manifest(tensors, _SCHEMA)
+    tensors["frame_ids"][..., 0] += 80
+    assert first["content_id"] == _content_manifest(tensors, _SCHEMA)["content_id"]
 
 
 def test_t80_uses_second_consecutive_dev_result_arrival_and_checkpoint_counts() -> None:

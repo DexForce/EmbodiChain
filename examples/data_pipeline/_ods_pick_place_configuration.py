@@ -76,9 +76,9 @@ def apply_configuration(args: argparse.Namespace) -> None:
         raise ValueError(
             "Auto-config currently requires live online chunk-pose showcase"
         )
-    if args.offline_data or args.export_data or args.smoke:
+    if args.offline_data or args.smoke:
         raise ValueError(
-            "Auto-config cannot combine with offline/export data or smoke overrides"
+            "Auto-config cannot combine with offline data or smoke overrides"
         )
     plan = report["configuration"]
     for name in ("batch_size", "producer_envs", "buffer_size"):

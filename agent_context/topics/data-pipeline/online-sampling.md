@@ -133,35 +133,29 @@ recovery or portable offline content identity.
 models, measured-state features and separate student evaluator. The private
 `_ods_pick_place_training.py` orchestrates geometry policies;
 `_ods_pick_place_policy.py` owns the short-history absolute-target chunk learner;
-`_ods_pick_place_benchmark.py` owns validated numeric corpora, batch-identity
-replay and efficiency accounting. The geometry feature contract uses measured
+`_ods_pick_place_benchmark.py` owns validated resident context sampling and
+efficiency accounting. The geometry feature contract uses measured
 proprioception, TCP/cube transforms, goal-relative positions and cube velocity.
 Normalization is frozen from initial training data. Policies do not consume
 expert segment annotations during inference.
 
-MLPs supervise individual frames using pose requests or joint residuals. The
-geometry GRU uses pose requests, complete causal prefixes and masked supervised
-windows; its recurrent state advances from episode reset during evaluation.
-The older joint-command GRU remains a separate compatibility route with its
-original observation/checkpoint contracts.
-Chunk BC derives absolute TCP targets from pre-action observations and recorded
-requests. Only causal history is a model input; future observations are used
-solely to decode supervised commands. The student executes queued network
-targets through the same bounded relative-pose controller, replans periodically,
-and clears history/queue at reset. Input and target statistics are frozen from
-initial training data and both are included in comparison fingerprints.
+The showcase uses one ChunkBC learner. It derives absolute TCP targets from
+pre-action observations and recorded requests; only causal history is a model
+input. The student executes queued network targets through the bounded
+relative-pose controller, replans periodically, and clears history/queue at
+reset. Input and target statistics are frozen from initial training data and
+included in comparison fingerprints.
 
-The runner supports live overlap, frozen initial data, offline full-corpus and
-serial-refresh modes. Offline matched delivery replays an explicit MLP frame
-manifest against the same validated corpus; recurrent/chunk exact-manifest replay is
-not supported. Serial refresh is labeled an unmatched schedule and cannot
-isolate overlap under identical supervision. Corpus manifests validate the
-observation/action schema and tensor content; content identity is independent
-of engine run IDs. Learner resume restores model/optimizer/RNG state, with a
-fresh ODS source for live runs rather than a restored replay cache.
+The runner supports live online supply, a frozen initial cache, and resident
+LeRobot offline data. A shared pure quota-selection helper in
+`engine/_sampling.py` preserves the draw algorithm across online and offline
+sources; their ledgers retain their distinct process/lock ownership. Corpus
+manifests validate schema and numeric content independently of engine run IDs.
+Resume restores ChunkBC/optimizer/RNG state, creating a fresh ODS cache for live
+runs. Unsupported policy/checkpoint types fail explicitly.
 
-Cold offline runs can select `--offline-storage lerobot` and an explicit
-`--offline-episodes` count independently of training rounds. The private
+Cold offline runs write LeRobot data with an explicit `--offline-episodes`
+count independently of training rounds. The private
 `_ods_pick_place_collection.py` overlaps the next accepted generation with
 bounded, single-writer SDK persistence; it does not stage an intermediate `.pt`
 corpus. One audited SDK load then creates resident CPU tensors. The numeric
@@ -171,7 +165,7 @@ temporary write peaks remain unmeasured. Writer/producer failures and deadlines
 propagate before an incomplete dataset can be published.
 
 `FrozenCorpus.configure_sampling_budget()` optionally protects all resident
-sampling entry points with one nonrefillable per-source allowance. It is
+context sampling with one nonrefillable per-source allowance. It is
 creator-process/thread only, rejects duplicate source identities and cannot be
 enabled after sampling. Protected offline resume is rejected until allowance
 restoration exists. Conventional offline baselines retain unrestricted reuse.

@@ -60,7 +60,7 @@ def _run(
         efficiency["cost/data_disk_peak_bytes"] = 2 * 1024**2
     summary = {
         "mode": mode,
-        "policy": "mlp-pose",
+        "policy": "chunk-pose",
         "stage": "showcase",
         "smoke": False,
         "threshold_test_success": threshold_test,
@@ -78,6 +78,9 @@ def _run(
         "no_video": True,
         "learning_rate": 0.001,
         "pose_ik": "dls",
+        "prediction_horizon": 64,
+        "action_horizon": 16,
+        "observation_noise": 0.01,
     }
     timeline = {
         "events": [
@@ -96,6 +99,7 @@ def _run(
         # Paired seeds share initialization; different seeds may differ.
         "initial_model_sha256": f"{seed:064x}",
         "normalization_sha256": "b" * 64,
+        "normalization_fields": ["mean", "std", "target_mean", "target_std"],
     }
     environment = {
         "python": "3.11.14",
@@ -234,36 +238,6 @@ def test_full_five_pair_matrix_can_satisfy_headline_requirements(
     report = build_comparison([load_run(p) for p in paths])
     assert report["headline_efficiency_supported"] is True
     assert report["paired_comparisons"][0]["median_ratio"] == 1
-
-
-def test_unmatched_serial_schedule_reports_descriptive_ratios_without_overlap_headline(
-    tmp_path: Path,
-) -> None:
-    paths = [
-        _run(tmp_path, mode, seed) for seed in range(5) for mode in ("online", "serial")
-    ]
-    for path in paths:
-        if path.name.startswith("serial"):
-            summary_path = path / "summary.json"
-            summary = json.loads(summary_path.read_text())
-            summary["matching"] = "unmatched_refresh_schedule"
-            summary_path.write_text(json.dumps(summary))
-    report = build_comparison([load_run(path) for path in paths])
-    comparison = report["paired_comparisons"][0]
-    assert comparison["matching"] == "unmatched_refresh_schedule"
-    assert comparison["ratios_supported"] is True
-    assert comparison["median_ratio"] == 1
-    assert comparison["causal_overlap_headline_supported"] is False
-    assert comparison["headline_efficiency_supported"] is False
-    assert report["headline_efficiency_supported"] is False
-    assert any(
-        "descriptive" in note and "causal overlap" in note
-        for note in comparison["qualification_notes"]
-    )
-    assert any(
-        "matching=unmatched_refresh_schedule" in warning
-        for warning in report["warnings"]
-    )
 
 
 def test_same_policy_with_different_controllers_cannot_support_efficiency_headline(

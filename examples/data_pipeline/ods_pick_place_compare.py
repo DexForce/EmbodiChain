@@ -327,9 +327,7 @@ def _groups(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         entry["matching_statuses"] = sorted(
             {r["matching"] for r in members if r["matching"] is not None}
         )
-        entry["causal_overlap_headline_supported"] = (
-            False if key[0] == "serial" else None
-        )
+        entry["causal_overlap_headline_supported"] = None
         observed = {}
         for metric in (
             "t80_dev_seconds",
@@ -440,12 +438,6 @@ def _paired_comparisons(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if len(seeds) < 5:
                 notes.append("Fewer than five paired seeds; preliminary evidence only")
             matching = None
-            if baseline == "serial":
-                statuses = {run["matching"] for run in modes[baseline]}
-                matching = next(iter(statuses)) if len(statuses) == 1 else None
-                notes.append(
-                    "Serial refresh schedules are unmatched or unverified at each update; observed time ratios are descriptive and cannot establish a causal overlap speedup"
-                )
             for run in both:
                 config = run["config"]
                 if run["smoke"] is not False or run["stage"] != "showcase":
@@ -490,9 +482,7 @@ def _paired_comparisons(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "baseline_mode": baseline,
                     "reference_mode": "online",
                     "matching": matching,
-                    "causal_overlap_headline_supported": (
-                        False if baseline == "serial" else None
-                    ),
+                    "causal_overlap_headline_supported": (None),
                     "intended_pairs": len(seeds),
                     "complete_pairs": len(pairs),
                     "pairs": pairs,
@@ -536,10 +526,6 @@ def build_comparison(runs: list[dict[str, Any]]) -> dict[str, Any]:
     if any(run["right_censored"] for run in runs):
         warnings.append(
             "Censored runs remain in attainment counts. Reported T80 medians describe attainers only and are not an overall time-to-target estimate."
-        )
-    if any(run["mode"] == "serial" for run in runs):
-        warnings.append(
-            "Serial timing is descriptive: unmatched or unverified refresh schedules do not support a causal overlap headline (matching=unmatched_refresh_schedule when declared)."
         )
     if any(not comparison["comparability_supported"] for comparison in comparisons):
         warnings.append(
