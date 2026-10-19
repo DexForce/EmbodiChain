@@ -1670,7 +1670,7 @@ def test_atomic_task_press_invocation_uses_articulated_target_manifest():
 
     assert isinstance(invocation.goal, PressGoal)
     assert invocation.goal.semantics.entity_id == "benchmark_microwave:button_cap"
-    assert invocation.motion_policy.strategy == "motion_gen"
+    assert invocation.motion_policy.strategy == "ik_interp"
     assert invocation.motion_policy.sample_count == 140
     assert type(invocation.skill_options) is PressOptions
     assert invocation.skill_options.hand_interp_steps == 12
@@ -1747,7 +1747,7 @@ def test_atomic_task_slide_invocation_uses_tutorial_options():
 
     assert isinstance(invocation.goal, SlideGoal)
     assert invocation.goal.semantics.entity_id == "benchmark_drawer:large_handle_bar"
-    assert invocation.motion_policy.strategy == "motion_gen"
+    assert invocation.motion_policy.strategy == "ik_interp"
     assert invocation.motion_policy.sample_count == 140
     assert type(invocation.skill_options) is SlideOptions
     assert invocation.skill_options.direction == "pull"
@@ -1824,7 +1824,7 @@ def test_atomic_task_twist_invocation_uses_tutorial_options():
 
     assert isinstance(invocation.goal, TwistGoal)
     assert invocation.goal.semantics.entity_id == "benchmark_microwave:cap_1"
-    assert invocation.motion_policy.strategy == "motion_gen"
+    assert invocation.motion_policy.strategy == "ik_interp"
     assert invocation.motion_policy.sample_count == 140
     assert type(invocation.skill_options) is TwistOptions
     assert invocation.skill_options.hand_interp_steps == 12
@@ -2593,6 +2593,20 @@ def test_report_contains_exactly_three_markdown_tables(tmp_path):
         "time_and_memory": [],
         "success_and_metrics": [],
         "leaderboard": [],
+        "generalization": [
+            {
+                "track": "pick",
+                "algorithm": "baseline",
+                "domain_id": "workspace_shell",
+                "domain_version": "v1",
+                "domain_kind": "robustness",
+                "coverage_rate": 1.0,
+                "success_rate": 0.5,
+                "spatial_bucket_success_rates": {"near": 1.0, "far": 0.0},
+                "spatial_bucket_counts": {"near": 1, "far": 1},
+                "spatial_bucket_failure_stages": {"far": {"physical": 1}},
+            }
+        ],
     }
 
     report = write_markdown_report(tmp_path / "report.md", suite, aggregates)
@@ -2602,8 +2616,11 @@ def test_report_contains_exactly_three_markdown_tables(tmp_path):
     assert text.count("## Time & Memory") == 1
     assert text.count("## Success & Other Metrics") == 1
     assert text.count("## Leaderboard") == 1
+    assert "- report_schema_version: `2`" in text
     assert "motion-validity gate" in text
     assert "n_valid" in text
+    assert 'spatial_bucket_success_rates={"far":0.0,"near":1.0}' in text
+    assert 'spatial_bucket_failure_stages={"far":{"physical":1}}' in text
 
 
 def test_curobo_prepare_backend_exposes_actual_graph_mode():
@@ -2955,6 +2972,122 @@ def test_runner_capability_gate_and_fake_adapter_lifecycle(tmp_path):
     finally:
         for name in names:
             unregister_planner_adapter(name)
+
+
+@pytest.mark.parametrize(
+    ("failure_mode", "failure_phase", "failure_code"),
+    [
+        ("availability", TrialPhase.AVAILABILITY, "runtime_unavailable"),
+        ("build", TrialPhase.CONSTRUCT, "planner_exception"),
+        ("prepare", TrialPhase.PREPARE, "planner_exception"),
+        ("scenario", TrialPhase.PREPARE, "scenario_prepare_error"),
+    ],
+)
+def test_runner_preserves_case_attribution_across_lifecycle_failures(
+    tmp_path, failure_mode, failure_phase, failure_code
+):
+    """Every early exit preserves planner attribution for every case."""
+    from scripts.benchmark.motion_generation.artifacts import TrialJsonlWriter
+    from scripts.benchmark.motion_generation.config import (
+        PlannerSpecCfg,
+        ProtocolCfg,
+        SuiteCfg,
+    )
+    from scripts.benchmark.motion_generation.planners.base import PlannerAdapter
+    from scripts.benchmark.motion_generation.registry import (
+        register_planner_adapter,
+        unregister_planner_adapter,
+    )
+    from scripts.benchmark.motion_generation.runner import BenchmarkRunner
+
+    adapter_name = "fake_lifecycle_failure"
+
+    class _LifecycleFailureFake(PlannerAdapter):
+        capabilities = frozenset({"eef_waypoint"})
+        separate_prepare = True
+
+        def availability(self) -> tuple[bool, str | None]:
+            if self.spec.config["failure_mode"] == "availability":
+                return False, "runtime missing"
+            return True, None
+
+        def build(self) -> None:
+            if self.spec.config["failure_mode"] == "build":
+                raise RuntimeError("build failed")
+
+        def prepare_cases(self, cases: list[BenchmarkCase]) -> None:
+            if self.spec.config["failure_mode"] == "prepare":
+                raise RuntimeError("prepare failed")
+
+        def plan(self, case: BenchmarkCase) -> PlanResult:  # noqa: ARG002
+            raise AssertionError("lifecycle failure must stop before planning")
+
+    register_planner_adapter(adapter_name, _LifecycleFailureFake)
+    try:
+        suite = SuiteCfg(
+            name="motion_generation",
+            suite_version="test_lifecycle_v1",
+            profile="smoke",
+            protocol=ProtocolCfg(warmup_trials=0, measured_trials=1),
+        )
+        spec = PlannerSpecCfg(
+            id="candidate",
+            adapter=adapter_name,
+            role=AlgorithmRole.CANDIDATE.value,
+            enabled=True,
+            config={"failure_mode": failure_mode},
+        )
+        runner = BenchmarkRunner(suite, [spec], device="cpu", output_root=tmp_path)
+        attributed = replace(
+            _case(), suite_version=suite.suite_version, case_id="attributed"
+        )
+        bypassed = replace(attributed, case_id="bypassed", seed=23)
+        provider = Mock()
+        provider.trial_metadata.side_effect = lambda case: {
+            "selected_planner_backend_used": case.case_id == attributed.case_id,
+            "effective_motion_algorithm": (
+                adapter_name
+                if case.case_id == attributed.case_id
+                else "sequential_ik_interpolation"
+            ),
+        }
+        provider.prepare_planner.side_effect = (
+            RuntimeError("scenario prepare failed")
+            if failure_mode == "scenario"
+            else None
+        )
+        writer = TrialJsonlWriter(tmp_path / "trials.jsonl")
+
+        runner._run_adapter(
+            writer,
+            Mock(),
+            Mock(device=torch.device("cpu")),
+            spec,
+            [attributed, bypassed],
+            frozenset({"eef_waypoint"}),
+            provider,
+        )
+
+        failures = [
+            record
+            for record in runner.records
+            if record.phase is failure_phase and record.failure_code == failure_code
+        ]
+        assert {record.case_id for record in failures} == {"attributed", "bypassed"}
+        assert {
+            record.case_id: record.metadata["selected_planner_backend_used"]
+            for record in failures
+        } == {"attributed": True, "bypassed": False}
+        leaderboard = aggregate_results(
+            runner.records,
+            list(runner.metadata.values()),
+            [attributed, bypassed],
+            measured_trials=1,
+        )["leaderboard"][0]
+        assert leaderboard["attributed_cases"] == 1
+        assert leaderboard["bypassed_cases"] == 1
+    finally:
+        unregister_planner_adapter(adapter_name)
 
 
 @pytest.mark.parametrize("full_state", [True, False])

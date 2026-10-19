@@ -1017,7 +1017,7 @@ class Robot(Articulation):
     ) -> tuple[torch.Tensor, torch.Tensor] | None:
         """Compute batched inverse kinematics for arena-frame poses.
 
-        When ``continuous`` is enabled, all analytic candidates are generated
+        When ``continuous`` is enabled, all solver candidates are generated
         in one solver call and the branch nearest to the previous path sample
         is selected sequentially. The selected solver must support continuous
         candidate selection.
@@ -1124,9 +1124,14 @@ class Robot(Articulation):
             pose_batch.reshape(len(local_env_ids), n_batch, 4, 4),
         )
         if continuous:
+            repeated_seed = (
+                joint_seed_tensor[:, None]
+                .expand(batch_size, n_batch, n_dof)
+                .reshape(-1, n_dof)
+            )
             candidate_valid, candidate_qpos = solver.get_ik(
                 target_xpos=pose_batch.reshape(-1, 4, 4),
-                qpos_seed=None,
+                qpos_seed=repeated_seed,
                 return_all_solutions=True,
             )
             return solver._select_continuous_ik_path(

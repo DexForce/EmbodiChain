@@ -27,6 +27,8 @@ from .models import BenchmarkCase, PlannerMetadata, TrialPhase, TrialRecord
 
 __all__ = ["aggregate_generalization"]
 
+_EFFECTIVE_MOTION_ALGORITHM_ROLE = "effective_motion_algorithm"
+
 
 def _track_group(case: BenchmarkCase) -> str:
     """Return the stable track identity shared by all domain populations."""
@@ -69,6 +71,66 @@ def _case_success(
     return sum(values) / max(len(values), expected), len(outcomes)
 
 
+def _spatial_bucket_statistics(
+    cases: Iterable[BenchmarkCase],
+    records_by_case: dict[str, list[TrialRecord]],
+    expected_repeats_by_case: dict[str, int],
+) -> tuple[dict[str, float], dict[str, int], dict[str, dict[str, int]]]:
+    """Aggregate row-level success and failure stages for spatial buckets."""
+    successes: dict[str, int] = defaultdict(int)
+    observed_counts: dict[str, int] = defaultdict(int)
+    expected_counts: dict[str, int] = defaultdict(int)
+    failures: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for case in cases:
+        randomization = case.case_parameters.get("randomization", {})
+        if not isinstance(randomization, dict):
+            continue
+        buckets = randomization.get("spatial_buckets")
+        if buckets is None:
+            continue
+        if not isinstance(buckets, list) or len(buckets) != case.batch_size:
+            raise ValueError(
+                f"Case {case.case_id!r} spatial_buckets must match batch_size."
+            )
+        for bucket in buckets:
+            expected_counts[str(bucket)] += expected_repeats_by_case.get(
+                case.case_id, 0
+            )
+        for record in records_by_case.get(case.case_id, []):
+            if record.phase is not TrialPhase.MEASURED:
+                continue
+            for outcome in record.outcomes:
+                if not 0 <= outcome.env_index < len(buckets):
+                    raise ValueError(
+                        f"Case {case.case_id!r} outcome env_index is outside "
+                        "spatial_buckets."
+                    )
+                bucket = str(buckets[outcome.env_index])
+                observed_counts[bucket] += 1
+                succeeded = bool(getattr(outcome, case.primary_success, False))
+                successes[bucket] += int(succeeded)
+                if not succeeded:
+                    stage = outcome.failure_stage or outcome.failure_code or "unknown"
+                    failures[bucket][stage] += 1
+    counts = {
+        bucket: max(expected_counts[bucket], observed_counts[bucket])
+        for bucket in sorted(expected_counts.keys() | observed_counts.keys())
+    }
+    for bucket, count in counts.items():
+        missing = count - observed_counts[bucket]
+        if missing:
+            failures[bucket]["missing_outcome"] += missing
+    rates = {bucket: successes[bucket] / count for bucket, count in counts.items()}
+    return (
+        rates,
+        dict(sorted(counts.items())),
+        {
+            bucket: dict(sorted(stage_counts.items()))
+            for bucket, stage_counts in sorted(failures.items())
+        },
+    )
+
+
 def _population_stats(
     rows: list[dict[str, object]],
 ) -> tuple[float | None, float | None, float | None, float | None]:
@@ -97,6 +159,78 @@ def _population_stats(
     return mean, worst, variance, retention
 
 
+def _population_row(
+    *,
+    track: str,
+    algorithm: str,
+    algorithm_role: str,
+    domain_id: str,
+    domain_version: str,
+    domain_kind: str,
+    cases: list[BenchmarkCase],
+    total_cases: int,
+    bypassed_cases: int,
+    records_by_case: dict[str, list[TrialRecord]],
+    expected_repeats_by_case: dict[str, int],
+) -> dict[str, object]:
+    """Aggregate one planner- or effective-algorithm domain population."""
+    population_records = [
+        record for case in cases for record in records_by_case.get(case.case_id, [])
+    ]
+    unsupported = _unsupported_case_ids(population_records)
+    applicable_cases = [case for case in cases if case.case_id not in unsupported]
+    expected_rows = sum(
+        case.batch_size * expected_repeats_by_case.get(case.case_id, 0)
+        for case in cases
+    )
+    observed_rows = sum(
+        len(record.outcomes)
+        for record in population_records
+        if record.phase is TrialPhase.MEASURED
+    )
+    case_rates = [
+        _case_success(
+            records_by_case.get(case.case_id, []),
+            case,
+            expected_repeats_by_case.get(case.case_id, 0),
+        )[0]
+        for case in applicable_cases
+    ]
+    success_rate = sum(case_rates) / len(case_rates) if case_rates else None
+    bucket_rates, bucket_counts, bucket_failures = _spatial_bucket_statistics(
+        applicable_cases,
+        records_by_case,
+        expected_repeats_by_case,
+    )
+    return {
+        "track": track,
+        "algorithm": algorithm,
+        "algorithm_role": algorithm_role,
+        "domain_id": domain_id,
+        "domain_version": domain_version,
+        "domain_kind": domain_kind,
+        "cases": total_cases,
+        "attributed_cases": len(cases),
+        "applicable_cases": len(applicable_cases),
+        "bypassed_cases": bypassed_cases,
+        "unsupported_cases": len(unsupported),
+        "coverage_rate": min(1.0, observed_rows / max(expected_rows, 1)),
+        "success_rate": success_rate,
+        "spatial_bucket_success_rates": bucket_rates,
+        "spatial_bucket_counts": bucket_counts,
+        "spatial_bucket_failure_stages": bucket_failures,
+        "nominal_success_rate": None,
+        "domain_mean_success_rate": None,
+        "domain_worst_success_rate": None,
+        "domain_success_variance": None,
+        "domain_retention": None,
+        "domain_mean": None,
+        "domain_worst": None,
+        "domain_variance": None,
+        "generalization_eligible": False,
+    }
+
+
 def aggregate_generalization(
     records: Iterable[TrialRecord],
     metadata: Iterable[PlannerMetadata],
@@ -106,9 +240,11 @@ def aggregate_generalization(
     """Aggregate versioned nominal, robustness, and held-out populations.
 
     Unsupported capability cases lower coverage and are excluded from the
-    success denominator.  Runtime errors and ordinary planner failures remain
-    applicable cases and therefore count as failures.  The returned rows are
-    sufficient to recompute the domain summary from raw trial records.
+    success denominator. Cases that bypass the selected planner are excluded
+    from planner attribution and reported under their effective motion
+    algorithm. Runtime errors and ordinary planner failures remain applicable
+    cases and therefore count as failures. The returned rows are sufficient
+    to recompute the domain summary from raw trial records.
 
     Args:
         records: Raw lifecycle and measured trial records.
@@ -117,8 +253,9 @@ def aggregate_generalization(
         measured_trials: Number of measured repeats expected per case.
 
     Returns:
-        One row per planner and evaluation domain, including generalization
-        summary statistics shared by that planner's non-nominal domains.
+        One row per attributed planner or effective algorithm and evaluation
+        domain, including generalization summary statistics shared by that
+        algorithm's non-nominal domains.
     """
     if measured_trials < 1:
         raise ValueError("measured_trials must be positive.")
@@ -128,8 +265,19 @@ def aggregate_generalization(
         return []
     metadata_list = list(metadata)
     by_algorithm_case: dict[tuple[str, str], list[TrialRecord]] = defaultdict(list)
+    by_effective_algorithm_case: dict[tuple[str, str], list[TrialRecord]] = defaultdict(
+        list
+    )
+    effective_case_sources: dict[tuple[str, str], set[str]] = defaultdict(set)
     for record in record_list:
         by_algorithm_case[(record.algorithm_id, record.case_id)].append(record)
+        if not record.uses_selected_planner_backend:
+            by_effective_algorithm_case[
+                (record.effective_motion_algorithm, record.case_id)
+            ].append(record)
+            effective_case_sources[
+                (record.effective_motion_algorithm, record.case_id)
+            ].add(record.algorithm_id)
 
     cases_by_population: dict[tuple[str, str, str, str], list[BenchmarkCase]] = (
         defaultdict(list)
@@ -145,60 +293,95 @@ def aggregate_generalization(
     for planner in metadata_list:
         for population_key, population_cases in sorted(cases_by_population.items()):
             track, domain_id, domain_version, domain_kind = population_key
-            population_records = [
-                record
+            bypassed = {
+                case.case_id
                 for case in population_cases
-                for record in by_algorithm_case[(planner.algorithm_id, case.case_id)]
-            ]
-            unsupported = _unsupported_case_ids(population_records)
-            applicable_cases = [
-                case for case in population_cases if case.case_id not in unsupported
-            ]
-            expected_rows = (
-                sum(case.batch_size for case in population_cases) * measured_trials
-            )
-            observed_rows = sum(
-                len(record.outcomes)
-                for record in population_records
-                if record.phase is TrialPhase.MEASURED
-            )
-            case_rates: list[float] = []
-            for case in applicable_cases:
-                rate, _ = _case_success(
-                    by_algorithm_case[(planner.algorithm_id, case.case_id)],
-                    case,
-                    measured_trials,
+                if any(
+                    not record.uses_selected_planner_backend
+                    for record in by_algorithm_case[
+                        (planner.algorithm_id, case.case_id)
+                    ]
                 )
-                case_rates.append(rate)
-            success_rate = sum(case_rates) / len(case_rates) if case_rates else None
+            }
+            attributed_cases = [
+                case for case in population_cases if case.case_id not in bypassed
+            ]
             rows.append(
-                {
-                    "track": track,
-                    "algorithm": planner.algorithm_id,
-                    "algorithm_role": planner.algorithm_role.value,
-                    "domain_id": domain_id,
-                    "domain_version": domain_version,
-                    "domain_kind": domain_kind,
-                    "cases": len(population_cases),
-                    "applicable_cases": len(applicable_cases),
-                    "unsupported_cases": len(unsupported),
-                    "coverage_rate": min(1.0, observed_rows / max(expected_rows, 1)),
-                    "success_rate": success_rate,
-                    "nominal_success_rate": None,
-                    "domain_mean_success_rate": None,
-                    "domain_worst_success_rate": None,
-                    "domain_success_variance": None,
-                    "domain_retention": None,
-                    "domain_mean": None,
-                    "domain_worst": None,
-                    "domain_variance": None,
-                    "generalization_eligible": False,
-                }
+                _population_row(
+                    track=track,
+                    algorithm=planner.algorithm_id,
+                    algorithm_role=planner.algorithm_role.value,
+                    domain_id=domain_id,
+                    domain_version=domain_version,
+                    domain_kind=domain_kind,
+                    cases=attributed_cases,
+                    total_cases=len(population_cases),
+                    bypassed_cases=len(bypassed),
+                    records_by_case={
+                        case.case_id: [
+                            record
+                            for record in by_algorithm_case[
+                                (planner.algorithm_id, case.case_id)
+                            ]
+                            if record.uses_selected_planner_backend
+                        ]
+                        for case in attributed_cases
+                    },
+                    expected_repeats_by_case={
+                        case.case_id: measured_trials for case in attributed_cases
+                    },
+                )
             )
 
-    by_summary_group: dict[tuple[str, str], list[dict[str, object]]] = defaultdict(list)
+    effective_algorithms = sorted(
+        {algorithm for algorithm, _ in by_effective_algorithm_case}
+    )
+    for algorithm in effective_algorithms:
+        for population_key, population_cases in sorted(cases_by_population.items()):
+            track, domain_id, domain_version, domain_kind = population_key
+            attributed_cases = [
+                case
+                for case in population_cases
+                if (algorithm, case.case_id) in by_effective_algorithm_case
+            ]
+            if not attributed_cases:
+                continue
+            rows.append(
+                _population_row(
+                    track=track,
+                    algorithm=algorithm,
+                    algorithm_role=_EFFECTIVE_MOTION_ALGORITHM_ROLE,
+                    domain_id=domain_id,
+                    domain_version=domain_version,
+                    domain_kind=domain_kind,
+                    cases=attributed_cases,
+                    total_cases=len(attributed_cases),
+                    bypassed_cases=0,
+                    records_by_case={
+                        case.case_id: by_effective_algorithm_case[
+                            (algorithm, case.case_id)
+                        ]
+                        for case in attributed_cases
+                    },
+                    expected_repeats_by_case={
+                        case.case_id: measured_trials
+                        * len(effective_case_sources[(algorithm, case.case_id)])
+                        for case in attributed_cases
+                    },
+                )
+            )
+
+    by_summary_group: dict[tuple[str, str, str], list[dict[str, object]]] = defaultdict(
+        list
+    )
     for row in rows:
-        by_summary_group[(str(row["track"]), str(row["algorithm"]))].append(row)
+        by_summary_group[
+            (
+                str(row["track"]),
+                str(row["algorithm"]),
+                str(row["algorithm_role"]),
+            )
+        ].append(row)
     for population_rows in by_summary_group.values():
         mean, worst, variance, retention = _population_stats(population_rows)
         nominal_rates = [

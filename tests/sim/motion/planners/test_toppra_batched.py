@@ -26,9 +26,34 @@ import torch
 from embodichain.lab.sim.motion.planners.toppra_planner import _toppra_solve_one_env
 from embodichain.lab.sim.motion.planners.utils import TrajectorySampleMethod
 
-
 # Numerical contracts are also exercised without the simulation adapter in
 # tests/compute/test_toppra.py.
+
+
+class _DeviceBoundTensor(torch.Tensor):
+    """CPU-backed stand-in that rejects direct NumPy conversion like CUDA."""
+
+    @staticmethod
+    def __new__(cls, value: list[float]) -> _DeviceBoundTensor:
+        return torch.Tensor._make_subclass(cls, torch.as_tensor(value), False)
+
+    def __array__(self, dtype=None, copy=None):
+        del dtype, copy
+        raise TypeError("move this device-bound tensor to CPU before NumPy conversion")
+
+    def cpu(self, *args, **kwargs) -> torch.Tensor:
+        del args, kwargs
+        return self.as_subclass(torch.Tensor).clone()
+
+
+# Note: TOPPRA's ParametrizeConstAccel robustly avoids returning None for smooth
+# splines (verified empirically across tiny limits, huge displacements, zigzags,
+# and plateaus), so the ``jnt_traj is None`` branch in ``_toppra_solve_one_env``
+# is defensive and not directly unit-tested here; infeasible inputs instead
+# raise during path/constraint construction and are caught by the
+# ``except Exception`` -> ``_empty_failure`` path.
+
+
 class TestToppraWorker:
     def test_solve_one_env_quantity(self):
         # 2-waypoint, 6-DOF
@@ -124,6 +149,56 @@ class TestToppraCfgFields:
         # Explicit override wins regardless of device.
         assert resolve("spawn", torch.device("cpu")) == "spawn"
         assert resolve("fork", torch.device("cuda", 0)) == "fork"
+
+
+@pytest.mark.parametrize("batch_size", [1, 2])
+def test_plan_materializes_device_bound_constraints_before_numpy_worker(
+    batch_size: int,
+) -> None:
+    from embodichain.lab.sim.motion.planners.toppra_planner import (
+        ToppraPlanner,
+        ToppraPlannerCfg,
+        ToppraPlanOptions,
+    )
+    from embodichain.lab.sim.motion.planners.utils import PlanState
+
+    planner = object.__new__(ToppraPlanner)
+    planner.cfg = ToppraPlannerCfg(robot_uid="test", max_workers=batch_size)
+    planner.device = torch.device("cpu")
+    planner._pool = None
+    planner._mp_context = "fork"
+    if batch_size > 1:
+
+        class _ImmediateFuture:
+            def __init__(self, result: dict) -> None:
+                self._result = result
+
+            def result(self) -> dict:
+                return self._result
+
+        class _InspectingPool:
+            @staticmethod
+            def submit(fn, *args) -> _ImmediateFuture:
+                assert isinstance(args[1], np.ndarray)
+                assert isinstance(args[2], np.ndarray)
+                return _ImmediateFuture(fn(*args))
+
+        planner._get_pool = lambda _: _InspectingPool()
+    qpos = torch.zeros(batch_size, 2)
+    states = [PlanState.from_qpos(qpos), PlanState.from_qpos(qpos.clone())]
+    options = ToppraPlanOptions(
+        sample_method=TrajectorySampleMethod.QUANTITY,
+        sample_interval=2,
+        constraints={"velocity": 0.2, "acceleration": 0.5},
+    )
+    options.constraints["velocity"] = _DeviceBoundTensor([0.2, 0.3])
+    options.constraints["acceleration"] = _DeviceBoundTensor([0.5, 0.6])
+
+    result = planner.plan(states, options)
+
+    assert result.success.tolist() == [True] * batch_size
+    assert result.positions is not None
+    assert result.positions.shape == (batch_size, 2, 2)
 
 
 class TestToppraPlanBatched:

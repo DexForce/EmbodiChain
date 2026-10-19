@@ -44,6 +44,13 @@ from embodichain.compute.trajectory._toppra import (
 )
 
 
+def _constraint_for_numpy_worker(value: object) -> object:
+    """Materialize tensor-backed limits on CPU before NumPy worker dispatch."""
+    if isinstance(value, torch.Tensor):
+        return value.detach().cpu().numpy()
+    return value
+
+
 def _toppra_solve_one_env(
     waypoints: np.ndarray,
     vel_constraint,
@@ -671,12 +678,8 @@ class ToppraPlanner(BasePlanner):
             [s.qpos.detach().cpu().numpy() for s in target_states], axis=1
         )  # (B, N, DOF)
 
-        vc = options.constraints["velocity"]
-        ac = options.constraints["acceleration"]
-        if isinstance(vc, torch.Tensor):
-            vc = vc.detach().cpu().numpy()
-        if isinstance(ac, torch.Tensor):
-            ac = ac.detach().cpu().numpy()
+        vc = _constraint_for_numpy_worker(options.constraints["velocity"])
+        ac = _constraint_for_numpy_worker(options.constraints["acceleration"])
         args_per_env = [
             (
                 waypoints[i],

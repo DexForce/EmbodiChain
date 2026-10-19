@@ -1261,6 +1261,19 @@ class CoordinatedPickment(
                 f"environment(s) {failed_env_ids}."
             )
 
+    @staticmethod
+    def _log_joint_step_failures(
+        control_part: str,
+        failed_mask: torch.Tensor,
+    ) -> None:
+        """Report dense paths rejected for one-control-interval joint jumps."""
+        failed_env_ids = torch.nonzero(failed_mask, as_tuple=False).flatten().tolist()
+        if failed_env_ids:
+            logger.log_warning(
+                f"Rejected {control_part} dense object path with joint steps "
+                f"above its velocity limit in environment(s) {failed_env_ids}."
+            )
+
     def _plan_masked_arm_trajectory(
         self,
         control_part: str,
@@ -1318,6 +1331,9 @@ class CoordinatedPickment(
         active_mask: torch.Tensor,
         resources: _CoordinatedPickResources,
         options: CoordinatedPickmentOptions,
+        *,
+        velocity_limit: float | None,
+        step_dt: float,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         n_waypoints = object_pose_traj.shape[1]
         keyframe_indices = self._select_motion_keyframe_indices(n_waypoints, options)
@@ -1393,11 +1409,126 @@ class CoordinatedPickment(
             left_traj[:, keyframe_col] = left_qpos_seed
             right_traj[:, keyframe_col] = right_qpos_seed
 
-        return (
-            success_mask,
-            self._interpolate_qpos_keyframes(left_traj, keyframe_indices, n_waypoints),
-            self._interpolate_qpos_keyframes(right_traj, keyframe_indices, n_waypoints),
+        left_seed = self._interpolate_qpos_keyframes(
+            left_traj, keyframe_indices, n_waypoints
         )
+        right_seed = self._interpolate_qpos_keyframes(
+            right_traj, keyframe_indices, n_waypoints
+        )
+        left_targets = torch.matmul(object_pose_traj, left_object_to_eef[:, None])
+        right_targets = torch.matmul(object_pose_traj, right_object_to_eef[:, None])
+        left_solver = self.robot.get_solver(resources.left_arm.control_part)
+        right_solver = self.robot.get_solver(resources.right_arm.control_part)
+        left_continuous = bool(
+            left_solver is not None and left_solver.supports_continuous_batch_ik
+        )
+        right_continuous = bool(
+            right_solver is not None and right_solver.supports_continuous_batch_ik
+        )
+        left_valid, left_projected = self.robot.compute_batch_ik(
+            pose=left_targets,
+            name=resources.left_arm.control_part,
+            joint_seed=left_start_qpos if left_continuous else left_seed,
+            continuous=left_continuous,
+        )
+        right_valid, right_projected = self.robot.compute_batch_ik(
+            pose=right_targets,
+            name=resources.right_arm.control_part,
+            joint_seed=right_start_qpos if right_continuous else right_seed,
+            continuous=right_continuous,
+        )
+        left_valid = torch.as_tensor(left_valid, device=self.device).to(torch.bool)
+        right_valid = torch.as_tensor(right_valid, device=self.device).to(torch.bool)
+        expected_valid_shape = (self.num_envs, n_waypoints)
+        if (
+            left_valid.shape != expected_valid_shape
+            or right_valid.shape != expected_valid_shape
+        ):
+            raise ValueError(
+                "Coordinated object-motion batch IK success must have shape "
+                f"{expected_valid_shape}."
+            )
+        left_projected = torch.as_tensor(
+            left_projected, dtype=torch.float32, device=self.device
+        )
+        right_projected = torch.as_tensor(
+            right_projected, dtype=torch.float32, device=self.device
+        )
+        if (
+            left_projected.shape != left_seed.shape
+            or right_projected.shape != right_seed.shape
+        ):
+            raise ValueError(
+                "Coordinated object-motion batch IK qpos must match its joint seeds."
+            )
+        left_valid &= torch.isfinite(left_projected).all(dim=-1)
+        right_valid &= torch.isfinite(right_projected).all(dim=-1)
+        left_step_valid = self._joint_steps_within_velocity_limits(
+            left_start_qpos,
+            left_projected,
+            resources.left_arm.control_part,
+            velocity_limit=velocity_limit,
+            step_dt=step_dt,
+        )
+        right_step_valid = self._joint_steps_within_velocity_limits(
+            right_start_qpos,
+            right_projected,
+            resources.right_arm.control_part,
+            velocity_limit=velocity_limit,
+            step_dt=step_dt,
+        )
+        left_path_valid = left_valid.all(dim=1) & left_step_valid
+        right_path_valid = right_valid.all(dim=1) & right_step_valid
+        projected_success = left_path_valid & right_path_valid
+        self._log_ik_failures(
+            resources.left_arm.control_part,
+            "dense object path",
+            success_mask & ~left_valid.all(dim=1),
+        )
+        self._log_ik_failures(
+            resources.right_arm.control_part,
+            "dense object path",
+            success_mask & ~right_valid.all(dim=1),
+        )
+        self._log_joint_step_failures(
+            resources.left_arm.control_part,
+            success_mask & left_valid.all(dim=1) & ~left_step_valid,
+        )
+        self._log_joint_step_failures(
+            resources.right_arm.control_part,
+            success_mask & right_valid.all(dim=1) & ~right_step_valid,
+        )
+        success_mask &= projected_success
+        left_projected = torch.where(
+            left_path_valid[:, None, None], left_projected, left_seed
+        )
+        right_projected = torch.where(
+            right_path_valid[:, None, None], right_projected, right_seed
+        )
+        return success_mask, left_projected, right_projected
+
+    def _joint_steps_within_velocity_limits(
+        self,
+        start_qpos: torch.Tensor,
+        trajectory: torch.Tensor,
+        control_part: str,
+        *,
+        velocity_limit: float | None,
+        step_dt: float,
+    ) -> torch.Tensor:
+        """Reject dense IK paths that jump farther than one control interval."""
+        limits = self.motion_generator._resolve_velocity_limits(
+            control_part=control_part,
+            batch_size=self.num_envs,
+            dof=start_qpos.shape[-1],
+            requested=velocity_limit,
+            reference=start_qpos,
+        )
+        positions = torch.cat((start_qpos[:, None], trajectory), dim=1)
+        max_step = limits.view(1, 1, -1) * step_dt
+        return torch.isfinite(positions).all(dim=(1, 2)) & (
+            positions.diff(dim=1).abs() <= max_step + 1.0e-6
+        ).all(dim=(1, 2))
 
     def _plan(
         self,
@@ -1477,8 +1608,16 @@ class CoordinatedPickment(
             state,
             left_approach_traj,
             right_approach_traj,
-            self._repeat_qpos(resources.left_hand_open_qpos, segments["approach"]),
-            self._repeat_qpos(resources.right_hand_open_qpos, segments["approach"]),
+            self._interpolate_qpos(
+                state.last_qpos[:, list(resources.left_hand.joint_ids)],
+                resources.left_hand_open_qpos,
+                segments["approach"],
+            ),
+            self._interpolate_qpos(
+                state.last_qpos[:, list(resources.right_hand.joint_ids)],
+                resources.right_hand_open_qpos,
+                segments["approach"],
+            ),
             resources=resources,
         )
 
@@ -1519,6 +1658,8 @@ class CoordinatedPickment(
                 success_mask,
                 resources,
                 options,
+                velocity_limit=request.motion_policy.velocity_limit,
+                step_dt=context.require_control_dt(),
             )
         )
 
@@ -1549,6 +1690,8 @@ class CoordinatedPickment(
                 success_mask,
                 resources,
                 options,
+                velocity_limit=request.motion_policy.velocity_limit,
+                step_dt=context.require_control_dt(),
             )
         )
 

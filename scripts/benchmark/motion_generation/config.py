@@ -87,6 +87,7 @@ class AtomicPoseRandomizationCfg:
     enabled: bool = False
     pose_batch_size: int = 1
     mode: str = "translation"
+    sampling_pattern: str = "uniform"
     object_translation_jitter_m: tuple[float, float, float] = (0.0, 0.0, 0.0)
     object_yaw_jitter_rad: float = 0.0
     object_roll_pitch_jitter_rad: tuple[float, float] = (0.0, 0.0)
@@ -129,7 +130,7 @@ class ProtocolCfg:
     rotation_threshold_rad: float = 0.1
     joint_limit_tolerance_rad: float = 1.0e-5
     confidence_level: float = 0.95
-    report_schema_version: str = "1"
+    report_schema_version: str = "2"
     seeds: list[int] = []
     joint_velocity_limit_rad_s: float | list[float] | None = None
     """Per-joint or scalar velocity limit overriding the asset's.
@@ -654,6 +655,7 @@ def resolve_atomic_pose_randomization(
        randomization:
          enabled: true
          mode: spatial_pose
+         sampling_pattern: stratified
          pose_batch_size: 8
          object_translation_jitter_m: [0.03, 0.03, 0.0]
          object_yaw_jitter_rad: 0.5236
@@ -672,6 +674,9 @@ def resolve_atomic_pose_randomization(
     ``random_pose_count`` is accepted as a readable alias for
     ``pose_batch_size``.  The helper does not mutate the track mapping, so the
     resolved suite and case manifest remain faithful to the source YAML.
+    ``workspace_shell`` assigns ordered normalized XY offset radii to rows;
+    three-dimensional translation vectors use those radii while scalar and
+    rotation ranges retain deterministic stratification.
     """
     if track.scenario != "atomic_task":
         raise ValueError(
@@ -707,6 +712,18 @@ def resolve_atomic_pose_randomization(
         raise ValueError(
             "atomic-task randomization.mode must be 'translation', "
             "'planar_pose', 'spatial_pose', or 'none'."
+        )
+
+    sampling_pattern = str(
+        randomization.get(
+            "sampling_pattern",
+            config.get("pose_sampling_pattern", "uniform"),
+        )
+    )
+    if sampling_pattern not in {"uniform", "stratified", "workspace_shell"}:
+        raise ValueError(
+            "atomic-task randomization.sampling_pattern must be "
+            "'uniform', 'stratified', or 'workspace_shell'."
         )
 
     object_jitter_value = randomization.get("object_translation_jitter_m")
@@ -821,6 +838,32 @@ def resolve_atomic_pose_randomization(
         name="atomic-task randomization.task_frame_roll_pitch_jitter_rad",
     )
 
+    if sampling_pattern == "workspace_shell":
+        translation_jitters = {
+            "object_translation_jitter_m": object_jitter,
+            "target_translation_jitter_m": target_jitter,
+            "support_object_translation_jitter_m": support_jitter,
+            "task_frame_translation_jitter_m": task_frame_jitter,
+        }
+        single_axis = [
+            name
+            for name, values in translation_jitters.items()
+            if (values[0] > 0.0) != (values[1] > 0.0)
+        ]
+        if single_axis:
+            raise ValueError(
+                "atomic-task workspace_shell requires both X and Y for "
+                f"{', '.join(single_axis)}."
+            )
+        if not any(
+            values[0] > 0.0 and values[1] > 0.0
+            for values in translation_jitters.values()
+        ):
+            raise ValueError(
+                "atomic-task workspace_shell requires at least one translation "
+                "jitter with positive X and Y ranges."
+            )
+
     stride = _positive_int(
         randomization.get("seed_stride", config.get("randomization_seed_stride")),
         name="atomic-task randomization.seed_stride",
@@ -901,6 +944,7 @@ def resolve_atomic_pose_randomization(
         enabled=enabled,
         pose_batch_size=pose_batch_size,
         mode=mode,
+        sampling_pattern=sampling_pattern,
         object_translation_jitter_m=object_jitter,
         object_yaw_jitter_rad=object_yaw_jitter,
         object_roll_pitch_jitter_rad=object_roll_pitch_jitter,

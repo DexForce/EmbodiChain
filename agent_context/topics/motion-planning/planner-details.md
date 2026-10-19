@@ -21,7 +21,12 @@ Unconfirmed starts and later poses still require successful IK and FK consistenc
 `interpolate_trajectory()` raises
 on any failed row; `generate()` carries per-row success in a normalized
 `PlanResult`. Fixed Cartesian sample preservation requires explicit `ik_interp`;
-it is not an implicit fallback from backend planning.
+it is not an implicit fallback from backend planning. When velocity or
+acceleration limits expand such a path, `MotionGenOptions.cartesian_path_sampler`
+may regenerate poses from normalized minimum-jerk progress. The callback must
+end at the requested target, begin within the active IK solver's accepted pose
+tolerance, and preserve the batch, dtype, and device. Without it, the facade
+resamples the caller-supplied Cartesian polyline.
 
 Preserve these coupled result rules in `motion_generator.py`:
 
@@ -162,6 +167,14 @@ Control-grid retiming requires zero first-arrival intervals. It rounds each
 row's duration up to the destination clock, samples uniform source-path phase,
 and recomputes qvel with zero first/last-valid and padded-hold velocities.
 Source `PlanResult.dt` remains planner timing.
+
+`compute/trajectory/interpolation.py::interpolate_minimum_jerk()` expands joint
+keyframes onto a fixed control interval while preserving every keyframe. The
+requested sample count is a minimum; per-segment counts grow to satisfy scalar
+or ordered per-joint velocity and acceleration limits, and spare samples are
+distributed by joint displacement rather than equally across unequal moves.
+The emitted dtype is checked on the destination grid so float32 cancellation
+cannot silently violate those derivative limits.
 
 `motion/execution.py::play_joint_trajectory()` requires `control_dt` to be an
 integer multiple of `physics_dt` and advances that many unchanged substeps.
