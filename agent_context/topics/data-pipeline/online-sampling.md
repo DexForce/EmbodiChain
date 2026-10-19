@@ -92,7 +92,7 @@ explicit qualified/provisional reuse profile and runtime metadata; it does not
 infer scientific bounds or change the measured batch size/concurrency. Memory
 constraints can reduce active consumption rather than raise quotas. Measurement
 helpers preserve units and common monotonic windows. See the task's
-[configuration guide](../../../extensions/embodichain_tasks/configs/tasks/manipulation/pick_place/ODS_CONFIGURATION_GUIDE.md)
+[configuration guide](../../../examples/ods/simple_bc_demo/docs/CONFIGURATION.md)
 for CLI binding and current limitations. Global anchor-budget pacing remains a
 separate mode and does not provide per-source protection.
 
@@ -127,77 +127,33 @@ Invalid frames, including history padding, retain `-1` in every provenance field
 from valid-frame counts. These IDs do not provide shared-buffer checkpoint
 recovery or portable offline content identity.
 
-## PickPlace experiment integration
+## PickPlace example integration
 
-`examples/data_pipeline/ods_pick_place_showcase.py` owns the entry point, policy
-models, measured-state features and separate student evaluator. The private
-`_ods_pick_place_training.py` orchestrates geometry policies;
-`_ods_pick_place_policy.py` owns the short-history absolute-target chunk learner;
-`_ods_pick_place_benchmark.py` owns validated numeric corpora, batch-identity
-replay and efficiency accounting. The geometry feature contract uses measured
-proprioception, TCP/cube transforms, goal-relative positions and cube velocity.
-Normalization is frozen from initial training data. Policies do not consume
-expert segment annotations during inference.
+`examples/ods/simple_bc_demo/` owns this example's complete task and learner.
+`train.py` calls one shared loop in `trainer.py`; `models.py` owns the BC
+variants, `observations.py` packs measured features, and `checkpoint.py` handles
+immutable snapshots. `evaluation.py` provides both the independent worker and
+an existing-checkpoint CLI. Student inference never calls expert planning.
 
-MLPs supervise individual frames using pose requests or joint residuals. The
-geometry GRU uses pose requests, complete causal prefixes and masked supervised
-windows; its recurrent state advances from episode reset during evaluation.
-The older joint-command GRU remains a separate compatibility route with its
-original observation/checkpoint contracts.
-Chunk BC derives absolute TCP targets from pre-action observations and recorded
-requests. Only causal history is a model input; future observations are used
-solely to decode supervised commands. The student executes queued network
-targets through the same bounded relative-pose controller, replans periodically,
-and clears history/queue at reset. Input and target statistics are frozen from
-initial training data and both are included in comparison fingerprints.
+The environment and physical configuration are example-local. Its deployment
+uses a module-qualified Gym ID so fresh ODS/evaluation subprocesses import
+`examples.ods.simple_bc_demo.environment` before constructing the task. The
+example is not part of official task discovery. Shared ODS and configuration
+algorithms stay in `embodichain.data_pipeline`.
 
-The runner supports live overlap, frozen initial data, offline full-corpus and
-serial-refresh modes. Offline matched delivery replays an explicit MLP frame
-manifest against the same validated corpus; recurrent/chunk exact-manifest replay is
-not supported. Serial refresh is labeled an unmatched schedule and cannot
-isolate overlap under identical supervision. Corpus manifests validate the
-observation/action schema and tensor content; content identity is independent
-of engine run IDs. Learner resume restores model/optimizer/RNG state, with a
-fresh ODS source for live runs rather than a restored replay cache.
+`collection.py` overlaps accepted generations with bounded direct LeRobot
+persistence, followed by one audited SDK load into resident CPU tensors.
+`data.py` owns frozen-corpus sampling and optional per-source quotas. Protected
+offline sampling is creator-process/thread only and cannot resume without
+restored quota state. `usage.py` and `flow.py` preserve source-exposure and
+scheduler measurements. Resume creates a fresh ODS run; it does not restore
+shared cache contents.
 
-Cold offline runs can select `--offline-storage lerobot` and an explicit
-`--offline-episodes` count independently of training rounds. The private
-`_ods_pick_place_collection.py` overlaps the next accepted generation with
-bounded, single-writer SDK persistence; it does not stage an intermediate `.pt`
-corpus. One audited SDK load then creates resident CPU tensors. The numeric
-loader uses bounded backing-dataset slices when available and records scalar
-fallback explicitly. Run-local SDK caches are included in final disk footprint;
-temporary write peaks remain unmeasured. Writer/producer failures and deadlines
-propagate before an incomplete dataset can be published.
-
-`FrozenCorpus.configure_sampling_budget()` optionally protects all resident
-sampling entry points with one nonrefillable per-source allowance. It is
-creator-process/thread only, rejects duplicate source identities and cannot be
-enabled after sampling. Protected offline resume is rejected until allowance
-restoration exists. Conventional offline baselines retain unrestricted reuse.
-`--deferred-evaluation-schedule updates` aligns checkpoint panels across online
-and offline modes; it does not claim online time-to-certification. G1 content,
-model initialization and all normalization hashes are reported separately.
-
-Small-data gates, expert physical qualification and student learning assessment
-are separate. Smoke success and low training loss do not establish physical
-student success or an efficiency advantage. See the task-owned
-[experiment protocol](../../../extensions/embodichain_tasks/configs/tasks/manipulation/pick_place/BENCHMARK.md)
-for comparable acquisition-inclusive/data-ready budgets and
-[task guidance](../../../extensions/embodichain_tasks/configs/tasks/manipulation/pick_place/README.md)
-for commands and measured results. Optional anchor-budget pacing and compact
-source-use accounting live in `_ods_pick_place_usage.py`; defaults retain fixed
-round scheduling. Deferred evaluation closes the producer before evaluating
-saved policies, so its model-selection results are post hoc and cannot certify
-online time-to-target. Evaluation scalars use each checkpoint's actual policy
-step; save-completion events separately timestamp when its weights became
-available. The study runner preserves missing save times in older runs and
-reports drawdown only over evaluated policies. Background resource sampling
-covers startup and waits independently of update counts; process-tree PSS is a
-sampled peak and learner Torch counters exclude native simulator allocations.
-See the task-owned
-[tuning protocol](../../../extensions/embodichain_tasks/configs/tasks/manipulation/pick_place/TUNING.md)
-for rate units, protected scene splits and measurement limits.
+See [the runnable README](../../../examples/ods/simple_bc_demo/README.md) for
+entry points and [configuration guidance](../../../examples/ods/simple_bc_demo/docs/CONFIGURATION.md)
+for sampling units and measurement limits. Deferred checkpoint evaluation is
+post hoc; its success timestamps are not online threshold certification.
+Smoke tests validate engineering behavior separately from real learning quality.
 
 ## Sampling failure boundary
 

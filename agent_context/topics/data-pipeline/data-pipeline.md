@@ -12,7 +12,7 @@ belongs to [data-assets](../data-assets/data-assets.md).
 | Online worker and sample selection | `embodichain/data_pipeline/engine/data.py`: `OnlineDataEngine` |
 | Throughput-derived settings and protected reuse profiles | `embodichain/data_pipeline/configuration.py`: `configure_ods`; sampler enforcement in `engine/data.py` |
 | Infinite PyTorch dataset | `embodichain/data_pipeline/datasets/online_data.py`: `OnlineDataset` |
-| PickPlace BC and offline comparisons | `examples/data_pipeline/ods_pick_place_showcase.py`; private training/benchmark helpers alongside it; task-owned physical evidence in `embodichain_tasks.manipulation.pick_place` |
+| PickPlace BC and offline comparisons | `examples/ods/simple_bc_demo/`: local environment/config, models, shared trainer and independent evaluator |
 | Commit/discard/finalization dispatch | `embodichain/lab/gym/envs/managers/dataset_manager.py` |
 | Synchronous LeRobot persistence | `embodichain/lab/gym/envs/managers/datasets.py`: `LeRobotRecorder` |
 | Background persistence | `embodichain/lab/gym/envs/managers/async_datasets.py`: `AsyncLeRobotRecorder` |
@@ -30,7 +30,7 @@ for fragment transactions, async ownership, depth output and shutdown. Read
 validation, and conversion across Python/LeRobot versions.
 
 The PickPlace example additionally accepts its own schema-validated LeRobot
-export directories through `_ods_pick_place_lerobot.py`. The SDK reads numeric
+export directories through `examples/ods/simple_bc_demo/lerobot.py`. The SDK reads numeric
 rows once; subsequent causal sampling uses resident CPU tensors. This private
 learning comparison does not replace the general recording/export tools or
 measure LeRobot per-minibatch loading throughput.

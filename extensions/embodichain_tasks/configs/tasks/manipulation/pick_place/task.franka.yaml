@@ -1,8 +1,0 @@
-id: PickPlace-Franka-v1
-enable_sensor: false
-environment:
-  component: env.yaml
-embodiment:
-  component: ../../../components/embodiments/franka_panda.yaml
-  overrides:
-    init_rot: [0.0, 0.0, 180.0]

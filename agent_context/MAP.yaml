@@ -397,6 +397,7 @@ topics:
     episode_sample_budget, OnlineDataBudgetExhaustedError, ODS 自动配置]
   paths: [topics/data-pipeline/data-pipeline.md]
   source_of_truth:
+  - examples/ods/simple_bc_demo/
   - embodichain/data_pipeline/engine/data.py
   - embodichain/data_pipeline/engine/language.py
   - embodichain/data_pipeline/configuration.py
@@ -411,7 +412,7 @@ topics:
   - embodichain/cli/dataset.py
   - tools/lerobot_export/
   - embodichain/lab/scripts/run_env.py
-  watch_paths: [embodichain/data_pipeline/, embodichain/lab/gym/envs/managers/dataset_manager.py, embodichain/lab/gym/envs/managers/datasets.py,
+  watch_paths: [examples/ods/simple_bc_demo/, embodichain/data_pipeline/, embodichain/lab/gym/envs/managers/dataset_manager.py, embodichain/lab/gym/envs/managers/datasets.py,
     embodichain/lab/gym/envs/managers/async_datasets.py, embodichain/lab/gym/envs/embodied_env.py, embodichain/lab/scripts/run_env.py,
     tests/data_pipeline/, embodichain/cli/dataset.py, tools/lerobot_export/]
   related_topics: [manager-functor, env-framework, task-programs, sensor-system]

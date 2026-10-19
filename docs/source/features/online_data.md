@@ -13,24 +13,17 @@ These components live under `embodichain/data_pipeline/` and are designed to wor
 ## OnlineDataEngine
 
 For an end-to-end BC experiment, run
-`python examples/data_pipeline/ods_pick_place_showcase.py` from an installed
-checkout. The Franka task qualifies a physical expert, trains a geometry MLP
-by default, and evaluates immutable student checkpoints in a separate process.
-`--policy gru-pose` selects a GRU with the same measured geometry and pose-request
-contract; `--policy mlp-joint` selects joint residuals. The older `--policy gru`
-route retains its original observation and joint-command contracts. Cameras
-are display-only; policy geometry comes from measured robot/object state.
+`python -m examples.ods.simple_bc_demo.train` from an installed source checkout.
+The self-contained example owns its Franka environment/configuration, models,
+trainer, independent checkpoint evaluator and offline-data controls under
+`examples/ods/simple_bc_demo/`. Its default ChunkBC predicts absolute TCP/gripper
+targets from two measured observations. Cameras are display-only.
 
-The runner supports live ODS, frozen initial data, offline full-corpus training,
-exact offline MLP minibatch replay and serial refresh. Exact replay requires
-`--mode offline-matched`, a validated `--offline-data` corpus and a matching
-`--batch-manifest`; it is not available for the geometry GRU. Serial refresh
-uses an unmatched supervision schedule, so its timings alone do not isolate
-the effect of overlap. Use `--stage overfit-one` or `--stage overfit-four` for
-small-data diagnostics and `--smoke --no-viewer --no-video` for an engineering
-check. These checks do not establish physical student success or a learning
-advantage. Commands, results and the comparison protocol live under
-`extensions/embodichain_tasks/configs/tasks/manipulation/pick_place/`.
+Use `--smoke --no-viewer --no-video` for a bounded engineering check. See the
+example's `README.md` for qualification, online ODS, direct LeRobot collection,
+existing-checkpoint evaluation and comparison commands. Its retained experiment
+records distinguish engineering checks, development learning results and final
+held-out tests. Shared ODS engine/configuration APIs remain in this package.
 
 ### Configuration and recorded-action meaning
 

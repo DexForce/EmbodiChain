@@ -1,8 +1,0 @@
-task_key: pick_place
-title: Pick and Place
-summary: Physically grasp, lift, release and withdraw from a cube.
-tags: [manipulation, imitation_learning]
-default_deployment: franka
-deployments:
-  franka:
-    config: task.franka.yaml

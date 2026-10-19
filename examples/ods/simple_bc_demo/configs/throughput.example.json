@@ -1,0 +1,29 @@
+{
+  "accepted_episodes_per_second": 0.93264,
+  "training_chunks_per_second": 14218.41,
+  "profile": {
+    "profile_id": "franka-chunkbc-provisional-fixed-k2660-v1",
+    "scope": "Franka PickPlace ChunkBC H64 action16 DLS; successful trajectory length 332\u2013333; exploratory bounded-quota range validation",
+    "qualified": false,
+    "min_chunks_per_episode": 2660,
+    "max_chunks_per_episode": 2660,
+    "hard_max_chunks_per_episode": 2660,
+    "latency_safety_factor": 1.25
+  },
+  "runtime": {
+    "batch_size": 256,
+    "producer_envs": 8,
+    "first_publication_p95_seconds": 9.5,
+    "cache_memory_bytes": 32000000,
+    "bytes_per_episode": 1000000,
+    "min_cache_episodes": 32,
+    "measurement_scope": "Concurrent paced B256 engineering probe; G=0.93264 accepted episodes/s,T=14218.41 chunks/s; not full saturation capacities"
+  },
+  "binding": {
+    "task": "SimpleBCPickPlace-Franka-v1",
+    "policy": "chunk-pose",
+    "prediction_horizon": 64,
+    "action_horizon": 16,
+    "pose_ik": "dls"
+  }
+}

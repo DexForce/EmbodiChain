@@ -2293,21 +2293,6 @@ embodichain_tasks.configs
 
    get_config_path
 
-embodichain_tasks.manipulation.pick_place
----------------------------------------
-
-Single-cycle physical cube placement with measured lift, release and stability
-acceptance shared by expert generation and learned-policy evaluation.
-
-.. currentmodule:: embodichain_tasks.manipulation.pick_place
-
-.. autosummary::
-
-   PickPlaceEnv
-
-.. autoclass:: PickPlaceEnv
-   :members:
-
 embodichain_tasks.manipulation.push_cube
 ----------------------------------------
 
