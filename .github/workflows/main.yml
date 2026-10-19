@@ -184,6 +184,31 @@ jobs:
           print(f"needs_gensim={str(bool(install.get('gensim'))).lower()}")
           print(f"needs_curobo={str(bool(install.get('curobo'))).lower()}")
           PY
+      # Fetch GitHub sources on the hosted runner. The GPU containers can lose
+      # GitHub DNS access; pip does not retry a failed VCS clone there.
+      - name: Check out cuRobo source
+        if: steps.plan.outputs.needs_curobo == 'true'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: NVlabs/curobo
+          ref: refs/tags/v0.8.0
+          path: ci-deps/curobo
+          persist-credentials: false
+      - name: Build cuRobo source distribution
+        if: steps.plan.outputs.needs_curobo == 'true'
+        run: |
+          python -m pip install --disable-pip-version-check --index-url https://pypi.org/simple build
+          # An sdist retains setuptools_scm version metadata without .git.
+          python -m build --sdist --outdir "${GITHUB_WORKSPACE}/ci-deps/curobo-dist" \
+            "${GITHUB_WORKSPACE}/ci-deps/curobo"
+          test -s "${GITHUB_WORKSPACE}/ci-deps/curobo-dist/nvidia_curobo-0.8.0.tar.gz"
+      - name: Upload cuRobo source distribution
+        if: steps.plan.outputs.needs_curobo == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: curobo-sdist
+          path: ci-deps/curobo-dist
+          if-no-files-found: error
       - name: Upload test plan
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -358,6 +383,12 @@ jobs:
         with:
           name: test-plan
           path: .
+      - name: Download cuRobo source distribution
+        if: env.NEEDS_CUROBO == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: curobo-sdist
+          path: ci-deps/curobo-dist
       - name: Install test package
         shell: bash -l {0}
         run: |
@@ -379,7 +410,7 @@ jobs:
             --extra-index-url https://download.blender.org/pypi/
           if [[ "${NEEDS_CUROBO}" == "true" ]]; then
             pip install \
-              "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@v0.8.0" \
+              "nvidia-curobo[cu12] @ file://${GITHUB_WORKSPACE}/ci-deps/curobo-dist/nvidia_curobo-0.8.0.tar.gz" \
               --index-url https://pypi.org/simple \
               --extra-index-url http://pyp.open3dv.site:2345/simple/ \
               --trusted-host pyp.open3dv.site \
