@@ -73,9 +73,8 @@ explicit visual-object USD loading can select one object's appearance by prim pa
     :inherited-members:
     :show-inheritance:
 
-.. autoclass:: VisualObjectCfg
-    :members:
-    :exclude-members: __init__, copy, replace, to_dict, validate
+Configuration fields are documented under
+:class:`embodichain.lab.sim.cfg.VisualObjectCfg`.
 
 Rigid Object
 ------------

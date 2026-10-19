@@ -18,6 +18,9 @@
 
 from __future__ import annotations
 
+# Resolve inherited ObjectBaseCfg annotations in runtime type inspection.
+import numpy as np
+
 from embodichain.utils import configclass
 from ..shapes import ShapeCfg
 from .asset import ObjectBaseCfg

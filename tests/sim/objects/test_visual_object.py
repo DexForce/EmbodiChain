@@ -324,3 +324,14 @@ def test_visual_state_survives_native_rebuild_without_changing_reset_baseline():
     torch.testing.assert_close(visual.get_local_pose(), initial)
     assert handles[1].visible
     assert handles[1].render.materials == [None]
+
+
+def test_visual_config_inherited_annotations_resolve():
+    from typing import get_type_hints
+
+    import sys
+
+    hints = get_type_hints(
+        VisualObjectCfg, globalns=vars(sys.modules[VisualObjectCfg.__module__])
+    )
+    assert hints["init_local_pose"] == np.ndarray | None
