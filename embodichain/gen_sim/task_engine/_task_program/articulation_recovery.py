@@ -28,7 +28,8 @@ from typing import Any
 import numpy as np
 import torch
 
-from embodichain.lab.sim.atomic_actions.plans import ActionPlan
+from embodichain.lab.sim.atomic_actions.goals import resolve_pose_goal
+from embodichain.lab.sim.atomic_actions.plans import ActionPlan, PlanningFailure
 from embodichain.lab.sim.atomic_actions.primitives.slide import Slide
 from embodichain.lab.sim.motion.motion_generator import MotionGenOptions
 from embodichain.lab.sim.motion.planners.utils import (
@@ -42,7 +43,7 @@ from embodichain.lab.sim.motion.solvers.qpos_seed_sampler import QposSeedSampler
 from embodichain.lab.sim.sim_manager import SimulationManager
 from embodichain.lab.sim.utility.solver_utils import create_pk_serial_chain
 
-from .articulation_collision import check_free_motion
+from .articulation_collision import check_free_motion, check_robot_motion
 from .motion import (
     _cartesian_samples,
     _joint_velocity_limits,
@@ -51,7 +52,7 @@ from .motion import (
 )
 
 __all__: list[str] = []
-ARTICULATION_RECOVERY_REVISION = 1
+ARTICULATION_RECOVERY_REVISION = 4
 MAX_SLIDE_FRAMES = 390
 MAX_ENDPOINTS = 4
 
@@ -70,6 +71,7 @@ class MotionCall:
 class PlanningScope:
     generator: Any
     kind: str
+    withdrawal_samples: int | None = None
     calls: list[MotionCall] = field(default_factory=list)
     tracks: tuple[torch.Tensor, ...] | None = None
     cursor: int = 0
@@ -161,8 +163,10 @@ def motion_scope(generator: Any) -> PlanningScope | None:
 
 
 @contextmanager
-def planning_scope(generator: Any, kind: str) -> Iterator[PlanningScope]:
-    scope = PlanningScope(generator, kind)
+def planning_scope(
+    generator: Any, kind: str, *, withdrawal_samples: int | None = None
+) -> Iterator[PlanningScope]:
+    scope = PlanningScope(generator, kind, withdrawal_samples=withdrawal_samples)
     token = _SCOPE.set(scope)
     try:
         yield scope
@@ -320,6 +324,103 @@ def _tracks(
         }
 
 
+def _preview_withdrawal(
+    scope: PlanningScope,
+    request: Any,
+    context: Any,
+    search: _Search,
+    trajectory: Any,
+) -> dict[str, Any]:
+    """Reject terminal branches without an unchanged-budget cleanup continuation.
+
+    The articulation and its contents have not moved yet, so scene clearance is
+    deliberately deferred to the fresh actual withdrawal plan. No preview path
+    is cached or dispatched.
+    """
+    from .articulation_slide import _withdrawal_targets
+    from .held_alignment_recovery import _RandomState
+
+    saved = _RandomState.capture(set())
+    try:
+        terminal = trajectory.positions[:, -1]
+        ids = list(search.robot.get_joint_ids(name=search.part))
+        arm = terminal[:, ids]
+        current = search.robot.compute_fk(qpos=arm, name=search.part, to_matrix=True)
+        link = resolve_pose_goal(request.goal.target_pose, context, name="E6 link")
+        axis = request.goal.semantics.affordance.translation_axis.to(current)
+        outward = -(link[:, :3, :3] @ axis)
+        targets = [
+            PlanState(move_type=MoveType.EEF_MOVE, xpos=pose)
+            for pose in _withdrawal_targets(current, outward).unbind(dim=1)
+        ]
+        samples = _cartesian_samples(current, targets, scope.withdrawal_samples)
+        path = search.path(search.to_root(torch.cat([p.xpos for p in samples])), arm)
+        evidence = {
+            "scope": "kinematics_and_robot_meshes_not_future_scene",
+            "samples": scope.withdrawal_samples,
+            "valid": False,
+        }
+        if path is None:
+            return {**evidence, "reason": "no_continuous_ik"}
+        full = terminal.expand(len(path), -1).clone()
+        full[:, ids] = path
+        dt = full.new_full((1, len(path)), search.dt)
+        dt[:, 0] = 0
+        if not _velocity_validity(
+            full[None], dt, _joint_velocity_limits(search.robot, None).to(full)
+        ).all():
+            return {**evidence, "reason": "final_command_velocity"}
+        collision = check_robot_motion(search.robot, full, search.part)
+        return {**evidence, "valid": collision["valid"], "robot_collision": collision}
+    finally:
+        saved.restore()
+
+
+def _screen_withdrawal(scope: PlanningScope, plan: ActionPlan) -> ActionPlan:
+    """Require fresh actual-scene clearance; lookahead is not a safety certificate."""
+    try:
+        trajectory = plan.joint_trajectory
+        if len(scope.calls) != 1 or trajectory is None:
+            raise ValueError("Withdrawal requires one complete motion trajectory.")
+        robot = scope.generator.robot
+        limits = _joint_velocity_limits(robot, None).to(trajectory.positions)
+        if not _velocity_validity(trajectory.positions, trajectory.dt, limits).all():
+            raise ValueError("Withdrawal exceeds final command velocity limits.")
+        simulation = SimulationManager.get_instance(
+            scope.generator.planner.cfg.sim_instance_id
+        )
+        evidence = check_free_motion(
+            robot,
+            simulation,
+            trajectory.positions[0],
+            scope.calls[0].options.control_part,
+        )
+    except (ImportError, ValueError) as error:
+        evidence = {"valid": False, "reason": f"{type(error).__name__}: {error}"}
+    return replace(
+        plan,
+        plan_success=(
+            plan.plan_success
+            if evidence["valid"]
+            else torch.zeros_like(plan.plan_success)
+        ),
+        diagnostics=replace(
+            plan.diagnostics,
+            failure=(
+                plan.diagnostics.failure
+                if evidence["valid"]
+                else PlanningFailure(
+                    "gen_sim_withdrawal_clearance_failed", retryable=False
+                )
+            ),
+            metadata={
+                **plan.diagnostics.metadata,
+                "gen_sim_withdrawal_clearance": evidence,
+            },
+        ),
+    )
+
+
 def recover(
     scope: PlanningScope,
     request: Any,
@@ -328,6 +429,12 @@ def recover(
     plan: Callable[[Any], ActionPlan],
 ) -> ActionPlan:
     """Replay only a fully screened recovery through the unchanged shared skill."""
+    if (
+        scope.kind == "withdraw"
+        and scope.withdrawal_samples is not None
+        and original.plan_success.all()
+    ):
+        original = _screen_withdrawal(scope, original)
     if original.plan_success.any() or not scope.compatible or not scope.calls:
         return original
     expected = 4 if scope.kind == "slide" else 1
@@ -400,6 +507,27 @@ def recover(
                 if not collision["valid"]:
                     details["collision"] = collision
                     continue
+                if scope.kind == "slide" and scope.withdrawal_samples is not None:
+                    preview = _preview_withdrawal(
+                        scope, request, context, search, trajectory
+                    )
+                    details.setdefault("withdrawal_candidates", []).append(
+                        {
+                            "endpoint_seed_index": metadata["endpoint_seed_index"],
+                            **preview,
+                        }
+                    )
+                    if not preview["valid"]:
+                        continue
+                    metadata = {
+                        **metadata,
+                        "withdrawal_preview": preview,
+                        "withdrawal_candidates": details["withdrawal_candidates"],
+                        "withdrawal_selection_changed": len(
+                            details["withdrawal_candidates"]
+                        )
+                        > 1,
+                    }
                 return replace(
                     recovered,
                     diagnostics=replace(

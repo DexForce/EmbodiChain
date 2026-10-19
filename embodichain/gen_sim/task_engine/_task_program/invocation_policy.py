@@ -121,6 +121,23 @@ def bind_articulation_calls(program: Any) -> tuple[tuple[str, str], ...]:
     )
 
 
+def bind_articulation_followups(program: Any) -> tuple[tuple[str, str], ...]:
+    """Pair only adjacent E6 calls with identical part, state and resource intent."""
+    ids = _invocation_ids(program)
+    segments = tuple(program.iter_segments())
+    pairs = []
+    for first, second in zip(segments, segments[1:]):
+        slide, withdraw = first.calls[0].call, second.calls[0].call
+        if (
+            getattr(slide, "call_id", None) == "gen_sim.articulation_slide"
+            and getattr(withdraw, "call_id", None) == "gen_sim.articulation_withdraw"
+            and slide.arguments == withdraw.arguments
+            and slide.resources == withdraw.resources
+        ):
+            pairs.append((ids[first.name], ids[second.name]))
+    return tuple(pairs)
+
+
 def pour_receiver_declarations(graph: dict[str, Any]) -> dict[str, str]:
     """Keep a recipe's explicit staging reference local to its Pour occurrence."""
     staged = {}
@@ -238,6 +255,7 @@ class GenSimActionEngine(AtomicActionEngine):
         motion_samples: tuple[tuple[str, int], ...] = (),
         cartesian_calls: tuple[str, ...] = (),
         articulation_calls: tuple[tuple[str, str], ...] = (),
+        articulation_followups: tuple[tuple[str, str], ...] = (),
         pour_return_calls: tuple[str, ...] = (),
         **kwargs: Any,
     ) -> None:
@@ -248,6 +266,8 @@ class GenSimActionEngine(AtomicActionEngine):
             raise ValueError("Cartesian planning scopes require invocation IDs.")
         self._cartesian_calls = frozenset(cartesian_calls)
         self._articulation_calls = dict(articulation_calls)
+        self._articulation_followups = dict(articulation_followups)
+        self._articulation_sessions: dict[str, tuple[str, Any]] = {}
         if (
             type(pour_return_calls) is not tuple
             or any(
@@ -276,6 +296,15 @@ class GenSimActionEngine(AtomicActionEngine):
         ):
             raise ValueError(
                 "Invocation motion budgets require unique IDs and integer sample counts."
+            )
+        if len(self._articulation_followups) != len(articulation_followups) or any(
+            self._articulation_calls.get(slide) != "slide"
+            or self._articulation_calls.get(withdraw) != "withdraw"
+            or withdraw not in self._motion_samples
+            for slide, withdraw in articulation_followups
+        ):
+            raise ValueError(
+                "E6 followups require exact calls and a declared withdrawal budget."
             )
         super().__init__(*args, **kwargs)
 
@@ -374,12 +403,22 @@ class GenSimActionEngine(AtomicActionEngine):
             or not any(item.skill_id == "twist" for item in selected)
             or (eligible_mask is not None and not bool(eligible_mask.any()))
         ):
-            return super().start(
+            session = super().start(
                 selected,
                 context,
                 eligible_mask=eligible_mask,
                 plan_transform=plan_transform,
             )
+            for item in selected:
+                following = getattr(self, "_articulation_followups", {}).get(
+                    item.invocation_id
+                )
+                if following is not None:
+                    self._articulation_sessions[following] = (
+                        item.invocation_id,
+                        session,
+                    )
+            return session
         from .twist_session import TwistFeedbackSession
 
         initial = self.initial_context() if context is None else context
@@ -390,6 +429,22 @@ class GenSimActionEngine(AtomicActionEngine):
             revision_controller=controller,
             eligible_mask=eligible_mask,
             plan_transform=plan_transform,
+        )
+
+    def _withdrawal_was_reselected(self, invocation_id: str) -> bool:
+        """Inspect installed plans, never speculative or rejected revisions."""
+        entry = getattr(self, "_articulation_sessions", {}).get(invocation_id)
+        if entry is None:
+            return False
+        slide_id, session = entry
+        return any(
+            attempt.request.invocation_id == slide_id
+            and bool(attempt.planned_mask.any())
+            and attempt.plan.diagnostics.metadata.get(
+                "gen_sim_articulation_recovery", {}
+            ).get("withdrawal_selection_changed")
+            is True
+            for attempt in session.plan_attempts
         )
 
     def _resolve(self, invocation: ActionInvocation) -> ResolvedActionRequest:
@@ -479,15 +534,27 @@ class GenSimActionEngine(AtomicActionEngine):
             request.invocation_id == preview.route.place_id
             for preview in previews.values()
         )
-        if paired and context is None:
+        bound_slide = (
+            request.skill_id == "slide"
+            and getattr(self, "_articulation_calls", {}).get(request.invocation_id)
+            == "slide"
+        )
+        if (paired or bound_slide) and context is None:
             context = self.initial_context()
         paired = paired and getattr(context, "batch_size", None) == 1
         parent = _COST.get()
         with search_cost_scope(wall_seconds=60.0 if paired else None) as cost:
             try:
                 with measure_search("complete_plan_request"):
-                    plan = self._plan_request_impl(
-                        request, context, plan_transform=plan_transform
+                    from .e6_preshape import plan_with_preshape
+
+                    plan = plan_with_preshape(
+                        self,
+                        request,
+                        context,
+                        lambda selected: self._plan_request_impl(
+                            selected, context, plan_transform=plan_transform
+                        ),
                     )
             except PlanningBudgetExceeded as error:
                 if parent is not None:
@@ -524,8 +591,9 @@ class GenSimActionEngine(AtomicActionEngine):
 
         capture = initial_plan_capture(request.invocation_id)
         from .alignment_continuation import _PREVIEW
+        from .e6_preshape import defer_initial_capture
 
-        if _PREVIEW.get():
+        if _PREVIEW.get() or defer_initial_capture(request.invocation_id):
             capture = None
         enabled = request.invocation_id in self._cartesian_calls
         alignment = (
@@ -637,7 +705,20 @@ class GenSimActionEngine(AtomicActionEngine):
                             selected, context, plan_transform=plan_transform
                         )
 
-                    with planning_scope(self.motion_generator, kind) as scope:
+                    followups = getattr(self, "_articulation_followups", {})
+                    following = followups.get(request.invocation_id)
+                    withdrawal_samples = (
+                        self._motion_samples[following]
+                        if following is not None
+                        else None
+                    )
+                    if self._withdrawal_was_reselected(request.invocation_id):
+                        withdrawal_samples = request.motion_policy.sample_count
+                    with planning_scope(
+                        self.motion_generator,
+                        kind,
+                        withdrawal_samples=withdrawal_samples,
+                    ) as scope:
                         plan = build(request)
                         plan = recover(scope, request, context, plan, build)
                 else:

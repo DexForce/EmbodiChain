@@ -570,17 +570,40 @@ are also ignored by this guard, so final effect and stability checks remain
 required. Shared Place retains its full-action guard. This is a bounded
 kinematic recovery, not collision or physical-placement qualification.
 E6 recovery is bound to exact registered Slide/withdraw invocation IDs, not
-all calls of those underlying skills. Failed single-environment CPU
+all calls of those underlying skills. Bound single-environment `ik_interp`
+Slide retains its 85% preshape unless every finite candidate fails aperture.
+Only then, measured whole-hand FK selects the smallest sufficient opening in
+the 84--80% closure band and rebuilds once with matching Slide options and
+call-local clearance. The 4 mm pad reserve, full-hand/table screening and all
+execution gates remain; width-fitting/table/IK failures do not widen the hand.
+Initial-plan evidence records the selected plan, not the intermediate rejection.
+Successful defaults, explicit nondefault preshapes and non-E6 calls are unchanged;
+regenerate E6 bundles for the preshape fingerprint revision.
+Failed single-environment CPU
 `PytorchSolver` / `ik_interp` pull-and-release plans can screen up to four
 terminal configurations, solve the contact path backwards, then connect a
 free-space joint approach. Slide recovery is capped at 1.5 times the request
 and 390 command frames; larger caller budgets are not shortened. Failed E6
 withdrawal can try local IK without changing its targets or frame budget.
+For an adjacent Slide/withdraw pair with identical part/state/resources,
+failed-Slide recovery also qualifies each proposed release posture against
+the declared withdrawal sample budget. It shares the runtime's unchanged
+withdrawal geometry, screens continuous IK, velocity and robot meshes, and
+discards the preview path. This is not a predicted-scene certificate: actual
+withdrawal is freshly planned and checked against current scene meshes before
+dispatch, including when its nominal plan succeeds, only when the lookahead
+actually rejected the formerly admissible terminal and selected another one.
+Unchanged successful branches and unpaired calls retain their existing checks;
+they do not acquire a blanket new scene gate. Qualification is read from the
+paired public ExecutionSession's installed plan attempts, not from speculative
+planning side effects. Rejected revisions cannot erase it; a later nominal
+replan in that session does not erase earlier installed reselection evidence.
+The E6 recovery fingerprint revision owns this change.
 The shared skills still rebuild arm/hand commands and the shared executor
 still owns execution. Both routes retain tolerances, restore RNG/planning
 scope, validate final full-robot velocity, and require fresh discrete mesh
 clearance for the changed free-space motion. This is not continuous collision
-or zero non-target-contact certification. Successful plans, other semantic
+or zero non-target-contact certification. Successful Slide plans, other semantic
 calls, collision-planner routes and shared Lab defaults remain unchanged.
 Recovery needs the GenSim `yourdfpy`/`python-fcl` dependencies; unavailable or
 unsupported geometry fails closed. Regenerate E6 bundles for the recovery

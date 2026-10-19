@@ -652,19 +652,27 @@ def test_e6_bundle_uses_standard_registration_and_complete_recipe(
         assert len(items[-1]["validators"]) == 1
         assert items[-1]["validators"][0]["minimum_position"] == pytest.approx(-0.03)
         assert items[-1]["validators"][0]["maximum_position"] == pytest.approx(0.03)
-    from embodichain.gen_sim.task_engine._task_program import articulation_recovery
+    from embodichain.gen_sim.task_engine._task_program import (
+        articulation_recovery,
+        e6_preshape,
+    )
     from embodichain.gen_sim.task_engine._bundle_runner import (
         _verify_integration_fingerprint,
     )
 
-    monkeypatch.setattr(articulation_recovery, "ARTICULATION_RECOVERY_REVISION", 999)
-    with pytest.raises(ValueError, match="fingerprint drifted"):
-        _verify_integration_fingerprint(
-            paths.root,
-            paths.deployment,
-            graph,
-            load_config(paths.integration_fingerprint),
-        )
+    for module, name in (
+        (articulation_recovery, "ARTICULATION_RECOVERY_REVISION"),
+        (e6_preshape, "E6_PRESHAPE_REVISION"),
+    ):
+        with monkeypatch.context() as patch:
+            patch.setattr(module, name, 999)
+            with pytest.raises(ValueError, match="fingerprint drifted"):
+                _verify_integration_fingerprint(
+                    paths.root,
+                    paths.deployment,
+                    graph,
+                    load_config(paths.integration_fingerprint),
+                )
 
 
 def test_e6_closed_target_rejects_unannotated_endpoint(

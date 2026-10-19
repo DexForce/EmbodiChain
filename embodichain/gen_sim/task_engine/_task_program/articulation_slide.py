@@ -251,6 +251,15 @@ class _SlideLowerer(RegisteredSemanticLowerer):
         )
 
 
+def _withdrawal_targets(current: torch.Tensor, outward: torch.Tensor) -> torch.Tensor:
+    """Share the unchanged cleanup geometry with terminal-branch qualification."""
+    raised = current.clone()
+    raised[:, 2, 3] += 0.12
+    withdrawn = raised.clone()
+    withdrawn[:, :3, 3] += 0.10 * outward
+    return torch.stack((current, raised, withdrawn), dim=1)
+
+
 class _WithdrawLowerer(_SlideLowerer):
     call_id: ClassVar[str] = WITHDRAW_CALL
     target_descriptor = MoveEndEffector.descriptor()
@@ -308,12 +317,8 @@ class _WithdrawLowerer(_SlideLowerer):
         outward = (
             -(link[:, :3, :3] @ current.new_tensor(binding.axis)) * binding.axis_sign
         )
-        raised = current.clone()
-        raised[:, 2, 3] += 0.12
-        withdrawn = raised.clone()
-        withdrawn[:, :3, 3] += 0.10 * outward
         return SemanticLowering(
-            goal=EndEffectorPoseGoal(torch.stack((current, raised, withdrawn), dim=1))
+            goal=EndEffectorPoseGoal(_withdrawal_targets(current, outward))
         )
 
 

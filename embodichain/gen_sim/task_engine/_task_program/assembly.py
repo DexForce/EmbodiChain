@@ -59,6 +59,7 @@ from .invocation_policy import (
     bind_pour_return_calls,
     POUR_RETURN_POLICY_REVISION,
     bind_articulation_calls,
+    bind_articulation_followups,
 )
 
 ADAPTER_CONTRACT = "gen_sim.task_program/2620929c/v13"
@@ -112,6 +113,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         motion_samples: tuple[tuple[str, int], ...] = (),
         cartesian_calls: tuple[str, ...] = (),
         articulation_calls: tuple[tuple[str, str], ...] = (),
+        articulation_followups: tuple[tuple[str, str], ...] = (),
         pour_return_calls: tuple[str, ...] = (),
         clearance_routes: tuple = (),
         alignment_continuation_routes: tuple = (),
@@ -136,6 +138,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         self._motion_samples = motion_samples
         self._cartesian_calls = cartesian_calls
         self._articulation_calls = articulation_calls
+        self._articulation_followups = articulation_followups
         self._pour_return_calls = pour_return_calls
         self._clearance_routes = clearance_routes
         self._alignment_continuation_routes = alignment_continuation_routes
@@ -243,6 +246,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
                 motion_samples=self._motion_samples,
                 cartesian_calls=self._cartesian_calls,
                 articulation_calls=self._articulation_calls,
+                articulation_followups=self._articulation_followups,
                 pour_return_calls=self._pour_return_calls,
             )
         else:
@@ -253,6 +257,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
                 motion_samples=self._motion_samples,
                 cartesian_calls=self._cartesian_calls,
                 articulation_calls=self._articulation_calls,
+                articulation_followups=self._articulation_followups,
                 pour_return_calls=self._pour_return_calls,
             )
         pick = GenSimPickUp()
@@ -508,6 +513,7 @@ class TaskAdapterFactory:
     motion_samples: tuple[tuple[str, int], ...] = ()
     cartesian_calls: tuple[str, ...] = ()
     articulation_calls: tuple[tuple[str, str], ...] = ()
+    articulation_followups: tuple[tuple[str, str], ...] = ()
     clearance_routes: tuple = ()
     alignment_continuation_routes: tuple = ()
     staging_contract: StagingContract = StagingContract.empty()
@@ -649,6 +655,12 @@ class TaskAdapterFactory:
                     environment.robot,
                     environment.sim.get_rigid_object("table"),
                 ),
+                clearance_factory=lambda hand, fraction: profile_clearances(
+                    self.registration,
+                    environment.robot,
+                    environment.sim.get_rigid_object("table"),
+                    preshape_fraction=fraction,
+                )[hand],
             )
         pick_continuations = ()
         if self.adaptive_pick:
@@ -745,6 +757,7 @@ class TaskAdapterFactory:
             motion_samples=self.motion_samples,
             cartesian_calls=self.cartesian_calls,
             articulation_calls=self.articulation_calls,
+            articulation_followups=self.articulation_followups,
             pour_return_calls=self.pour_return_calls,
             clearance_routes=self.clearance_routes,
             alignment_continuation_routes=self.alignment_continuation_routes,
@@ -1064,6 +1077,7 @@ def load_deployment(
         payload.get("pour_return_calls", []), compiled
     )
     articulation_calls = bind_articulation_calls(compiled)
+    articulation_followups = bind_articulation_followups(compiled)
     held_command_revision = payload.get("held_command_revision", 1)
     held_command_sources = bind_held_command_sources(
         payload.get("held_command_sources", {}),
@@ -1133,6 +1147,7 @@ def load_deployment(
 
     pour_receivers = bind_pour_receivers(payload["pour_receivers"], compiled)
     from .articulation_recovery import ARTICULATION_RECOVERY_REVISION
+    from .e6_preshape import E6_PRESHAPE_REVISION
     from .park_recovery import PARK_RECOVERY_REVISION
     from .pick_safety import PICK_OPENING_RECOVERY_REVISION
     from .services import _PickLowererFactory
@@ -1189,7 +1204,10 @@ def load_deployment(
                 else {}
             ),
             **(
-                {"articulation_recovery_revision": ARTICULATION_RECOVERY_REVISION}
+                {
+                    "articulation_recovery_revision": ARTICULATION_RECOVERY_REVISION,
+                    "e6_preshape_revision": E6_PRESHAPE_REVISION,
+                }
                 if articulation_calls
                 else {}
             ),
@@ -1262,6 +1280,7 @@ def load_deployment(
         motion_samples=motion_samples,
         cartesian_calls=cartesian_calls,
         articulation_calls=articulation_calls,
+        articulation_followups=articulation_followups,
         pour_return_calls=pour_return_calls,
         clearance_routes=clearance_routes,
         alignment_continuation_routes=alignment_continuation_routes,

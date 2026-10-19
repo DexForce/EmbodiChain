@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+import math
 
 import numpy as np
 from shapely.affinity import translate
@@ -48,35 +49,55 @@ def select_container_landing(
     if measured is None:
         return None
     floor, floor_height = measured
-    margin = 0.02
-    safe = floor.buffer(-margin)
     footprint = MultiPoint(child_vertices[:, :2]).convex_hull
     footprint_radius = float(np.linalg.norm(child_vertices[:, :2], axis=1).max())
-    if safe.is_empty or footprint.is_empty:
+    if footprint.is_empty:
         raise ValueError(
             "Container floor cannot contain the object footprint and margin."
         )
-    # Erode the measured floor by the actual projected footprint.  A single
-    # origin-centred circle overestimates a rectangular object's occupied area,
-    # which rejects valid placements after an upright reorientation.
-    allowed = safe
-    for x, y in footprint.exterior.coords[:-1]:
-        allowed = allowed.intersection(translate(safe, xoff=-float(x), yoff=-float(y)))
+    footprint_fits = False
+    # Keep established layouts exact; retry only spatial rejection at 5 mm.
+    for margin in (0.02, 0.005):
+        safe = floor.buffer(-margin)
+        if safe.is_empty:
+            continue
+        allowed = safe
+        for x, y in footprint.exterior.coords[:-1]:
+            allowed = allowed.intersection(
+                translate(safe, xoff=-float(x), yoff=-float(y))
+            )
+            if allowed.is_empty:
+                break
         if allowed.is_empty:
-            raise ValueError(
-                "Container floor cannot contain the object footprint and margin."
+            continue
+        footprint_fits = True
+        for x, y, previous_radius in occupied:
+            radius = footprint_radius + float(previous_radius) + margin
+            if margin == 0.005:
+                # Buffer polygons inscribe circles; expand so no arc loses clearance.
+                radius = (radius + 1e-9) / math.cos(math.pi / 64)
+            allowed = allowed.difference(
+                Point(float(x), float(y)).buffer(radius, quad_segs=16)
             )
-    for x, y, previous_radius in occupied:
-        allowed = allowed.difference(
-            Point(float(x), float(y)).buffer(
-                footprint_radius + float(previous_radius) + 0.02
-            )
+        if allowed.is_empty or allowed.area <= 1e-8:
+            continue
+        point = nearest_points(allowed, Point(arm_root[:2]))[0]
+        candidates = (
+            (point,) if margin == 0.02 else (point, allowed.representative_point())
         )
-    if allowed.is_empty or allowed.area <= 1e-8:
+        for point in candidates:
+            if margin == 0.005:
+                placed = translate(footprint, xoff=point.x, yoff=point.y)
+                if (
+                    not safe.covers(placed)
+                    or floor.boundary.distance(placed) + 1e-9 < margin
+                ):
+                    continue
+            height = float(floor_height - child_vertices[:, 2].min() + 0.001)
+            return float(point.x), float(point.y), height
+    if footprint_fits:
         raise ValueError("Container floor has no remaining landing space.")
-    point = nearest_points(allowed, Point(arm_root[:2]))[0]
-    height = float(floor_height - child_vertices[:, 2].min() + 0.001)
-    return float(point.x), float(point.y), height
+    raise ValueError("Container floor cannot contain the object footprint and margin.")
 
 
 def _floor_region(mesh: trimesh.Trimesh) -> tuple[BaseGeometry, float] | None:

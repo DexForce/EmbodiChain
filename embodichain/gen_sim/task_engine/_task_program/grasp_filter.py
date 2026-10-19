@@ -18,6 +18,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from functools import partial
+
 from dataclasses import dataclass
 import hashlib
 import math
@@ -407,11 +410,13 @@ class E6ApproachGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         geometry_keys: frozenset[str],
         *,
         clearance: HandClearance | None = None,
+        clearance_factory: Callable[[float], HandClearance] | None = None,
     ) -> None:
         super().__init__(delegate.gripper_model)
         self._delegate = delegate
         self._geometry_keys = geometry_keys
         self._clearance = clearance
+        self._clearance_factory = clearance_factory
 
     def _approach_direction(
         self,
@@ -503,8 +508,12 @@ class E6ApproachGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                 [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
             )
             augmented = []
+            from .e6_preshape import filter_candidates
+
             for row, (poses, widths, costs) in enumerate(rows):
-                filtered = self._clearance.filter(poses, widths, costs)
+                filtered = filter_candidates(
+                    self, self._clearance, poses, widths, costs
+                )
                 if torch.isfinite(filtered[2]).any():
                     augmented.append(filtered)
                     continue
@@ -540,7 +549,9 @@ class E6ApproachGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                     long_axis_candidates, costs, torch.full_like(costs, torch.inf)
                 )
                 augmented.append(
-                    self._clearance.filter(rotated, rotated_widths, rotated_costs)
+                    filter_candidates(
+                        self, self._clearance, rotated, rotated_widths, rotated_costs
+                    )
                 )
             rows = augmented
         return rows
@@ -554,6 +565,7 @@ def install_e6_approach_filters(
     geometry_keys: frozenset[str],
     *,
     clearances: dict[str, HandClearance] | None = None,
+    clearance_factory: Callable[[str, float], HandClearance] | None = None,
 ) -> dict[str, Any]:
     """Install the task-scoped E6 approach policy by handle geometry key."""
     if not geometry_keys:
@@ -563,6 +575,9 @@ def install_e6_approach_filters(
             generator,
             geometry_keys,
             clearance=None if clearances is None else clearances[name],
+            clearance_factory=(
+                None if clearance_factory is None else partial(clearance_factory, name)
+            ),
         )
         for name, generator in generators.items()
     }
