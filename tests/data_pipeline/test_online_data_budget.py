@@ -138,15 +138,11 @@ def test_duplicate_chunks_spend_source_quota_and_exhaust_without_partial_charge(
     assert engine.get_sampling_budget_snapshot()["total_delivered_chunks"] == 3
 
 
-@pytest.mark.parametrize(
-    "method", ["plain", "history", "context", "segment", "boundary"]
-)
+@pytest.mark.parametrize("method", ["plain", "context", "segment", "boundary"])
 def test_every_sampling_api_obeys_shared_episode_budget(method: str) -> None:
     engine = _engine(rows=2, budget=1, hard=1)
     if method == "plain":
         batch = engine.sample_batch(2, 2)
-    elif method == "history":
-        batch = engine.sample_batch_with_history(2, 2)
     elif method == "context":
         batch = engine.sample_batch_with_context(2, 2, 3)
     else:

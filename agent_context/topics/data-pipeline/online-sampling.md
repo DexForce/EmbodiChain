@@ -24,12 +24,6 @@
    checks every row in a sampled window, enforces `continuity_id`, applies
    segment/boundary/episode mode rules, and clones the final batch before releasing the lock
    (`engine/data.py`).
-   `sample_batch_with_history()` uses the same selection/copy boundary and
-   returns the complete contiguous causal prefix plus a supervised window.
-   Its `valid` mask excludes right padding; `loss_mask` selects the supervised
-   frames. Recurrent consumers can reconstruct inference history and supervise
-   episode starts. Prefixes never cross invalid frames or continuity changes;
-   optional start-window bias leaves ordinary sampling unchanged.
    `sample_batch_with_context()` samples every valid anchor, including episode
    ends, with a fixed causal-history/future extent. The current frame is at
    `history_length - 1`; invalid/continuity boundaries pad both sides with

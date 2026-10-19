@@ -89,32 +89,20 @@ Invalid frames retain `-1` for every provenance field. Engine-local IDs identify
 live samples; validated offline corpus manifests provide separate content
 identities.
 
-### Causal histories and padding
+### Causal context and padding
 
-For recurrent learners, `sample_batch_with_history(batch_size, chunk_size)`
-copies each supervised window and its entire uninterrupted causal prefix under
-the same producer lock. The result is padded on the right: `valid` marks real
-history/window frames, and `loss_mask` marks exactly `chunk_size` supervised
-frames per row. `start_probability` optionally increases the frequency of
-eligible episode-start windows. Prefix copying includes sensor payloads, so
-account for their memory cost when enabling it for image observations.
+`sample_batch_with_context(batch_size, history_length, prediction_horizon)`
+copies a fixed causal history and future supervision around each valid anchor
+under the producer lock. The current frame is at `history_length - 1`.
+Episode ends, validity gaps and continuity changes bound the context; numeric
+padding is zero, while language/provenance padding is `-1`. `valid` selects real
+frames and `loss_mask` selects real current/future targets. Decode language only
+for valid frames, as `resolve_language()` rejects padding IDs.
 
-History padding keeps `task_index` and `subtask_index` at `-1`, as it does for
-provenance. `resolve_language()` rejects invalid IDs; select `valid` or
-`loss_mask` frames before decoding a padded history. Real-frame language IDs
-remain immutable across reuse of their shared-buffer rows.
-
-The geometry GRU reconstructs state from the causal region's origin and
-supervises 24 steps per sampled sequence. It uses frozen geometry normalization,
-with a bounded normalized input range. MLPs supervise individual frames. From
-the second online round, the first quarter of updates may overlap refill;
-the remaining updates follow complete publication of the new generation.
-Supervision counters exclude recurrent prefix and padded frames.
-
-Live-run checkpoint resume restores model, optimizer and RNG state against a
-fresh ODS source. It does not restore the previous shared-memory buffer.
-Checkpoint policy metadata preserves the model's observation and action
-parameterization; unsupported combinations are rejected during resume.
+The PickPlace showcase uses ChunkBC with two measured observations and a masked
+action-chunk loss. Live resume restores the model, optimizer and RNG state while
+creating a fresh ODS source; it does not restore the previous shared cache.
+Unsupported checkpoint parameterizations are rejected explicitly.
 
 **Module:** `embodichain/data_pipeline/engine/data.py`
 
