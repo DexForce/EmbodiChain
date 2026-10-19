@@ -783,6 +783,12 @@ an undeclared hold window is not added. Historical milestones use their own
 recorded boundary, while final holding also checks fresh receiver-relative pose.
 Missing receipts or unsupported later execution remain unavailable, not inferred
 from command completion. This changes observation, not HandOver execution.
+E4 `place` outcomes with rigid `on`/`inside` targets also collect exact receiver
+release and placement evidence, separately from the earlier native TRANSFER
+milestone. Observer revision 7 records those two boundaries in execution order;
+final geometry cannot fill a missing transfer or historical placement. Explicit
+support revision 1 applies the same native support contract to these E4 placements
+without weakening legacy E1 or terminal E4-hold behavior.
 `task_engine/_task_program/identity.py` owns v38 bundle identity for both
 generation and verification. It projects only equivalent default HandOver and
 empty relative-route stage fields at validated declaration slots; explicit new

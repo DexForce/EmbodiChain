@@ -123,6 +123,19 @@ def _constraints(graph: dict, scene: PreparedScene, *, revision: int | None) -> 
     )
 
 
+@pytest.mark.parametrize("inside", [False, True])
+def test_explicit_e4_placement_support_is_not_skipped(support_scene, inside):
+    graph = _placement_graph(inside=inside, reference="tray")
+    for node in graph["nodes"]:
+        node["task_type"] = "E4"
+    graph["task_groups"][0]["task_type"] = "E4"
+    legacy = _constraints(graph, support_scene, revision=None)
+    strong = _constraints(graph, support_scene, revision=1)
+    assert "support_contract_revision" not in legacy
+    assert strong["presets"]["gen_sim.place.stable"]["support_contract_revision"] == 1
+    assert strong["presets"]["gen_sim.place.stable"]["reference"] == "tray"
+
+
 def _load_bundle(paths: Any) -> Any:
     return load_deployment(
         task_program=load_config(paths.deployment)["task_program"],

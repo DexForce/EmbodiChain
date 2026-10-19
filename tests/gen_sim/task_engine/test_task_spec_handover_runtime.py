@@ -30,6 +30,7 @@ from embodichain.gen_sim.task_engine._task_program.task_spec_runtime import (
 from embodichain.utils.utility import save_config
 from .test_semantic_graph_validation import _coverage
 from .test_task_spec_generation import candidate, selector, step
+from .test_task_spec_runtime import _placement_evidence, _table_region_evidence
 
 
 @pytest.fixture(autouse=True)
@@ -43,6 +44,210 @@ def _receipt_boundary(monkeypatch):
         lambda record, *_args, **_kwargs: record.get("measurements", {}).get("scope")
         == "observer_wiring_fixture",
     )
+
+
+def _placed_evidence(
+    tmp_path,
+    monkeypatch,
+    *,
+    relation="inside",
+    transfer=True,
+    damage=None,
+    strong=False,
+):
+    from embodichain.gen_sim.task_engine._task_program import handover_evidence
+    from embodichain.gen_sim.task_engine._task_program.task_spec_runtime import (
+        capture_placement_milestones,
+    )
+
+    data = (
+        _placement_evidence(tmp_path, task_type="E4")
+        if relation == "inside"
+        else _table_region_evidence(tmp_path, monkeypatch, task_type="E4")
+    )
+    if strong:
+        from .test_support_runtime import _strong_case
+
+        case = _strong_case(
+            tmp_path, task_type="E4", relation=relation, reference="region"
+        )
+        data = case.data
+        if damage == "support_trace":
+            case.terminal["metadata"]["post_policies"] = []
+    plan, contract, runtime, program, constraints, env, deployment = data
+    group = plan.graph["task_groups"][0]
+    transfer_records = (
+        {
+            group["id"]: {
+                "handover_complete": {
+                    "group_id": group["id"],
+                    "uid": "cube",
+                    "part_id": None,
+                    "accepted": [True],
+                    "measurements": {"scope": "observer_wiring_fixture"},
+                }
+            }
+        }
+        if transfer
+        else {}
+    )
+    monkeypatch.setattr(
+        handover_evidence,
+        "capture_handover_operations",
+        lambda *a, **k: transfer_records,
+    )
+    if damage == "release":
+        for segment in runtime["segments"]:
+            for call in segment["metadata"]["runtime"]["calls"]:
+                call["effects"] = []
+    elif damage in {"wrong_receiver", "receiver_and_receipt"}:
+        for node in plan.graph["nodes"]:
+            if node["call"].get("kind") == "place":
+                node["call"]["resources"]["primary"] = "right"
+        if damage == "receiver_and_receipt":
+            for segment in runtime["segments"]:
+                for call in segment["metadata"]["runtime"]["calls"]:
+                    for receipt in call["effects"]:
+                        receipt["effect_spec"]["state_expectations"][0][
+                            "resource_id"
+                        ] = "right"
+        contract["graph_digest"] = canonical_hash(plan.graph)
+    elif damage == "footprint":
+        env.sim.get_rigid_object("cube").get_local_pose()[0, 0, 3] = 1.0
+    final = capture_final_goals(
+        env, deployment, tmp_path, plan.graph, contract, 1, runtime=runtime
+    )
+    placements = capture_placement_milestones(
+        env, deployment, plan.graph, contract, runtime, 1, spec=plan.task_spec
+    )
+    if damage == "boundary" and group["id"] in placements:
+        placements[group["id"]]["measurements"]["boundary_frames"] = [999]
+    if damage == "foreign_placement" and group["id"] in placements:
+        placements[group["id"]]["group_id"] = "other_occurrence"
+    if damage == "foreign_transfer":
+        transfer_records[group["id"]]["handover_complete"][
+            "group_id"
+        ] = "other_occurrence"
+    return evaluate_runtime_evidence(
+        plan.task_spec,
+        contract,
+        plan.graph,
+        runtime,
+        final,
+        num_envs=1,
+        run_id="handover-placement-wiring",
+        program=program,
+        constraints=constraints,
+        placement_milestones=placements,
+        handover_milestones=transfer_records,
+    )["environments"][0]
+
+
+@pytest.mark.parametrize("relation", ["inside", "on"])
+def test_handover_place_uses_measured_relation_and_transfer(
+    tmp_path, monkeypatch, relation
+):
+    result = _placed_evidence(tmp_path, monkeypatch, relation=relation)
+    assert result["status"] == "satisfied"
+    assert result["certificate_ready"] is True
+
+
+def test_handover_final_placement_cannot_replace_transfer(tmp_path, monkeypatch):
+    result = _placed_evidence(tmp_path, monkeypatch, transfer=False)
+    assert result["goal"][0]["status"] == "satisfied"
+    assert result["certificate_ready"] is False
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "release",
+        "wrong_receiver",
+        "receiver_and_receipt",
+        "footprint",
+        "boundary",
+        "foreign_transfer",
+        "foreign_placement",
+    ],
+)
+def test_handover_placement_rejects_incomplete_or_foreign_evidence(
+    tmp_path, monkeypatch, damage
+):
+    result = _placed_evidence(tmp_path, monkeypatch, damage=damage)
+    assert result["certificate_ready"] is False
+
+
+@pytest.mark.parametrize("relation", ["inside", "on"])
+def test_handover_strong_placement_retains_support_contract(
+    tmp_path, monkeypatch, relation
+):
+    result = _placed_evidence(tmp_path, monkeypatch, relation=relation, strong=True)
+    assert result["certificate_ready"] is True
+    assert (
+        result["final_measurements"]["goal_001"]["members"][0]["measurements"]["scope"]
+        == "native_supported_placement"
+    )
+
+
+def test_handover_strong_support_never_downgrades_missing_trace(tmp_path, monkeypatch):
+    result = _placed_evidence(
+        tmp_path, monkeypatch, strong=True, damage="support_trace"
+    )
+    assert result["certificate_ready"] is False
+
+
+@pytest.mark.parametrize("borrow_first", [False, True])
+def test_repeated_handover_places_keep_independent_support_windows(
+    tmp_path, monkeypatch, borrow_first
+):
+    from .test_support_runtime import _repeated_case, _records
+    from embodichain.gen_sim.task_engine._task_program import handover_evidence
+
+    case = _repeated_case(tmp_path, task_type="E4")
+    if borrow_first:
+        case.source["rows"][0]["sample"] = deepcopy(case.first_sample)
+    plan, contract, runtime, program, constraints, env, deployment = case.data
+    transfers = {
+        group["id"]: {
+            "handover_complete": {
+                "group_id": group["id"],
+                "uid": "cube",
+                "part_id": None,
+                "accepted": [True],
+                "measurements": {"scope": "observer_wiring_fixture"},
+            }
+        }
+        for group in plan.graph["task_groups"]
+    }
+    monkeypatch.setattr(
+        handover_evidence, "capture_handover_operations", lambda *a, **k: transfers
+    )
+    final, history = _records(tmp_path, case)
+    row = evaluate_runtime_evidence(
+        plan.task_spec,
+        contract,
+        plan.graph,
+        runtime,
+        final,
+        num_envs=1,
+        run_id="repeated-handover-place",
+        program=program,
+        constraints=constraints,
+        placement_milestones=history,
+        handover_milestones=transfers,
+    )["environments"][0]
+    milestones = {m["predicate_id"]: m for m in row["milestones"]}
+    assert milestones["milestone:step_01"]["status"] == "satisfied"
+    assert row["certificate_ready"] is (not borrow_first)
+    if not borrow_first:
+        assert (
+            milestones["milestone:step_01.acquired"]["observed"]["step"]
+            < milestones["milestone:step_01"]["observed"]["step"]
+        )
+        assert (
+            milestones["milestone:step_02.acquired"]["observed"]["step"]
+            < milestones["milestone:step_02"]["observed"]["step"]
+        )
 
 
 def _evidence(*, repeated: bool = False):

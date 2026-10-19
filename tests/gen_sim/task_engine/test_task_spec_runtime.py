@@ -627,6 +627,7 @@ def _placement_evidence(
     hole=False,
     relation="inside",
     reference_uid="region",
+    task_type="E1",
 ):
     import numpy as np
     import trimesh
@@ -635,11 +636,19 @@ def _placement_evidence(
 
     source = candidate(
         step(
-            "E1",
+            task_type,
             "cube",
             target=selector(reference_uid),
             relation=relation,
-            required_arm="left_arm",
+            **(
+                {"required_arm": "left_arm"}
+                if task_type == "E1"
+                else {
+                    "transfer_arm": "right_arm",
+                    "receive_arm": "left_arm",
+                    "terminal_behavior": "place",
+                }
+            ),
         )
     )
     bindings = {
@@ -819,6 +828,7 @@ def _placement_evidence(
     path = tmp_path / "task_program/constraints.json"
     path.parent.mkdir(exist_ok=True)
     save_config(path, constraints)
+    save_config(tmp_path / "task_program/program.yaml", program)
     return plan, contract, runtime, program, constraints, env, deployment
 
 

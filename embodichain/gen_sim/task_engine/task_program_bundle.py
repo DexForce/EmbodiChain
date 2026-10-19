@@ -227,7 +227,7 @@ def generate_task_program_bundle(
         twist_mass_source: Opt in to the Default-only deployment MassAPI copy
             instead of the Lab mass conversion. This is also selected when the
             unmodified Lab loader does not expose the mass policy capability.
-        support_contract_revision: Explicit native E1 support contract; None
+        support_contract_revision: Explicit native E1/E4 placement support contract; None
             preserves legacy bundles, while 1 requires scoped physical evidence.
         pick_contact_revision: Explicit native rigid Pick closing screen. None
             preserves legacy sampling; 1 rejects nonpad-rest-first closure;
@@ -1241,7 +1241,7 @@ def _task_stability_payload(
         from ._task_program.drawer_binding import inside_parts
 
         for node in graph["nodes"]:
-            if node["task_type"] != "E1":
+            if node["task_type"] not in {"E1", "E4"}:
                 continue
             call = node["call"]
             args = call.get("arguments", {})

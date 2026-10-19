@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Measured E1 planar landing-region and release evidence, never an executor."""
+"""Measured placement and release evidence, never an executor."""
 
 from __future__ import annotations
 
@@ -197,6 +197,62 @@ def measure_planar_placement(
     }
 
 
+def _placement_predicate(predicate: Any) -> bool:
+    """Keep legacy E1 coverage and admit only explicit E4 terminal placements."""
+    return predicate.name == "semantic_goal" and (
+        predicate.arguments.get("task_type") == "E1"
+        or (
+            predicate.arguments.get("task_type") == "E4"
+            and predicate.arguments.get("terminal_behavior") == "place"
+            and predicate.arguments.get("relation") in {"on", "inside"}
+        )
+    )
+
+
+def _require_handover_receiver(
+    group: Mapping[str, Any],
+    nodes: Mapping[str, Any],
+    predicate: Any,
+    object_uid: str,
+    placement: Mapping[str, Any],
+) -> None:
+    """Bind the receiver's Place to this occurrence's earlier HandOver."""
+    transfers = [
+        nodes[key]
+        for key in group["node_ids"]
+        if nodes[key]["call"].get("kind") == "hand_over"
+        and nodes[key]["call"].get("object") == object_uid
+    ]
+    if len(transfers) != 1:
+        raise ValueError("E4 placement requires one matching HandOver occurrence.")
+    transfer = transfers[0]
+    resources = transfer["call"]["resources"]
+    if (
+        group["task_type"] != "E4"
+        or placement["call"].get(
+            "object", placement["call"].get("arguments", {}).get("object")
+        )
+        != object_uid
+        or any(
+            node.get("task_type") != "E4" or node.get("task_instance_id") != group["id"]
+            for node in (transfer, placement)
+        )
+        or placement["id"] not in group["node_ids"]
+        or group["node_ids"].index(transfer["id"])
+        >= group["node_ids"].index(placement["id"])
+        or resources.get("source") == resources.get("destination")
+        or placement["call"]["resources"].get("primary") != resources.get("destination")
+        or any(
+            predicate.arguments.get(field) not in {"auto", f"{resources.get(slot)}_arm"}
+            for field, slot in (
+                ("transfer_arm", "source"),
+                ("receive_arm", "destination"),
+            )
+        )
+    ):
+        raise ValueError("E4 placement does not belong to its declared receiver.")
+
+
 def placement_node(
     group: Mapping[str, Any],
     nodes: Mapping[str, Any],
@@ -207,12 +263,9 @@ def placement_node(
     *,
     support_contract_revision: int | None = None,
 ) -> tuple[Mapping[str, Any], str]:
-    """Resolve only the graph's exact object/reference and declared E1 relation."""
-    if (
-        predicate.name != "semantic_goal"
-        or predicate.arguments.get("task_type") != "E1"
-    ):
-        raise ValueError("This observer supports only E1 placement predicates.")
+    """Resolve the exact object/reference and the declared placement owner."""
+    if not _placement_predicate(predicate):
+        raise ValueError("This observer requires an E1 or terminal E4 placement.")
     reference = roles.get(predicate.arguments.get("reference"), [])
     if len(reference) != 1 or reference[0].get("part_id") is not None:
         raise ValueError("Placement needs one explicitly bound rigid reference.")
@@ -255,6 +308,10 @@ def placement_node(
             placements.append(node)
     if len(placements) != 1:
         raise ValueError("Placement predicate does not match one bound graph call.")
+    if predicate.arguments.get("task_type") == "E4":
+        _require_handover_receiver(
+            group, nodes, predicate, member["object_uid"], placements[0]
+        )
     return placements[0], reference_uid
 
 
