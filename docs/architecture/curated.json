@@ -5964,7 +5964,9 @@
             "scene-export",
             "simready",
             "asset-parsers",
-            "gen-sim-sessions"
+            "gen-sim-sessions",
+            "task-spec",
+            "task-engine"
           ]
         },
         {
@@ -6132,6 +6134,13 @@
             "embodied-env",
             "base-env",
             "simulation-manager"
+          ]
+        },
+        {
+          "id": "task-specification",
+          "label": "Task specification and orchestration",
+          "node_ids": [
+            "task-spec"
           ]
         }
       ]
@@ -6547,6 +6556,14 @@
             "scene-services",
             "compute",
             "scene-expansion"
+          ]
+        },
+        {
+          "id": "task-specification",
+          "label": "Task specification and orchestration",
+          "node_ids": [
+            "task-spec",
+            "task-engine"
           ]
         }
       ]
