@@ -313,5 +313,23 @@
       "Image/video decoding, distributed/global quota ownership, DAgger and RLinf integration remain outside this change.",
       "Action semantics and positive step_dt are now required for every public numeric source; legacy engine/chunk defaults are unchanged."
     ]
+  },
+  "unit_test_cleanup": {
+    "base_revision": "94a2a5cf1feeb8c6dd8e1d08c59a6e28a3a6981e",
+    "removed_example_test_files": 13,
+    "removed_example_test_lines": 3535,
+    "configuration_regime_cases": {
+      "before": 576,
+      "after": 8
+    },
+    "duplicate_dataset_iteration_cases_merged": 2,
+    "tests": {
+      "command": "python -m pytest -q tests/data_pipeline tests/docs/test_check_api_docs.py tests/test_agent_context_map.py tests/test_agent_context_tools.py",
+      "passed": 482,
+      "skipped": 0,
+      "elapsed_seconds": 23.82,
+      "environment": "Same Python 3.11/native runtime overlay and single-thread CPU settings as sequence_dataset_followup."
+    },
+    "scope": "No production implementation changes. Current unit tests target reusable ODS/dataset components, not example models, private writers, training or experiment reporting. Prior test counts, optimizer alignment and physical experiments remain historical evidence."
   }
 }

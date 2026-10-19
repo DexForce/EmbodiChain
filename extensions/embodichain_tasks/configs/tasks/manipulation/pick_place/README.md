@@ -138,19 +138,22 @@ python examples/data_pipeline/ods_pick_place_compare.py \
 
 ## Online/offline alignment
 
-The paired gate uses the real ODS sampler with a deterministic shared CPU
-buffer, official LeRobot SDK serialization/readback and the current learner:
+Maintained unit tests cover public ODS/resident sampling and the official
+LeRobot reader:
 
 ```bash
-OMP_NUM_THREADS=1 python -m pytest -q tests/data_pipeline/test_ods_pick_place_alignment.py
+OMP_NUM_THREADS=1 python -m pytest -q \
+  tests/data_pipeline/test_sources.py \
+  tests/data_pipeline/test_lerobot_source.py
 ```
 
-Install the optional LeRobot SDK to run the roundtrip checks. Identical source
-data and RNG states must give exactly equal observations, actions, masks,
-provenance and optimizer updates. Tests cover starts/ends, validity gaps, dirty
-tails, horizon 1/4/64 and binding source quotas. Canonical feature padding is
-applied after geometry conversion; unsupported continuity is rejected during
-offline snapshot creation. This validates data semantics, not an ODS speedup.
+Install the optional LeRobot SDK to run the reader checks. The public-source
+checks compare equal observations, actions, masks, provenance and sampling RNG
+for identical source snapshots. Reader tests cover numeric persistence/mapping,
+timestamps and bounded memory. The learning example's model and orchestration
+are validated through the runnable qualification, training and evaluation
+commands above; they have no dedicated unit tests. Earlier learner/optimizer
+alignment checks remain recorded historical evidence, not current CI coverage.
 
 The [alignment evidence](ODS_ALIGNMENT_VALIDATION.json) also records a real
 producer check: two generations/four accepted episodes, 1,330 valid frames,
@@ -160,9 +163,10 @@ all eight observed processes exited. No held-out final tests were opened.
 
 The [public loading design](../../../../../../docs/architecture/dataset-loading-design.md)
 is implemented for numeric data: `SequenceSpecCfg`, `BatchSource`,
-`OnlineDataSource`, `TensorDataSource`, `LeRobotDataSource` and `OfflineDataset`
-are exported from `embodichain.data_pipeline.datasets`. `OnlineDataset` keeps
-its chunk API and adds opt-in context iteration. The showcase consumes the
+`OnlineDataSource`, `TensorDataSource`, `LeRobotDataSource` and `SequenceDataset`
+are exported from `embodichain.data_pipeline.datasets`. `OfflineDataset` is a
+compatibility alias; `OnlineDataset` keeps its chunk API and delegates opt-in
+context iteration to `SequenceDataset`. The showcase consumes the
 common source interface; its private code retains writing and sidecar/hash
 auditing, with the duplicate resident sampler and SDK loading loop removed.
 Standard LeRobot numeric datasets can use the public reader without this

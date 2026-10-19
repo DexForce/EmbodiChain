@@ -130,5 +130,10 @@
     "Device-to-device numerical equality and large-dataset loading are outside this gate.",
     "Native runtime emitted its existing entity-balance warning during shutdown; all observed processes exited.",
     "Public loading interfaces are proposed only; existing telemetry overhead qualification remains unresolved."
-  ]
+  ],
+  "test_source_status": {
+    "historical_example_tests_removed": true,
+    "last_revision_containing_example_tests": "94a2a5cf1feeb8c6dd8e1d08c59a6e28a3a6981e",
+    "current_scope": "Unit tests cover public ODS/dataset contracts; model/optimizer alignment above is retained historical experimental evidence, not current CI coverage."
+  }
 }

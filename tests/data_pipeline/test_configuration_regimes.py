@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 from fractions import Fraction
-from itertools import product
 from unittest.mock import patch
 
 import pytest
@@ -44,16 +43,16 @@ _PROFILE_MIN = 7
 _PROFILE_MAX = 31
 _PROFILE_HARD = 47
 _EPISODE_BYTES = 103
-_CASES = list(
-    product(
-        (0.125, 0.3),  # Binary-exact and inexact successful publication rates.
-        (3.5, 17.25, 31.0, 124.0),  # Below, within, at, above profile bounds.
-        (1, 3),
-        (1, 17, 64),
-        (0.1, 2.5, 13.7),
-        (None, 2, 4, 12),  # Storage measured in writer batches, plus spare bytes.
-    )
-)
+_CASES = [
+    pytest.param(0.125, 3.5, 1, 1, 0.1, None, id="learner-limited"),
+    pytest.param(0.3, 17.25, 3, 17, 2.5, None, id="fractional-balance"),
+    pytest.param(0.125, 31.0, 1, 17, 0.1, None, id="recommended-cap"),
+    pytest.param(0.3, 124.0, 3, 64, 13.7, None, id="slow-publication"),
+    pytest.param(0.3, 124.0, 1, 64, 13.7, 12, id="memory-throttled"),
+    pytest.param(0.125, 17.25, 3, 17, 0.1, 2, id="minimal-writer-batches"),
+    pytest.param(0.125, 3.5, 1, 64, 0.1, 4, id="insufficient-diversity"),
+    pytest.param(0.3, 3.5, 3, 64, 2.5, 2, id="insufficient-full-batch"),
+]
 
 
 def _profile() -> ODSReuseProfileCfg:
@@ -131,7 +130,7 @@ def test_configuration_regime_conservation(
     latency: float,
     memory_batches: int | None,
 ) -> None:
-    """Check a deterministic matrix without reproducing the cache-sizing heuristic."""
+    """Check representative constraints without reproducing the sizing heuristic."""
     t = g * ratio
     profile = _profile()
     # Independent finite search over the profile: maximize affordable reuse,

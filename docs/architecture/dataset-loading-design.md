@@ -173,16 +173,18 @@ DAgger semantics or success-only eligibility for learner failures.
 
 ## Alignment gate
 
-The initial executable gate is
-`tests/data_pipeline/test_ods_pick_place_alignment.py`. It uses the actual
-engine sampler and quota ledger with a deterministic shared CPU buffer, actual
-official SDK persistence/readback, actual feature conversion and actual learner.
-It covers dirty tails, starts/ends, single-frame spans, invalid gaps, horizon
-1/4/64, nonbinding/binding quotas, failed full-batch allocation, provenance/RNG
-equality and three optimizer updates with identical augmentation randomness.
-Unsupported continuity is rejected before offline collection.
+Maintained unit coverage belongs to the reusable production components:
+`tests/data_pipeline/test_sources.py` compares actual ODS and resident sampling
+with deterministic CPU buffers; `test_lerobot_source.py` exercises the official
+SDK reader. Schema, quota, continuity, padding, ownership and failure contracts
+remain covered without importing the learning example.
 
-Public source and SDK tests additionally cover the following boundaries:
+The showcase learner, private writer, training orchestration and reporting are
+validated through runnable experiments and retained evidence, without dedicated
+unit tests. The earlier full-chain batch/optimizer alignment harness is retained
+in Git history; its recorded results below remain historical evidence.
+
+Public source and SDK tests cover the following boundaries:
 
 1. Keep source snapshots frozen during paired comparisons; record exact
    implementation hashes and distinguish historical validation from new runs.

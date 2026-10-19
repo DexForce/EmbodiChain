@@ -245,21 +245,32 @@ def test_dataset_wrappers_share_context_iteration(paired_sources, batch_size):
         batch_size=batch_size,
         generator=torch.Generator().manual_seed(88),
     )
-    offline = OfflineDataset(
-        resident,
-        sequence,
-        batch_size=batch_size,
-        generator=torch.Generator().manual_seed(88),
-        max_batches=2,
-    )
-    left, right = iter(online), iter(offline)
+    datasets = [
+        SequenceDataset(
+            source,
+            sequence,
+            batch_size=batch_size,
+            max_batches=2,
+            generator=torch.Generator().manual_seed(88),
+        )
+        for source in (live, resident)
+    ]
+    # Caller mutations must not change a Dataset's established window.
+    sequence.prediction_horizon = 1
+    reference = iter(online)
+    left, right = map(iter, datasets)
     for _ in range(2):
-        a, b = next(left), next(right)
-        assert a.batch_size == b.batch_size
-        assert all(torch.equal(a[key], b[key]) for key in a.keys())
-    with pytest.raises(StopIteration):
-        next(right)
-    dataset = OfflineDataset(resident, sequence, max_batches=4)
+        expected, a, b = next(reference), next(left), next(right)
+        assert expected.batch_size == a.batch_size == b.batch_size
+        assert a.batch_size[-1] == 4
+        assert all(
+            torch.equal(expected[key], a[key]) and torch.equal(a[key], b[key])
+            for key in a.keys()
+        )
+    for iterator in (left, right):
+        with pytest.raises(StopIteration):
+            next(iterator)
+    dataset = OfflineDataset(resident, SequenceSpecCfg(2, 3), max_batches=4)
     loader = DataLoader(
         dataset, batch_size=2, collate_fn=OfflineDataset.collate_fn, num_workers=0
     )
@@ -295,31 +306,6 @@ def test_offline_dataset_is_only_a_compatibility_name():
     from embodichain.data_pipeline.datasets.offline_data import OfflineDataset as legacy
 
     assert OfflineDataset is SequenceDataset is legacy
-
-
-@pytest.mark.parametrize("batch_size", [None, 3])
-def test_unified_dataset_preserves_live_and_resident_batches(
-    paired_sources, batch_size
-):
-    sequence = SequenceSpecCfg(2, 3)
-    datasets = [
-        SequenceDataset(
-            source,
-            sequence,
-            batch_size=batch_size,
-            max_batches=2,
-            generator=torch.Generator().manual_seed(88),
-        )
-        for source in paired_sources
-    ]
-    # Changing the caller's config cannot change an established iterator.
-    sequence.prediction_horizon = 1
-    left, right = [list(dataset) for dataset in datasets]
-    assert len(left) == len(right) == 2
-    for a, b in zip(left, right):
-        assert a.batch_size == b.batch_size
-        assert a.batch_size[-1] == 4
-        assert all(torch.equal(a[key], b[key]) for key in a.keys())
 
 
 def test_new_dataset_iterator_does_not_replenish_source_budget():

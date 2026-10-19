@@ -168,6 +168,9 @@ restoration exists. Conventional offline baselines retain unrestricted reuse.
 and offline modes; it does not claim online time-to-certification. G1 content,
 model initialization and all normalization hashes are reported separately.
 
+Unit tests target reusable data-pipeline contracts. The learning example's
+model, private persistence and orchestration are validated through runnable
+experiments and recorded evidence, without dedicated example unit tests.
 Small-data gates, expert physical qualification and student learning assessment
 are separate. Smoke success and low training loss do not establish physical
 student success or an efficiency advantage. See the task-owned
