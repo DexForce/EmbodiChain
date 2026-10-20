@@ -134,6 +134,89 @@ training-efficiency advantage.
   live cache with a new run ID; exact replay-cache or protected offline-ledger
   recovery is not implemented.
 
+## Training-system integration (planned)
+
+The diagram below describes the proposed integration boundary. The public
+numeric sources exist; the RLInf source adapter, same-state expert query and
+acknowledged episode handoff shown here remain follow-up work tracked in
+[#788](https://github.com/DexForce/EmbodiChain/issues/788). Solid arrows carry
+data; dotted arrows carry policy updates, acknowledgements or host control.
+
+```mermaid
+flowchart TB
+    Engine["Existing live engine owner<br/>Producer, cache and sampler"]
+    Source["Existing BatchSource interface<br/>Live or resident numeric contexts"]
+    Adapter["Planned BC/SFT model-data adapter<br/>Action semantics, masks and normalization"]
+    Host["Proposed reusable host controller<br/>Pacing, refill, bounded waits and event draining"]
+
+    subgraph Collection["Planned DAgger collection and publication"]
+        Rollout["Learner rollouts<br/>EmbodiChain environment"]
+        Query["Same-state expert query<br/>Behavior action, expert label and label validity"]
+        Publish["Committed labeled episodes<br/>Stable identities and bounded pending delivery"]
+        Rollout --> Query
+        Query --> Publish
+    end
+
+    subgraph Training["RLInf training ownership"]
+        Ingest["Selected ingestion adapter<br/>Validated admission and deduplication"]
+        Replay["One Actor-owned aggregation path<br/>Replay or online LeRobot dataset"]
+        Learner["Learner / Actor<br/>Model updates and policy versions"]
+        Ingest --> Replay
+        Replay --> Learner
+    end
+
+    Engine --> Source
+    Source --> Adapter
+    Adapter --> Learner
+    Publish --> Ingest
+    Ingest -.->|commit acknowledgement| Publish
+    Learner -.->|immutable policy snapshot| Rollout
+    Host -.->|live engine owner API| Engine
+    Host -.->|collection and shutdown policy| Rollout
+```
+
+The first integration consumes BC/SFT contexts directly through one validated
+model-data adapter. Compare actual batches, masks, losses and optimizer updates
+before expanding the worker/rank topology. Source capabilities must state which
+sampling modes, concurrency and recovery levels are supported; the Dataset
+continues to expose immediate sampling results and errors.
+
+DAgger has a different publication unit: committed labeled episodes, rather
+than repeatedly sampled BC contexts. Query the expert on the learner's actual
+pre-action observation and preserve behavior actions, expert labels, label
+validity, policy/expert versions and measured outcomes separately. Valid labels
+from failed learner episodes remain usable. The existing reset-and-execute
+expert producer does not implement this query protocol.
+
+Select one concrete RLInf ingestion path and one training aggregation/sampling
+owner. On that path ODS publishes experience, while RLInf owns training replay,
+eviction and any required delivery limits across ranks. A commit acknowledgement
+confirms admission, not optimizer consumption. Define capacity, deduplication,
+cancellation and retry behavior at the handoff; do not populate another replay
+with repeatedly sampled ODS minibatches.
+
+| Boundary | Current contract | Follow-up gate |
+| --- | --- | --- |
+| Runtime control | The application applies the static plan; the demo implements pacing/refill/waits. | Extract reusable owner-side control, health checks and lifecycle-event draining without adding hidden Dataset waits. |
+| Protected reuse | One copied context costs one per-source selection. | Keep global sample/insert pacing distinct from per-episode caps; qualify reuse profiles for the task/model/window and report actual supervised-frame exposure. |
+| Recovery | Online resume creates a fresh supply; protected resident-ledger resume is unsupported. | Add optional source state and coordinate identity, quota, RNG, pending deliveries and learner state before promising exact continuation. |
+| Concurrency | Live consumers share one local engine ledger; protected resident sources have a creating process/thread. | Define rank ownership and aggregate quotas explicitly before distributed sampling; copied workers cannot duplicate allowances. |
+| Storage | The LeRobot reader materializes numeric episodes in resident CPU tensors. | Qualify out-of-core decoding, bounded caches, staging and prefetch separately for visual or larger workloads. |
+
+PyTorch's loader and checkpoint machinery can transport application-defined
+state, and TorchRL provides collection, storage and sequence-sampling components.
+Evaluate compatible adapters against ODS's padding, episode weighting, continuity,
+copy lifetime and quota semantics before adopting a backend. Pin dependencies
+and distinguish released APIs from development-main features. These upstream
+components do not automatically provide an ODS cache/ledger snapshot or a
+same-state expert service.
+
+The proposed host controller must handle changing measured supply by adjusting
+pace, refill and bounded waits within the declared profile. Throughput alone
+does not establish learning-safe reuse limits, convergence or training benefit.
+Keep instrumentation cost and cold-start/data-ready comparisons in the
+[evaluation protocol](evaluation.md); a matched rate is not an efficiency result.
+
 See [configuration](configuration.md) for exact rate/cache formulas,
 [evaluation](evaluation.md) for engineering/learning/performance criteria, and
 the [Dataset/source design](https://github.com/DexForce/EmbodiChain/blob/main/docs/architecture/dataset-loading-design.md)

@@ -26,7 +26,7 @@ ods/evaluation
 ```
 
 - [Architecture and data flow](ods/architecture.md): process structure, module
-  ownership and online/offline routes.
+  ownership, online/offline routes and a separately marked planned RLInf handoff.
 - [Throughput configuration](ods/configuration.md): rate units, reuse profiles,
   exact cache/rate limits and consumer enforcement responsibilities.
 - [Evaluation and offline comparison](ods/evaluation.md): exposure, quality,
