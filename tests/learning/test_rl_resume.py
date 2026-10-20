@@ -28,10 +28,15 @@ import torch
 import yaml
 
 from embodichain.learning.rl.algo import build_algo
-from embodichain.learning.rl.checkpoint import _atomic_write
+from embodichain.learning.rl.checkpoint import _atomic_write, _resolve_resume
 from embodichain.learning.rl.policies import ActorCritic
 from embodichain.learning.rl.policy_evaluation.manifest import RunManifest
-from embodichain.learning.rl.train import parse_args, train_from_config
+from embodichain.learning.rl.train import (
+    _configure_checkpoints,
+    _save_final_checkpoint,
+    parse_args,
+    train_from_config,
+)
 from embodichain.learning.rl.utils.trainer import Trainer
 from embodichain_tasks.classic_control.point_mass import PointMassEnv
 
@@ -263,6 +268,10 @@ def _config(name: str) -> dict:
 def test_cli_contract_resumes_all_algorithms(tmp_path, monkeypatch, algorithm, source):
     monkeypatch.chdir(tmp_path)
     config = _config(algorithm)
+    if source == "best":
+        config["trainer"].update(
+            enable_eval=True, eval_freq=16, num_eval_envs=2, num_eval_episodes=2
+        )
     config_path = tmp_path / "train.json"
     config_path.write_text(json.dumps(config))
     first = train_from_config(str(config_path))
@@ -270,6 +279,8 @@ def test_cli_contract_resumes_all_algorithms(tmp_path, monkeypatch, algorithm, s
     run = path.parents[1]
     manifest = RunManifest.load(run)
     assert manifest.select_checkpoint("latest")[1] == path
+    if source == "best":
+        assert manifest.checkpoints["best"] is not None
     config["trainer"]["iterations"] = 3
     config_path.write_text(json.dumps(config))
     if source == "file":
@@ -279,6 +290,151 @@ def test_cli_contract_resumes_all_algorithms(tmp_path, monkeypatch, algorithm, s
     assert second["global_step"] == 48
     assert second["num_updates"] == 3
     assert Path(second["latest_checkpoint_path"]).resolve().parents[1] != run
+
+
+def _saved_run(run: Path) -> Trainer:
+    trainer = _trainer(run / "checkpoints")
+    _configure_checkpoints(
+        trainer,
+        _config("ppo"),
+        "train.json",
+        run,
+        gym_config="gym.json",
+        gym_data={"id": "test"},
+    )
+    trainer.train(16)
+    trainer.best_eval_value = 2.5
+    trainer.best_checkpoint_path = str(run / "checkpoints" / "best.pt")
+    trainer.save_checkpoint(trainer.best_checkpoint_path)
+    trainer.train(32)
+    return trainer
+
+
+@pytest.mark.parametrize("role", ["latest", "best"])
+def test_resume_selector_requires_only_selected_file(tmp_path, role):
+    run = tmp_path / "source"
+    _saved_run(run)
+    manifest = RunManifest.load(run)
+    selected = manifest.checkpoints[role]
+    other = manifest.checkpoints["best" if role == "latest" else "latest"]
+    other.unlink()
+    for path in manifest.configs.values():
+        path.unlink()
+    assert _resolve_resume(role, run) == selected
+    with pytest.raises(FileNotFoundError):
+        RunManifest.load(run)
+
+
+@pytest.mark.parametrize("role", ["latest", "best"])
+@pytest.mark.parametrize("missing", ["manifest", "entry", "file"])
+def test_resume_selector_never_substitutes_another_file(tmp_path, role, missing):
+    run = tmp_path / "source"
+    _saved_run(run)
+    manifest_path = run / "run-manifest.json"
+    manifest = RunManifest.load(run)
+    if missing == "manifest":
+        manifest_path.unlink()
+    elif missing == "entry":
+        data = json.loads(manifest_path.read_text())
+        data["checkpoints"][role] = None
+        manifest_path.write_text(json.dumps(data))
+    else:
+        manifest.checkpoints[role].unlink()
+    with pytest.raises(FileNotFoundError, match="manifest|checkpoint"):
+        _resolve_resume(role, run)
+
+
+def test_resume_selector_rejects_path_escape_when_file_checks_are_deferred(tmp_path):
+    run = tmp_path / "source"
+    _saved_run(run)
+    manifest_path = run / "run-manifest.json"
+    data = json.loads(manifest_path.read_text())
+    data["checkpoints"]["latest"] = "../outside.pt"
+    manifest_path.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="escapes the run"):
+        _resolve_resume("latest", run)
+
+
+@pytest.mark.parametrize("role", ["latest", "best"])
+def test_corrupt_selected_checkpoint_fails_before_mutation(tmp_path, role):
+    run = tmp_path / "source"
+    _saved_run(run)
+    manifest = RunManifest.load(run)
+    selected = manifest.checkpoints[role]
+    selected.write_bytes(b"")
+    restored = _trainer(tmp_path / "restored")
+    initial = deepcopy(restored.policy.state_dict())
+    with pytest.raises(EOFError):
+        restored.load_checkpoint(_resolve_resume(role, run))
+    _assert_state_equal(initial, restored.policy.state_dict())
+    assert restored.num_updates == 0
+
+
+def test_v2_checkpoint_restores_without_source_run_or_best_copy(tmp_path):
+    run = tmp_path / "source"
+    trainer = _saved_run(run)
+    manifest = RunManifest.load(run)
+    portable = tmp_path / "portable.pt"
+    manifest.checkpoints["latest"].replace(portable)
+    manifest.checkpoints["best"].unlink()
+    for path in manifest.configs.values():
+        path.unlink()
+    (run / "run-manifest.json").unlink()
+    restored = _trainer(tmp_path / "restored")
+    with pytest.warns(UserWarning, match="CLI configuration context"):
+        restored.load_checkpoint(portable)
+    assert restored.best_eval_value == trainer.best_eval_value
+    assert restored.best_checkpoint_path is None
+    _assert_state_equal(trainer.algorithm.state_dict(), restored.algorithm.state_dict())
+    restored.save_checkpoint()
+    assert len(list((tmp_path / "restored").glob("*.pt"))) == 1
+    restored.train(48)
+    assert restored.num_updates == 3
+
+
+@pytest.mark.parametrize("operation", ["periodic", "final"])
+@pytest.mark.parametrize("missing", ["manifest", "train", "gym", "best", "latest"])
+def test_deleted_run_artifact_fails_before_write_or_final_reuse(
+    tmp_path, monkeypatch, operation, missing
+):
+    import embodichain.learning.rl.checkpoint as checkpoints
+
+    run = tmp_path / "source"
+    trainer = _saved_run(run)
+    manifest = RunManifest.load(run)
+    paths = {
+        "manifest": run / "run-manifest.json",
+        **manifest.configs,
+        **manifest.checkpoints,
+    }
+    removed = paths[missing]
+    removed.unlink()
+    before = set(run.rglob("*"))
+
+    def unexpected_write(*args, **kwargs):
+        pytest.fail("Missing artifacts must be detected before writing a checkpoint")
+
+    monkeypatch.setattr(checkpoints, "_atomic_write", unexpected_write)
+    with pytest.raises(FileNotFoundError) as failure:
+        if operation == "periodic":
+            trainer.train(64)
+        else:
+            _save_final_checkpoint(trainer)
+    assert str(removed) in str(failure.value)
+    assert not removed.exists()
+    assert set(run.rglob("*")) == before
+
+
+def test_unreferenced_checkpoint_deletion_does_not_block_active_run(tmp_path):
+    run = tmp_path / "source"
+    trainer = _saved_run(run)
+    old_latest = Path(trainer.latest_checkpoint_path)
+    trainer.train(64)
+    old_latest.unlink()
+    trainer.train(96)
+    _save_final_checkpoint(trainer)
+    assert trainer.num_updates == 6
+    assert RunManifest.load(run).checkpoints["latest"].is_file()
 
 
 @pytest.mark.parametrize("algorithm", ["ppo", "grpo", "apg"])

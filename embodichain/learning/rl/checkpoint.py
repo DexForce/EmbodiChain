@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import os
 import random
-import shutil
 import tempfile
 import warnings
 from collections.abc import Mapping
@@ -63,11 +62,6 @@ def _capture_rng(device: torch.device) -> dict[str, Any]:
     if device.type == "cuda":
         state["cuda"] = torch.cuda.get_rng_state(device)
     return state
-
-
-def _atomic_copy(source: Path, destination: Path) -> None:
-    with source.open("rb") as incoming:
-        _atomic_write(destination, lambda stream: shutil.copyfileobj(incoming, stream))
 
 
 def _restore_rng(state: Mapping[str, Any], device: torch.device) -> None:
@@ -385,6 +379,22 @@ def _validate(trainer: Any, payload: Any, scheduler: str) -> list[str]:
     )
 
 
+def _validate_saved_files(trainer: Any) -> None:
+    """Check the last successful local save before writing or reusing it."""
+    if getattr(trainer, "_last_saved_update", None) is None:
+        return
+    path = Path(trainer.latest_checkpoint_path)
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"Previously saved latest checkpoint is missing: {path}"
+        )
+    run = getattr(trainer, "_checkpoint_run", None)
+    if run is not None:
+        from embodichain.learning.rl.policy_evaluation.manifest import RunManifest
+
+        RunManifest.load(run)
+
+
 def _save(trainer: Any, path: str | Path, extra: Mapping[str, Any]) -> str:
     """Collect local state on all ranks; rank zero owns files and callbacks."""
     distributed = getattr(trainer, "distributed", False)
@@ -393,6 +403,8 @@ def _save(trainer: Any, path: str | Path, extra: Mapping[str, Any]) -> str:
     error = None
     local = None
     try:
+        if rank == 0:
+            _validate_saved_files(trainer)
         local = {
             "rng": _capture_rng(trainer.algorithm.device),
             "normalizer": _policy_normalizers(policy),
@@ -473,10 +485,9 @@ def _load(trainer: Any, path: str | Path, scheduler: str) -> dict[str, Any]:
         trainer.global_step = int(payload["global_step"])
         trainer.num_updates = int(payload["num_updates"])
         trainer.best_eval_value = payload.get("best_eval_value")
+        trainer.best_checkpoint_path = None
         trainer.latest_checkpoint_path = str(path)
         trainer._last_saved_update = None
-        if rank == 0:
-            _restore_best(trainer, payload, Path(path))
         if hasattr(trainer.collector, "obs_td"):
             trainer.collector.obs_td = trainer.collector._reset_env()
             trainer.curr_ret.zero_()
@@ -513,28 +524,6 @@ def _load(trainer: Any, path: str | Path, scheduler: str) -> dict[str, Any]:
             stacklevel=3,
         )
     return payload
-
-
-def _restore_best(trainer: Any, payload: Mapping[str, Any], source: Path) -> None:
-    best = payload.get("best_checkpoint")
-    best_path = source.parent / best if best else None
-    if best_path is None or not best_path.is_file():
-        from embodichain.learning.rl.policy_evaluation.manifest import RunManifest
-
-        try:
-            best_path = RunManifest.load(source.resolve().parents[1]).checkpoints.get(
-                "best"
-            )
-        except (OSError, ValueError, TypeError, IndexError):
-            pass
-    trainer.best_checkpoint_path = None
-    if best_path is not None and best_path.is_file():
-        cfg = getattr(trainer, "cfg", None)
-        directory = getattr(trainer, "checkpoint_dir", None) or cfg.checkpoint_dir
-        destination = Path(directory) / "resumed_best.pt"
-        if best_path.resolve() != destination.resolve():
-            _atomic_copy(best_path, destination)
-        trainer.best_checkpoint_path = str(destination)
 
 
 def _validate_legacy_context(trainer: Any, source: Path) -> None:
@@ -586,13 +575,17 @@ def _resolve_resume(resume: str | Path | None, run: str | Path | None) -> Path |
             raise ValueError("--resume latest/best requires --run.")
         from embodichain.learning.rl.policy_evaluation.manifest import RunManifest
 
-        selected, path = RunManifest.load(run).select_checkpoint(str(resume))
-        print(f"Resume checkpoint ({selected}): {path}")
+        manifest = RunManifest.load(run, check_files=False)
+        path = manifest.checkpoints.get(str(resume))
+        if path is None:
+            raise FileNotFoundError(
+                f"Run manifest has no {resume} checkpoint: {manifest.root}"
+            )
     else:
         if run is not None:
             raise ValueError("--run is only used with --resume latest/best.")
         path = Path(resume).expanduser().resolve()
-        print(f"Resume checkpoint: {path}")
     if not path.is_file():
-        raise FileNotFoundError(f"Resume checkpoint does not exist: {path}")
+        raise FileNotFoundError(f"Resume checkpoint ({resume}) does not exist: {path}")
+    print(f"Resume checkpoint: {path}")
     return path

@@ -35,6 +35,7 @@ from embodichain.learning.rl.checkpoint import (
     _atomic_write,
     _resolve_resume,
     _sync_errors,
+    _validate_saved_files,
 )
 from embodichain.learning.rl.policies import get_registered_policy_names
 from embodichain.learning.rl.policy_evaluation.manifest import (
@@ -758,6 +759,7 @@ def _configure_checkpoints(
     trainer._checkpoint_config = deepcopy(cfg_data)
     if getattr(trainer, "rank", 0) != 0:
         return
+    trainer._checkpoint_run = Path(run_base)
     config_dir = Path(run_base) / "configs"
     train_path = config_dir / f"train{Path(config_path).suffix.lower() or '.yaml'}"
     gym_path = (
@@ -793,6 +795,14 @@ def _save_final_checkpoint(trainer) -> None:
     """Write the final update only if periodic/best saving has not written it."""
     if getattr(trainer, "_last_saved_update", None) != trainer.num_updates:
         trainer.save_checkpoint()
+        return
+    error = None
+    if getattr(trainer, "rank", 0) == 0:
+        try:
+            _validate_saved_files(trainer)
+        except Exception as exc:
+            error = exc
+    _sync_errors(error, getattr(trainer, "distributed", False))
 
 
 def _resume_training(trainer, resume, run, scheduler: str) -> None:

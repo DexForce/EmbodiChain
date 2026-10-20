@@ -45,11 +45,14 @@ class RunManifest:
         object.__setattr__(self, "checkpoints", dict(self.checkpoints))
 
     @classmethod
-    def load(cls, run: str | Path) -> RunManifest:
+    def load(cls, run: str | Path, *, check_files: bool = True) -> RunManifest:
         """Load ``run-manifest.json`` and resolve its referenced files.
 
         Args:
             run: EmbodiChain training run directory.
+            check_files: Require every referenced file to exist. Set to False
+                when the caller checks only the files needed for its operation.
+                Manifest structure and path containment are always validated.
 
         Returns:
             Resolved manifest.
@@ -61,12 +64,15 @@ class RunManifest:
         value = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(value, Mapping) or value.get("schema_version") != 1:
             raise ValueError(f"Unsupported run manifest: {path}")
-        configs = _resolve_group(root, value.get("configs"), "configs")
+        configs = _resolve_group(
+            root, value.get("configs"), "configs", check_files=check_files
+        )
         checkpoints = _resolve_group(
             root,
             value.get("checkpoints"),
             "checkpoints",
             allow_none=True,
+            check_files=check_files,
         )
         return cls(root, configs, checkpoints)
 
@@ -169,6 +175,7 @@ def _resolve_group(
     field: str,
     *,
     allow_none: bool = False,
+    check_files: bool = True,
 ) -> dict[str, Path | None]:
     if not isinstance(value, Mapping):
         raise TypeError(f"Run manifest {field} must be a mapping")
@@ -189,7 +196,9 @@ def _resolve_group(
             raise ValueError(
                 f"Run manifest {field}.{name} escapes the run directory"
             ) from error
-        if not path.is_file():
-            raise FileNotFoundError(f"Run manifest file does not exist: {path}")
+        if check_files and not path.is_file():
+            raise FileNotFoundError(
+                f"Run manifest file does not exist ({field}.{name}): {path}"
+            )
         result[str(name)] = path
     return result

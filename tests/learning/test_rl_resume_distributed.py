@@ -34,6 +34,7 @@ from embodichain.learning.rl.policy_evaluation.manifest import (
     write_run_manifest,
 )
 from embodichain.learning.rl.utils.trainer import Trainer
+from embodichain.learning.rl.train import _save_final_checkpoint
 from embodichain_tasks.classic_control.point_mass import PointMassEnv
 
 
@@ -142,6 +143,8 @@ def _worker(rank: int, group_file: str, directory: str) -> None:
             )
             restored = _components(rank, directory / f"{mode}_resumed", mode)
             restored.load_checkpoint(path)
+            assert restored.best_eval_value == trainer.best_eval_value
+            assert restored.best_checkpoint_path is None
             actual_rng = random.random(), np.random.rand(), torch.rand(3)
             assert actual_rng[:2] == expected_rng[:2]
             torch.testing.assert_close(actual_rng[2], expected_rng[2], rtol=0, atol=0)
@@ -165,8 +168,8 @@ def _worker(rank: int, group_file: str, directory: str) -> None:
             if rank == 0:
                 manifest = RunManifest.load(run)
                 assert manifest.checkpoints["best"] is not None
-                assert restored.best_checkpoint_path is not None
-                assert Path(restored.best_checkpoint_path).is_file()
+                if restored.best_checkpoint_path is not None:
+                    assert Path(restored.best_checkpoint_path).is_file()
                 payload = torch.load(path, weights_only=True)
                 assert len(payload["rng_by_rank"]) == 2
                 if mode != "grpo":
@@ -174,6 +177,13 @@ def _worker(rank: int, group_file: str, directory: str) -> None:
                         payload["normalizer_by_rank"][0]["actor_obs_normalizer.mean"],
                         payload["normalizer_by_rank"][1]["actor_obs_normalizer.mean"],
                     )
+            torch.distributed.barrier()
+            # Rank zero owns output files; final-save validation must fail on all ranks.
+            if rank == 0:
+                Path(restored.latest_checkpoint_path).unlink()
+            torch.distributed.barrier()
+            with pytest.raises(RuntimeError, match="rank 0.*latest checkpoint"):
+                _save_final_checkpoint(restored)
             torch.distributed.barrier()
             # Only rank 1 loses its input; both ranks must report the failure.
             try:

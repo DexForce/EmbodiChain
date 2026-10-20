@@ -517,8 +517,20 @@ action settings. Older schema-v2 files without APG settings load with a warning.
 ``restore`` preserves the original scheduler horizon. Extending a zero-ending
 linear curve past that horizon requires ``restart``; an unspecified new horizon
 is bound to the remaining update budget. Subsequent checkpoints preserve the
-restarted curve. ``best`` falls back to ``latest`` when no best checkpoint exists
-and prints the selected file.
+restarted curve.
+
+``latest`` and ``best`` resolve the exact path recorded in ``run-manifest.json``.
+A missing manifest, absent selected entry, missing file, or invalid checkpoint
+raises an error; training resume never substitutes another checkpoint. In
+particular, ``best`` requires a run that has produced a best checkpoint.
+Schema-v2 learning state can be restored from an explicit file without its
+source run. Selector-based resume also works when unselected historical
+checkpoints or archived configuration snapshots are missing; the current
+``--config`` still supplies the environment and policy construction settings.
+
+The historical best score is restored, but historical best files are not copied
+into the new run. Its ``best`` entry remains empty until a new evaluation improves
+that score. The source run retains its own best entry.
 
 Variable-horizon APG accepts an update budget or an explicit scheduler horizon.
 With a transition budget, the restored linear horizon is checked before each
@@ -527,8 +539,12 @@ actual optimizer update.
 Periodic and best saves update ``run-manifest.json`` after atomically writing
 a completed-update checkpoint. Configuration snapshots are frozen from the
 loaded configuration on the first save and reused by subsequent saves. A final
-save reuses a periodic or best checkpoint from the same update. An interrupted
-update retains the preceding checkpoint. Distributed resume requires the same
+save reuses a periodic or best checkpoint from the same update. Before a
+subsequent save or final reuse, the active run checks its last saved checkpoint,
+manifest, and the files referenced by that manifest. Missing files raise an
+error at that boundary with their paths; deleted artifacts are not recreated.
+Unreferenced historical checkpoints may be removed. An interrupted update
+retains the preceding checkpoint. Distributed resume requires the same
 process count; every rank
 participates in saving and loading, while rank zero owns file writes. Each rank
 restores its own RNG and observation-normalization buffers.

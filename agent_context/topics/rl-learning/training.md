@@ -23,7 +23,15 @@ or LR-scheduler state when present. Schema v2 also stores compatibility metadata
 and rank-local RNG/normalization state; GRPO includes its fixed KL reference.
 Both trainers expose `load_checkpoint(path, resume_scheduler="restore")`.
 CLI `--resume` selects a file or `latest/best` from `--run`; the source and new
-output run remain separate. Budgets are absolute targets and environments start
+output run remain separate. Selectors follow the exact manifest entry, fail when
+the entry or its file is missing, and never fall back to another checkpoint.
+Training selection defers unrelated file existence checks through
+`RunManifest.load(check_files=False)`; default manifest loading still validates
+every referenced file for evaluation. Schema-v2 files restore independently of
+source-run snapshots and historical checkpoints. Resume keeps the historical
+best score but does not copy its file: the new run gets a best entry only after
+an evaluation improves that score.
+Budgets are absolute targets and environments start
 fresh episodes. `restore` keeps the saved LR horizon; `restart` preserves
 optimizer momentum and binds the configured curve to remaining updates.
 Zero-ending linear curves cannot resume beyond their horizon in restore mode.
@@ -37,7 +45,10 @@ Legacy standard/APG-v1 files restore available fields and report missing metadat
 or RNG. `checkpoint.py` owns shared validation and atomic persistence.
 Configuration snapshots are frozen from loaded data on the first save; later
 saves update the run manifest without rewriting those snapshots. Final saves
-reuse the current update's periodic or best checkpoint. Interrupted updates retain
+reuse the current update's periodic or best checkpoint. Subsequent saves and final
+reuse verify the previous saved file and active run manifest references; missing
+artifacts raise errors instead of being recreated. Unreferenced historical files
+are not required. Interrupted updates retain
 the previous complete checkpoint. Evaluation reuses the frozen training
 normalizer without updating its statistics.
 
