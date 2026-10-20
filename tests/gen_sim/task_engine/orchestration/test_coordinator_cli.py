@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -415,12 +416,16 @@ def test_prepare_inherits_adapter_robot_profile_for_raw_scene_path(
     assert captured["source"].robot_profile == "ur10"
 
 
+@pytest.mark.parametrize("selected_physical", [False, True])
 def test_bound_prepare_publishes_semantic_task_program_bundle(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    selected_physical: bool,
 ) -> None:
     candidates = _candidate_set()
     adaptation = _adaptation(tmp_path)
+    physical = SimpleNamespace() if selected_physical else None
+    adaptation = replace(adaptation, physical_input=physical)
     task_agent = SimpleNamespace(generate=lambda *args, **kwargs: candidates)
     scene_adapter = SimpleNamespace(
         robot_profile="franka",
@@ -459,8 +464,10 @@ def test_bound_prepare_publishes_semantic_task_program_bundle(
         "success": {"kind": "all_task_groups"},
     }
     generated_calls: list[dict[str, object]] = []
+    generated_scenes: list[object] = []
 
     def generate_bundle(planned_graph, _scene, output, **kwargs):
+        generated_scenes.append(_scene)
         generated_calls.append({"graph": planned_graph, **kwargs})
         root = Path(output)
         paths = TaskProgramBundlePaths(
@@ -522,6 +529,9 @@ def test_bound_prepare_publishes_semantic_task_program_bundle(
     )
 
     assert result.bound
+    assert generated_scenes[0] is (
+        physical if selected_physical else adaptation.prepared_scene
+    )
     assert generated_calls == [
         {
             "graph": graph,

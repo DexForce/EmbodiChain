@@ -53,7 +53,7 @@ _Y_UP_TO_Z_UP = np.array(
 
 
 def inspect_final_scene(
-    source: str | Path,
+    source: str | Path | PreparedScene,
     *,
     revision_id: str,
     contact_tolerance_m: float = 0.03,
@@ -61,7 +61,9 @@ def inspect_final_scene(
     """Measure final AABBs, orientation, and support from exported geometry.
 
     Args:
-        source: Completed scene project or configuration path.
+        source: Completed scene project, configuration path, or an explicitly
+            selected normalized Z-up physical scene. Prepared inputs are
+            measured directly without reloading their original source model.
         revision_id: Content identity already assigned to the completed revision.
         contact_tolerance_m: Maximum support-surface contact gap in meters.
 
@@ -78,8 +80,13 @@ def inspect_final_scene(
         int(normalized_revision_id, 16)
     except ValueError as exc:
         raise ValueError("revision_id must be a SHA-256 hexadecimal digest.") from exc
-    resolved = resolve_source_scene(source)
-    prepared = prepare_scene(source)
+    if isinstance(source, PreparedScene):
+        prepared = source
+        convert_y_up = False
+    else:
+        resolved = resolve_source_scene(source)
+        prepared = prepare_scene(source)
+        convert_y_up = resolved.is_prompt2scene
     runtime = {
         str(item.get("uid")): item
         for item in (
@@ -95,7 +102,7 @@ def inspect_final_scene(
         role = str(raw.get("role", ""))
         geometry = _measure_geometry(
             runtime.get(uid, raw),
-            convert_y_up=resolved.is_prompt2scene,
+            convert_y_up=convert_y_up,
         )
         measured[uid] = {
             "uid": uid,

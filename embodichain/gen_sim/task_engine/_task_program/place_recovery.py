@@ -39,6 +39,19 @@ _SCENE_CLEARANCE_M = 0.002
 _DISTANCE_TOLERANCE_M = 1e-6
 
 
+def _maximum_cover_violation(points: Any, normals: Any, offsets: Any) -> float:
+    """Retain every vertex/plane pair with bounded multiplication scratch."""
+    import numpy as np
+
+    maximum = -np.inf
+    for start in range(0, len(points), 256):
+        values = points[start : start + 256] @ normals.T
+        values -= offsets
+        maximum = np.maximum(maximum, np.max(values))
+        del values
+    return float(maximum)
+
+
 def _convex_clearance(
     vertices: torch.Tensor,
     poses: torch.Tensor,
@@ -66,7 +79,7 @@ def _convex_clearance(
         if not hull.is_volume or not hull.is_convex:
             raise ValueError("Convex clearance requires a nondegenerate solid.")
         offsets = np.einsum("ij,ij->i", hull.face_normals, hull.triangles[:, 0])
-        if np.max(points @ hull.face_normals.T - offsets) > 1e-8:
+        if _maximum_cover_violation(points, hull.face_normals, offsets) > 1e-8:
             raise ValueError("Convex cover does not contain every source vertex.")
         faces = np.column_stack((np.full(len(hull.faces), 3), hull.faces)).ravel()
         return fcl.Convex(hull.vertices, len(hull.faces), faces)

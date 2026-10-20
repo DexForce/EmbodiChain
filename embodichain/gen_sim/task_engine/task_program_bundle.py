@@ -199,6 +199,7 @@ def generate_task_program_bundle(
     pick_contact_revision: int | None = None,
     pick_contact_revisions: Mapping[str, int] | None = None,
     world_yaw_free_places: Sequence[str] | None = None,
+    measured_rigid_calls: Sequence[str] | None = None,
     verify_pick_phases: bool = False,
     pour_geometry_revision: int | None = None,
     pour_proxy_position_tolerance_m: float | None = None,
@@ -262,6 +263,9 @@ def generate_task_program_bundle(
         upright_container_picks: Explicit E3 Pick node IDs mapped to maximum pad-axis
             tilt above the Z-up horizontal plane, in degrees. Omitted preserves
             legacy behavior. The caller declares these as upright-container Picks.
+        measured_rigid_calls: Explicit ordinary Pick and rigid-inside Place node
+            IDs opting into measured preshape, carry and occupied-floor proposals.
+            Omitted preserves legacy behavior and shared executor defaults.
 
     Returns:
         Final fingerprint-bound graph and all generated paths.
@@ -705,6 +709,7 @@ def generate_task_program_bundle(
         pick_contact_revision=pick_contact_revision,
         pick_contact_revisions=pick_contact_revisions,
         world_yaw_free_places=world_yaw_free_places,
+        measured_rigid_calls=measured_rigid_calls,
         upright_container_picks=upright_container_picks,
     )
     drawer_targets = {route.affordance for route in drawers}
@@ -969,6 +974,7 @@ def _task_stability_payload(
     pick_contact_revision: int | None = None,
     pick_contact_revisions: Mapping[str, int] | None = None,
     world_yaw_free_places: Sequence[str] | None = None,
+    measured_rigid_calls: Sequence[str] | None = None,
     upright_container_picks: Mapping[str, float] | None = None,
 ) -> dict[str, Any]:
     """Declare task conditions without adding public validator or runtime types."""
@@ -1310,6 +1316,27 @@ def _task_stability_payload(
             raise ValueError("World yaw freedom must name explicit inside Place nodes.")
         if names:
             result["world_yaw_free_places"] = list(names)
+    if measured_rigid_calls is not None:
+        from ._task_program.measured_rigid import declarations
+
+        names = declarations(measured_rigid_calls)
+        nodes = {n["id"]: n for n in graph["nodes"]}
+        if any(
+            name not in nodes
+            or not (
+                nodes[name]["call"]["kind"] == "pick"
+                or (
+                    nodes[name]["call"]["kind"] == "place"
+                    and nodes[name]["call"].get("inside")
+                )
+            )
+            for name in names
+        ):
+            raise ValueError(
+                "Measured rigid policy must name explicit Pick or inside Place nodes."
+            )
+        if names:
+            result["measured_rigid_calls"] = list(names)
     if upright_container_picks is not None:
         from ._task_program.pick_closure_quality import declarations
 

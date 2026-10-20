@@ -30,6 +30,44 @@ from embodichain.gen_sim.task_engine._task_program import place_recovery as gate
 from embodichain.lab.sim.atomic_actions import JointPositionTarget, PlannerDiagnostics
 
 
+@pytest.mark.parametrize("count", [4, 255, 256, 257, 1025])
+def test_cover_violation_matches_complete_dense_reduction(count):
+    rng = np.random.default_rng(1172)
+    points, normals, offsets = (
+        rng.normal(size=(count, 3)),
+        rng.normal(size=(71, 3)),
+        rng.normal(size=71),
+    )
+    assert gate._maximum_cover_violation(points, normals, offsets) == float(
+        np.max(points @ normals.T - offsets)
+    )
+
+
+@pytest.mark.parametrize("value", [-1e-8, 0.0, 0.999e-8, 1e-8, 1.001e-8])
+def test_cover_violation_keeps_original_rejection_threshold(value):
+    points = np.zeros((513, 3))
+    normals, offsets = np.ones((7, 3)), np.full(7, -value)
+    actual = gate._maximum_cover_violation(points, normals, offsets)
+    expected = float(np.max(points @ normals.T - offsets))
+    assert actual == expected
+    assert (actual > 1e-8) == (expected > 1e-8)
+
+
+def test_cover_violation_bounds_scratch_and_checks_final_vertex(monkeypatch):
+    original = np.max
+    shapes = []
+
+    def observed(values, *args, **kwargs):
+        shapes.append(values.shape)
+        return original(values, *args, **kwargs)
+
+    monkeypatch.setattr(np, "max", observed)
+    points = np.zeros((1025, 3))
+    points[-1, 0] = 1.0
+    assert gate._maximum_cover_violation(points, np.eye(3), np.zeros(3)) == 1.0
+    assert shapes == [(256, 3)] * 4 + [(1, 3)]
+
+
 @dataclass(frozen=True)
 class Plan:
     plan_success: torch.Tensor

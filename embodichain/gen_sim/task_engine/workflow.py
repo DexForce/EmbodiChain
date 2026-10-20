@@ -29,7 +29,10 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
+
+if TYPE_CHECKING:
+    from ._task_program.physical_inputs import FrozenPhysicalInput
 
 from embodichain.gen_sim.task_engine.reporting import (
     EXECUTION_REPORT_FILENAME,
@@ -524,6 +527,12 @@ class TaskEngineWorkflow:
         state = initial_state(normalized)
         attempts: list[dict[str, Any]] = []
         output_dir = Path(normalized["output_dir"])
+        physical_input = None
+        physical_selection = None
+        if planning_cfg.physical_reference is not None:
+            physical_input, physical_selection = _load_physical_reference(
+                normalized, planning_cfg, self.scene_adapter.robot_profile
+            )
 
         with ArtifactTransaction(output_dir, overwrite=overwrite) as transaction:
             staging = transaction.staging_dir
@@ -531,6 +540,11 @@ class TaskEngineWorkflow:
             # Keep audit ownership local to this run, including early binding failures.
             scene_adapter = copy(self.scene_adapter)
             scene_adapter.audit_dir = staging / "binding_audit"
+            if physical_input is not None:
+                scene_adapter.physical_input = physical_input
+                _write_json(
+                    staging / "selected_physical_input.json", physical_selection
+                )
             coordinator = self.coordinator
             if self._owns_coordinator:
                 coordinator = copy(coordinator)
@@ -686,8 +700,17 @@ class TaskEngineWorkflow:
                 % 10
                 == 0
             )
+            if physical_input is not None:
+                _write_json(
+                    staging / "visual_grounding_status.json",
+                    {
+                        "status": "skipped_physical_reference",
+                        "reason": "Original-source images cannot qualify the selected physical model.",
+                    },
+                )
             if (
-                (selection.selected_candidate is None or spot_check)
+                physical_input is None
+                and (selection.selected_candidate is None or spot_check)
                 and analysis.input_kind == "gym_project"
                 and normalized["scene_edit_prompt"] is None
             ):
@@ -961,10 +984,23 @@ class TaskEngineWorkflow:
                 if state.stages[WorkflowStage.FINAL_INSPECTION].value == "pending":
                     state = start_stage(state, WorkflowStage.FINAL_INSPECTION)
                 try:
-                    final_inspection = self.scene_backend.inspect(
-                        revision,
-                        attempt_root / "final_scene_inspection.json",
-                    )
+                    if physical_input is None:
+                        final_inspection = self.scene_backend.inspect(
+                            revision,
+                            attempt_root / "final_scene_inspection.json",
+                        )
+                    else:
+                        from .scene.final_inspection import inspect_final_scene
+
+                        physical_input.assert_unchanged()
+                        final_inspection = inspect_final_scene(
+                            physical_input.scene,
+                            revision_id=physical_input.physical_digest,
+                        )
+                        _write_json(
+                            attempt_root / "final_scene_inspection.json",
+                            final_inspection,
+                        )
                 except Exception as exc:
                     scene_error = exc
                     inspection_error = True
@@ -1000,6 +1036,11 @@ class TaskEngineWorkflow:
                         **(
                             {"twist_mass_source": True}
                             if planning_cfg.twist_mass_source
+                            else {}
+                        ),
+                        **(
+                            {"physical_input": physical_input}
+                            if physical_input is not None
                             else {}
                         ),
                         candidate_set=candidate_set,
@@ -1467,6 +1508,11 @@ class TaskEngineWorkflow:
                         "max_episode_steps": planning_cfg.max_episode_steps,
                         "fit_grasp_assets": planning_cfg.fit_grasp_assets,
                         **(
+                            {"physical_reference": planning_cfg.physical_reference}
+                            if planning_cfg.physical_reference is not None
+                            else {}
+                        ),
+                        **(
                             {"twist_mass_source": True}
                             if planning_cfg.twist_mass_source
                             else {}
@@ -1510,6 +1556,72 @@ def _complete_materialized_scene(
     if state.stages[WorkflowStage.SCENE_FINALIZATION].value == "running":
         state = complete_stage(state, WorkflowStage.SCENE_FINALIZATION)
     return state
+
+
+def _load_physical_reference(
+    request: TaskRunRequest,
+    planning: TaskEnginePlanningCfg,
+    robot_profile: str,
+) -> tuple[FrozenPhysicalInput, dict[str, Any]]:
+    """Select and pin one explicit model before any model or grounding calls."""
+    from ._task_program.physical_inputs import load_frozen_physical_input
+    from .orchestration.source_scene import prepare_scene
+
+    if request["image_path"] is not None or request["scene_edit_prompt"] is not None:
+        raise ValueError("physical_reference requires an existing, unedited scene.")
+    reference = Path(planning.physical_reference).expanduser().resolve()
+    output = Path(request["output_dir"]).expanduser().resolve()
+    if reference.is_relative_to(output) or output.is_relative_to(reference):
+        raise ValueError("physical_reference and output must not overlap.")
+    source = prepare_scene(request["gym_project"])
+    physical = load_frozen_physical_input(
+        source, reference, robot_profile=robot_profile
+    )
+    for name in ("max_episodes", "max_episode_steps"):
+        if getattr(planning, name) != physical.deployment[name]:
+            raise ValueError(
+                f"physical_reference owns {name}; configure its exact value."
+            )
+    if planning.fit_grasp_assets or planning.twist_mass_source:
+        raise ValueError("physical_reference forbids physical adaptation.")
+    fields = ("init_pos", "init_rot", "init_local_pose", "body_scale", "attrs")
+
+    def objects(scene: Any) -> dict[str, Any]:
+        return {
+            item["uid"]: item
+            for item in (*scene.background, *scene.rigid_objects, *scene.articulations)
+        }
+
+    initial, selected = objects(source), objects(physical.scene)
+    differences = {
+        uid: [
+            name
+            for name in fields
+            if canonical_hash(initial[uid].get(name))
+            != canonical_hash(selected[uid].get(name))
+        ]
+        for uid in initial
+    }
+    return physical, {
+        "schema_version": "gen_sim.physical-selection/v1",
+        "reference_bundle": str(reference),
+        "source_config": str(source.source_config_path),
+        "original_scene_equivalence": "not_claimed_explicit_physical_input",
+        "historical_identity": (
+            "existing_manifest_verified"
+            if (reference / "physical_input.json").is_file()
+            else "legacy_input_pinned_now_not_historical_success_certification"
+        ),
+        "changed_instance_fields": {
+            uid: names for uid, names in differences.items() if names
+        },
+        "source_asset_sha256": dict(source.asset_hashes),
+        "selected_asset_sha256": dict(physical.scene.asset_hashes),
+        "joint_drive_props": deepcopy(
+            physical.embodiment["simulation"].get("joint_drive_props")
+        ),
+        "physical_input": physical.manifest(),
+    }
 
 
 def _scene_remediable(

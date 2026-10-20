@@ -116,14 +116,44 @@ across nested previews and recovery. It rejects overdue planning at instrumented
 boundaries, not by preempting a native operation, so elapsed time may exceed that
 deadline until the next check. These search receipts neither prove acquisition
 or release nor replace final TaskSpec qualification.
+The normal coordinator derives call-local manipulation permissions from typed,
+unconstrained E1 rigid-inside Pick/Place pairs through
+`_task_program/policy_selection.py`. It selects measured preshape/inside geometry
+only for sources geometrically enclosed by an articulation's measured bounds,
+and later placements into the same receiver after such a transfer. Bounds request
+planning qualification; they do not certify containment or contact. An earlier
+operation on the same body invalidates this initial-geometry hint. Shared-receiver
+selection follows dependency ancestors, never future suffixes. Ordinary tabletop
+sources retain their existing preshape and transport. Heading-free rigid-inside
+steps may select failed-real-held yaw recovery independently, without task IDs.
+Reacquiring an E2 upright result retains its qualified revision-2 closing screen
+instead of combining that screen with measured preshape. Explicit orientation,
+axis/direction/layout, grasps, nonrigid receivers and other recipes are excluded.
+Selection does not modify physical inputs; the existing single-environment native
+Default IK qualification and complete physical gates remain required.
+Direct bundle-builder callers retain explicit capability selection and legacy
+behavior when declarations are omitted.
 Explicit `world_yaw_free_places` names ordinary rigid-inside Place nodes whose
-object heading may vary. It is absent by default and fingerprints with the task
+object heading may vary. It fingerprints with the task
 constraints. Only failed actual-held calls try the existing bounded world-Z yaw
 order; hypothetical Pick previews, explicit orientations and Cartesian routes
 keep their original behavior. The qualified route retains 0.12 m release clearance,
 0.05 m approach lift, the shared budget, landing-footprint screening and final
 Place inspection. It does not claim continuous collision or physical success;
 the ordinary runner and complete release/stability/TaskSpec gates remain required.
+Explicit `measured_rigid_calls` opts named ordinary Pick or rigid-inside Place
+occurrences into measured hand preshape and observed-geometry planning. It
+fingerprints only selected bundles. Pick retains its
+selected arm path and time grid while sizing the opening from native pads and
+the complete target projection. Inside Place observes current rigid occupants
+and the actual held footprint, retaining 5 mm floor/object planning reserves and
+0.12 m release clearance; bounded higher approach/retract candidates must pass
+native occupied-hand, operated-arm and cargo scene rest checks plus robot proxy
+and full-robot velocity checks. These are discrete fixed-scene planning screens,
+not continuous collision or physical-success certificates. Previews and legacy
+calls retain their existing policy; the normal executor still owns acquisition,
+retention, release, stability and TaskSpec acceptance. Convex-cover containment
+retains every vertex/plane pair and its tolerance with bounded row-wise scratch.
 Supported E1 placement allows up to 50 mm positive floor clearance while retaining
 the 10 mm penetration limit. Full-footprint coverage, exact released-state receipts
 and the other physical gates remain required; execution evidence records both limits.
@@ -599,6 +629,16 @@ paired public ExecutionSession's installed plan attempts, not from speculative
 planning side effects. Rejected revisions cannot erase it; a later nominal
 replan in that session does not erase earlier installed reselection evidence.
 The E6 recovery fingerprint revision owns this change.
+Failed five-stage push/close plans may instead qualify up to four grasp-seeded
+branches using the original per-stage targets and frame counts. Backward reach
+joins forward push, release and return through continuous IK; only the empty-hand
+approach uses joint interpolation. Shared Slide rebuilds every command. Final
+full-robot velocity and robot-mesh checks, fresh approach-scene screening and
+the existing paired withdrawal preview remain required. Scene screening does
+not certify future contact/return geometry or physical closing. Successful
+push plans remain unchanged. A rejected widened preshape retains its own
+diagnostic failure alongside the original nominal rejection, without changing
+which failed plan is returned.
 The shared skills still rebuild arm/hand commands and the shared executor
 still owns execution. Both routes retain tolerances, restore RNG/planning
 scope, validate final full-robot velocity, and require fresh discrete mesh
@@ -619,6 +659,19 @@ controls. Qualification is per grasp resource: an E6/E8/E9 on the other hand
 does not disable the cap; a hand shared with those operations keeps its authored
 controls. Payload qualification is likewise hand-local. Imported mimic behavior
 and shared robot defaults are unchanged.
+For an existing, unedited scene, `planning.physical_reference` in the ordinary
+Task Engine config explicitly selects a reference bundle's physical components
+before initial binding. `workflow.py` pins one `FrozenPhysicalInput` through
+SceneAdapter, final inspection and coordinator bundle generation; inspection
+measures that selected model under its physical digest, not the original scene.
+The selection owns episode limits and rejects additional asset/mass adaptation,
+source-transform overrides and reference/output overlap. Existing physical
+manifests are verified before import. Original-source visual grounding and
+reference-image review are not valid evidence for the selected model and are
+disabled in this mode. `selected_physical_input.json` records source/model
+differences; selection never certifies original-scene equivalence or historical
+success. Without an explicit reference, legacy graph-dependent calibration is
+unchanged; this opt-in contract is not default-wide composition isolation.
 Ordinary E1 placement on another object retains its position tolerance and uses
 `supported_placement`: scaled local mesh vertices are cached per environment,
 then transformed by observed poses for vertical gap and projected support-envelope

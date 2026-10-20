@@ -299,7 +299,7 @@ def test_packaged_workflow_configuration_uses_recovery_defaults() -> None:
     assert planning.candidate_count == 3
     assert planning.planning_mode == "offline"
     assert planning.max_episodes == 1
-    assert planning.max_episode_steps == 1000000
+    assert planning.max_episode_steps == 30000
     assert planning.fit_grasp_assets is True
     assert planning.twist_mass_source is False
     assert TaskEnginePlanningCfg().max_episode_steps == 10000
@@ -378,6 +378,40 @@ def test_planning_configuration_rejects_invalid_values() -> None:
         TaskEnginePlanningCfg(ik_solver="unsupported")
     with pytest.raises(TypeError):
         TaskEnginePlanningCfg(planner={"mode": "toppra", "dynamic_collision": True})
+
+
+def test_physical_reference_resolves_relative_to_configuration(tmp_path: Path) -> None:
+    import yaml
+
+    from embodichain.gen_sim.task_engine import config as config_module
+
+    raw = yaml.safe_load(
+        Path(config_module.__file__).with_name("defaults.yaml").read_text()
+    )
+    raw["planning"].update(
+        fit_grasp_assets=False, physical_reference="models/selected_bundle"
+    )
+    config = tmp_path / "configuration" / "task_engine.yaml"
+    config.parent.mkdir()
+    config.write_text(yaml.safe_dump(raw))
+
+    _, planning, _ = load_task_engine_config(config)
+
+    assert planning.physical_reference == str(
+        (config.parent / "models/selected_bundle").resolve()
+    )
+
+
+@pytest.mark.parametrize("value", ["", " ", True, 1, {}])
+def test_physical_reference_rejects_invalid_paths(value: Any) -> None:
+    with pytest.raises((TypeError, ValueError), match="physical_reference"):
+        TaskEnginePlanningCfg(physical_reference=value)
+
+
+@pytest.mark.parametrize("option", ["fit_grasp_assets", "twist_mass_source"])
+def test_physical_reference_rejects_implicit_physical_adaptation(option: str) -> None:
+    with pytest.raises(ValueError, match="physical_reference"):
+        TaskEnginePlanningCfg(physical_reference="selected_bundle", **{option: True})
 
 
 def test_output_separation_protects_an_explicit_config_parent(tmp_path: Path) -> None:

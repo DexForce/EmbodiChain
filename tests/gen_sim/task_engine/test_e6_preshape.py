@@ -39,6 +39,8 @@ from embodichain.lab.sim.atomic_actions import SlideOptions
 @dataclass
 class Diagnostics:
     metadata: dict = field(default_factory=dict)
+    failure: object = None
+    messages: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -251,6 +253,29 @@ def test_wider_hand_does_not_bypass_table_rejection(case):
     assert result.plan_success.tolist() == [False]
     assert measured == [0.84, 0.83]
     assert result.diagnostics.metadata["gen_sim_e6_preshape"]["accepted_plan"] is False
+
+
+def test_failed_wider_plan_retains_its_actual_failure_without_replacing_nominal(case):
+    engine, provider, _, context = case
+    nominal = Plan(torch.tensor([False]))
+    nominal.diagnostics.failure = NS(code="grasp_unavailable")
+    widened = Plan(torch.tensor([False]))
+    widened.diagnostics.failure = NS(code="approach_unqualified")
+    widened.diagnostics.metadata["motion_failure"] = {"phase": "approach"}
+    widened.diagnostics.messages = ["No continuous approach"]
+
+    def build(request):
+        screen(provider)
+        return nominal if request.skill_options.preshape_fraction == 0.85 else widened
+
+    result = plan_with_preshape(engine, Request(), context, build)
+    assert result.plan_success.tolist() == [False]
+    assert result.diagnostics.failure is nominal.diagnostics.failure
+    failure = result.diagnostics.metadata["gen_sim_e6_preshape"]["rebuild_failure"]
+    assert failure["code"] == "approach_unqualified"
+    assert failure["messages"] == ["No continuous approach"]
+    assert failure["metadata"]["motion_failure"] == {"phase": "approach"}
+    assert "gen_sim_e6_preshape" not in nominal.diagnostics.metadata
 
 
 @pytest.mark.parametrize("explicit", [False, True])

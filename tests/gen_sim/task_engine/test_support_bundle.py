@@ -399,6 +399,63 @@ def test_explicit_inside_yaw_survives_production_bundle_loading(
             )
 
 
+def test_measured_rigid_capability_roundtrips_without_changing_legacy_identity(
+    support_scene: PreparedScene, tmp_path: Path
+) -> None:
+    trimesh.creation.box(extents=(0.5, 0.02, 0.5)).export(
+        support_scene.rigid_objects[-1]["shape"]["fpath"]
+    )
+    graph = _placement_graph(inside=True, reference="tray")
+    _, paths = bundle.generate_task_program_bundle(
+        graph,
+        support_scene,
+        tmp_path / "measured",
+        robot_profile="dual_franka",
+        pick_contact_revision=4,
+        measured_rigid_calls=["pick", "place"],
+    )
+    loaded = _load_bundle(paths).integration
+    assert len(loaded.adapter_factory.measured_rigid_calls) == 2
+    constraints = load_config(paths.root / "task_program/constraints.json")
+    assert constraints["measured_rigid_calls"] == ["pick", "place"]
+    identities = []
+    for label, selected in (("absent", None), ("empty", [])):
+        _, legacy = bundle.generate_task_program_bundle(
+            graph,
+            support_scene,
+            tmp_path / label,
+            robot_profile="dual_franka",
+            pick_contact_revision=4,
+            measured_rigid_calls=selected,
+        )
+        assert "measured_rigid_calls" not in load_config(
+            legacy.root / "task_program/constraints.json"
+        )
+        integration = _load_bundle(legacy).integration
+        assert integration.adapter_factory.measured_rigid_calls == ()
+        identities.append(integration.integration_fingerprint)
+    assert identities[0] == identities[1] != loaded.integration_fingerprint
+    for invalid in ("place", ["missing"], ["place", "place"]):
+        with pytest.raises(ValueError, match="[Mm]easured"):
+            bundle.generate_task_program_bundle(
+                graph,
+                support_scene,
+                tmp_path / ("bad_" + repr(invalid)),
+                robot_profile="dual_franka",
+                pick_contact_revision=4,
+                measured_rigid_calls=invalid,
+            )
+    with pytest.raises(ValueError, match="revision4"):
+        bundle.generate_task_program_bundle(
+            graph,
+            support_scene,
+            tmp_path / "wrong_closing_revision",
+            robot_profile="dual_franka",
+            pick_contact_revision=1,
+            measured_rigid_calls=["pick"],
+        )
+
+
 def test_per_call_contact_revision_survives_strict_bundle_loading(
     support_scene: PreparedScene, tmp_path: Path
 ) -> None:

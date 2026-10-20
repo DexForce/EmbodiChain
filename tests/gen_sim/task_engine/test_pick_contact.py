@@ -806,6 +806,7 @@ def test_engine_factory_scopes_contact_revision_and_live_opening_context(
         "_motion_samples",
         "_cartesian_calls",
         "_articulation_calls",
+        "_articulation_followups",
         "_pour_return_calls",
         "_press_routes",
         "_twist_routes",
@@ -813,6 +814,7 @@ def test_engine_factory_scopes_contact_revision_and_live_opening_context(
         "_alignment_continuation_routes",
         "_pick_continuations",
         "_pour_continuations",
+        "_measured_rigid_calls",
     ):
         setattr(factory, name, ())
     factory._grasp_pose_generators = factory._pour_receivers = {}

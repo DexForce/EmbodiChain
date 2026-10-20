@@ -245,6 +245,59 @@ def test_frozen_rigid_preserves_explicit_legacy_effort(
     _assert_physical_oracle(paths, frozen_rigid)
 
 
+def test_loading_reference_checks_existing_physical_manifest_before_resealing(
+    frozen_rigid: FrozenPhysicalInput, tmp_path: Path
+) -> None:
+    _, paths = bundle.generate_task_program_bundle(
+        _placement_graph(),
+        frozen_rigid,
+        tmp_path / "selected",
+        robot_profile="dual_franka",
+    )
+    embodiment = load_config(paths.embodiment)
+    embodiment["simulation"]["joint_drive_props"]["max_effort"]["left_eef"] = 17.0
+    save_config(paths.embodiment, embodiment)
+
+    with pytest.raises(ValueError, match="Frozen physical output declarations changed"):
+        load_frozen_physical_input(frozen_rigid.scene, paths.root)
+
+
+def test_loading_reference_rejects_a_different_robot_profile(
+    frozen_rigid: FrozenPhysicalInput, tmp_path: Path
+) -> None:
+    _, paths = bundle.generate_task_program_bundle(
+        _placement_graph(),
+        frozen_rigid,
+        tmp_path / "selected",
+        robot_profile="dual_franka",
+    )
+    with pytest.raises(ValueError, match="robot profile"):
+        load_frozen_physical_input(
+            frozen_rigid.scene, paths.root, robot_profile="franka"
+        )
+
+
+def test_final_inspection_measures_the_selected_normalized_physical_scene(
+    frozen_rigid: FrozenPhysicalInput,
+) -> None:
+    from embodichain.gen_sim.task_engine.scene.final_inspection import (
+        inspect_final_scene,
+    )
+
+    inspection = inspect_final_scene(
+        frozen_rigid.scene, revision_id=frozen_rigid.physical_digest
+    )
+
+    assert inspection["scene_revision_id"] == frozen_rigid.physical_digest
+    assert inspection["source_config_path"] == str(
+        frozen_rigid.scene.source_config_path
+    )
+    bottle = next(row for row in inspection["objects"] if row["uid"] == "bottle")
+    assert bottle["world_aabb"] is not None
+    assert bottle["evidence"]["source"] == "final_geometry"
+    frozen_rigid.assert_unchanged()
+
+
 @pytest.mark.parametrize(
     "options",
     [

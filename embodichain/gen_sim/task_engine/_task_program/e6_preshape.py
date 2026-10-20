@@ -161,6 +161,29 @@ def plan_with_preshape(
                                 "measurements": measured,
                                 "accepted_plan": accepted,
                                 "physical_success": None,
+                                **(
+                                    {
+                                        "rebuild_failure": {
+                                            "code": getattr(
+                                                candidate.diagnostics.failure,
+                                                "code",
+                                                None,
+                                            ),
+                                            "messages": list(
+                                                getattr(
+                                                    candidate.diagnostics,
+                                                    "messages",
+                                                    (),
+                                                )
+                                            ),
+                                            "metadata": dict(
+                                                candidate.diagnostics.metadata
+                                            ),
+                                        }
+                                    }
+                                    if not viable
+                                    else {}
+                                ),
                             },
                         },
                     ),

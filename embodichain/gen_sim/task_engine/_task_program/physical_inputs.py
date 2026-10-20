@@ -126,6 +126,7 @@ class FrozenPhysicalInput:
         }
         return {
             "schema_version": "gen_sim.frozen-physical-input/v1",
+            "robot_profile": self.robot_profile,
             "physical_digest": self.physical_digest,
             "components_digest": canonical_hash(components),
             "planner_digest": canonical_hash(self.scene.planner_objects),
@@ -207,7 +208,22 @@ def load_frozen_physical_input(
         ValueError: If object identities, roles, poses or components disagree.
     """
     root = Path(bundle).expanduser().resolve()
+    existing = verify_physical_input_manifest(root)
+    if (
+        existing is not None
+        and existing.get("robot_profile", robot_profile) != robot_profile
+    ):
+        raise ValueError("Frozen reference robot profile differs from the request.")
     input_files = {str(root / name): _sha(root / name) for name in _COMPONENTS.values()}
+    if existing is not None:
+        input_files[str(root / "physical_input.json")] = _sha(
+            root / "physical_input.json"
+        )
+    scene_manifest = root / "static_scene_manifest.json"
+    if scene_manifest.is_file():
+        if load_config(scene_manifest).get("robot_profile") != robot_profile:
+            raise ValueError("Frozen reference robot profile differs from the request.")
+        input_files[str(scene_manifest)] = _sha(scene_manifest)
     deployment = load_config(root / _COMPONENTS["deployment"])
     for owner in ("scene", "embodiment"):
         if deployment.get(owner) != {"component": _COMPONENTS[owner]}:
@@ -251,18 +267,48 @@ def load_frozen_physical_input(
         if source[uid].get("role") != role:
             raise ValueError(f"Frozen scene role changed for {uid!r}.")
         merged = {**deepcopy(source[uid]), **deepcopy(config)}
+        # Source semantics may be reused, but omitted runtime fields keep their
+        # selected-model defaults rather than inheriting another model's pose.
+        for name in (
+            "shape",
+            "fpath",
+            "body_scale",
+            "init_pos",
+            "init_rot",
+            "init_local_pose",
+            "attrs",
+            "root_props",
+            "link_attrs",
+            "joint_drive_props",
+        ):
+            if name not in config:
+                merged.pop(name, None)
         merged.setdefault("init_rot", [0.0, 0.0, 0.0])
         if merged.get("init_local_pose") is not None:
             pose = np.asarray(merged["init_local_pose"], dtype=float)
-            expected = np.eye(4)
-            expected[:3, :3] = Rotation.from_euler(
-                "XYZ", merged["init_rot"], degrees=True
-            ).as_matrix()
-            expected[:3, 3] = merged["init_pos"]
-            if pose.shape != (4, 4) or not np.allclose(
-                pose, expected, atol=1e-12, rtol=0
-            ):
+            if pose.shape != (4, 4) or not np.isfinite(pose).all():
                 raise ValueError(f"Frozen scene pose fields disagree for {uid!r}.")
+            rotation = pose[:3, :3]
+            if not np.allclose(
+                rotation.T @ rotation, np.eye(3), atol=1e-10, rtol=0
+            ) or not np.isclose(np.linalg.det(rotation), 1.0, atol=1e-10, rtol=0):
+                raise ValueError(f"Frozen scene pose is not rigid for {uid!r}.")
+            expected = np.eye(4)
+            expected[:3, :3] = (
+                Rotation.from_euler("XYZ", config["init_rot"], degrees=True).as_matrix()
+                if "init_rot" in config
+                else pose[:3, :3]
+            )
+            expected[:3, 3] = config.get("init_pos", pose[:3, 3])
+            if not np.allclose(pose, expected, atol=1e-12, rtol=0):
+                raise ValueError(f"Frozen scene pose fields disagree for {uid!r}.")
+            merged["init_pos"] = pose[:3, 3].tolist()
+            if "init_rot" not in config:
+                merged["init_rot"] = (
+                    Rotation.from_matrix(pose[:3, :3])
+                    .as_euler("XYZ", degrees=True)
+                    .tolist()
+                )
         if role == "articulation":
             effective = _effective_articulation(config)
             effective_articulations.append(effective)

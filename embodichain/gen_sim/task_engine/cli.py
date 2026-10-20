@@ -318,6 +318,10 @@ def _run_workflow(
     adapter = SceneAdapter(model=args.model, robot_profile=args.robot_profile)
     workflow = TaskEngineWorkflow(scene_adapter=adapter)
     workflow_cfg, planning_cfg, execution_cfg = load_task_engine_config(args.config)
+    if reference_image and planning_cfg.physical_reference is not None:
+        parser.error(
+            "--reference-image cannot qualify a different physical_reference model."
+        )
     with reserve_run_directory(args.output_root) as allocation:
         if scene is not None:
             validate_scene_output_separation(scene, allocation.path)

@@ -52,7 +52,7 @@ from .motion import (
 )
 
 __all__: list[str] = []
-ARTICULATION_RECOVERY_REVISION = 4
+ARTICULATION_RECOVERY_REVISION = 5
 MAX_SLIDE_FRAMES = 390
 MAX_ENDPOINTS = 4
 
@@ -291,6 +291,9 @@ def _tracks(
         if path is not None:
             yield request, (path,), {"method": "local_ik", "frames": len(path)}
         return
+    if len(calls) == 5:
+        yield from _push_tracks(scope, request, search)
+        return
     budget = slide_budget(request.motion_policy.sample_count)
     if budget is None:
         return
@@ -320,6 +323,54 @@ def _tracks(
         yield selected, (approached, reached.flip(0), pulled.flip(0), released), {
             "method": "terminal_first",
             "frames": budget,
+            "endpoint_seed_index": index,
+        }
+
+
+def _push_tracks(
+    scope: PlanningScope, request: Any, search: _Search
+) -> Iterator[tuple[Any, tuple[torch.Tensor, ...], dict[str, Any]]]:
+    """Connect a free-space approach to one continuous, unchanged-budget push.
+
+    Grasp-first seeds keep the reach and push on one branch. All five original
+    targets and sample counts are retained; the shared Slide rebuild owns hand
+    commands, effects and execution. No scene motion is predicted here.
+    """
+    calls = scope.calls
+    start = calls[0].options.start_qpos
+    approach, grasp, pushed, release, returned = [
+        search.to_root(call.targets[-1].xpos) for call in calls
+    ]
+    counts = [call.options.sample_count for call in calls]
+
+    def line(a: torch.Tensor, b: torch.Tensor, count: int) -> torch.Tensor:
+        return interpolate_xpos_batched(a, b, count)[0, 1:]
+
+    for index, endpoint in search.endpoints(grasp, start):
+        reached_back = search.path(line(grasp, approach, counts[1]), endpoint)
+        if reached_back is None:
+            continue
+        pushed_path = search.path(line(grasp, pushed, counts[2]), endpoint)
+        if pushed_path is None:
+            continue
+        released = search.path(line(pushed, release, counts[3]), pushed_path[-1:])
+        if released is None:
+            continue
+        return_path = search.path(line(release, returned, counts[4]), released[-1:])
+        if return_path is None:
+            continue
+        approached = start + torch.linspace(0, 1, counts[0])[:, None] * (
+            reached_back[-1:] - start
+        )
+        yield request, (
+            approached,
+            reached_back.flip(0),
+            pushed_path,
+            released,
+            return_path,
+        ), {
+            "method": "push_grasp_first",
+            "frames": request.motion_policy.sample_count,
             "endpoint_seed_index": index,
         }
 
@@ -437,7 +488,8 @@ def recover(
         original = _screen_withdrawal(scope, original)
     if original.plan_success.any() or not scope.compatible or not scope.calls:
         return original
-    expected = 4 if scope.kind == "slide" else 1
+    push = scope.kind == "slide" and any(s.name == "push" for s in original.segments)
+    expected = (5 if push else 4) if scope.kind == "slide" else 1
     if len(scope.calls) != expected or context.batch_size != 1:
         return original
     if (
@@ -447,7 +499,7 @@ def recover(
         return original
     if scope.kind == "slide" and (
         request.skill_options.release_retreat_distance <= 0
-        or not any(s.name == "pull" for s in original.segments)
+        or not any(s.name == ("push" if push else "pull") for s in original.segments)
         or slide_budget(request.motion_policy.sample_count) is None
     ):
         return original
@@ -493,6 +545,13 @@ def recover(
                 ).all():
                     details["reason"] = "final_command_velocity"
                     continue
+                if push:
+                    robot_collision = check_robot_motion(
+                        robot, trajectory.positions[0], part
+                    )
+                    if not robot_collision["valid"]:
+                        details["robot_collision"] = robot_collision
+                        continue
                 count = (
                     len(tracks[0])
                     if scope.kind == "slide"

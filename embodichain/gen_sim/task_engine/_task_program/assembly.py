@@ -126,6 +126,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         pick_contact_revision: int | None = None,
         pick_contact_revisions: tuple[tuple[str, int], ...] = (),
         world_yaw_free_places: tuple[str, ...] = (),
+        measured_rigid_calls: tuple = (),
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -151,6 +152,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         self._pick_contact_revision = pick_contact_revision
         self._pick_contact_revisions = pick_contact_revisions
         self._world_yaw_free_places = world_yaw_free_places
+        self._measured_rigid_calls = measured_rigid_calls
         self._task_post_port = TaskStabilityPort(
             self.segment_policy_port,
             self._simulation,
@@ -356,6 +358,14 @@ class _TaskFactory(SimulationTaskProgramFactory):
             place.world_yaw_free_routes = bind_routes(self)
             place.world_yaw_simulation = self._simulation
         engine.register(place, replace=True)
+        if self._measured_rigid_calls:
+            from .measured_rigid import MeasuredRigidPolicy
+
+            engine._measured_rigid_policy = MeasuredRigidPolicy(
+                self._simulation,
+                self.task_program_registration.scene_binding,
+                self._measured_rigid_calls,
+            )
         engine.register(pour, replace=True)
         if self._coordinated_motion:
             engine.register(GenSimCoordinatedPickment(), replace=True)
@@ -524,6 +534,7 @@ class TaskAdapterFactory:
     pick_contact_revision: int | None = None
     pick_contact_revisions: tuple[tuple[str, int], ...] = ()
     world_yaw_free_places: tuple[str, ...] = ()
+    measured_rigid_calls: tuple = ()
     pour_return_calls: tuple[str, ...] = ()
     held_command_sources: tuple = ()
     upright_container_picks: tuple = ()
@@ -770,6 +781,7 @@ class TaskAdapterFactory:
             pick_contact_revision=self.pick_contact_revision,
             pick_contact_revisions=self.pick_contact_revisions,
             world_yaw_free_places=self.world_yaw_free_places,
+            measured_rigid_calls=self.measured_rigid_calls,
         )
         support = [
             cfg
@@ -836,6 +848,7 @@ def load_deployment(
             "pick_contact_revision",
             "pick_contact_revisions",
             "world_yaw_free_places",
+            "measured_rigid_calls",
         }
         or payload["schema_version"] != "gen_sim_task_constraints/v1"
     ):
@@ -1053,6 +1066,23 @@ def load_deployment(
     )
     if world_yaw_free_places and not adaptive_pick:
         raise ValueError("World yaw freedom requires ordinary Pick/Place binding.")
+    from .measured_rigid import (
+        MEASURED_RIGID_REVISION,
+        bind_calls as bind_measured_calls,
+    )
+
+    measured_rigid_calls = bind_measured_calls(
+        payload.get("measured_rigid_calls", []), compiled, dict(pick_purposes)
+    )
+    if measured_rigid_calls and not adaptive_pick:
+        raise ValueError("Measured rigid policy requires ordinary Pick/Place binding.")
+    for identity, _, container in measured_rigid_calls:
+        if not container and dict(pick_contact_revisions).get(
+            identity, pick_contact_revision
+        ) not in (None, 4):
+            raise ValueError(
+                "Measured preshape requires the qualified revision4 closing contract."
+            )
     from .pick_closure_quality import bind_policies
 
     upright_container_picks = bind_policies(
@@ -1156,6 +1186,11 @@ def load_deployment(
         {
             "adaptive_grasp_revision": ADAPTIVE_GRASP_REVISION,
             "invocation_policy_revision": INVOCATION_POLICY_REVISION,
+            **(
+                {"measured_rigid_revision": MEASURED_RIGID_REVISION}
+                if measured_rigid_calls
+                else {}
+            ),
             **(
                 {
                     "handover_scene_clearance_revision": HANDOVER_SCENE_CLEARANCE_REVISION,
@@ -1293,6 +1328,7 @@ def load_deployment(
         pick_contact_revision=pick_contact_revision,
         pick_contact_revisions=pick_contact_revisions,
         world_yaw_free_places=world_yaw_free_places,
+        measured_rigid_calls=measured_rigid_calls,
     )
     integration = replace(
         base.integration,

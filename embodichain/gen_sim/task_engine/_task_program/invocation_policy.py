@@ -260,6 +260,7 @@ class GenSimActionEngine(AtomicActionEngine):
         **kwargs: Any,
     ) -> None:
         self._motion_samples = dict(motion_samples)
+        self._measured_rigid_policy = None
         self._twist_session_controller = None
         self._twist_session_controllers: dict[str, Any] = {}
         if any(type(value) is not str or not value for value in cartesian_calls):
@@ -534,27 +535,38 @@ class GenSimActionEngine(AtomicActionEngine):
             request.invocation_id == preview.route.place_id
             for preview in previews.values()
         )
+        measured = getattr(self, "_measured_rigid_policy", None)
+        owns_measured = measured is not None and request.invocation_id in measured.calls
         bound_slide = (
             request.skill_id == "slide"
             and getattr(self, "_articulation_calls", {}).get(request.invocation_id)
             == "slide"
         )
-        if (paired or bound_slide) and context is None:
+        if (paired or bound_slide or owns_measured) and context is None:
             context = self.initial_context()
         paired = paired and getattr(context, "batch_size", None) == 1
         parent = _COST.get()
-        with search_cost_scope(wall_seconds=60.0 if paired else None) as cost:
+        with search_cost_scope(
+            wall_seconds=60.0 if paired or owns_measured else None
+        ) as cost:
             try:
                 with measure_search("complete_plan_request"):
                     from .e6_preshape import plan_with_preshape
 
-                    plan = plan_with_preshape(
-                        self,
-                        request,
-                        context,
-                        lambda selected: self._plan_request_impl(
-                            selected, context, plan_transform=plan_transform
-                        ),
+                    def build(selected: Any) -> Any:
+                        return plan_with_preshape(
+                            self,
+                            selected,
+                            context,
+                            lambda final: self._plan_request_impl(
+                                final, context, plan_transform=plan_transform
+                            ),
+                        )
+
+                    plan = (
+                        measured.plan(self, request, context, build)
+                        if owns_measured
+                        else build(request)
                     )
             except PlanningBudgetExceeded as error:
                 if parent is not None:
@@ -592,8 +604,13 @@ class GenSimActionEngine(AtomicActionEngine):
         capture = initial_plan_capture(request.invocation_id)
         from .alignment_continuation import _PREVIEW
         from .e6_preshape import defer_initial_capture
+        from .measured_rigid import defer_initial_capture as defer_measured_capture
 
-        if _PREVIEW.get() or defer_initial_capture(request.invocation_id):
+        if (
+            _PREVIEW.get()
+            or defer_initial_capture(request.invocation_id)
+            or defer_measured_capture(request.invocation_id)
+        ):
             capture = None
         enabled = request.invocation_id in self._cartesian_calls
         alignment = (

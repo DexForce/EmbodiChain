@@ -225,11 +225,24 @@ def test_replay_refuses_changed_goals_timing_or_invalid_fk(change):
 
 
 @pytest.mark.parametrize(
-    "failure",
-    [None, "velocity", "collision", "missing_dependency", "mismatch", "budget"],
+    "push,failure",
+    [
+        (push, failure)
+        for push in (False, True)
+        for failure in (
+            None,
+            "velocity",
+            "collision",
+            "robot_collision",
+            "missing_dependency",
+            "mismatch",
+            "budget",
+        )
+        if push or failure != "robot_collision"
+    ],
 )
 def test_only_fully_valid_recovery_is_accepted_and_rng_is_restored(
-    monkeypatch, failure
+    monkeypatch, push, failure
 ):
     solver = NS(device=torch.device("cpu"), _seed_sampler=None)
     monkeypatch.setattr(recovery, "PytorchSolver", type(solver))
@@ -237,12 +250,15 @@ def test_only_fully_valid_recovery_is_accepted_and_rng_is_restored(
     generator = NS(robot=robot, planner=NS(cfg=NS(sim_instance_id=7)))
     scope = recovery.PlanningScope(generator, "slide")
     options = NS(control_part="arm", start_qpos=torch.zeros(1, 2))
-    scope.calls = [recovery.MotionCall([], options) for _ in range(4)]
+    expected = 5 if push else 4
+    scope.calls = [recovery.MotionCall([], options) for _ in range(expected)]
     request = NS(
         skill_options=NS(release_retreat_distance=0.04),
         motion_policy=MotionPolicy(sample_count=260),
     )
     original = Plan()
+    if push:
+        original.segments = (NS(name="push"),)
     chosen = Plan(
         plan_success=torch.tensor([True]),
         diagnostics=Diagnostics(failure=None),
@@ -264,7 +280,7 @@ def test_only_fully_valid_recovery_is_accepted_and_rng_is_restored(
     monkeypatch.setattr(
         recovery,
         "_tracks",
-        lambda *a: iter(((request, (torch.zeros(3, 2),) * 4, {"frames": 390}),)),
+        lambda *a: iter(((request, (torch.zeros(3, 2),) * expected, {"frames": 390}),)),
     )
     monkeypatch.setattr(recovery, "_joint_velocity_limits", lambda *a: torch.ones(1, 2))
     monkeypatch.setattr(recovery.SimulationManager, "get_instance", lambda _: object())
@@ -275,13 +291,20 @@ def test_only_fully_valid_recovery_is_accepted_and_rng_is_restored(
         return {"valid": failure != "collision"}
 
     monkeypatch.setattr(recovery, "check_free_motion", collision)
+    robot_checks = []
+
+    def robot_collision(*args):
+        robot_checks.append(True)
+        return {"valid": failure != "robot_collision"}
+
+    monkeypatch.setattr(recovery, "check_robot_motion", robot_collision)
 
     def build(value):
         assert value is request
         torch.rand(5)
         random.random()
         np.random.rand(4)
-        scope.cursor = 4
+        scope.cursor = expected
         if failure == "mismatch":
             raise recovery._ReplayMismatch("changed target")
         return chosen
@@ -307,6 +330,8 @@ def test_only_fully_valid_recovery_is_accepted_and_rng_is_restored(
     )
     if failure is not None:
         assert result.diagnostics.failure == "original_failure"
+    if failure is None:
+        assert bool(robot_checks) is push
 
 
 def test_local_path_filters_fast_candidates_without_changing_solver_defaults():
@@ -330,6 +355,55 @@ def test_local_path_filters_fast_candidates_without_changing_solver_defaults():
     result = search.path(torch.eye(4)[None], start)
     torch.testing.assert_close(result, torch.tensor([[0.0, 0.0], [0.01, 0.01]]))
     assert torch.equal(start, torch.zeros_like(start))
+
+
+@pytest.mark.parametrize("failed_leg", [None, 0, 1, 2, 3])
+def test_push_tracks_keep_original_budget_contact_targets_and_continuity(failed_leg):
+    def pose(x):
+        result = torch.eye(4)[None]
+        result[:, 0, 3] = x
+        return result
+
+    calls = [
+        recovery.MotionCall(
+            [PlanState(move_type=MoveType.EEF_MOVE, xpos=pose(x))],
+            NS(start_qpos=torch.zeros(1, 2), sample_count=count),
+        )
+        for x, count in ((0.2, 5), (0.3, 5), (0.1, 5), (0.15, 4), (0.2, 5))
+    ]
+    scope = recovery.PlanningScope(object(), "slide", calls=calls)
+    endpoints = []
+    legs = []
+
+    def endpoint(target, start):
+        endpoints.append(target)
+        return [(7, torch.tensor([[0.3, 0.0]]))]
+
+    def path(poses, start):
+        index = len(legs)
+        legs.append(poses)
+        if index == failed_leg:
+            return None
+        q = torch.cat((poses[:, :1, 3], torch.zeros(len(poses), 1)), dim=1)
+        return torch.cat((start, q))
+
+    search = NS(to_root=lambda p: p, endpoints=endpoint, path=path)
+    request = NS(motion_policy=NS(sample_count=260))
+    rows = list(recovery._push_tracks(scope, request, search))
+    assert torch.equal(endpoints[0], pose(0.3))
+    if failed_leg is not None:
+        assert rows == []
+        return
+    selected, tracks, evidence = rows[0]
+    assert selected is request
+    assert [len(track) for track in tracks] == [5, 5, 5, 4, 5]
+    for first, second in zip(tracks, tracks[1:]):
+        torch.testing.assert_close(first[-1], second[0])
+    assert [float(track[-1, 0]) for track in tracks] == pytest.approx(
+        [0.2, 0.3, 0.1, 0.15, 0.2]
+    )
+    assert evidence["method"] == "push_grasp_first"
+    assert evidence["frames"] == 260
 
 
 @pytest.mark.parametrize("obstacle_x,accepted", [(0.5, False), (5.0, True)])

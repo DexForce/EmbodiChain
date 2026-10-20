@@ -23,7 +23,10 @@ from copy import deepcopy
 from dataclasses import dataclass
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .._task_program.physical_inputs import FrozenPhysicalInput
 
 from embodichain.gen_sim.task_engine import (
     TaskAgent,
@@ -43,6 +46,7 @@ from embodichain.gen_sim.task_engine.task_program_bundle import (
     TaskProgramBundlePaths,
     generate_task_program_bundle,
 )
+from .._task_program.policy_selection import select_manipulation_policy
 
 from .artifacts import (
     ArtifactTransaction,
@@ -124,6 +128,7 @@ class TaskEngineCoordinator:
         force_most_likely: bool = False,
         final_inspection: Mapping[str, Any] | None = None,
         unbound_action_plan: Mapping[str, Any] | None = None,
+        physical_input: FrozenPhysicalInput | None = None,
     ) -> PreparationResult:
         """Publish a graph and configured Task Program as one transaction.
 
@@ -141,6 +146,37 @@ class TaskEngineCoordinator:
             randomize_table_material,
         )
         normalized_source = self._coerce_source(source)
+        selected_physical = physical_input or getattr(
+            self.scene_adapter, "physical_input", None
+        )
+        if selected_physical is not None:
+            selected_physical.assert_unchanged()
+            output = Path(output_dir).expanduser().resolve()
+            inputs = [Path(name).resolve() for name in selected_physical.input_files]
+            references = [
+                item.parent
+                for item in inputs
+                if item.name == "task_program_deployment.yaml"
+            ]
+            if any(item.is_relative_to(output) for item in inputs) or any(
+                output.is_relative_to(root) for root in references
+            ):
+                raise ValueError("Selected physical input and output must not overlap.")
+            if fit_grasp_assets or twist_mass_source:
+                raise ValueError("Selected physical input forbids physical adaptation.")
+            for name, value in (
+                ("max_episodes", max_episodes),
+                ("max_episode_steps", max_episode_steps),
+            ):
+                if value is not None and value != selected_physical.deployment[name]:
+                    raise ValueError(f"Selected physical input owns {name}.")
+            if final_inspection is None:
+                from ..scene.final_inspection import inspect_final_scene
+
+                final_inspection = inspect_final_scene(
+                    selected_physical.scene,
+                    revision_id=selected_physical.physical_digest,
+                )
         validate_scene_output_separation(normalized_source.path, output_dir)
         with ArtifactTransaction(output_dir, overwrite=overwrite) as transaction:
             staging = transaction.staging_dir
@@ -170,6 +206,8 @@ class TaskEngineCoordinator:
             adaptation_kwargs: dict[str, Any] = {"force_most_likely": force_most_likely}
             if final_inspection is not None:
                 adaptation_kwargs["final_inspection"] = final_inspection
+            if selected_physical is not None:
+                adaptation_kwargs["physical_input"] = selected_physical
             adaptation = self.scene_adapter.adapt(
                 normalized_candidates,
                 normalized_source,
@@ -217,13 +255,41 @@ class TaskEngineCoordinator:
 
                 is_twist = any(node["task_type"] == "E8" for node in graph["nodes"])
                 height_candidates = (
-                    (0.001, 0.002, 0.003, 0.004) if is_twist else (None,)
+                    (0.001, 0.002, 0.003, 0.004)
+                    if is_twist and adaptation.physical_input is None
+                    else (None,)
                 )
                 for height in height_candidates:
                     try:
-                        extra = {"twist_support_lift_m": height} if is_twist else {}
+                        extra = (
+                            {"twist_support_lift_m": height}
+                            if height is not None
+                            else {}
+                        )
                         if twist_mass_source:
                             extra["twist_mass_source"] = True
+                        if str(adaptation.scene_manifest["robot_profile"]) in {
+                            "dual_franka",
+                            "dual_franka_robotiq_arg2f_140",
+                        }:
+                            selection = select_manipulation_policy(
+                                graph, plan.candidate, adaptation.prepared_scene
+                            )
+                            extra.update(selection)
+                            (staging / "manipulation_policy_selection.json").write_text(
+                                json.dumps(
+                                    {
+                                        "schema_version": "gen_sim.manipulation-policy-selection/v1",
+                                        "source": "typed_unconstrained_rigid_inside_recipe",
+                                        "selected_calls": selection,
+                                        "physical_input_modified": False,
+                                    },
+                                    indent=2,
+                                    ensure_ascii=False,
+                                )
+                                + "\n",
+                                encoding="utf-8",
+                            )
                         if any(n["task_type"] == "E3" for n in graph["nodes"]):
                             from .._task_program.pour_continuation import (
                                 supports_ordinary_pour,
@@ -233,7 +299,7 @@ class TaskEngineCoordinator:
                                 extra["pour_geometry_revision"] = 1
                         graph, generated = generate_task_program_bundle(
                             graph,
-                            adaptation.prepared_scene,
+                            adaptation.physical_input or adaptation.prepared_scene,
                             staging,
                             robot_profile=str(
                                 adaptation.scene_manifest["robot_profile"]

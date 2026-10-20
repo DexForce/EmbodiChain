@@ -60,6 +60,10 @@ def scene(button, tmp_path):
         "/Button/cap/button_cap",
     )
     stage.RemovePrim("/Button/cap/contact")
+    # Runtime physical-input validation uses the native triangle-mesh parser.
+    mesh = UsdGeom.Mesh(stage.GetPrimAtPath("/Button/cap/button_cap"))
+    mesh.GetFaceVertexCountsAttr().Set([3, 3])
+    mesh.GetFaceVertexIndicesAttr().Set([0, 1, 2, 0, 2, 3])
     UsdPhysics.MassAPI.Apply(stage.GetPrimAtPath("/Button/cap")).CreateMassAttr(0.02)
     stage.GetRootLayer().Save()
     art = {
