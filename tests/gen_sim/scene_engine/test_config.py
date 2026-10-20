@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -65,6 +66,44 @@ def test_scene_engine_help_exposes_only_runtime_arguments(
     assert "--target_body_scale_mode" not in output
     assert "gen_sim/.env" in output
     assert "--config" not in output
+
+
+@pytest.mark.parametrize(
+    "image,edit_prompt,policy",
+    [
+        ("scene.png", None, None),
+        (None, "move the cup", None),
+        ("scene.png", "move the cup", "policy.yaml"),
+        ("scene.png", None, "policy.yaml"),
+    ],
+)
+def test_scene_engine_main_dispatches_once_with_both_export_options(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    image: str | None,
+    edit_prompt: str | None,
+    policy: str | None,
+) -> None:
+    dispatch = Mock()
+    monkeypatch.setattr(start, "cli_scene_engine", dispatch)
+    output = str(tmp_path / "output")
+    argv = ["--output_root", output]
+    if image is not None:
+        argv.extend(("--image", image))
+    if edit_prompt is not None:
+        argv.extend(("--edit_prompt", edit_prompt))
+    if policy is not None:
+        argv.extend(("--scene-randomization-config", policy))
+
+    start.main(argv)
+
+    dispatch.assert_called_once_with(
+        image,
+        output,
+        edit_prompt=edit_prompt,
+        scene_z_rotation_degrees=180.0,
+        scene_randomization=Path(policy) if policy is not None else None,
+    )
 
 
 def test_scene_engine_cli_forwards_validated_paths(

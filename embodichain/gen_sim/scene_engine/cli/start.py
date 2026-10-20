@@ -121,11 +121,6 @@ def main(argv: Sequence[str] | None = None) -> None:
         args.output_root,
         edit_prompt=args.edit_prompt,
         scene_z_rotation_degrees=180.0,
-    )
-    cli_scene_engine(
-        args.image,
-        args.output_root,
-        edit_prompt=args.edit_prompt,
         scene_randomization=args.scene_randomization_config,
     )
 
