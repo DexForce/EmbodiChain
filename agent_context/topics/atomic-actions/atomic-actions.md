@@ -89,26 +89,11 @@ contact or physical goal satisfaction.
 - [Affordance sampling](affordance-sampling.md): legal geometric variation, reproducible branch identity, action feasibility, and the sim-only host boundary.
 - [Articulation geometry](articulation-geometry.md): topology/mesh ownership and directional affordance contracts.
 
-The `scripts/tutorials/atomic_action/place.py` tutorial configures a
-task-scoped Newton contact candidate on the cube and gripper collision links
-before `SimulationManager.prepare()`. Shared tutorial helpers also author
-`condim=4` on gripper/contact links and grasped objects before preparation.
-Newton manipulation overlays use `ke=4e4`, `kd=4e2`,
-`torsional_friction=0.1`, and `rolling_friction=0.01` on the gripper and
-directly manipulated object contact surfaces. `condim=4` activates the
-torsional term in MuJoCo-Warp; the rolling coefficient is retained for
-solvers/`condim=6` that support it.
-The profile was selected from Newton's native-contact examples and a fixed-
-seed Default comparison; it improves contact force-closure in the replay but
-does not promise identical open-loop Place behavior, whose attachment,
-mimic-joint, and release timing semantics remain backend-sensitive.
-The values are intentionally scoped and are not world defaults. Other surfaces
-keep their source contact dimension. Replay does not rewrite MuJoCo model
-arrays after CUDA Graph capture; contact storage is allocated for the authored
-dimensions. The packaged PGI/Franka embodiment and
-repeated-pick/open-drawer environment components carry the same Newton-only
-overlays, while their declared Default backend continues to consume only the
-portable fields.
+Sample Newton contact overlays are local to the selected scene and gripper;
+they are not world defaults or a guarantee of open-loop physical success.
+Author contact dimensions and material settings before `prepare()`, never by
+rewriting captured solver arrays. The current values live in
+`lab/scripts/_atomic_action/support.py` and the selected physical components.
 
 ## Semantic integration boundary
 
@@ -135,60 +120,41 @@ Projected assurance is not physical task success.
 Use `/add-atomic-action` to extend goals, planners, registration and focused tests.
 Keep planning side-effect-free; actions do not own task sequencing or simulator stepping.
 
-The direct-simulation sample host is `embodichain run-atomic-action --skill`:
-`lab/scripts/run_atomic_action.py` owns validated selection and cleanup;
-`lab/scripts/_atomic_action/host.py` owns compilation, provenance and output,
-while the sample modules own twelve fixed physical scenes and typed defaults.
-The required skill selects the scene; physics, robot and planner are direct
-selectors. Robot compatibility is checked before scene import or simulator
-construction: Pickup, Place, MoveJoint and Handover accept the three sample
-presets, while the other scenes require UR5. Layouts, skill options and
-operator settings remain sample-owned. `--variants N` requests N executions
-including the reference and creates N environments; the default is one.
-`--expansion affordance|trajectory|both` selects available factors, and explicit
-unsupported factors fail before simulation. No Cartesian-product recipe bank
-or collection/batching lifecycle is required.
-The dual-arm sample factory in `lab/scripts/_atomic_action/scenario.py` retains
-the arm preset unless Python callers select `solver="pytorch"`. The Handover
-scene currently makes that selection for Franka; UR presets keep analytical UR
-IK. Cartesian preparation uses the shared
-[batched motion facade](../motion-planning/planner-details.md#normalization-and-capabilities).
-Mounted-gripper TCP calibration belongs to `lab/scripts/_atomic_action/tcp_presets.py`.
-The UR5/PGI, Franka/PGI and UR10/Robotiq mounting poses are independent; named
-tool points retain the existing general, grasp and legacy PGI dual calibrations.
-Handover explicitly mounts the Robotiq 2F-140 asset on every supported arm.
-UR5 and Franka own separate Robotiq Handover TCP matrices (0.21 m local Z
-and a 90-degree local-Z rotation); the generic dual factory retains PGI unless
-that gripper is selected. The scene's antipodal generator uses its matching
-140 mm opening geometry, and closure commands follow the six Robotiq joints'
-mimic directions with a 0.5 rad master angle.
-Scene callers select those points, and single/dual robot factories forward full
-poses to their solvers. Explicit Python PGI `tcp_z` overrides affect only local
-Z while preserving rotation and lateral offsets. TCP calibration changes the
-kinematic tool frame, not physical geometry.
-The matching tutorial files are compatibility entry points to those same scenes.
-Affordance branches are attached before planning. `AtomicActionEngine.compile`
-accepts an optional `plan_transform`, applied before concatenation and projected
-state propagation. The direct host and Task Program delegate trajectory changes
-to `atomic_actions/_plan_expansion.py`, which uses `ActionPlanTemplateAdapter`
-and `motion.expansion`, then rebuilds complete plans through the engine.
-Phase declarations can only narrow the built-in free-phase policy; editable
-joints come from explicit motion bindings and each row uses its own limits.
-Zero-time joins, protected phases, phase endpoints, non-motion columns and
-stationary participants are restored from the source samples. Logical source
-identities seed the expansion; environment IDs remain output correlations.
+## Direct-simulation sample host
 
-MoveJoint makes required targets separate invocations. Pour's constrained
-phases remain exact while its PickUp preparation can vary. MoveHeldObject
-uses the same reference cube and PickUp preparation; PushObject retains its
-constrained contact path and exposes trajectory expansion only. Slide replans
-its push after executing the pull, using each row's measured robot/handle state.
-The host plays already aligned trajectories through `motion.execution` without
-changing their cadence; additional settling and final holds appear in the
-exported execution timeline. Sample output reports planning/playback completion
-with no measured physical-success authority or dataset collection. Physical
-initial scenes remain fixed; spatial generalization belongs to benchmark hosts.
-Usage and the versioned output contract live in the sample `README.md`.
+`embodichain run-atomic-action --skill` selects a fixed sample scene.
+`lab/scripts/run_atomic_action.py` owns typed configuration, validated selection
+and cleanup; `lab/scripts/_atomic_action/host.py` owns compilation, expansion,
+playback and output. Scene modules own physical setup and local defaults.
+Tutorial files forwarding there are compatibility entries. Read the
+[host README](../../../embodichain/lab/scripts/_atomic_action/README.md) for
+supported combinations, fixture calibration, expansion and output artifacts.
+
+`--variants N` requests N executions including the reference and creates N
+parallel environments; the default is one. The selected expansion mode applies
+supported affordance and trajectory factors without a Cartesian recipe bank or
+collection lifecycle. Unsupported explicit factors fail before simulation.
+
+Mounted-gripper TCPs belong to `lab/scripts/_atomic_action/tcp_presets.py`.
+They are independent full poses per fixture, forwarded to single/dual-arm
+solvers; changing a TCP changes the kinematic tool frame, not physical geometry.
+
+Affordance branch identity stays separate from physical slots. The engine's
+optional `plan_transform` runs before concatenation and projected-state
+propagation. The direct host and Task Program share
+`atomic_actions/_plan_expansion.py`, using `ActionPlanTemplateAdapter` and
+`motion.expansion` to rebuild commands, velocities and phase metadata together.
+Built-in phase permissions may only narrow; editable joints come from explicit
+motion bindings. Contact/hand samples, phase endpoints, required targets,
+stationary participants, zero-time joins and callback indices remain exact.
+
+Measured state remains row-local, including Slide's replanned push after pull.
+Playback and exported trajectories share a control clock with explicit contact
+settling and final holds. Completion reports planning and playback only; it
+does not establish measured success or Gym dataset collection. Physical scenes
+remain fixed; spatial generalization belongs to benchmark hosts. See
+[motion expansion](../motion-planning/motion-planning.md) for the shared
+operators and host ownership boundary.
 
 ## Recommended change sites
 

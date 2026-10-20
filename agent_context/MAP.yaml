@@ -382,8 +382,11 @@ topics:
   - embodichain/lab/task_program/integrations/_configured_composition.py
   - embodichain/lab/gym/envs/task_program/
   - embodichain/agents/mllm/task_program.py
-  watch_paths: [embodichain/lab/task_program/, embodichain/lab/gym/envs/task_program/, extensions/embodichain_tasks/configs/,
-    tests/lab/task_program/, tests/lab/task_program/semantics/]
+  watch_paths: [embodichain/lab/task_program/, embodichain/lab/gym/envs/task_program/,
+    extensions/embodichain_tasks/configs/components/embodiments/,
+    extensions/embodichain_tasks/configs/components/execution_policies/,
+    extensions/embodichain_tasks/configs/components/expansion_policies/,
+    extensions/embodichain_tasks/configs/tasks/manipulation/, tests/lab/task_program/]
   related_topics: [atomic-actions, env-framework, simulation-system, motion-planning, sensor-system, data-pipeline]
   status: active
 - id: gen-sim
