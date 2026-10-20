@@ -215,7 +215,10 @@ def test_initial_capture_counts_sequential_workflows_not_segments():
         (False, "exception"),
     ],
 )
-def test_bundle_plans_initial_call_once(tmp_path, monkeypatch, probe_only, outcome):
+@pytest.mark.parametrize("with_task_spec", [False, True])
+def test_bundle_plans_initial_call_once(
+    tmp_path, monkeypatch, probe_only, outcome, with_task_spec
+):
     import gymnasium
     from dataclasses import dataclass
     from embodichain.lab.gym.envs import demo
@@ -312,7 +315,50 @@ def test_bundle_plans_initial_call_once(tmp_path, monkeypatch, probe_only, outco
     if outcome == "exception":
         planning.side_effect = ValueError("fixture planning exception")
     monkeypatch.setattr(AtomicActionEngine, "_plan_request", planning)
-    env = SimpleNamespace(reset=Mock(), close=Mock())
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+
+    context = EpisodeContext(1)
+    reset_rows = []
+
+    def reset(**kwargs):
+        options = kwargs.get("options", {})
+        reset_rows.append((options, context.snapshot([0])[0]))
+        context._begin_episode([0])
+        callback = options.get("episode_prepare")
+        if callback is not None:
+            callback()
+        context._finish_initialization([0])
+
+    env = SimpleNamespace(
+        reset=Mock(side_effect=reset),
+        close=Mock(),
+        num_envs=1,
+        sim=object(),
+        episode_context=context,
+    )
+    if with_task_spec:
+        from embodichain.gen_sim import task_spec
+        from embodichain.gen_sim.task_engine import scene_expansion
+
+        (root / "task_spec.json").touch()
+        spec = SimpleNamespace(init=(), semantic_hash="1" * 64)
+        monkeypatch.setattr(task_spec.TaskSpec, "from_dict", lambda *a: spec)
+        monkeypatch.setattr(task_spec, "validate_task_spec", lambda *a: None)
+        monkeypatch.setattr(task_spec, "scene_layout_requirement", lambda *a: None)
+        monkeypatch.setattr(_bundle_runner, "_verify_task_spec_bundle", lambda *a: {})
+        monkeypatch.setattr(
+            scene_expansion, "_observe_initial_conditions", lambda *a: [{}]
+        )
+        monkeypatch.setattr(
+            scene_expansion,
+            "evaluate_scene_task_spec",
+            lambda *a, **kw: (
+                {
+                    "certificate_ready": outcome == "success",
+                    "acceptance_status": "passed" if outcome == "success" else "failed",
+                },
+            ),
+        )
     monkeypatch.setattr(gymnasium, "make", lambda **kw: env)
     monkeypatch.setattr(registration, "discover_task_packages", lambda: None)
     monkeypatch.setattr(registration, "execute_init_hooks", lambda: None)
@@ -344,7 +390,7 @@ def test_bundle_plans_initial_call_once(tmp_path, monkeypatch, probe_only, outco
     monkeypatch.setattr(
         _bundle_runner,
         "load_config",
-        lambda *a: {"id": "fixture", "max_episode_steps": 100},
+        lambda *a: {"id": "fixture", "max_episode_steps": 100, "simulation": {}},
     )
     monkeypatch.setattr(_bundle_runner, "_write_terminal_robot_state", lambda *a: None)
     monkeypatch.setattr(
@@ -362,6 +408,12 @@ def test_bundle_plans_initial_call_once(tmp_path, monkeypatch, probe_only, outco
     dispatched = []
 
     def execute(*args, **kwargs):
+        if with_task_spec:
+            snapshot = context.snapshot([0])[0]
+            assert snapshot["initialized"]
+            assert snapshot["pending_sources"] == ["gensim/task_spec"]
+            assert snapshot["sources"]["gensim/frozen_layout"]["accepted"]
+            assert not len(context.filter_recordable())
         plan = engine._plan_request(request)
         if plan.plan_success.any():
             dispatched.append(plan)
@@ -387,6 +439,20 @@ def test_bundle_plans_initial_call_once(tmp_path, monkeypatch, probe_only, outco
         ["--plan-probe-only"] if probe_only else (),
         execution_output=tmp_path / "execution",
     ) == (0 if outcome == "success" else 2)
+    if with_task_spec:
+        assert not reset_rows[0][1]["initialized"]
+        if probe_only:
+            assert not context.filter_recordable().numel()
+        else:
+            commit_options, final_snapshot = reset_rows[-1]
+            assert not final_snapshot["pending_sources"]
+            assert final_snapshot["recordable"] == (outcome == "success")
+            if outcome == "success":
+                assert commit_options["commit_env_ids"] == [0]
+                assert final_snapshot["sources"]["gensim/task_spec"]["accepted"]
+            else:
+                assert final_snapshot["rejections"]
+                assert not commit_options["save_data"]
     assert planning.call_count == 1
     assert probe_call.call_count == int(probe_only)
     assert execute_call.call_count == int(not probe_only)
@@ -707,8 +773,8 @@ def test_failed_attempt_captures_a_terminal_frame_before_flush(
             if capture_fails:
                 raise RuntimeError("camera fetch failed")
 
-        def save_and_clear(self):
-            calls.append(("flush",))
+        def save_and_clear(self, **kwargs):
+            calls.append(("flush", kwargs))
 
     monkeypatch.setattr(record, "record_camera_data", Recorder)
     params = {"name": "audience", "resolution": [640, 360]}
@@ -721,7 +787,10 @@ def test_failed_attempt_captures_a_terminal_frame_before_flush(
     )
     _bundle_runner._preserve_failed_execution_recording(env, tmp_path, num_envs=1)
 
-    assert calls == [("capture", env, None, params), ("flush",)]
+    assert calls == [
+        ("capture", env, [0], params),
+        ("flush", {"env_ids": [0], "purpose": "diagnostic"}),
+    ]
 
 
 def test_module_entrypoint_flushes_protocol_before_fast_exit(

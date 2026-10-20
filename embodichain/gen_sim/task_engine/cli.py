@@ -391,8 +391,8 @@ def _report_saved_videos(output_dir: Path) -> list[str]:
             {
                 path.resolve().as_posix()
                 for pattern in (
-                    "videos/*.mp4",
-                    "attempts/scene_*/action_attempts/action_*/videos/*.mp4",
+                    "**/videos/*.mp4",
+                    "**/videos/env_*/*.mp4",
                 )
                 for path in output_dir.glob(pattern)
                 if path.is_file()

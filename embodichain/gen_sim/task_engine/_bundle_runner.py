@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 from copy import deepcopy
+from contextlib import ExitStack
 import json
 import os
 from pathlib import Path
@@ -135,6 +136,16 @@ def execute_bundle(
     env: Any = None
     probe: dict[str, Any] | None = None
     initial_observations: tuple[dict, ...] = ()
+    recording_checks = ExitStack()
+    finish_task = None
+    prepare_callback = None
+
+    def reset_episode(**kwargs):
+        options = dict(kwargs.pop("options", {}) or {})
+        if prepare_callback is not None:
+            options["episode_prepare"] = prepare_callback
+        return env.reset(options=options, **kwargs)
+
     runtime_assets = tempfile.TemporaryDirectory(prefix="ec-task-assets-")
     try:
         import gymnasium
@@ -196,66 +207,122 @@ def execute_bundle(
             env_cfg.task_program
         )
         env = gymnasium.make(id=gym_config["id"], cfg=env_cfg, **action_config)
-        env.reset(seed=args.seed, options={"save_data": False})
-        if frozen_scene is not None:
-            target = getattr(env, "unwrapped", env)
-            target._scene_randomization_metadata = [
-                deepcopy(frozen_scene) for _ in range(target.num_envs)
-            ]
-            target._scene_randomization_invalid_rows = torch.zeros(
-                target.num_envs, dtype=torch.bool, device=target.device
+        target = getattr(env, "unwrapped", env)
+        if normative_spec is not None or frozen_scene is not None:
+            rows = list(range(target.num_envs))
+            physical_scene = load_config(root / "components/scene.yaml")["simulation"]
+            frozen_poses = {
+                entry["uid"]: entry["init_local_pose"]
+                for section in ("background", "rigid_object")
+                for entry in physical_scene.get(section, [])
+                if "init_local_pose" in entry
+            }
+            finish_task = recording_checks.enter_context(
+                target.episode_context.check("gensim/task_spec", rows)
             )
-            for metadata in getattr(target, "_demo_episode_metadata", ()):
-                metadata["scene_randomization"] = deepcopy(frozen_scene)
-        if normative_spec is not None:
-            from .scene_expansion import (
-                _observe_initial_conditions,
-                evaluate_scene_task_spec,
-            )
-            from embodichain.gen_sim.task_spec import evaluate_predicate
 
-            target = getattr(env, "unwrapped", env)
-            parents = (frozen_scene or {}).get("parent_by_uid", {})
-            initial_observations = _observe_initial_conditions(
-                normative_spec, target.sim, task_roles, parents
-            )
-            checks = [
-                [
-                    evaluate_predicate(predicate, observed).to_dict()
-                    for predicate in normative_spec.init
-                ]
-                for observed in initial_observations
-            ]
-            (output / "task_spec_initial_conditions.json").write_text(
-                json.dumps(
-                    {"observations": initial_observations, "checks": checks}, indent=2
-                )
-            )
-            if any(check["status"] != "satisfied" for row in checks for check in row):
-                result_metadata = {"completed": False, "segments": []}
-                evaluations = evaluate_scene_task_spec(
-                    normative_spec,
-                    graph,
-                    result_metadata,
-                    num_envs=len(row_success),
-                    initial_observations=initial_observations,
-                )
-                result_metadata["task_spec_evaluation"] = {
-                    "semantic_hash": normative_spec.semantic_hash,
-                    "rows": list(evaluations),
-                }
-                terminal_reasons = [
-                    "task_spec_" + value["acceptance_status"] for value in evaluations
-                ]
-                (output / "task_spec_evaluation.json").write_text(
-                    json.dumps(result_metadata["task_spec_evaluation"], indent=2)
-                )
-                target._scene_randomization_invalid_rows = torch.ones(
-                    target.num_envs, dtype=torch.bool, device=target.device
-                )
-                raise ValueError(
-                    "TaskSpec initial conditions are failed or unverified; execution and persistence are blocked."
-                )
+            def prepare_episode() -> None:
+                nonlocal initial_observations, result_metadata, terminal_reasons
+                with target.episode_context.check(
+                    "gensim/frozen_layout", rows
+                ) as finish_initial:
+                    if frozen_scene is not None:
+                        from embodichain.lab.sim.scene.expansion import (
+                            ScenePoseChange,
+                            SceneVariant,
+                            apply_scene_variants,
+                        )
+
+                        # Reset events may settle or reposition authored rigids.
+                        # Restore the complete frozen component before first observations.
+                        restore = SceneVariant(
+                            frozen_scene["layout"]["parent_scene_id"],
+                            frozen_scene["seed"],
+                            frozen_scene["layout"]["ordinal"],
+                            tuple(
+                                ScenePoseChange(uid, pose)
+                                for uid, pose in frozen_poses.items()
+                            ),
+                        )
+                        apply_scene_variants(
+                            target.sim,
+                            [restore] * target.num_envs,
+                            env_ids=rows,
+                            movable_entity_ids=tuple(frozen_poses),
+                        )
+                        for uid, expected in frozen_poses.items():
+                            actual = target.sim.get_rigid_object(uid).get_local_pose(
+                                to_matrix=True
+                            )
+                            if not np.allclose(
+                                actual.detach().cpu().numpy(),
+                                np.asarray(expected)[None],
+                                atol=2e-6,
+                                rtol=0,
+                            ):
+                                raise ValueError(
+                                    f"Runtime initial pose differs from frozen layout: {uid!r}."
+                                )
+                    from .scene_expansion import (
+                        _observe_initial_conditions,
+                        evaluate_scene_task_spec,
+                    )
+                    from embodichain.gen_sim.task_spec import evaluate_predicate
+
+                    parents = (frozen_scene or {}).get("parent_by_uid", {})
+                    initial_observations = _observe_initial_conditions(
+                        normative_spec, target.sim, task_roles, parents
+                    )
+                    checks = [
+                        [
+                            evaluate_predicate(predicate, observed).to_dict()
+                            for predicate in normative_spec.init
+                        ]
+                        for observed in initial_observations
+                    ]
+                    (output / "task_spec_initial_conditions.json").write_text(
+                        json.dumps(
+                            {"observations": initial_observations, "checks": checks},
+                            indent=2,
+                        )
+                    )
+                    if any(
+                        check["status"] != "satisfied"
+                        for row in checks
+                        for check in row
+                    ):
+                        result_metadata = {"completed": False, "segments": []}
+                        evaluations = evaluate_scene_task_spec(
+                            normative_spec,
+                            graph,
+                            result_metadata,
+                            num_envs=len(row_success),
+                            initial_observations=initial_observations,
+                        )
+                        result_metadata["task_spec_evaluation"] = {
+                            "semantic_hash": normative_spec.semantic_hash,
+                            "rows": list(evaluations),
+                        }
+                        terminal_reasons = [
+                            "task_spec_" + value["acceptance_status"]
+                            for value in evaluations
+                        ]
+                        (output / "task_spec_evaluation.json").write_text(
+                            json.dumps(
+                                result_metadata["task_spec_evaluation"], indent=2
+                            )
+                        )
+                        raise ValueError(
+                            "TaskSpec initial conditions are failed or unverified; execution and persistence are blocked."
+                        )
+                    finish_initial(
+                        accepted=True,
+                        metadata=frozen_scene
+                        or {"task_spec_semantic_hash": normative_spec.semantic_hash},
+                    )
+
+            prepare_callback = prepare_episode
+        reset_episode(seed=args.seed, options={"save_data": False})
         from ._task_program.cargo import capture_cargo, check_cargo
 
         cargo = capture_cargo(env, load_config(root / "components/scene.yaml"), graph)
@@ -275,6 +342,9 @@ def execute_bundle(
                 _isolated_initial_probe(env, deployment, env_cfg.task_program)
             )
             _write_terminal_robot_state(env, output)
+            if finish_task is not None:
+                finish_task(accepted=False, reasons="plan_probe_only")
+                recording_checks.close()
         else:
             from ._task_program.planning_probe import capture_initial_plan
 
@@ -335,31 +405,47 @@ def execute_bundle(
                     json.dumps(result_metadata["task_spec_evaluation"], indent=2)
                 )
                 target = getattr(env, "unwrapped", env)
-                target._scene_randomization_invalid_rows = torch.tensor(
-                    [not accepted for accepted in row_success],
-                    dtype=torch.bool,
-                    device=target.device,
+                finish_task(
+                    accepted=row_success,
+                    metadata={
+                        row: {
+                            "task_spec_evaluation": evaluation,
+                            "execution_success": row_success[row],
+                        }
+                        for row, evaluation in enumerate(evaluations)
+                    },
+                    reasons={
+                        row: terminal_reasons[row]
+                        for row, passed in enumerate(row_success)
+                        if not passed
+                    },
                 )
+                recording_checks.close()
                 accepted_rows = [
                     row for row, accepted in enumerate(row_success) if accepted
                 ]
-                if accepted_rows:
-                    env.reset(
-                        options={"save_data": True, "commit_env_ids": accepted_rows}
-                    )
-                else:
+                rejected_rows = [
+                    row for row, accepted in enumerate(row_success) if not accepted
+                ]
+                if rejected_rows:
                     _preserve_failed_execution_recording(
-                        env, output, num_envs=len(row_success)
+                        env, output, num_envs=len(row_success), env_ids=rejected_rows
                     )
-                    env.reset(options={"save_data": False})
+                reset_episode(
+                    options={
+                        "save_data": bool(accepted_rows),
+                        "commit_env_ids": accepted_rows,
+                    }
+                )
             elif result.completed and all(row_success):
-                env.reset()
+                reset_episode()
             else:
                 _preserve_failed_execution_recording(
                     env, output, num_envs=len(row_success)
                 )
-                env.reset(options={"save_data": False})
+                reset_episode(options={"save_data": False})
     except Exception as exc:
+        recording_checks.__exit__(type(exc), exc, exc.__traceback__)
         failure = _exception_metadata(exc)
         if env is not None:
             _write_terminal_robot_state(env, output)
@@ -372,10 +458,11 @@ def execute_bundle(
             except Exception as recording_error:
                 failure["recording_error"] = _exception_metadata(recording_error)
             try:
-                env.reset(options={"save_data": False})
+                reset_episode(options={"save_data": False})
             except Exception as abort_error:
                 failure["abort_error"] = _exception_metadata(abort_error)
     finally:
+        recording_checks.__exit__(*sys.exc_info())
         if env is not None:
             try:
                 from ._task_program.press_runtime import SENSOR_UID, PressContactSensor
@@ -642,6 +729,7 @@ def _preserve_failed_execution_recording(
     output: Path,
     *,
     num_envs: int,
+    env_ids: Sequence[int] | None = None,
 ) -> None:
     """Commit an audit copy of a failed attempt before the reset discards it.
 
@@ -651,13 +739,12 @@ def _preserve_failed_execution_recording(
     the isolated execution directory and never to the training dataset.
     """
     target = getattr(env, "unwrapped", env)
+    selected = list(range(num_envs)) if env_ids is None else list(env_ids)
     trajectory = getattr(target, "_traj_buffer", None)
     trajectory_steps = getattr(target, "_traj_steps", None)
     if trajectory is not None and trajectory_steps is not None:
         active_env_ids = [
-            env_id
-            for env_id in range(num_envs)
-            if int(trajectory_steps[env_id].item()) > 0
+            env_id for env_id in selected if int(trajectory_steps[env_id].item()) > 0
         ]
         if active_env_ids:
             trajectory_dir = output / "trajectory"
@@ -665,6 +752,7 @@ def _preserve_failed_execution_recording(
             target.save_trajectory(
                 trajectory_dir / "failed_attempt.pt",
                 env_ids=active_env_ids,
+                purpose="diagnostic",
             )
 
     event_manager = getattr(target, "event_manager", None)
@@ -678,9 +766,11 @@ def _preserve_failed_execution_recording(
                     try:
                         # A first-step failure can precede the recording interval.
                         # Fetch the last rendered state without advancing physics.
-                        functor_cfg.func(target, env_ids=None, **functor_cfg.params)
+                        functor_cfg.func(target, env_ids=selected, **functor_cfg.params)
                     finally:
-                        functor_cfg.func.save_and_clear()
+                        functor_cfg.func.save_and_clear(
+                            env_ids=selected, purpose="diagnostic"
+                        )
     except (AttributeError, TypeError, RuntimeError, OSError):
         # The trajectory is the required audit artifact.  Camera persistence is
         # best effort because custom environments may not expose this manager.

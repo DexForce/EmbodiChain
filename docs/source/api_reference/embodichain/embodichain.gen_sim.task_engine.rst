@@ -132,6 +132,14 @@ select CPU/CUDA generation or validated v4 replay. Each E1 layout gets an
 independent frozen bundle; acceptance requires measured segment validators
 and a matching TaskSpec evaluation before successful data is committed.
 
+The generic ``episode_prepare`` hook restores frozen poses and checks initial
+conditions before first-frame registration. Its ``gensim/frozen_layout`` check
+and the full execution's ``gensim/task_spec`` check both publish into
+``episode_context``. Only eligible rows reach normal trajectory, dataset and
+per-environment video writers. Failed or unverified rows use labelled diagnostics;
+replay never samples a new layout. See :doc:`/tutorial/data_expansion` for the
+shared eligibility and persistence lifecycle.
+
 .. automodule:: embodichain.gen_sim.task_engine.scene_expansion
    :members:
    :no-index:

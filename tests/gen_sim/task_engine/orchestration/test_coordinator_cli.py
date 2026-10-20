@@ -1306,3 +1306,20 @@ def test_cli_rejects_unimplemented_diagnostic_continuation() -> None:
             ]
         )
     assert error.value.code == 2
+
+
+def test_report_saved_videos_finds_independent_rows_without_diagnostics(tmp_path):
+    from embodichain.gen_sim.task_engine.cli import _report_saved_videos
+
+    row_video = (
+        tmp_path
+        / "variants/variant_000001/task_run/attempts/scene_0001/action_attempts/action_0001/videos/env_003/episode_000001_camera.mp4"
+    )
+    legacy_video = tmp_path / "videos/episode_000000_camera.mp4"
+    rejected_video = tmp_path / "videos/diagnostics/env_002/episode_000001_camera.mp4"
+    for path in (row_video, legacy_video, rejected_video):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+    assert _report_saved_videos(tmp_path) == sorted(
+        [row_video.resolve().as_posix(), legacy_video.resolve().as_posix()]
+    )

@@ -168,8 +168,14 @@ layout without sampling. Existing vectorized execution remains inside each bundl
 commands: existence, origin distance and mesh-supported `relation/on`. Unknown
 initial measurements block execution and data publication. Runtime segment
 validators supply E1 goal/milestone evidence; completion alone is insufficient.
-TaskSpec evaluation masks rejected rows before trajectory/dataset commit, while
-diagnostic recordings remain available. The parent manifest records each child,
+The runner uses the generic `episode_prepare` reset hook to restore every
+frozen rigid pose and validate initial evidence before registering the first frame.
+The `gensim/frozen_layout` EpisodeContext check publishes that initialization;
+`gensim/task_spec` stays pending through execution and measured acceptance.
+Normal trajectory, dataset and per-row video commits require both checks and the
+existing save policy. Rejected/unverified rows export only explicitly labelled
+diagnostics. See [episode lifecycle](../env-framework/execution.md) for reset,
+sticky rejection and immutable recording snapshots. The parent manifest records each child,
 task semantic hash, layout provenance and a separate execution fingerprint.
 Native mesh aliases are temporary runtime paths, retained until cleanup; source
 files and bundle fingerprints stay authoritative.
