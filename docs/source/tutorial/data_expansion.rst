@@ -256,7 +256,7 @@ Compose the deployment
 
 The runnable deployment is intentionally thin:
 
-.. literalinclude:: ../../../embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml
+.. literalinclude:: ../../../extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml
    :language: yaml
    :linenos:
 
@@ -266,7 +266,7 @@ only physical simulation and ordinary Gym values:
 .. dropdown:: Pour Water reusable environment
    :icon: code
 
-   .. literalinclude:: ../../../embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml
+   .. literalinclude:: ../../../extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml
       :language: yaml
       :linenos:
 
@@ -284,7 +284,7 @@ Python callables or naming simulator joints:
 .. dropdown:: Pour Water Task Program
    :icon: code
 
-   .. literalinclude:: ../../../embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task_program/program.yaml
+   .. literalinclude:: ../../../extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task_program/program.yaml
       :language: yaml
       :linenos:
 
@@ -295,7 +295,7 @@ registered transport and pour lowerers:
 .. dropdown:: Pour Water integration
    :icon: code
 
-   .. literalinclude:: ../../../embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task_program/integration.yaml
+   .. literalinclude:: ../../../extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task_program/integration.yaml
       :language: yaml
       :linenos:
 
@@ -378,7 +378,7 @@ Important fields are:
 
 The real Pour Water recorder block can be inspected directly:
 
-.. literalinclude:: ../../../embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml
+.. literalinclude:: ../../../extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml
    :language: yaml
    :start-at: dataset:
    :end-at: control_parts: [left_arm, left_eef, right_arm, right_eef]
