@@ -27,7 +27,6 @@ import torch
 from embodichain.utils import logger
 from embodichain.utils.math import (
     axis_angle_to_rotation_matrix,
-    get_relative_rotation,
     pose_inv,
 )
 
@@ -62,6 +61,7 @@ from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
     make_manipulation_slot,
 )
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+    find_symmetric_nearest_xpos,
     arm_qpos_from_state,
     resample_planned_trajectory,
     require_shared_task_state_key,
@@ -154,23 +154,6 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             dependencies.add(entity_id)
         return tuple(sorted(dependencies))
 
-    def _find_symmetric_nearest_xpos(
-        self, target_xpos: torch.Tensor, reference_xpos: torch.Tensor
-    ) -> torch.Tensor:
-        """Find the nearest symmetric pose to the reference pose."""
-        symmetric_xpos = target_xpos.clone()
-        symmetric_xpos[:, :3, 0] = -symmetric_xpos[:, :3, 0]
-        symmetric_xpos[:, :3, 1] = -symmetric_xpos[:, :3, 1]
-        angle_a = get_relative_rotation(
-            reference_xpos[:, :3, :3], target_xpos[:, :3, :3]
-        )
-        angle_b = get_relative_rotation(
-            reference_xpos[:, :3, :3], symmetric_xpos[:, :3, :3]
-        )
-        choose_target = (angle_a < angle_b)[..., None, None]
-        target_xpos = torch.where(choose_target, target_xpos, symmetric_xpos)
-        return target_xpos
-
     def _plan(
         self,
         request: ResolvedActionRequest[AxisAlignGoal, AxisAlignOptions],
@@ -253,7 +236,7 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
         )
         grasp_success = grasp_sample.success
         grasp_xpos = grasp_sample.poses
-        grasp_xpos = self._find_symmetric_nearest_xpos(
+        grasp_xpos = find_symmetric_nearest_xpos(
             grasp_xpos,
             reference_xpos=self.robot.compute_fk(
                 qpos=start_arm_qpos,

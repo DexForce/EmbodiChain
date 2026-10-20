@@ -23,6 +23,8 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+
+from cartesian_robot_support import CartesianRobot as _Robot
 import matplotlib
 
 matplotlib.use("Agg")
@@ -31,115 +33,15 @@ from matplotlib import pyplot as plt
 from scripts.tutorials.sim.planner.trapezoidal_planner import (
     build_cartesian_line_poses,
     build_demo_waypoints,
-    compute_eef_trajectory,
     configure_plot_fonts,
     diagnostic_output_path,
-    joint_derivatives_from_path_time_law,
     maximum_line_deviation,
-    nearest_equivalent_joint_solution,
-    plan_cartesian_bezier,
-    plan_cartesian_line,
     plot_trajectory_diagnostics,
     positive_float,
     replay_plan,
     sample_count,
     set_equal_3d_limits,
 )
-
-
-class _Solver:
-    """Identity kinematics used to validate path derivative propagation."""
-
-    def get_jacobian(self, qpos: torch.Tensor, jac_type: str = "full") -> torch.Tensor:
-        assert jac_type == "full"
-        dof = qpos.shape[-1]
-        return torch.eye(6, dof, dtype=qpos.dtype).expand(qpos.shape[0], -1, -1)
-
-
-class _Robot:
-    """Minimal robot interface used by the tutorial waypoint builders."""
-
-    def __init__(
-        self, batch_size: int = 2, dof: int = 6, *, dtype: torch.dtype = torch.float32
-    ) -> None:
-        self.qpos = torch.zeros(batch_size, dof, dtype=dtype)
-        self.commands: list[torch.Tensor] = []
-        self.solver = _Solver()
-        self.fk_call_count = 0
-        self.path_ik_call_count = 0
-
-    def get_qpos(self, name: str) -> torch.Tensor:
-        assert name == "left_arm"
-        return self.qpos
-
-    def get_joint_ids(self, name: str) -> list[int]:
-        assert name == "left_arm"
-        return list(range(self.qpos.shape[1]))
-
-    def get_qpos_limits(self, joint_ids: list[int]) -> torch.Tensor:
-        assert joint_ids == list(range(self.qpos.shape[1]))
-        limits = torch.tensor((-1.0, 1.0)).repeat(self.qpos.shape[1], 1)
-        return limits.unsqueeze(0).repeat(self.qpos.shape[0], 1, 1)
-
-    def compute_fk(
-        self,
-        qpos: torch.Tensor,
-        name: str,
-        to_matrix: bool,
-        env_ids: list[int] | None = None,
-    ) -> torch.Tensor:
-        assert name == "left_arm"
-        self.fk_call_count += 1
-        if env_ids is not None:
-            assert len(env_ids) == qpos.shape[0]
-        if to_matrix:
-            pose = torch.eye(4, dtype=qpos.dtype).repeat(qpos.shape[0], 1, 1)
-            pose[:, :3, 3] = qpos[:, :3]
-            return pose
-        quaternion = qpos.new_zeros((qpos.shape[0], 4))
-        quaternion[:, 3] = 1.0
-        return torch.cat((qpos[:, :3], quaternion), dim=-1)
-
-    def compute_ik(
-        self,
-        pose: torch.Tensor,
-        joint_seed: torch.Tensor,
-        name: str,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        assert name == "left_arm"
-        qpos = joint_seed.clone()
-        qpos[:, :3] = pose[:, :3, 3]
-        success = torch.ones(pose.shape[0], dtype=torch.bool)
-        return success, qpos
-
-    def compute_batch_ik(
-        self,
-        pose: torch.Tensor,
-        joint_seed: torch.Tensor,
-        name: str,
-        *,
-        continuous: bool = False,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        assert name == "left_arm"
-        assert continuous
-        self.path_ik_call_count += 1
-        qpos = joint_seed[:, None].expand(-1, pose.shape[1], -1).clone()
-        qpos[:, :, :3] = pose[:, :, :3, 3]
-        success = torch.ones(pose.shape[:2], dtype=torch.bool)
-        return success, qpos
-
-    def get_solver(self, name: str) -> _Solver:
-        assert name == "left_arm"
-        return self.solver
-
-    def get_control_part_base_pose(self, name: str, to_matrix: bool) -> torch.Tensor:
-        assert name == "left_arm"
-        assert to_matrix
-        return torch.eye(4, dtype=self.qpos.dtype).repeat(self.qpos.shape[0], 1, 1)
-
-    def set_qpos(self, qpos: torch.Tensor, name: str) -> None:
-        assert name == "left_arm"
-        self.commands.append(qpos.clone())
 
 
 class _Simulation:
@@ -211,174 +113,6 @@ def test_cartesian_demo_rejects_nonpositive_distance() -> None:
 
     with pytest.raises(ValueError, match="greater than zero"):
         build_cartesian_line_poses(robot, "left_arm", robot.qpos, 0.0)
-
-
-def test_cartesian_demo_requires_three_samples_for_path_derivatives() -> None:
-    robot = _Robot()
-
-    with pytest.raises(ValueError, match="sample_count >= 3"):
-        plan_cartesian_line(
-            robot,
-            "left_arm",
-            robot.qpos,
-            distance=0.1,
-            profile="trapezoidal",
-            sample_count=2,
-            velocity_limit=0.15,
-            acceleration_limit=0.3,
-            jerk_limit=1.0,
-            backend="torch",
-        )
-
-
-def test_cartesian_time_law_is_applied_before_ik() -> None:
-    robot = _Robot()
-    distance = 0.10
-    velocity_limit = 0.15
-    acceleration_limit = 0.30
-
-    result, desired_poses, scalar_plan = plan_cartesian_line(
-        robot,
-        "left_arm",
-        robot.qpos,
-        distance=distance,
-        profile="trapezoidal",
-        sample_count=101,
-        velocity_limit=velocity_limit,
-        acceleration_limit=acceleration_limit,
-        jerk_limit=1.0,
-        backend="torch",
-    )
-
-    desired_xyz = desired_poses[0, :, :3, 3]
-    assert torch.all(result.duration > 0.0)
-    assert maximum_line_deviation(desired_xyz).item() < 1e-7
-    assert scalar_plan.velocities.abs().max() <= velocity_limit + 1e-6
-    assert scalar_plan.accelerations.abs().max() <= acceleration_limit + 1e-6
-    assert torch.allclose(
-        desired_xyz[-1] - desired_xyz[0], torch.tensor([0, 0, -distance])
-    )
-    assert torch.count_nonzero(result.velocities[:, 0]) == 0
-    assert robot.path_ik_call_count == 1
-
-
-@pytest.mark.parametrize("count", [501, 2001])
-def test_cartesian_bezier_derivatives_match_timed_positions(count: int) -> None:
-    robot = _Robot(dtype=torch.float64)
-    robot.qpos[1, :3] = torch.tensor([0.1, -0.2, 0.3])
-    result, _, _ = plan_cartesian_bezier(
-        robot,
-        "left_arm",
-        robot.qpos,
-        distance=0.2,
-        profile="double_s",
-        sample_count=count,
-        velocity_limit=0.15,
-        acceleration_limit=0.3,
-        jerk_limit=1.0,
-        backend="torch",
-    )
-
-    for row in range(robot.qpos.shape[0]):
-        time = result.dt[row].cumsum(0)
-        velocity = torch.gradient(
-            result.positions[row], spacing=(time,), dim=(0,), edge_order=2
-        )[0]
-        acceleration = torch.gradient(
-            velocity, spacing=(time,), dim=(0,), edge_order=2
-        )[0]
-        # Interior central differences allow for finite spacing across jerk
-        # switches and the approximate arc-length inverse lookup.
-        torch.testing.assert_close(
-            result.velocities[row, 2:-2], velocity[2:-2], atol=2e-5, rtol=1e-3
-        )
-        torch.testing.assert_close(
-            result.accelerations[row, 2:-2], acceleration[2:-2], atol=2e-3, rtol=1e-3
-        )
-
-
-def test_eef_trajectory_uses_one_batched_fk_call() -> None:
-    robot = _Robot(batch_size=2)
-    sample_count = 101
-    joint_positions = torch.zeros(2, sample_count, 6)
-    joint_positions[1, :, 2] = torch.linspace(0.0, -0.1, sample_count)
-
-    poses = compute_eef_trajectory(robot, "left_arm", joint_positions, env_index=1)
-
-    assert poses.shape == (sample_count, 7)
-    assert torch.equal(poses[:, 2], joint_positions[1, :, 2])
-    assert torch.equal(
-        poses[:, 3:],
-        torch.tensor([0.0, 0.0, 0.0, 1.0]).expand(sample_count, -1),
-    )
-    assert robot.fk_call_count == 1
-
-
-def test_path_time_law_produces_exact_joint_derivatives_for_identity_model() -> None:
-    sample_count = 101
-    parameter = torch.linspace(0.0, torch.pi, sample_count, dtype=torch.float64)
-    path_position = torch.linspace(
-        0.0, 0.1, sample_count, dtype=torch.float64
-    ).unsqueeze(0)
-    path_velocity = torch.sin(parameter).unsqueeze(0)
-    path_acceleration = torch.cos(parameter).unsqueeze(0)
-    jacobians = (
-        torch.eye(6, dtype=torch.float64)
-        .reshape(1, 1, 6, 6)
-        .expand(1, sample_count, -1, -1)
-    )
-    tangent = torch.tensor([[0.0, 0.0, -1.0, 0.0, 0.0, 0.0]], dtype=torch.float64)
-
-    velocity, acceleration = joint_derivatives_from_path_time_law(
-        jacobians,
-        path_position,
-        path_velocity,
-        path_acceleration,
-        tangent,
-    )
-
-    assert torch.allclose(velocity[..., 2], -path_velocity, atol=1e-7)
-    assert torch.allclose(acceleration[..., 2], -path_acceleration, atol=1e-7)
-    assert torch.count_nonzero(velocity[..., [0, 1, 3, 4, 5]]) == 0
-
-
-def test_path_time_law_includes_jacobian_curvature_acceleration() -> None:
-    sample_count = 51
-    path_position = torch.linspace(
-        0.0, 1.0, sample_count, dtype=torch.float64
-    ).unsqueeze(0)
-    path_velocity = torch.full_like(path_position, 0.5)
-    path_acceleration = torch.zeros_like(path_position)
-    jacobians = (
-        torch.eye(6, dtype=torch.float64)
-        .reshape(1, 1, 6, 6)
-        .repeat(1, sample_count, 1, 1)
-    )
-    jacobians[0, :, 0, 0] = 1.0 + path_position[0]
-    tangent = torch.tensor([[1.0, 0.0, 0.0, 0.0, 0.0, 0.0]], dtype=torch.float64)
-
-    velocity, acceleration = joint_derivatives_from_path_time_law(
-        jacobians,
-        path_position,
-        path_velocity,
-        path_acceleration,
-        tangent,
-    )
-
-    expected_q_s = 1.0 / (1.0 + path_position)
-    expected_q_ss = -1.0 / (1.0 + path_position).square()
-    assert torch.allclose(velocity[..., 0], expected_q_s * 0.5, atol=1e-12)
-    assert torch.allclose(acceleration[..., 0], expected_q_ss * 0.25, atol=1e-12)
-
-
-def test_nearest_equivalent_ik_solution_removes_angle_wrap() -> None:
-    seed = torch.tensor([[3.13]])
-    wrapped_solution = torch.tensor([[-3.13]])
-    limits = torch.tensor([[[-2.0 * torch.pi, 2.0 * torch.pi]]])
-
-    continuous = nearest_equivalent_joint_solution(wrapped_solution, seed, limits)
-
-    assert (continuous - seed).abs().item() < 0.03
 
 
 def test_line_deviation_detects_off_axis_samples() -> None:

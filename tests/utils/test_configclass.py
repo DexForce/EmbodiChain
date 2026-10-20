@@ -21,7 +21,10 @@ from __future__ import annotations
 from dataclasses import fields
 from typing import ClassVar
 
+import torch
+
 from embodichain.utils import configclass
+from embodichain.utils.configclass import class_to_dict
 
 
 @configclass
@@ -39,3 +42,21 @@ def test_deferred_classvar_is_not_converted_to_a_dataclass_field() -> None:
     assert first.to_dict() == {"values": [1]}
     assert second.values == []
     assert _DeferredClassVarCfg.label == "shared"
+
+
+def test_legacy_serializer_preserves_nested_tensor_and_callable_contract() -> None:
+    from types import SimpleNamespace
+
+    from embodichain.utils.utility import class_to_dict as legacy_class_to_dict
+
+    tensor = torch.tensor([1.0, 2.0])
+    source = SimpleNamespace(
+        nested={"items": (SimpleNamespace(tensor=tensor),)},
+        callback=class_to_dict,
+    )
+
+    assert legacy_class_to_dict is class_to_dict
+    result = legacy_class_to_dict(source)
+    assert isinstance(result["nested"]["items"], tuple)
+    assert result["nested"]["items"][0]["tensor"] is tensor
+    assert result["callback"] == "embodichain.utils.configclass:class_to_dict"

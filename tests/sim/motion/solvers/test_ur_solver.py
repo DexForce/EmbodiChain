@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import torch
 import pytest
+
+from solver_support import grid_sample_qpos_from_limits
 import numpy as np
 import warp as wp
 
@@ -422,46 +424,6 @@ def test_ur_nearest_cuda_matches_full_candidates(seed_dtype: torch.dtype) -> Non
     assert valid.all()
 
 
-def grid_sample_qpos_from_limits(
-    qpos_limits: torch.Tensor,
-    steps_per_joint: int = 4,
-    device=None,
-    max_samples: int = 4096,
-    safe_margin: float = 5 / 180 * np.pi,  # 5 degrees in radians
-) -> torch.Tensor:
-    """Generate grid samples for qpos from qpos_limits.
-
-    Args:
-        qpos_limits: tensor of shape (1, n, 2) or (n, 2) where each row is [low, high].
-        steps_per_joint: number of values per joint (defaults to 2: low and high).
-        device: torch device to place the samples on.
-        max_samples: cap the number of returned samples (take first N if grid is larger).
-
-    Returns:
-        Tensor of shape (N, n) where N <= max_samples.
-    """
-    if device is None:
-        device = qpos_limits.device
-
-    limits = qpos_limits.squeeze(0) if qpos_limits.dim() == 3 else qpos_limits
-    lows = limits[:, 0].to(device) + safe_margin * 1.01
-    highs = limits[:, 1].to(device) - safe_margin * 1.01
-
-    # create per-joint linspaces
-    grids = [
-        torch.linspace(l.item(), h.item(), steps_per_joint, device=device)
-        for l, h in zip(lows, highs)
-    ]
-
-    # meshgrid and stack
-    mesh = torch.meshgrid(*grids, indexing="ij")
-    stacked = torch.stack([m.reshape(-1) for m in mesh], dim=1)
-
-    if stacked.shape[0] > max_samples:
-        return stacked[:max_samples]
-    return stacked
-
-
 class BaseSolverTest:
     """Shared FK/IK contract for UR arms on CPU and CUDA."""
 
@@ -527,7 +489,11 @@ class BaseSolverTest:
         # generate a small grid of qpos samples from the joint limits (low/high)
         qpos_limit = self.robot.get_qpos_limits(name=arm_name)
         sample_qpos = grid_sample_qpos_from_limits(
-            qpos_limit, steps_per_joint=8, device=self.robot.device, max_samples=65536
+            safe_margin=5 / 180 * np.pi,
+            qpos_limits=qpos_limit,
+            steps_per_joint=8,
+            device=self.robot.device,
+            max_samples=65536,
         )
         sample_qpos = sample_qpos[None, :, :]
         fk_xpos = self.robot.compute_batch_fk(
