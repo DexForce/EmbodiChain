@@ -19,10 +19,14 @@ validation host and are not portable download links.
 | [Online/offline alignment](ODS_ALIGNMENT_VALIDATION.json) | Base `ecf47fc431234c2119281038e99367b2fec85861` plus the recorded uncommitted fix: exact CPU batches/optimizer updates and real expert-producer integration |
 | [Public loading validation](DATASET_LOADING_VALIDATION.json) | Base `6d9e1708292131eb778d7f50b808682026d599d6` plus recorded changes; pre-extraction golden cases, numeric API/SDK checks and physical integrations; later consolidation and example-test removal are separately identified |
 
-[CONFIGURATION.md](CONFIGURATION.md) describes the current local CLI and the
-measurement/profile method. Its historical counts and measurements are labeled
-separately. The shared [loading design](../../../../docs/architecture/dataset-loading-design.md)
-owns the public numeric Dataset/source contract.
+[CONFIGURATION.md](CONFIGURATION.md) describes the local packet, CLI and report
+artifacts. Reusable behavior belongs to the
+[ODS overview](../../../../docs/source/features/online_data.md),
+[throughput configuration guide](../../../../docs/source/features/ods/configuration.md)
+and [evaluation guide](../../../../docs/source/features/ods/evaluation.md).
+The shared [loading design](../../../../docs/architecture/dataset-loading-design.md)
+records the public numeric Dataset/source architecture. Historical counts and
+measurements in this index retain their original revisions and limits.
 
 The historical checks establish the behavior of their recorded revisions.
 They do not assert that the relocated implementation has rerun the same learning

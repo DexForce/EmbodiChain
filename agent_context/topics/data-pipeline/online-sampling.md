@@ -87,9 +87,10 @@ targets from measured accepted episodes/s and training chunks/s. It reads an
 explicit qualified/provisional reuse profile and runtime metadata; it does not
 infer scientific bounds or change the measured batch size/concurrency. Memory
 constraints can reduce active consumption rather than raise quotas. Measurement
-helpers preserve units and common monotonic windows. See the local demo's
-[configuration guide](../../../examples/ods/simple_bc_demo/docs/CONFIGURATION.md)
-for CLI binding and current limitations.
+helpers preserve units and common monotonic windows. The
+[core configuration guide](../../../docs/source/features/ods/configuration.md)
+owns the reusable method; the [local binding](../../../examples/ods/simple_bc_demo/docs/CONFIGURATION.md)
+owns the demo CLI and artifact mapping.
 
 ## Recorded actions and provenance
 
@@ -171,8 +172,11 @@ and orchestration use runnable experiments and recorded evidence without
 dedicated example unit tests. Expert physical qualification, small-data
 diagnostics and student learning are separate; smoke success and low loss do
 not establish a learning or efficiency advantage. The local
-[configuration guide](../../../examples/ods/simple_bc_demo/docs/CONFIGURATION.md)
-owns rate units and measurement limits; the historical
+[ODS configuration guide](../../../docs/source/features/ods/configuration.md)
+owns reusable rate units, planner limits and scheduling responsibilities;
+the [evaluation guide](../../../docs/source/features/ods/evaluation.md) owns
+measurement scope. The [demo binding](../../../examples/ods/simple_bc_demo/docs/CONFIGURATION.md)
+records its local CLI and artifacts; the historical
 [pilot protocol](../../../examples/ods/simple_bc_demo/docs/OFFLINE_PILOT.md)
 separates acquisition-inclusive and data-ready budgets.
 

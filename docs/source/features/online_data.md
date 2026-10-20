@@ -1,34 +1,48 @@
-# Online Data Streaming
+# Online Data Streaming (ODS)
 
-This page documents the online data streaming pipeline used for live training from simulation. The core pieces are:
+ODS supplies owned, causally aligned training batches from continuously
+generated trajectories through a bounded CPU shared cache. The producer and
+learner can run independently; explicit provenance and optional per-trajectory
+delivery budgets make data use auditable. Shared APIs live in
+`embodichain.data_pipeline` and do not depend on a particular learner or task.
 
-- **OnlineDataEngine**: a process-safe shared buffer that stores trajectories coming from live simulation workers.
-- **OnlineDataset**: a PyTorch `IterableDataset` that samples trajectory chunks from the engine in either item mode or batch mode.
-- **ChunkSizeSampler**: an interface for drawing dynamic chunk sizes per iteration step.
+| Component | Responsibility |
+| --- | --- |
+| `OnlineDataEngine` | Own the simulation producer, shared storage, publication, locked selection/copy and optional live sampling ledger. |
+| `BatchSource` adapters | Present live, resident tensor and numeric LeRobot data under one explicit schema/context contract. |
+| `SequenceDataset` | Iterate causal contexts from a source; the caller owns production, loading, retry and refill. |
+| `OnlineDataset`, `ChunkSizeSampler` | Preserve item/batch chunk iteration and dynamic chunk lengths. |
+| `configure_ods()` | Calculate bounded reuse, cache and pacing/refill targets from measurements and a versioned profile; the host applies the plan. |
 
-These components live under `embodichain/data_pipeline/` and are designed to work with standard `DataLoader` patterns.
+## Guides and ownership
+
+```{toctree}
+:maxdepth: 1
+:hidden:
+
+ods/configuration
+ods/evaluation
+```
+
+- [Throughput configuration](ods/configuration.md): rate units, reuse profiles,
+  exact cache/rate limits and consumer enforcement responsibilities.
+- [Evaluation and offline comparison](ods/evaluation.md): exposure, quality,
+  timing, resource metrics and fair experimental controls.
+- [Dataset/source architecture](https://github.com/DexForce/EmbodiChain/blob/main/docs/architecture/dataset-loading-design.md):
+  public schemas, source ownership and implementation boundaries.
+- [Simple BC demo](https://github.com/DexForce/EmbodiChain/blob/main/examples/ods/simple_bc_demo/README.md):
+  one task/model binding, runnable commands and retained experiment results.
+
+These guides own reusable ODS behavior. Task-specific parameters, checkpoint
+results and historical validation remain with their examples.
 
 ---
 
 ## OnlineDataEngine
 
-For an end-to-end BC experiment, run
-`python -m examples.ods.simple_bc_demo.train` from an installed checkout.
-The local Franka task qualifies a physical expert, trains the sole ChunkBC
-learner, and evaluates immutable checkpoints in a separate process. The task,
-configs, trainer and evaluator live together in `examples/ods/simple_bc_demo/`;
-the module-qualified Gym ID is
-`examples.ods.simple_bc_demo.environment:SimpleBCPickPlace-Franka-v1`.
-Cameras are display-only; policy geometry comes from measured robot/object state.
-
-The runner supports live ODS, a frozen initial cache and resident LeRobot data
-with either an initial-cache or full-corpus offline baseline. It consumes the
-public `BatchSource` adapters; the shared engine and loaders remain in
-`embodichain.data_pipeline`. Use `--stage overfit-one|overfit-four` for small-data
-diagnostics and `--smoke --no-viewer --no-video` for an engineering check.
-These checks do not establish policy quality or an efficiency advantage.
-Commands and retained historical evidence are indexed in the
-[demo README](https://github.com/DexForce/EmbodiChain/blob/main/examples/ods/simple_bc_demo/README.md).
+The engine owns live production and publication. The training process chooses
+when to consume data, request manual refill and stop production. The engine
+does not own an optimizer or infer when a policy has learned the task.
 
 ### Configuration and recorded-action meaning
 
@@ -43,7 +57,9 @@ and expert commands.
 | `action_semantics` | `"expert_controller_command"` by default, or explicit `"policy_request"`. |
 | `action_contracts` | Ordered ActionManager contract IDs; required with an explicit `action_dim` for policy-request recording. |
 | `refill_policy` | `"sample_threshold"` by default, or owner-requested `"manual"` refill. |
+| `episode_sample_budget`, `episode_sample_hard_limit` | Optional per-source delivered-chunk budget and its configuration ceiling; supply both positive values or omit both. |
 | `include_provenance` | Add numeric frame identity and publication timestamps to sampled tensors. |
+| `lifecycle_event_capacity` | Optional bounded publication/eviction log; the owner must drain an enabled log during production and waits. |
 | `shutdown_timeout` | Finite, positive graceful-close wait in seconds; defaults to `5.0`. |
 
 For an environment with six relative EEF dimensions followed by one normalized
@@ -96,11 +112,6 @@ Episode ends, validity gaps and continuity changes bound the context; numeric
 padding is zero, while language/provenance padding is `-1`. `valid` selects real
 frames and `loss_mask` selects real current/future targets. Decode language only
 for valid frames, as `resolve_language()` rejects padding IDs.
-
-The PickPlace showcase uses ChunkBC with two measured observations and a masked
-action-chunk loss. Live resume restores the model, optimizer and RNG state while
-creating a fresh ODS source; it does not restore the previous shared cache.
-Unsupported checkpoint parameterizations are rejected explicitly.
 
 **Module:** `embodichain/data_pipeline/engine/data.py`
 
@@ -201,6 +212,107 @@ Start the engine before constructing multiprocessing `DataLoader` workers.
 Forked and spawned copies may call `sample_batch()`, but only the original
 owner process may call `start()` or `stop()`; consumer destructors never signal
 the shared producer.
+
+---
+
+## Per-trajectory delivery protection
+
+Set both `episode_sample_budget` and `episode_sample_hard_limit` on
+`OnlineDataEngineCfg` to positive integers with budget <= hard limit. Omit both
+for unrestricted historical behavior. Strict process-shared budgets use CPU
+storage and identify trajectories by immutable engine run/episode IDs, rather
+than reusable cache slots.
+
+One returned batch row/context consumes one selection, independent of chunk
+length. Within-batch duplicate draws count separately. Each sampling call
+selects, copies and debits its complete requested batch under the shared lock.
+A failed copy spends no quota; downstream transforms, optimizer failures and
+prefetch do not refund delivered data. A new Dataset iterator does not reset
+its source's allowance. Live replacement retires unused credits.
+
+`get_sampling_budget_snapshot()` exposes retained identities, assigned/delivered/
+remaining allowances and lifetime delivered chunks. Its unlocked total requires
+at least one valid continuity-qualified anchor, but does not apply every
+requested length, segment or generation filter. It is a scheduling hint, not
+proof that a specific batch can be sampled. Retired-source exposure and completed
+optimizer counts require consumer accounting.
+
+| Outcome | Required handling |
+| --- | --- |
+| Invalid schema/arguments | Fix the configuration; do not treat it as a data wait. |
+| `DataUnavailableError` | No eligible unlocked window/anchor exists. A live caller may wait with a deadline if production can change that condition. Fixed data cannot repair it by waiting. |
+| `DataBudgetExhaustedError` | Eligible data exists but cannot fund the requested full batch. Stop or have the owner schedule further supply within its declared production budget. No partial batch is silently debited. |
+| Worker/read/shutdown failure | Propagate the failure; do not continue indefinitely with old data. |
+
+`OnlineDataBudgetExhaustedError` is the engine-facing alias of common
+`DataBudgetExhaustedError`. Eligibility is checked before quota sufficiency;
+errors are immediate and Dataset wrappers do not silently retry. Worker health
+errors take precedence. Quota depletion does not automatically request refill.
+Use the [configuration guide](ods/configuration.md) to connect strict sampling
+protection to an explicit host pacing/refill policy.
+
+## Shared online and offline context sources
+
+`OnlineDataSource`, `TensorDataSource` and `LeRobotDataSource` expose
+`sample_context(batch_size, spec, generator=...)` under one `BatchSource`
+contract. Every source requires an explicit observation/action schema, action
+semantics or representation, and positive control period `step_dt`. Vector width
+alone cannot establish compatible meaning, joint order, units or frame convention.
+
+For history H and prediction horizon F, each context has H+F-1 positions and
+its current frame is H-1. `obs`, `actions`, `valid`, `loss_mask` and `frame_ids`
+retain the same axes across sources. Frame identity is `(source run, episode,
+frame)`; padding IDs are -1. Numeric padding is zero, and the loss mask includes
+only real current/future targets. Episodes, validity gaps, continuity changes,
+segment mode and optional generation filtering constrain eligible contexts.
+Feature conversion must preserve masks and restore zero padding if a nonlinear
+conversion maps the neutral padded input to a nonzero value.
+
+The following sketch assumes a truthful schema for the recorded numeric fields:
+
+```python
+from torch.utils.data import DataLoader
+from embodichain.data_pipeline.datasets import (
+    LeRobotDataSource,
+    SequenceDataset,
+    SequenceSpecCfg,
+)
+
+source = LeRobotDataSource(
+    "/path/to/dataset",
+    schema=schema,
+    source_id="recording-v1",
+    memory_limit_bytes=512 * 1024 * 1024,
+)
+sequence = SequenceSpecCfg(history_length=2, prediction_horizon=64)
+dataset = SequenceDataset(source, sequence, batch_size=64, max_batches=1000)
+loader = DataLoader(dataset, batch_size=None, num_workers=0)
+for batch in loader:
+    train_step(batch)
+```
+
+The LeRobot adapter uses official SDK numeric reads once, then samples resident
+CPU tensors. The resident allowance does not bound SDK caches, temporary staging,
+total process memory or native GPU allocations. Explicit mappings are required
+when recorded field names differ; standard numeric data does not require the
+BC demo sidecar. Image/video and out-of-core decoding are outside this backend.
+
+For live data, use `OnlineDataSource(engine, schema=schema,
+observation_transform=feature_fn)` with the same truthful feature/action contract.
+The caller starts/stops the engine and schedules any refill/wait. The adapter
+owns none of those lifecycle decisions. The transform must accept copied
+observations and their `valid_mask` and produce the declared numeric features.
+
+`SequenceDataset` yields items when `batch_size=None` and complete batches when
+it is specified; use DataLoader `batch_size=None` for prebatched iteration.
+`max_batches` limits one iterator, not source cardinality or training epochs.
+Explicit generators and finite iteration require owner-process consumption;
+protected resident sources also reject unsupported worker copies. Start with
+`num_workers=0`. `OfflineDataset` is a compatibility alias of `SequenceDataset`.
+
+The [Dataset/source design](https://github.com/DexForce/EmbodiChain/blob/main/docs/architecture/dataset-loading-design.md)
+provides architecture and boundary details. The following `OnlineDataset`
+interface remains available for existing chunk consumers.
 
 ---
 
@@ -307,13 +419,22 @@ sampler = GMMChunkSampler(
 
 ---
 
-## End-to-end demo
+## Runnable examples
 
 A runnable example that wires everything together is provided in:
 
 - `examples/data_pipeline/online_dataset_demo.py`
 
-It shows item mode, batch mode, and dynamic chunk sizes. Run it with:
+The local [Franka BC demo](https://github.com/DexForce/EmbodiChain/blob/main/examples/ods/simple_bc_demo/README.md)
+adds a complete learner, expert, checkpoint/evaluator and fixed-data controls:
+
+```bash
+python -m examples.ods.simple_bc_demo.train --smoke --no-viewer --no-video
+```
+
+Its architecture bindings, task-specific throughput packet, artifacts and
+learning results belong to the example. The generic chunk example shows item
+mode, batch mode and dynamic chunk sizes. Run it with:
 
 ```bash
 python examples/data_pipeline/online_dataset_demo.py

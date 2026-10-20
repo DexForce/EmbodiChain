@@ -1,4 +1,27 @@
-# Expert dataset tools
+# Data pipeline
+
+The package owns live ODS supply, shared numeric training-data sources, durable
+recording and offline dataset tools.
+
+## ODS and training-data consumption
+
+Start with the [ODS user guide](../../docs/source/features/online_data.md) for
+engine lifecycle, manual refill, causal contexts, delivery budgets and source
+ownership. The reusable operational guides are:
+
+- [Throughput-based configuration](../../docs/source/features/ods/configuration.md):
+  measured rates, protected reuse profiles, cache/active-rate limits and the
+  host's pacing/refill responsibilities.
+- [Evaluation and offline comparison](../../docs/source/features/ods/evaluation.md):
+  production/delivery/completion units, quality, timing, resources and fair controls.
+- [Dataset/source architecture](../../docs/architecture/dataset-loading-design.md):
+  the public `BatchSource`/`SequenceDataset` contract and numeric LeRobot loading.
+
+The [simple BC demo](../../examples/ods/simple_bc_demo/README.md) binds these
+capabilities to one local task and learner. Its parameters and experimental
+results remain example evidence rather than generic ODS defaults.
+
+## Expert dataset tools
 
 EmbodiChain records with its existing Python >=3.10 runtime and LeRobot 0.4.x.
 Offline validation, quality filtering, and recovery do not start a simulator.

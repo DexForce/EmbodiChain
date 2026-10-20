@@ -3,6 +3,12 @@
 Status: the initial numeric source/loader API and local BC demo integration are implemented.
 Updated 2026-10-19. Image/video sequence loading and out-of-core storage remain outside this implementation.
 
+For use and operation, start with the [ODS guide](../source/features/online_data.md),
+[throughput configuration](../source/features/ods/configuration.md) and
+[evaluation methodology](../source/features/ods/evaluation.md). This document
+owns source/Dataset architecture and implementation boundaries; task parameters
+and historical run evidence remain with the demo.
+
 ## Problem and acceptance criterion
 
 `SequenceDataset` supplies one PyTorch context-iteration interface for live and

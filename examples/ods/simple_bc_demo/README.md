@@ -103,7 +103,10 @@ with this small-data recipe. This is one-seed development evidence; see the
 
 The configuration input contains generation and training rates, runtime
 metadata, resource limits and a versioned per-trajectory reuse profile. See the
-[configuration method](docs/CONFIGURATION.md).
+[ODS configuration method](../../../docs/source/features/ods/configuration.md)
+and this demo's [packet/CLI binding](docs/CONFIGURATION.md). General data-source
+contracts and comparison metrics live in the
+[ODS documentation](../../../docs/source/features/online_data.md).
 `configs/throughput.example.json` contains historical provisional measurements;
 replace its rates and latency/memory metadata after measuring your deployment.
 

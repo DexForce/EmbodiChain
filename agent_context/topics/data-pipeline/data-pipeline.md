@@ -31,6 +31,12 @@ for fragment transactions, async ownership, depth output and shutdown. Read
 [offline dataset tools](offline-datasets.md) for lineage, quality filtering,
 validation, and conversion across Python/LeRobot versions.
 
+Reusable user documentation belongs to the [ODS guide](../../../docs/source/features/online_data.md),
+[throughput configuration](../../../docs/source/features/ods/configuration.md)
+and [evaluation methodology](../../../docs/source/features/ods/evaluation.md).
+Example-local documentation owns its task binding, CLI/artifact names and
+historical evidence. Keep generic operational contracts in those core guides.
+
 `BatchSource.sample_context()` returns owned TensorDicts under a shared
 `SequenceSpecCfg`; `SequenceDataset` supplies the common iteration interface.
 The package's `schema.py` owns common semantic validation and schema fingerprints;
@@ -41,11 +47,10 @@ requires explicit action semantics, step duration, field mapping and a resident
 memory limit; imports do not initialize simulation or import the SDK until load.
 The first backend samples resident numeric tensors after bounded SDK reads.
 
-The local BC demo uses these public sources. Its `lerobot.py`
-retains only example-owned writing and sidecar/hash auditing around the public
-reader. This does not measure per-minibatch disk reads or replace the recording
-and offline-inspection tools. See the [loading design](../../../docs/architecture/dataset-loading-design.md)
-for boundaries and usage links.
+The demo's `lerobot.py` owns writing and sidecar/hash auditing around the public
+reader. It measures initial loading rather than per-batch disk reads and does
+not replace recording or offline-inspection tools. See the
+[loading design](../../../docs/architecture/dataset-loading-design.md) for source boundaries.
 
 ## Online worker contract
 
