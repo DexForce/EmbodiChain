@@ -36,6 +36,9 @@ _FRANKA_COMPONENT = (
     / "embodichain_tasks/configs/components/embodiments/dual_franka_robotiq_arg2f_140.yaml"
 )
 _MARVIN_PROFILES = frozenset({"dual_tianji", "tianji_marvin"})
+# Simulation calibration for the low-inertia Marvin links with the heavier
+# Robotiq hands, not a factory rotor specification or a shared robot default.
+_MARVIN_ROBOTIQ_ARMATURE = 0.01
 _NEW_PROFILES = frozenset({"dual_ur10"}) | _MARVIN_PROFILES
 _NEW_EMBODIMENT_IDS = frozenset(
     {"dual_ur10_robotiq_arg2f_140", "tianji_marvin_robotiq_arg2f_140"}
@@ -153,6 +156,12 @@ def _load_robotiq_embodiment(profile: str, output_dir: Path) -> dict[str, Any]:
                 simulation["joint_drive_props"][prop][part] = getattr(
                     arm.joint_drive_props, prop
                 )[part]
+        simulation["joint_drive_props"]["armature"] = {
+            "left_arm": _MARVIN_ROBOTIQ_ARMATURE,
+            "right_arm": _MARVIN_ROBOTIQ_ARMATURE,
+            "left_eef": 0.0,
+            "right_eef": 0.0,
+        }
         home = [0.0] * 7
         simulation["init_qpos"] = [0.0] * 26
     simulation["uid"] = "DualUR10" if profile == "dual_ur10" else "TianjiMarvin"
@@ -251,18 +260,64 @@ def _fixed_frame_pose(path: Path, frame: str) -> np.ndarray:
 
 
 def _arm_base_position(embodiment: dict[str, Any], resource: str) -> np.ndarray:
+    """Locate the arm mount/shoulder separately from its IK reference frame."""
     simulation = embodiment["simulation"]
     for component in simulation.get("urdf_cfg", {}).get("components", ()):
         if component["component_type"] == f"{resource}_arm":
             return np.asarray(component["transform"], dtype=float)[:3, 3]
-    solver = simulation["solver_cfg"][f"{resource}_arm"]
-    return _fixed_frame_pose(Path(simulation["fpath"]), solver["root_link_name"])[:3, 3]
+    path = Path(simulation["fpath"])
+    first_joint = simulation["control_parts"][f"{resource}_arm"][0]
+    joint = ET.parse(path).getroot().find(f"joint[@name='{first_joint}']")
+    if joint is None or joint.get("type") not in {"revolute", "continuous"}:
+        raise ValueError("Robot shoulder anchor requires its first declared arm joint.")
+    parent = _fixed_frame_pose(path, joint.find("parent").get("link"))
+    origin = joint.find("origin")
+    translation = np.asarray(
+        [float(value) for value in origin.get("xyz", "0 0 0").split()]
+        if origin is not None
+        else [0.0, 0.0, 0.0]
+    )
+    return parent[:3, :3] @ translation + parent[:3, 3]
 
 
-def _bind_new_mount(embodiment: dict[str, Any], table_top_z: float) -> bool:
+def _bind_new_mount(
+    embodiment: dict[str, Any],
+    table_top_z: float,
+    *,
+    table_bounds: np.ndarray | None = None,
+) -> bool:
     if embodiment.get("embodiment_id") not in _NEW_EMBODIMENT_IDS:
         return False
     simulation = embodiment["simulation"]
+    if embodiment["embodiment_id"] == "tianji_marvin_robotiq_arg2f_140":
+        from ._task_program.twist_geometry import load_robot_link_meshes
+
+        bounds = np.asarray(table_bounds, dtype=float)
+        if (
+            bounds.shape != (2, 3)
+            or not np.isfinite(bounds).all()
+            or (bounds[0, :2] >= bounds[1, :2]).any()
+            or bounds[0, 2] > bounds[1, 2]
+        ):
+            raise ValueError("Marvin floor deployment requires measured table bounds.")
+        path = Path(simulation["fpath"])
+        body = load_robot_link_meshes(path, ("base_link",))["base_link"]
+        vertices = np.concatenate([part.vertices for part in body])
+        body_pose = _fixed_frame_pose(path, "base_link")
+        vertices = vertices @ body_pose[:3, :3].T + body_pose[:3, 3]
+        rotation = Rotation.from_euler(
+            "XYZ", simulation["init_rot"], degrees=True
+        ).as_matrix()
+        vertices = vertices @ rotation.T
+        # The whole body stands on the default ground (z=0), outside the
+        # table's convex collision envelope. Bench-arm shoulder mounting would
+        # either lift this body onto the table or bury its base underground.
+        simulation["init_pos"] = [
+            float(bounds[1, 0] - vertices[:, 0].min() + 0.02),
+            float(simulation["init_pos"][1]),
+            float(-vertices[:, 2].min() + 0.002),
+        ]
+        return True
     anchors = np.stack(
         [_arm_base_position(embodiment, side) for side in ("left", "right")]
     )
@@ -325,10 +380,15 @@ def _profile_lateral_positions(
     if profile not in _MARVIN_PROFILES:
         return None
     from embodichain.data import get_data_path
+    from embodichain.lab.sim.robots import TianjiMarvinCfg
 
     source = Path(get_data_path("TianjiMarvin/robot_acd.urdf"))
+    native = TianjiMarvinCfg.from_dict({"with_gripper": False, "fpath": str(source)})
+    embodiment = {
+        "simulation": {"fpath": str(source), "control_parts": native.control_parts}
+    }
     lateral = {
-        side: -float(_fixed_frame_pose(source, f"{side}_arm_base")[1, 3])
+        side: -float(_arm_base_position(embodiment, side)[1])
         for side in ("left", "right")
     }
     midpoint = sum(lateral.values()) / 2

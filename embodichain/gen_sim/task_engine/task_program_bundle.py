@@ -751,7 +751,22 @@ def generate_task_program_bundle(
         / "dual_arm_trajectory_verified.yaml"
     )
     if frozen is None:
-        _bind_embodiment_to_scene(embodiment_payload, table_top_z=scene.table_top_z)
+        table_bounds = None
+        if embodiment_payload["embodiment_id"] == "tianji_marvin_robotiq_arg2f_140":
+            table = next(
+                (item for item in scene.background if item["uid"] == "table"), None
+            )
+            if table is None:
+                raise ValueError(
+                    "Marvin floor deployment requires a measured scene table."
+                )
+            vertices = _table_world_vertices(table)
+            table_bounds = np.stack((vertices.min(0), vertices.max(0)))
+        _bind_embodiment_to_scene(
+            embodiment_payload,
+            table_top_z=scene.table_top_z,
+            table_bounds=table_bounds,
+        )
         if runtime_profile != COMPOSITION_PROFILE:
             _calibrate_task_gripper_effort(embodiment_payload, scene, selected_graph)
     if articulation_bindings and frozen is None:
@@ -3365,8 +3380,9 @@ def _bind_embodiment_to_scene(
     embodiment: dict[str, Any],
     *,
     table_top_z: float | None,
+    table_bounds: np.ndarray | None = None,
 ) -> None:
-    """Bind the generated deployment's robot mount to the current tabletop."""
+    """Bind a bench arm or whole-body robot to the measured scene."""
     if table_top_z is None or not math.isfinite(float(table_top_z)):
         raise ValueError("GenSim robot deployment requires a derived tabletop height.")
     simulation = embodiment.get("simulation")
@@ -3378,7 +3394,7 @@ def _bind_embodiment_to_scene(
             solver.setdefault("pos_eps", 5e-3)
     from .robot_profiles import _bind_new_mount
 
-    if _bind_new_mount(embodiment, float(table_top_z)):
+    if _bind_new_mount(embodiment, float(table_top_z), table_bounds=table_bounds):
         return
     init_pos = simulation.get("init_pos")
     if not isinstance(init_pos, list) or len(init_pos) != 3:

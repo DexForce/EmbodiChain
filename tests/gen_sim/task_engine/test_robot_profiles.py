@@ -179,12 +179,16 @@ def marvin_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     from embodichain.lab.sim.robots import tianji_marvin
 
     root = ET.Element("robot", name="marvin_fixture")
-    ET.SubElement(root, "link", name="body")
+    body = ET.SubElement(root, "link", name="base_link")
+    collision = ET.SubElement(body, "collision")
+    ET.SubElement(collision, "origin", xyz="0 0 0.5", rpy="0 0 0")
+    geometry = ET.SubElement(collision, "geometry")
+    ET.SubElement(geometry, "box", size="0.4 0.3 1.2")
     for side, label, lateral in (("left", "L", 0.25), ("right", "R", -0.25)):
         base = f"{side}_arm_base"
         ET.SubElement(root, "link", name=base)
         fixed = ET.SubElement(root, "joint", name=f"{side}_mount", type="fixed")
-        ET.SubElement(fixed, "parent", link="body")
+        ET.SubElement(fixed, "parent", link="base_link")
         ET.SubElement(fixed, "child", link=base)
         ET.SubElement(fixed, "origin", xyz=f"0 {lateral} 0.8", rpy="0 0 0")
         parent = base
@@ -221,6 +225,83 @@ def marvin_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(data, "get_data_path", resolve)
     monkeypatch.setattr(tianji_marvin, "get_data_path", resolve)
     return path
+
+
+@pytest.fixture
+def marvin_virtual_source(marvin_source: Path) -> Path:
+    """Preserve the real ACD layout: coincident solver roots, offset shoulders."""
+    root = ET.parse(marvin_source).getroot()
+    for side, sign in (("left", 1), ("right", -1)):
+        root.find(f"joint[@name='{side}_mount']/origin").attrib.update(
+            xyz="0 0 0", rpy=f"0 0 {np.pi / 2}"
+        )
+        root.find(
+            f"joint[@name='SHOULDER_PITCH_{side[0].upper()}_J1']/origin"
+        ).attrib.update(xyz=f"{sign * 0.2215} 0.000029142 1.121")
+    ET.ElementTree(root).write(marvin_source, encoding="utf-8")
+    return marvin_source
+
+
+def test_marvin_physical_anchors_are_not_virtual_solver_roots(
+    tmp_path: Path, marvin_virtual_source: Path
+) -> None:
+    embodiment = profiles._load_robotiq_embodiment("dual_tianji", tmp_path)
+    for side, sign in (("left", 1), ("right", -1)):
+        assert profiles._fixed_frame_pose(marvin_virtual_source, f"{side}_arm_base")[
+            :3, 3
+        ] == pytest.approx([0, 0, 0])
+        assert profiles._arm_base_position(embodiment, side) == pytest.approx(
+            [-0.000029142, sign * 0.2215, 1.121]
+        )
+    expected = {"left": -0.2215, "right": 0.2215}
+    assert profiles._profile_lateral_positions("dual_tianji") == pytest.approx(expected)
+    assert profiles._profile_lateral_positions(
+        "dual_tianji", embodiment
+    ) == pytest.approx(expected)
+
+
+def test_marvin_mount_uses_fixed_body_floor_and_table_clearance(
+    tmp_path: Path, marvin_virtual_source: Path
+) -> None:
+    embodiment = profiles._load_robotiq_embodiment("dual_tianji", tmp_path)
+    bounds = np.array([[-0.5, -0.8, 0], [0.5, 0.8, 0.8]])
+    assert profiles._bind_new_mount(embodiment, 0.8, table_bounds=bounds)
+    root = np.asarray(embodiment["simulation"]["init_pos"])
+    assert root[2] == pytest.approx(0.102)
+    assert root[0] - 0.2 >= bounds[1, 0] + 0.02 - 1e-10
+    assert root[2] - 0.1 == pytest.approx(0.002)
+    assert profiles._bind_new_mount(embodiment, 1.0, table_bounds=bounds)
+    assert embodiment["simulation"]["init_pos"] == pytest.approx(root)
+
+
+def test_marvin_floor_mount_rejects_missing_table_or_body_geometry(
+    tmp_path: Path, marvin_virtual_source: Path
+) -> None:
+    embodiment = profiles._load_robotiq_embodiment("dual_tianji", tmp_path)
+    original = deepcopy(embodiment)
+    with pytest.raises(ValueError, match="measured table bounds"):
+        profiles._bind_new_mount(embodiment, 0.8)
+    assert embodiment == original
+    path = Path(embodiment["simulation"]["fpath"])
+    root = ET.parse(path).getroot()
+    body = root.find("link[@name='base_link']")
+    for collision in list(body.findall("collision")):
+        body.remove(collision)
+    ET.ElementTree(root).write(path)
+    with pytest.raises(ValueError, match="no collision geometry"):
+        profiles._bind_new_mount(
+            embodiment, 0.8, table_bounds=np.array([[-0.5, -0.8, 0], [0.5, 0.8, 0.8]])
+        )
+    assert embodiment == original
+
+
+def test_marvin_physical_anchor_rejects_missing_declared_joint(
+    tmp_path: Path, marvin_virtual_source: Path
+) -> None:
+    embodiment = profiles._load_robotiq_embodiment("dual_tianji", tmp_path)
+    embodiment["simulation"]["control_parts"]["left_arm"][0] = "missing_shoulder"
+    with pytest.raises(ValueError, match="first declared arm joint"):
+        profiles._arm_base_position(embodiment, "left")
 
 
 def test_marvin_keeps_body_and_attaches_only_two_robotiq_hands(
@@ -271,8 +352,12 @@ def test_marvin_keeps_body_and_attaches_only_two_robotiq_hands(
         _bind_embodiment_to_scene,
     )
 
-    _bind_embodiment_to_scene(selected, table_top_z=0.8)
-    assert selected["simulation"]["init_pos"][2] == pytest.approx(0.05)
+    _bind_embodiment_to_scene(
+        selected,
+        table_top_z=0.8,
+        table_bounds=np.array([[-0.5, -0.8, 0], [0.5, 0.8, 0.8]]),
+    )
+    assert selected["simulation"]["init_pos"][2] == pytest.approx(0.102)
     assert profiles._profile_lateral_positions("tianji_marvin") == {
         "left": -0.25,
         "right": 0.25,
@@ -293,6 +378,48 @@ def test_dual_tianji_alias_preserves_model_and_physical_identity(
     assert selected["skill_profile"]["profile_id"] == legacy["embodiment_id"]
     assert profiles._profile_lateral_positions("dual_tianji") == (
         profiles._profile_lateral_positions("tianji_marvin")
+    )
+
+
+def test_marvin_robotiq_armature_does_not_change_hands_or_lab_defaults(
+    tmp_path: Path, marvin_source: Path
+) -> None:
+    from embodichain.lab.sim.cfg import RobotCfg
+    from embodichain.lab.sim.robots import TianjiMarvinCfg
+
+    native = TianjiMarvinCfg.from_dict(
+        {"with_gripper": False, "fpath": str(marvin_source)}
+    ).to_dict()
+    canonical = profiles._load_robotiq_embodiment("dual_franka", tmp_path)
+    selected = profiles._load_robotiq_embodiment("dual_tianji", tmp_path)
+    drive = selected["simulation"]["joint_drive_props"]
+    assert drive.get("armature") == {
+        "left_arm": 0.01,
+        "right_arm": 0.01,
+        "left_eef": 0.0,
+        "right_eef": 0.0,
+    }
+    cfg = RobotCfg.from_dict(selected["simulation"])
+    assert cfg.joint_drive_props.armature == drive["armature"]
+    for side in ("left", "right"):
+        part = f"{side}_eef"
+        for prop in ("stiffness", "damping", "max_effort"):
+            assert (
+                drive[prop][part]
+                == canonical["simulation"]["joint_drive_props"][prop][part]
+            )
+    assert profiles._load_robotiq_embodiment("dual_franka", tmp_path) == canonical
+    assert (
+        "armature"
+        not in profiles._load_robotiq_embodiment("dual_ur10", tmp_path)["simulation"][
+            "joint_drive_props"
+        ]
+    )
+    assert (
+        TianjiMarvinCfg.from_dict(
+            {"with_gripper": False, "fpath": str(marvin_source)}
+        ).to_dict()
+        == native
     )
 
 

@@ -456,6 +456,95 @@ def test_robot_mesh_screen_preserves_neighbor_gripper_and_other_arm_rules(
         assert free["frames"] == held["frames"] == 2
 
 
+@pytest.mark.parametrize(
+    "geometry_links,scene_obstacle,kind",
+    [
+        (("body", "shoulder"), False, None),
+        (("body", "elbow"), False, "other_arm"),
+        (("shoulder", "other_shoulder"), False, "other_arm"),
+        (("shoulder", "fixed_sibling"), False, "other_arm"),
+        (("body", "shoulder"), True, "scene"),
+    ],
+)
+def test_robot_mesh_screen_recognizes_rigid_mount_across_virtual_frames(
+    tmp_path, geometry_links, scene_obstacle, kind
+):
+    pytest.importorskip("fcl")
+    pytest.importorskip("yourdfpy")
+    from embodichain.gen_sim.task_engine._task_program.articulation_collision import (
+        check_free_motion,
+        check_robot_motion,
+    )
+
+    names = (
+        "body",
+        "torso_frame",
+        "arm_frame",
+        "shoulder",
+        "elbow",
+        "tool",
+        "other_shoulder",
+        "fixed_sibling",
+    )
+    box = '<collision><geometry><box size="0.1 0.1 0.1"/></geometry></collision>'
+    links = [
+        f'<link name="{name}">{box if name in geometry_links else ""}</link>'
+        for name in names
+    ]
+    edges = (
+        ("body", "torso_frame", "fixed"),
+        ("torso_frame", "arm_frame", "fixed"),
+        ("arm_frame", "shoulder", "revolute"),
+        ("shoulder", "elbow", "revolute"),
+        ("elbow", "tool", "fixed"),
+        ("body", "other_shoulder", "revolute"),
+        ("body", "fixed_sibling", "fixed"),
+    )
+    joints = [
+        f'<joint name="{child}" type="{joint_type}">'
+        f'<parent link="{parent}"/><child link="{child}"/>'
+        '<axis xyz="0 0 1"/>'
+        '<limit lower="-1" upper="1" effort="1" velocity="1"/></joint>'
+        for parent, child, joint_type in edges
+    ]
+    urdf = tmp_path / "whole_body.urdf"
+    urdf.write_text('<robot name="whole_body">' + "".join(links + joints) + "</robot>")
+    eye = torch.eye(4)[None]
+    robot = SimpleNamespace(
+        cfg=SimpleNamespace(fpath=str(urdf)),
+        joint_names=["shoulder", "elbow", "other_shoulder"],
+        get_qpos=lambda: torch.zeros(1, 3),
+        get_solver=lambda part: SimpleNamespace(
+            root_link_name="arm_frame", end_link_name="tool"
+        ),
+        get_local_pose=lambda **kwargs: eye,
+        get_link_pose=lambda *args, **kwargs: eye,
+    )
+    obstacle = SimpleNamespace(
+        get_local_pose=lambda **kwargs: eye,
+        get_collision_shapes=lambda: [
+            SimpleNamespace(
+                vertices=None,
+                triangles=None,
+                half_extents=torch.full((3,), 0.05),
+                local_pose=eye[0],
+            )
+        ],
+    )
+    simulation = SimpleNamespace(
+        get_rigid_object_uid_list=lambda: ["table"] if scene_obstacle else [],
+        get_rigid_object=lambda uid: obstacle,
+        get_articulation_uid_list=lambda: [],
+    )
+    positions = torch.zeros(1, 3)
+    free = check_free_motion(robot, simulation, positions, "arm")
+    assert free["valid"] is (kind is None)
+    if kind is not None:
+        assert free["kind"] == kind
+    robot_only = check_robot_motion(robot, positions, "arm")
+    assert robot_only["valid"] is (kind is None or scene_obstacle)
+
+
 def test_robot_mesh_checker_reuses_geometry_and_updates_every_frame(
     tmp_path, monkeypatch
 ):

@@ -63,7 +63,8 @@ def check_free_motion(
     Only the operated arm's approach or empty-hand withdrawal is checked here.
     Intended hand/handle contact during sliding is not a free-space certificate.
     URDF neighbors within two joints and intra-gripper mechanism pairs are
-    excluded from self tests, never from scene or other-arm tests.
+    excluded from self tests. The first moving link may meet its rigid mounting
+    ancestors across fixed frames; scene and other-arm contacts remain checked.
     """
     return _check_motion(robot, simulation, positions, control_part, include_scene=True)
 
@@ -148,14 +149,32 @@ def _make_checker(
 
     links = set(model.link_map)
     children: dict[str, set[str]] = {}
+    fixed_children: dict[str, set[str]] = {}
+    fixed_parents: dict[str, str] = {}
     neighbors = {name: {name} for name in links}
     for joint in model.robot.joints:
         children.setdefault(joint.parent, set()).add(joint.child)
         neighbors[joint.parent].add(joint.child)
         neighbors[joint.child].add(joint.parent)
+        if joint.type == "fixed":
+            fixed_children.setdefault(joint.parent, set()).add(joint.child)
+            fixed_parents[joint.child] = joint.parent
     solver = robot.get_solver(control_part)
     active_links = _descendants(children, solver.root_link_name)
     hand_links = _descendants(children, solver.end_link_name)
+    # Virtual solver frames do not turn the shoulder's own rigid mounting body
+    # into another arm. Do not exempt fixed siblings or later moving links.
+    mount_ancestors = {solver.root_link_name}
+    parent = solver.root_link_name
+    while parent in fixed_parents:
+        parent = fixed_parents[parent]
+        mount_ancestors.add(parent)
+    mount_branch = _descendants(fixed_children, solver.root_link_name)
+    mounting_links = {
+        joint.child
+        for joint in model.robot.joints
+        if joint.type != "fixed" and joint.parent in mount_branch
+    }
     near = {name: set.union(*(neighbors[n] for n in neighbors[name])) for name in links}
     world_root = robot.get_local_pose(to_matrix=True)[0].cpu().numpy().copy()
 
@@ -235,6 +254,15 @@ def _make_checker(
             )
             for kind, other in obstacles:
                 hit, pairs = active.in_collision_other(other, return_names=True)
+                if hit and kind == "other_arm":
+                    pairs = {
+                        (a, b)
+                        for a, b in pairs
+                        if not (
+                            owners[a] in mounting_links and owners[b] in mount_ancestors
+                        )
+                    }
+                    hit = bool(pairs)
                 if hit:
                     return {
                         "valid": False,

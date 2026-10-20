@@ -35,6 +35,17 @@ Task Engine `prepare`/`run-all --robot-profile` selects `dual_franka`,
 without changing existing serialized model IDs or frozen-reference receipts.
 The latter two robots retain the canonical complete Robotiq hands. Marvin uses
 its registered bare whole-body asset, not two copies of that robot.
+Marvin's coincident solver roots are not shoulder locations: spatial hints use
+the first controlled joint's fixed parent chain and origin. Its complete body
+is placed at floor level from fixed-body collision geometry, outside the
+measured table envelope; it must not inherit a bench-arm tabletop mount.
+Valid mounting does not certify the task's workspace or continuous paths.
+GenSim robot-mesh screens recognize the first moving link's own rigid mounting
+ancestors across fixed solver frames. This is not a body-wide exemption: later
+arm links, fixed siblings, the other arm and scene obstacles remain checked.
+The Marvin/Robotiq deployment adds 0.01 kg m^2 armature to each arm joint for
+simulation tracking stability with its low-inertia source links. Hand armature
+stays zero; this is not a factory calibration or a shared Lab robot default.
 Source-asset preflight precedes provider calls, while an explicit
 physical reference owns its frozen model and arm anchors. Robot switching
 requires a new bundle; `run --bundle` never replaces its embodiment. New-profile
