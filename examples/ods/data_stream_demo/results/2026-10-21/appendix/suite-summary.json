@@ -1,0 +1,292 @@
+{
+  "suite": "appendix",
+  "status": "complete",
+  "qualification_passed": true,
+  "results": [
+    {
+      "output": "/tmp/ods-data-stream-formal-20261021-v1/appendix/lerobot_same_cache/state/seed19001",
+      "supervision": "/tmp/ods-data-stream-formal-20261021-v1/appendix/_supervision/lerobot_same_cache/state/seed19001",
+      "status": "complete",
+      "qualified": true,
+      "returncode": 0,
+      "elapsed_seconds": 312.31109168892726,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 1124435,
+      "process_launch_monotonic_ns": 1688988392854722,
+      "device_guard": {
+        "samples": 103,
+        "selected_context_seen": false,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [],
+        "peak_known_owned_context_bytes": 0
+      },
+      "aux_graphics_scope": {
+        "physical_index": 7,
+        "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+        "model": "NVIDIA RTX PRO 5000 72GB Blackwell",
+        "allowed_type": "G",
+        "max_per_pid_bytes": 8388608,
+        "shared_by_suite_jobs": true
+      }
+    },
+    {
+      "output": "/tmp/ods-data-stream-formal-20261021-v1/appendix/lerobot_same_cache/dual/seed19001",
+      "supervision": "/tmp/ods-data-stream-formal-20261021-v1/appendix/_supervision/lerobot_same_cache/dual/seed19001",
+      "status": "complete",
+      "qualified": true,
+      "returncode": 0,
+      "elapsed_seconds": 316.1056162910536,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 1124437,
+      "process_launch_monotonic_ns": 1688988395658012,
+      "device_guard": {
+        "samples": 104,
+        "selected_context_seen": false,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [],
+        "peak_known_owned_context_bytes": 0
+      },
+      "aux_graphics_scope": {
+        "physical_index": 7,
+        "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+        "model": "NVIDIA RTX PRO 5000 72GB Blackwell",
+        "allowed_type": "G",
+        "max_per_pid_bytes": 8388608,
+        "shared_by_suite_jobs": true
+      }
+    },
+    {
+      "output": "/tmp/ods-data-stream-formal-20261021-v1/appendix/frozen/state/seed19001",
+      "supervision": "/tmp/ods-data-stream-formal-20261021-v1/appendix/_supervision/frozen/state/seed19001",
+      "status": "complete",
+      "qualified": true,
+      "returncode": 0,
+      "elapsed_seconds": 386.7893995339982,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 1124436,
+      "process_launch_monotonic_ns": 1688988394322698,
+      "device_guard": {
+        "samples": 127,
+        "selected_context_seen": true,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [],
+        "peak_known_owned_context_bytes": 3076521984
+      },
+      "aux_graphics_scope": {
+        "physical_index": 7,
+        "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+        "model": "NVIDIA RTX PRO 5000 72GB Blackwell",
+        "allowed_type": "G",
+        "max_per_pid_bytes": 8388608,
+        "shared_by_suite_jobs": true
+      }
+    },
+    {
+      "output": "/tmp/ods-data-stream-formal-20261021-v1/appendix/frozen/dual/seed19001",
+      "supervision": "/tmp/ods-data-stream-formal-20261021-v1/appendix/_supervision/frozen/dual/seed19001",
+      "status": "complete",
+      "qualified": true,
+      "returncode": 0,
+      "elapsed_seconds": 402.37727357516997,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 1124434,
+      "process_launch_monotonic_ns": 1688988391082550,
+      "device_guard": {
+        "samples": 132,
+        "selected_context_seen": true,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 1124584,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "peak_known_owned_context_bytes": 5941231616
+      },
+      "aux_graphics_scope": {
+        "physical_index": 7,
+        "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+        "model": "NVIDIA RTX PRO 5000 72GB Blackwell",
+        "allowed_type": "G",
+        "max_per_pid_bytes": 8388608,
+        "shared_by_suite_jobs": true
+      }
+    },
+    {
+      "output": "/tmp/ods-data-stream-formal-20261021-v1/appendix/lerobot_same_cache/single/seed19001",
+      "supervision": "/tmp/ods-data-stream-formal-20261021-v1/appendix/_supervision/lerobot_same_cache/single/seed19001",
+      "status": "complete",
+      "qualified": true,
+      "returncode": 0,
+      "elapsed_seconds": 316.5125916909892,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 1125075,
+      "process_launch_monotonic_ns": 1689300954574392,
+      "device_guard": {
+        "samples": 100,
+        "selected_context_seen": false,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [],
+        "peak_known_owned_context_bytes": 0
+      },
+      "aux_graphics_scope": {
+        "physical_index": 7,
+        "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+        "model": "NVIDIA RTX PRO 5000 72GB Blackwell",
+        "allowed_type": "G",
+        "max_per_pid_bytes": 8388608,
+        "shared_by_suite_jobs": true
+      }
+    },
+    {
+      "output": "/tmp/ods-data-stream-formal-20261021-v1/appendix/lerobot_unbounded/state/seed19001",
+      "supervision": "/tmp/ods-data-stream-formal-20261021-v1/appendix/_supervision/lerobot_unbounded/state/seed19001",
+      "status": "complete",
+      "qualified": true,
+      "returncode": 0,
+      "elapsed_seconds": 312.9599949538242,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 1125309,
+      "process_launch_monotonic_ns": 1689375434366519,
+      "device_guard": {
+        "samples": 98,
+        "selected_context_seen": false,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [],
+        "peak_known_owned_context_bytes": 0
+      },
+      "aux_graphics_scope": {
+        "physical_index": 7,
+        "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+        "model": "NVIDIA RTX PRO 5000 72GB Blackwell",
+        "allowed_type": "G",
+        "max_per_pid_bytes": 8388608,
+        "shared_by_suite_jobs": true
+      }
+    },
+    {
+      "output": "/tmp/ods-data-stream-formal-20261021-v1/appendix/frozen/single/seed19001",
+      "supervision": "/tmp/ods-data-stream-formal-20261021-v1/appendix/_supervision/frozen/single/seed19001",
+      "status": "complete",
+      "qualified": true,
+      "returncode": 0,
+      "elapsed_seconds": 397.3585502349306,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 1125104,
+      "process_launch_monotonic_ns": 1689304751857647,
+      "device_guard": {
+        "samples": 125,
+        "selected_context_seen": true,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 1125182,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "peak_known_owned_context_bytes": 5929697280
+      },
+      "aux_graphics_scope": {
+        "physical_index": 7,
+        "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+        "model": "NVIDIA RTX PRO 5000 72GB Blackwell",
+        "allowed_type": "G",
+        "max_per_pid_bytes": 8388608,
+        "shared_by_suite_jobs": true
+      }
+    },
+    {
+      "output": "/tmp/ods-data-stream-formal-20261021-v1/appendix/lerobot_unbounded/single/seed19001",
+      "supervision": "/tmp/ods-data-stream-formal-20261021-v1/appendix/_supervision/lerobot_unbounded/single/seed19001",
+      "status": "complete",
+      "qualified": true,
+      "returncode": 0,
+      "elapsed_seconds": 318.10153478803113,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 1125411,
+      "process_launch_monotonic_ns": 1689391019011589,
+      "device_guard": {
+        "samples": 99,
+        "selected_context_seen": false,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [],
+        "peak_known_owned_context_bytes": 0
+      },
+      "aux_graphics_scope": {
+        "physical_index": 7,
+        "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+        "model": "NVIDIA RTX PRO 5000 72GB Blackwell",
+        "allowed_type": "G",
+        "max_per_pid_bytes": 8388608,
+        "shared_by_suite_jobs": true
+      }
+    },
+    {
+      "output": "/tmp/ods-data-stream-formal-20261021-v1/appendix/lerobot_unbounded/dual/seed19001",
+      "supervision": "/tmp/ods-data-stream-formal-20261021-v1/appendix/_supervision/lerobot_unbounded/dual/seed19001",
+      "status": "complete",
+      "qualified": true,
+      "returncode": 0,
+      "elapsed_seconds": 319.29426748794504,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 1125781,
+      "process_launch_monotonic_ns": 1689617717783970,
+      "device_guard": {
+        "samples": 100,
+        "selected_context_seen": false,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [],
+        "peak_known_owned_context_bytes": 0
+      },
+      "aux_graphics_scope": {
+        "physical_index": 7,
+        "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+        "model": "NVIDIA RTX PRO 5000 72GB Blackwell",
+        "allowed_type": "G",
+        "max_per_pid_bytes": 8388608,
+        "shared_by_suite_jobs": true
+      }
+    }
+  ],
+  "preflight_error": null,
+  "limitations": [
+    "Select a physical NVML GPU UUID, set CUDA_VISIBLE_DEVICES and ODS_GPU_UUID to that UUID, and use logical cuda:0.",
+    "The matching native runtime must qualify CUDA UUID to Vulkan UUID mapping; no fallback to an unmasked or unreserved GPU is permitted.",
+    "Selected GPUs have three idle readings and at least 16GiB free. This is not an exclusive-device reservation.",
+    "An optional auxiliary graphics GPU is separately reserved and excluded from primary assignments; only known per-PID pure-G footprints up to 8 MiB are allowed there.",
+    "The parent samples compute and graphics contexts attributed to its child PID tree or process group; short-lived contexts can fall between samples.",
+    "No system-wide file cache is purged. Calibration is a preflight observation, not a guaranteed concurrent capacity."
+  ],
+  "aux_graphics_scope": {
+    "physical_index": 7,
+    "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+    "model": "NVIDIA RTX PRO 5000 72GB Blackwell",
+    "allowed_type": "G",
+    "max_per_pid_bytes": 8388608,
+    "shared_by_suite_jobs": true
+  },
+  "requested_aux_graphics_gpu_id": 7,
+  "report": "/tmp/ods-data-stream-formal-20261021-v1/appendix/report/report.md"
+}

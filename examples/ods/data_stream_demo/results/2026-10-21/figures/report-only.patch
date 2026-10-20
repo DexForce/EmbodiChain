@@ -1,0 +1,95 @@
+diff --git a/examples/ods/data_stream_demo/report.py b/examples/ods/data_stream_demo/report.py
+index 114c1a295..71cdb0ebf 100644
+--- a/examples/ods/data_stream_demo/report.py
++++ b/examples/ods/data_stream_demo/report.py
+@@ -242,6 +242,14 @@ def _timeline(runs: list[dict[str, Any]], plt: Any, output: Path) -> Any:
+             end = max((t for t in end_times if t is not None), default=0.0)
+             first = _metric(run, "first_batch_from_launch_seconds")
+             ready = _metric(run, "source_ready_seconds")
++            offline = run["config"]["arm"].startswith("lerobot")
++            cache_end = min(end, ready) if offline and ready is not None else end
++            if offline and ready is not None:
++                duration = _metric(run, "actual_measurement_seconds")
++                files_end = max(end, ready + duration) if duration is not None else end
++                axis.hlines(
++                    row, ready, files_end, colors="#596874", linewidth=3, alpha=0.65
++                )
+             if ready is not None:
+                 axis.plot(ready, row - 0.46, marker="|", color="#777777", markersize=9)
+             if first is not None:
+@@ -256,7 +264,7 @@ def _timeline(runs: list[dict[str, Any]], plt: Any, output: Path) -> Any:
+                 if slot in active:
+                     start, generation = active.pop(slot)
+                     axis.broken_barh(
+-                        [(start, max(0, time_value - start))],
++                        [(start, max(0, min(time_value, cache_end) - start))],
+                         (row - 0.37 + 0.6 * slot / cache, 0.6 / cache),
+                         facecolors=plt.get_cmap("tab10")(int(generation) % 10),
+                         alpha=0.4,
+@@ -265,7 +273,7 @@ def _timeline(runs: list[dict[str, Any]], plt: Any, output: Path) -> Any:
+                     active[slot] = (time_value, event.get("generation", 0))
+             for slot, (start, generation) in active.items():
+                 axis.broken_barh(
+-                    [(start, max(0, end - start))],
++                    [(start, max(0, cache_end - start))],
+                     (row - 0.37 + 0.6 * slot / cache, 0.6 / cache),
+                     facecolors=plt.get_cmap("tab10")(int(generation) % 10),
+                     alpha=0.4,
+@@ -311,6 +319,7 @@ def _timeline(runs: list[dict[str, Any]], plt: Any, output: Path) -> Any:
+         )
+         axis.grid(axis="x", alpha=0.2)
+     from matplotlib.patches import Patch
++    from matplotlib.lines import Line2D
+ 
+     generations = sorted(
+         {
+@@ -326,10 +335,19 @@ def _timeline(runs: list[dict[str, Any]], plt: Any, output: Path) -> Any:
+             handles=[
+                 Patch(color=plt.get_cmap("tab10")(g % 10), label=f"Generation {g}")
+                 for g in generations
++            ]
++            + [
++                Line2D(
++                    [0],
++                    [0],
++                    color="#596874",
++                    linewidth=3,
++                    label="Finalized corpus on disk",
++                )
+             ],
+             loc="upper center",
+             bbox_to_anchor=(0.5, 1.02),
+-            ncol=min(6, len(generations)),
++            ncol=min(6, len(generations) + 1),
+         )
+     figure.tight_layout()
+     _save(figure, output, "01_timeline")
+@@ -372,12 +390,11 @@ def _reuse(runs: list[dict[str, Any]], plt: Any, output: Path) -> None:
+         axis.set_title(vision)
+         axis.set_ylabel("Delivered chunks per immutable source")
+         axis.set_yscale("symlog", linthresh=10)
++        axis.set_ylim(bottom=0)
+         axis.grid(axis="y", alpha=0.2)
+         if caps:
+             axis.legend(fontsize=8)
+-    figure.suptitle(
+-        "All recorded source identities, including evicted sources (hollow diamonds)"
+-    )
++    figure.suptitle("All identities; hollow diamonds mark collector-cache eviction")
+     figure.tight_layout()
+     _save(figure, output, "02_reuse")
+     plt.close(figure)
+@@ -717,11 +734,11 @@ def write_report(
+     for name, caption in (
+         (
+             "01_timeline",
+-            "Availability, cache residency and delivered-generation timelines. Bands end at recorded eviction or log end; unrecorded write locks are not inferred.",
++            "Availability, cache residency and delivered-generation timelines. Offline collector bands stop at reader start (after engine shutdown); gray lines show finalized files on disk independently of remaining K. Unrecorded write locks are not inferred.",
+         ),
+         (
+             "02_reuse",
+-            "Per-source reuse, including evicted sources. The K line is a protection setting, not an optimal learning budget.",
++            "Per-source reuse; hollow diamonds mean collector-cache eviction. For LeRobot, all finalized corpus files remain available despite collector eviction. The K line is a protection setting, not an optimal learning budget.",
+         ),
+         (
+             "03_latency_demand",

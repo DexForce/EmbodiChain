@@ -5,6 +5,11 @@ consumer. There is no learner, optimizer or student evaluation. The experiment
 compares ODS with standard LeRobot files and real video decoding, independently
 of whether a policy can learn the task.
 
+The [recorded study](results/2026-10-21/RESULTS.md) contains 27 main runs and nine
+appendix diagnostics validated in the py311 environment, with raw measurement
+logs, per-run tables and figures. It includes the current visual-throughput
+limitation and process-exit cleanup warnings.
+
 Run commands from the repository root. The complete protocol, including the
 timing boundaries and comparison limits, is in the
 [design](../../../docs/architecture/ods-data-stream-showcase-design.md).

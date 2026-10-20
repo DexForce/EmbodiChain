@@ -1,0 +1,3352 @@
+{
+  "fixed_trial_groups": [
+    {
+      "case": "fixed-single-2",
+      "exit_code": 0,
+      "timeout": false,
+      "status": "complete",
+      "worker_exitcodes": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "forced": [],
+      "close_seconds": 2.573852727888152
+    },
+    {
+      "case": "fixed-single-3",
+      "exit_code": 0,
+      "timeout": false,
+      "status": "complete",
+      "worker_exitcodes": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "forced": [],
+      "close_seconds": 2.728411384159699
+    },
+    {
+      "case": "fixed-dual-1",
+      "exit_code": 0,
+      "timeout": false,
+      "status": "complete",
+      "worker_exitcodes": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "forced": [],
+      "close_seconds": 3.844564094906673
+    },
+    {
+      "case": "fixed-dual-2",
+      "exit_code": 0,
+      "timeout": false,
+      "status": "complete",
+      "worker_exitcodes": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "forced": [],
+      "close_seconds": 3.9102010109927505
+    },
+    {
+      "case": "fixed-dual-3",
+      "exit_code": 0,
+      "timeout": false,
+      "status": "complete",
+      "worker_exitcodes": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "forced": [],
+      "close_seconds": 3.4449462350457907
+    },
+    {
+      "case": "fixed-single-restart-K2",
+      "exit_code": 0,
+      "timeout": false,
+      "status": "complete",
+      "worker_exitcodes": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "forced": [],
+      "close_seconds": 5.815852284897119
+    },
+    {
+      "case": "fixed-dual-restart-K2",
+      "exit_code": 0,
+      "timeout": false,
+      "status": "complete",
+      "worker_exitcodes": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "forced": [],
+      "close_seconds": 7.203006891999394
+    },
+    {
+      "case": "fixed-single-quality",
+      "exit_code": 0,
+      "timeout": false,
+      "status": "complete",
+      "worker_exitcodes": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "forced": [],
+      "close_seconds": 2.5781089628580958
+    },
+    {
+      "case": "fixed-dual-quality",
+      "exit_code": 0,
+      "timeout": false,
+      "status": "complete",
+      "worker_exitcodes": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "forced": [],
+      "close_seconds": 3.6824373740237206
+    }
+  ],
+  "first_fixed_trial": {
+    "package": "examples.ods.data_stream_demo",
+    "vision": "single",
+    "batches": 2,
+    "batch_size": 32,
+    "affinity": [
+      64,
+      65,
+      66,
+      67,
+      68,
+      69,
+      70,
+      71
+    ],
+    "status": "complete",
+    "pid": 1049911,
+    "before_close": {
+      "episode_budget": null,
+      "delivered_chunks": 64,
+      "reserved_chunks": 128,
+      "cancelled_prefetch_chunks": 0,
+      "pending_batches": 4,
+      "remaining_chunks": null,
+      "episodes": [
+        {
+          "source_id": [
+            911890075406342351,
+            0
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 6,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            1
+          ],
+          "assigned": null,
+          "delivered": 2,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            2
+          ],
+          "assigned": null,
+          "delivered": 3,
+          "reserved": 3,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            3
+          ],
+          "assigned": null,
+          "delivered": 2,
+          "reserved": 4,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            4
+          ],
+          "assigned": null,
+          "delivered": 3,
+          "reserved": 6,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            5
+          ],
+          "assigned": null,
+          "delivered": 3,
+          "reserved": 3,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            6
+          ],
+          "assigned": null,
+          "delivered": 5,
+          "reserved": 2,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            7
+          ],
+          "assigned": null,
+          "delivered": 3,
+          "reserved": 3,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            8
+          ],
+          "assigned": null,
+          "delivered": 2,
+          "reserved": 2,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            9
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 4,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            10
+          ],
+          "assigned": null,
+          "delivered": 2,
+          "reserved": 4,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            11
+          ],
+          "assigned": null,
+          "delivered": 0,
+          "reserved": 3,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            12
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 5,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            13
+          ],
+          "assigned": null,
+          "delivered": 0,
+          "reserved": 5,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            14
+          ],
+          "assigned": null,
+          "delivered": 2,
+          "reserved": 6,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            15
+          ],
+          "assigned": null,
+          "delivered": 0,
+          "reserved": 8,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            16
+          ],
+          "assigned": null,
+          "delivered": 4,
+          "reserved": 4,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            17
+          ],
+          "assigned": null,
+          "delivered": 2,
+          "reserved": 7,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            18
+          ],
+          "assigned": null,
+          "delivered": 4,
+          "reserved": 7,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            19
+          ],
+          "assigned": null,
+          "delivered": 0,
+          "reserved": 2,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            20
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 4,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            21
+          ],
+          "assigned": null,
+          "delivered": 7,
+          "reserved": 2,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            22
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 6,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            23
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 1,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            24
+          ],
+          "assigned": null,
+          "delivered": 0,
+          "reserved": 2,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            25
+          ],
+          "assigned": null,
+          "delivered": 3,
+          "reserved": 6,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            26
+          ],
+          "assigned": null,
+          "delivered": 3,
+          "reserved": 3,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            27
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 4,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            28
+          ],
+          "assigned": null,
+          "delivered": 4,
+          "reserved": 3,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            29
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 3,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            30
+          ],
+          "assigned": null,
+          "delivered": 2,
+          "reserved": 6,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            31
+          ],
+          "assigned": null,
+          "delivered": 0,
+          "reserved": 4,
+          "remaining": null
+        }
+      ]
+    },
+    "close": {
+      "unconsumed_prefetch": {
+        "episode_budget": null,
+        "delivered_chunks": 64,
+        "reserved_chunks": 128,
+        "cancelled_prefetch_chunks": 0,
+        "pending_batches": 4,
+        "remaining_chunks": null,
+        "episodes": [
+          {
+            "source_id": [
+              911890075406342351,
+              0
+            ],
+            "assigned": null,
+            "delivered": 1,
+            "reserved": 6,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              1
+            ],
+            "assigned": null,
+            "delivered": 2,
+            "reserved": 0,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              2
+            ],
+            "assigned": null,
+            "delivered": 3,
+            "reserved": 3,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              3
+            ],
+            "assigned": null,
+            "delivered": 2,
+            "reserved": 4,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              4
+            ],
+            "assigned": null,
+            "delivered": 3,
+            "reserved": 6,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              5
+            ],
+            "assigned": null,
+            "delivered": 3,
+            "reserved": 3,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              6
+            ],
+            "assigned": null,
+            "delivered": 5,
+            "reserved": 2,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              7
+            ],
+            "assigned": null,
+            "delivered": 3,
+            "reserved": 3,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              8
+            ],
+            "assigned": null,
+            "delivered": 2,
+            "reserved": 2,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              9
+            ],
+            "assigned": null,
+            "delivered": 1,
+            "reserved": 4,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              10
+            ],
+            "assigned": null,
+            "delivered": 2,
+            "reserved": 4,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              11
+            ],
+            "assigned": null,
+            "delivered": 0,
+            "reserved": 3,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              12
+            ],
+            "assigned": null,
+            "delivered": 1,
+            "reserved": 5,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              13
+            ],
+            "assigned": null,
+            "delivered": 0,
+            "reserved": 5,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              14
+            ],
+            "assigned": null,
+            "delivered": 2,
+            "reserved": 6,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              15
+            ],
+            "assigned": null,
+            "delivered": 0,
+            "reserved": 8,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              16
+            ],
+            "assigned": null,
+            "delivered": 4,
+            "reserved": 4,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              17
+            ],
+            "assigned": null,
+            "delivered": 2,
+            "reserved": 7,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              18
+            ],
+            "assigned": null,
+            "delivered": 4,
+            "reserved": 7,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              19
+            ],
+            "assigned": null,
+            "delivered": 0,
+            "reserved": 2,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              20
+            ],
+            "assigned": null,
+            "delivered": 1,
+            "reserved": 4,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              21
+            ],
+            "assigned": null,
+            "delivered": 7,
+            "reserved": 2,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              22
+            ],
+            "assigned": null,
+            "delivered": 1,
+            "reserved": 6,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              23
+            ],
+            "assigned": null,
+            "delivered": 1,
+            "reserved": 1,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              24
+            ],
+            "assigned": null,
+            "delivered": 0,
+            "reserved": 2,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              25
+            ],
+            "assigned": null,
+            "delivered": 3,
+            "reserved": 6,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              26
+            ],
+            "assigned": null,
+            "delivered": 3,
+            "reserved": 3,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              27
+            ],
+            "assigned": null,
+            "delivered": 1,
+            "reserved": 4,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              28
+            ],
+            "assigned": null,
+            "delivered": 4,
+            "reserved": 3,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              29
+            ],
+            "assigned": null,
+            "delivered": 1,
+            "reserved": 3,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              30
+            ],
+            "assigned": null,
+            "delivered": 2,
+            "reserved": 6,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              31
+            ],
+            "assigned": null,
+            "delivered": 0,
+            "reserved": 4,
+            "remaining": null
+          }
+        ]
+      },
+      "worker_pids": [
+        1049914,
+        1049915,
+        1049916,
+        1049917
+      ],
+      "worker_exitcodes": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "workers_joined": true,
+      "forced_termination": false,
+      "discarded_prefetch_chunks": 128,
+      "shutdown_seconds": 2.600857306038961,
+      "cleanup_errors": []
+    },
+    "close_seconds": 2.601508733117953,
+    "after_close": {
+      "episode_budget": null,
+      "delivered_chunks": 64,
+      "reserved_chunks": 0,
+      "cancelled_prefetch_chunks": 128,
+      "pending_batches": 0,
+      "remaining_chunks": null,
+      "episodes": [
+        {
+          "source_id": [
+            911890075406342351,
+            0
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            1
+          ],
+          "assigned": null,
+          "delivered": 2,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            2
+          ],
+          "assigned": null,
+          "delivered": 3,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            3
+          ],
+          "assigned": null,
+          "delivered": 2,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            4
+          ],
+          "assigned": null,
+          "delivered": 3,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            5
+          ],
+          "assigned": null,
+          "delivered": 3,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            6
+          ],
+          "assigned": null,
+          "delivered": 5,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            7
+          ],
+          "assigned": null,
+          "delivered": 3,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            8
+          ],
+          "assigned": null,
+          "delivered": 2,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            9
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            10
+          ],
+          "assigned": null,
+          "delivered": 2,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            11
+          ],
+          "assigned": null,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            12
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            13
+          ],
+          "assigned": null,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            14
+          ],
+          "assigned": null,
+          "delivered": 2,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            15
+          ],
+          "assigned": null,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            16
+          ],
+          "assigned": null,
+          "delivered": 4,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            17
+          ],
+          "assigned": null,
+          "delivered": 2,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            18
+          ],
+          "assigned": null,
+          "delivered": 4,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            19
+          ],
+          "assigned": null,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            20
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            21
+          ],
+          "assigned": null,
+          "delivered": 7,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            22
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            23
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            24
+          ],
+          "assigned": null,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            25
+          ],
+          "assigned": null,
+          "delivered": 3,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            26
+          ],
+          "assigned": null,
+          "delivered": 3,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            27
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            28
+          ],
+          "assigned": null,
+          "delivered": 4,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            29
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            30
+          ],
+          "assigned": null,
+          "delivered": 2,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            31
+          ],
+          "assigned": null,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": null
+        }
+      ]
+    },
+    "harness_forced_pids": [],
+    "worker_exitcodes": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "worker_pids": [
+      1049914,
+      1049915,
+      1049916,
+      1049917
+    ],
+    "workers_gone": true,
+    "elapsed_seconds": 6.772027695085853,
+    "cuda_initialized": false
+  },
+  "error_quality": {
+    "decode_error": {
+      "type": "RuntimeError",
+      "message": "Caught RuntimeError in DataLoader worker process 0.\nOriginal Traceback (most recent call last):\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/torch/utils/data/_utils/worker.py\", line 349, in _worker_loop\n    data = fetcher.fetch(index)  # type: ignore[possibly-undefined]\n           ^^^^^^^^^^^^^^^^^^^^\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/torch/utils/data/_utils/fetch.py\", line 52, in fetch\n    data = [self.dataset[idx] for idx in possibly_batched_index]\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/torch/utils/data/_utils/fetch.py\", line 52, in <listcomp>\n    data = [self.dataset[idx] for idx in possibly_batched_index]\n            ~~~~~~~~~~~~^^^^^\n  File \"/root/sources/EmbodiChain-ods-stream-design/examples/ods/data_stream_demo/lerobot_io.py\", line 486, in __getitem__\n    item = self._dataset[index]  # Public SDK read, including real video decoding.\n           ~~~~~~~~~~~~~^^^^^^^\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/lerobot/datasets/lerobot_dataset.py\", line 1101, in __getitem__\n    video_frames = self._query_videos(query_timestamps, ep_idx)\n                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/lerobot/datasets/lerobot_dataset.py\", line 1064, in _query_videos\n    frames = decode_video_frames(video_path, shifted_query_ts, self.tolerance_s, self.video_backend)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/lerobot/datasets/video_utils.py\", line 150, in decode_video_frames\n    return decode_video_frames_torchcodec(video_path, timestamps, tolerance_s)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/lerobot/datasets/video_utils.py\", line 334, in decode_video_frames_torchcodec\n    decoder = decoder_cache.get_decoder(str(video_path))\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/lerobot/datasets/video_utils.py\", line 279, in get_decoder\n    decoder = VideoDecoder(file_handle, seek_mode=\"approximate\")\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/torchcodec/decoders/_video_decoder.py\", line 89, in __init__\n    self._decoder = create_decoder(source=source, seek_mode=seek_mode)\n                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/torchcodec/decoders/_decoder_utils.py\", line 45, in create_decoder\n    return core.create_from_file_like(source, seek_mode)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/torchcodec/_core/ops.py\", line 151, in create_from_file_like\n    return _convert_to_tensor(_pybind_ops.create_from_file_like(file_like, seek_mode))\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nRuntimeError: Failed to open input buffer: Invalid data found when processing input\n"
+    },
+    "failed_restart_rejected": true,
+    "close_error": {
+      "type": "RuntimeError",
+      "message": "Caught RuntimeError in DataLoader worker process 1.\nOriginal Traceback (most recent call last):\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/torch/utils/data/_utils/worker.py\", line 349, in _worker_loop\n    data = fetcher.fetch(index)  # type: ignore[possibly-undefined]\n           ^^^^^^^^^^^^^^^^^^^^\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/torch/utils/data/_utils/fetch.py\", line 52, in fetch\n    data = [self.dataset[idx] for idx in possibly_batched_index]\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/torch/utils/data/_utils/fetch.py\", line 52, in <listcomp>\n    data = [self.dataset[idx] for idx in possibly_batched_index]\n            ~~~~~~~~~~~~^^^^^\n  File \"/root/sources/EmbodiChain-ods-stream-design/examples/ods/data_stream_demo/lerobot_io.py\", line 486, in __getitem__\n    item = self._dataset[index]  # Public SDK read, including real video decoding.\n           ~~~~~~~~~~~~~^^^^^^^\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/lerobot/datasets/lerobot_dataset.py\", line 1101, in __getitem__\n    video_frames = self._query_videos(query_timestamps, ep_idx)\n                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/lerobot/datasets/lerobot_dataset.py\", line 1064, in _query_videos\n    frames = decode_video_frames(video_path, shifted_query_ts, self.tolerance_s, self.video_backend)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/lerobot/datasets/video_utils.py\", line 150, in decode_video_frames\n    return decode_video_frames_torchcodec(video_path, timestamps, tolerance_s)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/lerobot/datasets/video_utils.py\", line 334, in decode_video_frames_torchcodec\n    decoder = decoder_cache.get_decoder(str(video_path))\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/lerobot/datasets/video_utils.py\", line 279, in get_decoder\n    decoder = VideoDecoder(file_handle, seek_mode=\"approximate\")\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/torchcodec/decoders/_video_decoder.py\", line 89, in __init__\n    self._decoder = create_decoder(source=source, seek_mode=seek_mode)\n                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/torchcodec/decoders/_decoder_utils.py\", line 45, in create_decoder\n    return core.create_from_file_like(source, seek_mode)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/torchcodec/_core/ops.py\", line 151, in create_from_file_like\n    return _convert_to_tensor(_pybind_ops.create_from_file_like(file_like, seek_mode))\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nRuntimeError: Failed to open input buffer: Invalid data found when processing input\n",
+      "diagnostics": {
+        "unconsumed_prefetch": {
+          "episode_budget": 128,
+          "delivered_chunks": 0,
+          "reserved_chunks": 160,
+          "cancelled_prefetch_chunks": 0,
+          "pending_batches": 5,
+          "remaining_chunks": 3936,
+          "episodes": [
+            {
+              "source_id": [
+                911890075406342351,
+                0
+              ],
+              "assigned": 128,
+              "delivered": 0,
+              "reserved": 3,
+              "remaining": 125
+            },
+            {
+              "source_id": [
+                911890075406342351,
+                1
+              ],
+              "assigned": 128,
+              "delivered": 0,
+              "reserved": 2,
+              "remaining": 126
+            },
+            {
+              "source_id": [
+                911890075406342351,
+                2
+              ],
+              "assigned": 128,
+              "delivered": 0,
+              "reserved": 5,
+              "remaining": 123
+            },
+            {
+              "source_id": [
+                911890075406342351,
+                3
+              ],
+              "assigned": 128,
+              "delivered": 0,
+              "reserved": 4,
+              "remaining": 124
+            },
+            {
+              "source_id": [
+                911890075406342351,
+                4
+              ],
+              "assigned": 128,
+              "delivered": 0,
+              "reserved": 7,
+              "remaining": 121
+            },
+            {
+              "source_id": [
+                911890075406342351,
+                5
+              ],
+              "assigned": 128,
+              "delivered": 0,
+              "reserved": 4,
+              "remaining": 124
+            },
+            {
+              "source_id": [
+                911890075406342351,
+                6
+              ],
+              "assigned": 128,
+              "delivered": 0,
+              "reserved": 5,
+              "remaining": 123
+            },
+            {
+              "source_id": [
+                911890075406342351,
+                7
+              ],
+              "assigned": 128,
+              "delivered": 0,
+              "reserved": 5,
+              "remaining": 123
+            },
+            {
+              "source_id": [
+                911890075406342351,
+                8
+              ],
+              "assigned": 128,
+              "delivered": 0,
+              "reserved": 4,
+              "remaining": 124
+            },
+            {
+              "source_id": [
+                911890075406342351,
+                9
+              ],
+              "assigned": 128,
+              "delivered": 0,
+              "reserved": 4,
+              "remaining": 124
+            },
+            {
+              "source_id": [
+                911890075406342351,
+                10
+              ],
+              "assigned": 128,
+              "delivered": 0,
+              "reserved": 5,
+              "remaining": 123
+            },
+            {
+              "source_id": [
+                911890075406342351,
+                11
+              ],
+              "assigned": 128,
+              "delivered": 0,
+              "reserved": 3,
+              "remaining": 125
+            },
+            {
+              "source_id": [
+                911890075406342351,
+                12
+              ],
+              "assigned": 128,
+              "delivered": 0,
+              "reserved": 5,
+              "remaining": 123
+            },
+            {
+              "source_id": [
+                911890075406342351,
+                13
+              ],
+              "assigned": 128,
+              "delivered": 0,
+              "reserved": 4,
+              "remaining": 124
+            },
+            {
+              "source_id": [
+                911890075406342351,
+                14
+              ],
+              "assigned": 128,
+              "delivered": 0,
+              "reserved": 6,
+              "remaining": 122
+            },
+            {
+              "source_id": [
+                911890075406342351,
+                15
+              ],
+              "assigned": 128,
+              "delivered": 0,
+              "reserved": 5,
+              "remaining": 123
+            },
+            {
+              "source_id": [
+                911890075406342351,
+                16
+              ],
+              "assigned": 128,
+              "delivered": 0,
+              "reserved": 8,
+              "remaining": 120
+            },
+            {
+              "source_id": [
+                911890075406342351,
+                17
+              ],
+              "assigned": 128,
+              "delivered": 0,
+              "reserved": 7,
+              "remaining": 121
+            },
+            {
+              "source_id": [
+                911890075406342351,
+                18
+              ],
+              "assigned": 128,
+              "delivered": 0,
+              "reserved": 11,
+              "remaining": 117
+            },
+            {
+              "source_id": [
+                911890075406342351,
+                19
+              ],
+              "assigned": 128,
+              "delivered": 0,
+              "reserved": 1,
+              "remaining": 127
+            },
+            {
+              "source_id": [
+                911890075406342351,
+                20
+              ],
+              "assigned": 128,
+              "delivered": 0,
+              "reserved": 3,
+              "remaining": 125
+            },
+            {
+              "source_id": [
+                911890075406342351,
+                21
+              ],
+              "assigned": 128,
+              "delivered": 0,
+              "reserved": 9,
+              "remaining": 119
+            },
+            {
+              "source_id": [
+                911890075406342351,
+                22
+              ],
+              "assigned": 128,
+              "delivered": 0,
+              "reserved": 5,
+              "remaining": 123
+            },
+            {
+              "source_id": [
+                911890075406342351,
+                23
+              ],
+              "assigned": 128,
+              "delivered": 0,
+              "reserved": 1,
+              "remaining": 127
+            },
+            {
+              "source_id": [
+                911890075406342351,
+                24
+              ],
+              "assigned": 128,
+              "delivered": 0,
+              "reserved": 2,
+              "remaining": 126
+            },
+            {
+              "source_id": [
+                911890075406342351,
+                25
+              ],
+              "assigned": 128,
+              "delivered": 0,
+              "reserved": 9,
+              "remaining": 119
+            },
+            {
+              "source_id": [
+                911890075406342351,
+                26
+              ],
+              "assigned": 128,
+              "delivered": 0,
+              "reserved": 6,
+              "remaining": 122
+            },
+            {
+              "source_id": [
+                911890075406342351,
+                27
+              ],
+              "assigned": 128,
+              "delivered": 0,
+              "reserved": 5,
+              "remaining": 123
+            },
+            {
+              "source_id": [
+                911890075406342351,
+                28
+              ],
+              "assigned": 128,
+              "delivered": 0,
+              "reserved": 7,
+              "remaining": 121
+            },
+            {
+              "source_id": [
+                911890075406342351,
+                29
+              ],
+              "assigned": 128,
+              "delivered": 0,
+              "reserved": 4,
+              "remaining": 124
+            },
+            {
+              "source_id": [
+                911890075406342351,
+                30
+              ],
+              "assigned": 128,
+              "delivered": 0,
+              "reserved": 7,
+              "remaining": 121
+            },
+            {
+              "source_id": [
+                911890075406342351,
+                31
+              ],
+              "assigned": 128,
+              "delivered": 0,
+              "reserved": 4,
+              "remaining": 124
+            }
+          ]
+        },
+        "worker_pids": [
+          1056471,
+          1056472,
+          1056473,
+          1056474
+        ],
+        "worker_exitcodes": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "workers_joined": true,
+        "forced_termination": false,
+        "discarded_prefetch_chunks": 0,
+        "shutdown_seconds": 0.9842429449781775,
+        "cleanup_errors": [],
+        "error": "RuntimeError('Caught RuntimeError in DataLoader worker process 1.\\nOriginal Traceback (most recent call last):\\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/torch/utils/data/_utils/worker.py\", line 349, in _worker_loop\\n    data = fetcher.fetch(index)  # type: ignore[possibly-undefined]\\n           ^^^^^^^^^^^^^^^^^^^^\\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/torch/utils/data/_utils/fetch.py\", line 52, in fetch\\n    data = [self.dataset[idx] for idx in possibly_batched_index]\\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/torch/utils/data/_utils/fetch.py\", line 52, in <listcomp>\\n    data = [self.dataset[idx] for idx in possibly_batched_index]\\n            ~~~~~~~~~~~~^^^^^\\n  File \"/root/sources/EmbodiChain-ods-stream-design/examples/ods/data_stream_demo/lerobot_io.py\", line 486, in __getitem__\\n    item = self._dataset[index]  # Public SDK read, including real video decoding.\\n           ~~~~~~~~~~~~~^^^^^^^\\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/lerobot/datasets/lerobot_dataset.py\", line 1101, in __getitem__\\n    video_frames = self._query_videos(query_timestamps, ep_idx)\\n                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/lerobot/datasets/lerobot_dataset.py\", line 1064, in _query_videos\\n    frames = decode_video_frames(video_path, shifted_query_ts, self.tolerance_s, self.video_backend)\\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/lerobot/datasets/video_utils.py\", line 150, in decode_video_frames\\n    return decode_video_frames_torchcodec(video_path, timestamps, tolerance_s)\\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/lerobot/datasets/video_utils.py\", line 334, in decode_video_frames_torchcodec\\n    decoder = decoder_cache.get_decoder(str(video_path))\\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/lerobot/datasets/video_utils.py\", line 279, in get_decoder\\n    decoder = VideoDecoder(file_handle, seek_mode=\"approximate\")\\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/torchcodec/decoders/_video_decoder.py\", line 89, in __init__\\n    self._decoder = create_decoder(source=source, seek_mode=seek_mode)\\n                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/torchcodec/decoders/_decoder_utils.py\", line 45, in create_decoder\\n    return core.create_from_file_like(source, seek_mode)\\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/torchcodec/_core/ops.py\", line 151, in create_from_file_like\\n    return _convert_to_tensor(_pybind_ops.create_from_file_like(file_like, seek_mode))\\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\\nRuntimeError: Failed to open input buffer: Invalid data found when processing input\\n')"
+      }
+    },
+    "ledger_before": {
+      "episode_budget": 128,
+      "delivered_chunks": 0,
+      "reserved_chunks": 128,
+      "cancelled_prefetch_chunks": 0,
+      "pending_batches": 4,
+      "remaining_chunks": 3968,
+      "episodes": [
+        {
+          "source_id": [
+            911890075406342351,
+            0
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 2,
+          "remaining": 126
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            1
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 2,
+          "remaining": 126
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            2
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 4,
+          "remaining": 124
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            3
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 3,
+          "remaining": 125
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            4
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 5,
+          "remaining": 123
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            5
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 3,
+          "remaining": 125
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            6
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 5,
+          "remaining": 123
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            7
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 4,
+          "remaining": 124
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            8
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 4,
+          "remaining": 124
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            9
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 4,
+          "remaining": 124
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            10
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 3,
+          "remaining": 125
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            11
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 3,
+          "remaining": 125
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            12
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 3,
+          "remaining": 125
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            13
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 2,
+          "remaining": 126
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            14
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 5,
+          "remaining": 123
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            15
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 3,
+          "remaining": 125
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            16
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 8,
+          "remaining": 120
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            17
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 5,
+          "remaining": 123
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            18
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 9,
+          "remaining": 119
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            19
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            20
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 3,
+          "remaining": 125
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            21
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 8,
+          "remaining": 120
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            22
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 4,
+          "remaining": 124
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            23
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 1,
+          "remaining": 127
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            24
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            25
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 8,
+          "remaining": 120
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            26
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 4,
+          "remaining": 124
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            27
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 5,
+          "remaining": 123
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            28
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 6,
+          "remaining": 122
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            29
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 3,
+          "remaining": 125
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            30
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 7,
+          "remaining": 121
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            31
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 2,
+          "remaining": 126
+        }
+      ]
+    },
+    "ledger_after": {
+      "episode_budget": 128,
+      "delivered_chunks": 0,
+      "reserved_chunks": 0,
+      "cancelled_prefetch_chunks": 160,
+      "pending_batches": 0,
+      "remaining_chunks": 4096,
+      "episodes": [
+        {
+          "source_id": [
+            911890075406342351,
+            0
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            1
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            2
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            3
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            4
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            5
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            6
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            7
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            8
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            9
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            10
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            11
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            12
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            13
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            14
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            15
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            16
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            17
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            18
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            19
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            20
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            21
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            22
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            23
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            24
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            25
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            26
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            27
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            28
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            29
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            30
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            31
+          ],
+          "assigned": 128,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": 128
+        }
+      ]
+    },
+    "all_workers_zero": true,
+    "quality_single": {
+      "samples": [
+        {
+          "camera": "cam_high",
+          "index": 0,
+          "mae_uint8": 1.6350075453954862,
+          "psnr_db": 40.677524849772546,
+          "exact": false
+        },
+        {
+          "camera": "cam_high",
+          "index": 239,
+          "mae_uint8": 1.8774288644797632,
+          "psnr_db": 39.002611378147954,
+          "exact": false
+        },
+        {
+          "camera": "cam_high",
+          "index": 478,
+          "mae_uint8": 1.7707341506457415,
+          "psnr_db": 40.23819961048935,
+          "exact": false
+        }
+      ],
+      "worker_cleanup": {
+        "worker_pids": [
+          1056515
+        ],
+        "worker_exitcodes": [
+          0
+        ],
+        "workers_joined": true,
+        "forced_termination": false,
+        "discarded_prefetch_chunks": 0,
+        "shutdown_seconds": 6.677303463220596e-05,
+        "cleanup_errors": []
+      },
+      "scope": "fixed raw RGB references versus standard CPU video decoding; excluded from timed consumption"
+    },
+    "quality_dual": {
+      "samples": [
+        {
+          "camera": "cam_high",
+          "index": 0,
+          "mae_uint8": 1.6406531873046788,
+          "psnr_db": 40.68244347006563,
+          "exact": false
+        },
+        {
+          "camera": "cam_high",
+          "index": 239,
+          "mae_uint8": 1.8514941396393472,
+          "psnr_db": 39.12300230841422,
+          "exact": false
+        },
+        {
+          "camera": "cam_high",
+          "index": 478,
+          "mae_uint8": 1.7733129625617796,
+          "psnr_db": 40.22116915477631,
+          "exact": false
+        },
+        {
+          "camera": "cam_wrist",
+          "index": 0,
+          "mae_uint8": 1.71293818922796,
+          "psnr_db": 40.80509918007572,
+          "exact": false
+        },
+        {
+          "camera": "cam_wrist",
+          "index": 239,
+          "mae_uint8": 1.7772544594267619,
+          "psnr_db": 38.772698444002096,
+          "exact": false
+        },
+        {
+          "camera": "cam_wrist",
+          "index": 478,
+          "mae_uint8": 1.6077963386563852,
+          "psnr_db": 39.508355335079855,
+          "exact": false
+        }
+      ],
+      "worker_cleanup": {
+        "worker_pids": [
+          1056527
+        ],
+        "worker_exitcodes": [
+          0
+        ],
+        "workers_joined": true,
+        "forced_termination": false,
+        "discarded_prefetch_chunks": 0,
+        "shutdown_seconds": 6.66310079395771e-05,
+        "cleanup_errors": []
+      },
+      "scope": "fixed raw RGB references versus standard CPU video decoding; excluded from timed consumption"
+    }
+  },
+  "no_abort_or_semaphore_leak_markers": true,
+  "source_sha256": "05ec517e760578ed1f2113064e8c2309cc6bcd26f436467d6830a3f959e254d9",
+  "python310_syntax": true,
+  "raw_baseline_failure": {
+    "package": "baseline_pkg",
+    "vision": "single",
+    "batches": 2,
+    "batch_size": 32,
+    "affinity": [
+      64,
+      65,
+      66,
+      67,
+      68,
+      69,
+      70,
+      71
+    ],
+    "status": "failed",
+    "pid": 1047860,
+    "before_close": {
+      "episode_budget": null,
+      "delivered_chunks": 64,
+      "reserved_chunks": 128,
+      "cancelled_prefetch_chunks": 0,
+      "pending_batches": 4,
+      "remaining_chunks": null,
+      "episodes": [
+        {
+          "source_id": [
+            911890075406342351,
+            0
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 6,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            1
+          ],
+          "assigned": null,
+          "delivered": 2,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            2
+          ],
+          "assigned": null,
+          "delivered": 3,
+          "reserved": 3,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            3
+          ],
+          "assigned": null,
+          "delivered": 2,
+          "reserved": 4,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            4
+          ],
+          "assigned": null,
+          "delivered": 3,
+          "reserved": 6,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            5
+          ],
+          "assigned": null,
+          "delivered": 3,
+          "reserved": 3,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            6
+          ],
+          "assigned": null,
+          "delivered": 5,
+          "reserved": 2,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            7
+          ],
+          "assigned": null,
+          "delivered": 3,
+          "reserved": 3,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            8
+          ],
+          "assigned": null,
+          "delivered": 2,
+          "reserved": 2,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            9
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 4,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            10
+          ],
+          "assigned": null,
+          "delivered": 2,
+          "reserved": 4,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            11
+          ],
+          "assigned": null,
+          "delivered": 0,
+          "reserved": 3,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            12
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 5,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            13
+          ],
+          "assigned": null,
+          "delivered": 0,
+          "reserved": 5,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            14
+          ],
+          "assigned": null,
+          "delivered": 2,
+          "reserved": 6,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            15
+          ],
+          "assigned": null,
+          "delivered": 0,
+          "reserved": 8,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            16
+          ],
+          "assigned": null,
+          "delivered": 4,
+          "reserved": 4,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            17
+          ],
+          "assigned": null,
+          "delivered": 2,
+          "reserved": 7,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            18
+          ],
+          "assigned": null,
+          "delivered": 4,
+          "reserved": 7,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            19
+          ],
+          "assigned": null,
+          "delivered": 0,
+          "reserved": 2,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            20
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 4,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            21
+          ],
+          "assigned": null,
+          "delivered": 7,
+          "reserved": 2,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            22
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 6,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            23
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 1,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            24
+          ],
+          "assigned": null,
+          "delivered": 0,
+          "reserved": 2,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            25
+          ],
+          "assigned": null,
+          "delivered": 3,
+          "reserved": 6,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            26
+          ],
+          "assigned": null,
+          "delivered": 3,
+          "reserved": 3,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            27
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 4,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            28
+          ],
+          "assigned": null,
+          "delivered": 4,
+          "reserved": 3,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            29
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 3,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            30
+          ],
+          "assigned": null,
+          "delivered": 2,
+          "reserved": 6,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            31
+          ],
+          "assigned": null,
+          "delivered": 0,
+          "reserved": 4,
+          "remaining": null
+        }
+      ]
+    },
+    "close": {
+      "worker_pids": [
+        1047867,
+        1047868,
+        1047869,
+        1047870
+      ],
+      "worker_exitcodes": [
+        -6,
+        -6,
+        0,
+        0
+      ],
+      "workers_joined": true,
+      "unconsumed_prefetch": {
+        "episode_budget": null,
+        "delivered_chunks": 64,
+        "reserved_chunks": 128,
+        "cancelled_prefetch_chunks": 0,
+        "pending_batches": 4,
+        "remaining_chunks": null,
+        "episodes": [
+          {
+            "source_id": [
+              911890075406342351,
+              0
+            ],
+            "assigned": null,
+            "delivered": 1,
+            "reserved": 6,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              1
+            ],
+            "assigned": null,
+            "delivered": 2,
+            "reserved": 0,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              2
+            ],
+            "assigned": null,
+            "delivered": 3,
+            "reserved": 3,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              3
+            ],
+            "assigned": null,
+            "delivered": 2,
+            "reserved": 4,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              4
+            ],
+            "assigned": null,
+            "delivered": 3,
+            "reserved": 6,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              5
+            ],
+            "assigned": null,
+            "delivered": 3,
+            "reserved": 3,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              6
+            ],
+            "assigned": null,
+            "delivered": 5,
+            "reserved": 2,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              7
+            ],
+            "assigned": null,
+            "delivered": 3,
+            "reserved": 3,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              8
+            ],
+            "assigned": null,
+            "delivered": 2,
+            "reserved": 2,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              9
+            ],
+            "assigned": null,
+            "delivered": 1,
+            "reserved": 4,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              10
+            ],
+            "assigned": null,
+            "delivered": 2,
+            "reserved": 4,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              11
+            ],
+            "assigned": null,
+            "delivered": 0,
+            "reserved": 3,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              12
+            ],
+            "assigned": null,
+            "delivered": 1,
+            "reserved": 5,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              13
+            ],
+            "assigned": null,
+            "delivered": 0,
+            "reserved": 5,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              14
+            ],
+            "assigned": null,
+            "delivered": 2,
+            "reserved": 6,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              15
+            ],
+            "assigned": null,
+            "delivered": 0,
+            "reserved": 8,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              16
+            ],
+            "assigned": null,
+            "delivered": 4,
+            "reserved": 4,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              17
+            ],
+            "assigned": null,
+            "delivered": 2,
+            "reserved": 7,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              18
+            ],
+            "assigned": null,
+            "delivered": 4,
+            "reserved": 7,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              19
+            ],
+            "assigned": null,
+            "delivered": 0,
+            "reserved": 2,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              20
+            ],
+            "assigned": null,
+            "delivered": 1,
+            "reserved": 4,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              21
+            ],
+            "assigned": null,
+            "delivered": 7,
+            "reserved": 2,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              22
+            ],
+            "assigned": null,
+            "delivered": 1,
+            "reserved": 6,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              23
+            ],
+            "assigned": null,
+            "delivered": 1,
+            "reserved": 1,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              24
+            ],
+            "assigned": null,
+            "delivered": 0,
+            "reserved": 2,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              25
+            ],
+            "assigned": null,
+            "delivered": 3,
+            "reserved": 6,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              26
+            ],
+            "assigned": null,
+            "delivered": 3,
+            "reserved": 3,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              27
+            ],
+            "assigned": null,
+            "delivered": 1,
+            "reserved": 4,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              28
+            ],
+            "assigned": null,
+            "delivered": 4,
+            "reserved": 3,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              29
+            ],
+            "assigned": null,
+            "delivered": 1,
+            "reserved": 3,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              30
+            ],
+            "assigned": null,
+            "delivered": 2,
+            "reserved": 6,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              911890075406342351,
+              31
+            ],
+            "assigned": null,
+            "delivered": 0,
+            "reserved": 4,
+            "remaining": null
+          }
+        ]
+      }
+    },
+    "close_seconds": 1.578320421045646,
+    "after_close": {
+      "episode_budget": null,
+      "delivered_chunks": 64,
+      "reserved_chunks": 0,
+      "cancelled_prefetch_chunks": 128,
+      "pending_batches": 0,
+      "remaining_chunks": null,
+      "episodes": [
+        {
+          "source_id": [
+            911890075406342351,
+            0
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            1
+          ],
+          "assigned": null,
+          "delivered": 2,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            2
+          ],
+          "assigned": null,
+          "delivered": 3,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            3
+          ],
+          "assigned": null,
+          "delivered": 2,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            4
+          ],
+          "assigned": null,
+          "delivered": 3,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            5
+          ],
+          "assigned": null,
+          "delivered": 3,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            6
+          ],
+          "assigned": null,
+          "delivered": 5,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            7
+          ],
+          "assigned": null,
+          "delivered": 3,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            8
+          ],
+          "assigned": null,
+          "delivered": 2,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            9
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            10
+          ],
+          "assigned": null,
+          "delivered": 2,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            11
+          ],
+          "assigned": null,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            12
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            13
+          ],
+          "assigned": null,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            14
+          ],
+          "assigned": null,
+          "delivered": 2,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            15
+          ],
+          "assigned": null,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            16
+          ],
+          "assigned": null,
+          "delivered": 4,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            17
+          ],
+          "assigned": null,
+          "delivered": 2,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            18
+          ],
+          "assigned": null,
+          "delivered": 4,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            19
+          ],
+          "assigned": null,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            20
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            21
+          ],
+          "assigned": null,
+          "delivered": 7,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            22
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            23
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            24
+          ],
+          "assigned": null,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            25
+          ],
+          "assigned": null,
+          "delivered": 3,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            26
+          ],
+          "assigned": null,
+          "delivered": 3,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            27
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            28
+          ],
+          "assigned": null,
+          "delivered": 4,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            29
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            30
+          ],
+          "assigned": null,
+          "delivered": 2,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            911890075406342351,
+            31
+          ],
+          "assigned": null,
+          "delivered": 0,
+          "reserved": 0,
+          "remaining": null
+        }
+      ]
+    },
+    "error": {
+      "type": "AssertionError",
+      "message": "",
+      "traceback": "Traceback (most recent call last):\n  File \"/tmp/ods-data-stream-validation/final-audit/reader-shutdown-1869/trial.py\", line 32, in main\n    assert result['close']['workers_joined'] and all(code==0 for code in result['close']['worker_exitcodes'])\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError\n"
+    },
+    "harness_forced_pids": [],
+    "worker_exitcodes": [
+      -6,
+      -6,
+      0,
+      0
+    ],
+    "worker_pids": [
+      1047867,
+      1047868,
+      1047869,
+      1047870
+    ],
+    "workers_gone": true,
+    "elapsed_seconds": 5.890320519916713,
+    "cuda_initialized": false
+  },
+  "scope": "CPU64-71; real finalizedN32 AV1 single/dual256 B32 H2F32 DataLoader4 spawn/prefetch1; no GPU or reclassification of original v4 failed calibration"
+}

@@ -1,0 +1,114 @@
+{
+  "qualification_passed": true,
+  "stats": {
+    "requested_generation": 1,
+    "completed_generation": 1,
+    "successful_episodes": 1,
+    "failed_episodes": 0,
+    "generated_frames": 471,
+    "production_seconds": 14.18236777302809,
+    "sampled_chunks": 2,
+    "run_id": 1458686361159994202,
+    "valid_frames": 471
+  },
+  "camera_shapes": {
+    "cam_high": [
+      2,
+      33,
+      256,
+      256,
+      4
+    ],
+    "cam_wrist": [
+      2,
+      33,
+      256,
+      256,
+      4
+    ]
+  },
+  "camera_quality": {
+    "cam_high": {
+      "shape": [
+        66,
+        256,
+        256,
+        4
+      ],
+      "std_rgb": 28.623626708984375,
+      "nonblack_fraction": 1.0
+    },
+    "cam_wrist": {
+      "shape": [
+        66,
+        256,
+        256,
+        4
+      ],
+      "std_rgb": 36.66800308227539,
+      "nonblack_fraction": 1.0
+    }
+  },
+  "engine_close": {
+    "state": "OnlineDataEngineState.STOPPED",
+    "worker_closed": true,
+    "monitor_closed": true
+  },
+  "owned_pid_gpu_type_peak_mib": [
+    {
+      "uuid": "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5",
+      "pid": 1023088,
+      "type": "C",
+      "peak_mib": 5717.0
+    },
+    {
+      "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+      "pid": 1023088,
+      "type": "G",
+      "peak_mib": 6.0
+    },
+    {
+      "uuid": "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5",
+      "pid": 1023088,
+      "type": "C+G",
+      "peak_mib": 5717.0
+    }
+  ],
+  "monitor_samples": 28,
+  "resource_scope": "Explicit main GPU plus separately declared/reserved Vulkan-driver graphics initialization auxiliary GPU; not single-device isolation.",
+  "status": {
+    "parent_pid": 1023042,
+    "process_group": 1023042,
+    "exitcode": 0,
+    "elapsed_seconds": 42.70725906593725,
+    "primary_uuid": "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5",
+    "declared_auxiliary_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+    "auxiliary_allowed_context": "G only, <=8MiB per PID",
+    "unexpected_contexts": [],
+    "owned_processes": {
+      "1023042": 1792518014.67,
+      "1023082": 1792518023.04,
+      "1023083": 1792518023.05,
+      "1023087": 1792518023.27,
+      "1023088": 1792518023.3
+    },
+    "leftover_group_members": [],
+    "reaped_owned_helpers": [
+      {
+        "pid": 1023082,
+        "wait_status": 0
+      },
+      {
+        "pid": 1023087,
+        "wait_status": 0
+      }
+    ],
+    "forced_cleanup_signals": [],
+    "graceful_close": true,
+    "mask_before_python": "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5",
+    "SDL_VIDEODRIVER": "dummy",
+    "DISPLAY": null,
+    "resource_scope": "Explicit main GPU plus separately declared/reserved Vulkan-driver graphics initialization auxiliary GPU; not single-device isolation.",
+    "monitor_api": "nvidia-smi -q -x compute+graphics"
+  }
+}

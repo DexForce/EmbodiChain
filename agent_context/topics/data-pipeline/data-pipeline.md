@@ -44,6 +44,9 @@ owns the standard-decoded LeRobot/state/single/dual-camera comparison protocol.
 Its example-local decoded reader is separate from the public resident numeric
 reader. Follow it for the offline baseline, camera-profile qualification and
 timing boundaries; engineering success does not establish formal performance.
+The [recorded study](../../../examples/ods/data_stream_demo/results/2026-10-21/RESULTS.md)
+owns measured results, raw-log reproduction and workload-specific limitations;
+it does not establish training efficiency or policy performance.
 
 `BatchSource.sample_context()` returns owned TensorDicts under a shared
 `SequenceSpecCfg`; `SequenceDataset` supplies the common iteration interface.

@@ -1,0 +1,35 @@
+{
+  "samples": 20,
+  "own_entries": 15,
+  "gpu_uuids": [
+    "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508"
+  ],
+  "types": [
+    "G"
+  ],
+  "memory_values": [
+    "6 MiB"
+  ],
+  "stage_counts": {
+    "created_instance": 2,
+    "enumerated_devices": 2,
+    "queried_device": 7,
+    "all_queries_complete": 4
+  },
+  "first_entry": {
+    "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+    "pid": 1020976,
+    "type": "G",
+    "used_memory": "6 MiB",
+    "monotonic": 1681882.202542583,
+    "stage": "created_instance"
+  },
+  "last_entry": {
+    "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+    "pid": 1020976,
+    "type": "G",
+    "used_memory": "6 MiB",
+    "monotonic": 1681901.464646341,
+    "stage": "all_queries_complete"
+  }
+}

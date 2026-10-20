@@ -1,0 +1,196 @@
+{
+  "scope": "/tmp/ods-data-stream-formal-20261021-v1/main",
+  "resource_tracker_warning_runs": 27,
+  "records": [
+    {
+      "path": "/tmp/ods-data-stream-formal-20261021-v1/main/_supervision/lerobot/dual/seed19001/process.log",
+      "warnings": [
+        "/root/miniconda3/envs/py311/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown",
+        "  warnings.warn('resource_tracker: There appear to be %d '"
+      ]
+    },
+    {
+      "path": "/tmp/ods-data-stream-formal-20261021-v1/main/_supervision/lerobot/dual/seed19002/process.log",
+      "warnings": [
+        "/root/miniconda3/envs/py311/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown",
+        "  warnings.warn('resource_tracker: There appear to be %d '"
+      ]
+    },
+    {
+      "path": "/tmp/ods-data-stream-formal-20261021-v1/main/_supervision/lerobot/dual/seed19003/process.log",
+      "warnings": [
+        "/root/miniconda3/envs/py311/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown",
+        "  warnings.warn('resource_tracker: There appear to be %d '"
+      ]
+    },
+    {
+      "path": "/tmp/ods-data-stream-formal-20261021-v1/main/_supervision/lerobot/single/seed19001/process.log",
+      "warnings": [
+        "/root/miniconda3/envs/py311/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown",
+        "  warnings.warn('resource_tracker: There appear to be %d '"
+      ]
+    },
+    {
+      "path": "/tmp/ods-data-stream-formal-20261021-v1/main/_supervision/lerobot/single/seed19002/process.log",
+      "warnings": [
+        "/root/miniconda3/envs/py311/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown",
+        "  warnings.warn('resource_tracker: There appear to be %d '"
+      ]
+    },
+    {
+      "path": "/tmp/ods-data-stream-formal-20261021-v1/main/_supervision/lerobot/single/seed19003/process.log",
+      "warnings": [
+        "/root/miniconda3/envs/py311/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown",
+        "  warnings.warn('resource_tracker: There appear to be %d '"
+      ]
+    },
+    {
+      "path": "/tmp/ods-data-stream-formal-20261021-v1/main/_supervision/lerobot/state/seed19001/process.log",
+      "warnings": [
+        "/root/miniconda3/envs/py311/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown",
+        "  warnings.warn('resource_tracker: There appear to be %d '"
+      ]
+    },
+    {
+      "path": "/tmp/ods-data-stream-formal-20261021-v1/main/_supervision/lerobot/state/seed19002/process.log",
+      "warnings": [
+        "/root/miniconda3/envs/py311/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown",
+        "  warnings.warn('resource_tracker: There appear to be %d '"
+      ]
+    },
+    {
+      "path": "/tmp/ods-data-stream-formal-20261021-v1/main/_supervision/lerobot/state/seed19003/process.log",
+      "warnings": [
+        "/root/miniconda3/envs/py311/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown",
+        "  warnings.warn('resource_tracker: There appear to be %d '"
+      ]
+    },
+    {
+      "path": "/tmp/ods-data-stream-formal-20261021-v1/main/_supervision/protected/dual/seed19001/process.log",
+      "warnings": [
+        "/root/miniconda3/envs/py311/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown",
+        "  warnings.warn('resource_tracker: There appear to be %d '"
+      ]
+    },
+    {
+      "path": "/tmp/ods-data-stream-formal-20261021-v1/main/_supervision/protected/dual/seed19002/process.log",
+      "warnings": [
+        "/root/miniconda3/envs/py311/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown",
+        "  warnings.warn('resource_tracker: There appear to be %d '"
+      ]
+    },
+    {
+      "path": "/tmp/ods-data-stream-formal-20261021-v1/main/_supervision/protected/dual/seed19003/process.log",
+      "warnings": [
+        "/root/miniconda3/envs/py311/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown",
+        "  warnings.warn('resource_tracker: There appear to be %d '"
+      ]
+    },
+    {
+      "path": "/tmp/ods-data-stream-formal-20261021-v1/main/_supervision/protected/single/seed19001/process.log",
+      "warnings": [
+        "/root/miniconda3/envs/py311/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown",
+        "  warnings.warn('resource_tracker: There appear to be %d '"
+      ]
+    },
+    {
+      "path": "/tmp/ods-data-stream-formal-20261021-v1/main/_supervision/protected/single/seed19002/process.log",
+      "warnings": [
+        "/root/miniconda3/envs/py311/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown",
+        "  warnings.warn('resource_tracker: There appear to be %d '"
+      ]
+    },
+    {
+      "path": "/tmp/ods-data-stream-formal-20261021-v1/main/_supervision/protected/single/seed19003/process.log",
+      "warnings": [
+        "/root/miniconda3/envs/py311/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown",
+        "  warnings.warn('resource_tracker: There appear to be %d '"
+      ]
+    },
+    {
+      "path": "/tmp/ods-data-stream-formal-20261021-v1/main/_supervision/protected/state/seed19001/process.log",
+      "warnings": [
+        "/root/miniconda3/envs/py311/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown",
+        "  warnings.warn('resource_tracker: There appear to be %d '"
+      ]
+    },
+    {
+      "path": "/tmp/ods-data-stream-formal-20261021-v1/main/_supervision/protected/state/seed19002/process.log",
+      "warnings": [
+        "/root/miniconda3/envs/py311/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown",
+        "  warnings.warn('resource_tracker: There appear to be %d '"
+      ]
+    },
+    {
+      "path": "/tmp/ods-data-stream-formal-20261021-v1/main/_supervision/protected/state/seed19003/process.log",
+      "warnings": [
+        "/root/miniconda3/envs/py311/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown",
+        "  warnings.warn('resource_tracker: There appear to be %d '"
+      ]
+    },
+    {
+      "path": "/tmp/ods-data-stream-formal-20261021-v1/main/_supervision/streaming/dual/seed19001/process.log",
+      "warnings": [
+        "/root/miniconda3/envs/py311/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown",
+        "  warnings.warn('resource_tracker: There appear to be %d '"
+      ]
+    },
+    {
+      "path": "/tmp/ods-data-stream-formal-20261021-v1/main/_supervision/streaming/dual/seed19002/process.log",
+      "warnings": [
+        "/root/miniconda3/envs/py311/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown",
+        "  warnings.warn('resource_tracker: There appear to be %d '"
+      ]
+    },
+    {
+      "path": "/tmp/ods-data-stream-formal-20261021-v1/main/_supervision/streaming/dual/seed19003/process.log",
+      "warnings": [
+        "/root/miniconda3/envs/py311/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown",
+        "  warnings.warn('resource_tracker: There appear to be %d '"
+      ]
+    },
+    {
+      "path": "/tmp/ods-data-stream-formal-20261021-v1/main/_supervision/streaming/single/seed19001/process.log",
+      "warnings": [
+        "/root/miniconda3/envs/py311/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown",
+        "  warnings.warn('resource_tracker: There appear to be %d '"
+      ]
+    },
+    {
+      "path": "/tmp/ods-data-stream-formal-20261021-v1/main/_supervision/streaming/single/seed19002/process.log",
+      "warnings": [
+        "/root/miniconda3/envs/py311/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown",
+        "  warnings.warn('resource_tracker: There appear to be %d '"
+      ]
+    },
+    {
+      "path": "/tmp/ods-data-stream-formal-20261021-v1/main/_supervision/streaming/single/seed19003/process.log",
+      "warnings": [
+        "/root/miniconda3/envs/py311/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown",
+        "  warnings.warn('resource_tracker: There appear to be %d '"
+      ]
+    },
+    {
+      "path": "/tmp/ods-data-stream-formal-20261021-v1/main/_supervision/streaming/state/seed19001/process.log",
+      "warnings": [
+        "/root/miniconda3/envs/py311/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown",
+        "  warnings.warn('resource_tracker: There appear to be %d '"
+      ]
+    },
+    {
+      "path": "/tmp/ods-data-stream-formal-20261021-v1/main/_supervision/streaming/state/seed19002/process.log",
+      "warnings": [
+        "/root/miniconda3/envs/py311/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown",
+        "  warnings.warn('resource_tracker: There appear to be %d '"
+      ]
+    },
+    {
+      "path": "/tmp/ods-data-stream-formal-20261021-v1/main/_supervision/streaming/state/seed19003/process.log",
+      "warnings": [
+        "/root/miniconda3/envs/py311/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown",
+        "  warnings.warn('resource_tracker: There appear to be %d '"
+      ]
+    }
+  ],
+  "interpretation": "A shutdown warning is retained. All independent worker/PGID checks are separate. These logs alone cannot prove persistence or absence of semaphore leaks after resource_tracker cleanup."
+}

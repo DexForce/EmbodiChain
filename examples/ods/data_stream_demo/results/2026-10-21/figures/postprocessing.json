@@ -1,0 +1,124 @@
+{
+  "format": "ods-data-stream-postprocessing-v1",
+  "status": "passed",
+  "timed_commit": "cf18c610b87f5b429e15a1c26bc2655d0ed94740",
+  "timed_report_source_sha256": "36eb2e2fcd3bf5548e756a529f948c80c44ed69a670ea746b1c84ef21ff5e00f",
+  "postprocess_report_source_sha256": "796d64a3604f692478a3023cf2242e19311d8726ccfb95e9773571ff58a66fde",
+  "postprocess_patch_sha256": "1d8b22a0925db1f20af85f5c883fa2e51d68c8ae3b91a393e565df72a83d4917",
+  "postprocess_patch": "/tmp/ods-data-stream-formal-20261021-v1/report-final/report-only.patch",
+  "scope": "Posthoc report semantics only: offline collector cache residency stops at reader start, finalized files have a separate availability line, eviction means collector cache eviction, and reuse count axes have a zero lower bound while zero-count markers remain. All timed inputs remain unchanged; no benchmark rerun or qualification override.",
+  "input_root": "/tmp/ods-data-stream-formal-20261021-v1",
+  "output": "/tmp/ods-data-stream-formal-20261021-v1/report-final",
+  "command": [
+    "/root/miniconda3/envs/py311/bin/python",
+    "-m",
+    "examples.ods.data_stream_demo.report",
+    "/tmp/ods-data-stream-formal-20261021-v1",
+    "--output",
+    "/tmp/ods-data-stream-formal-20261021-v1/report-final",
+    "--animation"
+  ],
+  "environment": {
+    "CUDA_VISIBLE_DEVICES": "",
+    "cpu_affinity": [
+      120,
+      121,
+      122,
+      123,
+      124,
+      125,
+      126,
+      127
+    ],
+    "OMP_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1"
+  },
+  "calibration_packet_sha256": "509f79d522d903a049c854231c2d680d3ee67bcf45c722e340b8cf7ae9005abb",
+  "raw_input_snapshot": "/tmp/ods-data-stream-validation/final-audit/postprocessing-input-sha256.json",
+  "raw_input_files_verified_unchanged": 391,
+  "changed_raw_input_files": [],
+  "main_audit": "/tmp/ods-data-stream-validation/final-audit/main-final.json",
+  "appendix_audit": "/tmp/ods-data-stream-validation/final-audit/appendix-final.json",
+  "corpus_binding_audit": "/tmp/ods-data-stream-validation/final-audit/appendix-corpus-binding.json",
+  "native_audit": "/tmp/ods-data-stream-validation/final-audit/native-final.json",
+  "pre_patch_source_audit": "/tmp/ods-data-stream-validation/final-audit/timed-source-final.json",
+  "deterministic_artist_checks": "/tmp/ods-data-stream-validation/final-audit/report-postprocessing-semantics.json",
+  "synthetic_fixtures": "/tmp/ods-data-stream-validation/final-audit/report-fixtures-posthoc/validation.json",
+  "shutdown_warning_evidence": [
+    "/tmp/ods-data-stream-validation/final-audit/main-shutdown-warnings.json",
+    "/tmp/ods-data-stream-validation/final-audit/appendix-shutdown-warnings.json"
+  ],
+  "warnings": [
+    "Python resource_tracker reported one semaphore for shutdown cleanup in all 27 main runs and all three Frozen appendix runs; these warnings remain in original logs. All checked worker exit codes and owned process-group closure passed. The warnings alone do not establish persistent semaphore leakage or warning-free closure.",
+    "One unbounded/single appendix batch (32 chunks) completed after the measurement deadline. It remains in lifetime accounting and is excluded from window throughput/latency."
+  ],
+  "main_runs": 27,
+  "appendix_runs": 9,
+  "groups": 18,
+  "main_seeds_per_cell": 3,
+  "appendix_seeds_per_cell": 1,
+  "artifacts": {
+    "01_timeline.png": {
+      "sha256": "efda12d0ab1dfb991ea485924115652fbb513875885a9e4d695f2279b0cf28b7",
+      "bytes": 459115
+    },
+    "02_reuse.png": {
+      "sha256": "714ac7d352b951ef817870d592787e3509259380cb8c9fb75ac78cc3763edd7d",
+      "bytes": 135093
+    },
+    "03_latency_demand.png": {
+      "sha256": "d0dafb753f64fe00e8b6ae17b071d4d63dfba7005e658f032bc66909f68cd964",
+      "bytes": 240419
+    },
+    "04_visual_load.png": {
+      "sha256": "266b1a15823efb001d808f2c6717e4991cd9c8bd89a069b8bf84d1bcd33d1ca7",
+      "bytes": 277916
+    },
+    "01_timeline.svg": {
+      "sha256": "da1d9e0eb0fa984bfe720fe0539edce4c34d161c925331000328112cc5988fb1",
+      "bytes": 2249103
+    },
+    "02_reuse.svg": {
+      "sha256": "de6ccd5478d9a2083950e6640fed47b429f1dc6bb9bde546fcf146842f350e13",
+      "bytes": 295209
+    },
+    "03_latency_demand.svg": {
+      "sha256": "fc599873e9c6264881603a6230c44da3bb73db55ff0cf4b22ebe47d8fb89732b",
+      "bytes": 192601
+    },
+    "04_visual_load.svg": {
+      "sha256": "43d6638211ac6bacf12b7d75489935e494e2f4443f7e38f21229f2362450600c",
+      "bytes": 173057
+    },
+    "01_timeline.pdf": {
+      "sha256": "dea3e3078eb0d949b2cebfd825b300c9b5e0dcf48237e78a674d8bd9fb414edd",
+      "bytes": 1334510
+    },
+    "02_reuse.pdf": {
+      "sha256": "2c80255ba94e2ffc682370014236350bf1e198ea3672fda3f4dfb252275a17f7",
+      "bytes": 59481
+    },
+    "03_latency_demand.pdf": {
+      "sha256": "6a58c591548edffa4df7b0c6a07e217b3a6787d9f61799812f2918bb3dc35243",
+      "bytes": 42483
+    },
+    "04_visual_load.pdf": {
+      "sha256": "e723e0722cd24460f8824933f29785e0b7ccb41647d69064309457ce6476b8fe",
+      "bytes": 49996
+    },
+    "data_flow.gif": {
+      "sha256": "02a0ac6ff6698594e45b396b38e415015817eead33542a7cdb7802106a0adf78",
+      "bytes": 1875221,
+      "frames": 120
+    },
+    "report.md": {
+      "sha256": "5ad44f73d1f378686d004b748607623bf4c7a2bcfc826e5da7bf788a8b9526a5",
+      "bytes": 15379
+    },
+    "report.json": {
+      "sha256": "4a8a958d5f28208ecc48b71805e37b27ca9eeb1d2857a64df35e1c59cc8beb0a",
+      "bytes": 867810
+    }
+  }
+}

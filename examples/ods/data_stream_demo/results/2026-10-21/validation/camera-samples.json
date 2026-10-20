@@ -1,0 +1,8 @@
+{
+  "source": "/tmp/ods-data-stream-validation/device-isolation/qualified-primary3-aux7",
+  "scope": "Unmodified images from successful real v3 dual-camera qualification using primary GPU3 plus reserved GPU7; engineering illustration, excluded from timed performance measurements.",
+  "images": [
+    "figures/cam_high-sample.png",
+    "figures/cam_wrist-sample.png"
+  ]
+}

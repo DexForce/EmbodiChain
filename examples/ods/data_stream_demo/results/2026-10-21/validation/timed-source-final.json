@@ -1,0 +1,25 @@
+{
+  "status": "passed",
+  "timed_commit": "cf18c610b87f5b429e15a1c26bc2655d0ed94740",
+  "git_status": "",
+  "mismatched_sources": [],
+  "source_sha256": {
+    "embodichain/data_pipeline/engine/data.py": "4a5e160910f3b02bb7559b9c9803b2d47d92ab2962d024f9ac5d87cda1ef5271",
+    "embodichain/data_pipeline/runtime.py": "0992cd749605df1cd79d0f64ce2b5dbac0c9e7b48124fec2a5fd3b454c263819",
+    "examples/ods/data_stream_demo/__init__.py": "c9041fac160c5ee047510a80b557bb60b3d92de74a291ed68744365508d72fe0",
+    "examples/ods/data_stream_demo/acquisition.py": "a2188f50b0fc1dba3de02b8fde2a3b20b76ea510770abf271d2caaecc122d89c",
+    "examples/ods/data_stream_demo/lerobot_io.py": "05ec517e760578ed1f2113064e8c2309cc6bcd26f436467d6830a3f959e254d9",
+    "examples/ods/data_stream_demo/metrics.py": "4aa2372643d565ef9d87621fe118820536689aeea479d5bafac6bbf0cd5bac32",
+    "examples/ods/data_stream_demo/payload.py": "eb3bcaed0bcfe9f9d2109e6ad3b5ccb432392e5116877ac48446a09838f3911c",
+    "examples/ods/data_stream_demo/report.py": "36eb2e2fcd3bf5548e756a529f948c80c44ed69a670ea746b1c84ef21ff5e00f",
+    "examples/ods/data_stream_demo/run.py": "dd4369b5f83f728bce1feafca6ba397ba9db3a3434b8f1681bd74699106bed17",
+    "examples/ods/data_stream_demo/suite.py": "bde907ce27499f73c35686f42f4cdcf7f9d94d868e90317a6e9bc3500286a278",
+    "examples/ods/simple_bc_demo/config.py": "57b27cf7f38806c8a0993990dc2767de320f8f2102d47d9a4b1fdaf7e8ffdac4",
+    "examples/ods/simple_bc_demo/configs/env.yaml": "c801ab47187fbd0e9079208149077a781ce48dda0afd4c0ccd7a5bbe8f63dfa9",
+    "examples/ods/simple_bc_demo/configs/franka.yaml": "592bf09371e3e1c74a3aff9ee951cccb853f8a41d06dba314842fd49e0cb3366",
+    "examples/ods/simple_bc_demo/configs/task.yaml": "5d33898f4b18821ee5b8dff680663258de4e231202474259cf4c38bc416a9a4e",
+    "examples/ods/simple_bc_demo/environment.py": "107e0037361ea4e7635d503be9764622f50130a253de544f5bf9eebb41362329"
+  },
+  "calibration_packet_sha256": "509f79d522d903a049c854231c2d680d3ee67bcf45c722e340b8cf7ae9005abb",
+  "saved_before_report_patch": true
+}

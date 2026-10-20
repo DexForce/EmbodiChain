@@ -1,0 +1,386 @@
+{
+  "status": "complete",
+  "observed_utc": "2026-10-20T19:53:11.097459+00:00",
+  "method": "CPU-only streamed SHA256 after all 36 timed cells. No native module import, decoder, or GPU process.",
+  "native_commit": "00106a1db10e330c62cb62d8015b8474e997701b",
+  "native_worktree_status": " M python/dexsim/engine/newton_physics/runtime_kernels.py\n",
+  "matched_v3_loaded_files": 15,
+  "formal_loaded_mapping_records": [
+    {
+      "pid": 1063722,
+      "pgid": 1063655,
+      "audit_source": "/tmp/ods-data-stream-formal-20261021-v1/main/_supervision/lerobot/single/seed19003/device-contexts.jsonl",
+      "loaded_files": 18,
+      "all_current_files_match_timed_inode_size_mtime": true
+    },
+    {
+      "pid": 1063726,
+      "pgid": 1063653,
+      "audit_source": "/tmp/ods-data-stream-formal-20261021-v1/main/_supervision/protected/dual/seed19003/device-contexts.jsonl",
+      "loaded_files": 18,
+      "all_current_files_match_timed_inode_size_mtime": true
+    },
+    {
+      "pid": 1063704,
+      "pgid": 1063652,
+      "audit_source": "/tmp/ods-data-stream-formal-20261021-v1/main/_supervision/protected/state/seed19001/device-contexts.jsonl",
+      "loaded_files": 16,
+      "all_current_files_match_timed_inode_size_mtime": true
+    },
+    {
+      "pid": 1063733,
+      "pgid": 1063654,
+      "audit_source": "/tmp/ods-data-stream-formal-20261021-v1/main/_supervision/streaming/dual/seed19003/device-contexts.jsonl",
+      "loaded_files": 18,
+      "all_current_files_match_timed_inode_size_mtime": true
+    }
+  ],
+  "all_comparisons_passed": true,
+  "libraries": [
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/cuda/pybind.cpython-311-x86_64-linux-gnu.so",
+      "size_bytes": 5484144,
+      "inode": 138550296,
+      "mtime_ns": 1791083746318911606,
+      "sha256": "398e678ca7ebe2f1c05da2abd05b0d3618077c2fd5ab6c3fa32b0fb4ce5cb341",
+      "bundled_package_elf": true,
+      "matches_v3_loaded_baseline": true,
+      "matches_baseline_inode": true,
+      "resolved_path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/cuda/pybind.cpython-311-x86_64-linux-gnu.so",
+      "is_symlink": false
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libDexSim.so",
+      "size_bytes": 4288344,
+      "inode": 138551273,
+      "mtime_ns": 1791083746598919760,
+      "sha256": "4ffdf14cc719a5fb20698e307b05c2bcf6e93b9bab64152a053e174f129521ee",
+      "bundled_package_elf": true,
+      "matches_v3_loaded_baseline": true,
+      "matches_baseline_inode": true,
+      "resolved_path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libDexSim.so",
+      "is_symlink": false
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libPVDRuntime_64.so",
+      "size_bytes": 276064,
+      "inode": 138551223,
+      "mtime_ns": 1791083746586919410,
+      "sha256": "6ea77d04ac971ade3cadb163965329faf4a3192778a17dbd3f81860401fd36d5",
+      "bundled_package_elf": true,
+      "matches_v3_loaded_baseline": true,
+      "matches_baseline_inode": true,
+      "resolved_path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libPVDRuntime_64.so",
+      "is_symlink": false
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libPhysXGpu_64.so",
+      "size_bytes": 281514344,
+      "inode": 138551222,
+      "mtime_ns": 1791083746522917547,
+      "sha256": "978a4fdbb9c8657833ee4bf59b6e751e9946f3f344dc878e7764135377ceff54",
+      "bundled_package_elf": true,
+      "matches_v3_loaded_baseline": true,
+      "matches_baseline_inode": true,
+      "resolved_path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libPhysXGpu_64.so",
+      "is_symlink": false
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libSPIRV-Tools-shared.so",
+      "size_bytes": 1818560,
+      "inode": 138551227,
+      "mtime_ns": 1791083746586919410,
+      "sha256": "b5d87056133a60bcf869096329cc24b068dea55c3378ac4c275f7990a02bc039",
+      "bundled_package_elf": true,
+      "resolved_path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libSPIRV-Tools-shared.so",
+      "is_symlink": false
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libadaptation.so",
+      "size_bytes": 274272280,
+      "inode": 138551277,
+      "mtime_ns": 1791083746726923488,
+      "sha256": "213d20fadc98f19fc4df836a66d66617bdb1562bf87f452aedfcad69d63f0fb9",
+      "bundled_package_elf": true,
+      "matches_v3_loaded_baseline": true,
+      "matches_baseline_inode": true,
+      "resolved_path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libadaptation.so",
+      "is_symlink": false
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libcompute.so",
+      "size_bytes": 1756744,
+      "inode": 138551278,
+      "mtime_ns": 1791083746786925235,
+      "sha256": "09b18767dbf2772d97cebb29803117d3fd41de790095524adc86a8cd829bfa8c",
+      "bundled_package_elf": true,
+      "matches_v3_loaded_baseline": true,
+      "matches_baseline_inode": true,
+      "resolved_path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libcompute.so",
+      "is_symlink": false
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libcore.so",
+      "size_bytes": 1980944,
+      "inode": 138551275,
+      "mtime_ns": 1791083746610920109,
+      "sha256": "df6c7533142dfdbec269bb68f764cc2b5023022d6c0995bc0e9b0741b7ac7c24",
+      "bundled_package_elf": true,
+      "matches_v3_loaded_baseline": true,
+      "matches_baseline_inode": true,
+      "resolved_path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libcore.so",
+      "is_symlink": false
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libcuda_compute.so",
+      "size_bytes": 260760,
+      "inode": 138551295,
+      "mtime_ns": 1791083746814926050,
+      "sha256": "3262c7907fe7eb96f7f69f98e4545e7153fcc33134095b5b03cc6d56fbc4be75",
+      "bundled_package_elf": true,
+      "matches_v3_loaded_baseline": true,
+      "matches_baseline_inode": true,
+      "resolved_path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libcuda_compute.so",
+      "is_symlink": false
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libengine.so",
+      "size_bytes": 15919384,
+      "inode": 138551274,
+      "mtime_ns": 1791083746606919993,
+      "sha256": "d606ed050ca98c183cd9cbe2344e4f74ddf6aec9b11d1a03a6ba1da4bf0546f2",
+      "bundled_package_elf": true,
+      "matches_v3_loaded_baseline": true,
+      "matches_baseline_inode": true,
+      "resolved_path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libengine.so",
+      "is_symlink": false
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libglog.so",
+      "size_bytes": 213864,
+      "inode": 138551225,
+      "mtime_ns": 1791083746586919410,
+      "sha256": "aed03bf761d15bbae3d15f7abdac7d60bdcd62f6004dbe5a725f8820cabdb6f9",
+      "bundled_package_elf": true,
+      "resolved_path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libglog.so.0.6.0",
+      "is_symlink": true
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libglog.so.0.6.0",
+      "size_bytes": 213864,
+      "inode": 138551225,
+      "mtime_ns": 1791083746586919410,
+      "sha256": "aed03bf761d15bbae3d15f7abdac7d60bdcd62f6004dbe5a725f8820cabdb6f9",
+      "bundled_package_elf": true,
+      "resolved_path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libglog.so.0.6.0",
+      "is_symlink": false
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libglog.so.1",
+      "size_bytes": 213864,
+      "inode": 138551225,
+      "mtime_ns": 1791083746586919410,
+      "sha256": "aed03bf761d15bbae3d15f7abdac7d60bdcd62f6004dbe5a725f8820cabdb6f9",
+      "bundled_package_elf": true,
+      "resolved_path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libglog.so.0.6.0",
+      "is_symlink": true
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libnvidia-ngx-dlss.so",
+      "size_bytes": 59494264,
+      "inode": 138551214,
+      "mtime_ns": 1791083746350912538,
+      "sha256": "fc19b68cefb4218e0954fab812c782e0aa4d30526e0151c796e8887e0eca3acb",
+      "bundled_package_elf": true,
+      "resolved_path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libnvidia-ngx-dlss.so.310.7.0",
+      "is_symlink": true
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libnvidia-ngx-dlss.so.310.7.0",
+      "size_bytes": 59494264,
+      "inode": 138551214,
+      "mtime_ns": 1791083746350912538,
+      "sha256": "fc19b68cefb4218e0954fab812c782e0aa4d30526e0151c796e8887e0eca3acb",
+      "bundled_package_elf": true,
+      "resolved_path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libnvidia-ngx-dlss.so.310.7.0",
+      "is_symlink": false
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libnvidia-ngx-dlssd.so",
+      "size_bytes": 48213656,
+      "inode": 138551217,
+      "mtime_ns": 1791083746386913586,
+      "sha256": "98ffd25d001b7d57284e69d3e4ee80e6c0d889b7bfb556ed97e3c2f5a7808e27",
+      "bundled_package_elf": true,
+      "resolved_path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libnvidia-ngx-dlssd.so.310.7.128",
+      "is_symlink": true
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libnvidia-ngx-dlssd.so.310.7.128",
+      "size_bytes": 48213656,
+      "inode": 138551217,
+      "mtime_ns": 1791083746386913586,
+      "sha256": "98ffd25d001b7d57284e69d3e4ee80e6c0d889b7bfb556ed97e3c2f5a7808e27",
+      "bundled_package_elf": true,
+      "resolved_path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libnvidia-ngx-dlssd.so.310.7.128",
+      "is_symlink": false
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libnvidia-ngx-dlssg.so",
+      "size_bytes": 7764600,
+      "inode": 138551218,
+      "mtime_ns": 1791083746398913935,
+      "sha256": "676cfeace1bf675a281cf234df619f24cef16a1259f36119ebdf01138468a057",
+      "bundled_package_elf": true,
+      "resolved_path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libnvidia-ngx-dlssg.so.310.7.0",
+      "is_symlink": true
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libnvidia-ngx-dlssg.so.310.7.0",
+      "size_bytes": 7764600,
+      "inode": 138551218,
+      "mtime_ns": 1791083746398913935,
+      "sha256": "676cfeace1bf675a281cf234df619f24cef16a1259f36119ebdf01138468a057",
+      "bundled_package_elf": true,
+      "resolved_path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libnvidia-ngx-dlssg.so.310.7.0",
+      "is_symlink": false
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/librealtime-denoiser.so",
+      "size_bytes": 6650592,
+      "inode": 138551262,
+      "mtime_ns": 1791083746598919760,
+      "sha256": "3191e9fb206ce03f431320b961ac1bf65e3a3e24e05a576994a37a22fe5a0f2a",
+      "bundled_package_elf": true,
+      "matches_v3_loaded_baseline": true,
+      "matches_baseline_inode": true,
+      "resolved_path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/librealtime-denoiser.so",
+      "is_symlink": false
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/librender-filament.so",
+      "size_bytes": 25567464,
+      "inode": 138551285,
+      "mtime_ns": 1791083746814926050,
+      "sha256": "7b158de6fe3b276c67f7d773c63bdc157c027ef8505ba935079d773e6f46ad92",
+      "bundled_package_elf": true,
+      "matches_v3_loaded_baseline": true,
+      "matches_baseline_inode": true,
+      "resolved_path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/librender-filament.so",
+      "is_symlink": false
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/librender-hybrid.so",
+      "size_bytes": 28370560,
+      "inode": 138551284,
+      "mtime_ns": 1791083746798925584,
+      "sha256": "4077f25c484a7942d0ddd19001a538db23f4b11bff1543a319158300559e6ea0",
+      "bundled_package_elf": true,
+      "matches_v3_loaded_baseline": true,
+      "matches_baseline_inode": true,
+      "resolved_path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/librender-hybrid.so",
+      "is_symlink": false
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/librender-optix.so",
+      "size_bytes": 10078848,
+      "inode": 138551261,
+      "mtime_ns": 1791083746594919643,
+      "sha256": "567b694eca1c7d0e07b86aa710d7384d2793918f850784cf8e5daa798d84e226",
+      "bundled_package_elf": true,
+      "matches_v3_loaded_baseline": true,
+      "matches_baseline_inode": true,
+      "resolved_path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/librender-optix.so",
+      "is_symlink": false
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libscript.so",
+      "size_bytes": 802496,
+      "inode": 138551276,
+      "mtime_ns": 1791083746610920109,
+      "sha256": "601ceed90f88b5f0c6d9f2b85abb402c9c152b1f916d767cf966ad63a471682c",
+      "bundled_package_elf": true,
+      "matches_v3_loaded_baseline": true,
+      "matches_baseline_inode": true,
+      "resolved_path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libscript.so",
+      "is_symlink": false
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libvisacd_core.so",
+      "size_bytes": 6624784,
+      "inode": 138551229,
+      "mtime_ns": 1791083746590919527,
+      "sha256": "2f5dff6758c2c00678e07f51d509b419a6e8053b0f283e76c24c9060b2e3e934",
+      "bundled_package_elf": true,
+      "matches_v3_loaded_baseline": true,
+      "matches_baseline_inode": true,
+      "resolved_path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libvisacd_core.so",
+      "is_symlink": false
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libvulkan.so",
+      "size_bytes": 4310840,
+      "inode": 138551213,
+      "mtime_ns": 1791083746322911722,
+      "sha256": "15184a4238bf4e5fd984dd54408455ce046f210fb435d4229e2ecad13b91f292",
+      "bundled_package_elf": true,
+      "resolved_path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libvulkan.so.1.4.313",
+      "is_symlink": true
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libvulkan.so.1",
+      "size_bytes": 4310840,
+      "inode": 138551213,
+      "mtime_ns": 1791083746322911722,
+      "sha256": "15184a4238bf4e5fd984dd54408455ce046f210fb435d4229e2ecad13b91f292",
+      "bundled_package_elf": true,
+      "resolved_path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libvulkan.so.1.4.313",
+      "is_symlink": true
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libvulkan.so.1.4.313",
+      "size_bytes": 4310840,
+      "inode": 138551213,
+      "mtime_ns": 1791083746322911722,
+      "sha256": "15184a4238bf4e5fd984dd54408455ce046f210fb435d4229e2ecad13b91f292",
+      "bundled_package_elf": true,
+      "resolved_path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libvulkan.so.1.4.313",
+      "is_symlink": false
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libvulkan.so.1.4.313",
+      "size_bytes": 502416,
+      "inode": 119817405,
+      "mtime_ns": 1786330812945809247,
+      "sha256": "b3723dec1f69b761133264f27f3e7e67e9216effd47bbbd8847712099ea7be9a",
+      "bundled_package_elf": false,
+      "resolved_path": "/usr/lib/x86_64-linux-gnu/libvulkan.so.1.4.313",
+      "is_symlink": false
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libvulkan_lvp.so",
+      "size_bytes": 8063648,
+      "inode": 119809940,
+      "mtime_ns": 1786330810401738186,
+      "sha256": "05dfdf3ed34ad686e5086678ca7a8ef3816b59d9ff667cb552e7fff850eac1fc",
+      "bundled_package_elf": false,
+      "resolved_path": "/usr/lib/x86_64-linux-gnu/libvulkan_lvp.so",
+      "is_symlink": false
+    },
+    {
+      "path": "/usr/lib/x86_64-linux-gnu/libvulkan_virtio.so",
+      "size_bytes": 1299888,
+      "inode": 119809942,
+      "mtime_ns": 1786330810421738744,
+      "sha256": "608f0f726e86855c7c96e78026e1dcb4aa1ebc7f79866a96571bd2b661b8d46a",
+      "bundled_package_elf": false,
+      "resolved_path": "/usr/lib/x86_64-linux-gnu/libvulkan_virtio.so",
+      "is_symlink": false
+    }
+  ],
+  "scope": "The historical /proc maps evidence covers three attributable formal-run worker PIDs across LeRobot/protected/streaming. It is not a claim to have captured every transient mapping of every process.",
+  "bundled_elf_paths": 28,
+  "bundled_unique_elf_files": 21,
+  "total_hashed_paths": 31,
+  "total_unique_elf_files": 24
+}
