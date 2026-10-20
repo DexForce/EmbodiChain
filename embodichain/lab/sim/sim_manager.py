@@ -4873,6 +4873,7 @@ class SimulationManager:
             None,
             "auto",
             "mujoco_warp",
+            "dexuni",
         }
         if (
             use_coordinated_newton_clear

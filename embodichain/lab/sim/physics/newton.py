@@ -209,7 +209,28 @@ class NewtonPhysicsBackend(PhysicsBackend):
             return True
         solver_type = solver_type.lower()
         if solver_type.endswith("dexuni"):
-            return False
+            from dexsim.scene import ContactBuffer
+
+            # Current DexSim exposes mixed DexUni/MuJoCo contact reports with
+            # per-row quantity validity. Older wheels lack that contract.
+            if not hasattr(ContactBuffer, "impulse_valid"):
+                return False
+        world = getattr(self._manager, "_world", None)
+        if world is not None:
+            from dexsim.engine.newton_physics.backend_registry import get_newton_backend
+
+            backend = get_newton_backend(world)
+            mujoco_solver = getattr(backend, "mujoco_solver", None)
+            if mujoco_solver is not None and mujoco_solver.use_mujoco_cpu:
+                features = getattr(getattr(backend, "solver", None), "features", None)
+                # One-way DexUni disables MuJoCo contacts and keeps the VBD
+                # geometry-only source. Other CPU MuJoCo paths cannot report
+                # contacts, even when the Newton model itself lives on CUDA.
+                return bool(
+                    solver_type.endswith("dexuni")
+                    and getattr(features, "backend", None) == "coupled"
+                    and not getattr(features, "two_way_coupling_enabled", False)
+                )
         runtime_device = self._runtime_device
         if runtime_device is None:
             runtime_device = str(getattr(self._manager, "device", ""))

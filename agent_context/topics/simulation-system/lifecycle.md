@@ -56,8 +56,9 @@ rows before episode initialization events run.
 
 Manager reset restores all selected Newton articulations before one complete
 Scene batch clears drive targets, dynamics, warm-start state, kinematics and
-external wrenches. MuJoCo-Warp cannot safely clear a selected world's solver
-state with only some of its articulations; excluding a subset is rejected.
+external wrenches. MuJoCo-Warp and DexUni cannot safely clear a selected world's
+solver state with only some of its articulations; excluding a subset is rejected
+before any facade state changes.
 Other resource exclusions and environment selections remain honored.
 
 `destroy(exit_process=False)` queues native cleanup. Flush with

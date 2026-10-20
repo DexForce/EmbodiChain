@@ -122,6 +122,8 @@ class ContactSensor(BaseSensor):
         "distance",
         "user_ids",
         "is_valid",
+        "impulse_valid",
+        "friction_valid",
     ]
 
     def __init__(
@@ -287,6 +289,16 @@ class ContactSensor(BaseSensor):
                     dtype=torch.bool,
                     device=device,
                 ),
+                "impulse_valid": torch.zeros(
+                    (num_envs, config.max_contacts_per_env),
+                    dtype=torch.bool,
+                    device=device,
+                ),
+                "friction_valid": torch.zeros(
+                    (num_envs, config.max_contacts_per_env),
+                    dtype=torch.bool,
+                    device=device,
+                ),
             },
             batch_size=[num_envs, config.max_contacts_per_env],
             device=device,
@@ -357,8 +369,11 @@ class ContactSensor(BaseSensor):
     def _scatter_contacts(self, buffer: ContactBuffer) -> None:
         assert self._num_contacts_per_env is not None
         self._num_contacts_per_env.zero_()
-        self._data_buffer["is_valid"].zero_()
+        for name in ("is_valid", "impulse_valid", "friction_valid"):
+            self._data_buffer[name].zero_()
         self._sample_scatter_dropped_count.zero_()
+        quantity_valid = getattr(buffer, "quantity_valid", None)
+        capabilities = self.contact_capabilities
         wp.launch(
             kernel=scatter_contact_rows,
             dim=buffer.capacity,
@@ -382,6 +397,16 @@ class ContactSensor(BaseSensor):
                 ],
                 wp.from_torch(buffer.count_device),
                 wp.from_torch(self._sample_scatter_dropped_count),
+                wp.from_torch(
+                    quantity_valid
+                    if quantity_valid is not None
+                    else self._data_buffer["is_valid"]
+                ),
+                quantity_valid is not None,
+                capabilities.impulse,
+                capabilities.friction,
+                wp.from_torch(self._data_buffer["impulse_valid"]),
+                wp.from_torch(self._data_buffer["friction_valid"]),
             ],
             device=str(self.device),
             stream=current_warp_stream(self.device),
@@ -439,11 +464,17 @@ class ContactSensor(BaseSensor):
 
         Returns:
             Batched contact data. ``position`` is in the Arena frame;
-            ``normal`` points from actor 0 toward actor 1; ``friction`` and
-            ``impulse`` are impulses; ``distance`` is signed separation;
+            ``normal`` points from actor 0 toward actor 1; ``friction`` is
+            tangential impulse on actor 0; ``impulse`` preserves the native
+            scalar magnitude (total for Default CPU, normal otherwise);
+            ``distance`` is signed separation;
             ``user_ids`` contains backend-neutral contact actor IDs; and
             ``is_valid`` marks rows populated by the latest update. Values in
             invalid rows are unspecified and may come from an earlier update.
+            ``impulse_valid`` and ``friction_valid`` mark measured quantities
+            per row; unavailable values are placeholders, not measured zeros.
+            These flags may be true even when the aggregate capability is false
+            for a mixed DexUni report.
         """
         return self._data_buffer
 
@@ -546,6 +577,9 @@ class ContactSensor(BaseSensor):
             return
         key = (
             id(buffer),
+            id(getattr(buffer, "quantity_valid", None)),
+            self.contact_capabilities.impulse,
+            self.contact_capabilities.friction,
             dt,
             self.cfg.max_contacts_per_env,
             tuple(
@@ -589,7 +623,12 @@ class ContactSensor(BaseSensor):
         self._query_dropped_count.add_(buffer.dropped_count_device)
         self._scatter_dropped_count.add_(self._sample_scatter_dropped_count)
         for history in self._histories.values():
-            history._update_from_query(buffer, dt)
+            history._update_from_query(
+                buffer,
+                dt,
+                impulse_available=self.contact_capabilities.impulse,
+                friction_available=self.contact_capabilities.friction,
+            )
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         """Clear contact samples and histories only for the selected rows.
@@ -606,6 +645,8 @@ class ContactSensor(BaseSensor):
         )
         for value in (
             self._data_buffer["is_valid"],
+            self._data_buffer["impulse_valid"],
+            self._data_buffer["friction_valid"],
             self._num_contacts_per_env,
             self._scatter_dropped_count,
             self._sample_scatter_dropped_count,
@@ -647,6 +688,12 @@ class ContactSensor(BaseSensor):
             "distance": self._data_buffer["distance"][env_ids_tensor].flatten(0, 1),
             "user_ids": self._data_buffer["user_ids"][env_ids_tensor].flatten(0, 1),
             "is_valid": self._data_buffer["is_valid"][env_ids_tensor].flatten(0, 1),
+            "impulse_valid": self._data_buffer["impulse_valid"][env_ids_tensor].flatten(
+                0, 1
+            ),
+            "friction_valid": self._data_buffer["friction_valid"][
+                env_ids_tensor
+            ].flatten(0, 1),
         }
 
         # Create valid mask (only slots up to _num_contacts_per_env are valid)
@@ -685,6 +732,12 @@ class ContactSensor(BaseSensor):
                         (0, 2), dtype=torch.int32, device=self.device
                     ),
                     "is_valid": torch.empty((0,), dtype=torch.bool, device=self.device),
+                    "impulse_valid": torch.empty(
+                        (0,), dtype=torch.bool, device=self.device
+                    ),
+                    "friction_valid": torch.empty(
+                        (0,), dtype=torch.bool, device=self.device
+                    ),
                 },
                 batch_size=[0],
                 device=self.device,

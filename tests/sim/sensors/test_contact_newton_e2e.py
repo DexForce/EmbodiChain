@@ -33,7 +33,12 @@ from embodichain.lab.sim.sim_manager import SimulationManager, SimulationManager
 pytestmark = [pytest.mark.requires_sim, pytest.mark.gpu]
 
 
-def test_newton_contact_sensor_reports_each_arena() -> None:
+@pytest.mark.parametrize("solver_type", ["mujoco_warp", "dexuni"])
+def test_newton_contact_sensor_reports_each_arena(solver_type: str) -> None:
+    from dexsim.scene import ContactBuffer
+
+    if solver_type == "dexuni" and not hasattr(ContactBuffer, "impulse_valid"):
+        pytest.skip("DexUni contacts require DexSim's current dev API.")
     wp.init()
     if not wp.is_cuda_available():
         pytest.skip("CUDA is required for the Newton contact E2E contract.")
@@ -50,8 +55,12 @@ def test_newton_contact_sensor_reports_each_arena() -> None:
                 # Exercise a multi-point manifold so query-side reductions
                 # cannot satisfy this regression contract accidentally.
                 solver_cfg={
-                    "solver_type": "mujoco_warp",
-                    "enable_multiccd": True,
+                    "solver_type": solver_type,
+                    **(
+                        {"enable_multiccd": True}
+                        if solver_type == "mujoco_warp"
+                        else {}
+                    ),
                 },
             ),
         )
@@ -86,12 +95,29 @@ def test_newton_contact_sensor_reports_each_arena() -> None:
         sensor.update()
 
         assert sensor.contact_capabilities.geometry
-        assert sensor.contact_capabilities.impulse
         counts = sensor._num_contacts_per_env.cpu().tolist()
-        assert counts == [4, 4]
         data = sensor.get_data()
         assert data["is_valid"].sum(dim=1).cpu().tolist() == counts
-        assert (data["impulse"][data["is_valid"]] > 1.0e-7).all()
+        if solver_type == "mujoco_warp":
+            assert sensor.contact_capabilities.impulse
+            assert counts == [4, 4]
+            assert data["impulse_valid"][data["is_valid"]].all()
+            assert data["friction_valid"][data["is_valid"]].all()
+        else:
+            assert all(count > 0 for count in counts)
+            # DexUni includes geometry-only VBD rows. Its aggregate capability
+            # does not describe every row in a combined VBD/MuJoCo report.
+            assert not sensor.contact_capabilities.impulse
+            raw = sensor._query.fetch()
+            for env_id in range(sim.num_envs):
+                selected = raw.env_ids[: raw.count] == env_id
+                for name in ("impulse_valid", "friction_valid"):
+                    assert (
+                        data[name][env_id].sum()
+                        == getattr(raw, name)[: raw.count][selected].sum()
+                    )
+        measured = data["is_valid"] & data["impulse_valid"]
+        assert (data["impulse"][measured] > 1.0e-7).all()
         actor_ids = data["user_ids"][data["is_valid"]]
         assert all(
             sensor.get_actor_info(actor_id).path.endswith(("/ground", "/cube"))

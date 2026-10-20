@@ -2757,7 +2757,10 @@ def test_reset_objects_state_includes_deformable_assets() -> None:
     sim._deformable_objects["cloth"].reset.assert_called_once_with([1])
 
 
-def test_newton_reset_clears_all_articulations_in_selected_worlds_together() -> None:
+@pytest.mark.parametrize("solver_type", ["mujoco_warp", "dexuni"])
+def test_newton_reset_clears_all_articulations_in_selected_worlds_together(
+    solver_type,
+) -> None:
     sim = object.__new__(SimulationManager)
     robot = MagicMock()
     articulation = MagicMock()
@@ -2768,7 +2771,7 @@ def test_newton_reset_clears_all_articulations_in_selected_worlds_together() -> 
         "robot": ("robot_0", "robot_1"),
         "arm": ("arm_0", "arm_1"),
     }
-    sim.physics = SimpleNamespace(name="newton", solver_type="mujoco_warp")
+    sim.physics = SimpleNamespace(name="newton", solver_type=solver_type)
     sim.num_envs = 2
     sim._spawn_scene = SimpleNamespace(
         builder=SimpleNamespace(is_finalized=True, result=spawn_result),
@@ -2790,11 +2793,14 @@ def test_newton_reset_clears_all_articulations_in_selected_worlds_together() -> 
     native_batch.clear_dynamics.assert_called_once_with()
 
 
-def test_newton_reset_rejects_excluding_one_articulation_from_selected_worlds() -> None:
+@pytest.mark.parametrize("solver_type", ["mujoco_warp", "dexuni"])
+def test_newton_reset_rejects_excluding_one_articulation_from_selected_worlds(
+    solver_type,
+) -> None:
     sim = object.__new__(SimulationManager)
     robot = MagicMock()
     articulation = MagicMock()
-    sim.physics = SimpleNamespace(name="newton", solver_type="mujoco_warp")
+    sim.physics = SimpleNamespace(name="newton", solver_type=solver_type)
     sim._robots = {"robot": robot}
     sim._articulations = {"arm": articulation}
     sim._rigid_objects = {}
