@@ -4,6 +4,15 @@ Workspace analysis caches kinematic reachability; runtime sampling reuses cached
 joint configurations with the current robot base. This does not establish
 collision-free motion, grasp validity or task success.
 
+[Scene expansion](../scene-expansion/scene-expansion.md) owns scene proposals,
+physical preparation and the Task Program attempt boundary. Its
+`RobotSceneWorkspace` adapter in
+`embodichain/lab/sim/scene/workspace.py` converts
+valid current-base TCP samples through object-local grasp geometry and checks
+actual targets with pose IK, current joint limits and full-pose FK residuals.
+Cache sampling alone does not certify support,
+collision-free motion or task success.
+
 ## Entry points
 
 Paths below are relative to `embodichain/lab/sim/` unless qualified.
@@ -26,6 +35,11 @@ Offline: robot preset/asset → control part and joint limits → joint/Cartesia
 plane sampling → FK/IK → metrics → result cache. Runtime: `workspace_cfg`
 → lazy per-part cache load → cached qpos selection → current-base batch FK
 → bounded-position filtering.
+
+The CLI's `--robot` choices and preset construction use the shared
+[robot catalog](../robot-system/robot-system.md). Installed provider IDs and
+variant presets are supported without a separate CLI class map;
+`--robot-params` overrides the selected catalog defaults.
 
 `Robot.get_workspace()` loads `RobotWorkspace.from_cache(cache_path, ...)` on
 first use. `cache_path` may be a cache-entry directory (selecting `results.npz`)
@@ -68,6 +82,7 @@ cache-key inputs, runtime selection and cache failure diagnosis.
 | Runtime alignment, base pose, bounds and invalid padding | `tests/sim/motion/workspace/test_runtime.py` |
 | Manipulability color mapping, normalization and score alignment | `tests/sim/motion/workspace/test_manipulability_visualization.py` |
 | Workspace-aware event sampling | `tests/gym/envs/managers/test_workspace_randomization.py` |
+| Object-affordance scene proposals and actual pose IK | `tests/sim/scene/test_workspace.py` |
 
 Use [robot-system](../robot-system/robot-system.md) for robot config/kinematic
 wiring and [motion-planning](../motion-planning/motion-planning.md) for collision

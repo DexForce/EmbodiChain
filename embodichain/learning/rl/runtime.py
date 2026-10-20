@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -25,17 +26,15 @@ from typing import Any
 from gymnasium import spaces
 import torch
 
+from embodichain.lab.gym.envs.managers.cfg import EventCfg
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg, get_manager_modules
 from embodichain.lab.gym.utils.profiler import EnvProfilerCfg
 from embodichain.lab.gym.utils.registration import build_env
 from embodichain.lab.sim import SimulationManagerCfg
 from embodichain.lab.sim.cfg import RenderCfg
 from embodichain.learning.rl.env import build_learning_env
-from embodichain.learning.rl.models import (
-    build_mlp_from_cfg,
-    build_policy,
-    resolve_policy_obs_groups,
-)
+from embodichain.learning.models import build_mlp_from_cfg
+from embodichain.learning.rl.policies import build_policy, resolve_policy_obs_groups
 from embodichain.learning.rl.utils import (
     dict_to_tensordict,
     flatten_observation_groups,
@@ -160,17 +159,36 @@ def build_learning_policy_runtime(
     return PolicyRuntime(env, policy, device, env_name)
 
 
+def _trainer_events_need_renderer(events: Sequence[EventCfg]) -> bool:
+    """Inspect active, resolved event classes without constructing functors."""
+    from embodichain.lab.gym.envs.managers.record import (
+        record_camera_data,
+        validation_cameras,
+    )
+
+    for event in events:
+        func = event.func
+        if not isinstance(func, type):
+            continue
+        if issubclass(func, record_camera_data):
+            return True
+        if issubclass(func, validation_cameras) and event.params.get("cameras", []):
+            return True
+    return False
+
+
 def _build_gym_environment(
     config: dict[str, Any],
     *,
     simulation_device: torch.device,
     num_envs: int | None,
     headless: bool,
-    renderer: str,
+    renderer: str | None,
     gpu_id: int,
     seed: int | None = None,
     config_dir: str | Path | None = None,
     profiler: EnvProfilerCfg | None = None,
+    trainer_events: Sequence[EventCfg] = (),
 ) -> _GymEnvironmentRuntime:
     """Build the simulator Environment declared by a training config."""
     trainer_cfg = config["trainer"]
@@ -188,12 +206,26 @@ def _build_gym_environment(
         env_cfg.sim_cfg = SimulationManagerCfg()
     env_cfg.sim_cfg.sim_device = simulation_device
     env_cfg.sim_cfg.headless = headless
-    env_cfg.sim_cfg.render_cfg = RenderCfg(renderer=renderer)
+    if renderer is not None:
+        env_cfg.sim_cfg.render_cfg = RenderCfg(renderer=renderer)
     env_cfg.sim_cfg.gpu_id = (
         simulation_device.index
         if simulation_device.type == "cuda" and simulation_device.index is not None
         else gpu_id
     )
+    if env_cfg.sim_cfg.render_cfg.renderer == "auto" and _trainer_events_need_renderer(
+        trainer_events
+    ):
+        from embodichain.lab.sim import SimulationManager, cfg as sim_cfg
+        from embodichain.lab.sim.utility.render_utils import select_default_renderer
+
+        process_renderer = SimulationManager._get_process_renderer()
+        env_cfg.sim_cfg.render_cfg.renderer = (
+            process_renderer
+            if sim_cfg.DEFAULT_RENDERER == "auto"
+            and process_renderer not in (None, "no-render")
+            else select_default_renderer(env_cfg.sim_cfg.gpu_id)
+        )
     env_cfg.profiler = profiler
     env = build_env(gym_config["id"], base_env_cfg=env_cfg)
     return _GymEnvironmentRuntime(
@@ -211,14 +243,34 @@ def build_gym_policy_runtime(
     device: torch.device,
     num_envs: int | None,
     headless: bool,
-    renderer: str,
+    renderer: str | None,
     gpu_id: int,
     seed: int | None = None,
     config_dir: str | Path | None = None,
     profiler: EnvProfilerCfg | None = None,
     simulation_device: torch.device | None = None,
+    trainer_events: Sequence[EventCfg] = (),
 ) -> PolicyRuntime:
-    """Build a simulator task and the Policy declared by its training config."""
+    """Build a simulator task and the Policy declared by its training config.
+
+    Args:
+        config: Training configuration containing trainer and policy blocks.
+        device: Policy tensor device.
+        num_envs: Optional override for the number of environments.
+        headless: Whether to suppress the native window.
+        renderer: Explicit renderer override; None preserves the task's render
+            configuration, including demand-based auto selection.
+        gpu_id: Renderer GPU index when the simulation device has no CUDA index.
+        seed: Optional environment seed override.
+        config_dir: Directory used to resolve the referenced task configuration.
+        profiler: Optional environment profiler configuration.
+        simulation_device: Optional simulation device distinct from the policy.
+        trainer_events: Active training and evaluation events, resolved before
+            the first World so their cameras can reserve the process renderer.
+
+    Returns:
+        The constructed environment, policy and resolved task configuration.
+    """
     task = _build_gym_environment(
         config,
         simulation_device=simulation_device or device,
@@ -229,6 +281,7 @@ def build_gym_policy_runtime(
         seed=seed,
         config_dir=config_dir,
         profiler=profiler,
+        trainer_events=trainer_events,
     )
     env = task.env
     try:

@@ -8,13 +8,39 @@ Read this when the request needs these details. [Topic overview](task-programs.m
 
 - one `program_id`;
 - exact `TaskProgramIntegrationCfg` IDs;
-- optional named targets; and
+- optional overall language ``instruction`` and named targets; and
 - one bounded program tree.
 
 Supported nodes are `SequenceCfg`, `RepeatCfg`, `SegmentCfg`, `InvokeCfg`, and
 `ParallelCfg` with an owned `BarrierCfg`. Built-in call configs are `PickCfg`,
 `PlaceCfg`, and `HandOverCfg`; `RegisteredSemanticCallCfg` is the allowlisted
 extension form.
+
+The program's root `instruction` owns its overall task language; each explicit
+segment may declare a finer `instruction`. The compiler freezes both levels,
+including repeated/parallel segments. The Gym bridge and common demo executor
+bind them to the actual episode-selected program; omitted segment labels are
+marked as overall-task fallbacks. See `resolve_demo_instruction` in `demo.py`
+for task/direct-call/legacy precedence, shared with handwritten demonstrations. See
+the [persistence contract](../data-pipeline/data-pipeline.md#persistence-contract)
+for the independent task/subtask language mapping.
+
+Choose segment boundaries around independently describable subgoals under their
+required incoming task state. A segment may own one or several Semantic Calls;
+sequential splitting retains task state and downstream planning look-ahead.
+Keep release settling and final-state validators on the subgoal that establishes
+those outcomes. Atomic trajectory phase names or arbitrary waypoint counts do
+not establish semantic boundaries for an unannotated recorded demonstration.
+Language instructions express intent; physical acceptance still depends on the
+selected effect authority and validators, not on the presence of a label.
+
+Measured segment validators can check lift from the segment's incoming pose,
+world-axis position relative to another live object, and object uprightness.
+They belong to the program's acceptance contract; a projected call completing
+does not replace these measurements. The Gym tutorial at
+`scripts/tutorials/gym/simple_task_program.py` shows Cartesian end-effector
+motion with a tutorial-local registered call, the existing `MoveEndEffector`
+Atomic Skill, and the common Gym environment and demonstration executor.
 
 Unknown fields, duplicate keys, non-finite values, invalid exact types,
 excessive depth/nodes/repeats, cyclic or executable registered payloads, and
@@ -56,7 +82,11 @@ three typed selections: `environment.component`,
 `task_program.{program,integration,execution_policy}`, and
 `embodiment.component`. The reusable `env.yaml` owns only
 embodiment-independent Gym values and physical simulation entities. All
-deployment component paths resolve from `task.<embodiment>.yaml`.
+ordinary deployment component paths resolve from `task.<embodiment>.yaml`.
+Official `extensions/embodichain_tasks/configs/` references for program, integration and
+execution policy use the imported SDK's packaged configs. The shared
+[Gym component path contract](../env-framework/configuration.md#reusable-gym-deployment-components)
+defines the owner-directory and CWD-shadow behavior.
 `config_to_cfg()` checks that semantic binding targets exist in the physical
 scene, validates the task's required scene/embodiment contracts, composes the
 immutable integration catalog, injects its trusted profile/scene/preset
@@ -80,6 +110,21 @@ Ownership is explicit rather than a generic deep merge:
   selection/configuration, motion, tracking, recovery, runner, and
   effect-assurance policy. Planner collision objects are attached from the
   selected live scene and are not serialized in the policy.
+
+Configured `motion` policies accept optional finite, strictly positive
+`velocity_limit` and `acceleration_limit` values. Configured Pour action options
+accept a finite, non-negative `dwell_duration`; unknown timing keys still fail
+the closed-field decoder. Omitting `velocity_limit` preserves the Robot's
+ordered per-joint speed caps; an explicit scalar request is intersected with
+those caps rather than replacing them.
+
+Grasp generators select toolkit-owned geometry with a string `model` ID;
+an inline mapping is a custom calibration and its `model_id` does not trigger
+catalog lookup. The catalog is owned by
+`embodichain/toolkits/graspkit/pose_generator.py`, with source provenance in
+`embodichain/toolkits/graspkit/README.md`. Embodiments may omit algorithm and
+collision fields to use GraspKit defaults; task-specific tuning belongs in
+the allowlisted `grasp_pose_generator_overrides` mapping.
 
 The reference embodiment `skill_profile.contract_id` and `profile_id` values
 are unversioned. Versioned Gym, task-integration, or scene-registry IDs are
@@ -136,3 +181,24 @@ fixed internal epsilon rather than an author-controlled tolerance. The
 configured decoder derives those relations and normalizes the authoring
 hierarchy into the flat `SimulationSceneBinding` / `SceneRegistry` index.
 Scene-level affordance collections are not accepted.
+
+Placement affordances default to composing `object_target_pose` in their parent's
+frame. Select `object_target_frame: world_axes` when a target should follow the
+parent's measured position while its offset and orientation stay in world axes.
+This distinction matters for left/right sorting after reference-object rotation.
+World-axis targets fingerprint both their frame and declared pose; static
+manifests and live registries retain the same identity.
+
+`object_relative_position` validators default to `reference_frame: world_axes`,
+so reference rotation does not rotate their offset or per-axis tolerances.
+Select `reference_frame: parent` to measure both in the live reference frame,
+matching a target whose relative pose composes the complete parent transform.
+
+
+## Asset role requirements
+
+An integration may declare optional `asset_requirements`; decoding validates its
+closed role/relation contract without contacting providers. Offline asset
+materialization owns selection and emits a new bound deployment before ordinary
+compilation. See [asset generalization](../asset-generalization/asset-generalization.md)
+for supported adaptations, provenance and integrity boundaries.

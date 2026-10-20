@@ -71,7 +71,7 @@ class SceneExporter:
         GLB to z-up, so this exporter copies each GLB unchanged and converts
         only its world position and rotation for ``init_pos`` and ``init_rot``.
         ``body_scale`` remains the original y-up scale associated with the GLB.
-        This is not a complete ``EmbodiedEnv``/``run-env`` configuration because
+        This is not a complete ``EmbodiedEnv``/``run-task`` configuration because
         a generated scene does not determine a robot, its placement, or control.
         """
         if self.scene.table is None:

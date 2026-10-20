@@ -18,7 +18,6 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import replace
-from pathlib import Path
 
 import pytest
 
@@ -45,24 +44,28 @@ from embodichain.lab.task_program.semantics import (
     SemanticCallDescriptor,
 )
 from embodichain.utils.utility import load_config
+from embodichain.utils.config_paths import resolve_config_path
 
-# Fixed v38 declaration digests, independent of the new projection implementation.
-_LEGACY_REGISTRATION = (
+# Main 04020afc0 changes endpoint names, motion limits, and validator declarations.
+# Keep an independent golden for that declaration epoch, not an old-scene claim.
+_PRE_MAIN_REGISTRATION = (
     "1992baee8c923e814d096d18cee0e5d80575efeac1e1d23558f655d581984c00"
 )
-_LEGACY_CORE = "87f6a3a11d4b3fe1f143c0263b398f654a54a06edb3ef1f1529dd36fee46b3cf"
+_MAIN_REGISTRATION = "ca807ab4cd63103c024283efbaa928375cda2b54f2f95a7524d9e12f72f5f11e"
+_PRE_MAIN_CORE = "87f6a3a11d4b3fe1f143c0263b398f654a54a06edb3ef1f1529dd36fee46b3cf"
+_MAIN_CORE = "b28c58f4d801769e1bf0f6ae43c3077b60481f2ba7dd12a9fda2f26b200ae54e"
 _ROUTE_CASES = [
     (
         _RelativePlaceLowererFactory,
-        "ab7a2c157a297daf48af5d90ebe8b1eac0772063c85351a97a256b5ddf519fea",
+        "45cb1095ec0d5a6cfcdb7ba3a40f2b43df27692a13612723f1bb1c7bea3b997e",
     ),
     (
         _UprightPlaceLowererFactory,
-        "319e615b25c847fb0e44dddd5af3cef066ffa15b0db15bf6a919dd11729fb1a0",
+        "36ca52e06630fa9edc49f4ae0e4f904eaeb0ffc8353e2923c33dddff6e7f5ccd",
     ),
     (
         _StackPlaceFactory,
-        "d12d778254515da53c7165a494ee733802328766e1da47ff10a5f8f31fde1c4d",
+        "59f51e9f682df752da86605f98a4d20157728dc6dc7109048bfa471b838be70e",
     ),
 ]
 
@@ -70,10 +73,8 @@ _ROUTE_CASES = [
 def _compose(
     monkeypatch: pytest.MonkeyPatch, *, mode: str | None = None
 ) -> configured.TaskDeployment:
-    path = (
-        Path(__file__).parents[3]
-        / "embodichain_tasks/configs/tasks/manipulation/hand_over"
-        / "task.dual_ur5_dh_pgi_140_80.yaml"
+    path = resolve_config_path(
+        "extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/task.dual_ur5_dh_pgi_140_80.yaml"
     )
     physical = _resolve_gym_components(load_config(path), base_dir=path.parent)
     program_path, task, policy = _resolve_task_program_components(
@@ -132,36 +133,38 @@ def _with_route(
 
 
 @pytest.mark.parametrize("mode", [None, "grasp_command", "observed"])
-def test_handover_bundle_identity_uses_v38_default_and_keeps_explicit_new_mode(
+def test_handover_bundle_identity_preserves_default_and_explicit_mode(
     monkeypatch: pytest.MonkeyPatch, mode: str | None
 ) -> None:
     composed = _compose(monkeypatch, mode=mode)
     identity = bundle_registration_fingerprint(composed.integration.registration)
     if mode == "observed":
-        assert identity != _LEGACY_REGISTRATION
-        assert composed.integration.integration_fingerprint != _LEGACY_CORE
+        assert identity != _MAIN_REGISTRATION
+        assert composed.integration.integration_fingerprint != _MAIN_CORE
     else:
-        assert identity == _LEGACY_REGISTRATION
-        assert composed.integration.integration_fingerprint == _LEGACY_CORE
-    assert composed.integration.registration.fingerprint != _LEGACY_REGISTRATION
+        assert identity == _MAIN_REGISTRATION
+        assert composed.integration.integration_fingerprint == _MAIN_CORE
+    assert identity != _PRE_MAIN_REGISTRATION
+    assert composed.integration.integration_fingerprint != _PRE_MAIN_CORE
+    assert composed.integration.registration.fingerprint != _MAIN_REGISTRATION
     composed.integration.registration.assert_unchanged()
 
 
-@pytest.mark.parametrize("factory_type,legacy_digest", _ROUTE_CASES)
-def test_empty_stage_retains_v38_route_identity_but_real_changes_do_not(
+@pytest.mark.parametrize("factory_type,main_digest", _ROUTE_CASES)
+def test_empty_stage_preserves_route_identity_but_real_changes_do_not(
     deployment: configured.TaskDeployment,
     factory_type: type[_RelativePlaceLowererFactory],
-    legacy_digest: str,
+    main_digest: str,
 ) -> None:
     registration = _with_route(deployment.integration.registration, factory_type)
-    assert bundle_registration_fingerprint(registration) == legacy_digest
+    assert bundle_registration_fingerprint(registration) == main_digest
     for changed in (
         _with_route(
             deployment.integration.registration, factory_type, stage_id="step_02"
         ),
         _with_route(deployment.integration.registration, factory_type, height=0.2),
     ):
-        assert bundle_registration_fingerprint(changed) != legacy_digest
+        assert bundle_registration_fingerprint(changed) != main_digest
     registration.assert_unchanged()
 
 

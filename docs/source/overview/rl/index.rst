@@ -46,7 +46,7 @@ Module Categories
 
 - Algorithm (`algo/`): RL algorithm implementations, including `BaseAlgorithm`, `PPO`, etc.
 - Buffer (`buffer/`): Trajectory data buffer, such as `RolloutBuffer`.
-- Models (`models/`): Policy network modules, including `Policy`, `ActorCritic`, `MLP`.
+- Models (`learning/rl/policies/`): RL policy interfaces, actor-critic models and policy builders. Generic MLPs and normalization live in `learning/models/`.
 - Trainer (`utils/trainer.py`): Main training loop and logging management.
 - Config (`utils/config.py`): Algorithm config class definitions.
 - Train Script (`train.py`): RL training entry script.

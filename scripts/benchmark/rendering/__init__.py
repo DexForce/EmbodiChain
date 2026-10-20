@@ -17,3 +17,24 @@
 """Rendering benchmark entry points."""
 
 from __future__ import annotations
+
+from typing import Any
+
+__all__ = [
+    "BENCHMARK_MODES",
+    "BenchmarkCfg",
+    "build_leaderboard_rows",
+    "compute_quality_metrics",
+    "run_all_benchmarks",
+    "run_environment_sweep",
+    "write_markdown_report",
+]
+
+
+def __getattr__(name: str) -> Any:
+    """Load benchmark helpers lazily so ``python -m`` has no duplicate import."""
+    if name not in __all__:
+        raise AttributeError(name)
+    from . import offscreen_denoising
+
+    return getattr(offscreen_denoising, name)

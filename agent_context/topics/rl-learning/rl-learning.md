@@ -9,11 +9,11 @@
 | Standalone evaluation | `embodichain/learning/rl/policy_evaluation/cli.py`; local RUN/checkpoint, pretrained bundle or external Profile |
 | Programmatic training | `embodichain/learning/rl/train.py` → `train_from_config()` |
 | Algorithm registry | `embodichain/learning/rl/algo/__init__.py` |
-| Policy registry | `embodichain/learning/rl/models/__init__.py` |
+| Policy registry | `embodichain/learning/rl/policies/registry.py` |
 | Lightweight env registry | `embodichain/learning/rl/env.py` |
 | Standard trainer | `embodichain/learning/rl/utils/trainer.py` → `Trainer` |
 | Differentiable trainer | `embodichain/learning/rl/differentiable_trainer.py` |
-| Official configs | `embodichain_tasks/configs/tasks/<domain>/<task>/agents/` |
+| Official configs | `extensions/embodichain_tasks/configs/tasks/<domain>/<task>/agents/` |
 
 The compatibility module entry point is:
 
@@ -61,8 +61,12 @@ Select this path with `trainer.gym_config`.
 1. The CLI discovers installed task packages and executes their init hooks.
 2. `train_from_config()` loads the gym config.
 3. `config_to_cfg()` builds the environment config and manager functors.
-4. Trainer runtime fields override simulation device, GPU, renderer, headless
-   mode, environment count, and optional profiling.
+4. Trainer runtime fields override simulation device, GPU, headless mode,
+   environment count, and optional profiling. An explicit `trainer.renderer`
+   overrides rendering; omission preserves the task's render configuration.
+   Active train events and rank-zero enabled eval events are resolved before
+   the first World; built-in recording and nonempty validation cameras reserve
+   a native renderer when the effective task renderer is auto.
 5. `build_env()` constructs the registered Gym environment.
 6. A sample reset determines flattened observation and action dimensions.
 
@@ -99,11 +103,17 @@ but currently rejects distributed training and environment profiling.
 
 ### Native locomotion tasks
 
-Official velocity tasks live in `embodichain_tasks/embodichain_tasks/locomotion/velocity/`;
+Official velocity tasks live in `extensions/embodichain_tasks/embodichain_tasks/locomotion/velocity/`;
 Humanoid Run lives under `classic_control/humanoid/`. Matching task config
 directories own default/Newton environment and PPO files. The package init hook
 registers locomotion observations and rewards; joint actions and root-velocity
 randomization use the standard manager components.
+
+Headless, contact-only tasks can resolve auto rendering to NoRender. Camera
+recording and Viewer paths still require native replica capacity. Read the
+selected task's environment and PPO files for batch sizes and capacity budgets;
+these are deployment settings, not trainer defaults. See
+[render selection](../simulation-system/rendering.md#norender-initialization).
 
 Contact sampling and selective history reset follow the sensor-owned
 [contact history contract](../sensor-system/contact-history.md). Root-velocity
@@ -152,10 +162,11 @@ the complete-rollout safety and normalization contracts.
 | PPO, GRPO, APG implementations | `algo/ppo.py`, `algo/grpo.py`, `algo/apg.py` |
 | Standard rollout storage and views | `buffer/` |
 | Standard and differentiable collection | `collector/` |
-| Policy interface, actor-critic, actor-only, MLP builder | `models/` |
+| Policy interface, actor-critic, actor-only, policy builder | `learning/rl/policies/` |
+| Shared MLP and network builder | `learning/models/mlp.py` |
 | Running observation statistics | `normalization.py` |
 | Batched action-adjoint stabilization | `gradients.py` |
-| Actor and critic observation statistics | `models/normalizer.py` |
+| Actor and critic observation statistics | `learning/models/normalizer.py` |
 | Standard collect/update loop | `utils/trainer.py` |
 | Differentiable TBPTT/update loop | `differentiable_trainer.py` |
 | Shared completed-episode evaluation | `evaluation.py` |
@@ -167,6 +178,10 @@ Rollout payloads on the standard path are `TensorDict` objects. Policies
 consume observations and write action, log-probability, entropy, and value
 fields needed by their algorithm. Differentiable policies must expose
 graph-preserving action sampling.
+
+Trainer throughput counts transitions collected during the current `train()`
+call. Restored `global_step` remains a cumulative checkpoint counter and is
+excluded from that call's SPS numerator.
 
 For actor-critic policies, `policy.obs_groups.actor` and `.critic` select ordered
 observation groups. The collector and standard buffer preserve separate
@@ -184,6 +199,11 @@ DexSim's Motion Policy Evaluator, preserving the original task's reset, step,
 observation and action path. Supplying an Environment means the adapter owns
 its camera lifecycle; Kit's default flat-ground camera is not applied to it.
 
+Headless evaluation accepts `--renderer no-render`. When a saved training
+configuration uses NoRender, Viewer evaluation defaults to Hybrid; an explicit
+native renderer overrides that choice. `--viewer --renderer no-render` is
+rejected before creating the simulation.
+
 Tasks opt in through `PolicyViewerCameraCfg` and
 `get_policy_viewer_target_pose()` (world XYZ + XYZW). The six bundled flat
 velocity tasks own their presets; `policy_evaluation/_viewer_camera.py` owns
@@ -196,6 +216,14 @@ pose immediately after an update can still return the preceding rendered pose.
 Validate changes with `tests/learning/rl/policy_evaluation/test_viewer.py` and
 an actual native Viewer run. User controls and recording are described in the
 [policy evaluation guide](../../../docs/source/guides/policy_evaluation.md).
+
+General Torch layers and models live beside `rl` under `learning/layers` and
+`learning/models`. RL-specific Policy, ActorOnly, ActorCritic and the policy
+registry remain in `learning/rl/policies`; their consumers import from
+`embodichain.learning.rl.policies`. Shared MLPs, normalization and MLP construction
+import from `embodichain.learning.models`. See [learning layers](../learning-layers/learning-layers.md)
+for differentiable IK ownership. Root exports load on demand; importing a
+lightweight APG component must not eagerly load the simulator-backed Trainer.
 
 ## Invariants
 

@@ -416,10 +416,11 @@ class PytorchSolver(BaseSolver):
             **kwargs: Additional arguments for future extensions.
 
         Returns:
-            tuple[list[bool], torch.Tensor]: A tuple containing:
-                - A tensor of booleans indicating whether valid solutions were found for each target pose. (Shape: (batch_size,))
-                - A tensor of shape (batch_size, 1, dof) containing joint positions for
-                  each target pose, or an empty tensor if no valid solutions were found.
+            A success tensor and selected joint positions. By default their
+            shapes are ``(batch_size,)`` and ``(batch_size, 1, dof)``. With
+            ``return_all_solutions=True``, per-candidate validity and positions
+            have shapes ``(batch_size, num_samples)`` and
+            ``(batch_size, num_samples, dof)``.
         """
         # Convert target_pose to tensor and ensure correct device and dtype
         target_xpos = torch.as_tensor(
@@ -490,11 +491,11 @@ class PytorchSolver(BaseSolver):
         )
         if is_ik_success.any().item() is False:
             logger.log_warning("No IK solutions found for any of the target poses.")
-            failed_state = is_ik_success.reshape(batch_size, self._num_samples)[:, 0]
-            failed_qpos = ik_qpos.reshape(batch_size, self._num_samples, self.dof)[
-                :, 0, :
-            ]
-            return failed_state, failed_qpos
+            failed_state = is_ik_success.reshape(batch_size, self._num_samples)
+            failed_qpos = ik_qpos.reshape(batch_size, self._num_samples, self.dof)
+            if return_all_solutions:
+                return failed_state, failed_qpos
+            return failed_state[:, 0], failed_qpos[:, 0]
         # map ik_qpos to within limits and check validity
         is_mask_valid, ik_qpos_mapped = self._qpos_map_to_limits(ik_qpos)
         is_success = torch.logical_and(is_ik_success, is_mask_valid)
@@ -503,7 +504,7 @@ class PytorchSolver(BaseSolver):
         all_results = ik_qpos_mapped.reshape(batch_size, self._num_samples, self.dof)
 
         if return_all_solutions:
-            return all_is_success.any(dim=1), all_results
+            return all_is_success, all_results
 
         if self._solution_selection == "manipulability":
             # Re-rank successful candidates by Yoshikawa manipulability via
@@ -524,6 +525,59 @@ class PytorchSolver(BaseSolver):
         closest_indices = torch.argmin(qpos_seed_dis, dim=1)
         closest_qpos = all_results[torch.arange(batch_size), closest_indices]
         return all_is_success.any(dim=1), closest_qpos[:, None, :]
+
+    @property
+    def supports_continuous_batch_ik(self) -> bool:
+        """Return whether batched candidates support continuous path selection."""
+        return True
+
+    def _select_continuous_ik_path(
+        self,
+        candidate_qpos: torch.Tensor,
+        candidate_valid: torch.Tensor,
+        qpos_seed: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Select each IK sample nearest to the preceding selected posture."""
+        if candidate_qpos.ndim != 4:
+            raise ValueError("candidate_qpos must have shape (B, N, K, DOF).")
+        batch_size, sample_count, candidate_count, dof = candidate_qpos.shape
+        if dof != self.dof:
+            raise ValueError(f"candidate_qpos must have {self.dof} joints, got {dof}.")
+        if candidate_valid.shape != (batch_size, sample_count, candidate_count):
+            raise ValueError(
+                "candidate_valid must match the first three candidate_qpos "
+                "dimensions."
+            )
+        if qpos_seed.shape != (batch_size, dof):
+            raise ValueError(f"qpos_seed must have shape ({batch_size}, {dof}).")
+
+        candidates = candidate_qpos.to(device=self.device, dtype=torch.float32)
+        valid_candidates = candidate_valid.to(device=self.device, dtype=torch.bool)
+        previous = qpos_seed.to(device=self.device, dtype=torch.float32)
+        weights = self.ik_nearest_weight.to(
+            device=self.device, dtype=torch.float32
+        ).view(1, 1, dof)
+        batch_indices = torch.arange(batch_size, device=self.device)
+        path_valid: list[torch.Tensor] = []
+        path_qpos: list[torch.Tensor] = []
+
+        for sample_index in range(sample_count):
+            sample_candidates = candidates[:, sample_index]
+            sample_valid = valid_candidates[:, sample_index] & torch.isfinite(
+                sample_candidates
+            ).all(dim=-1)
+            weighted_delta = (sample_candidates - previous[:, None]) * weights
+            distances = torch.linalg.vector_norm(weighted_delta, dim=-1)
+            distances = distances.masked_fill(~sample_valid, float("inf"))
+            best_indices = torch.argmin(distances, dim=1)
+            has_solution = sample_valid.any(dim=1)
+            selected = sample_candidates[batch_indices, best_indices]
+            selected = torch.where(has_solution[:, None], selected, previous)
+            path_valid.append(has_solution)
+            path_qpos.append(selected)
+            previous = selected
+
+        return torch.stack(path_valid, dim=1), torch.stack(path_qpos, dim=1)
 
     def get_all_fk(self, qpos: torch.tensor) -> torch.tensor:
         r"""Get the forward kinematics for all links from root to end link.

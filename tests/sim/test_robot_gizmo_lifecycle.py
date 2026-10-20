@@ -25,6 +25,7 @@ import torch
 from dexsim.kit.ik.interactive import KeyPressTracker
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim.cfg import RobotCfg
 from embodichain.lab.sim.objects import GizmoCfg
 from embodichain.lab.sim.objects import gizmo as gizmo_module
 from embodichain.lab.visualization import VisualizationCfg
@@ -43,7 +44,7 @@ class _Robot:
             "right": ["right_joint"],
             "hand": ["finger"],
         }
-        self.cfg = SimpleNamespace(
+        self.cfg = RobotCfg(
             uid="robot",
             solver_cfg={
                 part: SimpleNamespace(

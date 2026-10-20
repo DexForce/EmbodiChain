@@ -61,6 +61,7 @@ def test_map_registers_the_supported_context_domains() -> None:
         "sim-visualization",
         "motion-planning",
         "rl-learning",
+        "learning-layers",
         "configclass-pattern",
         "randomization",
         "atomic-actions",
@@ -68,8 +69,11 @@ def test_map_registers_the_supported_context_domains() -> None:
         "task-spec",
         "gen-sim",
         "data-assets",
+        "asset-generalization",
         "data-pipeline",
         "robot-workspace",
+        "scene-expansion",
+        "scene-services",
         "differentiable-env",
     }
 
@@ -80,6 +84,7 @@ def test_new_topics_cover_their_owning_packages() -> None:
     topics = _topics_by_id()
     expected_source_prefixes = {
         "gen-sim": "embodichain/gen_sim/",
+        "scene-services": "embodichain/lab/sim/scene/",
         "data-assets": "embodichain/data/",
         "data-pipeline": "embodichain/data_pipeline/",
         "robot-workspace": "embodichain/lab/sim/motion/workspace/",
@@ -113,6 +118,12 @@ def test_representative_queries_route_against_the_repository_map() -> None:
         "get_data_path 如何解析资产路径？": ["data-assets"],
         "Newton physics backend config 在哪里？": ["simulation-system"],
         "可微环境 APG 如何重置？": ["differentiable-env"],
+        "可微 IK layer 的梯度": ["learning-layers"],
+        "DifferentiableIKLayer": ["learning-layers"],
+        "sim.scene 的场景布局服务在哪里？": ["scene-services"],
+        "程序化场景如何生成？": ["scene-services"],
+        "SceneState 如何恢复？": ["scene-services"],
+        "scene expansion 候选身份在哪里？": ["scene-expansion"],
     }
 
     assert {
@@ -142,3 +153,35 @@ def test_trajectory_test_changes_do_not_select_unrelated_ik_context() -> None:
     assert helper.affected_topics(
         data, ["tests/compute/test_trajectory_timing.py"]
     ) == ["motion-planning"]
+
+
+def test_rl_only_config_changes_do_not_select_task_program_context() -> None:
+    helper = _load_helper()
+    data = helper.load_map(_REPOSITORY_ROOT)
+
+    affected = helper.affected_topics(
+        data,
+        [
+            "extensions/embodichain_tasks/configs/tasks/"
+            "classic_control/cart_pole/agents/ppo.yaml"
+        ],
+    )
+
+    assert "rl-learning" in affected
+    assert "task-programs" not in affected
+
+
+def test_task_program_deployments_and_shared_components_remain_watched() -> None:
+    helper = _load_helper()
+    data = helper.load_map(_REPOSITORY_ROOT)
+    config_root = "extensions/embodichain_tasks/configs/"
+    paths = [
+        "tasks/manipulation/repeated_pick_place/task.ur5.yaml",
+        "tasks/manipulation/repeated_pick_place/task_program/integration.yaml",
+        "components/embodiments/franka_panda.yaml",
+        "components/execution_policies/trajectory_open_loop.yaml",
+        "components/expansion_policies/task_program_episode.yaml",
+    ]
+
+    for path in paths:
+        assert "task-programs" in helper.affected_topics(data, [config_root + path])

@@ -20,10 +20,51 @@ from __future__ import annotations
 
 import pytest
 import torch
+from types import SimpleNamespace
 
 from unittest.mock import MagicMock, Mock, call
 
 from embodichain.lab.sim.cfg import ArticulationCfg
+
+
+@pytest.mark.parametrize("selection", [None, [1]])
+def test_information_registration_only_publishes_by_default(selection) -> None:
+    from embodichain.lab.gym.envs.managers.events import register_info_to_env
+
+    env = SimpleNamespace(
+        num_envs=2,
+        device=torch.device("cpu"),
+        sim=SimpleNamespace(sync_render_state=Mock(), update=Mock()),
+    )
+    register_info_to_env(env, selection, registry=[])
+    env.sim.update.assert_not_called()
+    env.sim.sync_render_state.assert_called_once()
+
+
+def test_information_registration_rejects_partial_legacy_settling() -> None:
+    from embodichain.lab.gym.envs.managers.events import register_info_to_env
+
+    env = SimpleNamespace(
+        num_envs=2,
+        device=torch.device("cpu"),
+        sim=SimpleNamespace(sync_render_state=Mock(), update=Mock()),
+    )
+    with pytest.raises(ValueError, match="requires all environments"):
+        register_info_to_env(env, [1], registry=[], sim_update=True)
+    env.sim.update.assert_not_called()
+    env.sim.sync_render_state.assert_not_called()
+
+
+def test_information_registration_retains_explicit_full_world_settling() -> None:
+    from embodichain.lab.gym.envs.managers.events import register_info_to_env
+
+    env = SimpleNamespace(
+        num_envs=2,
+        device=torch.device("cpu"),
+        sim=SimpleNamespace(sync_render_state=Mock(), update=Mock()),
+    )
+    register_info_to_env(env, [1, 0], registry=[], sim_update=True)
+    env.sim.update.assert_called_once_with(step=100)
 
 
 class MockRobot:
@@ -1929,3 +1970,64 @@ def test_expansion_profile_reset_applies_selected_scene_and_visual_rows() -> Non
     assert torch.equal(cube.pose, pose[[1, 3]])
     assert torch.equal(cube.env_ids, torch.tensor([1, 3]))
     assert registry.calls == [(env, {1: "camera", 3: "material"}, 11)]
+
+
+def test_directory_replacement_constructor_and_sampling_remain_compatible(monkeypatch):
+    from types import SimpleNamespace
+    from embodichain.lab.gym.envs.managers import FunctorCfg
+    from embodichain.lab.gym.envs.managers import events
+    from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
+    from embodichain.lab.sim.cfg import RigidObjectCfg
+    from embodichain.lab.sim.shapes import MeshCfg
+
+    class Body:
+        def __init__(self, cfg):
+            self.cfg = cfg
+
+    asset = Body(RigidObjectCfg(uid="fork", shape=MeshCfg(fpath="original.ply")))
+    sim = SimpleNamespace(get_asset=lambda uid: asset, replace_rigid_object=Mock())
+    env = SimpleNamespace(sim=sim)
+    monkeypatch.setattr(events, "RigidObject", Body)
+    monkeypatch.setattr(events, "get_data_path", lambda path: path)
+    monkeypatch.setattr(
+        events, "get_all_files_in_directory", lambda path: ["b.ply", "a.ply"]
+    )
+    sampled = []
+    monkeypatch.setattr(
+        events.random, "choice", lambda paths: sampled.append(list(paths)) or paths[0]
+    )
+    entity = SceneEntityCfg(uid="fork")
+    term = events.replace_assets_from_group(
+        FunctorCfg(params={"entity_cfg": entity, "folder_path": "fork/"}), env
+    )
+    term(env, None, entity, "fork/")
+    assert sampled == [["a.ply", "b.ply"]]
+    selected = sim.replace_rigid_object.call_args.kwargs["cfg"]
+    assert selected.uid == "fork" and selected.shape.fpath == "a.ply"
+    assert asset.cfg.shape.fpath == "original.ply"
+
+
+@pytest.mark.parametrize("env_ids", [[], [1], [0, 0], [False], [0.0], slice(1, 1)])
+def test_prepared_asset_event_rejects_partial_or_invalid_rows(env_ids):
+    from types import SimpleNamespace
+    from embodichain.lab.gym.envs.managers import FunctorCfg
+    from embodichain.lab.gym.envs.managers.events import replace_assets_from_group
+
+    env = SimpleNamespace(num_envs=1)
+    term = replace_assets_from_group(FunctorCfg(params={"deployment": None}), env)
+    with pytest.raises(ValueError, match="B=1|integer rows"):
+        term(env, env_ids, deployment=object())
+
+
+def test_prepared_asset_event_idle_is_safe_and_modes_are_exclusive():
+    from types import SimpleNamespace
+    from embodichain.lab.gym.envs.managers import FunctorCfg
+    from embodichain.lab.gym.envs.managers.events import replace_assets_from_group
+
+    env = SimpleNamespace(num_envs=1)
+    term = replace_assets_from_group(FunctorCfg(params={"deployment": None}), env)
+    term(env, None, deployment=None)
+    with pytest.raises(ValueError, match="Choose deployment"):
+        replace_assets_from_group(
+            FunctorCfg(params={"deployment": None, "folder_path": "meshes/"}), env
+        )

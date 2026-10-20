@@ -32,10 +32,11 @@ from embodichain.lab.sim.motion.expansion.combined import load_visual_profile_re
 from embodichain.lab.sim.motion.expansion.profile import load_expansion_profile
 from embodichain.utils.config_paths import resolve_config_path
 from embodichain.utils.utility import load_config
-from embodichain.lab.scripts.run_env import _create_parser, _resolve_expansion_request
+from embodichain.lab.scripts.run_task import _create_parser, _resolve_expansion_request
 
 _TASK_CONFIG = Path(__file__).parents[4] / (
-    "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/" "task.ur5.yaml"
+    "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/"
+    "task.ur5.yaml"
 )
 
 
@@ -98,6 +99,28 @@ def test_combined_profile_rejects_capacity_and_environment_mismatch() -> None:
     assert isinstance(profile, CombinedExpansionProfile)
     with pytest.raises(ValueError, match="num_envs"):
         profile.validate_for_num_envs(8)
+
+
+def test_spatial_dedup_tolerance_travels_with_the_offset_scale() -> None:
+    profile = _profile()
+    assert isinstance(profile, CombinedExpansionProfile)
+    spatial = profile.trajectory.spatial
+    # The packaged task binds a conservative amplitude, so its deduplication
+    # tolerance has to name a smaller number explicitly.
+    assert spatial.joint_offset_scale == 0.005
+    assert spatial.dedup_tolerance == 0.002
+
+    payload = profile.to_dict()
+    payload["trajectory"]["spatial"]["dedup_tolerance"] = 0.005
+    with pytest.raises(ValueError, match="must stay below"):
+        CombinedExpansionProfile.from_mapping(payload)
+
+
+def test_spatial_dedup_tolerance_defaults_to_the_contract_tolerance() -> None:
+    profile = CombinedExpansionProfile.from_mapping(
+        {"trajectory": {"spatial": {"enabled": True, "joint_offset_scale": 0.05}}}
+    )
+    assert profile.trajectory.spatial.dedup_tolerance is None
 
 
 def test_recipe_schedule_is_complete_nominal_and_stable() -> None:

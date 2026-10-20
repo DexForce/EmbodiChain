@@ -25,6 +25,7 @@ import numpy as np
 from types import SimpleNamespace
 
 import trimesh
+from embodichain.utils.config_paths import resolve_config_path
 from embodichain.gen_sim.task_engine._task_program.configured import (
     decode_task_lowerer,
 )
@@ -1734,8 +1735,9 @@ def _inside_orientation_case(tmp_path: Path) -> tuple[PreparedScene, dict, dict]
         ),
     )
     embodiment = load_config(
-        Path(task_program_bundle.__file__).resolve().parents[3]
-        / "embodichain_tasks/configs/components/embodiments/dual_franka_robotiq_arg2f_140.yaml"
+        resolve_config_path(
+            "extensions/embodichain_tasks/configs/components/embodiments/dual_franka_robotiq_arg2f_140.yaml"
+        )
     )
     graph = _graph()
     graph["nodes"][0]["call"] = {

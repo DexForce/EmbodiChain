@@ -1,23 +1,26 @@
 # GenSim 与 TaskSpec 架构设计
 
-状态日期：2026-10-02（北京时间）
+集成核对日期：2026-10-21（北京时间）；早期设计分析基线为 2026-10-02。
 
 代码架构基线：`c38d9f3a`（本文档为架构说明提交）
 
 参考 PR：[DexForce/EmbodiChain #729](https://github.com/DexForce/EmbodiChain/pull/729)
 
-PR #729 当前核对的 base：`7e56e321`；head：`5af904c1`
-PR 状态：OPEN / UNSTABLE；CI 测试失败来自 `Drawer.zip` 外部镜像 MD5 不匹配，不能据此宣称主线已合入。
+本轮集成来源：PR #729 `99e685205` 与 `main` `04020afc0`。
+机器人与任务包采用 `extensions/embodichain_robots` 和
+`extensions/embodichain_tasks` 的主线所有权；GenSim 通过公开配置解析入口使用它们。
+下文的阶段规划不等于已完成的物理资格认证，历史 CI 或资产镜像结果也不代表当前状态。
 
 ## 结论
 
 当前架构应分成三层理解：
 
 1. `main` 已有的通用仿真、Task Program、Atomic Skill、Gym 和 Motion Expansion 基础设施。
-2. PR #729 正在补充的 GenSim Task Engine：任务解释、场景绑定、E1–E6/E9 方案生成、bundle 装配和物理运行检查。
+2. PR #729 正在补充的 GenSim Task Engine：任务解释、场景绑定、受支持的 E1–E6/E8–E9 方案生成、bundle 装配和物理运行检查。
 3. 本分支新增的纯 TaskSpec 规范层：roles、conditions、milestones、requirements、semantic hash 和 cache；运行证据继续由现有 runtime、Gym 和 expansion 所有者管理。
 
-PR #729 的方向是正确的执行基础设施演进，但它本身不拥有 TaskSpec。TaskSpec 作为规范语义和证据身份层，接在现有 Task Engine 与公共执行路径之上，而不是创建第二套 compiler、runtime、Session 或 Gym 生命周期。
+本 PR 同时包含 GenSim 所有的 TaskSpec 协议和 Task Engine 执行适配。TaskSpec
+作为规范语义和证据身份层接在现有公共执行路径之上，不创建第二套 compiler、runtime、Session 或 Gym 生命周期。
 
 ## 当前主线架构
 
@@ -296,11 +299,12 @@ FINAL_BINDING → STATIC_FEASIBILITY → GROUNDED_ACTION
 - provider-free preflight 不冒充物理可行性；
 - 静态、规划、物理执行和鲁棒性分开报告。
 
-### 2. 注册型 Semantic Call 仍缺 phase protection
+### 2. 注册型 Semantic Call 的 phase protection 必须显式声明
 
-公共 compiler 对内置 Pick/Place/HandOver 有 gate/guard，但 registered call 尚未拥有统一的 typed phase-protection contract。
+公共 compiler 已支持 registered call 的 typed acquisition/retention 声明，沿用现有 gate、guard 和 verified monitor。
+未声明的扩展不能自动获得这项保证；释放、撤手和任务终态仍需各自的实际证据。
 
-在运行结果被认证之前，必须先补齐：
+在运行结果被认证之前，必须逐项核实：
 
 - acquisition gate；
 - in-flight held-object guard；
@@ -315,7 +319,7 @@ FINAL_BINDING → STATIC_FEASIBILITY → GROUNDED_ACTION
 
 当前 `TaskCandidate.semantic_hash` 仍主要由 `draft.steps` 决定；这是兼容字段，不能用于任务级去重。TaskSpec 已提供独立的规范 semantic hash，但候选集合、场景绑定和历史数据尚未全部迁移到该 hash。
 
-### 5. 全局 TaskSpec 求值尚未接入运行闭环
+### 5. TaskSpec 运行求值仍有观测边界
 
 当前有多种局部检查：
 
@@ -326,7 +330,9 @@ FINAL_BINDING → STATIC_FEASIBILITY → GROUNDED_ACTION
 - E5 cargo envelope；
 - Gym physical objectives。
 
-TaskSpec v0.1 已提供有限 predicate 和 bounded temporal evaluator；现有 stability、articulation、press、cargo、physical objective 检查尚未统一适配到这套 predicate，也尚未在 Gym cleanup 前冻结统一运行报告。
+TaskSpec runtime 已接入声明覆盖、初态、中间 milestone 和末态求值。缺少有效观测的
+predicate 仍报告 `unavailable`，不能形成严格成功。CLI 默认的实验完成口径与严格
+TaskSpec 报告分开保存，不能把完整程序执行或视频观感当作严格认证。
 
 ### 6. Expansion 尚未完成 host 闭环
 
@@ -440,7 +446,7 @@ reset/settling 后记录真实初态；每个 Gym step 采样已声明的不变�
 | 问题 | 当前结论 |
 |---|---|
 | TaskSpec 是否已经在 `main` | `main` 尚未有协议；本分支已实现精简 TaskSpec v0.1 和 Task Engine 生成适配 |
-| PR #729 是否引入 TaskSpec | 没有；它引入的是 Task Engine 执行基础设施 |
+| PR #729 是否引入 TaskSpec | 是；包含 GenSim-owned 协议、生成和运行适配，不等于所有 predicate 都已有物理观测 |
 | 是否需要第二套执行器 | 不需要，也不应增加 |
 | TaskSpec 是否仍是目标 | 是，作为唯一规范语义所有者 |
 | 当前 graph 是否等于 TaskSpec | 不等于；它仍是候选方案 IR，TaskSpec hash 独立于动作步骤 |

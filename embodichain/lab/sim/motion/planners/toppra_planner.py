@@ -16,259 +16,201 @@
 
 from __future__ import annotations
 
-import os
+from collections.abc import Mapping, Sequence
+from copy import deepcopy
+from dataclasses import field
 
 import torch
-import numpy as np
-from concurrent.futures.process import BrokenProcessPool
 
+from embodichain.compute.trajectory._toppra_common import _validate_grid_size
+from embodichain.compute.trajectory._toppra_warp import _retime_toppra_warp
 from embodichain.utils import logger, configclass
-from embodichain.lab.sim.motion.planners.utils import MoveType, TrajectorySampleMethod
-from embodichain.lab.sim.motion.planners.base_planner import (
+from .base_planner import (
     validate_plan_options,
     BasePlanner,
     BasePlannerCfg,
     PlanOptions,
     _infer_batch_size,
 )
-from .utils import PlanState, PlanResult
+from ._joint_limits import _resolve_joint_constraints
+from .utils import MoveType, TrajectorySampleMethod, PlanState, PlanResult
 
-try:
-    import toppra as ta
-    import toppra.constraint as constraint
-except ImportError:
-    logger.log_error(
-        "toppra not installed. Install with `pip install toppra==0.6.3`", ImportError
+__all__ = [
+    "ToppraPlanner",
+    "ToppraPlannerCfg",
+    "ToppraPlanOptions",
+    "retime_joint_paths",
+]
+
+
+def _failed_result(
+    batch: int, dofs: int, device: torch.device, dtype: torch.dtype
+) -> PlanResult:
+    """Return independent zero-filled rows in the caller's floating precision."""
+    positions = torch.zeros((batch, 2, dofs), dtype=dtype, device=device)
+    return PlanResult(
+        success=torch.zeros(batch, dtype=torch.bool, device=device),
+        positions=positions,
+        velocities=torch.zeros_like(positions),
+        accelerations=torch.zeros_like(positions),
+        dt=torch.zeros((batch, 2), dtype=dtype, device=device),
     )
 
-ta.setup_logging(level="WARN")
 
+def retime_joint_paths(
+    positions: torch.Tensor,
+    *,
+    constraints: Mapping[str, float | Sequence[float] | torch.Tensor],
+    path_lengths: torch.Tensor | None = None,
+    sample_method: TrajectorySampleMethod = TrajectorySampleMethod.QUANTITY,
+    sample_interval: float | int | None = None,
+    grid_size: int = 100,
+    device: torch.device | None = None,
+) -> PlanResult:
+    """Re-parameterize already-planned joint paths under dynamic limits.
 
-def _build_constraint_arrays(value, acc, dofs: int) -> tuple[np.ndarray, np.ndarray]:
-    """Expand scalar limits to (dofs, 2) arrays; pass through arrays as-is."""
-    if isinstance(value, (float, int)):
-        vlims = np.array([[-value, value] for _ in range(dofs)])
-    else:
-        vlims = np.array(value)
-    if isinstance(acc, (float, int)):
-        alims = np.array([[-acc, acc] for _ in range(dofs)])
-    else:
-        alims = np.array(acc)
-    return vlims, alims
+    This is the time parameterization of :class:`ToppraPlanner`, exposed for
+    planners that produce geometry without executable timing. A closed-loop
+    policy rollout, for example, emits one joint sample per control step on a
+    nominal ``dt`` that no dynamic limit informed; feeding those samples here
+    replaces that timing with a solved one that respects the limits.
 
+    Warp handles both CPU and CUDA inputs. Sufficiently large CPU inference
+    batches share a bounded thread pool; small requests and gradient recording
+    run inline. Interval constraints enforce limits between grid points.
+    Floating outputs retain float32/float64 input precision; other input dtypes
+    are promoted to float32 before solving.
 
-def _toppra_solve_one_env(
-    waypoints: np.ndarray,
-    vel_constraint,
-    acc_constraint,
-    sample_method: "TrajectorySampleMethod",
-    sample_interval: float | int,
-) -> dict:
-    """Solve a single-env TOPPRA trajectory. Pure numpy/scipy — picklable, no torch/robot.
+    The path geometry is resampled along the fitted spline, so poses derived
+    from the input samples must be recomputed from the returned positions.
 
     Args:
-        waypoints: ``(N, DOF)`` numpy array of joint waypoints.
-        vel_constraint / acc_constraint: scalar or per-DoF array limits.
-        sample_method: TIME or QUANTITY.
-        sample_interval: seconds (TIME) or sample count (QUANTITY).
+        positions: Planned joint paths of shape ``(B, N, DOF)``.
+        constraints: ``velocity`` and ``acceleration`` limits, each a scalar,
+            one value per joint, or signed ``(DOF, 2)`` bounds, matching
+            :class:`ToppraPlanOptions`.
+        path_lengths: Optional valid prefix length for each batch row. This
+            excludes rectangular tail padding from spline fitting while
+            preserving explicit repeated endpoints inside each prefix.
+        sample_method: Fixed output quantity or approximately fixed time step.
+        sample_interval: Output count for ``QUANTITY`` or seconds for ``TIME``.
+            ``None`` keeps the input sample count and is only meaningful for
+            ``QUANTITY``, which leaves array shapes unchanged while the timing
+            behind them changes.
+        grid_size: Minimum parameterization grid size, as for
+            :class:`ToppraPlannerCfg`.
+        device: Device for the assembled tensors; defaults to the input's.
 
     Returns:
-        dict with ``positions`` ``(N_b, DOF)``, ``velocities``, ``accelerations``,
-        ``dt`` ``(N_b,)``, ``success`` bool, and ``n`` int.
+        PlanResult whose ``success`` is per-env and false where the path could
+        not be parameterized.
+
+    Raises:
+        ValueError: If ``positions`` is not a ``(B, N, DOF)`` tensor,
+            ``path_lengths`` is malformed, the constraints omit ``velocity``
+            or ``acceleration``, or ``TIME`` sampling is requested without an
+            explicit interval in seconds.
     """
-    dofs = waypoints.shape[1]
-    vlims, alims = _build_constraint_arrays(vel_constraint, acc_constraint, dofs)
-
-    if sample_method == TrajectorySampleMethod.TIME and sample_interval <= 0:
-        return _empty_failure(dofs)
-    if sample_method == TrajectorySampleMethod.QUANTITY and sample_interval < 2:
-        return _empty_failure(dofs)
-
-    # Remove consecutive duplicate waypoints. Long plateaus of identical points
-    # (e.g. when start_qpos equals the first target and joint-space interpolation
-    # is enabled) can make TOPPRA's controllable-set computation numerically
-    # ill-conditioned and fail with "Instance is not controllable".
-    dup_tol = 1e-6
-    keep = [0]
-    for i in range(1, len(waypoints)):
-        if np.max(np.abs(waypoints[i] - waypoints[keep[-1]])) >= dup_tol:
-            keep.append(i)
-    if keep[-1] != len(waypoints) - 1:
-        keep.append(len(waypoints) - 1)
-    waypoints = waypoints[keep]
-
-    # Trivial same-waypoint shortcut
-    if len(waypoints) == 2 and np.sum(np.abs(waypoints[1] - waypoints[0])) < 1e-3:
-        pos = np.stack([waypoints[0], waypoints[1]])
-        return {
-            "positions": pos,
-            "velocities": np.zeros_like(pos),
-            "accelerations": np.zeros_like(pos),
-            "dt": np.array([0.0, 0.0], dtype=np.float32),
-            "success": True,
-            "n": 2,
-        }
-
-    ss = np.linspace(0.0, 1.0, len(waypoints))
-    try:
-        path = ta.SplineInterpolator(ss, waypoints)
-        pc_vel = constraint.JointVelocityConstraint(vlims)
-        pc_acc = constraint.JointAccelerationConstraint(alims)
-        instance = ta.algorithm.TOPPRA(
-            [pc_vel, pc_acc],
-            path,
-            parametrizer="ParametrizeConstAccel",
-            gridpt_min_nb_points=max(100, 10 * len(waypoints)),
+    if positions.dim() != 3:
+        raise ValueError(
+            f"positions must have shape (B, N, DOF), got {tuple(positions.shape)}."
         )
-        jnt_traj = instance.compute_trajectory()
-    except Exception:
-        return _empty_failure(dofs)
+    missing = sorted({"velocity", "acceleration"}.difference(constraints))
+    if missing:
+        raise ValueError(f"constraints is missing required keys: {missing}.")
+    if sample_interval is None and sample_method is TrajectorySampleMethod.TIME:
+        # The default is a sample count; reading it as seconds would silently
+        # collapse a dense path to two samples whenever its duration is shorter.
+        raise ValueError(
+            "sample_interval is required for TIME sampling; it is a duration in "
+            "seconds, not the sample count the default supplies."
+        )
+    resolved_device = positions.device if device is None else device
+    batch, count, dofs = positions.shape
+    if path_lengths is not None:
+        if not isinstance(path_lengths, torch.Tensor) or path_lengths.shape != (batch,):
+            raise ValueError(f"path_lengths must have shape ({batch},)")
+        if path_lengths.dtype not in (
+            torch.uint8,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+        ):
+            raise ValueError("path_lengths must contain integers")
+        path_lengths = path_lengths.to(device=positions.device, dtype=torch.int32)
+        if bool(((path_lengths < 2) | (path_lengths > count)).any().item()):
+            raise ValueError(f"path_lengths must be between 2 and {count}")
+        path_lengths = path_lengths.contiguous()
+    resolved_interval = count if sample_interval is None else sample_interval
+    velocity, acceleration = constraints["velocity"], constraints["acceleration"]
 
-    if jnt_traj is None:
-        return _empty_failure(dofs)
-
-    duration = float(jnt_traj.duration)
-    if duration <= 0:
-        return _empty_failure(dofs)
-
-    if sample_method == TrajectorySampleMethod.TIME:
-        n_points = max(2, int(np.ceil(duration / sample_interval)) + 1)
-        ts = np.linspace(0.0, duration, n_points)
-    else:
-        ts = np.linspace(0.0, duration, num=int(sample_interval))
-
-    positions = np.array([jnt_traj.eval(t) for t in ts])
-    velocities = np.array([jnt_traj.evald(t) for t in ts])
-    accelerations = np.array([jnt_traj.evaldd(t) for t in ts])
-    dt = np.diff(ts, prepend=0.0).astype(np.float32)
-    return {
-        "positions": positions,
-        "velocities": velocities,
-        "accelerations": accelerations,
-        "dt": dt,
-        "success": True,
-        "n": len(ts),
-    }
-
-
-def _empty_failure(dofs: int) -> dict:
-    z = np.zeros((2, dofs), dtype=np.float32)
-    return {
-        "positions": z,
-        "velocities": np.zeros_like(z),
-        "accelerations": np.zeros_like(z),
-        "dt": np.array([0.0, 0.0], dtype=np.float32),
-        "success": False,
-        "n": 2,
-    }
-
-
-def _set_parent_death_signal() -> None:
-    r"""Best-effort: ask the kernel to SIGKILL this worker when its parent dies.
-
-    This is the **only** cleanup mechanism that survives ``os._exit(0)`` in the
-    parent process, which is what :meth:`SimulationManager.destroy` does by
-    default (gated by ``EMBODICHAIN_SIM_EXIT_PROCESS``).  ``os._exit`` skips
-    every Python-level finalizer — ``atexit`` handlers, ``__del__`` methods,
-    and ``concurrent.futures``' internal ``_python_exit`` that would otherwise
-    join/terminate daemon workers — so the worker processes would be orphaned
-    and reparented to init, leaving residual python processes behind.
-
-    A kernel parent-death signal fires regardless of *how* the parent exits
-    (``os._exit``, a crash, or a normal return), so workers are reaped even
-    when no Python cleanup runs.  No-op on non-Linux or if ``prctl`` is
-    unavailable; in that case workers still rely on ``__del__`` and the
-    daemon-process reaping that runs on a normal interpreter shutdown.
-    """
+    quantity = sample_method == TrajectorySampleMethod.QUANTITY
+    waypoints = (
+        positions
+        if positions.dtype in (torch.float32, torch.float64)
+        else positions.float()
+    )
     try:
-        import ctypes
-        import signal
-
-        libc = ctypes.CDLL(None)
-        PR_SET_PDEATHSIG = 1
-        libc.prctl.argtypes = [
-            ctypes.c_int,
-            ctypes.c_ulong,
-            ctypes.c_ulong,
-            ctypes.c_ulong,
-            ctypes.c_ulong,
-        ]
-        libc.prctl.restype = ctypes.c_int
-        libc.prctl(PR_SET_PDEATHSIG, signal.SIGKILL, 0, 0, 0)
-    except Exception:
-        pass
-
-
-def _worker_init() -> None:
-    r"""Initializer run in each worker when the pool starts.
-
-    Two responsibilities:
-
-    1. **Parent-death signal (Linux).**  Install ``prctl(PR_SET_PDEATHSIG,
-       SIGKILL)`` so the kernel kills this worker the instant its parent
-       dies.  This is what guarantees no residual worker processes when the
-       parent exits via ``os._exit(0)`` (see :func:`_set_parent_death_signal`).
-       Because of this, callers never need to explicitly shut the planner
-       down — workers self-terminate with the parent.
-
-    2. **atexit clearing (fork only).**  When ``fork`` is used, the parent
-       has usually already initialized CUDA/GPU by the time the pool is
-       created, and ``fork`` copies the parent's atexit registry into the
-       child.  Without clearing it the worker would try to run the parent's
-       cleanup routines on exit, which can deadlock or corrupt state.  With
-       ``spawn`` this is not necessary, but the initializer still runs so
-       that ``fork`` remains usable for advanced callers who create the pool
-       before CUDA is initialized.
-    """
-    import atexit
-    import multiprocessing as mp
-
-    if mp.get_start_method() == "fork":
-        atexit._clear()
-
-    _set_parent_death_signal()
-
-
-__all__ = ["ToppraPlanner", "ToppraPlannerCfg", "ToppraPlanOptions"]
+        result = _retime_toppra_warp(
+            waypoints,
+            velocity,
+            acceleration,
+            path_lengths=path_lengths,
+            sample_count=int(resolved_interval) if quantity else None,
+            sample_dt=None if quantity else float(resolved_interval),
+            grid_size=grid_size,
+        )
+    except (ValueError, FloatingPointError, OverflowError):
+        return _failed_result(batch, dofs, resolved_device, waypoints.dtype)
+    return PlanResult(
+        **{key: value.to(resolved_device) for key, value in result.items()}
+    )
 
 
 @configclass
 class ToppraPlannerCfg(BasePlannerCfg):
+    """Configure the shared CPU/CUDA Warp time parameterizer."""
 
     planner_type: str = "toppra"
-    max_workers: int | None = None
-    """Worker process count for the batched fan-out. None => min(cpu_count()//2, B)."""
-    mp_context: str | None = None
-    """Multiprocessing start method for the batched fan-out.
+    grid_size: int = field(default=100, kw_only=True)
+    """Minimum timing grid size; each spline segment is subdivided uniformly."""
 
-    ``None`` (default) auto-selects based on the simulation device:
-    ``'fork'`` on CPU and ``'spawn'`` on GPU. ``'fork'`` is faster — workers
-    inherit the parent's already-loaded modules, so pool startup is
-    near-instant — and is safe here because the TOPPRA worker
-    (:func:`_toppra_solve_one_env`) is pure numpy/scipy and never touches the
-    parent's Vulkan/Warp/CUDA context or render threads; ``_worker_init``
-    clears the inherited atexit registry and installs ``prctl(PR_SET_PDEATHSIG)``
-    so workers are reaped when the parent dies (incl. the ``os._exit`` path).
-    ``'spawn'`` is the safer choice when the parent has initialized CUDA
-    physics (``device='cuda'``) — fork-after-CUDA-init is the officially
-    unsupported case — or if fork deadlocks are observed, at the cost of
-    re-importing modules per worker.
-    """
+
+class _ToppraConstraints(dict):
+    """Copy config containers while preserving runtime tensor references."""
+
+    def __deepcopy__(self, memo: dict) -> _ToppraConstraints:
+        result = _ToppraConstraints()
+        memo[id(self)] = result
+        for key, value in self.items():
+            result[deepcopy(key, memo)] = (
+                value if isinstance(value, torch.Tensor) else deepcopy(value, memo)
+            )
+        return result
 
 
 @configclass
 class ToppraPlanOptions(PlanOptions):
 
+    control_part: str | None = field(default=None, kw_only=True)
+    """Control group whose joint order matches the trajectory columns."""
+
     constraints: dict = {
-        "velocity": 0.2,
-        "acceleration": 0.5,
+        "velocity": None,
+        "acceleration": None,
     }
     """Constraints for the planner, including velocity and acceleration limits.
 
-    Should be a dictionary with keys 'velocity' and 'acceleration', each containing a value or a list of limits for each joint.
+    Values may be scalars, per-joint magnitudes, or signed bounds. ``None``
+    velocity resolves robot speed caps at planning time. Acceleration is a
+    planning budget; ``None`` uses its compatibility default. Explicit speed
+    requests are capped by available robot limits.
+    Tensor bounds retain their references through option construction/copying
+    so gradients reach the caller, including through non-leaf expressions.
     """
 
-    sample_method: TrajectorySampleMethod = TrajectorySampleMethod.QUANTITY
+    sample_method: TrajectorySampleMethod = TrajectorySampleMethod.TIME
     """Method for sampling the trajectory.
 
     Options are 'time' for uniform time intervals or 'quantity' for a fixed number of samples.
@@ -279,133 +221,34 @@ class ToppraPlanOptions(PlanOptions):
 
     If sample_method is 'time', this is the time interval in seconds.
     If sample_method is 'quantity', this is the total number of samples.
+    Both modes support first-order gradients of waypoints and tensor motion limits.
     """
+
+    def __post_init__(self) -> None:
+        """Preserve tensor graphs before configclass copies mutable fields."""
+        self.constraints = _ToppraConstraints(self.constraints)
 
 
 class ToppraPlanner(BasePlanner):
-    """Time-optimal joint-space planner backed by TOPPRA."""
+    """Rest-to-rest joint-path timing with differentiable CPU/CUDA Warp kernels.
+
+    Uniform not-a-knot cubic geometry is timed under conservative interval
+    bounds. Results preserve the planner's float32 output contract.
+    """
 
     supported_move_types = frozenset({MoveType.JOINT_MOVE})
 
-    def __init__(self, cfg: ToppraPlannerCfg):
-        r"""Initialize the TOPPRA trajectory planner.
-
-        References:
-            - TOPPRA: Time-Optimal Path Parameterization for Robotic Systems (https://github.com/hungpham2511/toppra)
-
-        Args:
-            cfg: Configuration object containing ToppraPlanner settings
-        """
+    def __init__(self, cfg: ToppraPlannerCfg) -> None:
+        """Validate the timing grid and resolve the configured robot."""
+        _validate_grid_size(cfg.grid_size)
         super().__init__(cfg)
 
-        self._pool = None
-        # Resolve the multiprocessing start method once, now that self.device
-        # (from BasePlanner) is known. None => auto: fork on CPU, spawn on GPU.
-        self._mp_context = self._resolve_mp_context(cfg.mp_context, self.device)
-        # No atexit / __del__-based shutdown is registered here: workers install
-        # prctl(PR_SET_PDEATHSIG) in _worker_init, so the kernel reaps them the
-        # moment the parent process dies — including the os._exit(0) path taken
-        # by SimulationManager.destroy(), which skips every Python finalizer.
-        # __del__ below only handles in-process GC of an abandoned planner.
-
     def default_plan_options(self) -> ToppraPlanOptions:
-        """Return backend-default planning options."""
+        """Return a valid time-sampled default when no count is requested."""
         return ToppraPlanOptions()
 
-    @staticmethod
-    def _resolve_mp_context(mp_context: str | None, device: torch.device) -> str:
-        """Return the multiprocessing start method to use for the worker pool.
-
-        An explicit ``mp_context`` is honored as-is. ``None`` auto-selects:
-        ``'fork'`` on CPU (fast — workers inherit loaded modules; safe because
-        the worker is pure numpy/scipy), ``'spawn'`` everywhere else (safer
-        under an initialized CUDA context).
-
-        Args:
-            mp_context: The cfg value; ``None`` means auto-select.
-            device: The physics device the planner's robot runs on.
-
-        Returns:
-            One of ``'fork'`` / ``'spawn'``.
-        """
-        if mp_context is not None:
-            return mp_context
-        return "fork" if device.type == "cpu" else "spawn"
-
-    def _get_pool(self, batch_size: int):
-        if self._pool is not None:
-            return self._pool
-        import multiprocessing as mp
-
-        max_workers = self.cfg.max_workers
-        if max_workers is None:
-            max_workers = max(1, min((os.cpu_count() or 2) // 2, batch_size))
-        ctx = mp.get_context(self._mp_context)
-        from concurrent.futures import ProcessPoolExecutor
-
-        self._pool = ProcessPoolExecutor(
-            max_workers=max_workers,
-            mp_context=ctx,
-            initializer=_worker_init,
-        )
-        return self._pool
-
-    def _shutdown_pool(self) -> None:
-        r"""Shut down the TOPPRA worker process pool (internal).
-
-        We do **not** use ``shutdown(wait=True)``: with ``fork`` workers can
-        inherit the parent's CUDA/GPU context, causing them to deadlock inside
-        the driver at exit.  ``wait=True`` would then hang the main process,
-        and if the user kills it the workers are left behind as residual
-        python processes.
-
-        Instead we cancel pending work and then forcibly terminate/join/kill
-        every worker process so that this method returns only after all
-        workers are actually gone.
-
-        This is **not** part of the public API.  It exists for two internal
-        callers: the ``BrokenProcessPool`` recovery path in :meth:`plan`, and
-        ``__del__`` (so an abandoned planner in a long-running process does
-        not leak workers).  Normal process exit does not rely on it — workers
-        install ``prctl(PR_SET_PDEATHSIG)`` in :func:`_worker_init` and are
-        reaped by the kernel when the parent dies, even under ``os._exit``.
-        """
-        if self._pool is None:
-            return
-
-        # Capture the worker process objects before shutdown clears them.
-        worker_processes = list(getattr(self._pool, "_processes", {}).values())
-
-        # Stop accepting new work and cancel any futures that have not started.
-        self._pool.shutdown(wait=False, cancel_futures=True)
-
-        # Forcibly reap every worker.  This is required for fork-based pools
-        # when the parent has initialized CUDA: the children inherit the
-        # context and may not exit cleanly on their own.
-        for proc in worker_processes:
-            if not proc.is_alive():
-                continue
-            proc.terminate()
-            proc.join(timeout=5.0)
-            if proc.is_alive():
-                proc.kill()
-                proc.join(timeout=1.0)
-
-        self._pool = None
-
     def close(self) -> None:
-        """Release TOPPRA worker processes owned by this planner."""
-        self._shutdown_pool()
-
-    def __del__(self):
-        # Only matters for in-process GC of an abandoned planner (and as a
-        # non-Linux fallback).  Process-exit cleanup is handled by the kernel
-        # via PR_SET_PDEATHSIG installed in each worker, which survives the
-        # os._exit(0) path that SimulationManager.destroy() takes.
-        try:
-            self.close()
-        except Exception:
-            pass
+        """Complete the planner lifecycle; CPU workers belong to the shared runtime."""
 
     @validate_plan_options(options_cls=ToppraPlanOptions)
     def plan(
@@ -433,105 +276,43 @@ class ToppraPlanner(BasePlanner):
         b = _infer_batch_size(target_states) or 1
         dofs = target_states[0].qpos.shape[-1]
 
-        # Build (B, N, DOF) numpy waypoints
-        waypoints = np.stack(
-            [s.qpos.detach().cpu().numpy() for s in target_states], axis=1
-        )  # (B, N, DOF)
+        constraints = _resolve_joint_constraints(
+            self.robot,
+            options.constraints,
+            control_part=options.control_part,
+            dof=dofs,
+            batch_size=b,
+        )
 
-        vc = options.constraints["velocity"]
-        ac = options.constraints["acceleration"]
-        args_per_env = [
-            (waypoints[i], vc, ac, options.sample_method, options.sample_interval)
-            for i in range(b)
-        ]
-
-        # Single-env planning never needs a process pool.
-        if b == 1:
-            results = [_toppra_solve_one_env(*a) for a in args_per_env]
-        else:
-            # Inline fallback for max_workers==1 or a single-core machine.
-            max_workers = self.cfg.max_workers
-            use_inline = (max_workers == 1) or (
-                max_workers is None and ((os.cpu_count() or 2) // 2) <= 1
+        waypoints_tensor = torch.stack([s.qpos for s in target_states], dim=1).to(
+            self.device
+        )
+        if waypoints_tensor.dtype not in (torch.float32, torch.float64):
+            waypoints_tensor = waypoints_tensor.to(torch.float64)
+        try:
+            result = _retime_toppra_warp(
+                waypoints_tensor,
+                constraints["velocity"],
+                constraints["acceleration"],
+                sample_count=(
+                    int(options.sample_interval)
+                    if options.sample_method == TrajectorySampleMethod.QUANTITY
+                    else None
+                ),
+                sample_dt=(
+                    options.sample_interval
+                    if options.sample_method == TrajectorySampleMethod.TIME
+                    else None
+                ),
+                grid_size=self.cfg.grid_size,
             )
-            if use_inline:
-                results = [_toppra_solve_one_env(*a) for a in args_per_env]
-            else:
-                pool = self._get_pool(b)
-                results = [None] * b
-                try:
-                    futures = [
-                        pool.submit(_toppra_solve_one_env, *a) for a in args_per_env
-                    ]
-                    broken = False
-                    for i, fut in enumerate(futures):
-                        try:
-                            results[i] = fut.result()
-                        except BrokenProcessPool:
-                            logger.log_warning(
-                                "TOPPRA process pool broke; returning failure."
-                            )
-                            self._shutdown_pool()
-                            broken = True
-                            break
-                        except Exception:
-                            results[i] = _empty_failure(dofs)
-                    if broken:
-                        for i in range(b):
-                            if results[i] is None:
-                                results[i] = _empty_failure(dofs)
-                except BrokenProcessPool:
-                    # pool was already broken at submit time
-                    logger.log_warning("TOPPRA process pool broke; returning failure.")
-                    self._shutdown_pool()
-                    for i in range(b):
-                        if results[i] is None:
-                            results[i] = _empty_failure(dofs)
-
-        return self._assemble_batched_result(results, dofs)
-
-    def _assemble_batched_result(self, results: list[dict], dofs: int) -> PlanResult:
-        """Stack per-env TOPPRA results into a batched :class:`PlanResult`.
-
-        Each entry of ``results`` is the dict returned by
-        :func:`_toppra_solve_one_env`. Env trajectories may have different
-        lengths (``n``); this method pads shorter trajectories out to the
-        longest by repeating their final waypoint (held pose) with zero
-        velocity and acceleration, so every output tensor shares the same
-        ``(B, N, DOF)`` / ``(B, N)`` shape.
-
-        Args:
-            results: list of per-env result dicts (length ``B``).
-            dofs: per-env degrees of freedom.
-
-        Returns:
-            PlanResult with env-batched tensors (``success`` ``(B,)``,
-            ``positions``/``velocities``/``accelerations`` ``(B, N, DOF)``,
-            ``dt`` ``(B, N)``, ``duration`` ``(B,)``).
-        """
-        b = len(results)
-        max_n = max(r["n"] for r in results)
-        positions = np.zeros((b, max_n, dofs), dtype=np.float32)
-        velocities = np.zeros((b, max_n, dofs), dtype=np.float32)
-        accelerations = np.zeros((b, max_n, dofs), dtype=np.float32)
-        dt = np.zeros((b, max_n), dtype=np.float32)
-        success = np.zeros((b,), dtype=bool)
-        for i, r in enumerate(results):
-            n = r["n"]
-            positions[i, :n] = r["positions"]
-            velocities[i, :n] = r["velocities"]
-            accelerations[i, :n] = r["accelerations"]
-            dt[i, :n] = r["dt"]
-            success[i] = r["success"]
-            # tail-pad: repeat final waypoint for held-pose rows
-            if n < max_n:
-                positions[i, n:] = r["positions"][-1]
-                velocities[i, n:] = 0.0
-                accelerations[i, n:] = 0.0
+        except (ValueError, FloatingPointError, OverflowError):
+            return _failed_result(b, dofs, self.device, torch.float32)
+        # The existing planner contract returns float32 for all floating
+        # fields, independently of input precision.
         return PlanResult(
-            success=torch.as_tensor(success, device=self.device),
-            positions=torch.as_tensor(positions, device=self.device),
-            velocities=torch.as_tensor(velocities, device=self.device),
-            accelerations=torch.as_tensor(accelerations, device=self.device),
-            dt=torch.as_tensor(dt, device=self.device),
+            **{
+                key: value if key == "success" else value.to(torch.float32)
+                for key, value in result.items()
+            }
         )

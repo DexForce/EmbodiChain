@@ -53,6 +53,9 @@ from embodichain.data import get_data_path
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
+    from embodichain.lab.task_program.integrations.asset_materialization import (
+        MaterializedAssetDeployment,
+    )
 
 
 __all__ = [
@@ -152,12 +155,14 @@ def apply_expansion_profile_reset(
 
 
 class replace_assets_from_group(Functor):
-    """Replace assets in the environment from a specified group of assets.
+    """Replace a directory-sampled mesh or a prepared semantic asset combination.
 
-    The group of assets can be defined in the following ways:
-        - A directory containing multiple asset files.
-        - A json file listing multiple assets with their properties. (not supported yet)
-        - ... (other methods can be added in the future)
+    Existing ``entity_cfg``/``folder_path`` configurations keep their directory
+    sampling behavior. Alternatively, supply ``deployment`` from asset-batch
+    preparation. That mode jointly replaces the selected rigid bodies, retains
+    the environment and installs the adapted Task Program binding. It requires
+    a cleared B=1 episode boundary. Provider I/O and semantic matching belong
+    to preparation and do not run inside this event.
     """
 
     def __init__(self, cfg: FunctorCfg, env: EmbodiedEnv):
@@ -171,6 +176,17 @@ class replace_assets_from_group(Functor):
             ValueError: If the asset is not a RigidObject or an Articulation.
         """
         super().__init__(cfg, env)
+
+        self._prepared_mode = "deployment" in cfg.params
+        if self._prepared_mode:
+            if (
+                cfg.params.get("entity_cfg") is not None
+                or cfg.params.get("folder_path") is not None
+            ):
+                raise ValueError(
+                    "Choose deployment or entity_cfg/folder_path asset replacement"
+                )
+            return
 
         # extract the used quantities (to enable type-hinting)
         entity_cfg: SceneEntityCfg = cfg.params["entity_cfg"]
@@ -223,11 +239,52 @@ class replace_assets_from_group(Functor):
     def __call__(
         self,
         env: EmbodiedEnv,
-        env_ids: torch.Tensor | None,
-        entity_cfg: SceneEntityCfg,
-        folder_path: str,
+        env_ids: torch.Tensor | Sequence[int] | slice | None,
+        entity_cfg: SceneEntityCfg | None = None,
+        folder_path: str | None = None,
+        *,
+        deployment: MaterializedAssetDeployment | None = None,
     ) -> None:
+        """Apply the selected assets at an episode or batch boundary.
 
+        Args:
+            env: Existing environment whose selected objects are replaced.
+            env_ids: Reset rows; prepared deployments require all of B=1.
+            entity_cfg: Existing directory mode's mesh object selector.
+            folder_path: Existing directory mode's candidate directory/pattern.
+            deployment: Verified asset-batch artifact, or ``None`` while idle.
+        """
+        if getattr(self, "_prepared_mode", False):
+            if entity_cfg is not None or folder_path is not None:
+                raise ValueError("Prepared replacement cannot also select a directory")
+            if deployment is None:
+                return
+            if isinstance(env_ids, slice):
+                selected_ids = list(range(env.num_envs))[env_ids]
+            elif env_ids is None:
+                selected_ids = list(range(env.num_envs))
+            else:
+                selection = torch.as_tensor(env_ids)
+                if selection.dtype not in (torch.int32, torch.int64):
+                    raise ValueError(
+                        "Prepared replacement env_ids must be integer rows"
+                    )
+                selected_ids = selection.reshape(-1).tolist()
+            if env.num_envs != 1 or selected_ids != [0]:
+                raise ValueError(
+                    "Prepared asset replacement requires a complete B=1 reset"
+                )
+            from embodichain.lab.gym.envs._asset_replacement import (
+                _apply_asset_deployment,
+            )
+
+            _apply_asset_deployment(env, deployment)
+            return
+
+        if deployment is not None:
+            raise ValueError(
+                "Directory replacement was not initialized for a deployment"
+            )
         asset_path = random.choice(self._asset_group_path)
         replacement_cfg = deepcopy(self.asset_cfg)
         replacement_cfg.shape.fpath = asset_path
@@ -550,16 +607,35 @@ def register_info_to_env(
     env_ids: torch.Tensor | None,
     registry: List[Dict],
     registration: str = "affordance_datas",
-    sim_update: bool = True,
-):
+    sim_update: bool = False,
+) -> None:
+    """Register entity information without advancing physics by default.
+
+    Args:
+        env: Environment receiving the registered information.
+        env_ids: Environment indices to read. None selects all environments.
+        registry: Entity information declarations.
+        registration: Name of the environment's destination mapping.
+        sim_update: Explicitly run the legacy 100-step settle before reading.
+            This requires all environments because physics advances the World.
+    """
     if env_ids is None:
         env_ids = torch.arange(env.num_envs, device=env.device)
     if sim_update:
+        selected = torch.as_tensor(env_ids, dtype=torch.long, device=env.device)
+        all_ids = torch.arange(env.num_envs, device=env.device)
+        if not torch.equal(selected.sort().values, all_ids):
+            raise ValueError(
+                "sim_update=True requires all environments because settling "
+                "advances the entire physics World."
+            )
         logger.log_info(
             "Calling env.sim.update(100) for after-physics-applied object attributes..",
             color="green",
         )
         env.sim.update(step=100)
+    else:
+        env.sim.sync_render_state()
     for entity_registry in registry:
         entity_cfg = SceneEntityCfg(**entity_registry["entity_cfg"])
         logger.log_info(f"Registering {entity_cfg.uid}..", color="green")

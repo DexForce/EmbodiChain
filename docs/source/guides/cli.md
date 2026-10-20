@@ -74,6 +74,23 @@ joint controls, the interactive terminal, and worked examples.
 
 ---
 
+(cli-preview-robot)=
+## Preview Robot
+
+List exact robot and variant IDs, then preview the selected configuration:
+
+```bash
+embodichain list-robot
+embodichain preview-robot --robot FrankaPanda
+embodichain preview-robot --robot DexforceW1 --variant v025/DH_PGC --viser
+```
+
+The native window uses I to activate or toggle configured control-part IK
+Gizmos. Viser supports Gizmo dragging, joint controls, and pose reset.
+See {doc}`preview_robot` for robot files, overrides, and bounded headless runs.
+
+---
+
 (cli-list-tasks)=
 ## List Tasks
 
@@ -94,16 +111,52 @@ See {doc}`task_catalog` for catalog authoring and gallery export.
 
 ---
 
-(cli-run-environment)=
-## Run Environment
+(cli-list-robots)=
+## List Robots
+
+Discover installed robot families and their supported configurations:
+
+```bash
+embodichain list-robot
+python -m embodichain list-robot
+embodichain list-robot --help
+```
+
+The command reads lightweight catalog metadata without constructing robot
+configurations, initializing simulation, or downloading assets.
+
+| Column | Meaning |
+|---|---|
+| `Robot ID` | Registered family ID, such as `FrankaPanda`, `URRobot`, or `DexforceW1` |
+| `Variants` | Supported models or configuration profiles; `*` marks the default |
+| `Control DOF` | Unique independent joints in the default control parts; mimic followers are excluded and overlapping groups count once |
+| `Control Parts` | Default group names and joint counts; `eef (1+1m)` means one independent joint and one mimic follower |
+| `Mimic Joints` | Follower joint names from the default URDF, including passive followers outside the control parts |
+
+`-` means unavailable metadata. `None` in the mimic column means that the
+catalog declares no mimic joints. A count marked `total` includes all joints
+in that part when mimic membership is unknown.
+
+UR models share one family row. Dual-arm variants show the DOFs of each base
+robot, and W1 variants show body releases and hand combinations. Equivalent
+profiles are grouped together. Long values wrap to fit the terminal, and
+the table width is bounded between 80 and 120 columns.
+`NO_COLOR=1 embodichain list-robot` disables terminal colors.
+
+See {doc}`robot_catalog` for variant selection, DOF examples, third-party
+catalog registration, and the current import paths.
+
+---
+
+(cli-run-taskironment)=
+## Run Task
 
 Launch a Gymnasium environment for data generation, interactive preview, or trajectory replay.
-``embodichain run-task`` is an exact alias of ``embodichain run-env`` and accepts
-the same arguments.
+``embodichain run-task`` is the sole task execution command.
 
 For an end-to-end explanation of mode selection, preview, the differences
 between dataset/video/trajectory recording, and all three replay modes, see
-{doc}`run_env`.
+{doc}`run_task`.
 
 Task environments are **auto-discovered**: any installed package that declares
 an ``embodichain.tasks`` entry point is imported at startup, registering its
@@ -119,26 +172,26 @@ backend with ``environment.component`` or expose ``environment.default`` and
 
 ```bash
 # Run an environment with a gym config file
-embodichain run-env --gym_config path/to/config.yaml
+embodichain run-task --gym_config path/to/config.yaml
 
 # Run with multiple environments on GPU
-embodichain run-env \
+embodichain run-task \
     --gym_config config.yaml \
     --num_envs 4 \
     --device cuda \
     --gpu_id 0
 
 # Preview mode for interactive development
-embodichain run-env --gym_config config.yaml --preview
+embodichain run-task --gym_config config.yaml --preview
 
 # Headless execution
-embodichain run-env --gym_config config.yaml --headless
+embodichain run-task --gym_config config.yaml --headless
 
 # Headless browser visualization
-embodichain run-env --gym_config config.yaml --viser
+embodichain run-task --gym_config config.yaml --viser
 
 # Publish selected environments at controlled rates
-embodichain run-env --gym_config config.yaml \
+embodichain run-task --gym_config config.yaml \
     --viser \
     --viser-env-ids 0 2 \
     --viser-fps 15 \
@@ -146,19 +199,19 @@ embodichain run-env --gym_config config.yaml \
     --viser-soft-body-fps 5
 
 # Generate data AND record trajectories for later replay
-embodichain run-env --gym_config config.yaml --record_trajectory
+embodichain run-task --gym_config config.yaml --record_trajectory
 # trajectories auto-save to ~/.cache/embodichain_data/trajectories/<run_id>/
 
 # Replay a recorded trajectory (kinematic - exact reproduction, default)
-embodichain run-env --gym_config config.yaml \
+embodichain run-task --gym_config config.yaml \
     --replay --replay_trajectory path/to/traj.pt
 
 # Replay with physics re-simulation (dynamic)
-embodichain run-env --gym_config config.yaml \
+embodichain run-task --gym_config config.yaml \
     --replay --replay_trajectory path/to/traj.pt --replay_mode dynamic
 
 # Interactive scrubber (kinematic; step forward/back/jump via terminal)
-embodichain run-env --gym_config config.yaml \
+embodichain run-task --gym_config config.yaml \
     --replay --replay_trajectory path/to/traj.pt --replay_mode control
 ```
 
@@ -190,7 +243,7 @@ embodichain run-env --gym_config config.yaml \
 | ``--viser-host`` | ``127.0.0.1`` | Viser bind interface |
 | ``--viser-port`` | ``8080`` | Viser HTTP/WebSocket port |
 | ``--viser-fps`` | ``15.0`` | Maximum rigid pose and overlay update rate |
-| ``--viser-image-fps`` | every environment step | Maximum camera RGB preview rate when explicitly supplied; otherwise `run-env` captures after every environment step |
+| ``--viser-image-fps`` | every environment step | Maximum camera RGB preview rate when explicitly supplied; otherwise `run-task` captures after every environment step |
 | ``--viser-soft-body-fps`` | ``5.0`` | Maximum cloth and soft-body vertex rate |
 | ``--viser-env-ids`` | ``0`` | Space-separated environment IDs published to Viser, or ``all`` |
 
@@ -206,7 +259,7 @@ When ``--preview`` is enabled, an interactive REPL is available:
 - **``p``** — enter an IPython embed session with ``env`` in scope
 - **``q``** — quit
 
-See {doc}`run_env` for examples of inspecting and stepping ``env`` from the
+See {doc}`run_task` for examples of inspecting and stepping ``env`` from the
 embedded session, and for the distinction between interactive preview and the
 Viser browser backend.
 
@@ -234,7 +287,7 @@ Trajectories are recorded by passing ``--record_trajectory`` (or setting ``recor
 
 ``--replay`` and ``--preview`` are mutually exclusive.
 
-See {doc}`run_env` for the recorded file contents, environment compatibility
+See {doc}`run_task` for the recorded file contents, environment compatibility
 requirements, vectorized replay behavior, and a complete record/replay
 workflow.
 
@@ -245,7 +298,7 @@ and print a breakdown on ``env.close()``. Add ``--profile_output prof.json`` to
 also dump the report as JSON.
 
 ```bash
-embodichain run-env --gym_config config.yaml --headless --device cuda \
+embodichain run-task --gym_config config.yaml --headless --device cuda \
     --profile --profile_output prof.json --max_episodes 2
 ```
 
@@ -363,6 +416,39 @@ contract and a comparison with LeRobot's official Rerun visualization, see
 
 ---
 
+(cli-dataset-tools)=
+## Offline Dataset Tools
+
+Use an exact finalized dataset root containing `meta/info.json`:
+
+```bash
+embodichain dataset validate /absolute/path/to/dataset \
+    --media-frame-counts --output /tmp/validation.json
+embodichain dataset split /absolute/path/to/dataset /tmp/split.json \
+    --fractions 0.8 0.1 0.1 --seed 42 --success-only
+embodichain dataset recover /absolute/path/to/dataset
+embodichain dataset recover /absolute/path/to/dataset --repair
+```
+
+| Command | Purpose |
+| --- | --- |
+| `dataset validate` | Check frames, timing, action/language references, segments, provenance and optional media |
+| `dataset split` | Write a quality-filtered manifest that keeps source episodes and derivatives together |
+| `dataset recover` | Diagnose commit evidence; `--repair` can restore missing sidecars after disk verification |
+
+These commands operate without simulation. Stop writers before inspection or
+repair. They use an exact root and do not support preview's `--latest` option.
+Validation/recovery returns `1` for errors or unresolved evidence; successful
+operations return `0`, and invalid requests return `2`. Run each subcommand
+with `--help` for arguments. See {doc}`offline_expert_datasets` for complete
+parameters, report fields, quality/grouping rules, and recovery boundaries.
+
+The separate `embodichain-lerobot-export SOURCE DESTINATION` command runs in a
+Python 3.12 environment pinned to LeRobot 0.6.1. Installation, official language
+recipes, and depth units are covered in {doc}`lerobot_export`.
+
+---
+
 ## Train RL
 
 Launch reinforcement learning training from a JSON or YAML config file.
@@ -392,7 +478,7 @@ python -m embodichain.learning.rl.train --config embodichain_tasks/configs/tasks
 |---|---|---|
 | ``--config`` | *(required)* | Path to the RL training config file (``.json``, ``.yaml``, or ``.yml``) |
 | ``--distributed`` | ``None`` | Enable multi-GPU distributed training. If omitted, uses ``trainer.distributed`` from the config. Use ``--no-distributed`` to force single-process training. |
-| ``--profile`` | ``False`` | Same as ``run-env --profile``; profiles the training gym env during rollouts. Requires ``trainer.gym_config``. |
+| ``--profile`` | ``False`` | Same as ``run-task --profile``; profiles the training gym env during rollouts. Requires ``trainer.gym_config``. |
 | ``--profile_output`` | ``None`` | Dump the profiling report as JSON on ``env.close()`` (requires ``--profile``). |
 
 See the Profiling section under Run Env for report format. Outputs are written to ``./outputs/<exp_name>_<timestamp>/`` (TensorBoard logs and checkpoints). See the :doc:`../tutorial/rl` tutorial for config structure and training workflow.

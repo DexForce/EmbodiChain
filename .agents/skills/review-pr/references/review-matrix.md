@@ -210,7 +210,7 @@ tests. Run GPU/distributed tests serially and only when justified.
 
 ## Official tasks and configuration packages
 
-**Paths:** `embodichain_tasks/**` and reusable task components.
+**Paths:** `extensions/embodichain_tasks/**` and reusable task components.
 
 Check:
 

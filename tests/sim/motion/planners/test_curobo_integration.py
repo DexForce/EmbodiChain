@@ -37,7 +37,7 @@ pytestmark = [pytest.mark.requires_sim, pytest.mark.gpu]
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg  # noqa: E402
 from embodichain.lab.sim.objects import RigidObjectCfg  # noqa: E402
-from embodichain.lab.sim.robots import FrankaPandaCfg  # noqa: E402
+from embodichain_robots import FrankaPandaCfg  # noqa: E402
 from embodichain.lab.sim.cfg import RigidBodyPhysicsCfg  # noqa: E402
 from embodichain.lab.sim.shapes import CubeCfg  # noqa: E402
 from embodichain.lab.sim.motion.motion_generator import (
@@ -227,7 +227,7 @@ def test_curobo_v2_plans_batched_joint_space_moves_direct_first():
         )
         mg = MotionGenerator(MotionGenCfg(planner_cfg=cfg))
         start_qpos = robot.get_qpos(name=CONTROL_PART)
-        # Regression targets from atomic_franka_pgi_curobo_pose_batch seed 11.
+        # Regression targets from atomic_franka_pgi_pose_batch seed 11.
         # All eight straight joint-space paths are comfortably inside the arm
         # limits and free of self-collision; the old graph-first batch call
         # nevertheless reported rows 2, 4, 5, and 7 as failed.

@@ -17,7 +17,10 @@ Canonical skills live under `.agents/skills/`. `.claude/skills/` and
 
 The distribution and primary import package are **`embodichain`**, lowercase
 and one word. The repository directory is `EmbodiChain`; the same wheel
-bundles official tasks as the **`embodichain_tasks`** import package.
+bundles official tasks as **`embodichain_tasks`** and concrete robot presets as
+**`embodichain_robots`**, with the same version and distribution metadata.
+Their sources live under **`extensions/`**, a repository container rather than
+a Python namespace. Keep the `embodichain_` prefix for bundled extension modules.
 
 | Area | Owner |
 |---|---|
@@ -33,7 +36,15 @@ bundles official tasks as the **`embodichain_tasks`** import package.
 | RL algorithms, policies, collectors and trainers | `embodichain/learning/rl/` |
 | Real-device controllers / standalone tools | `embodichain/lab/devices/`, `embodichain/toolkits/` |
 | Shared config and math utilities | `embodichain/utils/` |
-| Official task entry points / components / deployments | `embodichain_tasks/` |
+| Official task entry points / components / deployments | `extensions/embodichain_tasks/` |
+| Concrete robot configurations / hardware revisions / calibrated defaults | `extensions/embodichain_robots/` |
+
+Generic robot runtime/configuration and dual-arm composition remain in
+`embodichain/lab/sim/`; lightweight catalog resolution lives in
+`embodichain/robot_registry.py`. Concrete robot presets register
+through the `embodichain.robots` catalog entry point. Concrete presets import
+from `embodichain_robots`; `embodichain.lab.sim.robots` owns only generic
+dual-arm composition.
 
 Shared numerical algorithms belong to `compute/<domain>/`, with Warp kernels
 under private `_warp/` packages. Compute must not import `lab`, simulation
@@ -51,10 +62,17 @@ generation bookkeeping; execution, reset and persistence belong to host integrat
 
 ## Task ownership
 
+Official robot defaults and examples name end-effector control groups `eef`
+(single arm) or `left_eef` / `right_eef` (dual arm), alongside `arm` or
+`left_arm` / `right_arm`. This is a naming convention, not a schema restriction:
+custom control-part names remain valid and must not be automatically rewritten.
+URDF component, link and joint names are separate identifiers and retain their
+asset-defined spelling. Capabilities come from explicit configuration, not names.
+
 Organize official tasks by family, optional subdomain and task identity.
 Keep import registration in the task-named module at
-`embodichain_tasks/embodichain_tasks/<category-path>/<task>.py`; configs belong
-under `embodichain_tasks/configs/tasks/<category-path>/<task>/`. Do not add a
+`extensions/embodichain_tasks/embodichain_tasks/<category-path>/<task>.py`; configs belong
+under `extensions/embodichain_tasks/configs/tasks/<category-path>/<task>/`. Do not add a
 same-named Python package for one entry point or `scenario` / `mdp` modules when
 existing config fields and manager functors express the task.
 
@@ -73,6 +91,12 @@ not switch it. Use a separate environment config for each backend.
 
 ## Code and validation
 
+- When task analysis identifies algorithmic complexity, data layout, batching,
+  memory use or synchronization costs as material to the implementation,
+  design and implement from a systems and HPC engineering perspective using
+  [implement-performance](.agents/skills/implement-performance/SKILL.md).
+  Preserve numerical correctness and public contracts; validate material
+  performance claims with representative measurements using `/benchmark`.
 - Run **`black==26.3.1`**, using `black .`, before every commit.
 - Use `/pre-commit-check` for proportional checks. New production fixes/features
   need focused tests that prove their behavior; use `/add-test` for project patterns.
@@ -123,6 +147,7 @@ Keep branches and PRs focused on one logical change and use the PR template.
 | `/add-functor` | Add observation, reward, event, action, dataset or randomization operation |
 | `/add-test` | Add focused tests with project conventions |
 | `/benchmark` | Write a benchmark using project patterns |
+| `/implement-performance` | Design and implement performance-sensitive computation |
 | `/update-api-docs` | Synchronize public API documentation |
 | `/pre-commit-check` | Validate readiness proportionally |
 | `/review-pr` | Review a change for evidence-backed regressions |

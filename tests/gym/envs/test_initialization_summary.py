@@ -41,6 +41,10 @@ class _SummaryCfg:
     seed = 42
     sim_steps_per_control = 4
     max_episode_steps = 300
+    filter_visual_rand = False
+    filter_dataset_saving = False
+    enable_sensor = True
+    sensor = []
 
 
 class _RobotStub:
@@ -289,7 +293,12 @@ def test_scene_setup_defers_simulation_summary_until_gym_is_ready(
     env = _make_summary_env()
     emitted: list[str] = []
 
-    def create_sim(cfg: SimulationManagerCfg, *, defer_startup_summary: bool = False):
+    def create_sim(
+        cfg: SimulationManagerCfg,
+        *,
+        defer_startup_summary: bool = False,
+        requires_native_renderer: bool | None = None,
+    ):
         if not defer_startup_summary:
             emitted.append("standalone startup")
         return SimpleNamespace()

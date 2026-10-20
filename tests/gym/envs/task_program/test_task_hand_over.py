@@ -99,7 +99,7 @@ def _gym_config_path() -> Path:
     """Return the installed-source dual-UR5 Gym config path."""
     return (
         Path(__file__).parents[4]
-        / "embodichain_tasks/configs/tasks/manipulation/hand_over/"
+        / "extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/"
         "task.dual_ur5_dh_pgi_140_80.yaml"
     )
 
@@ -204,8 +204,8 @@ def test_hand_over_gym_config_builds_dual_ur5_pgi_scene() -> None:
     assert cfg.robot.uid == "DualUR5"
     assert cfg.robot.control_parts["left_arm"] == ["left_joint[0-9]"]
     assert cfg.robot.control_parts["right_arm"] == ["right_joint[0-9]"]
-    assert cfg.robot.control_parts["left_hand"] == ["left_gripper_finger1_joint_1"]
-    assert cfg.robot.control_parts["right_hand"] == ["right_gripper_finger1_joint_1"]
+    assert cfg.robot.control_parts["left_eef"] == ["left_gripper_finger1_joint_1"]
+    assert cfg.robot.control_parts["right_eef"] == ["right_gripper_finger1_joint_1"]
     assert set(cfg.robot.urdf_cfg.components) == {
         "left_arm",
         "right_arm",
@@ -350,7 +350,7 @@ def test_hand_over_joint_position_evidence_uses_measured_aperture() -> None:
     class FakeRobot:
         @staticmethod
         def get_qpos(*, name: str) -> torch.Tensor:
-            assert name == "left_hand"
+            assert name == "left_eef"
             return torch.tensor(
                 [
                     [_OPEN_QPOS],
@@ -376,7 +376,7 @@ def test_hand_over_joint_position_evidence_uses_measured_aperture() -> None:
                 CONTROL_PART_EVIDENCE_PROVIDER_ID,
                 CONTROL_PART_EVIDENCE_PROVIDER_REVISION,
                 ControlPartEvidenceAddress(
-                    "left_hand",
+                    "left_eef",
                     CONSTRAINT_EFFECT_CHANNEL,
                 ),
             ),
@@ -392,7 +392,7 @@ def test_hand_over_joint_position_evidence_uses_measured_aperture() -> None:
     )
     observer = _JointPositionConstraintObserver(
         FakeRobot(),
-        control_parts=("left_hand", "right_hand"),
+        control_parts=("left_eef", "right_eef"),
         object_ids=(_CAN_ID,),
         open_qpos=(_OPEN_QPOS,),
         minimum_displacement=_CONSTRAINT_QPOS_THRESHOLD,
@@ -418,7 +418,7 @@ def test_hand_over_profile_binds_unified_left_to_right_transfer() -> None:
         endpoint.control_part
         for resource in binding.resources
         for endpoint in resource.endpoints
-    ] == ["left_arm", "left_hand", "right_arm", "right_hand"]
+    ] == ["left_arm", "left_eef", "right_arm", "right_eef"]
     assert dict(binding.defaults["hand_over"]) == {
         "source": "left",
         "destination": "right",
@@ -446,7 +446,7 @@ def test_hand_over_profile_binds_unified_left_to_right_transfer() -> None:
         "hand_over": ConfiguredHandOverPoseProvider.provider_id,
     }
     for side, command_preset in zip(("left", "right"), binding.command_presets):
-        assert command_preset.control_part == f"{side}_hand"
+        assert command_preset.control_part == f"{side}_eef"
         assert tuple(command_preset.commands["open"]) == (_OPEN_QPOS,)
         assert tuple(command_preset.commands["grasp"]) == (_GRASP_QPOS,)
 
@@ -533,6 +533,105 @@ def _run_real_sim_expert_episode() -> dict[str, object]:
         SimulationManager.flush_cleanup_queue()
 
 
+def _assert_transfer_constraint_evidence(
+    transfer_effect: dict[str, object], *, runtime_succeeded: bool
+) -> None:
+    """Validate the serialized evidence for a hand-over effect boundary."""
+    assert transfer_effect["effect_spec"]["semantic_id"] == "hand_over"
+    evidence_ids = set(transfer_effect["evidence"])
+    # Acquisition gates and the final delivery/release have different clauses.
+    # Read this boundary's grounded contract rather than inferring attachment
+    # from a participant's name or the call's overall status.
+    expected_constraint_values = {
+        clause["clause_id"]: clause["expected"]
+        for clause in transfer_effect["effect_spec"]["clauses"]
+        if clause.get("evidence_kind") == "constraint"
+    }
+    expected_evidence_ids = set(expected_constraint_values)
+    assert expected_evidence_ids <= {"source.constraint", "destination.constraint"}
+    assert evidence_ids
+    if runtime_succeeded:
+        assert transfer_effect["boundary"] == {"kind": "terminal"}
+        assert expected_evidence_ids == {"source.constraint", "destination.constraint"}
+        assert evidence_ids == expected_evidence_ids
+    else:
+        assert evidence_ids <= expected_evidence_ids
+    for evidence_id, evidence in transfer_effect["evidence"].items():
+        assert evidence["valid_mask"] == [True]
+        assert evidence["acquisition_errors"] == [None]
+        assert evidence["env_ids"] == [0]
+        assert len(evidence["values"]) == 1
+        assert type(evidence["values"][0]) is bool
+        if runtime_succeeded:
+            assert evidence["values"] == [expected_constraint_values[evidence_id]]
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    ("boundary", "observed", "runtime_succeeded", "should_pass"),
+    [
+        ("terminal", (False, False), True, True),
+        ("terminal", (False, True), True, False),
+        ("terminal", (True, False), True, False),
+        ("terminal", (True, True), False, True),
+        ("phase_effect_gate", (True,), False, True),
+        ("phase_effect_gate", (False,), False, True),
+        ("phase_effect_gate", (True,), True, False),
+        ("terminal", (0, False), False, False),
+    ],
+    ids=[
+        "completed_delivery_releases_both_grippers",
+        "completed_delivery_cannot_retain_destination_grasp",
+        "completed_delivery_cannot_retain_source_grasp",
+        "failed_transfer_can_retain_both_grasps",
+        "failed_acquisition_can_end_with_closed_source",
+        "failed_acquisition_can_end_with_open_source",
+        "completed_delivery_requires_a_terminal_effect",
+        "evidence_must_remain_boolean",
+    ],
+)
+def test_hand_over_constraint_evidence_matches_its_boundary_contract(
+    boundary: str,
+    observed: tuple[bool | int, ...],
+    runtime_succeeded: bool,
+    should_pass: bool,
+) -> None:
+    """Exercise successful delivery and partial failures without GPU variation."""
+    expected = (
+        {"source.constraint": False, "destination.constraint": False}
+        if boundary == "terminal"
+        else {"source.constraint": True}
+    )
+    transfer_effect = {
+        "boundary": {"kind": boundary},
+        "effect_spec": {
+            "semantic_id": "hand_over",
+            "clauses": [
+                {"clause_id": key, "evidence_kind": "constraint", "expected": value}
+                for key, value in expected.items()
+            ],
+        },
+        "evidence": {
+            key: {
+                "valid_mask": [True],
+                "acquisition_errors": [None],
+                "env_ids": [0],
+                "values": [value],
+            }
+            for key, value in zip(expected, observed)
+        },
+    }
+    if should_pass:
+        _assert_transfer_constraint_evidence(
+            transfer_effect, runtime_succeeded=runtime_succeeded
+        )
+    else:
+        with pytest.raises(AssertionError):
+            _assert_transfer_constraint_evidence(
+                transfer_effect, runtime_succeeded=runtime_succeeded
+            )
+
+
 @pytest.mark.requires_sim
 @pytest.mark.subprocess_sim
 @pytest.mark.gpu
@@ -614,19 +713,9 @@ def test_real_sim_expert_episode_reports_runtime_and_validation(
             }
 
     transfer_effect = runtime["calls"][0]["effects"][-1]
-    assert transfer_effect["effect_spec"]["semantic_id"] == "hand_over"
-    evidence_ids = set(transfer_effect["evidence"])
-    expected_evidence_ids = {"source.constraint", "destination.constraint"}
-    assert evidence_ids
-    if runtime_succeeded:
-        assert evidence_ids == expected_evidence_ids
-    else:
-        assert evidence_ids <= expected_evidence_ids
-    for evidence in transfer_effect["evidence"].values():
-        assert evidence["valid_mask"] == [True]
-        assert evidence["acquisition_errors"] == [None]
-        assert evidence["env_ids"] == [0]
-        assert evidence["values"] == [False]
+    _assert_transfer_constraint_evidence(
+        transfer_effect, runtime_succeeded=runtime_succeeded
+    )
 
     post_policies = metadata["post_policies"]
     post_policy_succeeded = False

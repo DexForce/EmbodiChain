@@ -35,6 +35,7 @@ from embodichain.lab.task_program import (
     TaskProgramIntegrationCfg,
     HandOverCfg,
     InvokeCfg,
+    PickCfg,
     decode_task_program,
 )
 from embodichain.lab.task_program.integrations import (
@@ -1130,6 +1131,64 @@ def _sample_effect(
     )
 
 
+def test_bridge_reuses_real_workflow_across_pick_and_place(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from embodichain.lab.gym.envs.task_program.bridge import TaskProgramDemoBridge
+
+    adapter, assembly, robot, cube = _evidence_adapter_runtime()
+    data = _pick_place_program_data()
+    data["integration"] = {
+        "robot_profile": "evidence_profile",
+        "scene_registry": "evidence_scene",
+        "runtime_preset": "evidence",
+    }
+    data["program"]["items"] = [
+        {"kind": "segment", "name": node["call"]["kind"], "steps": node}
+        for node in data["program"]["items"]
+    ]
+    compiled = adapter.compile(decode_task_program(data))
+    compiler = assembly.compiler
+    original_analyze, original_ground = compiler.analyze, compiler.ground
+    analyses = []
+    grounded_indices = []
+
+    def analyze(calls, **kwargs):
+        workflow = original_analyze(calls, **kwargs)
+        analyses.append(workflow)
+        return workflow
+
+    def ground(workflow, index, context, **kwargs):
+        value = original_ground(workflow, index, context, **kwargs)
+        grounded_indices.append(index)
+        return value
+
+    monkeypatch.setattr(compiler, "analyze", analyze)
+    monkeypatch.setattr(compiler, "ground", ground)
+    bridge = TaskProgramDemoBridge(
+        compiled, assembly.runtime, assembly.command_sink, assembly.clock
+    )
+    local_indices = []
+    for segment_index, segment in enumerate(bridge.iter_segments()):
+        for action in segment.actions:
+            robot.qpos = action.value.clone()
+            robot.constraint_state = torch.isclose(
+                robot.qpos[:, 1],
+                torch.full_like(robot.qpos[:, 1], _HAND_GRASP_POSITION),
+            )
+            if segment_index == 1:
+                cube.pose[:, 0, 3] = _RELEASE_SEPARATION
+        assert segment.validator().all()
+        local_indices.append(
+            [call["call_index"] for call in segment.metadata["runtime"]["calls"]]
+        )
+    assert bridge.completion_mask.all()
+    assert len(analyses) == 1
+    assert grounded_indices == [0, 1]
+    assert local_indices == [[0], [0]]
+    assert len(analyses[0].calls[0].downstream_object_targets) == 1
+
+
 def _pick_place_program_data() -> dict[str, object]:
     """Return the integration-free program shared with the MLLM frontend."""
     return {
@@ -1355,6 +1414,41 @@ def test_simulation_observation_owns_gym_control_cadence() -> None:
     assert context.control_dt == pytest.approx(_STEP_DT)
 
 
+def test_fresh_bridges_observe_new_scene_at_the_same_initial_clock() -> None:
+    """Reusing a compiled program must not reuse a previous scene's tick cache."""
+    adapter, _, robot, cube = _evidence_adapter_runtime()
+    compiled = adapter.compile(
+        TaskProgramCfg(
+            program_id="fresh_scene_bridges",
+            integration=_evidence_integration(),
+            program=InvokeCfg(call=PickCfg(object="cube")),
+        )
+    )
+    first_bridge = adapter.create_bridge(compiled)
+    first_runtime = first_bridge._runtime
+    first_provider = first_runtime.observation_provider
+    initial = first_provider.observe(TaskState.empty(_BATCH_SIZE, robot.device))
+    initial_pose = initial.scene.entities["cube"].pose.clone()
+
+    cube.pose[:, 0, 3] = 0.35  # Layout changes between episodes, before stepping.
+    second_bridge = adapter.create_bridge(compiled)
+    second_runtime = second_bridge._runtime
+    second_provider = second_runtime.observation_provider
+    refreshed = second_provider.observe(TaskState.empty(_BATCH_SIZE, robot.device))
+
+    assert first_bridge.clock.now() == second_bridge.clock.now() == 0.0
+    assert initial.scene.timestamp == refreshed.scene.timestamp == 0.0
+    assert first_provider is not second_provider
+    assert first_provider.scene_provider is not second_provider.scene_provider
+    assert (
+        first_runtime.engine.motion_generator
+        is not second_runtime.engine.motion_generator
+    )
+    torch.testing.assert_close(refreshed.scene.entities["cube"].pose, cube.pose)
+    torch.testing.assert_close(initial.scene.entities["cube"].pose, initial_pose)
+    assert not torch.equal(initial_pose, refreshed.scene.entities["cube"].pose)
+
+
 def test_mllm_and_config_share_invocations_and_verified_results(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1548,7 +1642,7 @@ def test_adapter_factory_forwards_policy_planner_config(
         SimulationSceneBinding(registry_id="scene"),
         _profile_binding(),
     )
-    planner_config = {"type": "toppra", "config": {"max_workers": 2}}
+    planner_config = {"type": "toppra", "config": {"grid_size": 127}}
     factory = SimulationTaskProgramAdapterFactory(
         registration,
         planner_config=planner_config,
@@ -1574,13 +1668,13 @@ def test_adapter_factory_forwards_policy_planner_config(
 def test_planner_config_decodes_to_typed_runtime_cfg() -> None:
     """A serialized planner selection becomes the selected planner config type."""
     planner_cfg = simulation_environment_module._planner_cfg_from_config(
-        {"type": "toppra", "config": {"max_workers": 2}},
+        {"type": "toppra", "config": {"grid_size": 127}},
         robot_uid="robot",
     )
 
     assert isinstance(planner_cfg, simulation_environment_module.ToppraPlannerCfg)
     assert planner_cfg.robot_uid == "robot"
-    assert planner_cfg.max_workers == 2
+    assert planner_cfg.grid_size == 127
 
 
 def test_curobo_scene_binding_preserves_live_object_references() -> None:

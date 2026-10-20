@@ -50,7 +50,7 @@ contracts = [
 tests = [
   "tests/gym/envs/**",
   "tests/gym/utils/**",
-  "tests/lab/scripts/test_run_env.py",
+  "tests/lab/scripts/test_run_task.py",
 ]
 contracts = [
   "tests/gym/envs/test_embodied_env.py",
@@ -275,6 +275,7 @@ risk = "medium"
 [[rules]]
 id = "robot-system"
 paths = [
+  "extensions/embodichain_robots/**",
   "embodichain/lab/sim/robots/**",
   "embodichain/lab/sim/objects/robot.py",
 ]
@@ -303,13 +304,13 @@ paths = [
   "embodichain/lab/gym/envs/demo.py",
   "embodichain/lab/gym/envs/settling.py",
   "embodichain/lab/gym/utils/**",
-  "embodichain/lab/scripts/run_env.py",
+  "embodichain/lab/scripts/run_task.py",
   "embodichain/cli/**",
 ]
 tests = [
   "tests/gym/envs/**",
   "tests/gym/utils/**",
-  "tests/lab/scripts/test_run_env.py",
+  "tests/lab/scripts/test_run_task.py",
   "tests/test_main.py",
 ]
 resource_hints = ["sim"]
@@ -326,7 +327,7 @@ id = "task-program"
 paths = [
   "embodichain/lab/task_program/**",
   "embodichain/lab/gym/envs/task_program/**",
-  "embodichain_tasks/**",
+  "extensions/embodichain_tasks/**",
 ]
 tests = [
   "tests/lab/task_program/**",

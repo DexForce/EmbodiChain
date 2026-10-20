@@ -474,6 +474,117 @@ class ObjectNearRelativeTargetValidatorCfg:
 
 
 @configclass
+class ObjectLiftedValidatorCfg:
+    """Require a world-Z increase since the owning segment started.
+
+    Args:
+        object: Logical scene object whose observed height is measured.
+        minimum_lift: Inclusive minimum increase in meters, relative to the
+            observed pose captured before the segment starts executing.
+        kind: Fixed ``object_lifted`` discriminator.
+    """
+
+    object: str = MISSING
+    minimum_lift: float = 0.05
+    kind: str = "object_lifted"
+
+    def __post_init__(self) -> None:
+        """Validate the object and a positive finite lift threshold."""
+        _validate_identifier(self.object, field_name="object")
+        self.minimum_lift = _validate_number(
+            self.minimum_lift, field_name="minimum_lift"
+        )
+        if self.minimum_lift <= 0.0:
+            raise ValueError("minimum_lift must be positive.")
+        _validate_kind(self.kind, expected="object_lifted", field_name="kind")
+
+
+@configclass
+class ObjectRelativePositionValidatorCfg:
+    """Require an object's position near a live reference plus a declared offset.
+
+    Each tolerance is exclusive; ``None`` disables checking that axis.
+    At least one axis must be checked. ``world_axes`` preserves world-oriented
+    offsets and tolerances; ``parent`` measures them in the live reference frame.
+
+    Args:
+        object: Logical scene object to validate.
+        reference: Logical scene object whose live position defines the origin.
+        position_offset: Desired XYZ displacement in the selected frame, in meters.
+        position_tolerance: Exclusive XYZ error bounds in meters; ``None``
+            disables the corresponding axis.
+        reference_frame: ``world_axes`` (default) or the live reference's ``parent`` frame.
+        kind: Fixed ``object_relative_position`` discriminator.
+    """
+
+    object: str = MISSING
+    reference: str = MISSING
+    position_offset: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    position_tolerance: tuple[float | None, float | None, float | None] = (
+        0.03,
+        0.03,
+        0.03,
+    )
+    kind: str = "object_relative_position"
+    reference_frame: str = "world_axes"
+
+    def __post_init__(self) -> None:
+        """Validate two object references and three per-axis bounds."""
+        _validate_identifier(self.object, field_name="object")
+        _validate_identifier(self.reference, field_name="reference")
+        if type(self.reference_frame) is not str or self.reference_frame not in (
+            "world_axes",
+            "parent",
+        ):
+            raise ValueError("reference_frame must be 'world_axes' or 'parent'.")
+        for field_name in ("position_offset", "position_tolerance"):
+            values = getattr(self, field_name)
+            if type(values) not in (tuple, list) or len(values) != 3:
+                raise ValueError(f"{field_name} must contain exactly three values.")
+            normalized = tuple(
+                (
+                    None
+                    if value is None and field_name == "position_tolerance"
+                    else _validate_number(value, field_name=field_name)
+                )
+                for value in values
+            )
+            setattr(self, field_name, normalized)
+        if not any(value is not None for value in self.position_tolerance):
+            raise ValueError("position_tolerance must check at least one axis.")
+        if any(value is not None and value <= 0.0 for value in self.position_tolerance):
+            raise ValueError("position_tolerance values must be positive or None.")
+        _validate_kind(
+            self.kind, expected="object_relative_position", field_name="kind"
+        )
+
+
+@configclass
+class ObjectUprightValidatorCfg:
+    """Require the object's local Z axis to tilt less than an angle from world Z.
+
+    Args:
+        object: Logical scene object whose local Z axis is measured.
+        maximum_tilt_degrees: Exclusive maximum angle from world Z in degrees.
+        kind: Fixed ``object_upright`` discriminator.
+    """
+
+    object: str = MISSING
+    maximum_tilt_degrees: float = 45.0
+    kind: str = "object_upright"
+
+    def __post_init__(self) -> None:
+        """Validate the object and the exclusive tilt bound in degrees."""
+        _validate_identifier(self.object, field_name="object")
+        self.maximum_tilt_degrees = _validate_number(
+            self.maximum_tilt_degrees, field_name="maximum_tilt_degrees"
+        )
+        if not 0.0 < self.maximum_tilt_degrees <= 180.0:
+            raise ValueError("maximum_tilt_degrees must be in (0, 180].")
+        _validate_kind(self.kind, expected="object_upright", field_name="kind")
+
+
+@configclass
 class ArticulationJointPositionValidatorCfg:
     """Validate one articulation joint against an inclusive position interval."""
 
@@ -520,6 +631,9 @@ ValidatorCfg: TypeAlias = (
     ObjectNearTargetValidatorCfg
     | ObjectNearRelativeTargetValidatorCfg
     | ArticulationJointPositionValidatorCfg
+    | ObjectLiftedValidatorCfg
+    | ObjectRelativePositionValidatorCfg
+    | ObjectUprightValidatorCfg
 )
 
 
@@ -593,17 +707,24 @@ class RepeatCfg:
 
 @configclass
 class SegmentCfg:
-    """Logical program transaction with post-policies and validators."""
+    """Logical transaction with optional segment-specific language instruction.
+
+    ``instruction`` describes this segment for dataset annotation. When omitted,
+    Gym demonstrations fall back to the episode's overall task instruction.
+    """
 
     name: str = MISSING
     steps: ProgramNodeCfg = MISSING
     post: tuple[PostPolicyCfg, ...] = field(default_factory=tuple)
     validators: tuple[ValidatorCfg, ...] = field(default_factory=tuple)
     kind: str = "segment"
+    instruction: str | None = None
 
     def __post_init__(self) -> None:
         """Validate the segment boundary and its declarative hooks."""
         _validate_identifier(self.name, field_name="name")
+        if self.instruction is not None:
+            _validate_identifier(self.instruction, field_name="instruction")
         if type(self.steps) not in _PROGRAM_NODE_TYPES:
             raise TypeError("steps must be an exact ProgramNodeCfg value.")
         if type(self.post) not in (list, tuple):
@@ -658,6 +779,9 @@ _SEMANTIC_CALL_TYPES = (
 )
 _POST_POLICY_TYPES = (WaitStablePostCfg,)
 _VALIDATOR_TYPES = (
+    ObjectLiftedValidatorCfg,
+    ObjectRelativePositionValidatorCfg,
+    ObjectUprightValidatorCfg,
     ObjectNearTargetValidatorCfg,
     ObjectNearRelativeTargetValidatorCfg,
     ArticulationJointPositionValidatorCfg,
@@ -760,16 +884,23 @@ def _validate_program(
 
 @configclass
 class TaskProgramCfg:
-    """Strict, executable-free Task Program configuration."""
+    """Strict, executable-free Task Program configuration.
+
+    ``instruction`` describes the overall task independently of the selected
+    embodiment and recorder. Segment instructions describe individual phases.
+    """
 
     program_id: str = MISSING
     integration: TaskProgramIntegrationCfg = MISSING
     program: ProgramNodeCfg = MISSING
     targets: dict[str, TargetCfg] = field(default_factory=dict)
+    instruction: str | None = None
 
     def __post_init__(self) -> None:
         """Validate the complete static configuration and target graph."""
         _validate_identifier(self.program_id, field_name="program_id")
+        if self.instruction is not None:
+            _validate_identifier(self.instruction, field_name="instruction")
         if type(self.integration) is not TaskProgramIntegrationCfg:
             raise TypeError("integration must be TaskProgramIntegrationCfg.")
         if type(self.targets) is not dict:

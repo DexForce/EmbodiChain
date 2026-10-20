@@ -1,424 +1,140 @@
 (task-programs)=
 
-# Embodied Task Program
+# Task Program
+
+Task Program lets you customize an expert demonstration by describing **what
+objects to pick, where to place them, and in what order**. Reuse an existing
+scene and robot, edit a YAML program, and run it through the normal environment
+launcher. You do not need to write a motion planner or an integration to start.
+
+**Start with {doc}`quickstart`: run a Franka example, change two moves, check the
+cube's resting position, and save one trajectory.**
 
 ```{toctree}
 :hidden:
 
+quickstart
+recipes
+troubleshooting
+validation
+architecture
 scene_registry
 robot_profiles
 ```
 
-```{currentmodule} embodichain.lab.task_program
-```
+## What can I make?
 
-Embodied Task Program is **a declarative orchestration and execution DSL for
-embodied tasks**. It accepts bounded source programs, validates them against
-provider-free scene and robot contracts, compiles Semantic Calls, and lowers
-those calls to executable Atomic Skills through an explicit integration.
+The official repeated Pick/Place program moves a cube between two targets.
+Its `repeat` node chooses A → B → A; each repetition contains a Pick segment
+and a Place segment. You can change the repetition count, targets, step order,
+and language descriptions in **one local `program.yaml`**. An existing deployment
+supplies the scene, robot, available calls and execution settings.
 
-Semantic Calls are the language's internal high-level instructions. They are
-not a separate product, package entry point, or independently executable API.
+The {doc}`quickstart` uses `repeated_pick_place/task.franka.yaml`, a single
+Franka Panda in the Default physics environment, without trajectory expansion.
+The complete original file is available as a
+{download}`download <../../../../extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task_program/program.yaml>`.
 
-```text
-Human / MLLM / Agent
-          |
-          v
-JSON/YAML/Python TaskProgramCfg
-          |
-          v
-language -> decode / validate -> compiler
-          |
-          v
-Semantic Calls -> semantic lowering -> Atomic Skills
-          |
-          v
-simulation / robot -> Gym lifecycle / recording
-```
+## What do I need?
 
-## Ownership boundaries
+- An installed SDK and compatible DexSim/GPU environment: {doc}`/quick_start/install`.
+- The selected deployment's robot assets: {doc}`/resources/assets`.
+- A text editor and a directory for your program and outputs.
 
-The public API is split deliberately:
+The tutorial uses an installed package reference for the deployment. A source
+checkout is only needed for the separate maintainer checks.
 
-| Package | Owns | Does not own |
+## Choose a route
+
+| Your goal | Start here | Continue with |
 |---|---|---|
-| `embodichain.lab.task_program.language` | Schema/AST values, strict decoding, validation, and loading | Live providers or execution |
-| `embodichain.lab.task_program.semantics` | Semantic Calls plus scene, robot-profile, effect, and evidence contracts | An independent action API |
-| `embodichain.lab.task_program.compiler` | AST compilation and Semantic Call lowering | Gym stepping or simulator ownership |
-| `embodichain.lab.task_program.runtime` | Semantic Call execution state and parallel scheduling | Episode lifecycle or recording |
-| `embodichain.lab.task_program.integrations` | Immutable registrations and explicit environment/simulation assembly | Core language rules |
-| `embodichain.lab.gym.envs.task_program` | `DemoSegment` adaptation, `env.step()` handshake, and configured Gym registration | Compiler, catalog, or simulation assembly |
-| `embodichain.lab.sim.atomic_actions` | Executable Atomic Skills, planning, commands, recovery, and verification requests | Task-language sequencing |
+| Customize a trajectory in an existing task | {doc}`quickstart` | {doc}`recipes`, then {doc}`troubleshooting` |
+| Learn the language without starting simulation | {doc}`/tutorial/task_program_python` | {doc}`architecture` |
+| Bind a new scene, robot or skill | {doc}`/tutorial/task_program` | {doc}`scene_registry`, {doc}`robot_profiles` |
+| Understand the compiler and runtime | {doc}`architecture` | {doc}`/api_reference/embodichain/embodichain.lab.task_program` |
 
-The stable language API is re-exported from `embodichain.lab.task_program`.
-Provider-specific applications import `task_program.integrations`; Gym bridge
-types are intentionally kept under `gym.envs.task_program`.
+## How do I know it worked?
 
-## Semantic layer
+**Command execution completed** means the requested motion finished. **Measured
+checks passed** means the observed state satisfied the checks you wrote. They
+are different results: the example's `projected` policy updates expected task
+state after motion, without measuring every grasp or release.
 
-The semantics subpackage is internal to Task Program but its typed contracts
-are public for integration authors:
+In the Quickstart you add a wait for stability and a position check after each
+Place. Inspect those results as well as episode completion, and confirm that
+the saved episode can be read. Passing these checks establishes position and
+stability for that run; it does not establish every possible physical property.
+See [assurance and acceptance](architecture.md#effect-assurance-is-mandatory).
 
-| Contract family | Main types | Responsibility |
-|---|---|---|
-| Semantic Calls | {class}`~embodichain.lab.task_program.semantics.Pick`, {class}`~embodichain.lab.task_program.semantics.Place`, {class}`~embodichain.lab.task_program.semantics.HandOver`, {class}`~embodichain.lab.task_program.semantics.RegisteredSemanticCall` | Immutable object-centric task intent. |
-| Scene semantics | {class}`~embodichain.lab.task_program.semantics.SceneRegistry`, {class}`~embodichain.lab.task_program.semantics.SceneManifest` | Canonical identity, topology, affordances, and provider-free snapshots. |
-| Robot semantics | {class}`~embodichain.lab.task_program.semantics.RobotSkillProfile`, {class}`~embodichain.lab.task_program.semantics.SkillPolicyPreset` | Embodiment resources, Atomic Skill bindings, policies, and effect assurance. |
-| Effects and evidence | {class}`~embodichain.lab.task_program.semantics.SemanticEffectSpec`, {class}`~embodichain.lab.task_program.semantics.EffectMonitorRef`, {class}`~embodichain.lab.task_program.semantics.EffectEvidenceCollector` | Typed postconditions and measured-evidence routing. |
+## What stays with the integration?
 
-The built-in call catalog contains `Pick`, `Place`, and `HandOver`. Extensions
-use a declarative `RegisteredSemanticCall`; the trusted integration, never the
-program payload, owns the corresponding lowerer. See {doc}`scene_registry` and
-{doc}`robot_profiles` for the two main integration contracts.
+Programs can only name objects and calls supported by their selected integration.
+Changing an `instruction` changes the description and language annotation;
+the structured calls determine the actions. A new object, robot, unregistered
+call or different motion policy needs integration/deployment work. Follow
+{doc}`/tutorial/task_program` for those changes.
 
-## Program schema
+For later workflows, see {doc}`/guides/offline_expert_datasets` for recording and
+consumption, {doc}`/guides/run_task` for expansion and launcher options, and
+{doc}`/features/generative_sim/index` for scene generation. These are optional follow-ups.
 
-An in-memory {class}`TaskProgramCfg` contains one `program_id`, an exact trusted
-{class}`TaskProgramIntegrationCfg` selection, optional named targets, and one
-bounded program tree. A program authored for a componentized deployment omits
-the integration selection from its serialized YAML. The deployment injects
-the selected scene-registry, robot-profile, and policy-preset IDs before strict
-decoding, which keeps the source program portable across compatible
-embodiments.
+## Previous architecture sections
 
-Supported program nodes are {class}`SequenceCfg`, {class}`RepeatCfg`,
-{class}`SegmentCfg`, {class}`InvokeCfg`, and {class}`ParallelCfg`. A
-{class}`BarrierCfg` belongs to its enclosing parallel node. Built-in call
-configs are {class}`PickCfg`, {class}`PlaceCfg`, and {class}`HandOverCfg`;
-{class}`RegisteredSemanticCallCfg` is the allowlisted extension form.
+The implementation reference has moved to {doc}`architecture`. Existing section
+links remain available below.
 
-Example:
+<a id="ownership-boundaries"></a>
 
-```yaml
-program_id: repeated_cube_pick_place
-targets:
-  drop_pose:
-    kind: cyclic_pose
-    values:
-      - position: [-0.40, 0.48, 0.10]
-        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
-      - position: [-0.42, -0.08, 0.10]
-        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
-program:
-  kind: repeat
-  count: 3
-  body:
-    kind: segment
-    name: move_cube
-    steps:
-      kind: sequence
-      items:
-        - kind: invoke
-          call:
-            kind: pick
-            object: cube
-        - kind: invoke
-          call:
-            kind: place
-            object: cube
-            at: {kind: target_ref, target: drop_pose}
-```
+[Ownership boundaries](architecture.md#ownership-boundaries)
 
-Serialized input is strict: unknown fields, duplicate keys, non-finite values,
-invalid discriminators, excessive depth or expansion, executable values, and
-unresolved references fail before live providers are touched. External formats
-do not carry a `schema_version` field.
+<a id="semantic-layer"></a>
 
-## Load and compile
+[Semantic layer](architecture.md#semantic-layer)
 
-Use the provider-independent package for both file and programmatic input:
+<a id="program-schema"></a>
 
-```python
-from embodichain.lab.task_program import (
-    TaskProgramIntegrationCfg,
-    TaskProgramCompiler,
-    load_task_program,
-)
+[Program schema](architecture.md#program-schema)
 
-program = load_task_program(
-    "task_program/program.yaml",
-    integration=TaskProgramIntegrationCfg(
-        robot_profile="ur5_dh_pgi_140_80",
-        scene_registry="task_program_repeated_pick_place",
-        runtime_preset="trajectory",
-    ),
-)
-compiled = TaskProgramCompiler(scene_manifest).compile(program)
-```
+<a id="load-and-compile"></a>
 
-Compilation observes no live simulator state. It resolves canonical scene
-references, expands bounded repeats and cyclic targets, assigns stable segment
-and call indices, preserves parallel branches, and returns an immutable
-{class}`CompiledTaskProgram`.
+[Load and compile](architecture.md#load-and-compile)
 
-The compiler does not generate controller actions. Live grounding and atomic
-planning begin only after an environment adapter has verified that the
-registration still matches the compiled scene/profile/catalog snapshots.
+<a id="configure-a-simulation-environment"></a>
 
-## Configure a simulation environment
+[Configure a simulation environment](architecture.md#configure-a-simulation-environment)
 
-Configuration-defined Task Programs separate the reusable physical environment
-from the runnable task deployment. An augmented deployment can add a
-task-facing expansion declaration alongside the core owners:
+<a id="runtime-lifecycle"></a>
 
-```text
-repeated_pick_place/
-├── envs/
-│   ├── default.yaml
-│   └── newton.yaml
-├── task.franka.yaml
-├── task.ur5.yaml
-├── expansion/
-│   └── repeated_pick_place.yaml
-└── task_program/
-    ├── integration.yaml
-    └── program.yaml
-```
+[Runtime lifecycle](architecture.md#runtime-lifecycle)
 
-Each file under `envs/` owns one physical backend and ordinary
-environment values. It has an `environment_id` for component identity but
-deliberately has no runnable `id`, robot, sensor, or Task Program selection:
+<a id="effect-assurance-is-mandatory"></a>
 
-```yaml
-environment_id: repeated_pick_place
-physics: default
-max_episode_steps: 1200
-simulation:
-  rigid_object:
-    - uid: cube
-      # Physical shape, dynamics, and initial pose.
-env:
-  sim_steps_per_control: 4
-  events: {}
-  dataset:
-    lerobot:
-      func: LeRobotRecorder
-      mode: save
-      params:
-        save_path: /tmp/repeated-pick-place/datasets
-        # robot_type is filled from the selected embodiment.
-```
+[Effect assurance is mandatory](architecture.md#effect-assurance-is-mandatory)
 
-A runnable `task.<embodiment>.yaml` selects the environment variants, all three
-Task Program components, and one reusable embodiment. The UR5 deployment can
-also reference the task-facing expansion declaration:
+<a id="parallel-programs"></a>
 
-```yaml
-id: TaskProgramRepeatedPickPlace-v1
-environment:
-  default: envs/default.yaml
-  newton: envs/newton.yaml
-task_program:
-  program: task_program/program.yaml
-  integration: task_program/integration.yaml
-  execution_policy: ../../../components/execution_policies/trajectory_open_loop.yaml
-embodiment:
-  component: ../../../components/embodiments/ur5_dh_pgi_140_80.yaml
-expansion:
-  config: expansion/repeated_pick_place.yaml
-```
+[Parallel programs](architecture.md#parallel-programs)
 
-The referenced expansion file is task-facing configuration rather than a
-second environment deployment. It owns batch runtime values, the shared
-expansion policy, task-specific augmentation overrides, and the collection
-target and recipe selection; the runner merges it after selecting the physical
-backend. `collection.target_episodes` is the final committed row count, while
-`num_envs` only controls the width of each batch.
+<a id="registered-calls"></a>
 
-The callable-free `integration.yaml` owns the semantic scene binding and
-task-specific profile additions. Its canonical identities map explicitly to
-UIDs in the physical environment:
+[Registered calls](architecture.md#registered-calls)
 
-```yaml
-integration_id: repeated_pick_place_v1
-program_id: repeated_cube_pick_place
-requires:
-  scene_contract: repeated_pick_place_scene_v1
-  embodiment_contract: single_arm_parallel_gripper
-scene_binding:
-  contract_id: repeated_pick_place_scene_v1
-  registry_id: task_program_repeated_pick_place
-  rigid_objects:
-    - entity_id: cube
-      simulation_uid: cube
-      dynamics: dynamic
-      semantic_type: cube
-      affordances:
-        - entity_id: cube_grasp
-          kind: antipodal_grasp
-profile:
-  defaults: {}
-  action_options: {}
-  effect_monitors: {}
-```
+<a id="reference-tasks"></a>
 
-The abbreviated profile mappings above must be populated for the calls used by
-the program. See `envs/default.yaml`, `task.ur5.yaml`, and
-`task_program/integration.yaml` under
-`embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/` for the
-complete reference composition.
+[Reference tasks](architecture.md#reference-tasks)
 
-Scene affordances are authored as children of their owning entry in
-`rigid_objects`, `articulations`, or `links`. The parent's `entity_id` names the
-physical scene entity; the child's `entity_id` is a separate, globally unique
-semantic feature that can be selected explicitly by a program or parent
-default. Nesting is the only way to declare ownership: scene-level
-`antipodal_grasps`, `support_surfaces`, and `containers`, and child
-`object_id`/`parent_id` fields, are rejected. The loader derives that parent
-relation from the YAML structure and normalizes the declarations into the flat,
-globally indexed Scene Registry.
+<a id="recommended-change-sites"></a>
 
-The task integration accepts only closed scene bindings, profile additions,
-monitor mappings, and allowlisted runtime-service kinds. Robot resources come
-from the embodiment component, while motion and runner policy come from the
-execution-policy component. Their composed integration does not accept dotted
-imports or arbitrary callables. The configured integration loader lives in
-`task_program/integrations/configured.py`; Gym registration remains the small
-concern of `gym/envs/task_program/registration.py`.
+[Recommended change sites](architecture.md#recommended-change-sites)
 
-`config_to_cfg()` resolves every component reference relative to the runnable
-deployment, expands the selected physical environment variant and embodiment,
-validates each semantic `simulation_uid` against the physical scene, composes
-the immutable integration catalog, validates the program, and registers the
-common `EmbodiedEnv` under the deployment-owned ID. A task-specific Python
-environment module is not required. A handwritten task can select the same
-environment variant mapping because those files contain no Task Program fields.
+<a id="focused-validation"></a>
 
-Run a selected program with:
+[Focused validation](architecture.md#focused-validation)
 
-```bash
-embodichain run-env \
-  --gym_config path/to/task.ur5.yaml \
-  --task-program path/to/program.yaml
-```
+<a id="further-reading"></a>
 
-The CLI override changes the program only. It cannot replace the integration,
-execution policy, environment, or embodiment selected by the runnable task
-deployment.
+[Further reading](architecture.md#further-reading)
 
-## Runtime lifecycle
+<a id="embodied-task-program"></a>
 
-The environment adapter compiles or accepts a trusted {class}`CompiledTaskProgram`,
-assembles fresh live providers, and creates one `TaskProgramDemoBridge`.
-`EmbodiedEnv.create_demo_segments()` exposes lazy actions; the bridge never
-calls `env.step()` itself. The normal demo executor owns the step handshake,
-recording, rewards, and reset lifecycle.
-
-```text
-compile program
-    -> provider-aware preflight
-    -> prepare next semantic call from fresh observation
-    -> lower to ActionInvocation
-    -> AtomicActionEngine + ExecutionRunner
-    -> verify or project the declared effect
-    -> post-policies
-    -> segment validators
-    -> publish final completion mask
-```
-
-Keep three acceptance boundaries separate:
-
-| Boundary | Meaning |
-|---|---|
-| Semantic effect monitor | Establishes whether one physical call achieved its postcondition and participates in recovery. |
-| Segment post-policy | Advances environment behavior after motion, for example waiting for an object to settle. |
-| Segment validator | Determines whether the resulting task or dataset segment is acceptable. |
-
-## Effect assurance is mandatory
-
-Every selected robot policy preset explicitly chooses
-`effect_assurance: verified` or `effect_assurance: projected`.
-
-- `verified` advances semantic state only from typed measured evidence. Curated
-  Pick, Place, and HandOver calls require an explicit monitor mapping.
-- `projected` advances the action plan's expected symbolic state after command
-  completion and forbids monitor mappings. It is suitable for trajectory-only
-  demonstrations, not proof of physical success.
-
-No monitor set is installed implicitly. A missing assurance field is a decode
-error, and a verified curated call without a monitor fails static compilation.
-
-Held-object guards and phase-effect gates remain observational. They may block
-a named atomic segment or invalidate an action-authorized symbolic relation;
-they never attach objects, freeze bodies, or overwrite poses.
-
-## Parallel programs
-
-Parallel blocks require:
-
-- disjoint resource claims and runtime targets;
-- aligned command frames on the environment control grid;
-- conflict-free symbolic writes;
-- an authoritative `ParallelCommandSafetyValidator`; and
-- an explicit fail-fast barrier.
-
-Resource disjointness alone is not physical-safety evidence. Missing or
-inconclusive safety validation fails closed. Nested parallel blocks are
-rejected.
-
-## Registered calls
-
-{class}`RegisteredSemanticCallCfg` carries only declarative data. The immutable
-simulation registration must declare exactly one matching lowerer factory and
-include that declaration in its integration fingerprint. Each live assembly
-receives a fresh lowerer instance and revalidates its call ID, revision, and
-target descriptor.
-
-Use registered calls to reuse a shared Atomic Skill from configuration. Do not
-put task-local motion generation in a lowerer or create another semantic
-runtime.
-
-## Reference tasks
-
-| Environment | Assurance | What it demonstrates |
-|---|---|---|
-| `TaskProgramRepeatedPickPlace-v1` | projected | Bounded repeat and cyclic targets over Pick and Place. |
-| `TaskProgramRepeatedPickPlace-Newton-v1` | projected | Newton companion using a scoped grasp/contact profile selected from the Default comparison. |
-| `TaskProgramRepeatedPickPlace-Franka-Newton-v1` | projected | Newton companion for the Franka embodiment. |
-| `TaskProgramOpenDrawer-v1` | projected | An allowlisted registered call lowered to atomic Slide. |
-| `TaskProgramOpenDrawer-Newton-v1` | projected | Newton companion using the scoped drawer-handle contact profile selected from the Default comparison. |
-| `HandOver-v1` | verified | Coordinated dual-resource HandOver with measured evidence, settling, and final-target validation. |
-| `PourWater-v1` | projected | Registered held-object transport and Pour calls composed after Pick. |
-
-Projected examples demonstrate planning and command generation only. They must
-not be presented as physically qualified task-success integrations.
-
-## Recommended change sites
-
-| Change | Owning location |
-|---|---|
-| Schema and AST dataclasses | `embodichain/lab/task_program/language/schema.py` |
-| Strict decoding and validation | `embodichain/lab/task_program/language/decoder.py` |
-| File loading and resource bounds | `embodichain/lab/task_program/language/loader.py` |
-| Provider-free compilation | `embodichain/lab/task_program/compiler/program.py` |
-| Semantic Call lowering | `embodichain/lab/task_program/compiler/lowering.py` |
-| Sequential and parallel execution | `embodichain/lab/task_program/runtime/` |
-| Semantic declarations | `embodichain/lab/task_program/semantics/` |
-| Registration and environment assembly | `embodichain/lab/task_program/integrations/` |
-| Gym bridge and segment lifecycle | `embodichain/lab/gym/envs/task_program/bridge.py` |
-| Dynamic Gym ID registration | `embodichain/lab/gym/envs/task_program/registration.py` |
-| Atomic planning and execution | `embodichain/lab/sim/atomic_actions/` |
-
-## Focused validation
-
-Run:
-
-```bash
-pytest -q tests/lab/task_program
-pytest -q tests/gym/envs/task_program
-pytest -q tests/sim/atomic_actions
-python docs/scripts/check_api_docs.py
-```
-
-Physical qualification additionally requires real-environment runs with
-measured evidence, controlled seeds/randomization, task validators, and saved
-completion metadata.
-
-## Further reading
-
-- {doc}`scene_registry` — canonical scene identities, affordances, and live providers
-- {doc}`robot_profiles` — robot resources, Atomic Skill bindings, and assurance
-- {doc}`../sim/atomic_actions/index` — direct typed atomic-action planning and
-  execution
-- {doc}`/tutorial/task_program_python` — author and compile a Task Program in Python
-- {doc}`/tutorial/task_program` — configure and run an embodied Task Program
+[Embodied Task Program architecture](architecture.md)

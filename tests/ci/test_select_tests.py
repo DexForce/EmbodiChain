@@ -75,8 +75,20 @@ def test_repository_manifest_selectors_resolve() -> None:
     ("source_path", "expected_selector"),
     [
         (
+            "extensions/embodichain_robots/franka_panda.py",
+            "tests/sim/robots/test_entrypoints.py",
+        ),
+        (
+            "extensions/embodichain_tasks/configs/tasks/manipulation/push_cube/env.json",
+            "tests/test_task_program_package_data.py",
+        ),
+        (
             "embodichain/lab/scripts/preview_joint_control.py",
             "tests/lab/scripts/test_preview_joint_control.py",
+        ),
+        (
+            "embodichain/lab/scripts/run_task.py",
+            "tests/lab/scripts/test_run_task.py",
         ),
         (
             "scripts/tutorials/atomic_action/pickup.py",
@@ -169,6 +181,79 @@ def test_data_pipeline_rule_covers_dataset_functor_consumer() -> None:
         map_data={},
     )
     assert "tests/gym/envs/managers/test_dataset_functors.py" in plan.selectors
+
+
+@pytest.mark.parametrize(
+    ("asset_path", "payload"),
+    [
+        ("tests/data_pipeline/assets/depth.mp4", b"\x00\xff\x99"),
+        ("tests/data_pipeline/assets/test_depth.mp4", b"\x00\xff\x99"),
+        ("tests/data_pipeline/assets/annotations.json", b'{"fps": 30}\n'),
+    ],
+)
+@pytest.mark.parametrize("global_change", [False, True])
+def test_changed_test_asset_selects_full_coverage_without_parsing_media(
+    tmp_path: Path, asset_path: str, payload: bytes, global_change: bool
+) -> None:
+    _write(tmp_path, asset_path)
+    (tmp_path / asset_path).write_bytes(payload)
+    _write(tmp_path, "tests/test_reader.py", "def test_read(): pass\n")
+    changed = [ChangedPath(asset_path)]
+    if global_change:
+        changed.append(ChangedPath(".github/workflows/main.yml"))
+
+    plan = build_plan(
+        tmp_path,
+        changed,
+        _manifest(full_pr_if=[".github/**"]),
+        map_data={"topics": []},
+    )
+
+    assert plan.mode == "full-pr"
+    assert plan.selectors == ["tests"]
+    assert all(asset_path not in selectors for selectors in plan.lanes.values())
+
+
+def test_changed_test_asset_preserves_explicit_slow_test_coverage(
+    tmp_path: Path,
+) -> None:
+    asset_path = "tests/assets/depth.mp4"
+    _write(tmp_path, asset_path)
+    (tmp_path / asset_path).write_bytes(b"\xff")
+    slow_test = "tests/test_slow_reader.py"
+    _write(
+        tmp_path,
+        slow_test,
+        "import pytest\n@pytest.mark.slow\ndef test_read(): pass\n",
+    )
+
+    plan = build_plan(
+        tmp_path,
+        [ChangedPath(asset_path), ChangedPath(slow_test)],
+        _manifest(),
+        map_data={"topics": []},
+    )
+
+    assert plan.mode == "full-pr"
+    assert plan.slow_lanes == {"slow-fast": [slow_test]}
+
+
+def test_documentation_media_keeps_documentation_only_coverage(tmp_path: Path) -> None:
+    asset_path = "tests/docs/assets/preview.png"
+    _write(tmp_path, asset_path)
+    (tmp_path / asset_path).write_bytes(b"\xff")
+    _write(tmp_path, "tests/docs/test_preview.py", "def test_preview(): pass\n")
+
+    plan = build_plan(
+        tmp_path,
+        [ChangedPath(asset_path)],
+        _manifest(),
+        map_data={"topics": []},
+    )
+
+    assert plan.mode == "docs-only"
+    assert plan.lanes == {"docs": ["tests/docs"]}
+    assert plan.slow_lanes == {}
 
 
 def test_manifest_rejects_partial_rule_without_tests(tmp_path: Path) -> None:

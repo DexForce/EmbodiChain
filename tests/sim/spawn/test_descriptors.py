@@ -772,7 +772,7 @@ def test_grouped_rigid_physics_overlays_usd_without_erasing_source(
     )
     scene = SimpleNamespace(materials={})
 
-    def parse_singleton(path, collection, label):
+    def parse_singleton(path, collection, label, *, prim_path=None):
         return scene, source
 
     monkeypatch.setattr(
@@ -817,7 +817,10 @@ def test_rigid_usd_can_recompute_source_inertia(
     )
     monkeypatch.setattr(
         "embodichain.lab.sim.spawn.usd._parse_singleton",
-        lambda path, collection, label: (SimpleNamespace(materials={}), source),
+        lambda path, collection, label, *, prim_path=None: (
+            SimpleNamespace(materials={}),
+            source,
+        ),
     )
     cfg = RigidObjectCfg(
         uid="cube",
@@ -850,7 +853,10 @@ def test_rigid_usd_preserves_asset_physics_by_default(
     )
     monkeypatch.setattr(
         "embodichain.lab.sim.spawn.usd._parse_singleton",
-        lambda path, collection, label: (SimpleNamespace(materials={}), source),
+        lambda path, collection, label, *, prim_path=None: (
+            SimpleNamespace(materials={}),
+            source,
+        ),
     )
     cfg = RigidObjectCfg(
         uid="cube",
@@ -1193,7 +1199,7 @@ def test_imported_rigid_gap_default_is_owned_by_embodichain(
     )
     monkeypatch.setattr(
         "embodichain.lab.sim.spawn.usd._parse_singleton",
-        lambda *_args: (SimpleNamespace(materials={}), source),
+        lambda *_args, **_kwargs: (SimpleNamespace(materials={}), source),
     )
     cfg = RigidObjectCfg(
         uid="cube", shape=MeshCfg(fpath="cube.usd"), asset_physics_mode=mode
@@ -1632,6 +1638,40 @@ def test_articulation_array_qpos_limits_compile_before_backend_build() -> None:
     joint = descriptor.get_joint_desc("arm_joint")
     assert joint.lower_limit == pytest.approx(-0.5)
     assert joint.upper_limit == pytest.approx(0.75)
+
+
+@pytest.mark.parametrize("solver_type", [None, "auto"])
+@pytest.mark.parametrize("authored_velocity", [0.05, None])
+def test_robot_default_drive_preserves_authored_velocity_limit(
+    solver_type: str | None,
+    authored_velocity: float | None,
+) -> None:
+    descriptor = _resolved_articulation_desc()
+    joint = descriptor.get_joint_desc("arm_joint")
+    joint.velocity_limit = authored_velocity
+    joint.dexsim = DexsimJointDesc(max_velocity=authored_velocity)
+    cfg = RobotCfg(
+        uid="robot", fpath="robot.urdf", control_parts={"arm": ["arm_joint"]}
+    )
+    configure_articulation_desc(descriptor, cfg, newton_solver_type=solver_type)
+    assert joint.velocity_limit == authored_velocity
+    assert joint.dexsim.max_velocity == authored_velocity
+
+
+@pytest.mark.parametrize("solver_type", [None, "auto"])
+def test_explicit_zero_speed_override_is_preserved(solver_type: str | None) -> None:
+    descriptor = _resolved_articulation_desc()
+    joint = descriptor.get_joint_desc("arm_joint")
+    joint.velocity_limit = None
+    cfg = RobotCfg(
+        uid="robot",
+        fpath="robot.urdf",
+        control_parts={"arm": ["arm_joint"]},
+        joint_drive_props=JointDrivePropertiesCfg(max_velocity=0.0),
+    )
+    configure_articulation_desc(descriptor, cfg, newton_solver_type=solver_type)
+    assert joint.velocity_limit == 0.0
+    assert joint.dexsim.max_velocity == 0.0
 
 
 def test_robot_control_part_drive_rule_expands_before_spawn() -> None:

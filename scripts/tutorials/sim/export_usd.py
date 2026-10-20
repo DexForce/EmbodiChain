@@ -66,7 +66,7 @@ from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
 
-from embodichain.lab.sim.robots.dexforce_w1.cfg import DexforceW1Cfg
+from embodichain_robots.dexforce_w1.cfg import DexforceW1Cfg
 
 
 def initialize_simulation(args) -> SimulationManager:

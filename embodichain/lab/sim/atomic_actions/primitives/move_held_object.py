@@ -157,12 +157,6 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
         control_part = motion_target.control_part
         arm_joint_ids = list(motion_target.joint_ids)
         hand_joint_ids = list(grasp_target.joint_ids)
-        hand_grasp_qpos = grasp.joint_positions(
-            GRASP_COMMAND,
-            num_envs=context.batch_size,
-            device=self.device,
-            dtype=context.robot.qpos.dtype,
-        )
         state = context
         held_object = state.get_held_object(task_state_key)
         if held_object is None:
@@ -227,7 +221,6 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
         success = result.success & eligible
 
         base_qpos = state.last_qpos.clone()
-        base_qpos[:, hand_joint_ids] = hand_grasp_qpos
         _, timed = to_full_robot_trajectory(
             result,
             base_qpos=base_qpos,

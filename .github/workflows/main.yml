@@ -63,7 +63,7 @@ jobs:
             docs:
               - 'docs/**'
               - 'embodichain/**'
-              - 'embodichain_tasks/**'
+              - 'extensions/**'
               - 'examples/**'
               - 'README.md'
               - 'pyproject.toml'
@@ -288,6 +288,10 @@ jobs:
       - name: Build docs
         shell: bash
         run: |
+          # The private index redirects public packages to a mirror with missing
+          # msgspec wheel metadata. Resolve viser's dependency from PyPI first.
+          python -m pip --isolated install --index-url https://pypi.org/simple \
+            'msgspec>=0.18.6,<1.0.0'
           pip install -e ".[gensim]" \
             --extra-index-url http://pyp.open3dv.site:2345/simple/ \
             --trusted-host pyp.open3dv.site \
@@ -342,6 +346,12 @@ jobs:
     container: *container_template
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # Workflow contract tests execute JavaScript; the simulator image has no node.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Preserve Node path for login shells
+        run: echo "CI_NODE_BIN_DIR=$(dirname "$(command -v node)")" >> "$GITHUB_ENV"
       - uses: ./.github/actions/activate-conda
       - name: Download test plan
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -358,18 +368,24 @@ jobs:
           else
             package='.'
           fi
+          # The private index redirects public packages to a mirror with missing
+          # msgspec wheel metadata. Resolve viser's dependency from PyPI first.
+          python -m pip --isolated install --index-url https://pypi.org/simple \
+            'msgspec>=0.18.6,<1.0.0'
           pip install -e "${package}" \
+            --index-url https://pypi.org/simple \
             --extra-index-url http://pyp.open3dv.site:2345/simple/ \
             --trusted-host pyp.open3dv.site \
             --extra-index-url https://download.blender.org/pypi/
           if [[ "${NEEDS_CUROBO}" == "true" ]]; then
             pip install \
               "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@v0.8.0" \
+              --index-url https://pypi.org/simple \
               --extra-index-url http://pyp.open3dv.site:2345/simple/ \
               --trusted-host pyp.open3dv.site \
               --extra-index-url https://download.blender.org/pypi/
           fi
-          pip install pytest-xdist
+          pip install --index-url https://pypi.org/simple pytest-xdist
 
       - name: Verify Scene Engine gensim installation
         if: env.NEEDS_GENSIM == 'true'
@@ -380,6 +396,9 @@ jobs:
         shell: bash -l {0}
         run: |
           source activate py311
+          # The image's login profile can reset the PATH set by setup-node.
+          export PATH="${CI_NODE_BIN_DIR}:${PATH}"
+          node --version
           # Run GPU processes before the long DexSim lane.  Native Vulkan/CUDA
           # teardown can briefly retain allocations after the sim subprocess;
           # this order prevents the GPU lane from inheriting that pressure.
@@ -517,6 +536,7 @@ jobs:
         shell: bash
         run: |
           python - <<'PY'
+          from configparser import ConfigParser
           from email.parser import Parser
           from pathlib import Path
           from zipfile import ZipFile
@@ -532,10 +552,14 @@ jobs:
               "embodichain/gen_sim/asset_engine/configs/gen_config.json",
               "embodichain_tasks/__init__.py",
               "embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml",
+              "embodichain_robots/__init__.py",
+              "embodichain_robots/_catalog.py",
           }
           with ZipFile(wheels[0]) as wheel:
               members = set(wheel.namelist())
               entry_points = wheel.read(f"{dist_info}entry_points.txt").decode()
+              entry_point_config = ConfigParser()
+              entry_point_config.read_string(entry_points)
               metadata = Parser().parsestr(wheel.read(f"{dist_info}METADATA").decode())
               runtime_version = wheel.read("embodichain/VERSION").decode().strip()
               if metadata["Version"] != version or runtime_version != version:
@@ -545,8 +569,8 @@ jobs:
                   )
 
           source_task_configs = {
-              path.as_posix()
-              for path in Path("embodichain_tasks/configs").rglob("*")
+              path.relative_to("extensions").as_posix()
+              for path in Path("extensions/embodichain_tasks/configs").rglob("*")
               if path.suffix in {".json", ".yaml", ".yml"}
           }
           wheel_task_configs = {
@@ -559,7 +583,7 @@ jobs:
               member
               for member in members
               if not member.startswith(
-                  ("embodichain/", "embodichain_tasks/", dist_info)
+                  ("embodichain/", "embodichain_tasks/", "embodichain_robots/", dist_info)
               )
               or "__pycache__" in member
               or member.endswith((".pyc", ".pyo"))
@@ -568,19 +592,24 @@ jobs:
           missing_task_configs = sorted(source_task_configs - wheel_task_configs)
           unexpected_task_configs = sorted(wheel_task_configs - source_task_configs)
           task_entry_point = "embodichain_tasks = embodichain_tasks"
+          robot_entry_point = entry_point_config.get(
+              "embodichain.robots", "official", fallback=None
+          ) == "embodichain_robots._catalog:ROBOT_CONFIGS"
           if (
               unexpected
               or missing
               or missing_task_configs
               or unexpected_task_configs
               or task_entry_point not in entry_points
+              or not robot_entry_point
           ):
               raise SystemExit(
                   "Invalid wheel contents; "
                   f"unexpected={unexpected}, missing={missing}, "
                   f"missing_task_configs={missing_task_configs}, "
                   f"unexpected_task_configs={unexpected_task_configs}, "
-                  f"task_entry_point={task_entry_point in entry_points}"
+                  f"task_entry_point={task_entry_point in entry_points}, "
+                  f"robot_entry_point={robot_entry_point}"
               )
           PY
 

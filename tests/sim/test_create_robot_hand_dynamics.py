@@ -39,7 +39,7 @@ def test_hand_open_close_stays_bounded(
     def record(sim, robot, max_steps=None):
         update = sim.update
         metadata.update(
-            hand_ids=robot.get_joint_ids("hand"),
+            hand_ids=robot.get_joint_ids("eef"),
             mimic_ids=robot.mimic_ids,
             parents=robot.mimic_parents,
             multipliers=torch.tensor(robot.mimic_multipliers),

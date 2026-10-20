@@ -59,6 +59,8 @@ class CuroboAdapter(PlannerAdapter):
     )
     model_revision = "curobo-v2"
     separate_prepare = True
+    timing_is_solved = True
+    """cuRobo optimizes the trajectory's timing under its own dynamic limits."""
 
     def __init__(self, spec: PlannerSpecCfg, context: PlannerContext) -> None:
         super().__init__(spec, context)
@@ -72,8 +74,49 @@ class CuroboAdapter(PlannerAdapter):
             return False, "cuRobo is not installed; install one of the cuRobo extras."
         return True, None
 
+    def _backend_motion_limits(self) -> dict[str, list[float]]:
+        """Map common control-part budgets into cuRobo's active-joint order."""
+        limits = self.resolve_motion_limits(require_timing=True)
+        robot = self.context.robot
+        active_ids = list(robot.active_joint_ids)
+        controlled_ids = list(robot.get_joint_ids(self.context.control_part))
+        if any(index not in active_ids for index in controlled_ids):
+            raise ValueError("cuRobo control parts must contain only active joints.")
+        from embodichain.lab.sim.motion.planners.curobo.curobo_yaml import (
+            _curobo_joint_limits,
+        )
+
+        defaults = _curobo_joint_limits(robot)
+        # Explicit requests are positive; the production exporter intersects
+        # these with Robot caps again, retaining zero caps on locked joints.
+        velocity = [value if value > 0 else 0.2 for value in defaults["max_velocity"]]
+        acceleration = defaults["max_acceleration"]
+        for column, joint_id in enumerate(controlled_ids):
+            speed = limits["velocity"][column]
+            if speed <= 0:
+                raise ValueError(
+                    "cuRobo cannot plan a joint with a zero velocity limit."
+                )
+            index = active_ids.index(joint_id)
+            velocity[index] = speed
+            acceleration[index] = limits["acceleration"][column]
+        for key, actual in (
+            ("max_velocity", velocity),
+            ("max_acceleration", acceleration),
+        ):
+            if key in self.spec.config:
+                requested = torch.as_tensor(self.spec.config[key], dtype=torch.float64)
+                if not torch.allclose(
+                    requested, torch.tensor(actual, dtype=torch.float64)
+                ):
+                    raise ValueError(
+                        f"Planner config.{key} differs from the suite motion budget."
+                    )
+        return {"max_velocity": velocity, "max_acceleration": acceleration}
+
     def build(self) -> None:
         """Construct MotionGenerator without materializing its lazy backend."""
+        limits = self._backend_motion_limits()
         values = self.spec.config
         world_values = dict(values.get("world", {}))
         auto_values = dict(values.get("auto_gen", {}))
@@ -91,6 +134,8 @@ class CuroboAdapter(PlannerAdapter):
         )
         planner_cfg = CuroboPlannerCfg(
             robot_uid=self.context.robot.uid,
+            max_velocity=limits["max_velocity"],
+            max_acceleration=limits["max_acceleration"],
             world=world,
             auto_gen=CuroboAutoGenCfg(**auto_values),
             collision_activation_distance=float(

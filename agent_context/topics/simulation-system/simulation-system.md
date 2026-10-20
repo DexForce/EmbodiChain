@@ -26,11 +26,41 @@ and readiness for each committed topology revision. DexSim `SceneBuilder` and
 and backend handles. `add_*()` returns a declared facade; `prepare()` binds
 that same object in place. UIDs identify resources in the manager registry.
 
+`VisualObject` owns render-only root poses, visibility and material assignments,
+with no rigid-body buffers or collision API. Its config lives in
+`cfg/visual_object.py`; mesh files use `MeshCfg.fpath`, as for rigid objects.
+`cfg/source.py:UsdSourceCfg` owns the source file and exact `source_prim_path`;
+visual, rigid and articulation configs accept it through `source`, exclusively
+with their existing shape/file input. `ObjectBaseCfg` keeps runtime identity
+and initial pose independent of file formats. `add_visual_object()` compiles mesh/primitive appearance or
+selects a USD object's appearance. Whole-scene `add_usd()`
+preserves physical types and wraps only objects without physics and colliders
+as visuals. Conflicting visual UIDs receive the scene-name prefix while returned
+keys preserve source prim paths. Other import UID conflicts fail before declaration.
+Imported facades retain their source address in `cfg.source`. This metadata
+does not request a second spawn or bind an unrelated existing scene entity.
+Visuals retain facade-owned pose/visibility/material-assignment state across native
+topology rebuilds, with separate reset baselines. They use the same prepare,
+replication, selective reset, removal and teardown owners as physical assets. They do not enter physical scene snapshots or planners.
+Pose I/O uses pure-visual `World.fetch_object_transform` / `apply_object_transform`
+tensor batches through the private Scene visual adapter. That boundary converts
+world matrices to arena-local poses and refreshes parent transforms and native
+IDs after topology changes.
+
+`spawn/_usd_assets.py` materializes package textures into `SpawnScene`-owned
+files. They survive topology rebuilds and are deleted after native Scene closure;
+facade source configs retain the original package address.
+
 `BaseEnv` owns Gym reset/step timing; `EmbodiedEnv` translates task composition
 into manager declarations. Scene replication and collision isolation belong
 to Spawn, not per-object collision-group calculations. Backend differences
 belong in physics hooks/capabilities or object adapters, not task-side native
 access. Contact sensors use the finalized Scene's `ContactQuery` boundary.
+
+[Scene services](../scene-services/scene-services.md) compose existing configs,
+propose layouts and read/change physical state through these owners. They do
+not add a registry or commit topology. Runtime scene services currently accept
+only B=1 selections; Spawn still owns replication and isolation.
 
 ## Lifecycle
 

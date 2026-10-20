@@ -614,9 +614,7 @@ def test_backend_property_groups_track_dexsim_spawn_descriptors() -> None:
         "collision_filter_parent",
         "is_visible",
         "is_site",
-        # DexSim 0.5.1rc1 native loader/ordering controls remain outside the
-        # backend-neutral EmbodiChain collision configuration.
-        "priority",
+        # Asset-loading adapter option, not a native ShapeConfig parameter.
         "use_native_mesh_loader",
     }
     assert (
@@ -1192,14 +1190,15 @@ def test_default_physics_cfg_applies_fixed_solver_defaults() -> None:
     assert physics_args["enable_friction_every_iteration"] is True
 
 
-def test_render_cfg_defaults_both_targets_to_dlss_rr() -> None:
-    """Default rendering follows DexSim's DLSS RR target defaults."""
+def test_render_cfg_defaults_to_dlss_rr_without_tone_mapping() -> None:
+    """Default rendering enables DLSS RR and bypasses tone mapping."""
     world_config = dexsim.WorldConfig()
 
     RenderCfg(renderer="hybrid").apply_to_dexsim_config(world_config)
 
     assert world_config.rt_pipeline_config.window.mode == RTRenderMode.DLSS_RR
     assert world_config.rt_pipeline_config.offscreen.mode == RTRenderMode.DLSS_RR
+    assert world_config.postprocess_config.tone_mapping_enabled is False
 
 
 @pytest.mark.parametrize(
@@ -1246,20 +1245,21 @@ def test_render_cfg_keeps_window_and_offscreen_modes_independent() -> None:
     assert world_config.rt_pipeline_config.offscreen.mode == RTRenderMode.NRD_RELAX
 
 
-def test_render_cfg_applies_tone_mapping_and_fixed_exposure() -> None:
-    """Tone mapping forwards its curve and fixed exposure to DexSim."""
+@pytest.mark.parametrize("enabled", [False, True])
+def test_render_cfg_applies_tone_mapping_and_fixed_exposure(enabled: bool) -> None:
+    """Tone mapping forwards its explicit switch and fixed exposure to DexSim."""
     expected_exposure = 1.25
     world_config = dexsim.WorldConfig()
     render_cfg = RenderCfg(
         renderer="rt",
-        tone_mapping_enabled=True,
+        tone_mapping_enabled=enabled,
         tone_mapping_exposure=expected_exposure,
     )
 
     render_cfg.apply_to_dexsim_config(world_config)
 
     assert world_config.renderer == Renderer.OFFLINERT
-    assert world_config.postprocess_config.tone_mapping_enabled is True
+    assert world_config.postprocess_config.tone_mapping_enabled is enabled
     assert (
         world_config.postprocess_config.tone_mapping_type
         == ToneMappingType.MODIFIED_REINHARD
@@ -1276,6 +1276,90 @@ def test_render_cfg_applies_renderer_and_sample_count() -> None:
 
     assert world_config.renderer == Renderer.FASTRT
     assert world_config.raytrace_config.render_iterations_per_frame == expected_spp
+
+
+def test_render_cfg_default_bounce_limits_preserve_native_defaults() -> None:
+    """Existing callers retain the native path budget when limits are omitted."""
+    world_config = dexsim.WorldConfig()
+    native_limits = (
+        world_config.raytrace_config.min_bounces,
+        world_config.raytrace_config.max_bounces,
+    )
+    config = RenderCfg()
+
+    assert (config.min_bounces, config.max_bounces) == native_limits == (4, 8)
+    config.apply_to_dexsim_config(world_config)
+    assert (
+        world_config.raytrace_config.min_bounces,
+        world_config.raytrace_config.max_bounces,
+    ) == native_limits
+
+
+@pytest.mark.parametrize("renderer", ["hybrid", "fast-rt", "rt"])
+@pytest.mark.parametrize("mode", ["off", "optix", "dlss", "nrd"])
+def test_render_cfg_forwards_bounce_limits_independently_of_pipeline(
+    renderer: str, mode: str
+) -> None:
+    """The ray budget reaches all backends without replacing NRD's own budget."""
+    world_config = dexsim.WorldConfig()
+    config = RenderCfg(
+        renderer=renderer,
+        min_bounces=1,
+        max_bounces=4,
+        denoising=sim_cfg.DenoisingCfg(window=mode, offscreen=mode),
+        nrd=sim_cfg.NRDCfg(max_indirect_bounces=2),
+    )
+
+    config.apply_to_dexsim_config(world_config)
+
+    assert world_config.raytrace_config.min_bounces == 1
+    assert world_config.raytrace_config.max_bounces == 4
+    assert world_config.nrd_config.max_indirect_bounces == 2
+
+
+@pytest.mark.parametrize("limits", [(0, 1), (1, 1), (8, 8)])
+def test_render_cfg_accepts_bounce_limit_boundaries(limits: tuple[int, int]) -> None:
+    """Immediate roulette and equal limits are supported native configurations."""
+    world_config = dexsim.WorldConfig()
+    config = RenderCfg(min_bounces=limits[0], max_bounces=limits[1])
+
+    config.apply_to_dexsim_config(world_config)
+
+    assert (
+        world_config.raytrace_config.min_bounces,
+        world_config.raytrace_config.max_bounces,
+    ) == limits
+
+
+@pytest.mark.parametrize(
+    ("settings", "error_field"),
+    [
+        ({"min_bounces": -1}, "min_bounces"),
+        ({"max_bounces": 0}, "max_bounces"),
+        ({"max_bounces": -1}, "max_bounces"),
+        ({"min_bounces": 9, "max_bounces": 8}, "min_bounces"),
+        ({"min_bounces": True}, "min_bounces"),
+        ({"max_bounces": False}, "max_bounces"),
+        ({"min_bounces": 1.5}, "min_bounces"),
+        ({"max_bounces": "8"}, "max_bounces"),
+        ({"min_bounces": None}, "min_bounces"),
+    ],
+)
+def test_render_cfg_rejects_invalid_bounce_limits_at_construction_and_conversion(
+    settings: dict[str, object], error_field: str
+) -> None:
+    """Direct construction and mutable edits fail before native config is written."""
+    with pytest.raises(ValueError, match=error_field):
+        RenderCfg(**settings)
+
+    config = RenderCfg()
+    for name, value in settings.items():
+        setattr(config, name, value)
+    world_config = dexsim.WorldConfig()
+    with pytest.raises(ValueError, match=error_field):
+        config.apply_to_dexsim_config(world_config)
+    assert world_config.raytrace_config.min_bounces == 4
+    assert world_config.raytrace_config.max_bounces == 8
 
 
 @pytest.mark.parametrize(

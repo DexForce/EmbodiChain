@@ -54,6 +54,22 @@ debugging.
 - **Layout and export**: refines the edited layout using the updated scene graph
   and writes the resulting scene back to `scene_export`.
 
+## Shared Scene Services
+
+Scene Engine uses the shared `sim.scene` CPU strategies for support detection,
+group placement and AABB packing, and `solve_layout()` for tabletop and
+parent-surface constraints. `GravitySettler` uses the shared settling and pose
+readback services while owning its temporary simulation. Model calls, assets,
+the editable scene graph, hierarchy traversal, Y-up conversion and exports
+remain in Scene Engine.
+
+The [scene services reference](../../api_reference/embodichain/embodichain.lab.sim.scene.rst)
+describes these integration boundaries and a model-free tabletop recipe. That
+recipe demonstrates explicit configuration composition, measured layout checks
+and state restoration; it is a separate entry point from image-based generation
+and text editing. Current physical services support B=1, independently of the
+CPU/CUDA batching supported by the underlying tensor geometry kernels.
+
 ## Configuration
 
 Scene Engine reads the LLM, segmentation, image-generation, and

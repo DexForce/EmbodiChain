@@ -68,7 +68,7 @@ from embodichain.lab.sim.cfg import (
     RenderCfg,
 )
 from embodichain.lab.sim.objects import SurfaceDeformableObject, RigidObject, Robot
-from embodichain.lab.sim.robots import URRobotCfg
+from embodichain_robots import URRobotCfg
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
 from embodichain.compute.trajectory import interpolate_with_nums
 from embodichain.lab.visualization import visualization_cfg_from_args
@@ -132,7 +132,7 @@ def create_robot(
                 },
             },
             "control_parts": {
-                "hand": ["FINGER[1-2]"],
+                "eef": ["FINGER[1-2]"],
             },
             "solver_cfg": {
                 "arm": {

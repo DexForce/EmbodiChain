@@ -80,8 +80,10 @@ Atomic plan transform; the bridge exposes immutable
 `TaskProgramExpansionRecord` provenance. Nonmatching calls and episodes
 without a profile keep the ordinary path.
 
-The current configured transform is B=1 and accepts neither timing nor
-Affordance expansion. Generic profile decoding, source adapters, candidate
+The configured combined transform supports batches and Pick Affordance
+expansion; timing expansion is not connected to this transform. Batch expansion
+records retain the stable environment IDs from the planning context, including
+reordered batches. Generic profile decoding, source adapters, candidate
 identity and coordination are owned by the
 [Motion Planning augmentation boundary](../motion-planning/motion-planning.md#trajectory-augmentation-boundary),
 not by Task Program or Gym.
@@ -91,25 +93,31 @@ not by Task Program or Gym.
 - [Language and semantic integration](configuration.md): strict decoding, scene/profile contracts, component ownership and service allowlists.
 - [Assurance and execution](execution.md): measured/projected effects, acceptance, parallel calls and MLLM boundaries.
 - [Dataset persistence](../data-pipeline/data-pipeline.md): recorder commits, fragments, failures and finalization.
+- [Scene services](../scene-services/scene-services.md): shared layout, physical state, deterministic changes and measured checks; Task Program retains semantics and execution lifecycle.
+- [Scene expansion](../scene-expansion/scene-expansion.md): fixed scene proposals, injected preparation, independent measured acceptance and reset-time persistence gates.
 
-## Reference integrations
+## Find a configured deployment
 
-| Environment | Assurance | Source |
-|---|---|---|
-| `TaskProgramRubiksCubePickPlace-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/rubiks_cube_pick_place/` |
-| `TaskProgramRepeatedPickPlace-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/` |
-| `TaskProgramRepeatedPickPlace-Newton-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml` with `--physics newton` |
-| `TaskProgramRepeatedPickPlace-Franka-Newton-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml` with `--physics newton` |
-| `TaskProgramOpenDrawer-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/open_drawer/` |
-| `TaskProgramOpenDrawer-Newton-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/open_drawer/task.ur5.yaml` with `--physics newton` |
-| `HandOver-v1` | verified | `embodichain_tasks/configs/tasks/manipulation/hand_over/` |
-| `PourWater-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/` |
+Use `embodichain list-task` and the task-local `catalog.yaml` / runnable YAML
+under `extensions/embodichain_tasks/configs/tasks/` for current IDs, embodiments
+and available deployments. The catalog implementation is
+`embodichain/cli/_task_catalog.py`; this overview does not maintain a second
+inventory of IDs or backend-specific defaults.
 
-The task-local configured expansion example is bound through the deployment's
-shared expansion policy; its README routes to
-`examples/sim/motion/repeated_pick_place_expansion_showcase.py`. That showcase
-reports projected completion and candidate provenance, not measured physical
-success or receipt-confirmed coverage.
+For a minimal projected workflow, start with
+[repeated pick/place](../../../extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/README.md).
+For measured handover, inspect the selected deployment and execution policy in
+`extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/`.
+Assurance belongs to that policy, not the task name or backend. Read the
+[environment selection contract](../env-framework/configuration.md#reusable-gym-deployment-components)
+for backend variants: selecting a physical component does not rename a Gym ID.
+
+Embodiments own robot/sensor calibration and skill profiles; deployment files
+own scene selection and task-local targets. Read their source configurations
+for dimensions, offsets and tuning values. The configured expansion showcase
+is linked from the repeated-pick/place README; projected completion and
+candidate provenance are distinct from measured physical success and
+receipt-confirmed coverage.
 
 ## Recommended change sites
 

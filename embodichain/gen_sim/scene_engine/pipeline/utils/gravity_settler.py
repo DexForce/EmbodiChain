@@ -35,6 +35,14 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import RigidBodyPhysicsCfg, RigidObjectCfg
 from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.utils.logger import log_info
+from embodichain.lab.sim.scene.query import SceneView
+from embodichain.lab.sim.scene.validation import (
+    SceneCheckReport,
+    SettlingCfg,
+    settle_scene,
+)
+
+__all__ = ["GravitySettlerConfig", "GravitySettleBody", "GravitySettler"]
 
 
 @dataclass(frozen=True)
@@ -44,9 +52,17 @@ class GravitySettlerConfig:
     settle_steps: int = 300
     physics_dt: float = 1.0 / 100.0
     sim_device: str = "cpu"
+    settling: SettlingCfg | None = None
 
     def __post_init__(self) -> None:
         """Reject invalid numerical controls before starting a simulation."""
+        if self.settling is not None and (
+            not isinstance(self.settling, SettlingCfg)
+            or self.settling.mode != "convergence"
+        ):
+            raise ValueError("Gravity settling opt-in must use convergence mode.")
+        if self.settling is not None:
+            self.settling.__post_init__()
         if self.settle_steps <= 0:
             raise ValueError("Gravity-settle settle_steps must be positive.")
         if self.physics_dt <= 0.0:
@@ -84,6 +100,7 @@ class GravitySettler:
         self.dynamic_asset_ids = set(dynamic_asset_ids)
         self.static_asset_ids = set(static_asset_ids)
         self.config = config if config is not None else GravitySettlerConfig()
+        self.last_report: SceneCheckReport | None = None
 
     def settle(self) -> dict[str, dict[str, list[float]]]:
         """Return final y-up poses for dynamic participants only.
@@ -93,6 +110,8 @@ class GravitySettler:
         Static participants and every object's scale are unchanged, so they are
         deliberately omitted from the result.
         """
+        self.config.__post_init__()
+        self.last_report = None
         # Check table.
         table = self.table_body.scene_object
         if table.kind != "table":
@@ -170,9 +189,8 @@ class GravitySettler:
                 physics=table.physics,
                 body_type="kinematic",
             )
-            simulated_assets: dict[str, object] = {}
             for asset_id, asset_info in participant_infos_by_id.items():
-                simulated_assets[asset_id] = self._add_sim_body(
+                self._add_sim_body(
                     sim=sim,
                     object_id=asset_id,
                     body_info=asset_info,
@@ -182,16 +200,19 @@ class GravitySettler:
                     ),
                 )
             sim.prepare()
-            sim.update(step=self.config.settle_steps)
+            view = SceneView(sim)
+            self.last_report = settle_scene(
+                view,
+                lambda count: sim.update(step=count),
+                self.config.settling or SettlingCfg(max_steps=self.config.settle_steps),
+            )
+            if self.config.settling is not None and not self.last_report.passed:
+                raise RuntimeError("Gravity settling failed measured convergence")
 
             settled_pose_by_id: dict[str, dict[str, list[float]]] = {}
             for asset_id in self.dynamic_asset_ids:
-                simulated_asset = simulated_assets[asset_id]
                 final_rigid_pose_z_up = np.asarray(
-                    simulated_asset.get_local_pose(to_matrix=True)[0]
-                    .detach()
-                    .cpu()
-                    .numpy(),
+                    view.pose(asset_id, to_matrix=True)[0].detach().cpu().numpy(),
                     dtype=float,
                 )
                 scale_matrix = np.eye(4)

@@ -30,7 +30,12 @@ from embodichain.lab.sim.motion.planners.base_planner import (
     _infer_batch_size,
     validate_plan_options,
 )
-from embodichain.lab.sim.motion.planners.utils import MoveType, PlanResult, PlanState
+from embodichain.lab.sim.motion.planners.utils import (
+    MoveType,
+    PlanResult,
+    PlanState,
+    TrajectorySampleMethod,
+)
 from embodichain.utils import configclass, logger
 from embodichain.utils.math import quat_error_magnitude, quat_from_matrix
 
@@ -68,6 +73,7 @@ class _WaypointObservationLayout:
     num_controlled_joints: int
     use_relative_obs: bool
     canonicalize_quat_obs: bool = True
+    joint_periodic_features: bool = False
 
     def __post_init__(self) -> None:
         if self.num_waypoints < 1 or self.num_controlled_joints < 1:
@@ -99,6 +105,8 @@ class _WaypointObservationLayout:
                     ("waypoint_joint_err", j * n),
                 ]
             )
+        if self.joint_periodic_features:
+            widths.extend((("joint_sin", j), ("joint_cos", j)))
         return tuple(widths)
 
     @property
@@ -131,13 +139,15 @@ class _WaypointObservationLayout:
             "quaternion_order": _WAYPOINT_OBSERVATION_QUATERNION_ORDER,
             "use_relative_obs": bool(self.use_relative_obs),
         }
+        if self.joint_periodic_features:
+            payload["joint_periodic_encoding"] = "sin_cos_radians"
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
         return hashlib.sha256(encoded).hexdigest()
 
     @property
     def onnx_metadata(self) -> dict[str, str]:
         """Return metadata expected from an NMG ONNX export."""
-        return {
+        metadata = {
             "nmg.observation_layout": _WAYPOINT_OBSERVATION_LAYOUT,
             "nmg.observation_fingerprint": self.fingerprint,
             "nmg.num_waypoints": str(int(self.num_waypoints)),
@@ -146,6 +156,9 @@ class _WaypointObservationLayout:
             "nmg.canonicalize_quat_obs": str(bool(self.canonicalize_quat_obs)).lower(),
             "nmg.quaternion_order": _WAYPOINT_OBSERVATION_QUATERNION_ORDER,
         }
+        if self.joint_periodic_features:
+            metadata["nmg.joint_periodic_encoding"] = "sin_cos_radians"
+        return metadata
 
     def concatenate(self, blocks: Mapping[str, torch.Tensor]) -> torch.Tensor:
         """Validate and concatenate named observation blocks in contract order."""
@@ -208,11 +221,16 @@ class _OnnxPolicy:
             raise ValueError(
                 f"Expected ONNX input shape [batch, obs], got {input_shape}."
             )
-        if len(output_shape) != 2 or output_shape[1] != 7:
+        if (
+            len(output_shape) != 2
+            or not isinstance(output_shape[1], int)
+            or output_shape[1] < 1
+        ):
             raise ValueError(
-                f"Expected ONNX output shape [batch, 7], got {output_shape}."
+                f"Expected ONNX output shape [batch, joints], got {output_shape}."
             )
         self.obs_dim = int(input_shape[1])
+        self.output_dim = int(output_shape[1])
         self.observation_metadata = dict(
             self.session.get_modelmeta().custom_metadata_map
         )
@@ -231,9 +249,19 @@ class _OnnxPolicy:
         return torch.as_tensor(action, dtype=torch.float32, device=obs.device)
 
 
-def _waypoint_obs_dim(num_waypoints: int, use_relative_obs: bool) -> int:
+def _waypoint_obs_dim(
+    num_waypoints: int,
+    use_relative_obs: bool,
+    num_arm_joints: int = 7,
+    joint_periodic_features: bool = False,
+) -> int:
     """Return the unified NMG constraint-observation width."""
-    return _WaypointObservationLayout(int(num_waypoints), 7, bool(use_relative_obs)).dim
+    return _WaypointObservationLayout(
+        int(num_waypoints),
+        int(num_arm_joints),
+        bool(use_relative_obs),
+        joint_periodic_features=bool(joint_periodic_features),
+    ).dim
 
 
 def _quat_inverse_xyzw(q: torch.Tensor) -> torch.Tensor:
@@ -289,6 +317,9 @@ class NeuralPlannerCfg(BasePlannerCfg):
     canonicalize_quat_obs: bool = True
     """Whether quaternion observations use the training-time ``w >= 0`` convention."""
 
+    joint_periodic_features: bool = False
+    """Append sin/cos of raw joints after the relative observation blocks."""
+
     intermediate_orientation: bool = True
     """Whether every Cartesian waypoint requires its orientation constraint."""
 
@@ -316,7 +347,30 @@ class NeuralPlannerCfg(BasePlannerCfg):
     """
 
     dt: float = 0.01
-    """Nominal timestep reported in PlanResult."""
+    """Output sampling period in seconds.
+
+    Without :attr:`constraints` this is bookkeeping rather than executable
+    timing.
+
+    The rollout integrates a joint delta per step and never solves a duration,
+    so this value is bookkeeping rather than executable timing: at the default
+    ``action_scale`` a saturated step implies ``action_scale / dt`` rad/s,
+    which exceeds a typical arm's joint velocity limit several times over. Set
+    :attr:`constraints` to replace it with a solved time parameterization, in
+    which case this becomes the period that trajectory is sampled on.
+    """
+
+    constraints: dict[str, float | list[float]] | None = None
+    """Optional ``velocity`` and ``acceleration`` limits for output retiming.
+
+    ``None`` keeps the rollout's nominal timing and current behavior. When set,
+    the closed-loop samples are treated as a geometric path and re-parameterized
+    under these limits, so the returned timing and derivatives are executable.
+    Keys and value shapes match :class:`ToppraPlanOptions`: a scalar or one
+    value per controlled joint. Retiming resamples the path, so it changes the
+    reported positions and poses as well as the timing, and it cannot reduce
+    the path's own jerk -- only the duration over which it is traversed.
+    """
 
 
 @configclass
@@ -390,11 +444,10 @@ class NeuralPlanner(BasePlanner):
         self._num_waypoints = int(self.cfg.num_waypoints)
         self._use_relative_obs = bool(self.cfg.use_relative_obs)
         self._canonicalize_quat_obs = bool(self.cfg.canonicalize_quat_obs)
+        self._joint_periodic_features = bool(self.cfg.joint_periodic_features)
         self._action_dim = int(self.cfg.num_arm_joints)
-        if self._action_dim != 7:
-            raise ValueError(
-                f"NMG ONNX policy controls 7 arm joints, got {self._action_dim}."
-            )
+        if self._action_dim < 1:
+            raise ValueError("num_arm_joints must be positive.")
         self._max_steps = int(self.cfg.max_steps)
         self._pos_eps = float(self.cfg.pos_eps)
         self._rot_eps = float(self.cfg.rot_eps)
@@ -402,11 +455,17 @@ class NeuralPlanner(BasePlanner):
         self._intermediate_orientation = bool(self.cfg.intermediate_orientation)
         self._policy = _OnnxPolicy(model_path, self.cfg.onnx_providers)
         self._obs_dim = self._policy.obs_dim
+        output_dim = getattr(self._policy, "output_dim", self._action_dim)
+        if output_dim != self._action_dim:
+            raise ValueError(
+                f"ONNX output has {output_dim} joints, expected {self._action_dim}."
+            )
         self._observation_layout = _WaypointObservationLayout(
             self._num_waypoints,
             self._action_dim,
             self._use_relative_obs,
             self._canonicalize_quat_obs,
+            self._joint_periodic_features,
         )
         self._policy_frame_from_world = self._as_transform(
             self.cfg.policy_frame_from_world, "policy_frame_from_world"
@@ -467,7 +526,7 @@ class NeuralPlanner(BasePlanner):
         Args:
             target_states: List of :class:`PlanState` waypoints. Each entry uses
                 :attr:`MoveType.EEF_MOVE` with ``xpos`` shape ``(B, 4, 4)`` or
-                :attr:`MoveType.JOINT_MOVE` with ``qpos`` shape ``(B, 7)``.
+                :attr:`MoveType.JOINT_MOVE` with ``qpos`` shape ``(B, num_arm_joints)``.
             options: :class:`NeuralPlanOptions` with ``control_part``,
                 ``start_qpos``, and ``max_steps`` overrides.
 
@@ -517,6 +576,7 @@ class NeuralPlanner(BasePlanner):
         positions = [qpos.clone()]
         xpos_list = [self._fk_matrix(qpos, control_part)]
         converged = torch.zeros(b, dtype=torch.bool, device=self.device)
+        path_lengths = torch.ones(b, dtype=torch.int32, device=self.device)
         max_steps = int(options.max_steps or self._max_steps)
 
         with torch.no_grad():
@@ -553,6 +613,7 @@ class NeuralPlanner(BasePlanner):
                 )
                 positions.append(qpos.clone())
                 xpos_list.append(self._fk_matrix(qpos, control_part))
+                path_lengths += not_converged.to(path_lengths.dtype)
 
                 ee_pose = self._fk_pose_xyzw(qpos, control_part)
                 reached = self._is_active_reached(
@@ -583,10 +644,27 @@ class NeuralPlanner(BasePlanner):
         dt[:, 0] = 0.0
         positions_t = positions_t.permute(1, 0, 2)
         xpos_t = xpos_t.permute(1, 0, 2, 3)
+        success = active_idx >= episode_k
+        if self.cfg.constraints is not None:
+            return self._retimed_result(
+                success,
+                positions_t,
+                control_part,
+                path_lengths=path_lengths,
+                waypoints=(
+                    waypoints_pos,
+                    waypoints_quat,
+                    waypoints_joint,
+                    pos_mask,
+                    rot_mask,
+                    joint_mask,
+                ),
+                episode_k=episode_k,
+                qpos_limits=(lower, upper),
+            )
         velocities_t, accelerations_t = self._compute_vel_acc_via_finite_diff(
             positions_t, dt
         )
-        success = active_idx >= episode_k
         return PlanResult(
             success=success,
             positions=positions_t,
@@ -595,6 +673,159 @@ class NeuralPlanner(BasePlanner):
             xpos_list=xpos_t,
             dt=dt,
         )
+
+    def _retimed_result(
+        self,
+        success: torch.Tensor,
+        positions: torch.Tensor,
+        control_part: str,
+        *,
+        path_lengths: torch.Tensor,
+        waypoints: tuple[torch.Tensor, ...],
+        episode_k: int,
+        qpos_limits: tuple[torch.Tensor, torch.Tensor],
+    ) -> PlanResult:
+        """Re-parameterize the rollout path under the configured limits.
+
+        Retiming fits a spline through the rollout samples and resamples it, so
+        the returned trajectory is not the one the rollout verified. Success is
+        therefore re-derived from the samples actually returned rather than
+        carried over: the resampled grid can step past a waypoint the rollout
+        stopped on, and a spline through samples clamped at a joint limit can
+        overshoot that limit between them. A row is reported as successful only
+        when its returned trajectory parameterizes, moves in nonzero time,
+        stays inside the joint limits, and still reaches every waypoint.
+
+        Args:
+            success: Per-env rollout convergence of shape ``(B,)``.
+            positions: Rollout joint samples of shape ``(B, N, DOF)``.
+            control_part: Robot control part used for forward kinematics.
+            path_lengths: Valid rollout prefix length for each environment.
+                Samples after that prefix only hold an already-converged row
+                while other rows continue and must not affect spline fitting.
+            waypoints: Parsed waypoint targets and masks from
+                :meth:`_parse_waypoints`.
+            episode_k: Number of waypoints this episode must reach.
+            qpos_limits: Lower and upper joint-position limits.
+
+        Returns:
+            PlanResult with solved timing, derivatives and recomputed poses.
+        """
+        from .toppra_planner import retime_joint_paths
+
+        # Sample the solved trajectory on the configured control period rather
+        # than on the rollout's step count. The rollout emits however many
+        # steps it happened to take, which is far too coarse once the duration
+        # stretches: a waypoint the rollout stopped on then falls between two
+        # output samples and is reported as missed.
+        retimed = retime_joint_paths(
+            positions,
+            constraints=dict(self.cfg.constraints),
+            path_lengths=path_lengths,
+            sample_method=TrajectorySampleMethod.TIME,
+            sample_interval=float(self.cfg.dt),
+            device=self.device,
+        )
+        retimed_positions = retimed.positions
+        # One batched FK over every sample; the waypoint re-check reuses it.
+        poses = self.robot.compute_batch_fk(
+            qpos=retimed_positions, name=control_part, to_matrix=True
+        )
+        success = success & retimed.success.to(success.device)
+        success = success & self._retimed_is_executable(
+            retimed_positions, retimed.dt, qpos_limits
+        )
+        success = success & self._retimed_reaches_waypoints(
+            retimed_positions, poses, waypoints, episode_k
+        )
+        return PlanResult(
+            success=success,
+            positions=retimed_positions,
+            velocities=retimed.velocities,
+            accelerations=retimed.accelerations,
+            xpos_list=poses,
+            dt=retimed.dt,
+        )
+
+    def _retimed_is_executable(
+        self,
+        positions: torch.Tensor,
+        dt: torch.Tensor,
+        qpos_limits: tuple[torch.Tensor, torch.Tensor],
+    ) -> torch.Tensor:
+        """Return whether each retimed row has real timing and legal positions.
+
+        The shared retiming kernel returns a zero-duration result for a path
+        whose endpoints nearly coincide, which would claim a move with no time
+        to execute it. Spline interpolation through samples the rollout clamped
+        at a joint limit can also overshoot that limit between them, since the
+        fit sees only the sampled values.
+        """
+        lower, upper = qpos_limits
+        arm = positions[..., : self._action_dim]
+        moves = (arm - arm[:, :1]).abs().amax(dim=(1, 2)) > 1.0e-9
+        timed = dt.sum(dim=-1) > 0.0
+        within = ((arm >= lower) & (arm <= upper)).all(dim=-1).all(dim=-1)
+        return within & (timed | ~moves)
+
+    def _retimed_reaches_waypoints(
+        self,
+        positions: torch.Tensor,
+        poses: torch.Tensor,
+        waypoints: tuple[torch.Tensor, ...],
+        episode_k: int,
+    ) -> torch.Tensor:
+        """Return whether each retimed row still reaches every waypoint in order.
+
+        Applies the rollout's own arrival test to the resampled grid, so a
+        trajectory that passes a waypoint only between output samples is not
+        reported as reaching it.
+
+        The test runs once per waypoint over every sample at once rather than
+        once per sample, so its cost does not grow with the solved duration
+        and nothing synchronizes with the host inside the loop. Order follows
+        the rollout with nondecreasing arrival indices, so targets independently
+        satisfied by one stationary sample do not require duplicate output.
+        """
+        (
+            waypoints_pos,
+            waypoints_quat,
+            waypoints_joint,
+            pos_mask,
+            rot_mask,
+            joint_mask,
+        ) = waypoints
+        batch, samples = positions.shape[:2]
+        flat_joint = positions[..., : self._action_dim].flatten(0, 1)
+        flat_pose = self._policy_pose_xyzw(poses.flatten(0, 1))
+        per_sample = lambda tensor: tensor.repeat_interleave(samples, dim=0)
+        targets = tuple(
+            per_sample(tensor)
+            for tensor in (
+                waypoints_pos,
+                waypoints_quat,
+                waypoints_joint,
+                pos_mask,
+                rot_mask,
+                joint_mask,
+            )
+        )
+        sample_index = torch.arange(samples, device=self.device)
+        # Sample at which the previous waypoint was first reached; -1 before
+        # the first, and `samples` once a row has missed one.
+        reached_at = torch.full((batch,), -1, dtype=torch.long, device=self.device)
+        for waypoint in range(episode_k):
+            active = torch.full(
+                (batch * samples,), waypoint, dtype=torch.long, device=self.device
+            )
+            reached = self._is_active_reached(
+                flat_joint, flat_pose, *targets, active
+            ).view(batch, samples)
+            eligible = reached & (sample_index >= reached_at.unsqueeze(-1))
+            reached_at = torch.where(
+                eligible, sample_index, torch.full_like(sample_index, samples)
+            ).amin(dim=-1)
+        return reached_at < samples
 
     def _parse_waypoints(self, target_states: list[PlanState]) -> tuple[
         torch.Tensor,
@@ -702,7 +933,11 @@ class NeuralPlanner(BasePlanner):
 
     def _fk_pose_xyzw(self, qpos: torch.Tensor, control_part: str) -> torch.Tensor:
         """Return the policy-frame FK pose as ``xyz + xyzw``."""
-        fk = self._to_policy_frame(self._fk_matrix(qpos, control_part))
+        return self._policy_pose_xyzw(self._fk_matrix(qpos, control_part))
+
+    def _policy_pose_xyzw(self, fk_matrix: torch.Tensor) -> torch.Tensor:
+        """Map ``(M, 4, 4)`` runtime TCP poses to policy-frame ``xyz + xyzw``."""
+        fk = self._to_policy_frame(fk_matrix)
         pos = fk[:, :3, 3]
         # ``quat_from_matrix`` is an EmbodiChain ``xyzw`` producer; converting
         # it again would turn a valid pose into a different rotation.
@@ -780,6 +1015,8 @@ class NeuralPlanner(BasePlanner):
                     ),
                 }
             )
+        if getattr(self, "_joint_periodic_features", False):
+            obs_blocks.update(joint_sin=joint_pos.sin(), joint_cos=joint_pos.cos())
         layout = getattr(
             self,
             "_observation_layout",
@@ -788,6 +1025,7 @@ class NeuralPlanner(BasePlanner):
                 self._action_dim,
                 self._use_relative_obs,
                 getattr(self, "_canonicalize_quat_obs", False),
+                getattr(self, "_joint_periodic_features", False),
             ),
         )
         obs = layout.concatenate(obs_blocks)

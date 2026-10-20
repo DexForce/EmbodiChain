@@ -1119,7 +1119,13 @@ def test_place_effect_spec_binds_source_and_verified_detach_baseline() -> None:
     assert grounded.invocation.phase_effect_gates == (gate.requirement,)
 
 
-def test_handover_effect_spec_binds_source_and_destination_relations() -> None:
+@pytest.mark.parametrize(
+    "final_target",
+    [None, SemanticPose((0.0, -0.2, 0.6), (0.0, 0.0, 0.0, 1.0))],
+)
+def test_handover_effect_spec_binds_source_and_destination_relations(
+    final_target: SemanticPose | None,
+) -> None:
     registry, _ = _scene_registry()
     provider = _DualCenterHandOverProvider()
     compiler, _ = _compiler(
@@ -1127,7 +1133,9 @@ def test_handover_effect_spec_binds_source_and_destination_relations() -> None:
         profile=_dual_profile(),
         handover_pose_providers=(provider,),
     )
-    workflow = compiler.analyze((HandOver(object=SceneObjectRef("cube")),))
+    workflow = compiler.analyze(
+        (HandOver(object=SceneObjectRef("cube"), final_target=final_target),)
+    )
 
     assert workflow.calls[0].symbolic_writes == frozenset(
         {
@@ -1163,6 +1171,10 @@ def test_handover_effect_spec_binds_source_and_destination_relations() -> None:
     assert destination.task_state_key == "right"
     assert isinstance(destination_constraint, BinaryEffectClause)
     assert destination_constraint.expected is False
+    assert {
+        clause["clause_id"]: clause["expected"]
+        for clause in spec.to_metadata()["clauses"]
+    } == {"source.constraint": False, "destination.constraint": False}
     assert type(grounded.invocation.goal) is HandOverGoal
     assert type(grounded.invocation.skill_options) is HandOverOptions
     assert tuple(guard.guard_id for guard in grounded.effect_guards) == (
@@ -1202,6 +1214,13 @@ def test_handover_effect_spec_binds_source_and_destination_relations() -> None:
     assert isinstance(destination_acquired_relation, HeldObjectStateExpectation)
     assert source_acquired_relation.relation is HeldObjectRelation.ATTACHED
     assert destination_acquired_relation.relation is HeldObjectRelation.ATTACHED
+    for gate, expected in zip(grounded.effect_gates, (True, True), strict=True):
+        assert [
+            clause["expected"]
+            for clause in gate.effect_spec.to_metadata()["clauses"]
+            if clause.get("evidence_kind") == "constraint"
+        ] == [expected]
+
     assert grounded.invocation.phase_effect_gates == tuple(
         gate.requirement for gate in grounded.effect_gates
     )

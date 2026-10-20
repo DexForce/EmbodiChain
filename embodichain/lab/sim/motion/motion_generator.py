@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import MISSING
 from typing import Literal
@@ -41,6 +41,7 @@ from embodichain.lab.sim.motion.planners import (
     NeuralPlannerCfg,
     CuroboPlanner,
     CuroboPlannerCfg,
+    CuroboPlanOptions,
 )
 from embodichain.compute.trajectory import (
     interpolate_with_distance,
@@ -48,21 +49,35 @@ from embodichain.compute.trajectory import (
     resample_in_time,
     differentiate_positions,
 )
+from embodichain.compute.trajectory.interpolation import (
+    _minimum_jerk_progress,
+    interpolate_minimum_jerk,
+)
 from embodichain.utils import logger, configclass
+from embodichain.utils.math import (
+    axis_angle_from_quat,
+    axis_angle_to_rotation_matrix,
+    quat_error_magnitude,
+    quat_from_matrix,
+)
+from .planners._joint_limits import _joint_velocity_limits, _plan_joint_ids
 from .planners.utils import (
     MoveType,
     PlanResult,
     PlanState,
     TrajectorySampleMethod,
-    normalize_success_mask,
-)
-from .planners.utils import (
     calculate_point_allocations,
-    interpolate_xpos,
     interpolate_xpos_batched,
+    normalize_success_mask,
 )
 
 __all__ = ["MotionGenerator", "MotionGenCfg", "MotionGenOptions"]
+
+# Limit flattened targets before numerical solvers expand their multi-start
+# seeds. One environment with many waypoints must not create an unbounded solve.
+# Also bound the path span between seed anchors for single-environment requests.
+_MAX_IK_BATCH_TARGETS = 512
+_MAX_IK_BATCH_WAYPOINTS = 32
 
 
 @configclass
@@ -84,10 +99,10 @@ class MotionGenOptions:
     """Requested output sample count; ``None`` preserves backend defaults."""
 
     velocity_limit: float | None = None
-    """Optional scalar joint velocity limit used by compatible backends."""
+    """Optional scalar speed request, capped by effective Robot joint limits."""
 
     acceleration_limit: float | None = None
-    """Optional scalar joint acceleration limit used by compatible backends."""
+    """Optional scalar planner-owned joint acceleration budget."""
 
     start_qpos: torch.Tensor | None = None
     """Observed controlled-joint start, shape ``(B, DOF)``.
@@ -129,10 +144,22 @@ class MotionGenOptions:
     """
 
     preserve_cartesian_samples: bool = False
-    """Treat Cartesian targets as exact output samples in ``ik_interp`` only.
+    """Treat Cartesian targets as an exact sampled path in ``ik_interp`` only.
 
     This constrained mode requires exactly ``sample_count - 1`` target states;
-    the observed start configuration supplies the first output sample.
+    the observed start configuration supplies the first sample. Without motion
+    limits, targets are emitted unchanged. With limits, their Cartesian path is
+    resampled by a minimum-jerk progress law and every emitted pose is solved by
+    IK.
+    """
+
+    cartesian_path_sampler: Callable[[torch.Tensor], torch.Tensor] | None = None
+    """Optional exact-path sampler for normalized progress values.
+
+    The callback receives a one-dimensional tensor spanning zero through one
+    and returns poses with shape ``(B, T, 4, 4)``. Use it for paths whose
+    geometry cannot be recovered from Cartesian chords, such as rotation about
+    an external hinge. It is valid only with ``preserve_cartesian_samples``.
     """
 
     interpolate_position_step: float = 0.002
@@ -148,13 +175,17 @@ class MotionGenOptions:
                 "preserve_cartesian_samples requires strategy='ik_interp'; "
                 "planner backends do not guarantee exact Cartesian samples."
             )
-        if self.strategy == "ik_interp" and any(
-            value is not None
-            for value in (self.plan_opts, self.velocity_limit, self.acceleration_limit)
-        ):
+        if self.cartesian_path_sampler is not None:
+            if not callable(self.cartesian_path_sampler):
+                raise TypeError("cartesian_path_sampler must be callable or None.")
+            if not self.preserve_cartesian_samples:
+                raise ValueError(
+                    "cartesian_path_sampler requires preserve_cartesian_samples=True."
+                )
+        if self.strategy == "ik_interp" and self.plan_opts is not None:
             raise ValueError(
-                "strategy='ik_interp' does not consume plan_opts, velocity_limit, "
-                "or acceleration_limit; use strategy='motion_gen' for backend limits."
+                "strategy='ik_interp' does not consume plan_opts; use "
+                "strategy='motion_gen' for backend-specific options."
             )
         if (
             self.strategy == "ik_interp"
@@ -173,10 +204,14 @@ class MotionGenOptions:
             )
         if self.sample_count is not None and self.sample_count < 2:
             raise ValueError("sample_count must be at least 2 when set.")
-        if self.velocity_limit is not None and self.velocity_limit <= 0.0:
-            raise ValueError("velocity_limit must be greater than zero when set.")
-        if self.acceleration_limit is not None and self.acceleration_limit <= 0.0:
-            raise ValueError("acceleration_limit must be greater than zero when set.")
+        if self.velocity_limit is not None and (
+            not math.isfinite(self.velocity_limit) or self.velocity_limit <= 0.0
+        ):
+            raise ValueError("velocity_limit must be finite and greater than zero.")
+        if self.acceleration_limit is not None and (
+            not math.isfinite(self.acceleration_limit) or self.acceleration_limit <= 0.0
+        ):
+            raise ValueError("acceleration_limit must be finite and greater than zero.")
         if self.interpolation_dt is not None:
             if isinstance(self.interpolation_dt, bool) or not isinstance(
                 self.interpolation_dt, (int, float)
@@ -450,8 +485,23 @@ class MotionGenerator:
         if sample_count is not None and sample_count < 2:
             raise ValueError("sample_count must be at least 2.")
         if plan_opts is not None:
-            return deepcopy(plan_opts)
+            resolved = deepcopy(plan_opts)
+            if isinstance(resolved, CuroboPlanOptions):
+                if velocity_limit is not None:
+                    resolved.max_velocity = float(velocity_limit)
+                if acceleration_limit is not None:
+                    resolved.max_acceleration = float(acceleration_limit)
+            return resolved
         planner_type = getattr(getattr(self.planner, "cfg", None), "planner_type", None)
+        if planner_type == "curobo":
+            return CuroboPlanOptions(
+                max_velocity=(
+                    None if velocity_limit is None else float(velocity_limit)
+                ),
+                max_acceleration=(
+                    None if acceleration_limit is None else float(acceleration_limit)
+                ),
+            )
         if planner_type in {"toppra", "trapezoidal"} and (
             sample_count is not None
             or velocity_limit is not None
@@ -462,11 +512,9 @@ class MotionGenerator:
                 if planner_type == "toppra"
                 else TrapezoidalPlanOptions
             )
-            constraints: dict[str, float] = {
-                "velocity": 0.2 if velocity_limit is None else velocity_limit,
-                "acceleration": (
-                    0.5 if acceleration_limit is None else acceleration_limit
-                ),
+            constraints: dict[str, float | None] = {
+                "velocity": velocity_limit,
+                "acceleration": acceleration_limit,
             }
             if planner_type == "trapezoidal":
                 constraints["jerk"] = 2.0
@@ -478,6 +526,59 @@ class MotionGenerator:
                 )
             return options_type(**options_kwargs)
         return self.planner.default_plan_options()
+
+    def _resolve_velocity_limits(
+        self,
+        *,
+        control_part: str | None,
+        batch_size: int,
+        dof: int,
+        requested: float | None,
+        reference: torch.Tensor,
+    ) -> torch.Tensor:
+        """Intersect one scalar request with effective ordered Robot speed caps.
+
+        Shared planner resolution fills missing runtime caps from the assembled
+        asset and projects mimic follower caps before selecting control joints.
+        Requests can only tighten known caps; joints still lacking metadata use
+        the request or the default interpolation budget.
+        """
+        joint_names = getattr(self.robot, "joint_names", None)
+        use_full_limits = isinstance(joint_names, (list, tuple)) and bool(joint_names)
+        if use_full_limits:
+            joint_ids = _plan_joint_ids(self.robot, control_part, dof)
+            limits = _joint_velocity_limits(
+                self.robot, device=reference.device, dtype=reference.dtype
+            )
+            limits = limits[:, joint_ids]
+        else:
+            limits = self.robot.get_qvel_limits(name=control_part).detach().clone()
+            if limits.ndim != 2 or limits.shape[1] != dof:
+                raise ValueError(
+                    "Robot velocity limits must have shape (B, interpolation DOF)."
+                )
+            limits = torch.where(
+                torch.isfinite(limits) & (limits >= 0.0) & (limits < 1.0e9),
+                limits,
+                torch.inf,
+            )
+        if limits.shape[0] < batch_size:
+            raise ValueError(
+                "Robot velocity limits do not cover the interpolation batch."
+            )
+        limits = limits[:batch_size].to(
+            device=reference.device,
+            dtype=reference.dtype,
+        )
+        caps = limits.amin(dim=0)
+        if requested is None:
+            return torch.where(torch.isfinite(caps), caps, 0.2)
+        requested_limits = torch.full_like(caps, float(requested))
+        return torch.where(
+            torch.isfinite(caps),
+            torch.minimum(caps, requested_limits),
+            requested_limits,
+        )
 
     @classmethod
     def register_planner_type(cls, name: str, planner_class, planner_cfg_class) -> None:
@@ -691,6 +792,29 @@ class MotionGenerator:
             # lower bound instead of rejecting an otherwise valid path. An
             # explicit TrapezoidalPlanOptions remains caller-authoritative.
             plan_opts.sample_interval = len(target_plan_states)
+        planner_context_method = getattr(
+            type(self.planner), "with_motion_context", None
+        )
+        legacy_backend_limits = planner_context_method in {
+            None,
+            BasePlanner.with_motion_context,
+        }
+        if (
+            not explicit_plan_options
+            and legacy_backend_limits
+            and isinstance(plan_opts, (ToppraPlanOptions, TrapezoidalPlanOptions))
+        ):
+            reference_qpos = target_plan_states[0].qpos
+            if reference_qpos is not None:
+                if reference_qpos.dim() == 1:
+                    reference_qpos = reference_qpos.unsqueeze(0)
+                plan_opts.constraints["velocity"] = self._resolve_velocity_limits(
+                    control_part=options.control_part,
+                    batch_size=reference_qpos.shape[0],
+                    dof=reference_qpos.shape[1],
+                    requested=options.velocity_limit,
+                    reference=reference_qpos,
+                )
         plan_opts = self.planner.with_motion_context(
             plan_opts,
             start_qpos=options.start_qpos,
@@ -718,44 +842,130 @@ class MotionGenerator:
         poses: torch.Tensor,
         start_qpos: torch.Tensor,
         control_part: str,
+        *,
+        known_start: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Solve required poses in order, retaining every row and IK failure."""
+        """Batch required poses, retaining FK-confirmed starts and IK failures.
+
+        Solvers with continuous candidate selection receive an initial path
+        seed. Other solvers first solve each chunk's endpoint from the preceding
+        chunk, then solve its interior together using interpolated joint seeds.
+        These seeds encourage a consistent branch without claiming continuous
+        selection for solvers that do not support it.
+        """
         device = self._runtime_device()
         start_qpos = start_qpos.to(device)
         batch_size, controlled_dof = start_qpos.shape
         if poses.ndim != 4 or poses.shape[0] != batch_size or poses.shape[2:] != (4, 4):
             raise ValueError("Cartesian waypoints must have shape (B, N, 4, 4).")
+        if poses.shape[1] == 0:
+            raise ValueError("Cartesian waypoints must contain at least one pose.")
+        poses = poses.to(device)
+        solver = self.robot.get_solver(control_part)
+        continuous = solver is not None and solver.supports_continuous_batch_ik
+        chunk_size = max(
+            1, min(_MAX_IK_BATCH_WAYPOINTS, _MAX_IK_BATCH_TARGETS // batch_size)
+        )
         success = torch.ones(batch_size, dtype=torch.bool, device=device)
         qpos_seed = start_qpos
-        solved_waypoints = []
-        for index in range(poses.shape[1]):
-            step_success, qpos = self.robot.compute_ik(
-                pose=poses[:, index].to(device),
-                name=control_part,
-                joint_seed=qpos_seed,
-            )
-            step_success = normalize_success_mask(
-                step_success,
-                num_envs=batch_size,
-                device=device,
-                name=f"IK success for target state {index}",
-            )
-            qpos = torch.as_tensor(qpos, dtype=start_qpos.dtype, device=device)
-            if qpos.shape != (batch_size, controlled_dof):
-                raise ValueError(
-                    "IK qpos must have shape "
-                    f"({batch_size}, {controlled_dof}), got {tuple(qpos.shape)}."
+        solved_waypoints: list[torch.Tensor] = []
+        first_index = 0
+        if known_start is not None:
+            known_start = known_start.to(device)
+            if bool(known_start.all()):
+                # FK already grounded this pose, including at singularities
+                # where IK may fail. Keep it outside the solver batches.
+                solved_waypoints.append(start_qpos[:, None, :])
+                first_index = 1
+        for offset in range(first_index, poses.shape[1], chunk_size):
+            chunk = poses[:, offset : offset + chunk_size]
+            count = chunk.shape[1]
+            if continuous:
+                valid, qpos = self._compute_cartesian_ik_batch(
+                    chunk, qpos_seed, control_part, continuous=True
                 )
-            step_success = step_success & torch.isfinite(qpos).all(dim=1)
-            qpos = torch.where(step_success[:, None], qpos, qpos_seed)
-            success &= step_success
+            else:
+                end_valid, end_qpos = self._compute_cartesian_ik_batch(
+                    chunk[:, -1:], qpos_seed[:, None, :], control_part
+                )
+                if count == 1:
+                    valid, qpos = end_valid, end_qpos
+                else:
+                    safe_end = torch.where(end_valid, end_qpos[:, 0], qpos_seed)
+                    weights = (
+                        torch.arange(1, count, dtype=start_qpos.dtype, device=device)
+                        / count
+                    )
+                    seeds = torch.lerp(
+                        qpos_seed[:, None, :],
+                        safe_end[:, None, :],
+                        weights[None, :, None],
+                    )
+                    inner_valid, inner_qpos = self._compute_cartesian_ik_batch(
+                        chunk[:, :-1], seeds, control_part
+                    )
+                    valid = torch.cat((inner_valid, end_valid), dim=1)
+                    qpos = torch.cat((inner_qpos, end_qpos), dim=1)
+
+            if offset == 0 and known_start is not None:
+                # Mixed rows still solve the unconfirmed first poses. Only
+                # confirmed rows may disregard that first sample's IK failure.
+                qpos = qpos.clone()
+                valid = valid.clone()
+                qpos[:, 0] = torch.where(known_start[:, None], start_qpos, qpos[:, 0])
+                valid[:, 0] |= known_start
+
+            # Invalid/nonfinite solutions hold the preceding valid seed, even
+            # across chunks. A later reachable pose never rescues a failed row.
+            indices = torch.arange(1, count + 1, device=device).expand(batch_size, -1)
+            previous_valid = torch.where(valid, indices, 0).cummax(dim=1).values
+            candidates = torch.cat((qpos_seed[:, None, :], qpos), dim=1)
+            qpos = candidates.gather(
+                1, previous_valid[:, :, None].expand(-1, -1, controlled_dof)
+            )
+            success &= valid.all(dim=1)
             solved_waypoints.append(qpos)
-            qpos_seed = qpos
-        positions = torch.stack(solved_waypoints, dim=1)
+            qpos_seed = qpos[:, -1]
+        positions = torch.cat(solved_waypoints, dim=1)
         positions = torch.where(
             success[:, None, None], positions, start_qpos[:, None, :]
         )
         return success, positions
+
+    def _compute_cartesian_ik_batch(
+        self,
+        poses: torch.Tensor,
+        joint_seed: torch.Tensor,
+        control_part: str,
+        *,
+        continuous: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Validate per-waypoint batch results and reject nonfinite solutions."""
+        valid, qpos = self.robot.compute_batch_ik(
+            pose=poses,
+            joint_seed=joint_seed,
+            name=control_part,
+            **({"continuous": True} if continuous else {}),
+        )
+        batch_size, count = poses.shape[:2]
+        if isinstance(valid, torch.Tensor) and valid.shape != (batch_size, count):
+            raise ValueError(
+                f"IK success must have shape ({batch_size}, {count}), "
+                f"got {tuple(valid.shape)}."
+            )
+        valid = normalize_success_mask(
+            valid.flatten() if isinstance(valid, torch.Tensor) else valid,
+            num_envs=batch_size * count,
+            device=joint_seed.device,
+            name="Batch IK success",
+        ).reshape(batch_size, count)
+        qpos = torch.as_tensor(qpos, dtype=joint_seed.dtype, device=joint_seed.device)
+        expected_shape = (batch_size, count, joint_seed.shape[-1])
+        if qpos.shape != expected_shape:
+            raise ValueError(
+                f"IK qpos must have shape {expected_shape}, got {tuple(qpos.shape)}."
+            )
+        return valid & torch.isfinite(qpos).all(dim=2), qpos
 
     def _generate_ik_interpolation(
         self,
@@ -796,11 +1006,7 @@ class MotionGenerator:
                 [start_qpos.unsqueeze(1), torch.stack(qpos_targets, dim=1)],
                 dim=1,
             )
-            positions = interpolate_with_distance(
-                trajectory=keyframes,
-                interp_num=options.sample_count,
-                device=device,
-            )
+            positions = self._interpolate_ik_keyframes(keyframes, options)
             dt = self._uniform_dt(
                 batch_size=batch_size,
                 waypoint_count=positions.shape[1],
@@ -841,13 +1047,34 @@ class MotionGenerator:
                     f"{len(target_states)} targets for sample_count "
                     f"{options.sample_count}."
                 )
-            positions = keyframes
+            preserve_fixed_grid = False
+            if options.velocity_limit is None and options.acceleration_limit is None:
+                velocity_limits = self._resolve_velocity_limits(
+                    control_part=options.control_part,
+                    batch_size=batch_size,
+                    dof=controlled_dof,
+                    requested=None,
+                    reference=keyframes,
+                )
+                preserve_fixed_grid = bool(
+                    (
+                        keyframes.diff(dim=1).abs() / options.interpolation_dt
+                        <= velocity_limits.view(1, 1, -1) + 1.0e-6
+                    )
+                    .all()
+                    .item()
+                )
+            if preserve_fixed_grid:
+                positions = keyframes
+            else:
+                limited_success, positions = self._interpolate_cartesian_with_limits(
+                    torch.stack(poses, dim=1),
+                    keyframes,
+                    options,
+                )
+                success &= limited_success
         else:
-            positions = interpolate_with_distance(
-                trajectory=keyframes,
-                interp_num=options.sample_count,
-                device=device,
-            )
+            positions = self._interpolate_ik_keyframes(keyframes, options)
         dt = self._uniform_dt(
             batch_size=batch_size,
             waypoint_count=positions.shape[1],
@@ -858,6 +1085,293 @@ class MotionGenerator:
             success=success,
             positions=positions,
             dt=dt,
+        )
+
+    def _interpolate_cartesian_with_limits(
+        self,
+        target_poses: torch.Tensor,
+        solved_keyframes: torch.Tensor,
+        options: MotionGenOptions,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Retain a sampled Cartesian path while enforcing joint motion limits."""
+        assert options.control_part is not None
+        assert options.sample_count is not None
+        assert options.interpolation_dt is not None
+        velocity_limits = self._resolve_velocity_limits(
+            control_part=options.control_part,
+            batch_size=solved_keyframes.shape[0],
+            dof=solved_keyframes.shape[2],
+            requested=options.velocity_limit,
+            reference=solved_keyframes,
+        )
+        acceleration_limit = (
+            0.5 if options.acceleration_limit is None else options.acceleration_limit
+        )
+        acceleration_limits = torch.full_like(velocity_limits, acceleration_limit)
+        variation = solved_keyframes.diff(dim=1).abs().sum(dim=1)
+        zero_velocity_motion = (velocity_limits == 0.0) & (variation > 0.0).any(dim=0)
+        if zero_velocity_motion.any():
+            raise ValueError("A zero-velocity Robot joint cannot follow this path.")
+        safe_velocity_limits = torch.where(
+            velocity_limits == 0.0,
+            torch.ones_like(velocity_limits),
+            velocity_limits,
+        )
+        duration = torch.maximum(
+            (1.875 * variation / safe_velocity_limits).amax(dim=1),
+            torch.sqrt((10.0 / math.sqrt(3.0)) * variation / acceleration_limits).amax(
+                dim=1
+            ),
+        )
+        interval_count = max(
+            options.sample_count - 1,
+            int(torch.ceil(duration.max() / options.interpolation_dt).item()),
+        )
+        success = torch.ones(
+            solved_keyframes.shape[0],
+            dtype=torch.bool,
+            device=solved_keyframes.device,
+        )
+        positions = solved_keyframes
+        for _ in range(6):
+            if interval_count > 10_000:
+                raise ValueError(
+                    "Cartesian path requires more than 10000 control intervals "
+                    "to satisfy the requested motion limits."
+                )
+            sampled_poses = self._sample_cartesian_path(
+                target_poses,
+                solved_keyframes,
+                interval_count + 1,
+                options.control_part,
+                path_sampler=options.cartesian_path_sampler,
+            )
+            iteration_success, solved = self._solve_cartesian_waypoints(
+                sampled_poses[:, 1:],
+                solved_keyframes[:, 0],
+                options.control_part,
+            )
+            success &= iteration_success
+            positions = torch.cat([solved_keyframes[:, :1], solved], dim=1)
+            interval_velocity = positions.diff(dim=1) / options.interpolation_dt
+            boundary_acceleration = (
+                torch.cat(
+                    [
+                        interval_velocity[:, :1],
+                        interval_velocity.diff(dim=1),
+                        -interval_velocity[:, -1:],
+                    ],
+                    dim=1,
+                )
+                / options.interpolation_dt
+            )
+            velocity_ratio = float(
+                (interval_velocity.abs() / safe_velocity_limits.view(1, 1, -1))
+                .amax()
+                .item()
+            )
+            acceleration_ratio = float(
+                (boundary_acceleration.abs() / acceleration_limits.view(1, 1, -1))
+                .amax()
+                .item()
+            )
+            scale = max(velocity_ratio, math.sqrt(acceleration_ratio))
+            if scale <= 1.0 + 1.0e-5:
+                return success, positions
+            interval_count = math.ceil(interval_count * scale * 1.02)
+
+        interval_velocity = positions.diff(dim=1) / options.interpolation_dt
+        boundary_acceleration = (
+            torch.cat(
+                [
+                    interval_velocity[:, :1],
+                    interval_velocity.diff(dim=1),
+                    -interval_velocity[:, -1:],
+                ],
+                dim=1,
+            )
+            / options.interpolation_dt
+        )
+        success &= (
+            interval_velocity.abs() <= velocity_limits.view(1, 1, -1) + 1.0e-6
+        ).all(dim=(1, 2))
+        success &= (
+            boundary_acceleration.abs() <= acceleration_limits.view(1, 1, -1) + 1.0e-5
+        ).all(dim=(1, 2))
+        return success, positions
+
+    def _sample_cartesian_path(
+        self,
+        target_poses: torch.Tensor,
+        solved_keyframes: torch.Tensor,
+        sample_count: int,
+        control_part: str,
+        *,
+        path_sampler: Callable[[torch.Tensor], torch.Tensor] | None = None,
+    ) -> torch.Tensor:
+        """Sample an exact path or Cartesian polyline with minimum-jerk progress."""
+        if self.robot is None:
+            raise RuntimeError("MotionGenerator requires a robot before interpolation.")
+        start_pose = self.robot.compute_fk(
+            qpos=solved_keyframes[:, 0],
+            name=control_part,
+            to_matrix=True,
+        ).to(device=target_poses.device, dtype=target_poses.dtype)
+        path = torch.cat([start_pose[:, None], target_poses], dim=1)
+        segment_lengths = solved_keyframes.diff(dim=1).abs().amax(dim=-1)
+        cumulative = torch.cumsum(segment_lengths, dim=1)
+        total = cumulative[:, -1:]
+        progress = _minimum_jerk_progress(
+            sample_count,
+            device=target_poses.device,
+            dtype=target_poses.dtype,
+        )
+        if path_sampler is not None:
+            result = path_sampler(progress)
+            expected_shape = (target_poses.shape[0], sample_count, 4, 4)
+            if not isinstance(result, torch.Tensor) or result.shape != expected_shape:
+                raise ValueError(
+                    "cartesian_path_sampler must return a tensor with shape "
+                    f"{expected_shape}."
+                )
+            if result.device != target_poses.device:
+                raise ValueError(
+                    "cartesian_path_sampler output must share the target device."
+                )
+            if result.dtype != target_poses.dtype:
+                raise ValueError(
+                    "cartesian_path_sampler output must share the target dtype."
+                )
+            if not torch.isfinite(result).all():
+                raise ValueError("cartesian_path_sampler output must be finite.")
+            position_tolerance, rotation_tolerance = self._cartesian_start_tolerances(
+                control_part
+            )
+            start_position_error = torch.linalg.vector_norm(
+                result[:, 0, :3, 3] - path[:, 0, :3, 3],
+                dim=-1,
+            )
+            start_rotation_error = quat_error_magnitude(
+                quat_from_matrix(result[:, 0, :3, :3]),
+                quat_from_matrix(path[:, 0, :3, :3]),
+            )
+            start_matches = bool(
+                (start_position_error <= position_tolerance).all()
+                and (start_rotation_error <= rotation_tolerance).all()
+                and torch.allclose(
+                    result[:, 0, 3],
+                    path[:, 0, 3],
+                    rtol=0.0,
+                    atol=1.0e-6,
+                )
+            )
+            if not start_matches or not torch.allclose(
+                result[:, -1], path[:, -1], rtol=1.0e-5, atol=1.0e-6
+            ):
+                raise ValueError(
+                    "cartesian_path_sampler must preserve the requested path endpoints."
+                )
+            return result
+        query = total * progress[None]
+        segment_index = torch.searchsorted(
+            cumulative.contiguous(), query.contiguous(), right=False
+        ).clamp(max=segment_lengths.shape[1] - 1)
+        segment_start_distance = torch.cat(
+            [torch.zeros_like(cumulative[:, :1]), cumulative[:, :-1]], dim=1
+        ).gather(1, segment_index)
+        selected_length = segment_lengths.gather(1, segment_index)
+        alpha = torch.where(
+            selected_length > 0,
+            (query - segment_start_distance) / selected_length.clamp_min(1.0e-12),
+            torch.zeros_like(query),
+        ).clamp(0.0, 1.0)
+        gather_index = segment_index[:, :, None, None].expand(-1, -1, 4, 4)
+        start = torch.gather(path[:, :-1], 1, gather_index)
+        end = torch.gather(path[:, 1:], 1, gather_index)
+        result = (
+            torch.eye(4, dtype=target_poses.dtype, device=target_poses.device)
+            .expand(target_poses.shape[0], sample_count, -1, -1)
+            .clone()
+        )
+        result[:, :, :3, 3] = torch.lerp(
+            start[:, :, :3, 3], end[:, :, :3, 3], alpha[:, :, None]
+        )
+        relative_rotation = torch.matmul(
+            start[:, :, :3, :3].transpose(-1, -2), end[:, :, :3, :3]
+        )
+        axis_angle = axis_angle_from_quat(quat_from_matrix(relative_rotation))
+        incremental_rotation = axis_angle_to_rotation_matrix(
+            axis_angle * alpha[:, :, None]
+        )
+        result[:, :, :3, :3] = torch.matmul(start[:, :, :3, :3], incremental_rotation)
+        result[:, 0] = path[:, 0]
+        result[:, -1] = path[:, -1]
+        return result
+
+    def _cartesian_start_tolerances(
+        self,
+        control_part: str,
+    ) -> tuple[float, float]:
+        """Return the active IK solver's accepted position and rotation errors."""
+        solver = self.robot.get_solver(control_part)
+        cfg = None if solver is None else getattr(solver, "cfg", None)
+
+        def configured_tolerance(*names: str) -> float:
+            for name in names:
+                value = getattr(cfg, name, None)
+                if (
+                    not isinstance(value, bool)
+                    and isinstance(value, (int, float))
+                    and math.isfinite(value)
+                    and value > 0.0
+                ):
+                    return max(1.0e-6, float(value))
+            return 1.0e-6
+
+        return configured_tolerance(
+            "pos_eps", "position_tolerance"
+        ), configured_tolerance("rot_eps", "rotation_tolerance")
+
+    def _interpolate_ik_keyframes(
+        self,
+        keyframes: torch.Tensor,
+        options: MotionGenOptions,
+    ) -> torch.Tensor:
+        """Interpolate IK keyframes under Robot-capped per-joint speeds."""
+        assert options.sample_count is not None
+        assert options.interpolation_dt is not None
+        velocity_limits = self._resolve_velocity_limits(
+            control_part=options.control_part,
+            batch_size=keyframes.shape[0],
+            dof=keyframes.shape[2],
+            requested=options.velocity_limit,
+            reference=keyframes,
+        )
+        if options.velocity_limit is None and options.acceleration_limit is None:
+            fixed_grid = interpolate_with_distance(
+                trajectory=keyframes,
+                interp_num=options.sample_count,
+                device=keyframes.device,
+            )
+            if bool(
+                (
+                    fixed_grid.diff(dim=1).abs() / options.interpolation_dt
+                    <= velocity_limits.view(1, 1, -1) + 1.0e-6
+                )
+                .all()
+                .item()
+            ):
+                return fixed_grid
+        return interpolate_minimum_jerk(
+            keyframes,
+            minimum_sample_count=options.sample_count,
+            step_dt=options.interpolation_dt,
+            velocity_limit=velocity_limits,
+            acceleration_limit=(
+                0.5
+                if options.acceleration_limit is None
+                else options.acceleration_limit
+            ),
         )
 
     @staticmethod
@@ -953,6 +1467,10 @@ class MotionGenerator:
             options.sample_count is not None
             and not preserve_samples
             and positions.shape[1] != options.sample_count
+            and not (
+                options.strategy == "ik_interp"
+                and positions.shape[1] >= options.sample_count
+            )
         ):
             positions, dt = resample_in_time(positions, dt, options.sample_count)
             resampled = True
@@ -1022,6 +1540,14 @@ class MotionGenerator:
                 )
         if velocities is None:
             velocities = differentiate_positions(positions, dt)
+        if options.strategy == "ik_interp" and positions.shape[1]:
+            velocities = velocities.clone()
+            velocities[:, 0] = 0.0
+            velocities[:, -1] = 0.0
+            if positions.shape[1] > 1:
+                stationary = positions[:, 1:] == positions[:, :-1]
+                velocities[:, :-1] = velocities[:, :-1].masked_fill(stationary, 0.0)
+                velocities[:, 1:] = velocities[:, 1:].masked_fill(stationary, 0.0)
 
         return PlanResult(
             success=success,
@@ -1394,8 +1920,23 @@ class MotionGenerator:
 
             if control_part is None:
                 raise ValueError("Cartesian interpolation requires control_part.")
+            # The observed start is already grounded by FK. Re-solving it with
+            # analytic IK can fail at a wrist singularity despite later poses
+            # being reachable. Preserve it only for rows whose whole pose agrees.
+            start_pose = self.robot.compute_fk(
+                qpos=qpos_seed, name=control_part, to_matrix=True
+            )
+            known_start = torch.isclose(
+                total_interpolated_poses[:, 0],
+                start_pose.to(total_interpolated_poses),
+                rtol=0.0,
+                atol=1e-6,
+            ).all(dim=(-2, -1))
             success, qpos_batch = self._solve_cartesian_waypoints(
-                total_interpolated_poses, qpos_seed, control_part
+                total_interpolated_poses,
+                qpos_seed,
+                control_part,
+                known_start=known_start,
             )
             # Keep the FK consistency guard, but never remove required poses.
             fk_batch = self.robot.compute_batch_fk(

@@ -23,3 +23,4 @@ follow the canonical routing rules in `.agents/skills/project-dev-context/`.
 - Review pull requests and diffs: `.github/copilot/review-pr.md`
 - Draft or create pull requests: `.github/copilot/pr.md`
 - Write benchmarks: `.github/copilot/benchmark.md`
+- Implement performance-sensitive computation: `.github/copilot/implement-performance.md`

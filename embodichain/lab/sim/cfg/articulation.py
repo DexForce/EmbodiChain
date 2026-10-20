@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import MISSING, fields
+from dataclasses import MISSING, field, fields
 import numbers
 from typing import Any, Dict, List, Literal, Sequence
 
@@ -29,6 +29,7 @@ import torch
 from embodichain.utils import configclass, is_configclass, logger
 
 from .asset import AssetPhysicsMode, ObjectBaseCfg, _resolve_asset_physics_mode
+from .source import UsdSourceCfg, _raise_removed_source_fields, _usd_source_from_value
 from .rigid import (
     RigidBodyPhysicsCfg,
     _rigid_body_physics_from_dict,
@@ -127,6 +128,7 @@ _REMOVED_ARTICULATION_CFG_FIELDS = {
 
 def _raise_removed_articulation_cfg_fields(init_dict: Mapping[str, Any]) -> None:
     """Reject removed flat articulation fields with actionable replacements."""
+    _raise_removed_source_fields(init_dict)
     removed = _REMOVED_ARTICULATION_CFG_FIELDS.keys() & init_dict.keys()
     if not removed:
         return
@@ -396,6 +398,9 @@ class ArticulationCfg(ObjectBaseCfg):
     fpath: str = None
     """Path to the articulation asset file."""
 
+    source: UsdSourceCfg | None = field(default=None, kw_only=True)
+    """USD source asset; mutually exclusive with :attr:`fpath`."""
+
     body_scale: tuple | list = (1.0, 1.0, 1.0)
     """Scale of the articulation in the simulation world frame."""
 
@@ -492,7 +497,9 @@ class ArticulationCfg(ObjectBaseCfg):
         _raise_removed_articulation_cfg_fields(init_dict)
         cfg = cls()
         for key, value in init_dict.items():
-            if key == "link_attrs" and isinstance(value, dict):
+            if key == "source":
+                cfg.source = _usd_source_from_value(value)
+            elif key == "link_attrs" and isinstance(value, dict):
                 cfg.link_attrs = link_attrs_from_dict(value)
             elif key == "attrs" and isinstance(value, Mapping):
                 cfg.attrs = _rigid_body_physics_from_dict(value)

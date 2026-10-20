@@ -14,10 +14,10 @@ Use the catalog commands to inspect the installed task set:
    embodichain list-task --category manipulation
    embodichain show-task embodichain_tasks:repeated_pick_place
 
-Configuration-backed environments run through ``embodichain run-env``. Tasks
+Configuration-backed environments run through ``embodichain run-task``. Tasks
 that exist only as learning environments or Python registrations are identified
 on their category page. See :doc:`/guides/task_catalog` for catalog metadata and
-static gallery export, and :doc:`/guides/run_env` for launch options.
+static gallery export, and :doc:`/guides/run_task` for launch options.
 
 Task hierarchy
 --------------

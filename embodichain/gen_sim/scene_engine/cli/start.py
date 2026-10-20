@@ -32,6 +32,7 @@ def cli_scene_engine(
     *,
     edit_prompt: str | None = None,
     scene_z_rotation_degrees: float = 180.0,
+    scene_randomization: dict | str | Path | None = None,
 ) -> None:
     """Generate a scene from an image, edit an export, or do both in sequence."""
     resolved_output_root = Path(output_root).expanduser().resolve()
@@ -44,6 +45,12 @@ def cli_scene_engine(
         if edit_prompt is None:
             raise ValueError("Provide --image, --edit_prompt, or both.")
         edit_scene(output_root=resolved_output_root, edit_prompt=edit_prompt)
+        if scene_randomization is not None:
+            from embodichain.gen_sim.scene_engine.randomization.adapter import (
+                randomize_scene_export,
+            )
+
+            randomize_scene_export(resolved_output_root, scene_randomization)
         print("Successfully completed!")
         return
 
@@ -68,6 +75,12 @@ def cli_scene_engine(
             output_root=resolved_output_root,
             edit_prompt=edit_prompt,
         )
+    if scene_randomization is not None:
+        from embodichain.gen_sim.scene_engine.randomization.adapter import (
+            randomize_scene_export,
+        )
+
+        randomize_scene_export(resolved_output_root, scene_randomization)
     print("Successfully completed!")
 
 
@@ -95,6 +108,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         default=None,
         help="Text instruction for editing an existing or newly generated output root",
     )
+    parser.add_argument(
+        "--scene-randomization-config",
+        type=Path,
+        default=None,
+        help="Optional post-export layout policy YAML",
+    )
     args = parser.parse_args(argv)
 
     cli_scene_engine(
@@ -102,6 +121,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         args.output_root,
         edit_prompt=args.edit_prompt,
         scene_z_rotation_degrees=180.0,
+    )
+    cli_scene_engine(
+        args.image,
+        args.output_root,
+        edit_prompt=args.edit_prompt,
+        scene_randomization=args.scene_randomization_config,
     )
 
 

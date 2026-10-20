@@ -21,7 +21,11 @@ as optional path samples. Warping applies keyframe offsets to a trajectory."""
 
 from __future__ import annotations
 
-from .interpolation import interpolate_with_distance, interpolate_with_nums
+from .interpolation import (
+    interpolate_minimum_jerk,
+    interpolate_with_distance,
+    interpolate_with_nums,
+)
 from .resampling import resample_with_distance
 from .timing import (
     differentiate_positions,
@@ -35,6 +39,7 @@ __all__ = [
     "resample_in_time",
     "retime_to_control_grid",
     "interpolate_with_distance",
+    "interpolate_minimum_jerk",
     "interpolate_with_nums",
     "resample_with_distance",
     "sort_and_padding_key_frame",

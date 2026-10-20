@@ -80,7 +80,7 @@ file-based config may also contain a `visualization` section. The old nested
 key `visualization.server` is accepted and normalized to
 `visualization.viser_server`.
 
-`run-env` changes the omitted `--viser-image-fps` default to `None`, so camera
+`run-task` changes the omitted `--viser-image-fps` default to `None`, so camera
 images are captured once per environment step after its final physics substep.
 An explicit CLI value or file-based `sensor_image_fps` retains wall-clock rate
 limiting.
@@ -99,3 +99,25 @@ Because `SimulationManager` starts Viser before the requested assets are
 loaded, the command forces a safe capture immediately after loading; this
 refreshes the dirty topology and publishes the initial poses before entering
 the update loop or optional `--preview` REPL.
+
+### Robot preview
+
+`embodichain preview-robot` owns a standalone simulation and defaults to the
+native window. It creates the World headless, declares the robot, and calls
+`prepare()` before opening that window. `--viser` uses the existing browser
+runtime and publishes a forced initial capture after registering Gizmos and
+joint controls. Shared setup/stepping lives in `lab/scripts/_preview.py`;
+robot selection is owned by [robot-system](../robot-system/robot-system.md).
+
+Managed control-part Gizmos use the existing [native/Viser IK contract](native-gizmos.md).
+`--no-gizmo` disables automatic robot IK; unsupported parts keep their joint
+controls. With Gizmos enabled, `ArticulationPreviewController` follows the
+latest drive targets before applying new slider commands. Manager Gizmo
+processing then runs before physics, so a new IK target survives subsequent
+preview pose holding. Asset preview retains its original controller default.
+
+Pure headless preview without a step limit exits after loading; `--max-steps`
+provides bounded stepping for any frontend. The launcher queues destruction
+without process exit and clears unwound failure frames before draining cleanup
+outside the exception handler. Laboratory package exports are lazy so preview
+help does not import simulation or concrete robot modules.

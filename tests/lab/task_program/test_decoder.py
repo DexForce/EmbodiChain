@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
 
 import pytest
 
@@ -58,7 +59,7 @@ def test_relative_validator_rejects_unmigrated_local_kind() -> None:
             "world_offset": [0.0, 0.0, 0.1],
         }
     ]
-    with pytest.raises(TaskProgramDecodeError, match="object_relative_position"):
+    with pytest.raises(TaskProgramDecodeError, match="world_offset"):
         decode_task_program(data)
 
 
@@ -372,6 +373,36 @@ def test_every_union_rejects_unknown_discriminator_at_exact_path(
     assert render_config_path(error.value.path) == expected_path
 
 
+@pytest.mark.parametrize("scope", ["program", "segment"])
+@pytest.mark.parametrize(
+    "instruction",
+    ["From the table, pick up the cube.", "Import the box from the next station."],
+)
+def test_decoder_accepts_natural_language_instruction(
+    scope: str, instruction: str
+) -> None:
+    data = _program_data()
+    owner = data if scope == "program" else data["program"]["body"]
+    owner["instruction"] = instruction
+    config = decode_task_program(data)
+    decoded = config if scope == "program" else config.program.body
+    assert decoded.instruction == instruction
+
+
+def test_registered_instruction_argument_still_rejects_executable_payload() -> None:
+    data = _program_data()
+    data["program"] = _invoke(
+        {
+            "kind": "registered",
+            "call_id": "example.inspect",
+            "arguments": {"instruction": "eval(1 + 1)"},
+        }
+    )
+    with pytest.raises(TaskProgramDecodeError) as error:
+        decode_task_program(data)
+    assert error.value.code == "executable_expression"
+
+
 def test_decoder_rejects_removed_top_level_schema_version() -> None:
     data = _program_data()
     data["schema_version"] = 2
@@ -586,3 +617,125 @@ def test_decoder_does_not_mutate_caller_input_on_failure() -> None:
         decode_task_program(data)
 
     assert data == before
+
+
+@pytest.mark.parametrize(
+    "instruction", [None, "Pick up the cube and move it to the next target."]
+)
+def test_decoder_accepts_optional_segment_instruction(instruction: str | None) -> None:
+    data = _program_data()
+    data["program"]["body"]["instruction"] = instruction
+    config = decode_task_program(data)
+    assert config.program.body.instruction == instruction
+
+
+@pytest.mark.parametrize("instruction", ["", "   ", " padded ", 7, True, ["pick"]])
+def test_decoder_rejects_invalid_segment_instruction(instruction: object) -> None:
+    data = _program_data()
+    data["program"]["body"]["instruction"] = instruction
+    with pytest.raises(TaskProgramDecodeError) as error:
+        decode_task_program(data)
+    assert error.value.path == ("program", "body", "instruction")
+
+
+@pytest.mark.parametrize("instruction", [None, "Move the cube between the targets."])
+def test_decoder_accepts_optional_overall_instruction(instruction: str | None) -> None:
+    data = _program_data()
+    data["instruction"] = instruction
+    config = decode_task_program(data)
+    assert config.instruction == instruction
+
+
+def test_decoder_preserves_legacy_program_without_overall_instruction() -> None:
+    assert decode_task_program(_program_data()).instruction is None
+
+
+@pytest.mark.parametrize("instruction", ["", "   ", " padded ", 7, True, ["pick"]])
+def test_decoder_rejects_invalid_overall_instruction(instruction: object) -> None:
+    data = _program_data()
+    data["instruction"] = instruction
+    with pytest.raises(TaskProgramDecodeError) as error:
+        decode_task_program(data)
+    assert error.value.path == ("instruction",)
+
+
+@pytest.mark.parametrize(
+    "validator",
+    [
+        {"kind": "object_lifted", "object": "cube", "minimum_lift": True},
+        {"kind": "object_lifted", "object": "cube", "minimum_lift": 0.0},
+        {"kind": "object_upright", "object": "cube", "maximum_tilt_degrees": 181.0},
+        {
+            "kind": "object_upright",
+            "object": "cube",
+            "maximum_tilt_degrees": float("nan"),
+        },
+        {
+            "kind": "object_relative_position",
+            "object": "cube",
+            "reference": "tray",
+            "position_tolerance": [None, None, None],
+        },
+        {
+            "kind": "object_relative_position",
+            "object": "cube",
+            "reference": "tray",
+            "position_tolerance": [0.1, -0.1, None],
+        },
+        {
+            "kind": "object_relative_position",
+            "object": "cube",
+            "reference": "tray",
+            "position_offset": [0.0, 0.0],
+        },
+        {
+            "kind": "object_relative_position",
+            "object": "cube",
+            "reference": "tray",
+            "position_offset": [False, 0.0, 0.0],
+        },
+        {"kind": "object_relative_position", "object": "cube"},
+        {"kind": "object_lifted", "object": "cube", "expression": "env.object.z"},
+    ],
+)
+def test_measured_object_validators_reject_invalid_closed_contracts(
+    validator: dict[str, object],
+) -> None:
+    data = _program_data()
+    data["program"]["body"]["validators"] = [validator]
+    with pytest.raises(TaskProgramDecodeError):
+        decode_task_program(data)
+
+
+@pytest.mark.parametrize("frame", ["world_axes", "parent"])
+def test_relative_position_reference_frame_round_trips(frame: str) -> None:
+    data = _program_data()
+    data["program"]["body"]["validators"] = [
+        {
+            "kind": "object_relative_position",
+            "object": "cube",
+            "reference": "tray",
+            "reference_frame": frame,
+        }
+    ]
+    config = decode_task_program(data)
+    data["program"]["body"]["validators"] = json.loads(
+        json.dumps([config.program.body.validators[0].to_dict()])
+    )
+    restored = decode_task_program(data)
+    assert restored.program.body.validators[0].reference_frame == frame
+
+
+@pytest.mark.parametrize("frame", [None, True, "object", ["parent"]])
+def test_relative_position_rejects_unknown_reference_frames(frame: object) -> None:
+    data = _program_data()
+    data["program"]["body"]["validators"] = [
+        {
+            "kind": "object_relative_position",
+            "object": "cube",
+            "reference": "tray",
+            "reference_frame": frame,
+        }
+    ]
+    with pytest.raises(TaskProgramDecodeError, match="reference_frame"):
+        decode_task_program(data)

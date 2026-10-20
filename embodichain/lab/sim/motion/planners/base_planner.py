@@ -28,6 +28,7 @@ from embodichain.utils import logger
 from embodichain.utils import configclass
 from embodichain.lab.sim.sim_manager import SimulationManager
 from .utils import MoveType, PlanState, PlanResult
+from ._joint_limits import _resolve_joint_constraints
 
 __all__ = [
     "BasePlannerCfg",
@@ -310,8 +311,8 @@ class BasePlanner(ABC):
     ) -> PlanOptions:
         """Attach MotionGenerator runtime context to backend options.
 
-        The base planner has no context fields and therefore returns ``options``
-        unchanged. Backends with contextual options override this method.
+        The base planner fills an absent control group when the options support
+        it. Backends with additional contextual options override this method.
 
         Args:
             options: The backend's planning options, already constructed (either
@@ -322,6 +323,8 @@ class BasePlanner(ABC):
         Returns:
             The (possibly mutated) planning options carrying the context.
         """
+        if hasattr(options, "control_part") and options.control_part is None:
+            options.control_part = control_part
         return options
 
     def with_collision_world(
@@ -410,7 +413,12 @@ class BasePlanner(ABC):
         logger.log_error("Subclasses must implement plan() method", NotImplementedError)
 
     def is_satisfied_constraint(
-        self, vels: torch.Tensor, accs: torch.Tensor, constraints: dict
+        self,
+        vels: torch.Tensor,
+        accs: torch.Tensor,
+        constraints: dict,
+        *,
+        control_part: str | None = None,
     ) -> bool:
         r"""Check if the trajectory satisfies velocity and acceleration constraints.
 
@@ -421,7 +429,10 @@ class BasePlanner(ABC):
         Args:
             vels: Velocity tensor (..., DOF) where the last dimension is DOF
             accs: Acceleration tensor (..., DOF) where the last dimension is DOF
-            constraints: Dictionary containing 'velocity' and 'acceleration' limits
+            constraints: Dictionary containing 'velocity' and 'acceleration'
+                limits. ``None`` velocity resolves robot speed caps;
+                ``None`` acceleration uses the planner default.
+            control_part: Control group for resolving unspecified joint limits.
 
         Returns:
             bool: True if all constraints are satisfied, False otherwise
@@ -434,9 +445,19 @@ class BasePlanner(ABC):
             - Supports batch dimension computation, e.g. (B, N, DOF) or (N, DOF)
         """
         device = vels.device
+        if any(constraints.get(key) is None for key in ("velocity", "acceleration")):
+            constraints = _resolve_joint_constraints(
+                self.robot,
+                constraints,
+                control_part=control_part,
+                dof=vels.shape[-1],
+                batch_size=vels.shape[0] if vels.ndim >= 3 else 1,
+            )
 
-        max_vel = torch.tensor(constraints["velocity"], dtype=vels.dtype, device=device)
-        max_acc = torch.tensor(
+        max_vel = torch.as_tensor(
+            constraints["velocity"], dtype=vels.dtype, device=device
+        )
+        max_acc = torch.as_tensor(
             constraints["acceleration"], dtype=accs.dtype, device=device
         )
 

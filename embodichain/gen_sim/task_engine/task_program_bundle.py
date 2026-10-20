@@ -31,6 +31,7 @@ import numpy as np
 
 from embodichain.lab.task_program.language import load_task_program
 from embodichain.utils.utility import load_config, save_config
+from embodichain.utils.config_paths import resolve_config_path
 
 from .config import TaskEnginePlanningCfg
 from .robot_profiles import _canonical_robot_profile
@@ -434,7 +435,6 @@ def generate_task_program_bundle(
         normalize_scene_assets,
     )
 
-    project_root = Path(__file__).resolve().parents[3]
     from .robot_profiles import _load_robotiq_embodiment
 
     embodiment_payload = (
@@ -745,10 +745,8 @@ def generate_task_program_bundle(
         semantic_task_graph=root / "semantic_task_graph.json",
         integration_fingerprint=root / "integration_fingerprint.json",
     )
-    policy_source = (
-        project_root
-        / "embodichain_tasks/configs/components/execution_policies"
-        / "dual_arm_trajectory_verified.yaml"
+    policy_source = resolve_config_path(
+        "extensions/embodichain_tasks/configs/components/execution_policies/dual_arm_trajectory_verified.yaml"
     )
     if frozen is None:
         table_bounds = None

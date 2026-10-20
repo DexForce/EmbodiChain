@@ -1,0 +1,134 @@
+schema_version: 1
+name: atomic_dual_ur5_pgi_coordinated_placement
+suite_version: atomic_dual_ur5_pgi_coordinated_placement_v2
+profile: smoke
+
+# CoordinatedPlacement on the tutorial dual UR5 + PGI robot and bread/pan
+# scene.  Each arm first runs the tutorial's explicit-grasp PickUp; the poses
+# below are the tutorial's table, bread and pan poses after its mesh-frame
+# corrections.  The bread uses this benchmark's default friction and damping;
+# the tutorial leaves them at the engine defaults.  The skill rejects cuRobo.
+# Known result on current main: the case plans, but TOPPRA's path to the pan
+# handle drives the right arm into the table (right_joint1 stops at -0.29 rad
+# for a -0.47 rad command and reaches it once the table is moved away), so it
+# ends in a controller tracking failure.  Mounting the robot at
+# (1.95, 0.0, 0.2) clears the table, but the left PGI closes only to 0.0013
+# on the bread and the bread slips out during the placing move.  The tutorial
+# itself fails to plan this placement on main.
+robot:
+  id: dual_ur5_pgi_coordinated_placement
+  provider: dual_arm
+  config:
+    robot_type: ur5
+    uid: benchmark_dual_ur5_coordinated_placement
+    urdf_name: benchmark_dual_ur5_coordinated_placement
+    tcp_z: 0.121
+    solver: ur
+    init_pos: [1.85, 0.0, 0.1]
+
+planners:
+  - id: toppra
+    adapter: toppra
+    role: primary_baseline
+    enabled: true
+    config: {}
+
+protocol:
+  report_schema_version: "3"
+  # Preserve the existing Atomic motion budget for every timed planner.
+  joint_velocity_limit_rad_s: 0.2
+  joint_acceleration_limit_rad_s2: 0.5
+  warmup_trials: 1
+  measured_trials: 1
+  sample_interval: 80
+  validation_samples: 512
+  position_threshold_m: 0.01
+  rotation_threshold_rad: 0.1
+  joint_limit_tolerance_rad: 0.00001
+
+tracks:
+  - id: atomic-skill
+    scenario: atomic_skill
+    enabled: true
+    config:
+      batch_sizes: [1]
+      seeds: [11]
+      physics:
+        steps_per_waypoint: 16
+        hold_steps: 80
+        hold_sim_steps: 2
+        joint_tracking_tolerance_rad: 0.05
+      grippers:
+        - control_part: left_eef
+          open_qpos: [0.0]
+          grasp_qpos: [0.030]
+        - control_part: right_eef
+          open_qpos: [0.0]
+          grasp_qpos: [0.040]
+      fixtures:
+        - id: table
+          kind: mesh
+          asset_path: CoordinatedPlacementAndPickment/table.glb
+          body_type: kinematic
+          position: [0.000146, 0.000233, 0.268229]
+          rotation_deg: [90.755789, 89.343732, 179.244269]
+          mass: 10.0
+          dynamic_friction: 0.9
+          static_friction: 0.95
+          restitution: 0.01
+      objects:
+        - id: bread
+          kind: mesh
+          asset_path: CoordinatedPlacementAndPickment/bread.glb
+          scale: [1.75, 1.75, 1.75]
+          position: [0.007266, 0.172187, 0.675881]
+          rotation_deg: [88.282569, -85.590228, -1.661869]
+          max_convex_hull_num: 8
+          mass: 0.01
+          restitution: 0.01
+          contact_offset: 0.003
+          rest_offset: 0.001
+          settle_steps: 100
+        - id: pan
+          kind: mesh
+          asset_path: CoordinatedPlacementAndPickment/pan.glb
+          scale: [1.75, 1.75, 1.75]
+          position: [0.000968, -0.141895, 0.651]
+          rotation_deg: [90.589028, -8.186552, -179.231704]
+          max_convex_hull_num: 16
+          mass: 0.01
+          dynamic_friction: 0.97
+          static_friction: 0.99
+          restitution: 0.01
+          linear_damping: 1.0
+          angular_damping: 2.0
+          contact_offset: 0.001
+          rest_offset: 0.0
+          settle_steps: 100
+      skills:
+        - id: coordinated_placement
+          sample_count: 120
+          placing_height_offset_m: 0.1
+          support_height_offset_m: 0.0
+          # The tutorial lifts 0.10 m before and after placing, which puts the
+          # placing arm 2 cm above its reach on current main; the tutorial
+          # itself fails to plan this placement.  0.05 m keeps a 3 cm margin.
+          lift_height_m: 0.05
+          hand_interp_steps: 10
+          hold_steps: 6
+          retreat_steps: 18
+          pick_pre_grasp_distance_m: 0.12
+          placing_pick_sample_count: 100
+          placing_pick_lift_height_m: 0.12
+          placing_pick_hand_interp_steps: 10
+          support_pick_sample_count: 130
+          support_pick_lift_height_m: 0.10
+          support_pick_hand_interp_steps: 32
+          placing_grasp_z_clearance_m: 0.018
+          support_grasp_z_clearance_m: 0.0
+          pre_action_settle_steps: 100
+          cases:
+            - name: bread_onto_pan
+              object: bread
+              support_object: pan
+              task_difficulty: hard

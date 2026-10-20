@@ -6,16 +6,44 @@
 |---|---|
 | Runtime control parts, FK/IK adaptation, joint ordering | `embodichain/lab/sim/objects/robot.py` → `Robot` |
 | Config decoding, construction hooks, backend alternatives | `embodichain/lab/sim/cfg/robot.py` → `RobotCfg`, `RobotPresetCfg` |
-| Available robot configs | `embodichain/lab/sim/robots/__init__.py` |
-| W1 variants and serialization | `embodichain/lab/sim/robots/dexforce_w1/` → `cfg.py`, `specs.py`, `hand_specs.py` |
+| Available robot configs and variants | `extensions/embodichain_robots/_catalog.py`; `extensions/embodichain_robots/__init__.py` owns lazy exports |
+| Shared Gym/CLI/dual-arm selection | `embodichain/robot_registry.py` → `list_robot_cfgs`, `resolve_robot_cfg` |
+| Robot listing CLI | `embodichain/cli/list_robot.py` → `embodichain list-robot` |
+| Generic robot preview and standalone RobotCfg files | `embodichain/lab/scripts/preview_robot.py` → `embodichain preview-robot` |
+| W1 variants and serialization | `extensions/embodichain_robots/dexforce_w1/` → `cfg.py`, `specs.py`, `hand_specs.py` |
 | Composed robot frames and joint-name mapping | `embodichain/lab/sim/robots/dual_arm.py` |
 | Shared articulation state and drive properties | `embodichain/lab/sim/objects/articulation.py`, `embodichain/lab/sim/cfg/articulation.py` |
 
 `Robot` extends `Articulation` with named control parts, per-part solvers and
-runtime workspace access. Robot configs own asset/kinematic assembly; the
-manager owns creation and backend binding. For a new config use
+runtime workspace access. Robot configs own asset/kinematic assembly and
+optional mounted camera declarations; the manager owns creation and backend
+binding. For a new config use
 [add-robot](../../../.agents/skills/add-robot/SKILL.md); for reusable robot/sensor
 suites use [add-embodiment-component](../../../.agents/skills/add-embodiment-component/SKILL.md).
+
+Concrete robot definitions live in the separate `embodichain_robots` import
+package under `extensions/embodichain_robots/`, bundled in the main wheel with
+the core version. `extensions/` is only a source container; imports keep the
+`embodichain_` prefix. Generic `Robot`,
+`RobotCfg`, `RobotPresetCfg`, and dual-arm composition remain in the core.
+Concrete presets import from `embodichain_robots`. The core
+`embodichain.lab.sim.robots` package exposes only generic dual-arm composition.
+
+Catalog listing defers robot classes and asset downloads; resolution imports
+one `RobotCfg` subclass and isolates its defaults/overrides. Gym, workspace
+analysis, dual-arm composition, and preview share `embodichain/robot_registry.py`.
+Selectors use exact registered IDs; aliases and `Cfg` suffixes are not accepted.
+An explicit `variant` applies profile defaults before caller overrides, while
+omission preserves existing construction behavior. See
+[catalog contracts](catalogs.md) for entry points, metadata and model profiles.
+
+`preview-robot` accepts a catalog ID or a standalone JSON/YAML RobotCfg file.
+File `class_type` optionally selects the catalog; local asset paths, including
+`urdf_cfg.sensors[*].sensor_source` URDF files in lists or mappings, resolve
+from the file directory. Inline sensor definitions and data IDs are preserved.
+Configuration decoding and validation precede World
+creation. Native and Viser lifecycle, Gizmo/slider target coordination, and
+cleanup belong to [preview activation](../sim-visualization/configuration.md#robot-preview).
 
 ## Configuration resolution
 
@@ -44,6 +72,20 @@ source link names, keeps chains arm-local, and rejects opposite-arm/unknown
 frames. Mount transforms belong to assembly, not the serial chain.
 
 ## Joint and solver boundaries
+
+Official defaults use `arm` / `eef` for single-arm control groups and
+`left_arm`, `right_arm`, `left_eef`, `right_eef` for dual-arm groups. The EEF
+group can control parallel grippers or dexterous hands; its name does not
+declare capabilities. Custom keys, including `hand`, remain valid and are not
+automatically aliased. URDF component names such as `left_hand` and native link
+or joint names belong to the asset namespace and are independent of this rule.
+
+Panda's default `hand` group is now `eef`; Aloha Mini, Tianji Marvin and the
+official dual-UR5 embodiment use `left_eef` / `right_eef` in place of
+`left_hand` / `right_hand`. Callers of those defaults must update named-part
+queries, drive overrides, endpoint bindings and service keys together. Existing
+trajectory-file field names are independent and should be mapped explicitly
+when loading older data, rather than renamed as part of a control-group change.
 
 `control_parts` expands joint-name patterns at initialization. For Spawn-bound
 robots, part IDs resolve by name against the final batch `qpos` order, not
@@ -74,6 +116,39 @@ library adapters own conversions.
 
 ## Physics and motion integration
 
+`RobotCfg.sensors` owns robot-local camera calibration; `enable_sensor`
+opts into initialization in standalone simulation. Gym overrides that switch
+on an isolated robot configuration using its environment acquisition setting.
+Concrete defaults live in `embodichain_robots` and reach Gym and online buffers
+through the shared catalog resolver. `URDFCfg.sensors` remains physical sensor
+asset assembly, separate from these runtime camera declarations.
+`TianjiMarvinCfg` preserves source mass, inertia and COM values, including for
+custom URDFs. The bundled `tianji_marvin.yaml` embodiment explicitly opts into
+recorded simulation mass/tensor overrides (1000 times the pinned asset entries).
+Source units are unconfirmed; this is a demo calibration assumption, not a
+manufacturer-verified SI conversion. The component records the asset revision
+and fingerprint and preserves source COMs. The reusable embodiment aligns the
+catalog tool convention with GraspKit's opening/approach axes and calibrates
+gripper drives. Reuse that component for Task Programs; the standalone catalog
+retains its documented source-tool TCP convention.
+The gripper-equipped Marvin preset also owns two 640×360 wrist RGB-D cameras,
+`cam_left_wrist` and `cam_right_wrist`, parented to the hand-base links.
+Their nominal 87°×58° optics approximate D405; mounting transforms are measured
+from the bundled single-lens mesh, not calibrated on hardware, and depth is
+ideal rendered geometry. The bare-arm variant declares no cameras. Explicit
+`sensors` overrides replace the suite; standalone creation and Gym acquisition
+continue to use the existing sensor switches. The embodiment's independent
+`sensor` list does not duplicate these mounted declarations.
+Both Marvin variants default to the compact ready pose with lowered elbows;
+the gripper variant appends four open-finger positions. `init_qpos` follows
+source order (interleaved left/right arm joints, then fingers). The shared
+embodiment explicitly pins the same pose, and the official Marvin demos inherit
+it; their deployment files do not duplicate older ready-pose overrides.
+The manager qualifies parent links with the final robot UID without changing
+the declaration. Independent cameras remain deployment/embodiment-owned.
+Creation, attachment and rebuild behavior belong to
+[sensors](../sensor-system/sensor-system.md).
+
 Keep portable intent in an ordinary `RobotCfg`; joint-property and root/body
 physics ownership is defined in [simulation](../simulation-system/simulation-system.md).
 Use `RobotPresetCfg` only for a complete alternative asset/actuator definition.
@@ -88,10 +163,20 @@ selects per-part caches; `get_workspace()` loads them on first access, while
 [robot workspace](../robot-workspace/robot-workspace.md) for cache ownership and
 [motion planning](../motion-planning/motion-planning.md) for planner integration.
 
+`RobotCfg` preserves asset velocity limits unless a drive override is configured.
+Planning reads effective speeds through `get_qvel_limits()` and existing mimic
+metadata. Acceleration budgets and missing-speed fallback belong to the
+[planner contracts](../motion-planning/planner-details.md).
+
 ## Focused validation
 
 | Changed boundary | Existing coverage |
 |---|---|
+| Robot catalogs, third-party selection across consumers | `tests/test_robot_registry.py` |
+| Robot preview inputs, initialization, and cleanup | `tests/lab/scripts/test_preview_robot.py` |
+| Robot CLI metadata, table formatting, and deferred imports | `tests/cli/test_list_robot.py`, `tests/test_main.py` |
+| Removed legacy imports and lazy canonical robot imports | `tests/sim/robots/test_imports.py` |
+| Bundled robot package discovery/staging | `tests/test_robot_package.py` |
 | Config merge, W1 versions/TCP round-trips, chain DOFs | `tests/sim/objects/test_robot_cfg.py` |
 | Dual-arm source/assembled frames and properties | `tests/sim/objects/test_dual_arm.py` |
 | Runtime part/joint/frame behavior | `tests/sim/objects/test_robot.py` |

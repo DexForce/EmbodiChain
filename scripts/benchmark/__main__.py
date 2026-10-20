@@ -21,10 +21,12 @@ Usage examples::
     embodichain benchmark rl --tasks push_cube --algorithms ppo --suite default
     embodichain benchmark rl --rebuild-report-only
     embodichain benchmark robotics-kinematic-solver -s pytorch
-    embodichain benchmark motion-generation --suite smoke
-    embodichain benchmark atomic-action --smoke
+    embodichain benchmark motion-generation --suite motion_panda_free_space_smoke
+    embodichain benchmark motion-generation --suite atomic_franka_pgi_smoke
+    embodichain benchmark atomic-action-profile --smoke
     embodichain benchmark grasp-pose-generator --device cuda
     embodichain benchmark workspace-analyzer
+    embodichain benchmark rendering --camera-count 2 --resolution 1280x720
 """
 
 from __future__ import annotations
@@ -51,14 +53,14 @@ def _run_rl_cli(_: argparse.Namespace) -> None:
 
 
 def _run_motion_generation_cli(args: argparse.Namespace) -> None:
-    """Run the shared planner and Atomic Task benchmark."""
+    """Run the shared Motion Planning and Atomic Skills benchmark."""
     from scripts.benchmark.motion_generation.run_benchmark import run_from_args
 
     run_from_args(args)
 
 
-def _run_atomic_action_cli(_: argparse.Namespace) -> None:
-    """Run atomic action benchmark CLI entrypoint."""
+def _run_atomic_action_profile_cli(_: argparse.Namespace) -> None:
+    """Run individual atomic action profiling over preset scenes."""
     from scripts.benchmark.atomic_action.run_benchmark import main as atomic_main
 
     atomic_main()
@@ -78,6 +80,13 @@ def _run_workspace_analyzer_cli(_: argparse.Namespace) -> None:
     )
 
     run_all_benchmarks()
+
+
+def _run_rendering_cli(_: argparse.Namespace) -> None:
+    """Run the configurable rendering benchmark entrypoint."""
+    from scripts.benchmark.rendering.offscreen_denoising import main as rendering_main
+
+    rendering_main()
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -118,18 +127,22 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     motion_generation_parser = subparsers.add_parser(
         "motion-generation",
-        help="Benchmark planners on fixed motion and Atomic Task cases.",
+        help="Compare planners with Motion Planning or Atomic Skills suites.",
+        description=(
+            "Compare planners with Motion Planning or Atomic Skills suites. "
+            "Use --suite to select the cases and robot."
+        ),
     )
     add_parser_arguments(motion_generation_parser)
     motion_generation_parser.set_defaults(func=_run_motion_generation_cli)
 
-    # -- atomic-action -------------------------------------------------------
-    atomic_action_parser = subparsers.add_parser(
-        "atomic-action",
+    # -- atomic-action-profile -----------------------------------------------
+    atomic_action_profile_parser = subparsers.add_parser(
+        "atomic-action-profile",
         add_help=False,
-        help="Benchmark atomic actions over object presets and positions.",
+        help="Profile individual atomic actions over object presets and positions.",
     )
-    atomic_action_parser.set_defaults(func=_run_atomic_action_cli)
+    atomic_action_profile_parser.set_defaults(func=_run_atomic_action_profile_cli)
 
     # -- grasp-pose-generator -----------------------------------------------
     grasp_pose_parser = subparsers.add_parser(
@@ -146,6 +159,14 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     workspace_parser.set_defaults(func=_run_workspace_analyzer_cli)
 
+    # -- rendering -----------------------------------------------------------
+    rendering_parser = subparsers.add_parser(
+        "rendering",
+        add_help=False,
+        help="Benchmark configurable offscreen rendering and denoising.",
+    )
+    rendering_parser.set_defaults(func=_run_rendering_cli)
+
     # -- Parse ---------------------------------------------------------------
     # If no sub-command is given, print help and exit.
     arguments = list(sys.argv[1:] if argv is None else argv)
@@ -155,7 +176,12 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     # Determine which sub-command was selected, then reconstruct argv so
     # that each sub-command's entry point can call ``parse_args()`` normally.
-    delegated_commands = {"rl", "atomic-action", "grasp-pose-generator"}
+    delegated_commands = {
+        "rl",
+        "atomic-action-profile",
+        "grasp-pose-generator",
+        "rendering",
+    }
     if arguments[0] in delegated_commands:
         known, _ = parser.parse_known_args(arguments)
     else:
