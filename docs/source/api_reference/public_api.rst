@@ -119,7 +119,7 @@ corrected full-body definition.
 .. autoclass:: DexforceW1RightArmV021
 
 embodichain.data_pipeline
-------------------------
+-------------------------
 
 The configuration submodule derives bounded pipeline settings without starting
 an online worker. Importing the data-pipeline package remains lazy.
@@ -131,7 +131,7 @@ an online worker. Importing the data-pipeline package remains lazy.
    configuration
 
 embodichain.data_pipeline.configuration
---------------------------------------
+---------------------------------------
 
 Configure ODS from measured generation and training capacities. A versioned
 profile bounds selections per trajectory; the planner never promotes provisional
