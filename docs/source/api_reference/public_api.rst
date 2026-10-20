@@ -544,6 +544,7 @@ baseline and saves successful candidates with a completion manifest.
 .. autosummary::
 
    main
+
 embodichain.gen_sim.scene_engine.core.scene_edit_plan
 -----------------------------------------------------
 

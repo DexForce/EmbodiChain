@@ -230,6 +230,7 @@ Schema
    :module: embodichain.lab.task_program.language.schema
    :no-typesetting:
    :no-index-entry:
+
 .. autoclass:: ArticulationJointPositionValidatorCfg
    :members:
 
