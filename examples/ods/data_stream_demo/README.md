@@ -41,6 +41,10 @@ uses `no-render`; visual acquisition still needs native headless rendering.
 The standard reader requires the pinned SDK/decoder and an FFmpeg build
 supporting the selected AV1 encoder:
 
+Validation used PyTorch 2.7.0+cu128 with the SDK/decoder versions below. The
+isolated DataLoader lifecycle hook is tested against that PyTorch version;
+use a matching simulator and Torch/TorchCodec build.
+
 ```bash
 python -m pip install -e .
 python -m pip install 'lerobot==0.4.4' 'torchcodec==0.5'
@@ -144,9 +148,7 @@ uses primary GPUs **plus a shared reserved auxiliary GPU**, and is not a
 single-GPU result. Low memory and `G` type alone do not prove no computation;
 the permission relies on the separate controlled native-runtime qualification.
 
-The initial 94-sample probe covered compute contexts only. It did not establish
-graphics isolation; v3's three visual guard failures remain failures. A later
-minimal libvulkan probe, without CUDA/SDL/DexSim or device/queue submission,
+An independent minimal libvulkan probe, without CUDA/SDL/DexSim or device/queue submission,
 reproduced the 6 MiB GPU7 footprint after `vkCreateInstance` and its disappearance
 after instance destruction. A real dual-camera ODS episode then qualified
 primary GPU3 plus the explicit GPU7 footprint with graceful process cleanup.
@@ -225,6 +227,12 @@ recreating an iterator does not replenish them. Normal OS file caches,
 decoder instances and bounded prefetch are retained and disclosed. The
 experiment does not clear system-wide caches.
 
+Closing first stops new dispatch and drains existing prefetch without counting
+it as delivered. Every reader and quality-audit worker must exit with code zero;
+joining an aborted worker or forcing termination fails the run. Summaries retain
+discarded reservations and shutdown time. Iterator restart keeps already
+delivered K usage.
+
 ## Render results
 
 Rendering reads retained logs and performs no acquisition, decoding or new
@@ -271,6 +279,12 @@ LeRobot waits for N finalized episodes, whereas ODS starts after C episodes.
 Source-ready first-batch starts from available data, but LeRobot still reads
 and decodes. These two timing scopes overlap and must not be added. Their
 entire difference cannot be attributed to shared-memory transport.
+
+Wait counters overlap only the source-ready observation window; cold generation
+waits remain in `lifetime_data_wait_seconds`. Request throttling and terminal
+supply-exhausted idle time are separate. Controller recovery includes the final
+successful retry service, so wait and service counters are not mutually
+exclusive phases and must not be summed as a wall-time breakdown.
 
 Protected streaming can deliberately wait for new data after exhausting the
 current budget. Report this separately from slow copying or decoding. A

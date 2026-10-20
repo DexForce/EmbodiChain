@@ -433,6 +433,7 @@ def run_one(args: argparse.Namespace) -> dict[str, Any]:
             if args.calibration_run and not offline
             else args.duration_seconds
         )
+        tracker.measurement_deadline = deadline
         if offline:
             reader = StandardLeRobotReader(
                 corpus,
@@ -525,13 +526,26 @@ def run_one(args: argparse.Namespace) -> dict[str, Any]:
                     end_reason = "calibration_complete"
                     break
             if exhausted:
+                idle_started = min(time.monotonic(), deadline)
                 time.sleep(min(0.02, max(0.0, deadline - time.monotonic())))
+                tracker.interval(
+                    "supply_exhausted_idle",
+                    idle_started,
+                    min(time.monotonic(), deadline),
+                )
                 continue
+            throttle_started = min(time.monotonic(), deadline)
             while time.monotonic() < min(next_request, deadline):
                 if flow is not None:
                     flow.poll()
                 time.sleep(
                     min(0.02, max(0.0, min(next_request, deadline) - time.monotonic()))
+                )
+            if next_request > throttle_started:
+                tracker.interval(
+                    "request_throttle",
+                    throttle_started,
+                    min(time.monotonic(), deadline),
                 )
             if time.monotonic() >= deadline:
                 break

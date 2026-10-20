@@ -287,6 +287,18 @@ quantiles or generation-coverage qualification. Native reads/decodes cannot
 always be cancelled mid-call; trailing completion/cleanup time is disclosed.
 The ownership audit retains views of one original returned batch, including
 its full image backing allocation, and includes that cost in sampled memory.
+Consumer wait counters use only their overlap with the measurement window;
+cold-generation waits are retained in a separate lifetime counter. Report
+request-rate throttling and exhausted-source idle time separately. Controller
+recovery intervals include the final successful retry service and therefore
+must not be added to sampling service as mutually exclusive phases.
+
+Standard-reader shutdown stops new prefetch dispatch, drains the finite pending
+reads without counting them as delivery, then requires every worker to exit
+normally. Cancellation preserves the delivered K ledger. Aborted or forcibly
+terminated workers fail the run even when they have joined; cleanup and quality
+audits use the same strict exit check. Drain time is disclosed after the fixed
+observation window.
 
 Device qualification observes both compute and graphics contexts by owned PID
 tree/process group. A CUDA mask alone does not prove graphics isolation. On the

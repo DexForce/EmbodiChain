@@ -142,9 +142,11 @@ class StreamMetrics:
         self.services: list[float] = []
         self.worker_services: list[float] = []
         self.waits: Counter[str] = Counter()
+        self.window_waits: Counter[str] = Counter()
         self.first_batch: float | None = None
         self.reader_started: float | None = None
         self.measurement_started: float | None = None
+        self.measurement_deadline: float | None = None
         self.last_batch: float | None = None
         self.overlap_generations: set[int] = set()
         self.publication_completed: dict[int, float] = {}
@@ -185,6 +187,15 @@ class StreamMetrics:
     def interval(self, kind: str, started: float, ended: float) -> None:
         """Record cooperative flow-control waits using absolute host times."""
         self.waits[kind] += ended - started
+        if (
+            self.measurement_started is not None
+            and self.measurement_deadline is not None
+        ):
+            self.window_waits[kind] += max(
+                0.0,
+                min(ended, self.measurement_deadline)
+                - max(started, self.origin + self.measurement_started),
+            )
 
     def generation_complete(self, generation: int) -> None:
         """Observe a completed fill without equating it with first publication."""
@@ -307,8 +318,14 @@ class StreamMetrics:
             "consumed_generations": sorted(self.window_generations),
             "generation_chunk_counts": dict(self.generations),
             "overlap_generations": sorted(self.overlap_generations),
-            "data_wait_seconds": self.waits["data_wait"],
-            "throttle_seconds": self.waits["usage_throttle"],
+            "data_wait_seconds": self.window_waits["data_wait"],
+            "lifetime_data_wait_seconds": self.waits["data_wait"],
+            "throttle_seconds": self.window_waits["usage_throttle"]
+            + self.window_waits["request_throttle"],
+            "usage_throttle_seconds": self.window_waits["usage_throttle"],
+            "request_throttle_seconds": self.window_waits["request_throttle"],
+            "supply_exhausted_idle_seconds": self.window_waits["supply_exhausted_idle"],
+            "wait_scope": "measurement-window overlap; controller recovery includes its successful retry service; not a disjoint time decomposition; cold generation waits retained only in lifetime_data_wait_seconds",
             "valid_image_samples": self.image_samples,
             "payload_bytes": self.bytes,
             "logical_payload_bytes_per_second": (

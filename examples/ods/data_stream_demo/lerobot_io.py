@@ -543,6 +543,74 @@ def _initialize_worker(worker_id: int) -> None:
     os.environ["HF_DATASETS_OFFLINE"] = "1"
 
 
+def _finish_loader(
+    iterator: Any, diagnostics: dict[str, Any], *, timeout: float
+) -> None:
+    """Drain a finite dispatch stream before requiring clean worker shutdown."""
+    workers = list(getattr(iterator, "_workers", ()))
+    started = time.monotonic()
+    drained = 0
+    error: BaseException | None = None
+    cleanup_errors: list[str] = []
+    forced = False
+    try:
+        while True:
+            remaining = started + timeout - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(
+                    "LeRobot prefetch drain missed its shutdown deadline"
+                )
+            iterator._timeout = min(timeout, remaining)
+            try:
+                batch = next(iterator)
+            except StopIteration:
+                break
+            drained += len(batch["valid"])
+            del batch
+    except BaseException as failure:
+        error = failure
+    finally:
+        try:
+            # PyTorch has no public DataLoader.close(). Reading remains through
+            # the public SDK; this private call is isolated to lifecycle cleanup.
+            iterator._shutdown_workers()
+        except BaseException as failure:
+            cleanup_errors.append(repr(failure))
+            if error is None:
+                error = failure
+        for worker in workers:
+            for stop in (None, worker.terminate, worker.kill):
+                try:
+                    if stop is not None and worker.is_alive():
+                        forced = True
+                        stop()
+                    worker.join(timeout=5)
+                    if not worker.is_alive():
+                        break
+                except BaseException as failure:
+                    cleanup_errors.append(repr(failure))
+                    if error is None:
+                        error = failure
+        codes = [worker.exitcode for worker in workers]
+        forced |= any(code in (-15, -9) for code in codes)
+        diagnostics.update(
+            worker_pids=[worker.pid for worker in workers],
+            worker_exitcodes=codes,
+            workers_joined=all(not worker.is_alive() for worker in workers),
+            forced_termination=forced,
+            discarded_prefetch_chunks=drained,
+            shutdown_seconds=time.monotonic() - started,
+            cleanup_errors=cleanup_errors,
+        )
+    if error is None and (
+        forced or not diagnostics["workers_joined"] or any(code != 0 for code in codes)
+    ):
+        error = RuntimeError(f"LeRobot worker shutdown was not clean: {diagnostics}")
+    if error is not None:
+        diagnostics["error"] = repr(error)
+        raise error
+
+
 class _ReservationSampler:
     """Parent-only episode-uniform index selection and shared exposure ledger."""
 
@@ -554,9 +622,10 @@ class _ReservationSampler:
         self.generator = torch.Generator().manual_seed(cfg.seed)
         self.next_reservation = 0
         self.cancelled_chunks = 0
+        self.dispatch_enabled = True
 
     def __iter__(self) -> Iterator[list[tuple[int, int]]]:
-        while True:
+        while self.dispatch_enabled:
             available = [
                 index
                 for index in range(len(self.episodes))
@@ -655,6 +724,7 @@ class StandardLeRobotReader:
         self._failed = False
         self._closed = False
         self._shutdown: dict[str, Any] = {}
+        self._shutdown_error: BaseException | None = None
         self._stats: dict[str, Any] = {
             "delivered_batches": 0,
             "sdk_getitem_calls": 0,
@@ -679,6 +749,7 @@ class StandardLeRobotReader:
             raise RuntimeError("Reader is closed or terminally failed")
 
     def _start(self) -> None:
+        self._sampler.dispatch_enabled = True
         self._loader = DataLoader(
             self._dataset,
             batch_sampler=self._sampler,
@@ -794,35 +865,36 @@ class StandardLeRobotReader:
         }
 
     def _stop_workers(self) -> None:
-        workers = list(getattr(self._iterator, "_workers", ()))
-        # PyTorch has no public DataLoader.close(). This private call is isolated
-        # to lifecycle cleanup; all reads still use the public Dataset API.
-        if self._iterator is not None:
-            self._iterator._shutdown_workers()
-        self._shutdown = {
-            "worker_pids": [worker.pid for worker in workers],
-            "worker_exitcodes": [worker.exitcode for worker in workers],
-            "workers_joined": all(not worker.is_alive() for worker in workers),
-        }
-        if not self._shutdown["workers_joined"]:
-            for worker in workers:
-                if worker.is_alive():
-                    worker.terminate()
-                    worker.join(timeout=5)
-            self._shutdown["forced_termination"] = True
-            if any(worker.is_alive() for worker in workers):
-                raise TimeoutError("LeRobot DataLoader workers did not terminate")
-        self._iterator, self._loader = None, None
+        if self._iterator is None:
+            if self._shutdown_error is not None:
+                raise self._shutdown_error
+            return
+        self._sampler.dispatch_enabled = False
+        self._shutdown = {"unconsumed_prefetch": self.snapshot_budget()}
+        try:
+            # Discard already reserved outputs without committing exposure or
+            # dispatching replacements. Workers become idle before teardown.
+            _finish_loader(
+                self._iterator, self._shutdown, timeout=min(30.0, self.cfg.timeout)
+            )
+        except BaseException as error:
+            self._failed = True
+            self._shutdown_error = error
+            raise
+        finally:
+            self._iterator, self._loader = None, None
 
     def restart(self) -> None:
         """Restart worker iteration without resetting delivered exposure credits."""
         self._check()
-        self._stop_workers()
-        self._sampler.cancel_outstanding()
+        try:
+            self._stop_workers()
+        finally:
+            self._sampler.cancel_outstanding()
         self._start()
 
     def close(self) -> dict[str, Any]:
-        """Stop owned workers and report unused prefetch before releasing it.
+        """Drain unused prefetch without delivery, then require clean worker exits.
 
         Returns:
             Shutdown status and the unconsumed reservation snapshot.
@@ -830,10 +902,13 @@ class StandardLeRobotReader:
         if self._owner != (os.getpid(), threading.get_ident()):
             raise RuntimeError("Reader close requires the creator process/thread")
         if not self._closed:
-            self._stop_workers()
-            self._shutdown["unconsumed_prefetch"] = self.snapshot_budget()
-            self._sampler.cancel_outstanding()
-            self._closed = True
+            try:
+                self._stop_workers()
+            finally:
+                self._sampler.cancel_outstanding()
+                self._closed = True
+        if self._shutdown_error is not None:
+            raise self._shutdown_error
         return copy.deepcopy(self._shutdown)
 
     def __enter__(self) -> StandardLeRobotReader:
@@ -878,8 +953,10 @@ def audit_video_quality(root: Path | str) -> dict[str, Any]:
     )
     iterator = iter(loader)
     samples = []
+    shutdown: dict[str, Any] = {}
     try:
-        for ref, batch in zip(refs, iterator):
+        for index, batch in enumerate(iterator):
+            ref = refs[index]
             decoded = batch["images"][ref["camera"]][0, 0].movedim(0, -1).double() * 255
             raw = torch.from_numpy(
                 np.load(root / ref["path"], allow_pickle=False)
@@ -896,8 +973,9 @@ def audit_video_quality(root: Path | str) -> dict[str, Any]:
                 }
             )
     finally:
-        iterator._shutdown_workers()
+        _finish_loader(iterator, shutdown, timeout=min(30.0, cfg.timeout))
     return {
         "samples": samples,
+        "worker_cleanup": shutdown,
         "scope": "fixed raw RGB references versus standard CPU video decoding; excluded from timed consumption",
     }
