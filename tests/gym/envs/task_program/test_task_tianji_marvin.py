@@ -317,7 +317,7 @@ def test_marvin_pour_lowers_scene_and_targets_without_changing_program_steps(
     cfg = config_to_cfg(payload, source_path=path)
     assert cfg.target_control_frequency == 100
     preset = deployment.integration.registration.robot_profile_binding.presets[0]
-    assert preset.motion_policy.sample_count == 480
+    assert preset.motion_policy.sample_count == 160
     assert preset.action_option_templates[
         "simulation.pour"
     ].rotate_angle == pytest.approx(-torch.pi / 3)
