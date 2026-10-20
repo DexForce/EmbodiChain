@@ -66,10 +66,10 @@ def test_atomic_cli_plans_and_replays_nominal_scene(
     assert result.returncode == 0, result.stdout[-20000:] + result.stderr[-20000:]
     manifest = json.loads((output / "expansion_manifest.json").read_text())
     assert manifest["status"] == "executed"
-    assert manifest["recipe_indices"] == [0]
+    assert manifest["variants"] == manifest["num_envs"] == 1
     assert manifest["replays"]
     for replay in manifest["replays"]:
-        assert len(replay["rows"]) == 1
+        assert all(len(stage["rows"]) == 1 for stage in replay["stages"])
         trajectory = torch.load(replay["trajectory_path"], weights_only=True)
         positions, dt = trajectory["positions"], trajectory["dt"]
         assert positions.shape[0] == 1

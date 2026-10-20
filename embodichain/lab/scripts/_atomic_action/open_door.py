@@ -55,6 +55,7 @@ from embodichain.lab.scripts._atomic_action.support import (
     parse_affordance_sampling_arguments,
     prepare_tutorial_scene,
     replay_trajectory,
+    _compile_demo,
     run_tutorial,
 )
 
@@ -180,6 +181,7 @@ def run(args: argparse.Namespace) -> None:
             "eef": create_parallel_jaw_grasp_pose_generator(
                 n_sample=args.n_sample,
                 force_refresh=args.force_reannotate,
+                approach_direction_samples=getattr(args, "grasp_approach_samples", 4),
             )
         },
     )
@@ -188,7 +190,9 @@ def run(args: argparse.Namespace) -> None:
         args,
         "Inspect the closed microwave, then press Enter to plan OpenDoor...",
     )
-    compiled = engine.compile(
+    compiled = _compile_demo(
+        engine,
+        args,
         (
             engine.make_invocation(
                 "open_door",
@@ -228,7 +232,7 @@ def run(args: argparse.Namespace) -> None:
     )
     log_affordance_branch_diagnostics(compiled.action_plans[0])
     if not compiled.plan_success.all():
-        if getattr(args, "_configured_run", False):
+        if getattr(args, "run", None) is not None:
             raise RuntimeError(
                 f"Atomic planning failed: {compiled.plan_success.tolist()}"
             )

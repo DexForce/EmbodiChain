@@ -56,6 +56,7 @@ from embodichain.lab.scripts._atomic_action.support import (
     log_trajectory_variant_diagnostics,
     parse_trajectory_variant_arguments,
     replay_trajectory,
+    _compile_demo,
     run_tutorial,
     save_tool_path_view,
     save_variant_joint_plot,
@@ -157,6 +158,7 @@ def run(args: argparse.Namespace) -> None:
             "eef": create_parallel_jaw_grasp_pose_generator(
                 n_sample=args.n_sample,
                 force_refresh=args.force_reannotate,
+                approach_direction_samples=getattr(args, "grasp_approach_samples", 4),
             )
         },
     )
@@ -176,7 +178,9 @@ def run(args: argparse.Namespace) -> None:
     )
 
     endpoint_mapping = {"primary": {"motion": "arm", "grasp": "eef"}}
-    compiled = engine.compile(
+    compiled = _compile_demo(
+        engine,
+        args,
         (
             engine.make_invocation(
                 "pick_up",
@@ -214,20 +218,20 @@ def run(args: argparse.Namespace) -> None:
             control_dt=sim.sim_config.physics_dt,
             **(
                 {"affordance_sampling": create_affordance_sampling_context(args)}
-                if getattr(args, "_configured_run", False)
+                if getattr(args, "run", None) is not None
                 else {}
             ),
         ),
     )
     if not compiled.plan_success.all():
-        if getattr(args, "_configured_run", False):
+        if getattr(args, "run", None) is not None:
             raise RuntimeError(
                 f"Atomic planning failed: {compiled.plan_success.tolist()}"
             )
         logger.log_warning("Failed to plan Place demo trajectory.")
         return
 
-    if not getattr(args, "_configured_run", False):
+    if getattr(args, "run", None) is None:
         # Each row replays a different way of executing the same plan. Only the
         # free motion changes: the grasp and the release keep their planned
         # waypoints, so every row picks and places the cube identically.
@@ -267,7 +271,7 @@ def run(args: argparse.Namespace) -> None:
         robot,
         (
             compiled.trajectory
-            if getattr(args, "_configured_run", False)
+            if getattr(args, "run", None) is not None
             else trajectory_variant_rows(variants, args.num_envs)
         ),
         args,

@@ -136,13 +136,18 @@ Use `/add-atomic-action` to extend goals, planners, registration and focused tes
 Keep planning side-effect-free; actions do not own task sequencing or simulator stepping.
 
 The direct-simulation sample host is `embodichain run-atomic-action --skill`:
-`lab/scripts/run_atomic_action.py` owns selection, batching and cleanup;
-`lab/scripts/_atomic_action/` owns the ten example scenes and internal sample defaults.
+`lab/scripts/run_atomic_action.py` owns validated selection and cleanup;
+`lab/scripts/_atomic_action/host.py` owns compilation, provenance and output,
+while the sample modules own twelve fixed physical scenes and typed defaults.
 The required skill selects the scene; physics, robot and planner are direct
 selectors. Robot compatibility is checked before scene import or simulator
 construction: Pickup, Place, MoveJoint and Handover accept the three sample
 presets, while the other scenes require UR5. Layouts, skill options and
-expansion settings remain sample-owned rather than externally configurable.
+operator settings remain sample-owned. `--variants N` requests N executions
+including the reference and creates N environments; the default is one.
+`--expansion affordance|trajectory|both` selects available factors, and explicit
+unsupported factors fail before simulation. No Cartesian-product recipe bank
+or collection/batching lifecycle is required.
 The dual-arm sample factory in `lab/scripts/_atomic_action/scenario.py` retains
 the arm preset unless Python callers select `solver="pytorch"`. The Handover
 scene currently makes that selection for Franka; UR presets keep analytical UR
@@ -156,29 +161,34 @@ UR5 and Franka own separate Robotiq Handover TCP matrices (0.21 m local Z
 and a 90-degree local-Z rotation); the generic dual factory retains PGI unless
 that gripper is selected. The scene's antipodal generator uses its matching
 140 mm opening geometry, and closure commands follow the six Robotiq joints'
-mimic directions with a 0.4 rad master angle.
+mimic directions with a 0.5 rad master angle.
 Scene callers select those points, and single/dual robot factories forward full
 poses to their solvers. Explicit Python PGI `tcp_z` overrides affect only local
 Z while preserving rotation and lateral offsets. TCP calibration changes the
 kinematic tool frame, not physical geometry.
 The matching tutorial files are compatibility entry points to those same scenes.
-Affordance branch overrides stay independent of physical slots, then the host
-adapts each compiled reference to `motion.expansion` for spatial variants.
-Contact phases and hand columns stay exact; protected phase samples are copied
-from the source after adaptation, including near-identical zero-time joins.
-Original action joins and intervals are restored before replay so callbacks
-retain their source indices. MoveJoint compiles each required joint target as
-a separate invocation, preserving its ordered waypoints as action boundaries
-through control-grid retiming and spatial expansion. Pour exports rotation,
-apex dwell and return boundaries; its constrained held-object phases are
-protected from spatial perturbation while the preceding PickUp free phases
-remain editable. Slide
-replans its push from each row's robot/handle observations after pull. Every
-Slide reference remains row-local through expansion and replay, including its
-start, locked contact path, timing and sampling provenance; shared affordance
-branch identity does not imply equivalent measured states. Output status records
-planning/playback completion, with no measured physical-success authority or
-Gym dataset collection. Usage lives in the host's `README.md`.
+Affordance branches are attached before planning. `AtomicActionEngine.compile`
+accepts an optional `plan_transform`, applied before concatenation and projected
+state propagation. The direct host and Task Program delegate trajectory changes
+to `atomic_actions/_plan_expansion.py`, which uses `ActionPlanTemplateAdapter`
+and `motion.expansion`, then rebuilds complete plans through the engine.
+Phase declarations can only narrow the built-in free-phase policy; editable
+joints come from explicit motion bindings and each row uses its own limits.
+Zero-time joins, protected phases, phase endpoints, non-motion columns and
+stationary participants are restored from the source samples. Logical source
+identities seed the expansion; environment IDs remain output correlations.
+
+MoveJoint makes required targets separate invocations. Pour's constrained
+phases remain exact while its PickUp preparation can vary. MoveHeldObject
+uses the same reference cube and PickUp preparation; PushObject retains its
+constrained contact path and exposes trajectory expansion only. Slide replans
+its push after executing the pull, using each row's measured robot/handle state.
+The host plays already aligned trajectories through `motion.execution` without
+changing their cadence; additional settling and final holds appear in the
+exported execution timeline. Sample output reports planning/playback completion
+with no measured physical-success authority or dataset collection. Physical
+initial scenes remain fixed; spatial generalization belongs to benchmark hosts.
+Usage and the versioned output contract live in the sample `README.md`.
 
 ## Recommended change sites
 

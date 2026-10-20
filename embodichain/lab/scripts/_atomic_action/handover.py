@@ -57,6 +57,7 @@ from embodichain.lab.scripts._atomic_action.support import (
     prepare_tutorial_scene,
     publish_tutorial_scene,
     replay_trajectory,
+    _compile_demo,
     run_tutorial,
     serve_tutorial_scene,
 )
@@ -84,9 +85,8 @@ OBJECT_ROT_HORIZONTAL = (90.0, 0.0, 0.0)
 FINAL_OBJECT_XYZ = (0.0, -0.2, 0.6)
 # ---------------------------------------------------------------------------
 
-# Robotiq's revolute closing angle follows the URDF mimic directions. At 0.4
-# rad the pads preload the sample can's approximately 63 mm diameter.
-HAND_CLOSE_QPOS = 0.4
+# Calibrated master angle; signed joint commands follow the URDF mimic directions.
+HAND_CLOSE_QPOS = 0.5
 HANDOVER_GRIPPER_MODEL = ParallelJawGripperModelCfg(
     model_id="robotiq_2f_140",
     min_opening_width=0.005,
@@ -236,6 +236,7 @@ def run_handover_demo(
     grasp_pose_generator = create_parallel_jaw_grasp_pose_generator(
         n_sample=args.n_sample,
         force_refresh=args.force_reannotate,
+        approach_direction_samples=getattr(args, "grasp_approach_samples", 4),
         gripper_model=HANDOVER_GRIPPER_MODEL,
     )
     engine = create_simulation_atomic_action_engine(
@@ -262,7 +263,9 @@ def run_handover_demo(
     # wait for object to drop
     for _ in range(50):
         sim.update(step=10)
-    compiled = engine.compile(
+    compiled = _compile_demo(
+        engine,
+        args,
         (
             engine.make_invocation(
                 "hand_over",
@@ -294,7 +297,7 @@ def run_handover_demo(
     traj = compiled.trajectory.positions
 
     if not success.all():
-        if getattr(args, "_configured_run", False):
+        if getattr(args, "run", None) is not None:
             raise RuntimeError(f"Atomic planning failed: {success.tolist()}")
         logger.log_warning("Failed to plan the unified HandOver trajectory.")
         return
@@ -313,7 +316,6 @@ def run_handover_demo(
         args,
         video_prefix="handover_auto_play",
         hold_steps=0,
-        trajectory_sim_steps=TRAJECTORY_SIM_STEPS,
         look_at=HANDOVER_RECORD_LOOK_AT,
         compiled=compiled,
     )

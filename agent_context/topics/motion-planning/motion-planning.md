@@ -154,8 +154,8 @@ genuinely different variants are discarded as duplicates; an enabled spatial
 factor at or below the tolerance now fails configuration decoding instead of
 silently keeping the nominal variant alone.
 
-The configured ten-scene CLI uses the same variant operators and owns its
-compiled-plan adaptation and replay provenance; see the
+The twelve-scene Atomic CLI uses the same variant operators through the
+shared Atomic plan adapter and owns its replay provenance; see the
 [Atomic host boundary](../atomic-actions/atomic-actions.md). It does not extend
 the Gym Task Program collection lifecycle.
 

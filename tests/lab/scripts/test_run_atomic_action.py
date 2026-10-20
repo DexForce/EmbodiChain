@@ -28,11 +28,10 @@ from embodichain.lab.scripts import run_atomic_action as launcher
 from embodichain.lab.scripts._atomic_action.defaults import (
     ROBOTS,
     SCENES,
-    _recipes,
     _sample_defaults,
     _scene_args,
+    AtomicSkillRunCfg,
 )
-from embodichain.lab.scripts._atomic_action.expansion import _augment, _template
 from embodichain.lab.scripts._atomic_action.support import (
     NEWTON_GRASP_CONTACT_DAMPING,
     NEWTON_GRASP_CONTACT_STIFFNESS,
@@ -502,690 +501,110 @@ def test_invalid_tcp_calibration_is_rejected(value: float) -> None:
 
 
 @pytest.mark.parametrize("skill", SCENES)
-def test_internal_scene_defaults_preserve_expansion_recipes(skill: str) -> None:
-    cfg = _sample_defaults(skill)
-    recipes = _recipes(cfg)
-    expected = 4 if skill == "move_joint" else 16
-    assert len(recipes) == expected
-    assert recipes[0] == (0, 0)
-    assert cfg["expansion"]["trajectory"]["spatial"]["operators"] == [
-        "joint_residual",
-        "via_points",
-    ]
-
-
-def test_sample_defaults_are_independent_between_runs() -> None:
-    cfg = _sample_defaults("pickup")
-    cfg["options"]["approach"] = "custom"
-    cfg["expansion"]["trajectory"]["spatial"]["operators"].clear()
-    cfg["runtime"]["headless"] = True
-    fresh = _sample_defaults("pickup")
-    assert fresh["options"]["approach"] == "top"
-    assert fresh["expansion"]["trajectory"]["spatial"]["operators"] == [
-        "joint_residual",
-        "via_points",
-    ]
-    assert fresh["runtime"]["headless"] is False
-
-
-def test_cli_requires_skill(capsys: pytest.CaptureFixture[str]) -> None:
-    with pytest.raises(SystemExit) as exc:
-        launcher._create_parser().parse_args([])
-    assert exc.value.code == 2
-    assert "--skill" in capsys.readouterr().err
-
-
-def test_cli_selector_defaults() -> None:
-    args = launcher._create_parser().parse_args(["--skill", "place"])
-    assert (args.skill, args.physics, args.robot, args.planner) == (
-        "place",
-        "default",
-        "ur5",
-        "trapezoidal",
+def test_every_sample_defaults_to_one_reference_environment(skill: str) -> None:
+    cfg = launcher._resolve_sample(
+        launcher._create_parser().parse_args(["--skill", skill])
     )
-    cfg, selected = launcher._resolve_sample(args)
-    assert cfg["runtime"]["num_envs"] == 16
-    assert selected == tuple(range(16))
+    assert isinstance(cfg, AtomicSkillRunCfg)
+    assert cfg.variants == 1
+    assert not cfg.affordance_enabled and not cfg.trajectory_enabled
+    assert _scene_args(cfg).num_envs == 1
 
 
-@pytest.mark.parametrize(
-    "option, value",
-    [
-        ("--skill", "unknown"),
-        ("--physics", "other"),
-        ("--robot", "panda"),
-        ("--planner", "other"),
-    ],
-)
-def test_cli_rejects_unknown_selectors(option: str, value: str) -> None:
-    with pytest.raises(SystemExit) as exc:
-        launcher._create_parser().parse_args(["--skill", "place", option, value])
-    assert exc.value.code == 2
-
-
-@pytest.mark.parametrize("option", ("--config", "--list-skills"))
-def test_removed_configuration_arguments_are_rejected(option: str) -> None:
-    with pytest.raises(SystemExit) as exc:
-        launcher._create_parser().parse_args(["--skill", "place", option])
-    assert exc.value.code == 2
-
-
-@pytest.mark.parametrize("skill", SCENES)
-@pytest.mark.parametrize("robot", ROBOTS)
-def test_skill_robot_compatibility(skill: str, robot: str) -> None:
-    args = launcher._create_parser().parse_args(["--skill", skill, "--robot", robot])
-    if skill not in MULTI_ROBOT_SCENES and robot != "ur5":
-        with pytest.raises(ValueError, match="requires robot 'ur5'"):
-            launcher._resolve_sample(args)
-    else:
-        cfg, _ = launcher._resolve_sample(args)
-        scene_args = _scene_args(cfg, (0,), 0)
-        assert cfg["skill"] == skill
-        assert cfg["robot"] == scene_args.robot == robot
-
-
-@pytest.mark.parametrize(
-    "skill", tuple(skill for skill in SCENES if skill not in MULTI_ROBOT_SCENES)
-)
-@pytest.mark.parametrize("robot", ("franka", "ur10"))
-def test_unsupported_robot_is_rejected_before_simulation(
-    skill: str,
-    robot: str,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    def unexpected_batch(*args, **kwargs):
-        pytest.fail("unsupported robot reached simulator execution")
-
-    monkeypatch.setattr(launcher, "_run_batch", unexpected_batch)
-    output_dir = tmp_path / "output"
-    with pytest.raises(SystemExit) as exc:
-        launcher.cli(
-            ["--skill", skill, "--robot", robot, "--output-dir", str(output_dir)]
+@pytest.mark.parametrize("count", (2, 8))
+@pytest.mark.parametrize("mode", ("affordance", "trajectory", "both"))
+def test_variant_count_is_the_parallel_environment_count(count: int, mode: str) -> None:
+    cfg = launcher._resolve_sample(
+        launcher._create_parser().parse_args(
+            ["--skill", "place", "--variants", str(count), "--expansion", mode]
         )
-    assert exc.value.code == 2
-    assert "requires robot 'ur5'" in capsys.readouterr().err
-    assert not output_dir.exists()
-
-
-@pytest.mark.parametrize("physics", ("default", "newton"))
-@pytest.mark.parametrize("planner", ("trapezoidal", "toppra", "curobo"))
-def test_direct_selectors_reach_scene(physics: str, planner: str) -> None:
-    args = launcher._create_parser().parse_args(
-        [
-            "--skill",
-            "place",
-            "--physics",
-            physics,
-            "--robot",
-            "franka",
-            "--planner",
-            planner,
-        ]
     )
-    cfg, _ = launcher._resolve_sample(args)
-    scene_args = _scene_args(cfg, (0,), 0)
-    assert cfg["physics"] == scene_args.physics == physics
-    assert cfg["robot"] == scene_args.robot == "franka"
-    assert cfg["planner"] == scene_args.planner == planner
-
-
-def test_cli_runtime_controls_are_retained(tmp_path: Path) -> None:
-    args = launcher._create_parser().parse_args(
-        [
-            "--skill",
-            "pickup",
-            "--headless",
-            "--num-envs",
-            "2",
-            "--recipe-indices",
-            "2",
-            "4",
-            "--seed",
-            "17",
-            "--save-video",
-            "--output-dir",
-            str(tmp_path),
-        ]
+    args = _scene_args(cfg)
+    assert args.num_envs == count
+    assert cfg.affordance_enabled == (mode in {"affordance", "both"})
+    assert cfg.trajectory_enabled == (mode in {"trajectory", "both"})
+    assert not any(
+        name.startswith("_config") or name == "_recipes" for name in vars(args)
     )
-    cfg, selected = launcher._resolve_sample(args)
-    assert cfg["runtime"]["headless"] is True
-    assert cfg["runtime"]["num_envs"] == 2
-    assert selected == (2, 4)
-    assert cfg["seed"] == 17
-    assert cfg["output"]["save_video"] is True
-    assert cfg["output"]["directory"] == str(tmp_path)
-
-
-def test_nominal_replay_disables_both_expansion_paths() -> None:
-    args = launcher._create_parser().parse_args(
-        ["--skill", "place", "--no-expansion", "--num-envs", "1"]
-    )
-    cfg, selected = launcher._resolve_sample(args)
-    assert selected == (0,)
-    assert _recipes(cfg) == ((0, 0),)
-    assert cfg["expansion"]["affordance"]["enabled"] is False
-    assert cfg["expansion"]["trajectory"]["spatial"]["enabled"] is False
-    assert cfg["runtime"]["num_envs"] == 1
 
 
 @pytest.mark.parametrize(
-    "options, message",
-    [
-        (["--num-envs", "0"], "positive"),
-        (["--num-envs", "-1"], "positive"),
+    "arguments,message",
+    (
+        (["--variants", "0"], "variants must be positive"),
+        (["--variants", "-1"], "variants must be positive"),
+        (["--variants", "8", "--num-envs", "2"], "must equal"),
+        (["--variants", "2", "--no-expansion"], "requires --variants 1"),
         (["--gpu-id", "-1"], "non-negative"),
-        (["--arena-space", "nan"], "finite and positive"),
-        (["--arena-space", "0"], "finite and positive"),
-        (["--seed", "-1"], "seed"),
-        (["--seed", str(2**32)], "seed"),
-        (["--recipe-indices", "0", "0"], "unique"),
-        (["--recipe-indices", "16"], "unique"),
+        (["--seed", "-1"], "seed must"),
+        (["--arena-space", "nan"], "finite"),
         (["--save-video", "--renderer", "no-render"], "requires a renderer"),
-    ],
+    ),
 )
-def test_runtime_errors_are_rejected_before_execution(
-    options: list[str], message: str
+def test_invalid_cli_settings_fail_before_simulation(
+    arguments: list[str], message: str
 ) -> None:
-    args = launcher._create_parser().parse_args(["--skill", "place", *options])
+    args = launcher._create_parser().parse_args(["--skill", "place", *arguments])
     with pytest.raises(ValueError, match=message):
         launcher._resolve_sample(args)
 
 
-@pytest.mark.parametrize("planner", ("trapezoidal", "toppra", "curobo"))
-def test_sample_pour_retains_native_planner_sampling(planner: str) -> None:
-    from embodichain.lab.scripts._atomic_action.pour import _create_pick_motion_policy
-
-    policy = _create_pick_motion_policy(planner, fixed_sample_count=False)
-    assert policy.plan_opts is None
-    assert policy.strategy == "motion_gen"
-
-
-def test_affordance_branch_identity_is_independent_of_slots() -> None:
-    cfg = _sample_defaults("pickup")
-    args = _scene_args(cfg, (8, 2, 4), 7)
-    sampling = create_affordance_sampling_context(args)
-    assert [sampling.branch_for(row, row_index=row) for row in range(3)] == [2, 0, 1]
-    other = create_affordance_sampling_context(_scene_args(cfg, (8,), 0))
-    assert torch.equal(
-        sampling.generator("grasp").get_state(), other.generator("grasp").get_state()
+@pytest.mark.parametrize("skill", ("move_joint", "push_object"))
+def test_samples_without_affordances_reject_affordance_only_mode(skill: str) -> None:
+    args = launcher._create_parser().parse_args(
+        ["--skill", skill, "--variants", "2", "--expansion", "affordance"]
     )
+    with pytest.raises(ValueError, match="no affordance"):
+        launcher._resolve_sample(args)
 
 
-def _compiled(rows: int = 3) -> SimpleNamespace:
-    # Two actions repeat their join at sample 40 with zero elapsed time.
-    horizon = 71
-    positions = torch.zeros(rows, horizon, 3)
-    positions[:, :40, 0] = torch.linspace(0, 0.5, 40)
-    positions[:, 40:, 0] = torch.linspace(0.5, 0.0, horizon - 40)
-    positions[:, :, 2] = 0.04  # gripper is never an editable arm joint
-    intervals = torch.full((rows, horizon), 0.01)
-    intervals[:, 0] = 0
-    intervals[:, 40] = 0
-    segments = (
-        (
-            SimpleNamespace(name="approach", start=0, stop=25),
-            SimpleNamespace(name="close", start=25, stop=40),
-        ),
-        (
-            SimpleNamespace(name="approach", start=0, stop=20),
-            SimpleNamespace(name="release", start=20, stop=31),
-        ),
-    )
-    plans = tuple(
-        SimpleNamespace(
-            skill_id=skill, segments=group, diagnostics=SimpleNamespace(metadata={})
-        )
-        for skill, group in zip(("pick_up", "place"), segments)
-    )
-
-    def segment(index: int, name: str) -> SimpleNamespace:
-        value = next(value for value in segments[index] if value.name == name)
-        offset = 40 if index else 0
-        return SimpleNamespace(
-            name=name, start=value.start + offset, stop=value.stop + offset
-        )
-
-    return SimpleNamespace(
-        trajectory=TimedTrajectory(
-            positions, None, None, intervals, torch.arange(rows)
-        ),
-        action_plans=plans,
-        segment=segment,
-    )
-
-
-class _Robot:
-    joint_names = ("arm_0", "arm_1", "hand")
-
-    def get_joint_ids(self, name: str) -> list[int]:
-        assert name == "arm"
-        return [0, 1]
-
-    def get_qpos_limits(self) -> torch.Tensor:
-        return torch.tensor([[-3.0, 3.0], [-3.0, 3.0], [0.0, 0.05]]).expand(3, -1, -1)
-
-
-def test_both_spatial_operators_keep_contacts_hands_clock_and_action_joins() -> None:
-    cfg = _sample_defaults("place")
-    args = _scene_args(cfg, (0, 1, 2), 0)
-    compiled = _compiled()
-    expanded, records = _augment(compiled, _Robot(), args)
-    assert records[0]["operator"] == "none"
-    assert {record["operator"] for record in records[1:]} == {
-        "joint_residual",
-        "via_points",
-    }
-    assert torch.equal(expanded.dt, compiled.trajectory.dt)
-    assert torch.equal(expanded.positions[0], compiled.trajectory.positions[0])
-    assert torch.equal(
-        expanded.positions[:, :, 2], compiled.trajectory.positions[:, :, 2]
-    )
-    for left, right in ((25, 40), (60, 71)):
-        assert torch.equal(
-            expanded.positions[:, left:right],
-            compiled.trajectory.positions[:, left:right],
-        )
-    for endpoint in (0, 24, 39, 40, 59, 60, 70):
-        assert torch.equal(
-            expanded.positions[:, endpoint], compiled.trajectory.positions[:, endpoint]
-        )
-    assert not torch.equal(
-        expanded.positions[1, :25, :2], compiled.trajectory.positions[1, :25, :2]
-    )
-    assert not torch.equal(
-        expanded.positions[2, :25, :2], compiled.trajectory.positions[2, :25, :2]
-    )
-
-
-@pytest.mark.parametrize("robot_type", ("ur5", "franka", "ur10"))
-def test_move_joint_expansion_preserves_required_mid_waypoint(
-    monkeypatch: pytest.MonkeyPatch, robot_type: str
+@pytest.mark.parametrize("skill", SCENES)
+@pytest.mark.parametrize("robot", ROBOTS)
+def test_sample_robot_compatibility_is_validated_before_scene_import(
+    skill: str, robot: str
 ) -> None:
-    """Compile the sample with real planning/retiming before applying both operators."""
-    from embodichain.lab.scripts._atomic_action import move_joint
+    if skill not in MULTI_ROBOT_SCENES and robot != "ur5":
+        with pytest.raises(ValueError, match="requires robot"):
+            _sample_defaults(skill, robot=robot)
+    else:
+        assert _sample_defaults(skill, robot=robot).robot == robot
 
-    cfg = _sample_defaults("move_joint", robot=robot_type)
-    args = _scene_args(cfg, (0, 1, 2), 0)
-    args.no_vis_eef_axis = True
-    args.num_envs = len(args._recipes)
-    robot_cfg = create_tutorial_robot_cfg(robot_type)
-    arm_dof = len(robot_cfg.control_parts["arm"])
-    qpos = torch.tensor(robot_cfg.init_qpos).repeat(args.num_envs, 1)
-    limits = torch.tensor([-2 * torch.pi, 2 * torch.pi]).expand(
-        args.num_envs, qpos.shape[1], 2
-    )
-    robot = SimpleNamespace(
-        device=torch.device("cpu"),
-        dof=qpos.shape[1],
-        num_instances=args.num_envs,
-        control_parts=robot_cfg.control_parts,
-        joint_names=tuple(f"joint_{index}" for index in range(qpos.shape[1])),
-        get_qpos=lambda name=None: qpos[:, :arm_dof] if name == "arm" else qpos,
-        get_joint_ids=lambda name: list(range(arm_dof)),
-        get_qpos_limits=lambda name=None: (
-            limits[:, :arm_dof] if name == "arm" else limits
-        ),
-        get_qvel_limits=lambda **kwargs: torch.full(qpos.shape, torch.inf),
-        mimic_ids=(),
-        mimic_parents=(),
-        mimic_multipliers=(),
-    )
-    planner = object.__new__(TrapezoidalPlanner)
-    planner.device = robot.device
-    planner.robot = robot
-    planner.cfg = SimpleNamespace(planner_type="trapezoidal")
-    generator = object.__new__(MotionGenerator)
-    generator.planner = planner
-    generator.robot = robot
-    generator.device = robot.device
-    sim = SimpleNamespace(
-        sim_config=SimpleNamespace(physics_dt=0.01), prepare=lambda: None
-    )
-    monkeypatch.setattr(move_joint, "create_tutorial_simulation", lambda args: sim)
-    monkeypatch.setattr(move_joint, "add_tutorial_robot", lambda *args: robot)
-    monkeypatch.setattr(
-        move_joint, "create_curobo_motion_generator", lambda *args, **kwargs: generator
-    )
-    monkeypatch.setattr(move_joint, "prepare_tutorial_scene", lambda *args: False)
-    compiled_plans = []
-    monkeypatch.setattr(
-        move_joint,
-        "replay_trajectory",
-        lambda *args, **kwargs: compiled_plans.append(kwargs["compiled"]),
-    )
-    move_joint.run(args)
-    compiled = compiled_plans[0]
-    assert compiled.plan_success.all()
-    expanded, records = _augment(compiled, robot, args)
-    assert [record["operator"] for record in records] == [
-        "none",
-        "joint_residual",
-        "via_points",
-    ]
-    home = qpos[0, :arm_dof]
-    mid = home.clone()
-    # The sample's explicit UR5 offsets also apply to the first six joints of
-    # the Franka and UR10 presets; any remaining arm joint keeps its home value.
-    mid[:6] += torch.tensor([0.15, 0.17, -0.12, -0.03, 0.0, 0.10])
-    distances = torch.linalg.vector_norm(
-        expanded.positions[:, :, :arm_dof] - mid, dim=2
-    )
-    torch.testing.assert_close(
-        distances[1:].min(dim=1).values, torch.zeros(2), rtol=0, atol=1e-7
-    )
-    assert len(compiled.action_plans) == 3
-    mid_segment = compiled.segment(1, "move_joints")
-    home_segment = compiled.segment(2, "move_joints")
-    assert torch.equal(
-        expanded.positions[:, mid_segment.stop - 1, :arm_dof],
-        mid.expand(args.num_envs, -1),
-    )
-    assert torch.equal(
-        expanded.positions[:, home_segment.start, :arm_dof],
-        mid.expand(args.num_envs, -1),
-    )
-    assert torch.equal(
-        expanded.positions[:, -1, :arm_dof], home.expand(args.num_envs, -1)
-    )
-    assert torch.equal(expanded.dt, compiled.trajectory.dt)
-    assert torch.equal(
-        expanded.positions[:, :, arm_dof:],
-        compiled.trajectory.positions[:, :, arm_dof:],
-    )
-    assert torch.equal(expanded.positions[0], compiled.trajectory.positions[0])
-    for row in (1, 2):
-        assert not torch.equal(
-            expanded.positions[row, mid_segment.start : mid_segment.stop, :arm_dof],
-            compiled.trajectory.positions[
-                0, mid_segment.start : mid_segment.stop, :arm_dof
-            ],
+
+def test_removed_cartesian_product_recipe_argument_is_rejected() -> None:
+    with pytest.raises(SystemExit):
+        launcher._create_parser().parse_args(
+            ["--skill", "place", "--recipe-indices", "0"]
         )
 
 
-@pytest.mark.parametrize("join_dt", [0.0, 0.01])
-@pytest.mark.parametrize("join_offset", [0.0, 1e-6])
-@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
-def test_pour_expansion_preserves_interior_rotated_target(
-    join_dt: float, join_offset: float, dtype: torch.dtype
+def test_cli_saves_completed_run_and_automatic_capacity(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Both operators retain Pour's off-center target and still expand PickUp."""
-    cfg = _sample_defaults("pour")
-    compiled = _compiled()
-    source = compiled.trajectory
-    compiled.trajectory = TimedTrajectory(
-        source.positions.to(dtype), None, None, source.dt.to(dtype), source.env_ids
-    )
-    pour_start = 40
-    # A revolute joint encodes an out-and-back rotation. The target deliberately
-    # occurs away from the segment midpoint and after the duplicate action join.
-    poured_index = pour_start + 9
-    horizon = compiled.trajectory.waypoint_count
-    angle = cfg["options"]["rotate_angle"]
-    positions = compiled.trajectory.positions
-    positions[:, pour_start:, 0] = positions[:, pour_start - 1, 0:1]
-    positions[:, pour_start : poured_index + 1, 1] = torch.linspace(
-        0.0, angle, poured_index - pour_start + 1, dtype=dtype
-    )
-    positions[:, poured_index:, 1] = torch.linspace(
-        angle, 0.0, horizon - poured_index, dtype=dtype
-    )
-    # The adapter permits near-identical zero-time joins within 1e-5. Dropping
-    # this sample must not replace the protected Pour state with its predecessor.
-    positions[:, pour_start, 0] += join_offset
-    compiled.trajectory.dt[:, pour_start] = join_dt
-    compiled.action_plans = (
-        compiled.action_plans[0],
-        SimpleNamespace(
-            skill_id="pour",
-            segments=(
-                SimpleNamespace(name="pour", start=0, stop=horizon - pour_start),
-            ),
-            diagnostics=SimpleNamespace(metadata={}),
-        ),
-    )
-    pickup_segment = compiled.segment
+    def run_sample(cfg, args, run):
+        assert cfg.variants == 2
+        assert _scene_args(cfg).num_envs == 2
+        run.replays.append({"status": "executed", "measured_task_success": None})
 
-    def segment(index: int, name: str) -> SimpleNamespace:
-        if index == 0:
-            return pickup_segment(index, name)
-        assert index == 1 and name == "pour"
-        return SimpleNamespace(name=name, start=pour_start, stop=horizon)
-
-    compiled.segment = segment
-    expanded, records = _augment(compiled, _Robot(), _scene_args(cfg, (0, 1, 2), 0))
-
-    assert {record["operator"] for record in records[1:]} == {
-        "joint_residual",
-        "via_points",
-    }
-    target = positions[0, poured_index]
-    assert torch.equal(expanded.positions[:, poured_index], target.expand(3, -1))
-    # With no exported leg boundary, protect the complete Pour interval rather
-    # than guessing an anchor from time or a trajectory extremum.
-    assert torch.equal(expanded.positions[:, pour_start:], positions[:, pour_start:])
-    assert torch.equal(expanded.dt, compiled.trajectory.dt)
-    for row in (1, 2):
-        assert not torch.equal(expanded.positions[row, :25], positions[row, :25])
-
-
-def test_trajectory_variant_is_stable_when_recipe_moves_to_another_batch() -> None:
-    cfg = _sample_defaults("place")
-    compiled = _compiled()
-    together, _ = _augment(compiled, _Robot(), _scene_args(cfg, (0, 1, 2), 0))
-    isolated, _ = _augment(_compiled(1), _Robot(), _scene_args(cfg, (2,), 9))
-    assert torch.equal(together.positions[2], isolated.positions[0])
-
-
-def test_spatial_variants_share_one_grasp_reference_per_branch() -> None:
-    cfg = _sample_defaults("place")
-    compiled = _compiled()
-    # Model different feasible IK/grasp rankings on otherwise equal slots.
-    compiled.trajectory.positions[1, :, 1] = 0.3
-    compiled.trajectory.positions[2, :, 1] = 0.6
-    expanded, records = _augment(compiled, _Robot(), _scene_args(cfg, (0, 1, 2), 0))
-    assert [record["reference_row"] for record in records] == [0, 0, 0]
-    assert torch.equal(
-        expanded.positions[:, 25:40],
-        compiled.trajectory.positions[0:1, 25:40].expand(3, -1, -1),
-    )
-
-
-def _compiled_slide_push() -> SimpleNamespace:
-    """Model three pushes replanned from distinct post-pull robot/handle states."""
-    phases = (
-        ("approach", 25),
-        ("reach", 15),
-        ("close", 5),
-        ("push", 25),
-        ("open", 5),
-        ("return", 25),
-    )
-    segments = []
-    offset = 0
-    for name, count in phases:
-        segments.append(SimpleNamespace(name=name, start=offset, stop=offset + count))
-        offset += count
-    starts = torch.tensor([0.0, 0.12, -0.08])
-    handles = torch.tensor([0.3, 0.47, 0.19])
-    positions = torch.zeros(3, offset, 3)
-    for segment in segments:
-        count = segment.stop - segment.start
-        if segment.name == "approach":
-            x = torch.lerp(
-                starts[:, None], handles[:, None] - 0.1, torch.linspace(0, 1, count)
-            )
-        elif segment.name == "reach":
-            x = handles[:, None] - torch.linspace(0.1, 0, count)
-        elif segment.name == "push":
-            x = handles[:, None] - torch.linspace(0, 0.18, count)
-        elif segment.name == "return":
-            x = handles[:, None] - 0.18 + torch.linspace(0, 0.1, count)
-        else:
-            x = handles[:, None] - (0.18 if segment.name == "open" else 0)
-        positions[:, segment.start : segment.stop, 0] = x
-        if segment.name == "close":
-            hand = torch.linspace(0, 0.04, count)
-        elif segment.name == "open":
-            hand = torch.linspace(0.04, 0, count)
-        else:
-            hand = 0.04 if segment.name == "push" else 0
-        positions[:, segment.start : segment.stop, 2] = hand
-    intervals = torch.tensor([0.01, 0.02, 0.04])[:, None].expand(3, offset).clone()
-    intervals[:, 0] = 0
-    metadata = {
-        "affordance_sample": {
-            "grasp": {"candidate_ids": [7, 7, 7], "reused": [False, False, False]},
-            "measured_handle_x": handles.tolist(),
-        }
-    }
-
-    def segment(action_index: int, name: str) -> SimpleNamespace:
-        assert action_index == 0
-        return next(value for value in segments if value.name == name)
-
-    return SimpleNamespace(
-        trajectory=TimedTrajectory(positions, None, None, intervals, torch.arange(3)),
-        action_plans=(
-            SimpleNamespace(
-                skill_id="slide",
-                segments=tuple(segments),
-                diagnostics=SimpleNamespace(metadata=metadata),
-            ),
-        ),
-        segment=segment,
-    )
-
-
-@pytest.mark.parametrize("recipes", [(0, 1, 2), (1, 0, 2)])
-@pytest.mark.parametrize("hold_steps", [0, None])
-def test_slide_push_variants_preserve_each_replanned_row(
-    recipes: tuple[int, ...], hold_steps: int | None
-) -> None:
-    """Shared grasp identity must not replace live row starts, contacts or clocks."""
-    cfg = _sample_defaults("slide")
-    cfg["runtime"]["hold_steps"] = hold_steps
-    compiled = _compiled_slide_push()
-    source = compiled.trajectory
-    expanded, records = _augment(compiled, _Robot(), _scene_args(cfg, recipes, 0))
-
-    torch.testing.assert_close(
-        expanded.positions[:, 0], source.positions[:, 0], rtol=0, atol=0
-    )
-    assert torch.equal(expanded.dt, source.dt)
-    assert [record["reference_row"] for record in records] == [0, 1, 2]
-    assert {record["operator"] for record in records} == {
-        "none",
-        "joint_residual",
-        "via_points",
-    }
-    for segment in compiled.action_plans[0].segments:
-        region = slice(segment.start, segment.stop)
-        if segment.name in {"reach", "close", "push", "open"}:
-            assert torch.equal(
-                expanded.positions[:, region], source.positions[:, region]
-            )
-        else:
-            for endpoint in (segment.start, segment.stop - 1):
-                torch.testing.assert_close(
-                    expanded.positions[:, endpoint],
-                    source.positions[:, endpoint],
-                    rtol=0,
-                    atol=0,
-                )
-            for row, record in enumerate(records):
-                if record["operator"] != "none":
-                    assert not torch.equal(
-                        expanded.positions[row, region, :2],
-                        source.positions[row, region, :2],
-                    )
-    assert torch.equal(expanded.positions[:, :, 2], source.positions[:, :, 2])
-    for row, record in enumerate(records):
-        sample = record["affordance_samples"][0]
-        assert sample["grasp"]["candidate_ids"] == 7
-        assert (
-            sample["measured_handle_x"]
-            == compiled.action_plans[0].diagnostics.metadata["affordance_sample"][
-                "measured_handle_x"
-            ][row]
-        )
-        if record["operator"] == "none":
-            assert torch.equal(expanded.positions[row], source.positions[row])
-
-
-def test_zero_time_position_change_is_rejected() -> None:
-    compiled = _compiled()
-    compiled.trajectory.positions[0, 40, 0] += 0.1
-    with pytest.raises(ValueError, match="zero time"):
-        _template(compiled, 0, _Robot.joint_names, (0, 1), "place", 0)
-
-
-def test_missing_distinct_variants_fail_without_reusing_nominal(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from embodichain.lab.scripts._atomic_action import expansion
-
-    cfg = _sample_defaults("place")
-    fake = SimpleNamespace(
-        variants=(SimpleNamespace(spatial_operator="none"),), rejected={"duplicates": 4}
-    )
-    monkeypatch.setattr(
-        expansion, "expand_trajectory_variants", lambda *args, **kwargs: fake
-    )
-    with pytest.raises(RuntimeError, match="only 1 survived"):
-        _augment(_compiled(1), _Robot(), _scene_args(cfg, (1,), 0))
-
-
-def test_cli_batches_all_recipes_and_records_completion(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    batches = []
-
-    def run_batch(cfg, indices, batch_id, cli_args, *, last):
-        batches.append((indices, last))
-        return [{"status": "executed", "batch_id": batch_id}]
-
-    monkeypatch.setattr(launcher, "_run_batch", run_batch)
-    launcher.cli(
-        [
-            "--skill",
-            "place",
-            "--num-envs",
-            "3",
-            "--recipe-indices",
-            "0",
-            "1",
-            "2",
-            "4",
-            "--output-dir",
-            str(tmp_path),
-        ]
-    )
-    assert batches == [((0, 1, 2), False), ((4,), True)]
+    monkeypatch.setattr(launcher, "_run_sample", run_sample)
+    launcher.cli(["--skill", "place", "--variants", "2", "--output-dir", str(tmp_path)])
     manifest = json.loads((tmp_path / "expansion_manifest.json").read_text())
+    assert manifest["schema_version"] == 2
     assert manifest["status"] == "executed"
-    assert len(manifest["replays"]) == 2
+    assert manifest["num_envs"] == manifest["variants"] == 2
+    assert manifest["enabled_factors"] == ["affordance", "trajectory"]
     assert manifest["measured_task_success"] is None
 
 
-def test_cli_persists_failure_status(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("error", (RuntimeError("planning failed"), SystemExit(130)))
+def test_cli_persists_failure_and_interruption(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, error: BaseException
 ) -> None:
-    def fail(*args, **kwargs):
-        raise RuntimeError("IK failure")
+    def fail(cfg, args, run):
+        raise error
 
-    monkeypatch.setattr(launcher, "_run_batch", fail)
-    with pytest.raises(RuntimeError, match="IK failure"):
-        launcher.cli(
-            [
-                "--skill",
-                "place",
-                "--no-expansion",
-                "--output-dir",
-                str(tmp_path),
-            ]
-        )
+    monkeypatch.setattr(launcher, "_run_sample", fail)
+    with pytest.raises(type(error)):
+        launcher.cli(["--skill", "place", "--output-dir", str(tmp_path)])
     manifest = json.loads((tmp_path / "expansion_manifest.json").read_text())
     assert manifest["status"] == "failed"
-    assert "IK failure" in manifest["error"]
+    assert type(error).__name__ in manifest["error"]

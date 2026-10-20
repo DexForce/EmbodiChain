@@ -1344,7 +1344,7 @@ def test_replay_timed_trajectory_uses_arrival_intervals() -> None:
             hold_steps=0,
         )
 
-    assert sim.update.call_args_list == [call(step=2), call(step=3), call(step=3)]
+    assert sim.update.call_args_list == [call(0.1, 2), call(0.1, 3)]
     assert robot.set_qpos.call_count == 3
 
 
@@ -1371,7 +1371,7 @@ def test_replay_timed_trajectory_settles_once_after_newton_native_grasp() -> Non
             hold_steps=0,
         )
 
-    assert sim.update.call_args_list == [call(step=1), call(step=4), call(step=1)]
+    assert sim.update.call_args_list == [call(0.1, 1), call(0.1, 4)]
     robot.get_joint_ids.assert_called_once_with(name="eef")
 
 
@@ -1410,12 +1410,12 @@ def test_replay_timed_trajectory_settles_after_each_native_hand_phase() -> None:
         )
 
     assert sim.update.call_args_list == [
-        call(step=1),
-        call(step=1),
-        call(step=4),
-        call(step=1),
-        call(step=1),
-        call(step=4),
+        call(0.1, 1),
+        call(0.1, 1),
+        call(0.1, 4),
+        call(0.1, 1),
+        call(0.1, 1),
+        call(0.1, 3),
     ]
 
 

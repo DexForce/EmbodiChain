@@ -5298,9 +5298,16 @@ def test_handover_picks_with_nearer_arm_and_preserves_waypoint_rotations(
     trajectory = _joint_trajectory(plan)
     assert plan.plan_success.tolist() == [True, True]
     assert trajectory.positions.shape == (NUM_ENVS, 28, DUAL_ROBOT_DOF)
-    assert planned_parts == ["left_arm", "left_arm", "right_arm", "right_arm"]
+    assert planned_parts == [
+        "left_arm",
+        "left_arm",
+        "left_arm",
+        "right_arm",
+        "right_arm",
+    ]
     assert [segment.name for segment in plan.segments] == [
         "pickup_approach",
+        "pickup_reach",
         "pickup_close",
         "pickup_transport",
         "receive_approach",
@@ -5316,27 +5323,27 @@ def test_handover_picks_with_nearer_arm_and_preserves_waypoint_rotations(
     assert torch.equal(pickup_call.kwargs["obj_longest_axis"], expected_axis)
     assert pickup_call.kwargs["is_positive_part"].tolist() == [False, False]
 
-    pickup_grasp_rotation = planned_targets[0][:, 1, :3, :3]
+    pickup_grasp_rotation = planned_targets[1][:, 0, :3, :3]
     assert torch.allclose(
-        planned_targets[1][:, :, :3, :3],
+        planned_targets[2][:, :, :3, :3],
         pickup_grasp_rotation[:, None].expand(-1, 2, -1, -1),
     )
-    receive_grasp_rotation = planned_targets[2][:, 1, :3, :3]
+    receive_grasp_rotation = planned_targets[3][:, 1, :3, :3]
     assert torch.allclose(
-        planned_targets[3][:, :, :3, :3],
+        planned_targets[4][:, :, :3, :3],
         receive_grasp_rotation[:, None].expand(-1, 2, -1, -1),
     )
     assert torch.allclose(
-        planned_targets[3][:, 0, :3, 3],
+        planned_targets[4][:, 0, :3, 3],
         torch.tensor([[0.4, -0.2, 0.7], [0.4, -0.2, 0.7]]),
     )
     assert torch.allclose(
-        planned_targets[3][:, 1, :3, 3],
+        planned_targets[4][:, 1, :3, 3],
         torch.tensor([[0.4, -0.2, 0.65], [0.4, -0.2, 0.65]]),
     )
     assert torch.allclose(
-        planned_targets[3][:, 0, 2, 3],
-        planned_targets[2][:, 1, 2, 3],
+        planned_targets[4][:, 0, 2, 3],
+        planned_targets[3][:, 1, 2, 3],
     )
 
     pickup_close_end = plan.segment("pickup_close").stop - 1
@@ -5345,6 +5352,16 @@ def test_handover_picks_with_nearer_arm_and_preserves_waypoint_rotations(
     handover_release_end = plan.segment("handover_release").stop - 1
     receive_release_end = plan.segment("receive_release").stop - 1
     positions = trajectory.positions
+    # The empty-hand approach ends at an explicit pre-grasp waypoint; its
+    # following reach is a distinct phase that expansion cannot perturb.
+    pre_grasp = plan.segment("pickup_approach").stop - 1
+    grasp = plan.segment("pickup_reach").stop - 1
+    assert torch.allclose(
+        positions[:, pre_grasp, :ARM_DOF], torch.full((NUM_ENVS, ARM_DOF), 0.1)
+    )
+    assert torch.allclose(
+        positions[:, grasp, :ARM_DOF], torch.full((NUM_ENVS, ARM_DOF), 0.2)
+    )
     assert torch.all(
         positions[:, pickup_close_end, DUAL_ARM_DOF : DUAL_ARM_DOF + 2] == 1
     )
@@ -5375,6 +5392,114 @@ def test_handover_picks_with_nearer_arm_and_preserves_waypoint_rotations(
     assert plan.scene_dependency_monitor_until == {
         "handover_object": plan.segment("pickup_close").start
     }
+
+
+def test_handover_preserves_extended_pickup_phase_boundaries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Native planner timing may extend both sides of the pre-grasp boundary."""
+    action = _bind_action(_dual_motion_generator(), HandOver())
+    semantics, _ = _handover_semantics()
+    object_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    object_pose[:, :3, 3] = torch.tensor([-0.8, 0.1, 0.5])
+    context = _handover_context(object_pose)
+    final_pose = torch.eye(4)
+    final_pose[:3, 3] = torch.tensor([0.4, -0.2, 0.65])
+    action._resolve_grasp = Mock(
+        side_effect=lambda _affordance, sampled_pose, *_args, **kwargs: AffordanceSample(
+            success=torch.ones(NUM_ENVS, dtype=torch.bool),
+            poses=sampled_pose.clone(),
+            metadata={"key": kwargs["sample_key"]},
+        )
+    )
+    phase_names = (
+        "pickup_approach",
+        "pickup_reach",
+        "pickup_transport",
+        "receive_approach",
+        "place",
+    )
+    extra_samples = {"pickup_approach": 2, "pickup_reach": 3}
+    planned_paths: dict[str, torch.Tensor] = {}
+
+    def plan_from_start(
+        motion_generator: MotionGenerator,
+        control_part: str,
+        start_qpos: torch.Tensor,
+        target_poses: torch.Tensor,
+        n_waypoints: int,
+        motion_policy: MotionPolicy,
+        interpolation_dt: float | None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        del (
+            motion_generator,
+            control_part,
+            target_poses,
+            motion_policy,
+            interpolation_dt,
+        )
+        name = phase_names[len(planned_paths)]
+        weights = torch.linspace(0, 1, n_waypoints + extra_samples.get(name, 0))
+        path = start_qpos[:, None] + weights[None, :, None] * 0.1
+        planned_paths[name] = path
+        return torch.ones(NUM_ENVS, dtype=torch.bool), path
+
+    monkeypatch.setattr(
+        "embodichain.lab.sim.atomic_actions.primitives.hand_over."
+        "plan_named_arm_trajectory",
+        plan_from_start,
+    )
+    sample_count = 24
+    options = HandOverOptions(
+        pre_grasp_distance=0.1,
+        lift_height=0.2,
+        hand_interp_steps=2,
+        hold_steps=4,
+    )
+    invocation = ActionInvocation(
+        skill_id="hand_over",
+        goal=HandOverGoal(semantics, target_pose=final_pose),
+        binding=_dual_binding(action, "source", "destination"),
+        motion_policy=MotionPolicy(sample_count=sample_count),
+        skill_options=options,
+    )
+
+    plan = _plan_action(action, invocation, context)
+
+    trajectory = _joint_trajectory(plan)
+    assert plan.plan_success.tolist() == [True, True]
+    assert trajectory.waypoint_count == (
+        sample_count + options.hold_steps + sum(extra_samples.values())
+    )
+    approach = plan.segment("pickup_approach")
+    reach = plan.segment("pickup_reach")
+    close = plan.segment("pickup_close")
+    expected_approach = planned_paths["pickup_approach"]
+    # The reach's first sample repeats the exported pre-grasp waypoint.
+    expected_reach = planned_paths["pickup_reach"][:, 1:]
+    assert approach.waypoint_count == expected_approach.shape[1]
+    assert reach.waypoint_count == expected_reach.shape[1]
+    torch.testing.assert_close(
+        trajectory.positions[:, approach.start : approach.stop, :ARM_DOF],
+        expected_approach,
+    )
+    torch.testing.assert_close(
+        trajectory.positions[:, reach.start : reach.stop, :ARM_DOF], expected_reach
+    )
+    torch.testing.assert_close(
+        trajectory.positions[:, approach.stop - 1, :ARM_DOF],
+        planned_paths["pickup_reach"][:, 0],
+    )
+    torch.testing.assert_close(
+        trajectory.positions[:, close.start, :ARM_DOF], expected_reach[:, -1]
+    )
+    assert plan.segments[0].start == 0
+    assert all(
+        first.stop == second.start
+        for first, second in zip(plan.segments, plan.segments[1:])
+    )
+    assert plan.segments[-1].stop == trajectory.waypoint_count
+    assert plan.scene_dependency_monitor_until == {"handover_object": close.start}
 
 
 @pytest.mark.parametrize("hold_steps", [0, 4])
@@ -5505,6 +5630,7 @@ def test_handover_can_end_with_receiving_resource_holding_object(
     assert plan.plan_success.tolist() == [True, True]
     assert [segment.name for segment in plan.segments] == [
         "pickup_approach",
+        "pickup_reach",
         "pickup_close",
         "pickup_transport",
         "receive_approach",
@@ -5943,7 +6069,6 @@ def test_handover_reports_path_failure_between_reachable_waypoints(
     assert any(
         "phase 'pickup_approach' failed between waypoints" in warning
         and "pickup_pre_grasp" in warning
-        and "pickup_grasp" in warning
         and "env_ids=[0]" in warning
         for warning in warnings
     )

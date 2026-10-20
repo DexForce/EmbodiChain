@@ -118,3 +118,77 @@ def test_position_playback_does_not_write_velocity_targets() -> None:
     )
 
     assert robot.qvel_commands == []
+
+
+def test_aligned_playback_preserves_zero_time_joins_callbacks_and_records_holds() -> (
+    None
+):
+    sim = _FakeSimulation(physics_dt=0.01)
+    robot = _FakeRobot()
+    observed_steps = []
+    source = torch.tensor([[[0.0], [0.1], [0.1], [0.2]]])
+    result = play_joint_trajectory(
+        sim,
+        robot,
+        positions=source,
+        dt=torch.tensor([[0.0, 0.01, 0.0, 0.01]]),
+        joint_ids=[1],
+        cfg=JointTrajectoryPlaybackCfg(preserve_source_grid=True),
+        on_step=lambda index, count: observed_steps.append((index, count)),
+        hold_durations={1: 0.02, 3: 0.03},
+    )
+    assert observed_steps == [(index, 4) for index in range(4)]
+    assert torch.equal(torch.stack(robot.qpos_commands, dim=1), source)
+    assert sim.updates == [(0.01, 1), (0.01, 2), (0.01, 1), (0.01, 3)]
+    assert float(result.dt.sum()) == pytest.approx(
+        sum(dt * steps for dt, steps in sim.updates)
+    )
+    torch.testing.assert_close(result.dt, torch.tensor([[0.0, 0.01, 0.02, 0.01, 0.03]]))
+    assert torch.equal(result.positions[:, -1], source[:, -1])
+
+
+def test_aligned_playback_does_not_add_a_final_command_interval() -> None:
+    sim = _FakeSimulation(physics_dt=0.01)
+    result = play_joint_trajectory(
+        sim,
+        _FakeRobot(),
+        positions=torch.tensor([[[0.0], [0.1], [0.2]]]),
+        dt=torch.tensor([[0.0, 0.01, 0.01]]),
+        joint_ids=[1],
+        cfg=JointTrajectoryPlaybackCfg(preserve_source_grid=True),
+    )
+    assert sim.updates == [(0.01, 1), (0.01, 1)]
+    assert float(result.dt.sum()) == pytest.approx(0.02)
+
+
+def test_off_grid_holds_fail_before_dispatch() -> None:
+    sim = _FakeSimulation(physics_dt=0.01)
+    robot = _FakeRobot()
+    with pytest.raises(ValueError, match="hold durations must align"):
+        play_joint_trajectory(
+            sim,
+            robot,
+            positions=torch.tensor([[[0.0], [0.1]]]),
+            dt=torch.tensor([[0.0, 0.01]]),
+            joint_ids=[1],
+            cfg=JointTrajectoryPlaybackCfg(preserve_source_grid=True),
+            hold_durations={0: 0.015},
+        )
+    assert not robot.qpos_commands and not sim.updates
+
+
+def test_source_index_options_cannot_silently_target_resampled_interior_points() -> (
+    None
+):
+    sim = _FakeSimulation(physics_dt=0.01)
+    robot = _FakeRobot()
+    with pytest.raises(ValueError, match="require preserve_source_grid"):
+        play_joint_trajectory(
+            sim,
+            robot,
+            positions=torch.tensor([[[0.0], [1.0]]]),
+            dt=torch.tensor([[0.0, 0.02]]),
+            joint_ids=[1],
+            hold_durations={1: 0.03},
+        )
+    assert not robot.qpos_commands and not sim.updates

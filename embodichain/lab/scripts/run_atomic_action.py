@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Sequence
-from copy import deepcopy
 import importlib
 import json
 import math
@@ -32,7 +31,7 @@ from embodichain.lab.scripts._atomic_action.defaults import (
     PLANNERS,
     ROBOTS,
     SCENES,
-    _recipes,
+    AtomicSkillRunCfg,
     _sample_defaults,
     _scene_args,
 )
@@ -73,7 +72,9 @@ def _create_parser() -> argparse.ArgumentParser:
         if action.dest == "physics":
             action.help = "Physics backend for the sample scene (default: default)."
         elif action.dest == "num_envs":
-            action.help = "Parallel sample capacity; defaults to 16 (4 for move_joint)."
+            action.help = (
+                "Compatibility check: must equal --variants; capacity is automatic."
+            )
         elif action.dest == "renderer":
             action.help = "Renderer backend; omission uses the sample's auto renderer."
     parser.add_argument(
@@ -82,11 +83,16 @@ def _create_parser() -> argparse.ArgumentParser:
         help="Replay only the nominal grasp and trajectory.",
     )
     parser.add_argument(
-        "--recipe-indices",
-        "--recipe_indices",
+        "--variants",
         type=int,
-        nargs="+",
-        help="Select logical grasp/trajectory recipes independently of physical slots.",
+        default=1,
+        help="Total executions including the reference; creates N environments.",
+    )
+    parser.add_argument(
+        "--expansion",
+        choices=("affordance", "trajectory", "both"),
+        default="both",
+        help="Enabled factors when --variants is greater than one.",
     )
     parser.add_argument(
         "--output-dir",
@@ -112,92 +118,77 @@ def _create_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _resolve_sample(args: argparse.Namespace) -> tuple[dict[str, Any], tuple[int, ...]]:
+def _resolve_sample(args: argparse.Namespace) -> AtomicSkillRunCfg:
     cfg = _sample_defaults(
         args.skill, physics=args.physics, robot=args.robot, planner=args.planner
     )
+    cfg.variants = args.variants
+    cfg.expansion = args.expansion
+    if cfg.variants < 1:
+        raise ValueError("--variants must be positive")
+    if args.no_expansion and cfg.variants != 1:
+        raise ValueError("--no-expansion requires --variants 1")
+    if args.num_envs is not None and args.num_envs != cfg.variants:
+        raise ValueError(
+            "--num-envs must equal --variants; environment count is automatic"
+        )
+    if cfg.expansion == "affordance" and cfg.skill in {"move_joint", "push_object"}:
+        raise ValueError(
+            f"{cfg.skill} has no affordance expansion; use --expansion trajectory"
+        )
     for key in (
-        "num_envs",
         "device",
         "headless",
         "renderer",
         "arena_space",
         "gpu_id",
         "real_time",
+        "seed",
+        "save_video",
     ):
         value = getattr(args, key, None)
         if value is not None:
-            cfg["runtime"][key] = value
-    if type(cfg["runtime"]["num_envs"]) is not int or cfg["runtime"]["num_envs"] < 1:
-        raise ValueError("--num-envs must be positive")
-    if cfg["runtime"]["gpu_id"] < 0:
+            setattr(cfg, key, value)
+    if cfg.gpu_id < 0:
         raise ValueError("--gpu-id must be non-negative")
-    if cfg["runtime"]["arena_space"] is not None:
-        spacing = cfg["runtime"]["arena_space"]
-        if not math.isfinite(spacing) or spacing <= 0:
-            raise ValueError("--arena-space must be finite and positive")
-    if cfg["runtime"]["device"] == "":
-        raise ValueError("--device must be a nonempty device string")
-    if args.seed is not None:
-        if not 0 <= args.seed < 2**32:
-            raise ValueError("--seed must be in [0, 2**32)")
-        cfg["seed"] = args.seed
-    if args.output_dir is not None:
-        cfg["output"]["directory"] = str(args.output_dir.expanduser().resolve())
-    if args.save_video is not None:
-        cfg["output"]["save_video"] = args.save_video
-    if cfg["output"]["save_video"] and cfg["runtime"]["renderer"] == "no-render":
-        raise ValueError("--save-video requires a renderer")
-    if args.no_expansion:
-        cfg["expansion"]["affordance"]["enabled"] = False
-        cfg["expansion"]["trajectory"]["variants_per_family"] = 1
-        cfg["expansion"]["trajectory"]["spatial"]["enabled"] = False
-    recipes = _recipes(cfg)
-    selected = (
-        tuple(range(len(recipes)))
-        if args.recipe_indices is None
-        else tuple(args.recipe_indices)
-    )
-    if (
-        not selected
-        or len(set(selected)) != len(selected)
-        or any(index < 0 or index >= len(recipes) for index in selected)
+    if cfg.arena_space is not None and (
+        not math.isfinite(cfg.arena_space) or cfg.arena_space <= 0
     ):
-        raise ValueError(f"recipe indices must be unique and in [0, {len(recipes)})")
-    return cfg, selected
+        raise ValueError("--arena-space must be finite and positive")
+    if not cfg.device:
+        raise ValueError("--device must be a nonempty device string")
+    if not 0 <= cfg.seed < 2**32:
+        raise ValueError("--seed must be in [0, 2**32)")
+    if args.output_dir is not None:
+        cfg.output_dir = str(args.output_dir.expanduser().resolve())
+    if cfg.save_video and cfg.renderer == "no-render":
+        raise ValueError("--save-video requires a renderer")
+    cfg.validate()
+    return cfg
 
 
-def _run_batch(
-    cfg: dict[str, Any],
-    indices: tuple[int, ...],
-    batch_id: int,
-    cli_args: argparse.Namespace,
-    *,
-    last: bool,
-) -> list[dict[str, Any]]:
+def _run_sample(cfg: AtomicSkillRunCfg, cli_args: argparse.Namespace, run: Any) -> None:
     from embodichain.lab.sim import SimulationManager
     from embodichain.utils import set_seed
     from embodichain.lab.scripts._atomic_action.support import run_tutorial
 
-    scene_args = _scene_args(cfg, indices, batch_id)
-    scene_args.num_envs = len(indices)
-    # Copy only visualization settings supplied by the shared launcher.
+    scene_args = _scene_args(cfg)
+    scene_args.run = run
     for key, value in vars(cli_args).items():
         if key == "viser" or key.startswith("viser_"):
             setattr(scene_args, key, value)
     scene = importlib.import_module(
-        f"embodichain.lab.scripts._atomic_action.{cfg['skill']}"
+        f"embodichain.lab.scripts._atomic_action.{cfg.skill}"
     )
     error = None
 
-    def run() -> None:
+    def run_scene() -> None:
         nonlocal error
-        # Release failure tracebacks before native simulation cleanup. A
-        # traceback can otherwise retain borrowed material/scene wrappers.
         try:
-            set_seed(cfg["seed"])
+            set_seed(cfg.seed)
             scene.run(scene_args)
-            if last and cli_args.keep_alive:
+            run.validate_variants()
+            if cli_args.keep_alive:
                 sim = SimulationManager.get_instance()
                 try:
                     while True:
@@ -205,16 +196,18 @@ def _run_batch(
                 except KeyboardInterrupt:
                     pass
         except Exception as exc:
-            error = f"{type(exc).__name__}: {exc}"
+            # Unwind native scene wrappers before run_tutorial destroys the world.
+            import traceback
 
-    run_tutorial(run)
+            error = traceback.format_exc()
+
+    run_tutorial(run_scene)
     if error is not None:
         raise RuntimeError(error)
-    return deepcopy(scene_args._records)
 
 
 def cli(argv: Sequence[str] | None = None) -> None:
-    """Run selected Atomic scene recipes with internal sample defaults.
+    """Run N fixed-scene Atomic executions with automatic parallel capacity.
 
     Args:
         argv: Arguments excluding the executable and subcommand names.
@@ -222,38 +215,43 @@ def cli(argv: Sequence[str] | None = None) -> None:
     parser = _create_parser()
     args = parser.parse_args(argv)
     try:
-        cfg, selected = _resolve_sample(args)
+        cfg = _resolve_sample(args)
     except ValueError as exc:
         parser.error(str(exc))
-    directory = Path(cfg["output"]["directory"])
+    from embodichain.lab.scripts._atomic_action.host import AtomicSkillRun
+
+    directory = Path(cfg.output_dir)
     directory.mkdir(parents=True, exist_ok=True)
+    run = AtomicSkillRun(cfg)
     manifest = {
-        "schema_version": 1,
-        "config": cfg,
-        "recipe_indices": selected,
+        "schema_version": 2,
+        "config": cfg.to_dict(),
+        "variants": cfg.variants,
+        "num_envs": cfg.variants,
         "status": "running",
-        "replays": [],
+        "replays": run.replays,
         "measured_task_success": None,
+        "enabled_factors": [
+            name
+            for name, enabled in (
+                ("affordance", cfg.affordance_enabled),
+                ("trajectory", cfg.trajectory_enabled),
+            )
+            if enabled
+        ],
     }
     manifest_path = directory / "expansion_manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
     try:
-        capacity = cfg["runtime"]["num_envs"]
-        for batch_id, start in enumerate(range(0, len(selected), capacity)):
-            indices = selected[start : start + capacity]
-            records = _run_batch(
-                cfg, indices, batch_id, args, last=start + capacity >= len(selected)
-            )
-            manifest["replays"].extend(records)
-            manifest_path.write_text(json.dumps(manifest, indent=2, default=str) + "\n")
+        _run_sample(cfg, args, run)
         manifest["status"] = "executed"
-        print(f"Executed {len(selected)} Atomic recipes. Manifest: {manifest_path}")
+        print(f"Executed {cfg.variants} Atomic variants. Manifest: {manifest_path}")
     except BaseException as exc:
         manifest["status"] = "failed"
         manifest["error"] = f"{type(exc).__name__}: {exc}"
         raise
     finally:
-        manifest_path.write_text(json.dumps(manifest, indent=2, default=str) + "\n")
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
 
 
 if __name__ == "__main__":

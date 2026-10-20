@@ -55,6 +55,7 @@ from embodichain.lab.scripts._atomic_action.support import (
     parse_affordance_sampling_arguments,
     prepare_tutorial_scene,
     replay_trajectory,
+    _compile_demo,
     run_tutorial,
 )
 
@@ -224,7 +225,9 @@ def run(args: argparse.Namespace) -> None:
         "Inspect the knob target, then press Enter to plan Twist...",
     )
 
-    compiled = engine.compile(
+    compiled = _compile_demo(
+        engine,
+        args,
         (
             engine.make_invocation(
                 "twist",
@@ -234,7 +237,7 @@ def run(args: argparse.Namespace) -> None:
                 ),
                 control_parts={"primary": {"motion": "arm", "grasp": "eef"}},
                 motion_policy=MotionPolicy(
-                    strategy="motion_gen",
+                    strategy="ik_interp",
                     sample_count=TWIST_SAMPLE_INTERVAL,
                 ),
                 skill_options=TwistOptions(
@@ -251,7 +254,7 @@ def run(args: argparse.Namespace) -> None:
     )
     log_affordance_branch_diagnostics(compiled.action_plans[0])
     if not compiled.plan_success.all():
-        if getattr(args, "_configured_run", False):
+        if getattr(args, "run", None) is not None:
             raise RuntimeError(
                 f"Atomic planning failed: {compiled.plan_success.tolist()}"
             )

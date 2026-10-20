@@ -23,7 +23,7 @@ import math
 import pathlib
 import re
 import time
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence, Iterable
 from typing import TYPE_CHECKING, Literal
 
 import torch
@@ -82,6 +82,11 @@ from .tcp_presets import (
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.motion.expansion import TrajectoryVariantSet
+    from embodichain.lab.sim.atomic_actions import (
+        AtomicActionEngine,
+        ActionInvocation,
+        PlanningContext,
+    )
 
 RECORD_WIDTH = 640
 RECORD_HEIGHT = 480
@@ -358,12 +363,15 @@ def create_affordance_sampling_context(
     Returns:
         Sampling context, or ``None`` for the nominal single branch.
     """
-    if getattr(args, "_configured_run", False):
+    if getattr(args, "run", None) is not None:
         return AffordanceSamplingContext(
             count=args.affordance_branches,
             seed=args.sampling_seed,
             # Branch identity stays independent of the batch/physical slot.
-            branch_overrides=tuple(branch for branch, _ in args._recipes),
+            branch_overrides=tuple(
+                row if args.run.cfg.affordance_enabled else 0
+                for row in range(args.run.cfg.variants)
+            ),
         )
     if getattr(args, "affordance_branches", 1) == 1:
         return None
@@ -1213,8 +1221,9 @@ def create_tutorial_simulation(
     Returns:
         A simulation manager with the tutorial key light configured.
     """
-    if getattr(args, "arena_space", None) is not None and getattr(
-        args, "_configured_run", False
+    if (
+        getattr(args, "arena_space", None) is not None
+        and getattr(args, "run", None) is not None
     ):
         arena_space = args.arena_space
     sim = SimulationManager(
@@ -1685,6 +1694,7 @@ def create_parallel_jaw_grasp_pose_generator(
     force_refresh: bool,
     opening_margin: float = 0.03,
     gripper_model: ParallelJawGripperModelCfg | None = None,
+    approach_direction_samples: int = 4,
 ) -> AntipodalGraspPoseGenerator:
     """Create a standalone generator for the sample's mounted gripper.
 
@@ -1693,13 +1703,17 @@ def create_parallel_jaw_grasp_pose_generator(
         force_refresh: Whether to regenerate cached object annotations.
         opening_margin: Additional clearance used for grasp collision checks.
         gripper_model: Explicit fixture geometry; omission uses the PGI sample.
+        approach_direction_samples: Candidate approach draws; the fixed-scene
+            CLI uses one to isolate geometric and trajectory factors.
 
     Returns:
         A generator with an independently owned gripper model.
     """
     return AntipodalGraspPoseGenerator(
         TUTORIAL_PARALLEL_JAW_MODEL if gripper_model is None else gripper_model,
-        algorithm_cfg=AntipodalGraspPoseGeneratorCfg(sample_count=n_sample),
+        algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
+            sample_count=n_sample, approach_direction_samples=approach_direction_samples
+        ),
         collision_cfg=ParallelJawGraspCollisionCfg(
             opening_margin=opening_margin,
             point_sample_density=0.012,
@@ -1859,7 +1873,7 @@ def serve_tutorial_scene(
     Returns:
         Whether a keep-alive loop was run.
     """
-    if getattr(args, "_configured_run", False):
+    if getattr(args, "run", None) is not None:
         return False
     if not getattr(args, "viser", False):
         return False
@@ -1870,6 +1884,21 @@ def serve_tutorial_scene(
     except KeyboardInterrupt:
         pass
     return True
+
+
+def _compile_demo(
+    engine: AtomicActionEngine,
+    args: argparse.Namespace,
+    invocations: Iterable[ActionInvocation],
+    context: PlanningContext,
+) -> CompiledTrajectory:
+    """Compile a sample through its explicit host, or the standalone engine."""
+    run = getattr(args, "run", None)
+    return (
+        engine.compile(invocations, context)
+        if run is None
+        else run.compile(engine, invocations, context)
+    )
 
 
 def replay_trajectory(
@@ -1898,114 +1927,126 @@ def replay_trajectory(
         args: Parsed tutorial arguments controlling auto-play recording.
         video_prefix: Output video filename prefix.
         hold_steps: Number of final-pose simulation updates after the trajectory.
-        trajectory_sim_steps: Optional fixed physics steps per waypoint. When
-            omitted for a ``TimedTrajectory``, its arrival intervals determine
-            the synchronized physics-step count. Native Newton replays add one
-            short contact-settling hold after each hand transition. Legacy
-            tensors otherwise default to four.
+        trajectory_sim_steps: Physics steps per legacy position-tensor sample,
+            defaulting to four. Timed trajectories always use their own arrival
+            intervals. Native Newton contact settling is recorded explicitly.
         hold_sim_steps: Physics steps for each final-pose update.
         joint_ids: Optional joint IDs when controlling a robot subset.
         on_trajectory_step: Optional callback run after each trajectory update.
         look_at: Optional recorder camera pose for auto-play videos.
         record: Whether to start auto-play recording for this replay.
-        compiled: Original Atomic plan used by the configured CLI's expansion
+        compiled: Already transformed Atomic compilation owned by the sample
             host. Standalone example calls may omit it.
     """
-    configured = getattr(args, "_configured_run", False)
-    replay_record_path = None
-    if configured:
-        from .expansion import _augment, _save_replay
+    from embodichain.lab.sim.motion.execution import (
+        JointTrajectoryPlaybackCfg,
+        play_joint_trajectory,
+    )
 
+    run = getattr(args, "run", None)
+    replay_record = None
+    if run is not None:
         if compiled is None:
-            raise ValueError("Configured replay requires the compiled Atomic plan")
-        trajectory, records = _augment(compiled, robot, args)
-        replay_record_path = _save_replay(
-            compiled, trajectory, records, args, video_prefix
-        )
-        record = args._config["output"]["save_video"]
-        if args.hold_steps is not None:
-            hold_steps = args.hold_steps
-    if trajectory_sim_steps is not None and trajectory_sim_steps <= 0:
-        raise ValueError("trajectory_sim_steps must be greater than zero.")
+            raise ValueError("Atomic sample replay requires its compiled plan")
+        trajectory = compiled.trajectory
+        replay_record = run.begin_replay(compiled, video_prefix)
+        record = run.cfg.save_video
+        args.auto_play_video_path = replay_record["video_path"]
+        if run.cfg.hold_steps is not None:
+            hold_steps = run.cfg.hold_steps
+    physics_dt = float(sim.sim_config.physics_dt)
     timed = trajectory if isinstance(trajectory, TimedTrajectory) else None
     positions = timed.positions if timed is not None else trajectory
-    if not isinstance(positions, torch.Tensor) or positions.dim() != 3:
-        raise ValueError("trajectory positions must have shape (B, N, D).")
-    if positions.shape[1] == 0:
-        raise ValueError("trajectory must contain at least one waypoint.")
-
-    native_contact_settle_steps = _newton_native_contact_settle_steps(
-        sim,
-        robot,
-        positions,
-    )
-
-    recording_started = (
-        start_auto_play_recording(
-            sim,
-            args,
-            video_prefix=video_prefix,
-            look_at=DEFAULT_AUTO_PLAY_LOOK_AT if look_at is None else look_at,
+    if (
+        not isinstance(positions, torch.Tensor)
+        or positions.dim() != 3
+        or positions.shape[1] == 0
+    ):
+        raise ValueError("trajectory positions must have shape (B, N, D) with N > 0")
+    if trajectory_sim_steps is not None and trajectory_sim_steps <= 0:
+        raise ValueError("trajectory_sim_steps must be positive")
+    # Timed plans own their arrival intervals. The legacy fixed-step option
+    # only applies to position tensors, never to a TimedTrajectory.
+    if timed is None:
+        dt = positions.new_full(
+            positions.shape[:2], physics_dt * (trajectory_sim_steps or 4)
         )
-        if record
-        else False
-    )
-    try:
-        total_steps = positions.shape[1]
-        for step_idx in range(total_steps):
-            if joint_ids is None:
-                robot.set_qpos(positions[:, step_idx, :])
-            else:
-                robot.set_qpos(positions[:, step_idx, :], joint_ids=joint_ids)
-            waypoint_sim_steps = trajectory_sim_steps
-            if waypoint_sim_steps is None and timed is not None:
-                next_index = min(step_idx + 1, total_steps - 1)
-                duration = float(timed.dt[:, next_index].max().item())
-                step_ratio = duration / float(sim.sim_config.physics_dt)
-                nearest_step_count = round(step_ratio)
-                waypoint_sim_steps = max(
-                    1,
-                    (
-                        nearest_step_count
-                        if math.isclose(
-                            step_ratio,
-                            nearest_step_count,
-                            rel_tol=1.0e-6,
-                            abs_tol=1.0e-9,
-                        )
-                        else math.ceil(step_ratio)
-                    ),
-                )
-            if step_idx in native_contact_settle_steps:
-                settle_steps = math.ceil(
-                    NEWTON_NATIVE_CONTACT_SETTLE_DURATION
-                    / float(sim.sim_config.physics_dt)
-                )
-                waypoint_sim_steps = (
-                    4 if waypoint_sim_steps is None else waypoint_sim_steps
-                ) + max(1, settle_steps)
-            sim.update(step=4 if waypoint_sim_steps is None else waypoint_sim_steps)
-            if on_trajectory_step is not None:
-                on_trajectory_step(step_idx, total_steps)
-            if not configured or args.real_time:
-                time.sleep(1e-2)
-
-        final_qpos = positions[:, -1, :]
-        for _ in range(hold_steps):
-            if joint_ids is None:
-                robot.set_qpos(final_qpos)
-            else:
-                robot.set_qpos(final_qpos, joint_ids=joint_ids)
-            sim.update(step=hold_sim_steps)
-            if not configured or args.real_time:
-                time.sleep(1e-2)
-        if replay_record_path is not None:
-            import json
-
-            args._records[-1]["status"] = "executed"
-            replay_record_path.write_text(
-                json.dumps(args._records[-1], indent=2, default=str) + "\n"
+        dt[:, 0] = 0
+    else:
+        dt = timed.dt
+        if run is None:
+            # Preserve arbitrary standalone source samples and their callback
+            # indices while rounding each interval up to executable substeps.
+            ratios = dt / physics_dt
+            counts = torch.where(
+                torch.isclose(ratios, ratios.round(), rtol=1e-6, atol=1e-8),
+                ratios.round(),
+                ratios.ceil(),
             )
+            dt = counts * physics_dt
+    holds = {
+        index: math.ceil(NEWTON_NATIVE_CONTACT_SETTLE_DURATION / physics_dt)
+        * physics_dt
+        for index in _newton_native_contact_settle_steps(
+            sim,
+            robot,
+            positions,
+            joint_ids=(
+                None if replay_record is None else replay_record["grasp_joint_indices"]
+            ),
+        )
+    }
+    if hold_steps:
+        last = positions.shape[1] - 1
+        holds[last] = holds.get(last, 0.0) + hold_steps * hold_sim_steps * physics_dt
+    duration = float(dt.max(dim=0).values.sum()) + sum(holds.values())
+    video_fps = (
+        _recording_fps(duration)
+        if record and getattr(args, "auto_play", False)
+        else AUTO_PLAY_RECORD_FPS
+    )
+    if replay_record is not None and record:
+        replay_record["video_fps"] = video_fps
+        run.write_replay(replay_record)
+    recording_started = False
+
+    def on_step(index: int, count: int) -> None:
+        if on_trajectory_step is not None:
+            on_trajectory_step(index, count)
+        if getattr(args, "real_time", False):
+            following = float(dt[:, index + 1].max()) if index + 1 < count else 0.0
+            time.sleep(following + holds.get(index, 0.0))
+
+    try:
+        if record:
+            recording_started = start_auto_play_recording(
+                sim,
+                args,
+                video_prefix=video_prefix,
+                fps=video_fps,
+                look_at=DEFAULT_AUTO_PLAY_LOOK_AT if look_at is None else look_at,
+            )
+        executed = play_joint_trajectory(
+            sim,
+            robot,
+            positions=positions,
+            dt=dt,
+            joint_ids=(
+                list(range(positions.shape[-1])) if joint_ids is None else joint_ids
+            ),
+            cfg=JointTrajectoryPlaybackCfg(
+                control_dt=physics_dt, preserve_source_grid=True
+            ),
+            on_step=on_step,
+            hold_durations=holds,
+        )
+        if replay_record is not None:
+            run.finish_replay(replay_record, executed, holds)
+    except BaseException as exc:
+        if replay_record is not None:
+            replay_record.update(status="failed", error=f"{type(exc).__name__}: {exc}")
+            run.write_replay(replay_record)
+        raise
     finally:
         stop_auto_play_recording(sim, recording_started)
 
@@ -2014,6 +2055,8 @@ def _newton_native_contact_settle_steps(
     sim: SimulationManager,
     robot: Robot,
     positions: torch.Tensor,
+    *,
+    joint_ids: Sequence[int] | None = None,
 ) -> frozenset[int]:
     """Return endpoints for contiguous native-MuJoCo hand-motion intervals.
 
@@ -2026,22 +2069,23 @@ def _newton_native_contact_settle_steps(
     """
     if getattr(sim, "is_newton_backend", False) is not True:
         return frozenset()
-    control_parts = getattr(robot, "control_parts", None)
-    if not isinstance(control_parts, Mapping):
-        return frozenset()
+    hand_joint_ids = set() if joint_ids is None else set(joint_ids)
+    if joint_ids is None:
+        control_parts = getattr(robot, "control_parts", None)
+        if not isinstance(control_parts, Mapping):
+            return frozenset()
 
-    hand_joint_ids: set[int] = set()
-    for part_name in control_parts:
-        if not any(
-            marker in part_name.lower() for marker in ("eef", "hand", "gripper")
-        ):
-            continue
-        joint_ids = robot.get_joint_ids(name=part_name)
-        hand_joint_ids.update(
-            joint_id
-            for joint_id in joint_ids
-            if isinstance(joint_id, int) and 0 <= joint_id < positions.shape[2]
-        )
+        for part_name in control_parts:
+            if not any(
+                marker in part_name.lower() for marker in ("eef", "hand", "gripper")
+            ):
+                continue
+            joint_ids = robot.get_joint_ids(name=part_name)
+            hand_joint_ids.update(
+                joint_id
+                for joint_id in joint_ids
+                if isinstance(joint_id, int) and 0 <= joint_id < positions.shape[2]
+            )
     if not hand_joint_ids:
         return frozenset()
 
@@ -2082,7 +2126,7 @@ def make_clear_dynamics_callback(
     obj: RigidObject,
     clear_after_step: int,
 ) -> Callable[[int, int], None]:
-    """Create a one-shot replay callback that freezes an attached object."""
+    """Clear residual object motion once at the source trajectory phase boundary."""
     dynamics_cleared = False
 
     def clear_dynamics(step_idx: int, _: int) -> None:
@@ -2116,6 +2160,22 @@ def should_wait_for_tutorial_input(args: argparse.Namespace) -> bool:
     return not (getattr(args, "auto_play", False) or _uses_noninteractive_display(args))
 
 
+def _recording_fps(duration: float) -> int:
+    """Fit the complete known-duration replay in the existing RGB frame budget."""
+    if not math.isfinite(duration) or duration < 0:
+        raise ValueError("recording duration must be finite and nonnegative")
+    frame_capacity = (
+        AUTO_PLAY_RECORD_MAX_MEMORY * 1024 * 1024 // (RECORD_WIDTH * RECORD_HEIGHT * 3)
+        - 2
+    )
+    fps = min(AUTO_PLAY_RECORD_FPS, int(frame_capacity / max(duration, 1.0)))
+    if fps < 1:
+        raise ValueError(
+            "replay exceeds the recording memory budget even at one frame per second"
+        )
+    return fps
+
+
 def start_auto_play_recording(
     sim: SimulationManager,
     args: argparse.Namespace,
@@ -2125,11 +2185,43 @@ def start_auto_play_recording(
         Sequence[float],
         Sequence[float],
     ] = DEFAULT_AUTO_PLAY_LOOK_AT,
+    *,
+    fps: int = AUTO_PLAY_RECORD_FPS,
 ) -> bool:
-    """Start recording for ``--auto_play`` tutorial runs."""
+    """Start recording for ``--auto_play`` tutorial runs.
+
+    Args:
+        sim: Simulation whose viewer camera supplies RGB frames.
+        args: Sample viewer and output options.
+        video_prefix: Default output filename prefix.
+        look_at: Eye, target and up vectors for the recording camera.
+        fps: Positive output cadence chosen to fit the complete replay.
+
+    Returns:
+        Whether a recorder was started.
+    """
     if not getattr(args, "auto_play", False):
         return False
 
+    # Frame all requested variants rather than recording only reference row 0.
+    if getattr(args, "run", None) is not None and args.num_envs > 1:
+        offsets = sim.arena_offsets.detach().cpu()
+        center = (offsets.max(dim=0).values + offsets.min(dim=0).values) * 0.5
+        eye, target, up = (
+            torch.as_tensor(value, dtype=torch.float32) for value in look_at
+        )
+        extent = float(
+            torch.linalg.vector_norm(
+                offsets.max(dim=0).values - offsets.min(dim=0).values
+            )
+        )
+        distance = float(torch.linalg.vector_norm(eye - target))
+        scale = 1.0 + extent / max(0.9 * distance, 1e-6)
+        look_at = (
+            (target + center + (eye - target) * scale).tolist(),
+            (target + center).tolist(),
+            up.tolist(),
+        )
     original_width = sim.sim_config.width
     original_height = sim.sim_config.height
     try:
@@ -2137,7 +2229,7 @@ def start_auto_play_recording(
         sim.sim_config.height = RECORD_HEIGHT
         if not sim.start_window_record(
             save_path=getattr(args, "auto_play_video_path", None),
-            fps=AUTO_PLAY_RECORD_FPS,
+            fps=fps,
             max_memory=AUTO_PLAY_RECORD_MAX_MEMORY,
             video_prefix=video_prefix,
             look_at=look_at,

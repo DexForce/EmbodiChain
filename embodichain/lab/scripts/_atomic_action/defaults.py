@@ -24,6 +24,7 @@ import math
 from typing import Any
 
 from embodichain.cli.sim import add_sim_args_to_parser
+from embodichain.utils import configclass
 
 SCENES = (
     "pickup",
@@ -36,6 +37,8 @@ SCENES = (
     "move_joint",
     "axis_align",
     "open_door",
+    "move_held_object",
+    "push_object",
 )
 ROBOTS = ("ur5", "franka", "ur10")
 PLANNERS = ("trapezoidal", "toppra", "curobo")
@@ -50,6 +53,8 @@ OPTIONS: dict[str, dict[str, Any]] = {
     "twist": {"twist_angle": -0.7853981634, "rigid_object": False},
     "handover": {"is_horizontal": False},
     "move_joint": {},
+    "move_held_object": {},
+    "push_object": {},
     "axis_align": {"alignment": "upright"},
     "open_door": {
         "open_angle": math.radians(60),
@@ -60,116 +65,90 @@ OPTIONS: dict[str, dict[str, Any]] = {
 }
 
 
+@configclass
+class AtomicSkillRunCfg:
+    """Resolved sample selectors, fixed-scene factors and output settings."""
+
+    skill: str = "pickup"
+    physics: str = "default"
+    robot: str = "ur5"
+    planner: str = "trapezoidal"
+    variants: int = 1
+    expansion: str = "both"
+    seed: int = 0
+    device: str = "cpu"
+    renderer: str = "auto"
+    headless: bool = False
+    arena_space: float | None = None
+    gpu_id: int = 0
+    real_time: bool = False
+    output_dir: str = "/tmp/atomic-action/pickup"
+    save_video: bool = False
+    save_trajectories: bool = True
+    grasp_approach_samples: int = 1
+    n_sample: int = 10000
+    force_reannotate: bool = False
+    hold_steps: int | None = None
+
+    @property
+    def affordance_enabled(self) -> bool:
+        return (
+            self.variants > 1
+            and self.expansion in ("affordance", "both")
+            and self.skill not in {"move_joint", "push_object"}
+        )
+
+    @property
+    def trajectory_enabled(self) -> bool:
+        return self.variants > 1 and self.expansion in ("trajectory", "both")
+
+
 def _sample_defaults(
     skill: str,
     *,
     physics: str = "default",
     robot: str = "ur5",
     planner: str = "trapezoidal",
-) -> dict[str, Any]:
-    """Build an independent sample recipe without loading external resources.
-
-    Scene implementations own layouts; these values retain the original sample
-    options, grasp sampling and expansion policy. Compatibility is checked here
-    before the launcher imports any scene or constructs a simulator.
-    """
-    if skill not in SCENES:
-        raise ValueError(f"skill must be one of {SCENES}")
-    if physics not in ("default", "newton"):
-        raise ValueError("physics must be default or newton")
-    if robot not in ROBOTS:
-        raise ValueError(f"robot must be one of {ROBOTS}")
-    if planner not in PLANNERS:
-        raise ValueError(f"planner must be one of {PLANNERS}")
+) -> AtomicSkillRunCfg:
+    """Validate sample compatibility before loading scene or simulator modules."""
+    for value, choices, name in (
+        (skill, SCENES, "skill"),
+        (physics, ("default", "newton"), "physics"),
+        (robot, ROBOTS, "robot"),
+        (planner, PLANNERS, "planner"),
+    ):
+        if value not in choices:
+            raise ValueError(f"{name} must be one of {choices}")
     if skill not in MULTI_ROBOT_SCENES and robot != "ur5":
         raise ValueError(
             f"Skill {skill!r} requires robot 'ur5'; the 'franka' and 'ur10' "
             "presets are supported by pickup, place, move_joint and handover"
         )
-    has_affordance = skill != "move_joint"
-    return {
-        "skill": skill,
-        "physics": physics,
-        "robot": robot,
-        "planner": planner,
-        "seed": 0,
-        "runtime": {
-            "num_envs": 16 if has_affordance else 4,
-            "device": "cpu",
-            "renderer": "auto",
-            "headless": False,
-            "arena_space": None,
-            "gpu_id": 0,
-            "real_time": False,
-            "hold_steps": None,
-        },
-        "options": deepcopy(OPTIONS[skill]),
-        "grasp": {"n_sample": 10000, "force_reannotate": False},
-        "expansion": {
-            "affordance": {
-                "enabled": has_affordance,
-                "branches_per_family": 4 if has_affordance else 1,
-            },
-            "trajectory": {
-                "variants_per_family": 4,
-                "max_proposals": 128,
-                "spatial": {
-                    "enabled": True,
-                    "operators": ["joint_residual", "via_points"],
-                    "joint_offset_scale": 0.005,
-                    "dedup_tolerance": 0.002,
-                    "via_count": 3,
-                },
-            },
-        },
-        "output": {
-            "directory": f"/tmp/atomic-action/{skill}",
-            "save_video": False,
-            "save_trajectories": True,
-        },
-    }
-
-
-def _recipes(cfg: dict[str, Any]) -> tuple[tuple[int, int], ...]:
-    affordance = cfg["expansion"]["affordance"]
-    branches = affordance["branches_per_family"] if affordance["enabled"] else 1
-    variants = cfg["expansion"]["trajectory"]["variants_per_family"]
-    return tuple(
-        (branch, variant) for branch in range(branches) for variant in range(variants)
+    return AtomicSkillRunCfg(
+        skill=skill,
+        physics=physics,
+        robot=robot,
+        planner=planner,
+        output_dir=f"/tmp/atomic-action/{skill}",
     )
 
 
-def _scene_args(
-    cfg: dict[str, Any], recipe_indices: tuple[int, ...], batch_id: int
-) -> argparse.Namespace:
-    # Simulation/Viser parser defaults are owned by the common launcher.
+def _scene_args(cfg: AtomicSkillRunCfg) -> argparse.Namespace:
+    """Build the compatibility arguments consumed by shared example scenes."""
     parser = argparse.ArgumentParser()
     add_sim_args_to_parser(parser)
     args = parser.parse_args([])
-    vars(args).update(cfg["runtime"])
-    vars(args).update(cfg["options"])
-    vars(args).update(cfg["grasp"])
-    args.physics = cfg["physics"]
-    args.robot = cfg["robot"]
-    args.planner = cfg["planner"]
+    vars(args).update(cfg.to_dict())
+    vars(args).update(deepcopy(OPTIONS[cfg.skill]))
+    args.num_envs = cfg.variants
     args.auto_play = True
     args.auto_play_video_path = None
     args.no_vis_eef_axis = False
     args.diagnose_plan = False
-    args.headless_play = args.headless
-    args.sampling_seed = cfg["seed"]
+    args.headless_play = cfg.headless
+    args.sampling_seed = cfg.seed
     args.sampling_attempt = 0
-    affordance = cfg["expansion"]["affordance"]
-    args.affordance_branches = (
-        affordance["branches_per_family"] if affordance["enabled"] else 1
-    )
-    args._recipes = tuple(_recipes(cfg)[index] for index in recipe_indices)
-    args._recipe_indices = recipe_indices
-    args._batch_id = batch_id
-    args._config = cfg
-    args._configured_run = True
-    args._records = []
-    args._replay_index = 0
+    args.affordance_branches = cfg.variants if cfg.affordance_enabled else 1
     return args
 
 

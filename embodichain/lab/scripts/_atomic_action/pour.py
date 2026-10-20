@@ -55,6 +55,7 @@ from embodichain.lab.scripts._atomic_action.support import (
     make_clear_dynamics_callback,
     prepare_tutorial_scene,
     replay_trajectory,
+    _compile_demo,
     run_tutorial,
     TutorialPlanner,
 )
@@ -152,6 +153,7 @@ def run(args: argparse.Namespace) -> None:
             "eef": create_parallel_jaw_grasp_pose_generator(
                 n_sample=args.n_sample,
                 force_refresh=args.force_reannotate,
+                approach_direction_samples=getattr(args, "grasp_approach_samples", 4),
             )
         },
     )
@@ -165,7 +167,9 @@ def run(args: argparse.Namespace) -> None:
     )
 
     control_parts = {"primary": {"motion": "arm", "grasp": "eef"}}
-    compiled = engine.compile(
+    compiled = _compile_demo(
+        engine,
+        args,
         (
             engine.make_invocation(
                 "pick_up",
@@ -173,7 +177,7 @@ def run(args: argparse.Namespace) -> None:
                 control_parts=control_parts,
                 motion_policy=_create_pick_motion_policy(
                     planner,
-                    fixed_sample_count=not getattr(args, "_configured_run", False),
+                    fixed_sample_count=getattr(args, "run", None) is None,
                 ),
                 skill_options=PickUpOptions(
                     approach_direction=torch.tensor(
@@ -201,13 +205,13 @@ def run(args: argparse.Namespace) -> None:
             control_dt=sim.sim_config.physics_dt,
             **(
                 {"affordance_sampling": create_affordance_sampling_context(args)}
-                if getattr(args, "_configured_run", False)
+                if getattr(args, "run", None) is not None
                 else {}
             ),
         ),
     )
     if not compiled.plan_success.all():
-        if getattr(args, "_configured_run", False):
+        if getattr(args, "run", None) is not None:
             raise RuntimeError(
                 f"Atomic planning failed: {compiled.plan_success.tolist()}"
             )

@@ -38,6 +38,7 @@ from embodichain.lab.scripts._atomic_action.support import (
     draw_axis_marker,
     prepare_tutorial_scene,
     replay_trajectory,
+    _compile_demo,
     run_tutorial,
 )
 from embodichain.lab.scripts._atomic_action.support import (
@@ -105,7 +106,9 @@ def run(args: argparse.Namespace) -> None:
         strategy="motion_gen",
         sample_count=MOVE_JOINTS_SAMPLE_INTERVAL,
     )
-    compiled = engine.compile(
+    compiled = _compile_demo(
+        engine,
+        args,
         # Required targets must be action boundaries before control-grid
         # retiming and spatial expansion, which preserve phase endpoints.
         tuple(
@@ -121,13 +124,13 @@ def run(args: argparse.Namespace) -> None:
             control_dt=sim.sim_config.physics_dt,
             **(
                 {"affordance_sampling": create_affordance_sampling_context(args)}
-                if getattr(args, "_configured_run", False)
+                if getattr(args, "run", None) is not None
                 else {}
             ),
         ),
     )
     if not compiled.plan_success.all():
-        if getattr(args, "_configured_run", False):
+        if getattr(args, "run", None) is not None:
             raise RuntimeError(
                 f"Atomic planning failed: {compiled.plan_success.tolist()}"
             )

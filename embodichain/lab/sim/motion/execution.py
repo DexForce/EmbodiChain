@@ -21,11 +21,15 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 import inspect
-from typing import Callable, Protocol, TYPE_CHECKING, Literal, Sequence
+from typing import Callable, Protocol, TYPE_CHECKING, Literal, Sequence, Mapping
 
 import torch
 
-from embodichain.compute.trajectory import retime_to_control_grid
+from embodichain.compute.trajectory import (
+    retime_to_control_grid,
+    differentiate_positions,
+)
+from .planners.utils import PlanResult
 from embodichain.utils import configclass
 
 from .expansion.contracts import CommitReceipt, ExpertEpisode, ValidationResult
@@ -59,6 +63,8 @@ class JointTrajectoryPlaybackCfg:
     Args:
         control_dt: Command period, or ``None`` for one physics period.
         joint_command_mode: Whether to write qpos alone or qpos and qvel.
+        preserve_source_grid: Preserve already aligned samples and their source
+            indices instead of resampling; required for source callbacks and holds.
     """
 
     control_dt: float | None = None
@@ -67,7 +73,12 @@ class JointTrajectoryPlaybackCfg:
     joint_command_mode: JointCommandMode = "position"
     """Whether playback writes qpos alone or qpos and qvel targets."""
 
+    preserve_source_grid: bool = False
+    """Execute already aligned samples and zero-time joins without resampling."""
+
     def __post_init__(self) -> None:
+        if not isinstance(self.preserve_source_grid, bool):
+            raise TypeError("preserve_source_grid must be a bool.")
         if self.control_dt is not None and (
             isinstance(self.control_dt, bool)
             or not isinstance(self.control_dt, (int, float))
@@ -116,7 +127,9 @@ def play_joint_trajectory(
     dt: torch.Tensor,
     joint_ids: Sequence[int],
     cfg: JointTrajectoryPlaybackCfg | None = None,
-) -> None:
+    on_step: Callable[[int, int], None] | None = None,
+    hold_durations: Mapping[int, float] | None = None,
+) -> PlanResult:
     """Play a timed joint path without changing the simulation physics period.
 
     Planner timing is first quantized to the configured fixed command period.
@@ -130,6 +143,14 @@ def play_joint_trajectory(
         dt: Source arrival intervals with shape ``(B, N)``.
         joint_ids: Full-robot joint columns addressed by ``positions``.
         cfg: Playback settings. Defaults to position-only at ``physics_dt``.
+        on_step: Callback after each source command and its following interval.
+        hold_durations: Explicit additional holds after source command indices,
+            in seconds. Each hold must align with the physics period. Source-index
+            callbacks and holds require ``cfg.preserve_source_grid=True``.
+
+    Returns:
+        Executed positions, velocities and arrival intervals, including holds.
+        The final hold, when present, appears as a repeated terminal sample.
     """
     if cfg is None:
         cfg = JointTrajectoryPlaybackCfg()
@@ -153,26 +174,98 @@ def play_joint_trajectory(
         sim,
         cfg.control_dt,
     )
-    positions, velocities, _, _ = retime_to_control_grid(
-        positions,
-        dt,
-        control_dt,
-    )
-    for waypoint in range(positions.shape[1] - 1):
-        robot.set_qpos(
-            positions[:, waypoint],
-            joint_ids=resolved_joint_ids,
+    if not cfg.preserve_source_grid and (on_step is not None or hold_durations):
+        raise ValueError(
+            "source-index callbacks and holds require preserve_source_grid=True"
         )
-        if cfg.joint_command_mode == "position_velocity":
-            robot.set_qvel(
-                velocities[:, waypoint],
-                joint_ids=resolved_joint_ids,
+    if not cfg.preserve_source_grid:
+        positions, _, dt, _ = retime_to_control_grid(positions, dt, control_dt)
+    else:
+        if dt.shape != positions.shape[:2] or not torch.isfinite(positions).all():
+            raise ValueError(
+                "dt and finite positions must share the batch and sample axes"
             )
-        sim.update(physics_dt, physics_steps)
-
-    robot.set_qpos(positions[:, -1], joint_ids=resolved_joint_ids)
-    if cfg.joint_command_mode == "position_velocity":
-        robot.set_qvel(velocities[:, -1], joint_ids=resolved_joint_ids)
+        if (
+            not torch.isfinite(dt).all()
+            or bool((dt < 0).any())
+            or bool((dt[:, 0] != 0).any())
+        ):
+            raise ValueError(
+                "source intervals must be finite, nonnegative and start at zero"
+            )
+        zero_changes = (dt[:, 1:] == 0) & (
+            positions.diff(dim=1).abs().amax(dim=-1) > 1e-5
+        )
+        if bool(zero_changes.any()):
+            raise ValueError("source trajectory changes position in zero time")
+    count = positions.shape[1]
+    if count == 0:
+        raise ValueError("trajectory must contain at least one sample")
+    if on_step is not None and not callable(on_step):
+        raise TypeError("on_step must be callable or None")
+    for duration in dt.max(dim=0).values.detach().cpu().tolist():
+        ratio = duration / control_dt
+        if not math.isclose(ratio, round(ratio), rel_tol=1e-6, abs_tol=1e-7):
+            raise ValueError("source intervals must align with the control grid")
+    holds = {} if hold_durations is None else dict(hold_durations)
+    for index, duration in holds.items():
+        if type(index) is not int or not 0 <= index < count:
+            raise ValueError("hold indices must select source commands")
+        if not math.isfinite(duration) or duration < 0:
+            raise ValueError("hold durations must be finite and nonnegative")
+        ratio = duration / physics_dt
+        if not math.isclose(ratio, round(ratio), rel_tol=1e-6, abs_tol=1e-7):
+            raise ValueError("hold durations must align with the physics grid")
+    # All environments share one physical clock. Short/padded rows hold while
+    # their peers execute the corresponding command interval.
+    intervals = dt.max(dim=0).values.detach().cpu().tolist()
+    elapsed = [0.0] + [
+        intervals[index] + holds.get(index - 1, 0.0) for index in range(1, count)
+    ]
+    terminal_hold = holds.get(count - 1, 0.0)
+    durations = elapsed[1:] + [terminal_hold]
+    step_counts = []
+    for duration in durations:
+        ratio = duration / physics_dt
+        steps = round(ratio)
+        if not math.isclose(ratio, steps, rel_tol=1e-6, abs_tol=1e-7):
+            raise ValueError("playback intervals must align with the physics grid")
+        step_counts.append(steps)
+    executed_dt = (
+        dt.new_tensor(elapsed).unsqueeze(0).expand(positions.shape[0], -1).clone()
+    )
+    # Near-equal zero-time source joins stay exact in commanded positions; use
+    # their preceding sample only for numerical differentiation.
+    derivative_positions = positions.clone()
+    for index in range(1, count):
+        if elapsed[index] == 0:
+            derivative_positions[:, index] = derivative_positions[:, index - 1]
+    velocities = differentiate_positions(derivative_positions, executed_dt)
+    velocities[:, -1] = 0
+    for waypoint in range(count):
+        robot.set_qpos(positions[:, waypoint], joint_ids=resolved_joint_ids)
+        if cfg.joint_command_mode == "position_velocity":
+            robot.set_qvel(velocities[:, waypoint], joint_ids=resolved_joint_ids)
+        if step_counts[waypoint]:
+            sim.update(physics_dt, step_counts[waypoint])
+        if on_step is not None:
+            on_step(waypoint, count)
+    if terminal_hold:
+        positions = torch.cat((positions, positions[:, -1:]), dim=1)
+        velocities = torch.cat(
+            (velocities, torch.zeros_like(velocities[:, -1:])), dim=1
+        )
+        executed_dt = torch.cat(
+            (executed_dt, dt.new_full((positions.shape[0], 1), terminal_hold)), dim=1
+        )
+    return PlanResult(
+        success=torch.ones(
+            positions.shape[0], dtype=torch.bool, device=positions.device
+        ),
+        positions=positions,
+        velocities=velocities,
+        dt=executed_dt,
+    )
 
 
 class InitialStatePort(Protocol):
