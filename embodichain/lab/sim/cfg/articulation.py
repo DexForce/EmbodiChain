@@ -28,7 +28,13 @@ import torch
 
 from embodichain.utils import configclass, is_configclass, logger
 
-from .asset import AssetPhysicsMode, ObjectBaseCfg, _resolve_asset_physics_mode
+from .asset import (
+    AssetPhysicsMode,
+    ObjectBaseCfg,
+    UsdSourceCfg,
+    _is_usd_source,
+    _resolve_asset_physics_mode,
+)
 from .rigid import (
     RigidBodyPhysicsCfg,
     _rigid_body_physics_from_dict,
@@ -66,18 +72,18 @@ class ArticulationRootPropertiesCfg:
 
     ``fixed_base`` and ``self_collision_enabled`` are consumed by both
     backends. ``sleep_threshold`` and the solver-iteration fields are supported
-    only by the Default backend and are ignored by Newton. By default, the
-    articulation root is fixed and self-collision is disabled. Explicit
-    ``None`` values preserve the source value or backend/import default.
+    only by the Default backend and are ignored by Newton. Defaults preserve
+    USD root properties; URDF import defaults remain a fixed base with
+    self-collision disabled. Explicit values override source intent.
     """
 
-    fixed_base: bool | None = True
+    fixed_base: bool | None = None
     """Whether the articulation root is rigidly fixed to the world frame.
 
     Set to ``None`` to preserve the source value or backend/import default.
     """
 
-    self_collision_enabled: bool | None = False
+    self_collision_enabled: bool | None = None
     """Whether non-filtered link pairs in the articulation may self-collide.
 
     Newton may still apply source-authored or Spawn-owned filtering to adjacent
@@ -396,7 +402,7 @@ class ArticulationCfg(ObjectBaseCfg):
     fpath: str = None
     """Path to the articulation asset file."""
 
-    body_scale: tuple | list = (1.0, 1.0, 1.0)
+    body_scale: tuple | list | None = None
     """Scale of the articulation in the simulation world frame."""
 
     compute_uv: bool = False
@@ -433,9 +439,8 @@ class ArticulationCfg(ObjectBaseCfg):
 
     Fixed-base and self-collision intent is portable. Root sleep and solver
     iterations are Default-only fields and are ignored by Newton. The portable
-    fields default to a fixed base with self-collision disabled. Set either
-    field to ``None`` to preserve an authored USD/backend value; URDF imports
-    then use the established fixed-base, self-collision-off defaults.
+    fields preserve authored USD/backend values by default; URDF imports use
+    the established fixed-base, self-collision-off defaults.
     """
 
     joint_drive_props: JointDrivePropertiesCfg | None = None
@@ -479,6 +484,15 @@ class ArticulationCfg(ObjectBaseCfg):
     of fixed, revolute, and prismatic joints, including child-side joint frames.
     Set False to load other joint topologies for simulation without FK.
     """
+
+    usd: UsdSourceCfg = UsdSourceCfg()
+    """USD source selection and root-pose policy."""
+
+    def __post_init__(self) -> None:
+        if isinstance(self.usd, Mapping):
+            self.usd = UsdSourceCfg.from_dict(self.usd)
+        if self.body_scale is None and not _is_usd_source(self.fpath):
+            self.body_scale = (1.0, 1.0, 1.0)
 
     def resolve_asset_physics_mode(self) -> AssetPhysicsMode:
         """Return the effective file-backed physics policy."""
@@ -527,4 +541,19 @@ class ArticulationCfg(ObjectBaseCfg):
                 R.from_matrix(cfg.init_local_pose[:3, :3]).as_euler("xyz", degrees=True)
             )
 
+        if _is_usd_source(cfg.fpath):
+            if "body_scale" not in init_dict:
+                cfg.body_scale = None
+            if not {"init_pos", "init_rot", "init_local_pose"}.intersection(init_dict):
+                cfg.init_local_pose = None
         return cfg
+
+
+__all__ = [
+    "ArticulationRootPropertiesCfg",
+    "LinkPhysicsOverrideCfg",
+    "link_attrs_from_dict",
+    "JointDrivePropertiesCfg",
+    "NewtonJointDrivePropertiesCfg",
+    "ArticulationCfg",
+]
