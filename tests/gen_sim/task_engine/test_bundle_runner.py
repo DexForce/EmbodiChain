@@ -826,3 +826,21 @@ def test_module_entrypoint_flushes_protocol_before_fast_exit(
 
 
 __all__: list[str] = []
+
+
+def test_failed_trajectory_is_isolated_from_normal_record_directory(tmp_path):
+    save = Mock()
+    env = SimpleNamespace(
+        _traj_buffer=object(),
+        _traj_steps=torch.tensor([4, 7, 9]),
+        save_trajectory=save,
+    )
+    _bundle_runner._preserve_failed_execution_recording(
+        env, tmp_path, num_envs=3, env_ids=[2, 0]
+    )
+    save.assert_called_once_with(
+        tmp_path / "diagnostics/failed_attempt.pt",
+        env_ids=[2, 0],
+        purpose="diagnostic",
+    )
+    assert not (tmp_path / "trajectory").exists()

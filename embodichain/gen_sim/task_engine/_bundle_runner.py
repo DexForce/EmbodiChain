@@ -747,7 +747,7 @@ def _preserve_failed_execution_recording(
             env_id for env_id in selected if int(trajectory_steps[env_id].item()) > 0
         ]
         if active_env_ids:
-            trajectory_dir = output / "trajectory"
+            trajectory_dir = output / "diagnostics"
             trajectory_dir.mkdir(parents=True, exist_ok=True)
             target.save_trajectory(
                 trajectory_dir / "failed_attempt.pt",
