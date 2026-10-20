@@ -45,7 +45,7 @@ python scripts/tutorials/sim/create_cloth.py --viser
 Gym environments use the same launcher options:
 
 ```bash
-embodichain run-env --gym_config path/to/config.yaml --viser
+embodichain run-task --gym_config path/to/config.yaml --viser
 ```
 
 Enabling `--viser` makes the environment headless automatically. The native
@@ -208,7 +208,7 @@ are expanded by default, and the camera selector controls only the frustum.
 RGB images use a separate latest-frame queue and `sensor_image_fps`, so image
 rendering cannot build up a backlog behind simulation frames. Setting
 `sensor_image_fps=None` captures after each eligible simulation step;
-`run-env --viser` uses this mode by default.
+`run-task --viser` uses this mode by default.
 
 The **Environments** panel independently hides or shows exported environments.
 For more than 16 environments, it switches to a scalable **Show all
@@ -218,7 +218,7 @@ The **Overlays** panel controls frames, trajectories, targets, and point clouds.
 Hiding an environment affects its static meshes, deformable meshes, and camera
 frustum together.
 
-When `run-env --replay --replay_mode control --viser` is active, the expanded
+When `run-task --replay --replay_mode control --viser` is active, the expanded
 **Replay control** panel adds an integer **Frame** slider. Browser seeks are
 coalesced and applied on the replay thread; dragging the slider pauses terminal
 auto-play, and terminal frame changes update the browser value.
@@ -258,7 +258,7 @@ Scripts using the common environment launcher accept:
 | `--viser-host` | `127.0.0.1` | Bind interface. |
 | `--viser-port` | `8080` | Server port. |
 | `--viser-fps` | `15.0` | Scene pose update limit. |
-| `--viser-image-fps` | `2.0`; `run-env`: every environment step | Camera RGB update limit when explicitly supplied. |
+| `--viser-image-fps` | `2.0`; `run-task`: every environment step | Camera RGB update limit when explicitly supplied. |
 | `--viser-soft-body-fps` | `5.0` | Deformable mesh update limit. |
 | `--viser-env-ids ID ...` | `0` | Environment IDs to publish, or `all`. |
 

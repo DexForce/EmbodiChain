@@ -50,8 +50,10 @@ Whenever positions exist, `dt` contains per-sample arrival intervals `(B, N)`;
 Timing does not alter simulator `physics_dt`.
 
 `MotionGenOptions.strategy` selects the timing owner. `motion_gen` invokes the
-backend; `ik_interp` requires explicit start/count/dt, rejects backend options
-and derivative limits, and supports joint/EEF moves. Required Cartesian IK
+backend; `ik_interp` requires explicit start/count/dt, rejects backend-specific
+options, consumes optional scalar velocity/acceleration limits, and supports
+joint/EEF moves. Limited interpolation uses minimum-jerk rest-to-rest segments
+and treats the requested count as a lower bound. Required Cartesian IK
 failures fail the row; waypoints are never discarded to salvage success.
 Unsupported routes raise instead of silently selecting another strategy.
 

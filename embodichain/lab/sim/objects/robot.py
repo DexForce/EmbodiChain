@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from tensordict import TensorDict
 
 from embodichain.lab.sim.cfg import RobotCfg, RobotWorkspaceCfg
+from embodichain.lab.sim.cfg.source import _asset_file_path
 from embodichain.lab.sim.motion.solvers import SolverCfg, BaseSolver
 from embodichain.lab.sim.objects import Articulation
 from embodichain.lab.sim.utility.tensor import to_tensor
@@ -1017,7 +1018,7 @@ class Robot(Articulation):
     ) -> tuple[torch.Tensor, torch.Tensor] | None:
         """Compute batched inverse kinematics for arena-frame poses.
 
-        When ``continuous`` is enabled, all analytic candidates are generated
+        When ``continuous`` is enabled, all solver candidates are generated
         in one solver call and the branch nearest to the previous path sample
         is selected sequentially. The selected solver must support continuous
         candidate selection.
@@ -1124,9 +1125,14 @@ class Robot(Articulation):
             pose_batch.reshape(len(local_env_ids), n_batch, 4, 4),
         )
         if continuous:
+            repeated_seed = (
+                joint_seed_tensor[:, None]
+                .expand(batch_size, n_batch, n_dof)
+                .reshape(-1, n_dof)
+            )
             candidate_valid, candidate_qpos = solver.get_ik(
                 target_xpos=pose_batch.reshape(-1, 4, 4),
-                qpos_seed=None,
+                qpos_seed=repeated_seed,
                 return_all_solutions=True,
             )
             return solver._select_continuous_ik_path(
@@ -1341,7 +1347,7 @@ class Robot(Articulation):
                 )
 
             if cfg.urdf_path is None:
-                cfg.urdf_path = self.cfg.fpath
+                cfg.urdf_path = _asset_file_path(self.cfg)
             self._solvers["default"] = cfg.init_solver(device=self.device)
             self._sync_solver_limits()
         elif isinstance(cfg, Dict):
@@ -1353,7 +1359,7 @@ class Robot(Articulation):
             # If solver_cfg is a dictionary, iterate through it to create solvers
             for name, solver_cfg in cfg.items():
                 if solver_cfg.urdf_path is None:
-                    solver_cfg.urdf_path = self.cfg.fpath
+                    solver_cfg.urdf_path = _asset_file_path(self.cfg)
                 _, part_names, value = resolve_matching_names_values(
                     {name: solver_cfg}, self.cfg.control_parts.keys()
                 )

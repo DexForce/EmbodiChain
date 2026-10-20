@@ -31,7 +31,7 @@ Inspect the available deployments:
 
 ```bash
 embodichain show-task embodichain_tasks:repeated_pick_place
-embodichain run-env \
+embodichain run-task \
   --gym-config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml
 ```
 
@@ -82,10 +82,10 @@ The Python showcase remains available for visual debugging and uses the same
 below the repository's `output/` directory unless `--output-dir` overrides it:
 
 ```bash
-python examples/sim/motion/repeated_pick_place_expansion_combined.py \
+python examples/expansion/trajectory/repeated_pick_place_expansion_combined.py \
   --task-config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml
 
-python examples/sim/motion/repeated_pick_place_expansion_showcase.py \
+python examples/expansion/trajectory/repeated_pick_place_expansion_showcase.py \
   --task-config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml \
   --candidate-indices 0 16 32 48 --num_envs 16 --seed 7 \
   --device cpu --headless
@@ -120,7 +120,7 @@ measured drop onto the support are observed before retracting.
 Run without creating a training dataset:
 
 ```bash
-python -m embodichain run-env \
+python -m embodichain run-task \
   --gym-config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.tianji_marvin.yaml \
   --headless --viser --renderer hybrid --seed 0 --max_episodes 1 --filter-dataset-saving
 ```

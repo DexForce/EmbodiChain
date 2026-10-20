@@ -96,6 +96,63 @@ The expert planner must **not** call ``env.step()`` itself. The common executor
 owns stepping so observations, actions, terminal signals, segment annotations,
 and dataset frames stay causally aligned.
 
+Recording eligibility and component evidence
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Every environment exposes an
+:class:`~embodichain.lab.gym.envs.episode_context.EpisodeContext`. Components
+report their own acceptance through a synchronous check; the context combines
+those reports without deciding geometry validity or task success. For example,
+a host can publish an already measured row mask and its evidence:
+
+.. code-block:: python
+
+   with env.episode_context.check("task/validation", env_ids) as finish:
+       accepted, evidence, reasons = measure_task_acceptance(env, env_ids)
+       finish(accepted=accepted, metadata=evidence, reasons=reasons)
+
+   eligible_ids = env.episode_context.filter_recordable(env_ids)
+   row_snapshots = env.episode_context.snapshot(env_ids)
+
+``accepted`` is a bool or a boolean mask in selected-row order. Metadata may be
+a shared JSON mapping or an integer-row-keyed mapping; reasons may be a string
+or a row-keyed mapping. Report exactly once before leaving the scope. Exceptions,
+cancellation and a missing report reject those buffers; a missing report also
+raises an error. Overlapping checks from the same source are rejected.
+
+A row can be submitted only after successful reset initialization, with no
+pending check and no earlier rejection in its current buffers. Different
+sources combine by intersection. An outer check remains pending across internal
+resets. Replacing demo metadata, starting another demo or reseeding cannot
+remove a rejection; the host must successfully consume or discard the buffers
+and begin a new episode. Existing success/failed-episode, fragment and explicit
+commit policies still apply after this eligibility filter.
+
+Reset consumes the old recording before changing physical state. A save error
+preserves the episode and its buffers for retry. New observations and the first
+frame must be registered before initialization completes. Construction alone
+does not create an eligible recording. ``close()`` never implicitly commits.
+
+Read the same row snapshots through ``info["episode_context"]`` and
+``env.get_demo_episode_metadata(row)["episode_context"]``. They contain episode
+numbers, initialization/recording eligibility, pending sources, rejection
+reasons and independent source metadata. Asynchronous writers copy their data
+and snapshots before enqueueing.
+
+The reset event is named ``ExpandSceneLayout`` in Python and YAML. It records
+layout provenance under ``sources["events/<configured_event_name>"]``. Its name
+replaces ``RandomizeSceneLayout`` directly, while the configured event name and
+its random stream remain unchanged. See the runnable
+`scene expansion examples <https://github.com/DexForce/EmbodiChain/tree/main/scripts/tutorials/scene>`_
+for online generation, saved-layout replay and the portable tabletop assets.
+
+Normal videos are independent files under
+``videos/env_NNN/episode_NNNNNN_<camera>.mp4``, with JSON context sidecars.
+Selected-row reset leaves other rows' frames untouched. Failed writes retain
+an owned job and retry under the same episode identity. Explicit diagnostic
+exports use ``purpose="diagnostic"`` and a separate diagnostics directory;
+their evidence is excluded from normal datasets. Mosaics remain previews.
+
 Paradigm 1: Handwritten Trajectories
 ------------------------------------
 
@@ -174,7 +231,7 @@ route. For example, smoke-test stacking without writing a dataset:
 
 .. code-block:: bash
 
-   embodichain run-env \
+   embodichain run-task \
        --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.cobotmagic.yaml \
        --headless --filter_dataset_saving --max_episodes 1
 
@@ -199,7 +256,7 @@ Compose the deployment
 
 The runnable deployment is intentionally thin:
 
-.. literalinclude:: ../../../embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml
+.. literalinclude:: ../../../extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml
    :language: yaml
    :linenos:
 
@@ -209,7 +266,7 @@ only physical simulation and ordinary Gym values:
 .. dropdown:: Pour Water reusable environment
    :icon: code
 
-   .. literalinclude:: ../../../embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml
+   .. literalinclude:: ../../../extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml
       :language: yaml
       :linenos:
 
@@ -227,7 +284,7 @@ Python callables or naming simulator joints:
 .. dropdown:: Pour Water Task Program
    :icon: code
 
-   .. literalinclude:: ../../../embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task_program/program.yaml
+   .. literalinclude:: ../../../extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task_program/program.yaml
       :language: yaml
       :linenos:
 
@@ -238,7 +295,7 @@ registered transport and pour lowerers:
 .. dropdown:: Pour Water integration
    :icon: code
 
-   .. literalinclude:: ../../../embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task_program/integration.yaml
+   .. literalinclude:: ../../../extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task_program/integration.yaml
       :language: yaml
       :linenos:
 
@@ -256,7 +313,7 @@ runnable deployment can record directly:
 
 .. code-block:: bash
 
-   embodichain run-env \
+   embodichain run-task \
        --gym_config embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml \
        --headless \
        --max_episodes 1
@@ -321,7 +378,7 @@ Important fields are:
 
 The real Pour Water recorder block can be inspected directly:
 
-.. literalinclude:: ../../../embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml
+.. literalinclude:: ../../../extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml
    :language: yaml
    :start-at: dataset:
    :end-at: control_parts: [left_arm, left_eef, right_arm, right_eef]
@@ -330,7 +387,7 @@ The real Pour Water recorder block can be inspected directly:
 Execution, Validation, and Persistence
 --------------------------------------
 
-Without ``--preview`` or ``--replay``, ``embodichain run-env`` performs offline
+Without ``--preview`` or ``--replay``, ``embodichain run-task`` performs offline
 data expansion:
 
 1. Resolve ``create_demo_segments()`` from the handwritten task or configured
@@ -429,7 +486,7 @@ Useful modes and options are:
 * ``--max_episodes`` overrides the configured ``collection.target_episodes``.
 * ``collection.max_attempts`` controls retries for one selected batch.
 
-See :doc:`/guides/run_env` for preview, dataset recording, debug video,
+See :doc:`/guides/run_task` for preview, dataset recording, debug video,
 trajectory recording, and replay modes, and :doc:`/guides/cli` for the complete
 argument list.
 

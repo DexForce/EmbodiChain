@@ -27,7 +27,11 @@ from .anchored_batch import (
     prepare_anchored_batch,
     resample_with_anchors_batched,
 )
-from .interpolation import interpolate_with_distance, interpolate_with_nums
+from .interpolation import (
+    interpolate_minimum_jerk,
+    interpolate_with_distance,
+    interpolate_with_nums,
+)
 from .resampling import resample_with_distance
 from .timing import (
     differentiate_positions,
@@ -46,6 +50,7 @@ __all__ = [
     "resample_in_time",
     "retime_to_control_grid",
     "interpolate_with_distance",
+    "interpolate_minimum_jerk",
     "interpolate_with_nums",
     "resample_with_distance",
     "sort_and_padding_key_frame",

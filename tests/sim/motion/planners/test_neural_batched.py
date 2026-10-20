@@ -87,6 +87,7 @@ class TestNeuralPlanBatched:
                 "dt": 0.01,
                 "control_part": "arm",
                 "num_arm_joints": 7,
+                "constraints": None,
             },
         )()
 
@@ -134,7 +135,11 @@ class TestNeuralEarlyConvergenceHold:
             NeuralPlanOptions,
             _waypoint_obs_dim,
         )
-        from embodichain.lab.sim.motion.planners.utils import PlanState, MoveType
+        from embodichain.lab.sim.motion.planners.utils import (
+            MoveType,
+            PlanResult,
+            PlanState,
+        )
 
         planner = NeuralPlanner.__new__(NeuralPlanner)
         planner.device = torch.device("cpu")
@@ -158,8 +163,19 @@ class TestNeuralEarlyConvergenceHold:
                 "dt": 0.01,
                 "control_part": "arm",
                 "num_arm_joints": 7,
+                "constraints": {"velocity": 1.0, "acceleration": 2.0},
             },
         )()
+
+        captured = {}
+
+        def fake_retime(success, positions, control_part, **kwargs):
+            captured["path_lengths"] = kwargs["path_lengths"].clone()
+            dt = torch.full(positions.shape[:2], 0.01, device=positions.device)
+            dt[:, 0] = 0.0
+            return PlanResult(success=success, positions=positions, dt=dt)
+
+        planner._retimed_result = fake_retime
 
         # Non-trivial policy action so qpos would drift if not masked.
         planner._policy = lambda obs: torch.ones(obs.shape[0], 7) * 0.5
@@ -217,6 +233,9 @@ class TestNeuralEarlyConvergenceHold:
         assert r.success[0].item() is True
         assert r.success[1].item() is False
         assert r.success[2].item() is False
+        # The converged row contributes only its initial state plus the two
+        # samples that reached its targets. Other rows retain the full rollout.
+        assert captured["path_lengths"].tolist() == [3, 6, 6]
         # Env 0 converges at end of step 1 (active_idx 0->1 on step0, 1->2 on
         # step1 => converged after step1). From step 2 onward, env 0's qpos
         # must not change (held).

@@ -33,6 +33,14 @@ class MyTaskEnv(EmbodiedEnv):
 Format: `<TaskName>-v<N>` (e.g. `PourWater-v1`, `PushCubeRL`).
 RL tasks sometimes drop the `-v<N>` suffix (`CartPoleRL`, `PushCubeRL`).
 
+### Render-only scene objects
+
+`visual_object` lists `VisualObjectCfg` declarations in inline configs or the
+physical environment component. The production loader resolves mesh assets and
+`EmbodiedEnv` declares them alongside background objects. Their state participates
+in selected-environment reset, while physical background/collision semantics stay
+with `background` and `rigid_object`. See the [simulation object boundary](../simulation-system/simulation-system.md).
+
 ### Component ownership
 
 | File / component | Owns | Must not own |
@@ -245,3 +253,13 @@ tasks can stay directly under `manipulation`.
 Do not organize task ownership around a solution method such as `rl` or
 `task_program`. Keep registration in the task-named module and do not create
 a same-named Python package for a task that has only one Python entry point.
+
+
+## Explicit local resource paths
+
+Mesh `fpath`, `urdf_path`, and `xml_path` values prefixed with `./` or `../`
+resolve from the physical environment, scene, or embodiment component that
+declares them. Inline resources resolve from the deployment file. Bare dataset
+identifiers retain the existing data registry behavior and are not probed against
+the current working directory. Asset-batch materialization uses this boundary;
+see [asset generalization](../asset-generalization/asset-generalization.md).

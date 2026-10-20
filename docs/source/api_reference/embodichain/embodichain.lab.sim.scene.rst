@@ -12,6 +12,38 @@ already includes asset scale and orientation. GenSim adapts its Y-up editing
 model at its existing boundary; shared services never load prompts or assets
 from generation directories.
 
+Robot-aware workspace proposals
+------------------------------
+
+The reusable workspace adapter combines Robot cache sampling with object-local
+grasp geometry. ``sample_object_poses`` returns proposed object poses and joint
+seeds; ``check_object_pose`` independently checks actual pose IK, joint limits
+and complete FK position/orientation residuals. It returns ``SceneCheckReport``.
+These checks do not establish support, collision-free motion or task success.
+The legacy Task Program import converts reports to ``ValidationResult``.
+
+.. currentmodule:: embodichain.lab.sim.scene
+
+.. autosummary::
+
+   RobotSceneWorkspace
+   SceneWorkspaceCandidate
+
+.. autoclass:: RobotSceneWorkspace
+   :members:
+
+.. autoclass:: SceneWorkspaceCandidate
+   :members:
+
+Implementation module: ``embodichain.lab.sim.scene.workspace``
+
+.. currentmodule:: embodichain.lab.sim.scene.workspace
+
+.. autosummary::
+
+   RobotSceneWorkspace
+   SceneWorkspaceCandidate
+
 The implemented layout is fixed-orientation XY placement using AABB proxies.
 It does not establish exact mesh collision freedom, vertical support, robot
 reachability or task success. Physical state services currently reject worlds
@@ -264,7 +296,7 @@ A view reads existing physical bindings and cloned poses while retaining the env
 embodichain.lab.sim.scene.state
 -------------------------------
 
-Snapshots own immutable arena-local physical state, including velocities, joints, controller targets and efforts. Restore preflights ownership, backend, binding, topology and current joint limits before writes. Saved joint positions or targets outside those limits are rejected rather than silently clipped. Restore does not step and cannot be used as a full backend checkpoint. Native failures may leave partial writes.
+Snapshots own immutable arena-local physical state, including velocities, joints, controller targets and efforts. Restore preflights ownership, backend, binding, topology and current joint limits before writes. By default saved joint positions or targets outside those limits are rejected. Callers may explicitly pass ``qpos_tolerance`` to allow small measured-position excursions to be clipped and then verify the actual round trip; controller targets remain strict. Restore does not step and cannot be used as a full backend checkpoint. Native failures may leave partial writes.
 
 .. currentmodule:: embodichain.lab.sim.scene.state
 

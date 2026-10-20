@@ -1,1095 +1,345 @@
-# Neural Motion Generator Benchmark Design
+# Motion Planning & Atomic Skills Benchmark Design
 
-## Proposal
+This document describes the implemented comparison and evaluation contracts.
+The [README](./README.md) owns commands, suite selection, configuration examples
+and extension entry points. Unimplemented capabilities are collected in
+[future extensions](#9-future-extensions).
 
-Build an extensible motion-generation benchmark for EmbodiChain that treats
-Neural Motion Generator (NMG) checkpoints as candidates and cuRobo as the
-primary baseline. The benchmark should evaluate three distinct questions:
+## 1. Scope and comparison boundaries
 
-1. How fast and resource-efficient is trajectory generation?
-2. Is the generated trajectory accurate, safe, smooth, and executable?
-3. Does the trajectory complete an Atomic Action or a multi-action task under
-   physics simulation?
+The framework answers three separate questions: how much generation costs,
+whether the generated motion satisfies its constraints, and whether executing
+an Atomic Skill produces the intended physical result. A planner success flag
+alone establishes neither trajectory validity nor physical success.
 
-The default comparison should be NMG versus cuRobo. IK plus interpolation and
-TOPPRA should remain optional diagnostic baselines rather than define the main
-leaderboard.
+`TrackCfg.scenario` selects the report family:
 
-## Implemented vertical slice
+- `free_space` owns Motion Planning populations and independent geometry /
+  solved-timing rankings. It covers planner scaling across EEF and joint goals,
+  batches, ordered waypoints, path shapes and start-state bins.
+- `atomic_skill` owns skill compilation, replay and physical-stage ranking.
+  The smoke suite retains MoveEndEffector and MoveJoints as integration checks;
+  interaction and generalization suites exercise physical tasks.
 
-The first physics-backed slice is available as
-`suites/atomic_franka_pgi_curobo.yaml`. It runs Franka + PGI with cuRobo only,
-and covers `MoveEndEffector`, `MoveJoints`, antipodal-grasp `PickUp`,
-`MoveHeldObject`, `Place`, `Press`, `Slide`, and `Twist`. Every skill pins
-`MotionPolicy(strategy="motion_gen")` and compiles through the same
-`AtomicActionEngine`; scenario code never calls cuRobo directly.
-The `atomic_franka_pgi_curobo_smoke_v3` contact cases use the same articulated
-assets and placements as their Atomic Action tutorials. `Press` and `Twist`
-use `Microwave/microwave.urdf`; `Slide` uses
-`Drawer/model_split_links_with_inertials.urdf`. Their target and sampling
-configuration is:
+There is no combined score across these families. The separate
+`atomic-action-profile` command diagnoses individual actions and does not enter
+this framework's rankings.
 
-| Skill | Target link | Target joint | `sample_count` | `hand_interp_steps` |
-|---|---|---|---:|---:|
-| `Press` | `button_link` | `button_joint` | 256 | 12 |
-| `Slide` | `large_handle_bar` | `cabinet_to_drawer` | 140 | 12 |
-| `Twist` | `knob_link` | `knob_joint` | 256 | 20 |
+## 2. Ownership and fixed inputs
 
-Cases freeze targets derived from the actual link geometry rather than
-synthetic semantic targets.
-
-Physical replay samples the target joint from each action's effect segment
-through release, retract, and the final hold. Peak signed displacement remains
-an explicit diagnostic, including for a spring-loaded button that rebounds,
-but `task_success` is intentionally gated only by valid executed motion rather
-than the articulation's final state.
-
-The optional `atomic_franka_pgi_curobo_pose_batch` suite exercises the same
-runner with translation-only pose perturbations. Its `pose_batch_size` is
-mapped directly to the simulator batch (`B=8` in the supplied YAML): each
-environment row is one independently sampled object or target pose, and the
-corresponding Atomic Action goal is planned in one vectorized call. Explicit
-`GraspGoal.object_pose` values keep PickUp and the PickUp→MoveHeldObject/
-Place composites grounded to the settled per-row cube pose. The coverage track
-contains all eight skills. Press, Slide, and Twist perturb the physical
-Microwave/Drawer root translation before freezing the live target-link pose;
-Slide samples one PGI grasp once in target-local coordinates and screens its
-translated copies together. General per-row geometry-sampled antipodal
-candidate selection remains a future extension.
-
-The pose-batch suite uses the asset, target, and sampling settings above. The
-six-skill `atomic_franka_pgi_curobo_randomized` suite uses the same `Press`
-settings. All three suites configure `physics.hold_steps=80` and
-`physics.hold_sim_steps=2` for the final pose hold. The standalone `Press` and
-`Twist` tutorials each use 256 final-pose updates, also with two physics steps
-per update.
-
-The shared runner now selects planners, scenarios, robots, Atomic Action case
-providers, and object kinds through registries. Cases freeze the full robot
-start state, explicit targets/grasp, object configuration, difficulty factors,
-and independent sequential-IK evidence before measured planner calls. Reports
-keep planning, kinematic motion validity, controller execution, and physical
-task success separate while retaining exactly three tables.
-
-Run the slice with:
-
-```bash
-python -m scripts.benchmark.motion_generation.run_benchmark \
-  --suite atomic_franka_pgi_curobo --device cuda
-```
-
-Record every successful measured case (including all three articulated
-interactions) with:
-
-```bash
-python -m scripts.benchmark.motion_generation.run_benchmark \
-  --suite atomic_franka_pgi_curobo --device cuda \
-  --record-video --video-case-limit 0
-```
-
-`--video-case-limit` is a global run limit, so a value of `1` records at most
-one case. Add `--record-failed-video` when failed cases should be retained as
-static debug scenes. For live inspection, open the simulator viewer with:
-
-```bash
-python -m scripts.benchmark.motion_generation.run_benchmark \
-  --suite atomic_franka_pgi_curobo --device cuda --no-headless
-```
-
-## Motivation
-
-The existing NeuralPlanner benchmark provides useful latency, memory, rollout,
-and endpoint-error measurements, but it only exercises fixed Franka waypoint
-sets in planner-only mode. It does not measure collision safety, dynamic
-feasibility, execution tracking, or physical task completion. It also does not
-currently include cuRobo even though both `BasePlanner` and `MotionGenerator`
-support the cuRobo backend.
-
-NMG will continue to evolve toward obstacle conditioning, multimodal motion,
-physics-aware refinement, closed-loop recovery, and cross-embodiment
-adaptation. A versioned suite, fixed case manifests, capability-aware tracks,
-and stage-specific outcomes are needed so future results remain comparable and
-failures remain diagnosable.
-
-## 1. Objectives and scope
-
-The benchmark should support:
-
-- regression testing across NMG checkpoint and model revisions;
-- paired comparison between NMG and cuRobo for success, trajectory quality,
-  collision safety, latency, throughput, and memory;
-- optional IK plus interpolation and TOPPRA diagnostics;
-- incremental tracks for obstacle tokens, multimodal generation, Analytic
-  Policy Gradient (APG) refinement, closed-loop recovery, and new robots;
-- actionable failure attribution for training-data and model iteration.
-
-The benchmark must not collapse every measurement into one opaque composite
-score. In particular, `PlanResult.success` must not be treated as equivalent to
-physical task success.
-
-## 2. Current implementation and design implications
-
-### 2.1 Current NeuralPlanner capability boundary
-
-`embodichain/lab/sim/motion/planners/neural_planner.py` currently:
-
-- directly supports only `MoveType.EEF_MOVE`;
-- uses a 7-DoF waypoint Transformer checkpoint, currently centered on Franka;
-- derives the maximum number of waypoints from checkpoint `waypoint_max`;
-- updates rollout state through FK, which is a kinematic model loop rather than
-  sensor-driven simulation or real-robot recovery;
-- reports a fixed nominal `dt`, with velocity and acceleration estimated from
-  joint-position finite differences;
-- has no explicit obstacle, collision, multimodal-sampling, or APG-refinement
-  input/output interface yet.
-
-The v1 benchmark must run within these constraints while reserving
-capability-gated tracks for future features. An unsupported capability must be
-reported as `unsupported`, not silently converted into success or failure.
-
-### 2.2 Gaps in the current NeuralPlanner benchmark
-
-`scripts/benchmark/motion_generation/run_benchmark.py` already handles:
-
-- warmup trials separately from measured trials;
-- CUDA synchronization;
-- CPU RSS, GPU allocation delta, and peak GPU memory;
-- planning latency, final TCP error, and waypoint best-hit error;
-- optional IK-interpolation and TOPPRA baselines.
-
-However, it currently uses one Franka start state, fixed waypoint offsets, and
-one environment. Repeating a deterministic case mostly measures runtime
-variance, not workspace coverage or generalization. It also lacks:
-
-- joint-limit, velocity, acceleration, jerk, collision, and clearance checks;
-- path length, path efficiency, and smoothness;
-- physics execution and controller tracking;
-- Atomic Action task completion;
-- batch-scaling measurements;
-- resolved checkpoint, case-manifest, seed, software, and hardware metadata.
-
-The planner and `MotionGenerator` already register `CuroboPlanner`, but the
-current NMG benchmark does not include it. The new default matrix should be
-`NMG vs cuRobo`; IK interpolation and TOPPRA should not be the primary
-reference.
-
-The current `compute_waypoint_errors()` independently searches the whole
-trajectory for the best sample for each waypoint. This can reward out-of-order
-motion and can select different samples for the best position and orientation.
-The new benchmark must use ordered waypoint matching.
-
-The current report also creates multiple Quality/Performance tables grouped by
-waypoint count plus two leaderboards. EmbodiChain benchmark convention requires
-one Markdown report with exactly three tables:
-
-1. `Time & Memory`
-2. `Success & Other Metrics`
-3. `Leaderboard`
-
-### 2.3 Atomic Action integration
-
-`MotionPolicy.strategy` defaults to `"ik_interp"`. Existing Atomic Action
-benchmarks construct a TOPPRA `MotionGenerator`, but invocations that do not
-explicitly change `strategy` still use local IK plus interpolation.
-
-NMG and cuRobo Atomic Action evaluation must explicitly set:
-
-```python
-motion_policy = MotionPolicy(strategy="motion_gen")
-```
-
-The NMG checkpoint must remain confined to `NeuralPlannerCfg`. Atomic Action
-scenarios, grasp sampling, objects, controllers, and task-success rules must
-not contain NMG-specific branches. The planner factory should be the only
-backend-specific injection point.
-
-## 3. Architecture
+The execution path is:
 
 ```text
-Suite YAML + fixed Case Manifest
-                |
-                v
-        Scenario Providers
-      /          |           \
- planner-only  trajectory   atomic-task
-      |          |           |
-      +------ Planner Factory/Adapter ------+
-                         |
-                         v
-                 Raw Trial Records
-                         |
-             +-----------+-----------+
-             |                       |
-       Metric Evaluators        Failure Classifier
-             |                       |
-             +-----------+-----------+
-                         |
-                         v
-             Aggregates + Leaderboard
-                         |
-                         v
-       one Markdown report with exactly 3 tables
+Suite YAML -> scenario cases -> frozen manifest -> planner adapter
+                                              -> raw lifecycle/trial records
+                                              -> external evaluation
+                                              -> family aggregates and report
 ```
 
-Keep the existing CLI entry point:
+`config.py` owns configuration and domain expansion; `runner.py` owns the case
+matrix, planner lifecycle and artifact writing. Scenario providers own scene
+state, frozen inputs and evaluation. Planner adapters own backend construction,
+preparation, capability checks and generation. `metrics/trajectory.py` validates
+motion; `aggregation.py`, `generalization.py` and `reporting.py` consume records
+without invoking planners or simulators. Atomic provider/replay owners are
+listed in the [extension guide](./README.md#provider-and-evaluator-interfaces).
 
-```bash
-embodichain benchmark motion-generation
-```
+Every planner receives the same case's robot start state, ordered targets,
+objects, grasps, seed and physics parameters. Cases record independent
+reachability evidence before measured calls. A planner being evaluated cannot
+select the cases that enter its own success denominator. EEF and joint goals
+have distinct identities: `reference_qpos` is diagnostic for an EEF goal and the
+actual ordered target for a joint goal. Adapters must not replace an EEF target
+with its reference joint solution.
 
-Reuse established patterns from the current benchmark system:
+The manifest records full start state, case parameters, embodiment/domain
+identity and required capabilities. Each track/batch population is written
+before any planner evaluates it; later populations extend the manifest. The
+scenario restores robot, object and simulator state before replay.
 
-- dispatch through `scripts/benchmark/__main__.py`;
-- Atomic Action `smoke/coverage/full` profiles, case sweeps, physics replay,
-  and physical-success rules;
-- RL benchmark suite YAML, config/runner/reporting separation, resolved
-  protocol, per-run artifacts, and compatibility-aware resume;
-- the current NeuralPlanner warmup, CUDA synchronization, memory measurement,
-  and optional-baseline flow;
-- one Markdown report, exactly three tables, and a complete leaderboard.
+The NMG policy belongs to its planner configuration. Objects, grasp sampling,
+controllers and physical evaluators must remain independent of the selected
+model. Optional `nmg` and `nmg_retimed` candidates share the same checkpoint and
+inputs so their comparison isolates the effect of timing the policy path.
 
-Refactor the current monolithic script incrementally into:
+## 3. Motion, timing and limit contracts
+
+### Geometry and solved timing
+
+External evaluation recomputes errors and constraints from the output:
 
 ```text
-scripts/benchmark/motion_generation/
-├── run_benchmark.py        # thin CLI entry point
-├── config.py               # suite, planner, and scenario configuration
-├── registry.py             # planner/scenario/metric registries
-├── runner.py               # case matrix, warmup, trials, and resume
-├── artifacts.py            # manifests, JSONL, and environment metadata
-├── aggregation.py          # grouping, confidence intervals, leaderboard
-├── reporting.py            # exactly three Markdown tables
-├── planners/
-│   ├── base.py
-│   ├── neural.py
-│   ├── curobo.py
-│   ├── ik_interpolate.py
-│   └── toppra.py
-├── scenarios/
-│   ├── reach.py
-│   ├── waypoint_path.py
-│   ├── obstacle.py
-│   ├── perturbation.py
-│   └── atomic_action.py
-├── metrics/
-│   ├── performance.py
-│   ├── kinematic.py
-│   ├── dynamic.py
-│   ├── collision.py
-│   ├── execution.py
-│   └── task.py
-└── suites/
-    ├── smoke.yaml
-    ├── coverage.yaml
-    └── full.yaml
+geometry_valid = finite_positions
+                 and ordered_waypoints_reached
+                 and joint_position_limits_satisfied
+
+timed_motion_valid = geometry_valid
+                     and valid_solved_timing
+                     and applicable_dynamic_limits_satisfied
 ```
 
-### 3.1 Extension interfaces
-
-Runner logic should not branch on planner names. Use protocols such as:
-
-```python
-class PlannerAdapter(Protocol):
-    @property
-    def metadata(self) -> PlannerMetadata: ...
-
-    def build(self, context: BenchmarkContext) -> MotionGenerator: ...
-
-    def prepare(self, case: BenchmarkCase) -> PreparationMetrics: ...
-
-    def warmup(self, case: BenchmarkCase) -> None: ...
-
-    def plan(self, case: BenchmarkCase) -> PlanResult: ...
-
-
-class ScenarioProvider(Protocol):
-    @property
-    def required_capabilities(self) -> frozenset[str]: ...
-
-    def generate_cases(
-        self,
-        manifest: SuiteManifest,
-        seed: int,
-    ) -> Iterable[BenchmarkCase]: ...
-
-
-class MetricEvaluator(Protocol):
-    @property
-    def required_artifacts(self) -> frozenset[str]: ...
-
-    def evaluate(self, trial: TrialArtifacts) -> dict[str, float | bool]: ...
-```
-
-`PlannerMetadata` should include at least:
-
-- `algorithm_id`, for example `nmg_transformer`, `curobo`,
-  `ik_interpolate`, or `toppra`;
-- `algorithm_role`: `candidate`, `primary_baseline`, or
-  `diagnostic_baseline`;
-- model revision, checkpoint path, and SHA256 when applicable;
-- capabilities such as `eef_waypoint`, `joint_waypoint`, `obstacle`,
-  `sampling`, `refinement`, and `closed_loop`;
-- supported robots, maximum waypoint count, and input/output schema version;
-- planner parameters, model parameter count, and inference dtype.
-
-Adding an NMG architecture, refiner, or baseline should require only a new
-adapter/registry entry and suite configuration, not runner, aggregation, or
-reporting changes.
-
-### 3.2 Trial data model
-
-Each trial should have a stable key:
-
-```text
-(suite_version, track, scenario_id, case_id, algorithm_id,
- model_revision, seed, repeat, batch_size)
-```
-
-`TrialRecord` should separate:
-
-- **identity**: the key above, robot, device, git commit, and config/checkpoint
-  hashes;
-- **case**: start qpos, target waypoints, obstacle/object state, and
-  perturbations;
-- **outcomes**: planning, motion, execution, and task success plus failure
-  stage;
-- **metrics**: performance, memory, trajectory, and task values.
-
-Raw JSONL/JSON artifacts should retain numeric types. Percentage formatting
-belongs only in Markdown rendering, not before aggregation.
-
-### 3.3 Primary NMG-versus-cuRobo protocol
-
-The default suite should require only:
-
-- `nmg:<checkpoint_revision>` as the candidate;
-- `curobo:<config_hash>` as the primary baseline.
-
-IK interpolation and TOPPRA should be enabled only through
-`--extra-baselines` or suite configuration. If enabled, they must still appear
-in reports and the leaderboard with role `diagnostic_baseline`.
-
-Use three paired tracks:
-
-1. **Free-space common input**: cuRobo uses an empty collision world. Both
-   planners receive identical start qpos and ordered EEF waypoints. This is the
-   primary quality and performance leaderboard.
-2. **Collision-aware deployment**: both planners execute in the same
-   simulation scene; cuRobo receives the correct collision world while current
-   NMG does not receive obstacle tokens. This track measures deployment
-   behavior and the current capability gap, not model quality under equal
-   information.
-3. **Atomic task**: both planners run through the same `AtomicActionEngine`,
-   objects, grasps, controller, and physical success criteria.
-
-cuRobo supports both `EEF_MOVE` and `JOINT_MOVE`, while current NMG supports
-only `EEF_MOVE`. The primary leaderboard must use their common `EEF_MOVE`
-capability. Joint-space cases belong in cuRobo-only or diagnostic tracks.
-
-#### Freeze the cuRobo configuration
-
-Every run must record and hash:
-
-- `max_attempts` and `max_planning_time`;
-- `interpolation_dt` and `collision_activation_distance`;
-- `use_cuda_graph`, actual fallback state, and `warmup_iterations`;
-- robot sphere-fit settings and collision-sphere buffer;
-- obstacle representation, collision cache, and `multi_env`;
-- static/dynamic obstacle names and world-content hash;
-- `preserve_plan_samples`.
-
-World representation and sphere fitting are part of the baseline definition
-and must not change silently between checkpoint comparisons.
-
-The primary leaderboard should use a frozen operational configuration, for
-example checkpoint-default NMG `max_steps` and fixed cuRobo `max_attempts`.
-Also add a latency-budget sweep:
-
-- sweep NMG `max_steps`;
-- sweep cuRobo `max_attempts`, with a common `planning_budget_ms`;
-- retain success-latency Pareto data.
-
-`CuroboPlannerCfg.max_planning_time` currently validates the budget after the
-plan; it is not a preemptive real-time deadline. The outer benchmark must
-record actual wall latency and `budget_compliance_rate` whether or not a
-planner supports interruption.
-
-#### Lifecycle and timing
-
-cuRobo lazily creates and caches a backend for each
-`(control_part, batch_size, multi_env, move_type)`. First use may include
-robot sphere fitting, voxel-world generation, CUDA graph capture, and warmup.
-NMG has checkpoint loading, actor construction, and
-device transfer.
-
-Report the following separately for both:
-
-```text
-planner_construct_ms
-backend_prepare_ms
-cold_plan_ms
-warm_plan_ms
-```
-
-The planning-latency leaderboard must use only `warm_plan_ms`.
-`backend_prepare_ms` represents one-time deployment cost; `cold_plan_ms`
-represents the first real case. Every batch size and goal type needs its own
-prepare/warmup phase.
-
-cuRobo always plans on CUDA. The primary comparison should therefore use the
-same CUDA device and fp32 interface. NMG CPU results may be reported as a
-separate characterization, not ranked against cuRobo CUDA latency.
-
-#### Multi-waypoint and sample policy
-
-cuRobo plans multiple waypoint segments sequentially. NMG consumes the full
-waypoint sequence in one model invocation. The primary performance metric is
-the total cost of one `MotionGenerator.generate()` call for the same high-level
-input. Also report `num_segments` and `cost_time_per_segment_ms`, but do not
-replace total-latency ranking with per-segment latency.
-
-- Planner-native quality: set cuRobo `preserve_plan_samples=True` to retain
-  native collision-checked samples and `dt`.
-- Common path metrics: resample derived copies from both planners by the same
-  arc-length procedure.
-- Atomic Action/common execution: use the same action `sample_count` and let
-  `MotionGenerator` perform common resampling, but do not call the
-  resampled result a native-timing trajectory.
-
-#### Collision worlds
-
-- Use `CuroboWorldCfg.multi_env=False` when every batch row has the same
-  robot-relative obstacle layout.
-- Use `multi_env=True` when obstacle poses differ relative to each robot.
-- Supply per-environment dynamic poses through `dynamic_obstacle_names` and
-  `CuroboPlanOptions.dynamic_obstacle_poses`.
-- Dynamic obstacles must use `cuboid` or `mesh`, not the `sphere`
-  representation that cannot be updated by the original object name.
-- Revalidate collision success with an independent simulator/common
-  validator. cuRobo `success=True` is not benchmark ground truth.
-
-## 4. Layered evaluation
-
-### 4.1 L0: generation performance
-
-L0 isolates planner computation and does not execute the trajectory.
-
-Sweep:
-
-- batch size: `1, 8, 64`, with larger batches in the full profile;
-- waypoint count: `1, 3, min(5, model_max)`, plus supported maxima;
-- start state: nominal, random reachable, near joint limit, near singularity;
-- path shape: direct, L-turn, S-curve, orientation-only, and combined
-  translation/orientation;
-- target-distance and orientation-delta bins;
-- primary device/dtype: same CUDA device and fp32 interface for NMG and cuRobo;
-- separate NMG CPU/fp16/bf16 characterization;
-- cold start and warm steady state.
-
-Timing boundaries:
-
-- measure `planner_construct_ms` and `backend_prepare_ms` separately;
-- measure `cold_plan_ms` for the first real input;
-- measure `warm_plan_ms` after fixed warmup;
-- exclude setup, case generation, reporting, FK metrics, and validation;
-- call `torch.cuda.synchronize()` before and after CUDA timing.
-
-Primary metrics:
-
-- latency p50/p95/p99;
-- `latency_per_env_ms`;
-- `cost_time_per_segment_ms` for explaining multi-waypoint scaling;
-- trajectories per second;
-- rollout steps and policy steps per second;
-- CPU RSS delta, GPU allocation delta, and peak GPU memory;
-- real-time factor only when trajectory duration has clear semantics.
-
-For Atomic Action tracks, separate `action_planning_ms`,
-`physics_execution_ms`, and `task_end_to_end_ms`.
-
-### 4.2 L1: trajectory quality and executability
-
-Distinguish three evaluation views:
-
-1. **path-only**: resample by arc length and compare geometry;
-2. **native-timing**: use each planner's own `dt` and derived duration;
-3. **common-execution**: use the same controller, control dt, and simulator.
-
-Do not directly compare NMG's fixed nominal `dt=0.01` against IK interpolation
-with no meaningful duration. Report unavailable native timing as `N/A`.
-Dynamic fairness should come from common execution or common
-time-parameterization.
-
-Use `preserve_plan_samples=True` for cuRobo native-timing evaluation and the
-original NMG `PlanResult`. Recompute endpoint, constraint, collision, and
-smoothness metrics from output trajectories rather than trusting either
-planner's internal success flag.
-
-#### Goal and waypoint metrics
-
-- final translation error in mm;
-- final rotation geodesic error in degrees;
-- ordered waypoint success rate;
-- waypoint translation/rotation mean, p95, and maximum error;
-- completed waypoint ratio;
-- time or step to final target.
-
-Define ordered arrival as:
-
-```text
-t_i = the first sample satisfying t_i > t_(i-1), and
-      position_error(t_i) <= pos_threshold, and
-      rotation_error(t_i) <= rot_threshold
-```
-
-The waypoint sequence succeeds only if every valid waypoint has a matching
-`t_i`. Continuous error statistics may use monotonic dynamic programming to
-jointly match waypoints and trajectory samples. Position and orientation must
-not select unrelated best samples.
-
-#### Kinematic and dynamic metrics
-
-- finite-value rate;
-- joint-position-limit violation rate and maximum normalized violation;
-- joint velocity, acceleration, and jerk violation rates;
-- maximum/mean joint velocity, acceleration, and jerk;
-- joint path length;
-- Cartesian translation and rotation path length;
-- path efficiency relative to a geometric lower bound or same-case reference;
-- path curvature and path-only smoothness;
-- time-indexed integrated squared acceleration and jerk;
-- endpoint settling error and hold stability.
-
-Define `motion_valid` independently:
-
-```text
-motion_valid =
-    finite
-    and ordered_waypoints_reached
-    and joint_limits_satisfied
-    and dynamic_limits_satisfied_when_applicable
-    and collision_free_when_applicable
-```
-
-#### Collision and physics-execution metrics
-
-- environment collision rate;
-- self-collision rate;
-- minimum clearance;
-- undesired-contact count and maximum contact impulse;
-- controller joint-tracking RMSE and maximum error;
-- executed TCP tracking RMSE;
-- execution timeout rate;
-- final pose error after simulation execution;
-- final pose drift after a fixed stable-hold period.
-
-Enable collision metrics only when the scenario supplies a trustworthy
-collision world. In `free-space-common`, cuRobo receives an empty world. In
-`collision-deployment`, cuRobo receives the full world while current NMG is an
-`obstacle_unaware` candidate. The report must expose this information
-asymmetry.
-
-#### Reference-based metrics
-
-ADE/FDE, expert joint distance, and cost ratio are diagnostic, not primary
-success criteria. A single reference path can unfairly penalize valid alternate
-IK branches or left/right obstacle-avoidance modes.
-
-cuRobo may serve as a strong reference for path cost, duration, and clearance,
-but it is not the only ground truth. NMG should pass whenever it satisfies the
-same external constraints and task criteria, even with a different valid path.
-
-Future generative NMG tracks should add:
-
-- top-k feasibility/success;
-- best-of-k cost;
-- valid mode count and trajectory diversity;
-- total sampling cost per successful sample.
-
-### 4.3 L2: Atomic Actions and task completion
-
-L2 uses `AtomicActionEngine` to generate a trajectory and then executes or
-replays it in physics simulation. Object, contact, and robot state determine
-task success.
-
-Backend fairness:
-
-- NMG and primary baseline cuRobo use `strategy="motion_gen"`;
-- optional TOPPRA diagnostics use `strategy="motion_gen"`;
-- optional IK-interpolation diagnostics use `strategy="ik_interp"`;
-- grasp generator, object preset, start state, target, controller, sample
-  interval, seed, and physics parameters are identical;
-- do not execute a fabricated trajectory after planning failure;
-- restore robot, object, and simulator state before every case.
-
-Contact tasks need explicit collision-world ownership:
-
-- the manipulated Pick/Place target must not be treated as a generic
-  non-contact obstacle during required contact phases;
-- tables, environmental obstacles, and non-target objects should enter the
-  cuRobo world;
-- the current EmbodiChain cuRobo adapter does not expose dynamic held-object
-  attachment, so `MoveHeldObject` must record
-  `held_object_geometry_in_planner=false` and validate object collisions in
-  simulation;
-- write visible constraints into `constraint_information` for every result.
-
-In `atomic_franka_pgi_curobo_smoke_v3`, the Microwave and Drawer are present as
-physical articulations in the simulator, but the cuRobo adapter still receives
-an empty external world. Consequently, the suite can validate contact-driven
-target-joint actuation, but it does not establish collision safety against
-non-target articulation links or other environment geometry. This limitation
-must remain visible in the run metadata and report interpretation.
-
-Suggested coverage:
-
-| Action or sequence | Primary task-success criteria |
-|---|---|
-| MoveEndEffector | Planning succeeds, executed TCP reaches and holds target, no disallowed collision |
-| PickUp | Approach/lift plan succeeds, `held_object` is created, minimum object lift is reached, no drop |
-| MoveHeldObject | Object reaches target pose, grasp remains stable, object drift/tilt stays within threshold |
-| Place | Place pose reached, release succeeds, final object pose is correct and stable |
-| Pick-Move-Place | Every stage succeeds in sequence; final object pose and release state are correct |
-| Press | Button joint reaches the configured peak signed displacement from the press segment through replay hold; final rebound is allowed |
-| Slide | Drawer prismatic joint reaches the configured peak signed displacement from the pull segment through replay hold |
-| Twist | Knob revolute joint reaches the configured peak signed displacement from the twist segment through replay hold |
-
-Record:
-
-- `planning_success`;
-- `motion_valid`;
-- `execution_success`;
-- `task_success`;
-- per-Atomic-Action stage success;
-- task completion time;
-- replan/retry count;
-- task-specific pose, lift, slip, release, and contact metrics.
-- articulated-contact target-joint initial/final displacement and peak signed
-  displacement.
-
-Sequence success must come from one sequential episode. Do not approximate it
-by multiplying independently measured action success rates.
+Waypoint matching requires monotonically increasing arrival samples. EEF
+position and orientation must satisfy their thresholds at the same sample;
+joint targets use an explicit per-joint error threshold. Best hits at unrelated
+samples or out-of-order arrivals do not satisfy the requested path.
+
+`PlanResult` carries `dt` whenever positions exist, including for methods that
+only provide a nominal clock. `timing_is_solved` distinguishes those outputs
+from trajectories whose timing was solved under limits. Raw NMG and fixed-clock
+IK interpolation participate in geometry ranking; TOPPRA, cuRobo and retimed
+NMG can additionally participate in timed ranking. Nominal-clock dynamics remain
+diagnostics, and unavailable timed validity/duration is N/A. Continuous path
+quality is conditioned on geometry-valid outcomes consistently across methods.
+
+Velocity, acceleration and jerk are recomputed using compact divided
+differences. Central differences could hide a trajectory reversing at every
+sample. Derivatives that cannot be resolved from the available samples remain
+unavailable. `motion_valid` remains a raw outcome field for controller and
+end-to-end evaluation; it does not replace the separate geometry/timing views.
+
+### Shared budgets
+
+Planning and validation use the same effective joint-speed caps: valid runtime
+limits, positive URDF fallback for unavailable runtime values, and propagated
+mimic constraints. An explicit suite speed request can fill a missing limit or
+reduce a known cap; it cannot enlarge a usable robot limit. Acceleration and
+jerk have no automatic asset fallback and are suite-owned budgets.
+
+Timing adapters reject unavailable required limits or conflicting
+adapter-local budgets. Scenario-owned IK uses scalar `MotionPolicy` limits,
+so per-joint suite vectors are conservatively reduced to their minimum and
+recorded in `policy_motion_limits`. Backend adapters receive the full vector.
+Retiming does not guarantee jerk compliance; an explicitly configured jerk
+budget is still checked independently.
+
+### Effective motion source
+
+Planner-backed Atomic Skills use the adapter's `MotionGenerator` with
+`strategy="motion_gen"`. Exact Cartesian skills may require `ik_interp`;
+coordinated skills may own their IK path. Records carry
+`selected_planner_backend_used` and `effective_motion_algorithm`, so a bypassed
+backend receives no credit for motion it did not produce.
+
+CoordinatedPickment uses its own IK projection and fixed sample clock, so its
+timing is nominal. Dual-arm cases freeze each arm's requested poses and require
+both arms to reach them in order. Grasp sampling is case-scoped to prevent one
+case's configuration from changing another's trajectory.
+
+### Measurement boundaries
+
+Construction, lazy backend preparation, cold calls, warmup and measured calls
+are separate `TrialPhase` values. Warmup does not enter steady-state aggregates.
+cuRobo preparation can include sphere fitting, backend creation and CUDA graph
+capture; NMG construction includes checkpoint loading. Prepare/warm each
+required input shape before measuring it.
+
+The measured operation is `planner_call` for Motion Planning and
+`atomic_action_compile` for Atomic Skills. Their report fields are
+`planning_time_ms` and `compile_time_ms`. Physics execution and end-to-end time
+are separate, and compile latency is never ranked against a bare planner call.
+Validation, case generation, reporting and optional video capture are outside
+the timed operation. CUDA wall timing synchronizes around the operation.
+
+Native generation preserves planner samples where configured. Derived path
+metrics may resample copies; common Atomic execution uses the shared controller
+cadence while preserving segment timing. Motion limits may extend the requested
+sample count. Native timing and replay timing must remain identifiable.
+Multi-waypoint latency measures the complete request, including
+cuRobo's sequential segments; a per-segment diagnostic is not a replacement
+for that cost.
+
+CPU memory is retained RSS delta. GPU allocation and peak fields cover the
+Torch allocator, not all native/CUDA-graph allocations. Persistent backend
+caches and process ordering limit cross-run memory/cold-start comparisons;
+subprocess isolation is not yet implemented.
+
+## 4. Physical evaluation
+
+All built-in skills use `PhysicalStageEvaluator` over measured replay
+observations. The evaluator receives frozen case inputs, `ExecutionObservation`
+and motion outcomes. It does not receive the scenario/engine,
+`CompiledTrajectory` or projected symbolic context, so predicted effects cannot
+substitute for physical evidence.
+
+Providers declare `replay_observation_windows()` while the compiled segment
+map is available. Each window selects raw TCP, active-object, scene-object,
+articulation-joint or gripper-joint channels and can include terminal settling.
+Replay also records configured gripper commands. Missing optional observations
+remain unavailable evidence. Push contact uses a labeled object-motion proxy;
+it is not contact-sensor evidence.
+
+Contact replay retains target-joint traces and peak signed displacement through
+release/retract/hold as diagnostics. Evaluators use their declared stage windows:
+Press permits spring rebound after a successful press; other articulated skills
+also require their grasp, motion and release stages. A diagnostic peak over the
+whole replay cannot replace those stage criteria. The actual skill stages and
+thresholds are owned by `evaluation.py` and the provider evaluators.
+
+Return one `PhysicalEvaluation` per environment with the same ordered stage
+IDs. Stage status is `passed`, `failed`, `not_reached`, `not_applicable` or
+`unavailable`. Failed and unavailable stages require failure codes; measurements
+use finite numeric values with units in their names. A failed, unavailable or
+unreached stage prevents subsequent stages from being reached. Duplicate/missing
+rows, duplicate stages and
+inconsistent ordering are evaluator errors, recorded as
+`metric_evaluation_error`.
+
+Physical success requires at least one applicable stage and every applicable
+stage to pass. An incomplete or all-inapplicable result cannot establish
+success. `physical_skill_success` remains independent of motion diagnostics;
+`end_to_end_success` additionally requires planning, valid motion and successful
+execution. The raw `task_success` field retains that overall meaning. Custom
+providers without a physical evaluator can still implement `task_result()`;
+the built-ins do not maintain a second scoring path.
+
+The Atomic Action runtime's `PhysicalEvidenceRequest`, `PhysicalEvidenceBatch`
+and `PhysicalEvidenceFrame` provide a separate evidence port for execution
+verifiers, phase gates and held-object guards. `ExecutionRunner` can collect an
+aligned frame after a fresh observation. Primitives declare evidence
+requirements rather than reading or mutating simulator objects. Runtime
+verifiers and benchmark evaluators can adapt the same evidence source without
+sharing their orchestration.
+
+The supplied cuRobo comparisons use an empty external collision world even
+when physical articulations exist in the simulator. Replay establishes measured
+task outcomes, not collision safety against non-target links or environment
+geometry. Held-object geometry is not dynamically attached to the planner;
+this constraint-information gap must remain visible in result interpretation.
 
 ## 5. Scenario tracks and capability gates
 
-| Track | Current NMG | cuRobo | Purpose |
-|---|---:|---:|---|
-| `free-space-common` | Supported | Supported | Empty-world, identical EEF-waypoint primary comparison |
-| `workspace-generalization` | Supported | Supported | Workspace, orientation, joint-limit, and singularity bins |
-| `collision-deployment` | Executable without obstacle input | Supported | Deployment success and current capability gap |
-| `atomic-task` | Partially supported | Supported | Atomic Action and action-chain physical completion |
-| `obstacle-aware-common-input` | Not yet supported | Supported | Future equal-information scene-constraint comparison |
-| `multimodal` | Not yet supported | Single-output reference | Top-k coverage, diversity, and sampling cost |
-| `physics-refinement` | Not yet supported | Reference | NMG initialization plus APG/trajectory optimization |
-| `closed-loop-recovery` | Not yet supported | Not yet supported | Observation, target, and disturbance recovery |
-| `cross-embodiment` | Not yet supported | Multi-robot configuration | Robot, DoF, control-rate, and dynamics adaptation |
+The implemented scenarios are `free_space` and `atomic_skill`. Free-space
+requires `batched` and `empty_world` capabilities, then checks EEF or joint
+support per case. Atomic Skills also check provider-specific requirements.
 
-Before case generation, check `required_capabilities`:
+- `supported`: run the mandatory case normally.
+- `unsupported`: record the reason and exclude it from the success-rate
+  denominator; it still lowers coverage.
+- Runtime error or failed execution after support is declared: count as failure.
 
-- `supported`: run normally;
-- `unsupported`: record the reason and exclude it from that track's
-  denominator;
-- `error`: the adapter declared support but failed, so count it as failure.
+A population with no applicable cases has N/A success, not zero or perfect
+success. Missing supported cases also count as failures. Aggregation balances
+cases so a large environment batch cannot dominate a single-environment case.
+Track eligibility requires complete mandatory coverage. Ineligible algorithms
+remain visible with `eligible=false`; omitting difficult cases cannot improve
+eligibility.
 
-Always report `coverage_rate` to prevent selective execution from improving
-rank. Formal track eligibility requires 100% coverage of mandatory cases.
-Retain ineligible algorithms in the leaderboard with `eligible=false`.
+## 6. Domain populations and generalization
 
-## 6. Suites and scenario matrix
+Domains have versioned identities and declared `nominal`, `robustness` or
+`held_out` kinds. Expansion preserves a shared `track_group`, applies overrides
+to separate effective tracks and freezes the resulting cases. Undeclared
+domains stay null; randomization alone does not imply a nominal baseline.
 
-### 6.1 Profiles
+Spatial suites group skills by their physical contract. Isolated factors keep
+primitive parameters, physics, robot and task semantics fixed. Object-only
+skills are not labeled as target-shift evaluations. The shipped populations
+include:
 
-- `smoke`: one robot, a few deterministic cases, `B=1`, one seed; for PRs.
-- `coverage`: workspace/path bins, `B=1/8/64`, at least five seeds, and
-  representative Atomic Action object/position cases; for nightly runs.
-- `full`: dense workspace/OOD cases, boundary states, all objects/positions,
-  obstacles, perturbations, and at least 20 seeds; for model releases.
+| Population | What changes |
+| --- | --- |
+| Object/target pose | Subject or Cartesian target translation/orientation; articulations may also vary root height and roll/pitch |
+| Workspace/relative shells | Offset radius toward a configured workspace boundary, recorded as near/mid/far buckets |
+| Task frame | Shared planar translation/yaw of the scene while preserving relative layout |
+| Composed pose | Skill-appropriate subject, target, support and task-frame factors varied together |
+| Primitive geometry | Cube `size` only: uniform scales and axis-elongated cuboids, with separate nominal populations |
 
-The shipped `atomic_franka_pgi_curobo_pose_batch` coverage suite is the
-translation-only Atomic Task variant: `randomization.pose_batch_size: K` is
-paired with one simulator `batch_sizes: [K]`, and each environment row carries
-one deterministic object/target pose perturbation. A case therefore makes one
-batched planner request for all `K` rows. It uses fixed cube grasps and moves
-the real Microwave/Drawer root for Press, Slide, and Twist. The Slide case
-shares one geometry-sampled target-local grasp across the translated rows;
-fully independent per-row antipodal candidate selection remains a future
-extension.
+Pose domains use deterministic stratification including interval bounds.
+Primitive domains retain the logical object ID, physical parameters, skill
+settings, seeds and nominal pose; YAML anchors keep runtime parameter overrides
+and provenance identical. Primitive populations remain separate from pose
+shifts. Dual-arm placement additionally varies support pose and rebuilds grasp
+and target transforms per environment row. Exact bounds and sample counts live
+in suite YAML rather than a second documentation copy.
 
-### 6.2 Fixed case manifests
-
-Generate randomized scenarios into a fixed manifest before giving them to any
-planner. Save:
-
-- robot and start qpos;
-- ordered target waypoints;
-- object/obstacle poses and physical properties;
-- target distance, orientation delta, and workspace bin;
-- perturbation schedule;
-- validity evidence, such as independent reachability validation;
-- case schema version.
-
-Unreachable targets may form a separate robustness track but must not enter the
-normal success denominator. Case inclusion must not depend on the success of
-the cuRobo run being evaluated, which would create baseline selection bias.
-Use generation rules, an independent validator, or a frozen offline oracle.
-
-### 6.3 Example suite
-
-```yaml
-schema_version: 1
-suite: nmg_coverage_v1
-profile: coverage
-seeds: [11, 23, 37, 53, 71]
-
-planners:
-  - id: nmg_transformer
-    adapter: neural
-    role: candidate
-    checkpoint: ${NMG_CHECKPOINT}
-  - id: curobo
-    adapter: curobo
-    role: primary_baseline
-    config:
-      max_attempts: 5
-      interpolation_dt: 0.025
-      use_cuda_graph: true
-      warmup_iterations: 1
-      preserve_plan_samples: true
-      world:
-        multi_env: false
-
-tracks:
-  free-space-common:
-    required_capabilities: [eef_waypoint]
-    scenarios: [nominal_reach, random_reach, waypoint_path, boundary_reach]
-    batch_sizes: [1, 8, 64]
-    waypoint_counts: [1, 3, 5]
-    world: empty
-  collision-deployment:
-    required_capabilities: [eef_waypoint]
-    scenarios: [static_obstacle, randomized_obstacle]
-    comparison_mode: asymmetric_information
-  atomic-task:
-    required_capabilities: [eef_waypoint]
-    scenarios:
-      - move_end_effector
-      - pick_up
-      - move_held_object
-      - place
-      - pick_move_place
-
-scenario_overrides:
-  randomized_obstacle:
-    planners:
-      curobo:
-        config:
-          world:
-            multi_env: true
-
-track_overrides:
-  atomic-task:
-    planners:
-      curobo:
-        config:
-          preserve_plan_samples: false
-
-protocol:
-  warmup_trials: 3
-  measured_trials: 20
-  confidence_level: 0.95
-  common_control_dt: 0.01
-```
-
-Environment variables are only configuration inputs. Save resolved values,
-NMG checkpoint hash, cuRobo config hash, and world-content hash in run
-metadata.
-
-`free-space-common`, `collision-deployment`, and `atomic-task` should create
-isolated planner instances. Rebuild cuRobo planner/backends when static world
-geometry or representation changes. Reuse a backend only for fixed geometry
-whose registered dynamic-obstacle poses are updated.
+Domain summaries report coverage, nominal success, non-nominal mean/worst
+success, population variance and retention, plus spatial-bucket counts and
+failure stages where present. Generalization eligibility requires a nominal
+baseline and at least one non-nominal domain, all with complete measured
+coverage within the same track and attributed algorithm. Retention is
+worst-domain success divided by nominal success; it is N/A when the nominal
+population is incomplete or has zero success. Unsupported populations follow
+section 5's denominator rules.
 
 ## 7. Success semantics and failure taxonomy
 
-Each case defines `primary_success`:
+Keep planning, geometry, solved timing, execution and physical stages separate.
+Planner-internal stopping thresholds do not define benchmark success. External
+motion thresholds are suite-owned; physical criteria are versioned in
+`evaluation.py`. Both remain identical across compared algorithms. Sequence
+success comes from one replayed episode, never a product of independent action
+rates.
 
-- L0 planner-only: `planning_success`;
-- L1 trajectory: `motion_valid`;
-- L2 execution: `execution_success`;
-- L2 task: `task_success`.
+Failure records preserve the failed layer and reason. The vocabulary includes:
 
-Planner-internal `pos_eps/rot_eps` only determine when that planner stops.
-Cross-algorithm `ordered_waypoints_reached`, `motion_valid`, and
-`primary_success` must use suite-owned, versioned external thresholds that are
-identical for every algorithm.
+- Input/capability: `invalid_case`, `unsupported_capability`,
+  `unsupported_capacity`, `runtime_unavailable`.
+- Planning/evaluation: `checkpoint_load_failure`, `planner_exception`,
+  `planner_reported_failure`, `timeout`, `scenario_prepare_error`,
+  `metric_evaluation_error`.
+- Motion: `non_finite_trajectory`, `waypoint_miss`, `joint_limit_violation`,
+  `dynamic_limit_violation`, `controller_tracking_failure`.
+- Physical task: `object_not_grasped`, `object_dropped`, `release_failure`,
+  `task_goal_miss`, plus skill-stage-specific reasons.
 
-Retain every stage:
+A future qualified collision validator may add `self_collision` and
+`environment_collision`; empty-world trajectory validity does not establish
+those checks. Raw `stages` and `failure_stage` retain physical attribution even
+when a separate motion or execution failure also exists.
 
-```text
-input_valid
-  -> planning_success
-  -> ordered_waypoints_reached
-  -> motion_valid
-  -> execution_success
-  -> task_success
-```
+## 8. Artifacts and report contract
 
-Use a stable failure taxonomy:
+`resolved_suite.yaml`, `environment.json`, `case_manifest.json` and
+`trials.jsonl` preserve the configuration, runtime environment, frozen inputs
+and raw lifecycle/outcome records. Numeric values stay numeric until Markdown
+rendering. Case manifest schema `3` includes optional domain, track-group,
+embodiment and capability metadata.
 
-- `invalid_case`
-- `unsupported_capability`
-- `checkpoint_load_failure`
-- `planner_exception`
-- `planner_reported_failure`
-- `timeout`
-- `non_finite_trajectory`
-- `waypoint_miss`
-- `joint_limit_violation`
-- `dynamic_limit_violation`
-- `self_collision`
-- `environment_collision`
-- `controller_tracking_failure`
-- `object_not_grasped`
-- `object_dropped`
-- `release_failure`
-- `task_goal_miss`
+Report schema `3` uses explicit family views. `aggregate_results()` receives
+`track_scenarios` from resolved configuration; friendly track/skill names do not
+select the family. Each represented family has three tables:
 
-Store failure stage and reason in raw artifacts. Notes may summarize common
-failures, but must not add a fourth Markdown table.
+1. **Time & Memory:** lifecycle and steady-state timing with the family's timed
+   operation, execution timing where applicable, and memory measurements.
+2. **Success & Other Metrics:** coverage, applicable success views, stage rates
+   and continuous quality diagnostics.
+3. **Leaderboard:** all evaluated algorithms within each track and ranking,
+   including unsupported or ineligible rows. Geometry, timed-motion and
+   physical-skill success are never combined into one rank.
 
-## 8. Fairness and statistical protocol
+`report_views` is the family index; canonical aggregate tables use
+`motion_planning_*` and `atomic_skills_*` names. The additional
+`motion_timing_leaderboard` exposes solved timing, and `generalization` contains
+domain statistics. Markdown consumes these views directly, without an
+unprefixed legacy leaderboard fallback. Raw trial records remain shared.
 
-### 8.1 Baseline fairness
+Unmeasured and inapplicable values render as N/A. Supported failures remain in
+success denominators; continuous geometry metrics use the declared valid
+population. Report success and coverage alongside conditional quality to keep
+missing or failed cases visible. No algorithm disappears merely because it
+could not run.
 
-- Use the same case, start qpos, waypoint order, and external tolerance.
-- Default to NMG candidate versus cuRobo primary baseline.
-- Give cuRobo an empty world in `free-space-common`.
-- Record the scene/constraint information visible to each planner in
-  `collision-deployment`.
-- Time only planner generation; exclude FK/collision metrics.
-- Do not force identical sample counts during native generation.
-- Apply common path resampling only to derived copies.
-- Use the same controller and control dt for execution metrics.
-- Report native time parameterization and common execution separately.
-- Retain baseline failures; never remove failed cases from aggregation.
-- Report success-conditioned continuous metrics and all-case failure-aware
-  statistics to avoid survivor bias.
-- Prefer isolated subprocesses for NMG and cuRobo. cuRobo CUDA graphs,
-  backends, and world caches persist and can contaminate memory or cold-start
-  results based on execution order.
+Suite populations/thresholds, case schema and report schema are versioned
+independently. Combine results only under matching suite/protocol definitions;
+latency comparisons additionally need matching hardware, device, dtype and
+batch protocol. NMG CPU characterization is separate from cuRobo CUDA latency.
+Old artifacts must not be relabeled as a new protocol.
 
-### 8.2 Reproducibility and confidence intervals
+## 9. Future extensions
 
-- Fix Python, NumPy, Torch, and simulator seeds.
-- Warm up every `(planner, scenario, batch_size, waypoint_count)` separately.
-- Report latency p50/p95/p99.
-- Report Wilson or bootstrap 95% confidence intervals for success.
-- Report mean, median, p95, and bootstrap 95% confidence intervals for
-  continuous metrics.
-- Record OS, CPU, GPU, driver, CUDA, Torch, DexSim, and EmbodiChain git commit.
-- In addition to PyTorch allocator memory, record process-level GPU memory when
-  available to capture cuRobo/CUDA-graph allocations.
-- Save the resolved suite and case manifest.
+These are not current benchmark capabilities:
 
-### 8.3 Protocol versioning
-
-- Version suite, case manifest, metric schema, and report schema independently.
-- Increment suite version when thresholds, scenario distribution, or primary
-  success changes.
-- Combine leaderboard results only across identical suite/protocol versions.
-- Require matching hardware class, device, dtype, and batch protocol for
-  latency leaderboards.
-- Historical checkpoints may be rerun on a new suite, but old results must not
-  be silently relabeled as the new protocol.
-
-## 9. Artifacts and report contract
-
-Suggested output:
-
-```text
-outputs/benchmarks/nmg/<run_id>/
-├── resolved_suite.yaml
-├── environment.json
-├── case_manifest.json
-├── trials.jsonl
-├── aggregates.json
-├── report.md
-└── videos/                 # optional representative success/failure cases
-```
-
-Each run produces one `report.md` with exactly three tables.
-
-### 9.1 Time & Memory
-
-Recommended columns:
-
-```text
-track, scenario, comparison_mode, algorithm, algorithm_role, model_revision,
-planner_config_hash, batch_size, waypoint_count, num_segments, num_trials,
-planner_construct_ms, backend_prepare_ms, cost_time_ms, cold_plan_ms,
-warm_plan_ms_p50, warm_plan_ms_p95, trajectories_per_second,
-planning_budget_ms, budget_compliance_rate,
-cpu_delta_mb, gpu_delta_mb, peak_gpu_mb
-```
-
-`cost_time_ms` is the mean primary steady-state timed operation for the row.
-The scenario protocol or a `timing_scope` field must define that operation.
-
-### 9.2 Success & Other Metrics
-
-Aggregate by `(track, scenario, algorithm, condition_bin)`:
-
-```text
-track, scenario, comparison_mode, algorithm, algorithm_role,
-constraint_information, cases, coverage_rate, success_rate,
-planning_success_rate, execution_success_rate,
-task_success_rate, final_pos_err_mm, final_rot_err_deg,
-waypoint_completion_rate, joint_violation_rate, dynamic_violation_rate,
-collision_rate, min_clearance_m, path_efficiency, jerk_cost,
-task_metric, top_failure
-```
-
-Use `N/A`, not zero, for inapplicable values.
-
-### 9.3 Leaderboard
-
-Use one table with a `track` column:
-
-```text
-track, rank, algorithm, algorithm_role, model_revision, planner_config_hash,
-eligible, coverage_rate, overall_success_rate, motion_valid_rate,
-task_success_rate, latency_p95_ms, peak_gpu_mb
-```
-
-`overall_success_rate` is the macro average of `primary_success` over all
-mandatory cases in the track. Sort within each track by:
-
-1. `eligible=True`;
-2. `overall_success_rate` descending;
-3. `coverage_rate` descending;
-4. `latency_p95_ms` ascending.
-
-Include every evaluated algorithm in the current scope, not only the top
-entries. Trajectory imitation error must not override task success in ranking.
-
-## 10. NMG-specific diagnostics
-
-These should not block v1, but the schema should reserve them.
-
-### 10.1 Solution leakage
-
-- Use Cartesian-only conditioning for the primary leaderboard.
-- Treat Cartesian plus joint target as an ablation only.
-- Test the same Cartesian target from different start qpos and legal IK
-  branches.
-- Report sensitivity to joint-interpolation shortcuts.
-- Record actual checkpoint input fields in metadata.
-
-### 10.2 Physics refinement and APG
-
-Create paired cases:
-
-- `nmg_raw`
-- `nmg_plus_refinement`
-
-Report:
-
-- hard-feasibility gain;
-- task-success gain;
-- trajectory-cost reduction;
-- added latency and iterations;
-- refinement-divergence rate.
-
-### 10.3 Closed-loop recovery
-
-When observation feedback is available, add:
-
-- state-observation noise;
-- target-pose motion during execution;
-- external force or joint-tracking disturbances;
-- object slip;
-- obstacle motion.
-
-Report recovery success, time to recover, replan count, maximum post-disturbance
-error, and final task success. The current FK rollout must not be reported as
-closed-loop recovery.
-
-## 11. Implementation phases
-
-### Phase 0: protocol and cuRobo baseline
-
-- Split config, aggregation, and reporting from the current script.
-- Preserve the current CLI and checkpoint download behavior.
-- Add a cuRobo adapter and make it the default primary baseline.
-- Default the CLI/suite to `nmg curobo`; require explicit diagnostic
-  IK/TOPPRA baselines.
-- Separate cuRobo backend prepare, cold plan, and warm plan timing.
-- Produce exactly three report tables.
-- Save resolved config, environment metadata, and trial JSONL.
-- Add unit tests for report schema, full leaderboard coverage, and ordered
-  waypoint metrics.
-
-Minimum tests:
-
-- ordered waypoint matching rejects out-of-order and split
-  position/orientation hits;
-- warmup trials do not enter aggregation;
-- `unsupported`, `error`, and ordinary failure remain distinct;
-- failed trials are not silently removed from continuous aggregation;
-- the leaderboard includes every in-scope algorithm and applies
-  success/coverage/latency ordering;
-- generated reports contain exactly three Markdown tables;
-- planner-only smoke test with a fake NMG checkpoint;
-- graceful skip when the optional cuRobo runtime is unavailable;
-- cuRobo empty-world, shared-world, and multi-env dynamic-world configuration;
-- Atomic Action integration with `strategy="motion_gen"`.
-
-### Phase 1: core motion
-
-- Add fixed manifests, randomized workspace/path cases, and batch scaling.
-- Implement paired NMG-versus-cuRobo `free-space-common`.
-- Add frozen operational configuration and latency-budget/Pareto sweeps.
-- Add path-only, native-timing, joint, and dynamic metrics.
-- Add common resampling and failure classification.
-- Keep cuRobo as the primary baseline; add IK/TOPPRA only through adapters when
-  requested.
-
-### Phase 2: physics and Atomic Actions
-
-- Add cuRobo collision worlds and `collision-deployment`.
-- Parameterize planner construction in Atomic Action benchmarks.
-- Explicitly separate `ik_interp` and `motion_gen`.
-- Reuse current object/position/approach profiles and physical-success rules.
-- Add MoveEndEffector, PickUp, MoveHeldObject, Place, and
-  Pick-Move-Place.
-- Add controller tracking, collision/contact, and stable-hold metrics.
-
-### Phase 3: future NMG capabilities
-
-- Add equal-information obstacle-aware, multimodal, APG-refinement, and
-  closed-loop-recovery tracks.
-- Add cross-embodiment and unseen-robot tracks.
-- Add release profiles and a long-lived checkpoint leaderboard.
-
-## 12. Acceptance criteria
-
-- The current Franka NMG checkpoint and cuRobo run the same default `smoke` and
-  `free-space-common` manifest.
-- cuRobo is the default primary baseline; IK/TOPPRA do not affect the default
-  main leaderboard.
-- cuRobo backend preparation and steady-state planning latency are separate.
-- Free-space, collision-deployment, and Atomic Action tracks use correct,
-  traceable cuRobo world configurations.
-- NMG enters supported Atomic Action cases through
-  `strategy="motion_gen"`.
-- Planning, motion, execution, and task success remain distinct.
-- New planners and metrics register without runner changes.
-- Every baseline replays the same fixed manifest.
-- Native timing and common execution are not mixed.
-- Every run has raw trial artifacts, reproducibility metadata, and one
-  Markdown report.
-- The report has exactly three tables and a leaderboard covering every
-  evaluated algorithm.
-- Unsupported capabilities, real failures, and runtime errors remain distinct.
-- PR smoke runs finish within a practical budget; coverage/full run in
-  nightly/release workflows.
+- Qualified collision worlds and independent collision validation. A deployment
+  comparison must expose information asymmetry when cuRobo receives obstacles
+  and an NMG policy does not; equal-input obstacle comparison requires a policy
+  that accepts the same constraints.
+- Latency-budget/Pareto sweeps, confidence intervals, per-process isolation and
+  broader memory accounting. `max_planning_time` checked after a plan is not a
+  preemptive deadline.
+- Multimodal top-k feasibility, diversity and sampling cost; paired physics/APG
+  refinement with both quality gain and added cost reported.
+- Observation-driven recovery under moving targets, noise, disturbances and
+  slip. FK rollout alone is not closed-loop recovery.
+- General per-row antipodal grasp sampling, release-scale profiles and packaged
+  benchmark resources. Multiple configured robots alone do not establish
+  unseen-embodiment generalization.

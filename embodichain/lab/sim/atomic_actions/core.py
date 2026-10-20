@@ -686,6 +686,8 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             # and the final settling window must never retain a moving target.
             stationary = timed.positions[:, 1:] == timed.positions[:, :-1]
             velocities[:, :-1] = velocities[:, :-1].masked_fill(stationary, 0.0)
+            velocities[:, 1:] = velocities[:, 1:].masked_fill(stationary, 0.0)
+            velocities[:, 0] = 0.0
             velocities[:, -1] = 0.0
         timed = replace(timed, velocities=velocities)
 

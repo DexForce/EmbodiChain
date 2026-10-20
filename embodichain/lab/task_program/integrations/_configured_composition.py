@@ -285,8 +285,15 @@ def _resolve_task_program_components(
                 "profile",
             }
         ),
-        optional=frozenset({"runtime_services"}),
+        optional=frozenset({"runtime_services", "asset_requirements"}),
     )
+    if "asset_requirements" in integration:
+        from embodichain.lab.task_program.semantics.asset_requirements import (
+            AssetRequirements,
+        )
+
+        AssetRequirements.from_dict(integration["asset_requirements"])
+
     # Data references belong to the integration file, independently of process cwd.
     integration = deepcopy(dict(integration))
     services = integration.get("runtime_services", {})

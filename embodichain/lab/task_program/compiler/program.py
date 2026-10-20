@@ -255,6 +255,7 @@ class _ObjectStateValues:
         0.03,
     )
     maximum_tilt_degrees: float | None = None
+    reference_frame: str = "world_axes"
 
 
 @dataclass(frozen=True, slots=True)
@@ -390,7 +391,12 @@ class CompiledObjectStateValidator:
             "object_lifted": (ObjectLiftedValidatorCfg, ("minimum_lift",)),
             "object_relative_position": (
                 ObjectRelativePositionValidatorCfg,
-                ("reference", "position_offset", "position_tolerance"),
+                (
+                    "reference",
+                    "position_offset",
+                    "position_tolerance",
+                    "reference_frame",
+                ),
             ),
             "object_upright": (ObjectUprightValidatorCfg, ("maximum_tilt_degrees",)),
         }

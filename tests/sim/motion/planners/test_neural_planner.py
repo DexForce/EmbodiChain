@@ -31,6 +31,8 @@ from embodichain.lab.sim.motion.planners import (
 )
 from embodichain.lab.sim.motion.planners import neural_planner as neural_planner_module
 from embodichain.lab.sim.motion.planners.neural_planner import NeuralPlanOptions
+from embodichain.lab.sim.motion.planners.toppra_planner import retime_joint_paths
+from embodichain.lab.sim.motion.planners.utils import TrajectorySampleMethod
 from embodichain.lab.sim.sim_manager import SimulationManager
 
 NUM_ARM_JOINTS = 7
@@ -114,6 +116,13 @@ class FakeRobot:
         if to_matrix:
             return torch.eye(4).repeat(batch, 1, 1)
         return torch.tensor([[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]]).repeat(batch, 1)
+
+
+def _fake_batch_fk(self, qpos, name=None, env_ids=None, to_matrix=False):
+    return torch.eye(4).repeat(qpos.shape[0], qpos.shape[1], 1, 1)
+
+
+FakeRobot.compute_batch_fk = _fake_batch_fk
 
 
 class FakeSimulationManager:
@@ -454,6 +463,323 @@ def test_neural_planner_returns_velocities_and_accelerations(tmp_path, monkeypat
     assert result.accelerations.shape == result.positions.shape
     assert torch.isfinite(result.velocities).all()
     assert torch.isfinite(result.accelerations).all()
+
+
+class SaturatingOnnxPolicy(FakeOnnxPolicy):
+    """Policy that always saturates, the worst case for implied velocity."""
+
+    def __call__(self, obs: torch.Tensor) -> torch.Tensor:
+        self.last_obs = obs.clone()
+        return torch.ones(obs.shape[0], NUM_ARM_JOINTS, device=obs.device)
+
+
+def _rollout(tmp_path, monkeypatch, *, policy=None, **cfg_overrides):
+    """Roll the neural planner out toward one identity pose target."""
+    model_path = _create_fake_onnx_model(tmp_path)
+    fake_sim = FakeSimulationManager()
+    monkeypatch.setattr(
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
+    )
+    if policy is not None:
+        monkeypatch.setattr(neural_planner_module, "_OnnxPolicy", policy)
+    motion_generator = MotionGenerator(
+        cfg=MotionGenCfg(
+            planner_cfg=NeuralPlannerCfg(
+                robot_uid="fake_robot",
+                onnx_model_path=model_path,
+                control_part="main_arm",
+                **cfg_overrides,
+            )
+        )
+    )
+    return motion_generator.generate(
+        target_states=[
+            PlanState.single(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))
+        ],
+        options=MotionGenOptions(
+            plan_opts=NeuralPlanOptions(
+                control_part="main_arm",
+                start_qpos=torch.zeros(NUM_ARM_JOINTS),
+            ),
+        ),
+    )
+
+
+def test_neural_planner_keeps_nominal_timing_without_constraints(tmp_path, monkeypatch):
+    result = _rollout(tmp_path, monkeypatch, policy=SaturatingOnnxPolicy)
+
+    # The default path is unchanged: one nominal interval per rollout step.
+    intervals = result.dt[0, 1:]
+    assert torch.allclose(intervals, torch.full_like(intervals, 0.01))
+    # 0.2 rad per 0.01 s is 20 rad/s, which no arm can execute.
+    assert float(result.velocities.abs().max()) == pytest.approx(20.0, rel=1e-3)
+
+
+def test_neural_planner_constraints_replace_timing_and_bound_dynamics(
+    tmp_path, monkeypatch
+):
+    nominal = _rollout(tmp_path, monkeypatch, policy=SaturatingOnnxPolicy)
+    retimed = _rollout(
+        tmp_path,
+        monkeypatch,
+        policy=SaturatingOnnxPolicy,
+        constraints={"velocity": 1.0, "acceleration": 2.0},
+    )
+
+    assert bool(retimed.success.all())
+    assert float(retimed.velocities.abs().max()) <= 1.0 + 1e-6
+    assert float(retimed.accelerations.abs().max()) <= 2.0 + 1e-6
+    # Respecting the limits costs time; the nominal timing understated it.
+    assert float(retimed.dt.sum()) > float(nominal.dt.sum())
+    # Retiming resamples the path, so poses must track the returned positions.
+    assert retimed.xpos_list.shape[:2] == retimed.positions.shape[:2]
+
+
+def test_retime_joint_paths_rejects_malformed_input():
+    positions = torch.zeros(1, 4, NUM_ARM_JOINTS)
+    limits = {"velocity": 1.0, "acceleration": 1.0}
+    with pytest.raises(ValueError, match="velocity"):
+        retime_joint_paths(positions, constraints={"acceleration": 1.0})
+    with pytest.raises(ValueError, match=r"\(B, N, DOF\)"):
+        retime_joint_paths(positions[0], constraints=limits)
+    # The default interval is a sample count; reading it as seconds would
+    # silently collapse a dense path to two samples.
+    with pytest.raises(ValueError, match="TIME sampling"):
+        retime_joint_paths(
+            positions,
+            constraints=limits,
+            sample_method=TrajectorySampleMethod.TIME,
+        )
+    with pytest.raises(ValueError, match="path_lengths"):
+        retime_joint_paths(
+            positions,
+            constraints=limits,
+            path_lengths=torch.tensor([5]),
+        )
+
+
+def test_retime_joint_paths_slices_a_single_cpu_path_to_its_valid_prefix():
+    path = torch.zeros(1, 4, NUM_ARM_JOINTS, dtype=torch.float64)
+    path[0, :, 0] = torch.tensor([0.0, 0.05, 0.1, 0.1])
+    limits = {"velocity": 1.0, "acceleration": 2.0}
+
+    result = retime_joint_paths(
+        path,
+        constraints=limits,
+        path_lengths=torch.tensor([3]),
+        sample_interval=17,
+    )
+    trimmed = retime_joint_paths(path[:, :3], constraints=limits, sample_interval=17)
+
+    torch.testing.assert_close(result.positions, trimmed.positions)
+    torch.testing.assert_close(result.dt, trimmed.dt)
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    "bfloat16_input", ["positions", "velocity", "acceleration", "all"]
+)
+def test_retime_joint_paths_accepts_single_cpu_bfloat16_inputs(
+    bfloat16_input: str,
+) -> None:
+    path = torch.zeros(1, 3, NUM_ARM_JOINTS)
+    # Binary-exact values isolate dtype conversion from input quantization.
+    path[0, :, 0] = torch.tensor([0.0, 0.125, 0.25])
+    limits = {
+        "velocity": torch.ones(NUM_ARM_JOINTS),
+        "acceleration": torch.full((NUM_ARM_JOINTS,), 2.0),
+    }
+    reference = retime_joint_paths(path, constraints=limits, sample_interval=17)
+    if bfloat16_input in {"positions", "all"}:
+        path = path.to(torch.bfloat16)
+    limits = {
+        name: value.to(torch.bfloat16) if bfloat16_input in {name, "all"} else value
+        for name, value in limits.items()
+    }
+
+    result = retime_joint_paths(path, constraints=limits, sample_interval=17)
+
+    assert result.success.tolist() == reference.success.tolist() == [True]
+    for field in ("positions", "velocities", "accelerations", "dt"):
+        torch.testing.assert_close(getattr(result, field), getattr(reference, field))
+
+
+def test_retime_joint_paths_solves_a_cpu_batch_in_one_call(monkeypatch):
+    from embodichain.lab.sim.motion.planners import toppra_planner as toppra_module
+
+    paths = torch.zeros(3, 6, NUM_ARM_JOINTS, dtype=torch.float64)
+    paths[:, :, 0] = torch.linspace(0.0, 1.0, 6)
+    paths[1, :, 1] = torch.linspace(0.0, -0.5, 6)
+    paths[2, :, 0] *= 0.3
+    limits = {"velocity": 1.0, "acceleration": 2.0}
+    rows = [retime_joint_paths(paths[i : i + 1], constraints=limits) for i in range(3)]
+
+    calls = []
+    original = toppra_module._retime_toppra_warp
+    monkeypatch.setattr(
+        toppra_module,
+        "_retime_toppra_warp",
+        lambda *args, **kwargs: calls.append(1) or original(*args, **kwargs),
+    )
+    batched = retime_joint_paths(paths, constraints=limits)
+
+    # Rows are no longer solved one after another on the CPU.
+    assert len(calls) == 1
+    assert bool(batched.success.all())
+    for index, row in enumerate(rows):
+        assert float(batched.dt[index].sum()) == pytest.approx(
+            float(row.dt.sum()), abs=1e-5
+        )
+
+
+def test_retime_joint_paths_promotes_half_precision_before_warp():
+    paths = torch.zeros(2, 6, NUM_ARM_JOINTS, dtype=torch.float16)
+    paths[:, :, 0] = torch.linspace(0.0, 1.0, 6, dtype=torch.float16)
+
+    result = retime_joint_paths(
+        paths,
+        constraints={"velocity": 1.0, "acceleration": 2.0},
+    )
+
+    assert result.success.tolist() == [True, True]
+    assert result.positions.dtype == torch.float32
+
+
+def test_retiming_samples_on_the_control_period_not_the_rollout_step_count(
+    tmp_path, monkeypatch
+):
+    # The rollout emits however many steps it happened to take. Inheriting that
+    # count leaves a stretched trajectory sampled far too coarsely, so a
+    # waypoint the rollout stopped on falls between two output samples.
+    nominal = _rollout(tmp_path, monkeypatch, policy=SaturatingOnnxPolicy)
+    retimed = _rollout(
+        tmp_path,
+        monkeypatch,
+        policy=SaturatingOnnxPolicy,
+        constraints={"velocity": 1.0, "acceleration": 2.0},
+    )
+    duration = float(retimed.dt.sum())
+    assert duration > float(nominal.dt.sum())
+    # One sample per nominal dt over the solved duration, not one per step.
+    assert retimed.positions.shape[1] > nominal.positions.shape[1]
+    assert retimed.positions.shape[1] == pytest.approx(duration / 0.01, rel=0.05)
+
+
+def test_retimed_success_reflects_the_trajectory_actually_returned(
+    tmp_path, monkeypatch
+):
+    # A joint limit the rollout clamps against is also a limit the spline must
+    # respect, and the resampled grid must still reach the goal. Success is
+    # re-derived from the returned samples rather than inherited.
+    retimed = _rollout(
+        tmp_path,
+        monkeypatch,
+        policy=SaturatingOnnxPolicy,
+        constraints={"velocity": 1.0, "acceleration": 2.0},
+    )
+    arm = retimed.positions[..., :NUM_ARM_JOINTS]
+    # FakeRobot declares +-2.0 rad on every joint.
+    assert float(arm.max()) <= 2.0 + 1e-6
+    assert float(arm.min()) >= -2.0 - 1e-6
+    assert float(retimed.dt.sum()) > 0.0
+
+
+def test_retimed_waypoint_check_keeps_order_and_runs_once_per_waypoint(
+    tmp_path, monkeypatch
+):
+    model_path = _create_fake_onnx_model(tmp_path)
+    fake_sim = FakeSimulationManager()
+    monkeypatch.setattr(
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
+    )
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=model_path,
+            control_part="main_arm",
+        )
+    )
+    # Two joint-space waypoints on joint 0: 0.5 rad, then 1.0 rad.
+    batch, samples = 3, 3
+    waypoints_joint = torch.zeros(batch, NUM_WAYPOINTS, NUM_ARM_JOINTS)
+    waypoints_joint[:, 0, 0] = 0.5
+    waypoints_joint[:, 1, 0] = 1.0
+    joint_mask = torch.zeros(batch, NUM_WAYPOINTS)
+    joint_mask[:, :2] = 1.0
+    waypoints_quat = torch.zeros(batch, NUM_WAYPOINTS, 4)
+    waypoints_quat[..., 3] = 1.0
+    no_mask = torch.zeros(batch, NUM_WAYPOINTS)
+    waypoints = (
+        torch.zeros(batch, NUM_WAYPOINTS, 3),
+        waypoints_quat,
+        waypoints_joint,
+        no_mask,
+        no_mask,
+        joint_mask,
+    )
+    positions = torch.zeros(batch, samples, NUM_ARM_JOINTS)
+    positions[0, :, 0] = torch.tensor([0.0, 0.5, 1.0])  # in order
+    positions[1, :, 0] = torch.tensor([0.0, 1.0, 0.5])  # second before first
+    positions[2, :, 0] = torch.tensor([0.0, 0.0, 0.5])  # never the second
+    poses = torch.eye(4).repeat(batch, samples, 1, 1)
+
+    calls = []
+    original = planner._is_active_reached
+    monkeypatch.setattr(
+        planner,
+        "_is_active_reached",
+        lambda *args: calls.append(1) or original(*args),
+    )
+    reached = planner._retimed_reaches_waypoints(positions, poses, waypoints, 2)
+
+    assert reached.tolist() == [True, False, False]
+    # One batched test per waypoint, independent of the sample count.
+    assert len(calls) == 2
+
+
+def test_retimed_waypoint_check_allows_repeated_stationary_targets(
+    tmp_path, monkeypatch
+):
+    model_path = _create_fake_onnx_model(tmp_path)
+    fake_sim = FakeSimulationManager()
+    monkeypatch.setattr(
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
+    )
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=model_path,
+            control_part="main_arm",
+        )
+    )
+    waypoints_joint = torch.zeros(1, NUM_WAYPOINTS, NUM_ARM_JOINTS)
+    waypoints_joint[:, :3, 0] = 0.5
+    joint_mask = torch.zeros(1, NUM_WAYPOINTS)
+    joint_mask[:, :3] = 1.0
+    waypoints_quat = torch.zeros(1, NUM_WAYPOINTS, 4)
+    waypoints_quat[..., 3] = 1.0
+    no_mask = torch.zeros(1, NUM_WAYPOINTS)
+    waypoints = (
+        torch.zeros(1, NUM_WAYPOINTS, 3),
+        waypoints_quat,
+        waypoints_joint,
+        no_mask,
+        no_mask,
+        joint_mask,
+    )
+    positions = torch.zeros(1, 2, NUM_ARM_JOINTS)
+    positions[:, 1, 0] = 0.5
+    poses = torch.eye(4).repeat(1, 2, 1, 1)
+
+    reached = planner._retimed_reaches_waypoints(positions, poses, waypoints, 3)
+
+    assert reached.tolist() == [True]
 
 
 def test_neural_planner_disables_grad_for_all_fk_calls(tmp_path, monkeypatch):

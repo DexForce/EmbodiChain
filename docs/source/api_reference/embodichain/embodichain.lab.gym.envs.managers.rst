@@ -56,6 +56,7 @@ functors), :class:`ActionManager` (``process_action(action)`` then
       JointPositionToLimitsAction
       JointVelocityAction
       ParallelGripperAction
+      RelativeEefPoseAction
       RelativeJointPositionAction
       LeRobotRecorder
       AsyncLeRobotRecorder
@@ -173,6 +174,24 @@ Action Terms
     :show-inheritance:
 
 .. autoclass:: EefPoseAction
+    :members:
+    :inherited-members:
+    :show-inheritance:
+
+``RelativeEefPoseAction`` defaults to the configured arm IK solver. Both backends
+validate the solver chain's joint order and map seeds and returned commands
+between that order and the configured joint selection. Its optional
+``ik_method="dls"`` backend applies one damped Jacobian increment in the arena
+frame, rescales the whole increment to ``max_joint_delta``, and clips position
+limits, reading current robot limits on every control step. It uses the actual solver
+root-link transform, and shifts the end-link Jacobian to the configured TCP
+offset on the environment device. This backend approximates a local pose step;
+``ik_success`` means a finite controller step and does not assert pose convergence.
+The action descriptor records its method, damping, bound, and success semantics.
+``joint_delta``, ``joint_step_limited``, and ``joint_limit_clipped_mask`` expose
+the applied increment and both forms of limiting; resets clear selected rows.
+
+.. autoclass:: RelativeEefPoseAction
     :members:
     :inherited-members:
     :show-inheritance:

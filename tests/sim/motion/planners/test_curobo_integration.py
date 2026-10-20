@@ -227,7 +227,7 @@ def test_curobo_v2_plans_batched_joint_space_moves_direct_first():
         )
         mg = MotionGenerator(MotionGenCfg(planner_cfg=cfg))
         start_qpos = robot.get_qpos(name=CONTROL_PART)
-        # Regression targets from atomic_franka_pgi_curobo_pose_batch seed 11.
+        # Regression targets from atomic_franka_pgi_pose_batch seed 11.
         # All eight straight joint-space paths are comfortably inside the arm
         # limits and free of self-collision; the old graph-first batch call
         # nevertheless reported rows 2, 4, 5, and 7 as failed.

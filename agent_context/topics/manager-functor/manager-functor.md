@@ -144,3 +144,9 @@ rows with zero before applying terms.
 arm IK and `ParallelGripperAction` maps one scalar to explicit independent
 gripper joints. ActionManager dispatches selected-row reset to every term so
 untouched rows retain their action history.
+
+Prepared semantic asset combinations use the existing
+`events.replace_assets_from_group` event's `deployment` mode at a cleared batch
+boundary. It shares the original directory replacement entry point; preparation,
+Task Program adaptation and reused-environment collection are owned by
+[asset generalization](../asset-generalization/asset-generalization.md).

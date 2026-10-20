@@ -54,9 +54,16 @@ class SceneExportImporter:
         self,
         *,
         output_root: str | Path,
+        scene_export_root: str | Path | None = None,
     ) -> None:
         self.output_root = Path(output_root).expanduser().resolve()
-        self.scene_export_root = self.output_root / "scene_export"
+        self.scene_export_root = (
+            self.output_root / "scene_export"
+            if scene_export_root is None
+            else Path(scene_export_root).expanduser().resolve()
+        )
+        if not self.scene_export_root.is_relative_to(self.output_root):
+            raise ValueError("Scene export directory must stay within output root.")
         self.mesh_assets_root = self.scene_export_root / "mesh_assets"
         self.scene_config_path = self.scene_export_root / "scene_config.json"
         self.scene_graph_path = self.scene_export_root / "scene_graph.json"
@@ -70,13 +77,23 @@ class SceneExportImporter:
 
     def import_scene_and_graph(self) -> tuple[Scene, SceneGraph]:
         """Import a scene and graph after validating the complete edit input."""
+        scene, scene_graph = self.read_scene_and_graph()
+        self._write_scene_json(scene)
+        return scene, scene_graph
+
+    def read_scene_and_graph(self) -> tuple[Scene, SceneGraph]:
+        """Validate and read an export without writing debugging artifacts.
+
+        The returned scene uses editable Y-up poses. Asset references and the
+        graph receive the same validation as :meth:`import_scene_and_graph`,
+        while every source file, including ``scene.json``, remains untouched.
+        """
         scene = self._load_scene()
         scene_graph = self._load_scene_graph()
         if set(scene_graph.node_by_id()) != {
             scene_object.id for scene_object in scene.objects
         }:
             raise ValueError("Scene graph nodes must match imported scene object ids.")
-        self._write_scene_json(scene)
         return scene, scene_graph
 
     def _load_scene(self) -> Scene:

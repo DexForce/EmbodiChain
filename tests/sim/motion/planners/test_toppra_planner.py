@@ -98,7 +98,6 @@ class TestToppraPlanner:
             )
             is True
         )
-        assert self.planner._pool is None
 
 
 if __name__ == "__main__":
