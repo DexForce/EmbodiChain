@@ -141,7 +141,7 @@ standoff poses the caller must replan. The resolved config is reported on the re
 
 `scripts/tutorials/atomic_action/place.py` is the demonstration host, hooked
 the way the Affordance sampling tutorials are: shared helpers live in
-`lab/scripts/_atomic_action/support.py` through the `tutorial_utils.py` adapter;
+`examples/embodichain_examples/atomic_action/support.py` through the `tutorial_utils.py` adapter;
 the tutorial declares only which named segments may move,
 and one variant replays per simulation row. Phases come from the action's own
 `TrajectorySegment` ranges; only motion at or after the lift is retimed so the

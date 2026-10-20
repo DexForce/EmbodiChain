@@ -78,9 +78,14 @@ COMMANDS = (
         help="Run a task for data generation or preview.",
     ),
     Command(
+        name="run-example",
+        target="embodichain.cli.run_example:main",
+        help="List and run installed examples by name.",
+    ),
+    Command(
         name="run-atomic-action",
-        target="embodichain.lab.scripts.run_atomic_action:cli",
-        help="Replay Atomic Skill scenes with grasp and trajectory expansion.",
+        target="embodichain.cli.run_example:atomic_action_cli",
+        help="Alias for run-example atomic-action.",
     ),
     Command(
         name="list-task",

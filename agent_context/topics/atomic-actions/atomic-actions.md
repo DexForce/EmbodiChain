@@ -93,7 +93,7 @@ Sample Newton contact overlays are local to the selected scene and gripper;
 they are not world defaults or a guarantee of open-loop physical success.
 Author contact dimensions and material settings before `prepare()`, never by
 rewriting captured solver arrays. The current values live in
-`lab/scripts/_atomic_action/support.py` and the selected physical components.
+`examples/embodichain_examples/atomic_action/support.py` and the selected physical components.
 
 ## Semantic integration boundary
 
@@ -120,39 +120,42 @@ Projected assurance is not physical task success.
 Use `/add-atomic-action` to extend goals, planners, registration and focused tests.
 Keep planning side-effect-free; actions do not own task sequencing or simulator stepping.
 
-## Direct-simulation sample host
+## Direct-simulation example
 
-`embodichain run-atomic-action --skill` selects a fixed sample scene.
-`lab/scripts/run_atomic_action.py` owns typed configuration, validated selection
-and cleanup; `lab/scripts/_atomic_action/host.py` owns compilation, expansion,
-playback and output. Scene modules own physical setup and local defaults.
+`embodichain run-example atomic-action --skill` selects a fixed sample scene;
+`run-atomic-action` remains a compatibility alias. The generic launcher in
+`embodichain/cli/run_example.py` reads lightweight `embodichain.examples`
+entry-point catalogs and forwards arguments to the selected example.
+
+The example lives in `examples/embodichain_examples/atomic_action/` and ships
+under the separate `embodichain_examples` import namespace. Its `run.py` owns
+typed configuration and validated selection; `host.py` owns compilation,
+expansion and output. Scene modules own physical setup and local defaults.
 Tutorial files forwarding there are compatibility entries. Read the
-[host README](../../../embodichain/lab/scripts/_atomic_action/README.md) for
-supported combinations, fixture calibration, expansion and output artifacts.
+[example README](../../../examples/embodichain_examples/atomic_action/README.md)
+for supported combinations, fixture calibration, playback and output artifacts.
 
 `--variants N` requests N executions including the reference and creates N
-parallel environments; the default is one. The selected expansion mode applies
-supported affordance and trajectory factors without a Cartesian recipe bank or
-collection lifecycle. Unsupported explicit factors fail before simulation.
+parallel environments; the default is one. Supported affordance and trajectory
+factors apply without a Cartesian recipe bank or collection lifecycle.
+Unsupported explicit factors fail before simulation. Mounted-gripper TCPs are
+example-owned full poses forwarded to single/dual-arm solvers.
 
-Mounted-gripper TCPs belong to `lab/scripts/_atomic_action/tcp_presets.py`.
-They are independent full poses per fixture, forwarded to single/dual-arm
-solvers; changing a TCP changes the kinematic tool frame, not physical geometry.
-
-Affordance branch identity stays separate from physical slots. The engine's
-optional `plan_transform` runs before concatenation and projected-state
-propagation. The direct host and Task Program share
+The engine's optional `plan_transform` runs before concatenation and projected
+state propagation. The example and Task Program share
 `atomic_actions/_plan_expansion.py`, using `ActionPlanTemplateAdapter` and
 `motion.expansion` to rebuild commands, velocities and phase metadata together.
+Core simulation and Task Program code do not depend on the example package.
 Built-in phase permissions may only narrow; editable joints come from explicit
-motion bindings. Contact/hand samples, phase endpoints, required targets,
-stationary participants, zero-time joins and callback indices remain exact.
+motion bindings. Contact/hand samples, endpoints, required targets, stationary
+participants, zero-time joins and callback indices remain exact.
 
-Measured state remains row-local, including Slide's replanned push after pull.
-Playback and exported trajectories share a control clock with explicit contact
-settling and final holds. Completion reports planning and playback only; it
-does not establish measured success or Gym dataset collection. Physical scenes
-remain fixed; spatial generalization belongs to benchmark hosts. See
+Logical variant identity stays separate from physical slots. Measured state
+remains row-local, including Slide's replanned push after pull. Playback and
+exports share a control clock with explicit settling and final holds.
+Completion reports planning and playback; it does not establish measured
+success or Gym dataset collection. Scenes remain fixed; spatial generalization
+belongs to benchmark hosts. See
 [motion expansion](../motion-planning/motion-planning.md) for the shared
 operators and host ownership boundary.
 

@@ -24,15 +24,15 @@ import xml.etree.ElementTree as ET
 import pytest
 import torch
 
-from embodichain.lab.scripts import run_atomic_action as launcher
-from embodichain.lab.scripts._atomic_action.defaults import (
+from embodichain_examples.atomic_action import run as launcher
+from embodichain_examples.atomic_action.defaults import (
     ROBOTS,
     SCENES,
     _sample_defaults,
     _scene_args,
     AtomicSkillRunCfg,
 )
-from embodichain.lab.scripts._atomic_action.support import (
+from embodichain_examples.atomic_action.support import (
     NEWTON_GRASP_CONTACT_DAMPING,
     NEWTON_GRASP_CONTACT_STIFFNESS,
     NEWTON_GRASP_ROLLING_FRICTION,
@@ -47,11 +47,11 @@ from embodichain.lab.sim.cfg import RobotCfg
 from embodichain_robots import franka_panda
 from embodichain.utils.string import resolve_matching_names
 
-from embodichain.lab.scripts._atomic_action import scenario, tcp_presets
-from embodichain.lab.scripts._atomic_action.scenario import (
+from embodichain_examples.atomic_action import scenario, tcp_presets
+from embodichain_examples.atomic_action.scenario import (
     create_dual_tutorial_robot_cfg,
 )
-from embodichain.lab.scripts._atomic_action.support import (
+from embodichain_examples.atomic_action.support import (
     create_tutorial_robot_cfg,
     create_ur5_gripper_robot_cfg,
     create_ur10_robotiq_robot_cfg,
@@ -344,7 +344,7 @@ def test_dual_robot_explicit_pytorch_selection_preserves_solver_contract(
 def test_handover_uses_numerical_franka_and_analytical_ur_defaults(
     monkeypatch: pytest.MonkeyPatch, robot: str
 ) -> None:
-    from embodichain.lab.scripts._atomic_action import handover
+    from embodichain_examples.atomic_action import handover
 
     captured = {}
     expected_robot = object()
@@ -365,8 +365,8 @@ def test_handover_uses_numerical_franka_and_analytical_ur_defaults(
 @pytest.mark.parametrize("robot_type", ROBOTS)
 def test_handover_robotiq_assembly_and_signed_hand_commands(robot_type: str) -> None:
     """Every selected arm mounts the requested asset with valid six-joint commands."""
-    from embodichain.lab.scripts._atomic_action import handover
-    from embodichain.lab.scripts._atomic_action.support import get_hand_open_close_qpos
+    from embodichain_examples.atomic_action import handover
+    from embodichain_examples.atomic_action.support import get_hand_open_close_qpos
 
     cfg = create_dual_tutorial_robot_cfg(
         robot_type=robot_type,
@@ -472,8 +472,8 @@ def test_handover_robotiq_tcp_is_independent_of_pgi_and_other_arms(
 
 
 def test_handover_grasp_model_uses_robotiq_opening_and_owns_its_geometry() -> None:
-    from embodichain.lab.scripts._atomic_action import handover
-    from embodichain.lab.scripts._atomic_action.support import (
+    from embodichain_examples.atomic_action import handover
+    from embodichain_examples.atomic_action.support import (
         create_parallel_jaw_grasp_pose_generator,
     )
 

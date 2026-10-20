@@ -41,7 +41,7 @@ from embodichain.lab.sim.cfg import (
 from embodichain.lab.sim.objects import Articulation, RigidObject
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
-from embodichain.lab.scripts._atomic_action.support import (
+from embodichain_examples.atomic_action.support import (
     add_ur5_gripper_robot,
     configure_newton_link_contacts,
     create_affordance_sampling_context,

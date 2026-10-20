@@ -38,11 +38,11 @@ from embodichain.lab.sim.motion.planners import (
     TrajectorySampleMethod,
 )
 from embodichain.utils import logger
-from embodichain.lab.scripts._atomic_action.axis_align import (
+from embodichain_examples.atomic_action.axis_align import (
     create_align_object,
     create_axis_align_semantics,
 )
-from embodichain.lab.scripts._atomic_action.support import (
+from embodichain_examples.atomic_action.support import (
     create_affordance_sampling_context,
     add_ur5_gripper_robot,
     create_parallel_jaw_grasp_pose_generator,

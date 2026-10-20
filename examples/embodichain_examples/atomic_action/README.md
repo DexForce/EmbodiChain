@@ -1,13 +1,17 @@
-# Atomic Skill CLI scenes
+# Atomic Skill example
+
+The example is shipped as `embodichain_examples.atomic_action` from this
+`examples/` directory. `embodichain run-atomic-action` remains an alias for
+`embodichain run-example atomic-action`.
 
 Run a fixed-scene reference with one environment, or request the total number
 of executions including that reference:
 
 ```bash
-embodichain run-atomic-action --skill place
-embodichain run-atomic-action --skill place --variants 8
-embodichain run-atomic-action --skill place --variants 8 --expansion affordance
-embodichain run-atomic-action --skill place --variants 8 --expansion trajectory
+embodichain run-example atomic-action --skill place
+embodichain run-example atomic-action --skill place --variants 8
+embodichain run-example atomic-action --skill place --variants 8 --expansion affordance
+embodichain run-example atomic-action --skill place --variants 8 --expansion trajectory
 ```
 
 The twelve scenes are `pickup`, `place`, `pour`, `press`, `slide`, `twist`,
@@ -56,8 +60,8 @@ size, asset, and scene-family generalization belong to benchmark hosts.
 ## Playback and outputs
 
 ```bash
-embodichain run-atomic-action --skill handover --variants 2 --save-video --headless
-embodichain run-atomic-action --skill place --variants 4 --viser --headless --keep-alive
+embodichain run-example atomic-action --skill handover --variants 2 --save-video --headless
+embodichain run-example atomic-action --skill place --variants 4 --viser --headless --keep-alive
 ```
 
 Omitting `--headless` opens the native sample viewer. Replay starts automatically;

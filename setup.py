@@ -35,6 +35,8 @@ EXTENSIONS_DIR = THIS_DIR / "extensions"
 TASKS_PROJECT_DIR = EXTENSIONS_DIR / "embodichain_tasks"
 TASKS_PACKAGE_PATTERNS = ["embodichain_tasks", "embodichain_tasks.*"]
 ROBOTS_PACKAGE_PATTERNS = ["embodichain_robots", "embodichain_robots.*"]
+EXAMPLES_DIR = THIS_DIR / "examples"
+EXAMPLES_PACKAGE_PATTERNS = ["embodichain_examples", "embodichain_examples.*"]
 
 # Defer importing torch until it's actually needed (when building extensions).
 # This prevents `setup.py` from failing at import time in environments where
@@ -84,7 +86,7 @@ class CleanCommand(Command):
 
 
 def get_packages() -> list[str]:
-    """Return core, task, and robot packages shipped in the main wheel."""
+    """Return core and bundled task, robot and example packages."""
     core_packages = find_namespace_packages(
         where=str(THIS_DIR), include=CORE_PACKAGE_PATTERNS
     )
@@ -94,12 +96,16 @@ def get_packages() -> list[str]:
     robot_packages = find_namespace_packages(
         where=str(EXTENSIONS_DIR), include=ROBOTS_PACKAGE_PATTERNS
     )
+    example_packages = find_namespace_packages(
+        where=str(EXAMPLES_DIR), include=EXAMPLES_PACKAGE_PATTERNS
+    )
     return sorted(
         set(
             [
                 *core_packages,
                 *task_packages,
                 *robot_packages,
+                *example_packages,
                 "embodichain_tasks.configs",
             ]
         )
@@ -112,6 +118,7 @@ def get_package_dir() -> dict[str, str]:
         "embodichain_tasks": "extensions/embodichain_tasks/embodichain_tasks",
         "embodichain_tasks.configs": "extensions/embodichain_tasks/configs",
         "embodichain_robots": "extensions/embodichain_robots",
+        "embodichain_examples": "examples/embodichain_examples",
     }
 
 
@@ -147,7 +154,8 @@ def main():
         package_data={
             "embodichain": ["VERSION"],
             "embodichain.gen_sim.simready_pipeline.configs": ["*.json"],
-            "embodichain.lab.scripts._atomic_action": ["README.md"],
+            "embodichain_examples": ["README.md"],
+            "embodichain_examples.atomic_action": ["README.md"],
             "embodichain_tasks.configs": [
                 "**/*.json",
                 "**/*.yaml",

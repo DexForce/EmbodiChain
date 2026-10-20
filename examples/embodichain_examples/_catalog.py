@@ -14,8 +14,15 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Internal scene hosts shared by atomic examples and the configured CLI."""
+"""Official example names and lazy launch targets."""
 
 from __future__ import annotations
 
 __all__: list[str] = []
+
+EXAMPLES: dict[str, dict[str, str]] = {
+    "atomic-action": {
+        "target": "embodichain_examples.atomic_action.run:cli",
+        "description": "Twelve fixed-scene Atomic Skills with affordance and trajectory expansion.",
+    },
+}
