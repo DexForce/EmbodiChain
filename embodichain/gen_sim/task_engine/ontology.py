@@ -178,7 +178,7 @@ TASK_CONTRACTS: Mapping[str, TaskContract] = MappingProxyType(
             "E3",
             "Pick up a source container, execute a tilt-and-restore pour over "
             "a fixed target container, then place and home.",
-            frozenset({"target", "relation", "required_arm"}),
+            frozenset({"target", "relation", "required_arm", "pour_goal_mode"}),
             "rigid_object",
             frozenset({"graspable", "pourable"}),
             "poured",
@@ -277,8 +277,14 @@ def task_success_type(
     task_type: str,
     params: Mapping[str, Any] | None = None,
 ) -> str:
-    """Resolve a TaskSpec success type, including E5's terminal behavior."""
+    """Resolve explicit E3 evidence intent and E5 terminal behavior."""
     contract = task_contract(task_type)
+    if task_type == "E3":
+        mode = (params or {}).get("pour_goal_mode", "fluid")
+        if mode not in {"fluid", "motion"}:
+            raise ValueError("E3 pour_goal_mode must be fluid or motion.")
+        if mode == "motion":
+            return "pour_motion"
     if not contract.terminal_success_types:
         return contract.success_type
     terminal_behavior = str((params or {}).get("terminal_behavior", "hold"))

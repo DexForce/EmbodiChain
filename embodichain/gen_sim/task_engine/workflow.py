@@ -113,6 +113,7 @@ class SubprocessActionExecutor:
         dataset_saving: bool = False,
         failure_policy: str = "stop",
         open_window: bool = False,
+        acceptance_mode: str = "strict",
     ) -> Mapping[str, Any]:
         """Execute one task, isolating E8 resource retries from physical results.
 
@@ -132,6 +133,9 @@ class SubprocessActionExecutor:
             raise ValueError("failure_policy must be 'stop' or 'continue'.")
         if not isinstance(open_window, bool):
             raise TypeError("open_window must be a boolean.")
+        acceptance_options = (
+            {"acceptance_mode": acceptance_mode} if acceptance_mode != "strict" else {}
+        )
         from ._task_program.twist_attempts import is_twist_bundle
 
         bundle_root = Path(bundle).expanduser().resolve()
@@ -144,6 +148,7 @@ class SubprocessActionExecutor:
                 dataset_saving=dataset_saving,
                 failure_policy=failure_policy,
                 open_window=open_window,
+                **acceptance_options,
             )
         from .orchestration.execution_resources import (
             ResourceAdmissionError,
@@ -165,6 +170,7 @@ class SubprocessActionExecutor:
                     dataset_saving=dataset_saving,
                     failure_policy=failure_policy,
                     open_window=open_window,
+                    **acceptance_options,
                 )
             except ResourceAdmissionError as error:
                 attempts.append(
@@ -221,6 +227,7 @@ class SubprocessActionExecutor:
         dataset_saving: bool = False,
         failure_policy: str = "stop",
         open_window: bool = False,
+        acceptance_mode: str = "strict",
     ) -> Mapping[str, Any]:
         """Run one simulator attempt and preserve its report and trajectory.
 
@@ -270,6 +277,10 @@ class SubprocessActionExecutor:
         if not dataset_saving:
             command.append("--filter_dataset_saving")
         command.extend(["--failure-policy", failure_policy])
+        if acceptance_mode not in {"strict", "experiment"}:
+            raise ValueError("Unknown execution acceptance mode.")
+        if acceptance_mode != "strict":
+            command.extend(["--acceptance-mode", acceptance_mode])
         log_path = attempt_root / "action.log"
         print(
             "[Task Engine] Starting "
@@ -1002,6 +1013,11 @@ class TaskEngineWorkflow:
                             if planning_cfg.twist_mass_source
                             else {}
                         ),
+                        **(
+                            {"runtime_profile": planning_cfg.runtime_profile}
+                            if planning_cfg.runtime_profile != "default"
+                            else {}
+                        ),
                         candidate_set=candidate_set,
                         force_most_likely=False,
                         final_inspection=final_inspection,
@@ -1234,6 +1250,10 @@ class TaskEngineWorkflow:
                         "dataset_saving": bool(dataset_saving),
                         "failure_policy": failure_policy,
                     }
+                    if execution_cfg.acceptance_mode != "strict":
+                        execution_options["acceptance_mode"] = (
+                            execution_cfg.acceptance_mode
+                        )
                     if open_window:
                         execution_options["open_window"] = True
                     from ._task_program.twist_attempts import execute_support_candidates
@@ -1253,6 +1273,7 @@ class TaskEngineWorkflow:
                         report,
                         required_semantic_steps=success_terms,
                         bundle=executed_preparation.output_dir,
+                        acceptance_mode=execution_cfg.acceptance_mode,
                     )
                     if len(successes) != execution_cfg.num_envs:
                         raise ValueError(
@@ -1467,6 +1488,11 @@ class TaskEngineWorkflow:
                         "max_episode_steps": planning_cfg.max_episode_steps,
                         "fit_grasp_assets": planning_cfg.fit_grasp_assets,
                         **(
+                            {"runtime_profile": planning_cfg.runtime_profile}
+                            if planning_cfg.runtime_profile != "default"
+                            else {}
+                        ),
+                        **(
                             {"twist_mass_source": True}
                             if planning_cfg.twist_mass_source
                             else {}
@@ -1476,6 +1502,11 @@ class TaskEngineWorkflow:
                         "num_envs": execution_cfg.num_envs,
                         "success_policy": execution_cfg.success_policy,
                         "min_successful_envs": execution_cfg.min_successful_envs,
+                        **(
+                            {"acceptance_mode": execution_cfg.acceptance_mode}
+                            if execution_cfg.acceptance_mode != "strict"
+                            else {}
+                        ),
                         "dataset_saving": bool(run_metadata["dataset_saving"]),
                         "failure_policy": str(run_metadata["failure_policy"]),
                     },
@@ -1602,6 +1633,7 @@ def _environment_successes(
     *,
     required_semantic_steps: Sequence[str] = (),
     bundle: Path | None = None,
+    acceptance_mode: str = "strict",
 ) -> list[bool]:
     environments = report.get("environments")
     if not isinstance(environments, Sequence) or isinstance(environments, (str, bytes)):
@@ -1623,6 +1655,19 @@ def _environment_successes(
         values.append(success)
     if not values:
         raise ValueError("Execution report must contain at least one environment.")
+    if acceptance_mode == "experiment":
+        from .experiment_policy import program_completion_mask
+
+        runtime = report.get("runtime_result") or {}
+        measured = program_completion_mask(runtime, len(values))
+        if (
+            runtime.get("acceptance_mode") != "experiment"
+            or report.get("failure") is not None
+        ):
+            return [False] * len(values)
+        return [a and b for a, b in zip(values, measured, strict=True)]
+    if acceptance_mode != "strict":
+        raise ValueError("Unknown acceptance mode.")
     if bundle is not None and (bundle / "task_spec.json").exists():
         from .semantic_graph_validation import (
             verify_graph_contract,

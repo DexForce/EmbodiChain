@@ -117,6 +117,7 @@ class TaskEngineCoordinator:
         max_episode_steps: int | None = None,
         fit_grasp_assets: bool = False,
         twist_mass_source: bool = False,
+        runtime_profile: str = "default",
         planner_policy: Mapping[str, Any] | None = None,
         randomize_scene: bool = False,
         randomize_table_material: bool = False,
@@ -140,6 +141,9 @@ class TaskEngineCoordinator:
             randomize_scene,
             randomize_table_material,
         )
+        from ..experiment_policy import validate_profile
+
+        validate_profile(runtime_profile)
         normalized_source = self._coerce_source(source)
         validate_scene_output_separation(normalized_source.path, output_dir)
         with ArtifactTransaction(output_dir, overwrite=overwrite) as transaction:
@@ -205,7 +209,13 @@ class TaskEngineCoordinator:
                 "status": "running",
             }
             try:
-                plan = self.semantic_planner.plan_spec(
+                planner = self.semantic_planner
+                if runtime_profile != "default":
+                    from copy import copy
+
+                    planner = copy(planner)
+                    planner.reuse_pour_resource = True
+                plan = planner.plan_spec(
                     selected,
                     role_bindings,
                     adaptation.prepared_scene.planner_objects,
@@ -222,6 +232,8 @@ class TaskEngineCoordinator:
                 for height in height_candidates:
                     try:
                         extra = {"twist_support_lift_m": height} if is_twist else {}
+                        if runtime_profile != "default":
+                            extra["runtime_profile"] = runtime_profile
                         if twist_mass_source:
                             extra["twist_mass_source"] = True
                         if any(n["task_type"] == "E3" for n in graph["nodes"]):
@@ -230,7 +242,11 @@ class TaskEngineCoordinator:
                             )
 
                             if supports_ordinary_pour(graph, plan.candidate):
-                                extra["pour_geometry_revision"] = 1
+                                extra["pour_geometry_revision"] = (
+                                    2 if runtime_profile != "default" else 1
+                                )
+                                if runtime_profile != "default":
+                                    extra["pour_proxy_position_tolerance_m"] = 0.02
                         graph, generated = generate_task_program_bundle(
                             graph,
                             adaptation.prepared_scene,

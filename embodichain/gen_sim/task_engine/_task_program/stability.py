@@ -118,8 +118,15 @@ class StabilityConstraint:
     motion_parts: tuple[str, ...] = ()
     world_axis: tuple[float, float, float] | None = None
     support_contract_revision: int | None = None
+    com_tolerance: float | None = None
 
     def __post_init__(self) -> None:
+        if self.com_tolerance is not None and (
+            type(self.com_tolerance) not in (int, float)
+            or not math.isfinite(self.com_tolerance)
+            or self.com_tolerance <= 0
+        ):
+            raise ValueError("COM tolerance must be finite and positive.")
         if self.support_contract_revision is not None and (
             type(self.support_contract_revision) is not int
             or self.support_contract_revision != 1
@@ -443,9 +450,19 @@ class TaskStabilityPort:
         self, cfg: StabilityConstraint, pose: torch.Tensor, reference: torch.Tensor
     ) -> tuple[torch.Tensor, dict[str, Any]]:
         observer = self._support_observers[(cfg.entity, cfg.reference)]
-        if cfg.support_contract_revision == 1:
-            return observer.observe(pose, reference, support_contract_revision=1)
-        return observer.observe(pose, reference)
+        if cfg.com_tolerance is None:
+            if cfg.support_contract_revision == 1:
+                return observer.observe(pose, reference, support_contract_revision=1)
+            return observer.observe(pose, reference)
+        previous = observer.tolerance
+        try:
+            if cfg.com_tolerance is not None:
+                observer.tolerance = cfg.com_tolerance
+            if cfg.support_contract_revision == 1:
+                return observer.observe(pose, reference, support_contract_revision=1)
+            return observer.observe(pose, reference)
+        finally:
+            observer.tolerance = previous
 
     def validate_policy(self, policy: Any, *, segment: Any) -> None:
         """Validate declared identity and membership without reading live state."""

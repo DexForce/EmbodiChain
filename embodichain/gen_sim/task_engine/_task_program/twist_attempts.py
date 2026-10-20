@@ -347,6 +347,11 @@ def _execute_support_heights(
                     max_episode_steps=planning.max_episode_steps,
                     fit_grasp_assets=planning.fit_grasp_assets,
                     twist_support_lift_m=candidate_height,
+                    **(
+                        {"runtime_profile": planning.runtime_profile}
+                        if planning.runtime_profile != "default"
+                        else {}
+                    ),
                     **_spec_arguments(preparation),
                     **(
                         {"twist_grip_depth_m": grip_depth_m}
@@ -482,6 +487,11 @@ def execute_support_candidates(
                 fit_grasp_assets=planning.fit_grasp_assets,
                 twist_support_lift_m=height,
                 twist_grip_depth_m=candidate_depth,
+                **(
+                    {"runtime_profile": planning.runtime_profile}
+                    if planning.runtime_profile != "default"
+                    else {}
+                ),
                 **_spec_arguments(preparation),
                 **({"twist_contact_feedback": True} if contact_feedback else {}),
                 **({"twist_mass_source": True} if planning.twist_mass_source else {}),

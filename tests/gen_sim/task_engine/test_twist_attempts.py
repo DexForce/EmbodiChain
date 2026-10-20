@@ -171,8 +171,9 @@ def test_support_retry_requires_specific_startup_failure(tmp_path, reason, expec
 
 @pytest.mark.parametrize("mass_source", (False, True))
 @pytest.mark.parametrize("verify_phases", (False, True))
+@pytest.mark.parametrize("runtime_profile", ("default", "contact_experiment"))
 def test_support_retry_rebuilds_from_same_source_and_preserves_receipts(
-    tmp_path, monkeypatch, mass_source, verify_phases
+    tmp_path, monkeypatch, mass_source, verify_phases, runtime_profile
 ):
     from embodichain.gen_sim.task_engine import task_program_bundle as generator
 
@@ -189,6 +190,7 @@ def test_support_retry_rebuilds_from_same_source_and_preserves_receipts(
     built, called = [], []
 
     def generate(graph, scene, output, **kwargs):
+        assert kwargs.get("runtime_profile", "default") == runtime_profile
         assert scene is source and graph is prep.semantic_task_graph
         assert kwargs.get("verify_pick_phases", False) is verify_phases
         if not verify_phases:
@@ -225,10 +227,12 @@ def test_support_retry_rebuilds_from_same_source_and_preserves_receipts(
     monkeypatch.setattr(generator, "generate_task_program_bundle", generate)
     report, selected, output, attempts = execute_support_candidates(
         prep,
-        tmp_path / f"action_{int(mass_source)}_{int(verify_phases)}",
+        tmp_path / f"action_{int(mass_source)}_{int(verify_phases)}_{runtime_profile}",
         execute,
         {"seed": 7},
-        TaskEnginePlanningCfg(twist_mass_source=mass_source),
+        TaskEnginePlanningCfg(
+            twist_mass_source=mass_source, runtime_profile=runtime_profile
+        ),
     )
     assert report["status"] == "succeeded" and built == [0.002, 0.003]
     assert [attempt["height_m"] for attempt in attempts] == [0.001, 0.002, 0.003]

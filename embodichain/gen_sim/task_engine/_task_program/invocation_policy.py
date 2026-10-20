@@ -470,6 +470,15 @@ class GenSimActionEngine(AtomicActionEngine):
         )
 
         previews = {}
+        action = (
+            self.actions.get(request.skill_id) if plan_transform is not None else None
+        )
+        idle_transform = (
+            plan_transform is not None
+            and request.invocation_id in getattr(action, "idle_invocations", {})
+        )
+        if idle_transform and context is None:
+            context = self.initial_context()
         if request.skill_id in {"pick_up", "place"}:
             previews = (
                 getattr(self.actions.get("pick_up"), "continuation_previews", None)
@@ -489,6 +498,8 @@ class GenSimActionEngine(AtomicActionEngine):
                     plan = self._plan_request_impl(
                         request, context, plan_transform=plan_transform
                     )
+                    if idle_transform:
+                        plan = action.inspect_final_plan(request, context, plan)
             except PlanningBudgetExceeded as error:
                 if parent is not None:
                     raise

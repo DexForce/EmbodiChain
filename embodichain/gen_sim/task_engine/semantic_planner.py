@@ -81,6 +81,8 @@ class SemanticTaskPlanner:
         ValueError: If either relation distance is not positive.
     """
 
+    reuse_pour_resource: bool = False
+
     def __init__(
         self,
         *,
@@ -213,6 +215,7 @@ class SemanticTaskPlanner:
         steps_by_id = {str(step["id"]): step for step in steps}
         result_objects: dict[str, str] = {}
         held_by: dict[str, str] = {}
+        pour_resources: dict[str, str] = {}
         pending_cleanup: set[str] = set()
         upright_objects: set[str] = set()
         upright_staging_targets: dict[str, str] = {}
@@ -370,6 +373,8 @@ class SemanticTaskPlanner:
                             "resources": {"primary": resource},
                         }
                     )
+                if self.reuse_pour_resource:
+                    pour_resources.update({object_id: resource, target_id: resource})
                 pour_target = f"{step_id}_pour_target"
                 return_target = f"{step_id}_return_target"
                 targets[return_target] = {
@@ -515,8 +520,10 @@ class SemanticTaskPlanner:
                         ("left", "right") if owner == "coordinated" else (owner,)
                     )
                 }
+                previous = pour_resources.get(object_id)
                 resource = (
                     holder
+                    or (previous if previous not in occupied_resources else None)
                     or self._nearest_resource(
                         object_id,
                         objects,

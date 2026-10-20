@@ -68,11 +68,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--bundle", required=True)
     parser.add_argument("--execution-output", required=True)
+    parser.add_argument(
+        "--acceptance-mode", choices=("strict", "experiment"), default="strict"
+    )
     protocol, forwarded = parser.parse_known_args(argv)
     return execute_bundle(
         protocol.bundle,
         forwarded,
         execution_output=protocol.execution_output,
+        **(
+            {"acceptance_mode": protocol.acceptance_mode}
+            if protocol.acceptance_mode != "strict"
+            else {}
+        ),
     )
 
 
@@ -81,8 +89,11 @@ def execute_bundle(
     forwarded: Sequence[str] = (),
     *,
     execution_output: str | Path | None = None,
+    acceptance_mode: str = "strict",
 ) -> int:
     """Execute one semantic bundle through the ordinary Gym Task Program bridge."""
+    if acceptance_mode not in {"strict", "experiment"}:
+        raise ValueError("Unknown execution acceptance mode.")
     root = Path(bundle).expanduser().resolve()
     if not root.is_dir():
         raise FileNotFoundError(f"Bundle directory does not exist: {root}")
@@ -324,7 +335,10 @@ def execute_bundle(
             if task_spec_contract is not None:
                 result_metadata["program_success"] = list(row_success)
                 row_success, terminal_reasons = _apply_task_spec_verdict(
-                    result_metadata, row_success, terminal_reasons
+                    result_metadata,
+                    row_success,
+                    terminal_reasons,
+                    acceptance_mode=acceptance_mode,
                 )
             initial_rejected = (
                 probe is not None
@@ -489,7 +503,27 @@ def execute_bundle(
         failure=failure,
         trajectory_root=trajectory_root,
         cargo_report=cargo_report,
+        acceptance_mode=acceptance_mode,
     )
+    if acceptance_mode == "experiment":
+        strict = _build_execution_report(
+            graph,
+            result_metadata,
+            row_success=list(
+                (result_metadata or {}).get("program_success", row_success)
+            ),
+            terminal_reasons=list(
+                (result_metadata or {}).get("terminal_reasons", terminal_reasons)
+            ),
+            failure=failure,
+            trajectory_root=trajectory_root,
+            cargo_report=cargo_report,
+        )
+        (output / "strict_execution_report.json").write_text(
+            json.dumps(strict, indent=2) + "\n"
+        )
+        if report["runtime_result"] is not None:
+            report["runtime_result"]["acceptance_mode"] = "experiment"
     if probe is None:
         probe = {
             "scope": "initial_call",
@@ -618,10 +652,14 @@ def _build_execution_report(
     failure: dict[str, Any] | None,
     trajectory_root: Path,
     cargo_report: dict[str, Any] | None = None,
+    acceptance_mode: str = "strict",
 ) -> dict[str, Any]:
     """Build a report without turning row-local failure into global failure."""
     row_success, terminal_reasons = _apply_task_spec_verdict(
-        runtime_result, row_success, terminal_reasons
+        runtime_result,
+        row_success,
+        terminal_reasons,
+        acceptance_mode=acceptance_mode,
     )
     semantic_success = _semantic_success_by_env(
         graph,
@@ -673,8 +711,19 @@ def _apply_task_spec_verdict(
     runtime_result: dict[str, Any] | None,
     row_success: list[bool],
     terminal_reasons: list[str],
+    *,
+    acceptance_mode: str = "strict",
 ) -> tuple[list[bool], list[str]]:
     """Keep legacy success unchanged; new contracts require a verified verdict."""
+    if acceptance_mode == "experiment":
+        from .experiment_policy import program_completion_mask
+
+        measured = program_completion_mask(runtime_result, len(row_success))
+        return [
+            a and b for a, b in zip(row_success, measured, strict=True)
+        ], terminal_reasons
+    if acceptance_mode != "strict":
+        raise ValueError("Unknown acceptance mode.")
     if not runtime_result or "task_spec_evaluation" not in runtime_result:
         return row_success, terminal_reasons
     rows = runtime_result["task_spec_evaluation"]["environments"]

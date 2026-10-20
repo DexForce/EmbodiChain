@@ -45,8 +45,15 @@ class TaskEngineExecutionCfg:
     num_envs: int = 1
     success_policy: str = "any"
     min_successful_envs: int = 1
+    acceptance_mode: str = "strict"
 
     def __post_init__(self) -> None:
+        if self.acceptance_mode not in {"strict", "experiment"}:
+            raise ValueError("acceptance_mode must be strict or experiment.")
+        if self.acceptance_mode == "experiment" and self.num_envs != 1:
+            raise ValueError(
+                "Experimental program acceptance currently requires one environment."
+            )
         if (
             isinstance(self.num_envs, bool)
             or not isinstance(self.num_envs, int)
@@ -111,8 +118,12 @@ class TaskEnginePlanningCfg:
     max_episode_steps: int = 10000
     fit_grasp_assets: bool = False
     twist_mass_source: bool = False
+    runtime_profile: str = "default"
 
     def __post_init__(self) -> None:
+        from .experiment_policy import validate_profile
+
+        validate_profile(self.runtime_profile)
         for field_name in (
             "candidate_count",
             "max_episodes",
@@ -179,14 +190,20 @@ def load_task_engine_config(
     if (
         not required_planning
         <= set(planning)
-        <= required_planning | {"fit_grasp_assets", "twist_mass_source"}
+        <= required_planning
+        | {"fit_grasp_assets", "twist_mass_source", "runtime_profile"}
     ):
         raise ValueError("Task Engine planning configuration fields are invalid.")
-    if set(execution) != {
-        "num_envs",
-        "success_policy",
-        "min_successful_envs",
-    }:
+    if (
+        not {"num_envs", "success_policy", "min_successful_envs"}
+        <= set(execution)
+        <= {
+            "num_envs",
+            "success_policy",
+            "min_successful_envs",
+            "acceptance_mode",
+        }
+    ):
         raise ValueError("Task Engine execution configuration fields are invalid.")
     return (
         TaskEngineWorkflowCfg(**workflow),

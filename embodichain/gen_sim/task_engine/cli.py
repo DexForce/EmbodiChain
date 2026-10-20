@@ -434,10 +434,17 @@ def _run_prepared_bundle(args: argparse.Namespace, *, started_at: float) -> int:
             dataset_saving=bool(args.dataset_saving),
             failure_policy=args.failure_policy,
             open_window=bool(args.open_window),
+            **(
+                {"acceptance_mode": execution_cfg.acceptance_mode}
+                if execution_cfg.acceptance_mode != "strict"
+                else {}
+            ),
         )
     successes = _environment_successes(
         report,
         required_semantic_steps=_bundle_success_terms(Path(args.bundle)),
+        bundle=Path(args.bundle),
+        acceptance_mode=execution_cfg.acceptance_mode,
     )
     accepted = (
         str(report.get("status")) not in {"rejected", "aborted"}

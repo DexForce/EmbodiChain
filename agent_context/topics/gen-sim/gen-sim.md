@@ -272,6 +272,40 @@ gate participates in the existing bounded direction retry. Ordinary/default call
 remain unchanged. These planning receipts do not certify physical acquisition,
 release or task success; complete native execution and TaskSpec remain required.
 
+The standard Task Engine `--config` may explicitly select
+`planning.runtime_profile: composition_experiment|contact_experiment` and
+`execution.acceptance_mode: experiment`; both packaged experiment YAML files
+bound preparation to a single scene and action attempt. Default configuration
+remains unchanged. Only the contact profile adds a material-only Robotiq pad
+overlay (static/dynamic friction 2.85/2.70); composition retains original materials.
+Both profiles use 100/100/30 mm COM/position/support tolerances
+for supported on-placement. It derives horizontal end-grasp HandOver/Place
+permissions from exact adjacent occurrences, not task IDs. Related auto-arm
+Pour source/receiver reuse and terminal same-object reacquisition may add a
+visible empty-arm clearance/restore pair. Its finite proximal-joint proposals
+are ranked by FK endpoint separation, screened against the current scene and
+rechecked on emitted (including transformed) MoveJoints trajectories. This is
+a bounded heuristic, not a complete bimanual planner or stability guarantee.
+Composition keeps original Pick closure and total sample counts. Contact also
+retains its qualified 24-point ordinary Pick closure with 12 extra total samples,
+leaving approach/lift counts unchanged. Frozen physical inputs reject these opt-ins.
+Its native grip observer revision 2 also permits an experimental detached
+observation when the measured independent URDF driving joints are within the
+profile's existing open tolerance and exactly one pad remains in contact.
+Acquisition and holding still require native opposed bilateral contact;
+nonfinite, dropped, bilateral or non-opposing two-pad observations cannot use
+this release rule. Raw contacts and measured opening are recorded. This means
+open-hand loss of bilateral grip, not contact-free separation; actual retract,
+placement and settling still execute. Default revision 1 remains unchanged.
+
+Explicit experimental acceptance requires complete native program execution,
+all original segment/post-policy/validator checks and cargo acceptance; only
+the outer TaskSpec certificate is advisory. The canonical runner preserves
+`task_spec_evaluation.json` and publishes `strict_execution_report.json` beside
+the clearly marked experimental report. Both `run` and `run-all` use this same
+production path, without importing artifact-directory workers. This opt-in
+outcome is not default-parameter success or strict TaskSpec certification.
+
 `generate_task_program_bundle(verify_pick_phases=True)` explicitly enables
 registered Pick acquisition/lift verification through its fingerprinted lowerer
 declaration. The default preserves legacy factory identity; closing geometry,

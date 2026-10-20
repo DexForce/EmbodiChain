@@ -412,7 +412,7 @@ def _terminal_goals(
             }:
                 slots.pop((subject, "placement"), None)
         for predicate in predicates:
-            if predicate.name in {"poured", "pressed"} or (
+            if predicate.name in {"poured", "pour_motion", "pressed"} or (
                 predicate.name == "semantic_goal"
                 and predicate.arguments.get("task_type") == "E8"
             ):

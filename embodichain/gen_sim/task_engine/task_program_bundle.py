@@ -204,6 +204,8 @@ def generate_task_program_bundle(
     pour_geometry_revision: int | None = None,
     pour_proxy_position_tolerance_m: float | None = None,
     upright_container_picks: Mapping[str, float] | None = None,
+    idle_clearance_routes: Sequence[Mapping[str, Any]] | None = None,
+    runtime_profile: str = "default",
 ) -> tuple[SemanticTaskGraph, TaskProgramBundlePaths]:
     """Write, compose, and provider-free preflight one semantic deployment.
 
@@ -263,9 +265,13 @@ def generate_task_program_bundle(
             legacy behavior; hypothetical Pick previews never use this recovery.
         post_handover_places: Explicit receiver relative-on Place node IDs granted
             failure-only goal-conditioned recovery. Targets and grasp stay fixed.
+        idle_clearance_routes: Explicit empty-arm joint offsets and paired Park
+            segments. No helper is inserted or enabled when omitted.
         upright_container_picks: Explicit E3 Pick node IDs mapped to maximum pad-axis
             tilt above the Z-up horizontal plane, in degrees. Omitted preserves
             legacy behavior. The caller declares these as upright-container Picks.
+        runtime_profile: Explicit task-independent experimental contact policy.
+            Omission preserves legacy physics, sampling and route declarations.
 
     Returns:
         Final fingerprint-bound graph and all generated paths.
@@ -275,6 +281,10 @@ def generate_task_program_bundle(
             integration cannot be composed and preflighted.
     """
     selected_graph = validate_semantic_task_graph(graph)
+    from .experiment_policy import validate_profile, CONTACT_PROFILE
+
+    validate_profile(runtime_profile)
+    experiment = runtime_profile != "default"
     if pour_geometry_revision is not None:
         if type(pour_geometry_revision) is not int or pour_geometry_revision not in (
             1,
@@ -322,6 +332,7 @@ def generate_task_program_bundle(
             raise ValueError("Frozen physical input owns its robot-profile selection.")
         if (
             fit_grasp_assets
+            or experiment
             or twist_mass_source
             or twist_grip_depth_m is not None
             or twist_support_lift_m != 0.001
@@ -406,6 +417,10 @@ def generate_task_program_bundle(
         if normalized_profile == "dual_franka_pgi":
             _apply_pgi_experiment_embodiment(embodiment_payload)
         _calibrate_task_gripper_opening(embodiment_payload)
+    if runtime_profile == CONTACT_PROFILE:
+        from .experiment_policy import apply_contact_embodiment
+
+        apply_contact_embodiment(embodiment_payload)
     adaptation = None
     if fit_grasp_assets:
         from .orchestration.grasp_fit import fit_grasp_assets as fit_assets
@@ -652,6 +667,23 @@ def generate_task_program_bundle(
         if node["call"].get("call_id") == _PICK_CALL_ID:
             node["call"]["call_id"] = f"gen_sim.pick.{node['task_instance_id']}"
     selected_graph = _add_handover_staging(selected_graph, scene)
+    if experiment:
+        from .experiment_policy import (
+            horizontal_handover_permissions,
+            add_reacquisition_clearance,
+        )
+
+        post_handover_places, pick_contact_revisions = horizontal_handover_permissions(
+            selected_graph
+        )
+        if idle_clearance_routes is not None:
+            raise ValueError(
+                "Contact profile owns its generated clearance declarations."
+            )
+        selected_graph, generated_idle = add_reacquisition_clearance(
+            selected_graph, embodiment_payload
+        )
+        idle_clearance_routes = generated_idle or None
     paths = TaskProgramBundlePaths(
         root=root,
         deployment=root / "task_program_deployment.yaml",
@@ -722,6 +754,10 @@ def generate_task_program_bundle(
     stability["motion_samples"] = motion_sample_declarations(
         selected_graph, drawer_groups=drawer_groups
     )
+    if runtime_profile == CONTACT_PROFILE:
+        for node in selected_graph["nodes"]:
+            if node["call"]["kind"] == "pick":
+                stability["motion_samples"][node["id"]] += 12
     stability["cartesian_calls"] = cartesian_call_declarations(
         selected_graph, drawer_groups=drawer_groups
     )
@@ -739,34 +775,40 @@ def generate_task_program_bundle(
     ) = _staging_contract_payload(selected_graph, scene, program_id)
     if drawers:
         stability["drawers"] = [route.payload() for route in drawers]
-    save_config(
-        paths.program,
-        _program_payload(
-            selected_graph,
-            program_id,
-            scene,
-            stability_presets=stability["presets"],
-        ),
+    program_payload = _program_payload(
+        selected_graph,
+        program_id,
+        scene,
+        stability_presets=stability["presets"],
     )
+    if experiment:
+        from .experiment_policy import apply_placement_tolerances
+
+        apply_placement_tolerances(stability, program_payload)
+        stability["runtime_profile"] = runtime_profile
+    save_config(paths.program, program_payload)
     _write_json(
         task_program_root / "constraints.json",
         stability,
     )
-    save_config(
-        paths.integration,
-        _integration_payload(
-            selected_graph,
-            scene,
-            program_id=program_id,
-            scene_contract=scene_contract,
-            collision_world=policy_payload["motion"]["strategy"] == "motion_gen",
-            embodiment=embodiment_payload,
-            twist_contact_feedback=twist_contact_feedback,
-            verify_pick_phases=verify_pick_phases,
-            pour_geometry_revision=pour_geometry_revision,
-            pour_proxy_position_tolerance_m=pour_proxy_position_tolerance_m,
-        ),
+    integration_payload = _integration_payload(
+        selected_graph,
+        scene,
+        program_id=program_id,
+        scene_contract=scene_contract,
+        collision_world=policy_payload["motion"]["strategy"] == "motion_gen",
+        embodiment=embodiment_payload,
+        twist_contact_feedback=twist_contact_feedback,
+        verify_pick_phases=verify_pick_phases,
+        pour_geometry_revision=pour_geometry_revision,
+        pour_proxy_position_tolerance_m=pour_proxy_position_tolerance_m,
+        idle_clearance_routes=idle_clearance_routes,
     )
+    if runtime_profile == CONTACT_PROFILE:
+        from .experiment_policy import apply_contact_options
+
+        apply_contact_options(integration_payload)
+    save_config(paths.integration, integration_payload)
     scene_payload = _scene_payload(scene, program_id=program_id)
     if frozen is not None:
         scene_payload["simulation"] = deepcopy(frozen.scene_simulation)
@@ -1838,7 +1880,16 @@ def _integration_payload(
     verify_pick_phases: bool = False,
     pour_geometry_revision: int | None = None,
     pour_proxy_position_tolerance_m: float | None = None,
+    idle_clearance_routes: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    from dataclasses import asdict
+    from ._task_program.idle_clearance import CALL_ID as IDLE_CALL, decode_routes
+
+    idle_routes = (
+        decode_routes(idle_clearance_routes, path="idle_clearance_routes")
+        if idle_clearance_routes is not None
+        else ()
+    )
     scene_objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
     articulation_bindings = graph_bindings(graph, scene)
     from ._task_program.press_binding import graph_routes, PREPARE_CALL, PRESS_CALL
@@ -2200,6 +2251,11 @@ def _integration_payload(
             referenced_objects.add(str(call["arguments"]["object"]))
         elif call["kind"] == "registered" and call["call_id"] == "simulation.park":
             has_park_call = True
+        elif call["kind"] == "registered" and call["call_id"] == IDLE_CALL:
+            if not idle_routes:
+                raise ValueError(
+                    "Idle clearance requires an explicit registered route."
+                )
         elif call["kind"] == "registered" and call["call_id"] == PARK_CALL:
             has_articulation_park_call = True
         elif call["kind"] == "registered" and call["call_id"] in {
@@ -2588,6 +2644,7 @@ def _integration_payload(
                     if has_park_call
                     else {}
                 ),
+                **({IDLE_CALL: {"kind": "move_joints"}} if idle_routes else {}),
                 **(
                     {PARK_CALL: {"kind": "move_joints"}}
                     if has_articulation_park_call
@@ -2843,6 +2900,16 @@ def _integration_payload(
                     else []
                 ),
                 *([{"kind": "park"}] if has_park_call else []),
+                *(
+                    [
+                        {
+                            "kind": "idle_arm_clearance",
+                            "routes": [asdict(r) for r in idle_routes],
+                        }
+                    ]
+                    if idle_routes
+                    else []
+                ),
                 *(
                     [{"kind": "articulation_park"}]
                     if has_articulation_park_call

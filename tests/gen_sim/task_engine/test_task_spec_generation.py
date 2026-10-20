@@ -78,6 +78,70 @@ def candidate(*steps: dict[str, Any]) -> dict[str, Any]:
     )["candidates"][0]
 
 
+def test_explicit_pour_motion_is_distinct_and_legacy_fluid_identity_is_preserved():
+    legacy = candidate(step("E3", "vessel", target=selector("cup"), relation="above"))
+    fluid = candidate(
+        step(
+            "E3",
+            "vessel",
+            target=selector("cup"),
+            relation="above",
+            pour_goal_mode="fluid",
+        )
+    )
+    motion = candidate(
+        step(
+            "E3",
+            "vessel",
+            target=selector("cup"),
+            relation="above",
+            pour_goal_mode="motion",
+        )
+    )
+    old_spec, fluid_spec, motion_spec = [
+        task_spec_from_candidate(item) for item in (legacy, fluid, motion)
+    ]
+    assert "pour_goal_mode" not in legacy["draft"]["steps"][0]
+    assert old_spec.goal[0].name == fluid_spec.goal[0].name == "poured"
+    assert old_spec.semantic_hash == fluid_spec.semantic_hash
+    assert motion_spec.goal[0].name == "pour_motion"
+    assert motion_spec.milestones[0].achieve[0].name == "pour_motion"
+    assert motion_spec.semantic_hash != old_spec.semantic_hash
+    assert motion["scene_request"] == legacy["scene_request"]
+
+
+def test_pour_motion_remains_a_historical_achievement_after_later_placement():
+    spec = task_spec_from_candidate(
+        candidate(
+            step(
+                "E3",
+                "vessel",
+                target=selector("cup"),
+                relation="above",
+                pour_goal_mode="motion",
+            ),
+            step("E1", "vessel", target=selector("table"), relation="on"),
+        )
+    )
+    assert {item.name for item in spec.goal} == {"pour_motion", "semantic_goal"}
+    assert spec.milestones[1].after == (spec.milestones[0].id,)
+
+
+@pytest.mark.parametrize(
+    "kind,mode", [("E2", "motion"), ("E3", "contact_only"), ("E3", None), ("E3", True)]
+)
+def test_pour_goal_mode_rejects_wrong_task_or_unknown_meaning(kind, mode):
+    from embodichain.gen_sim.task_engine.interpretation import (
+        validate_instruction_intent,
+    )
+
+    value = step(kind, "vessel", id="s1", pour_goal_mode=mode)
+    if kind == "E3":
+        value.update(target=selector("cup"), relation="above")
+    with pytest.raises(ValueError):
+        validate_instruction_intent({"steps": [value]})
+
+
 def test_independent_upright_subjects_are_both_terminal_goals() -> None:
     spec = task_spec_from_candidate(
         candidate(step("E2", "red can"), step("E2", "blue can"))

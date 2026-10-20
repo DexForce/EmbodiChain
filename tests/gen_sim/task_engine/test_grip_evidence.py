@@ -175,6 +175,98 @@ def test_dropped_contact_and_unrecorded_query_counts_are_auditable() -> None:
     assert snapshot["trace"][0]["dropped_contacts"] == 3
 
 
+@pytest.mark.parametrize(
+    "case,accepted",
+    [
+        ("open_release", True),
+        ("acquire", False),
+        ("closed", False),
+        ("dropped", False),
+        ("nonfinite", False),
+        ("two_sides", False),
+        ("not_detached", False),
+    ],
+)
+def test_experimental_open_release_preserves_acquisition_and_query_guards(
+    case, accepted
+):
+    from embodichain.lab.task_program.semantics.effects import HeldObjectRelation
+
+    observer, sensor, query, context = _observer_fixture()
+    data = sensor.get_data.return_value
+    data["is_valid"][0, 1] = False
+    query.clause.expected = False
+    query.expectation.relation = HeldObjectRelation.DETACHED
+    observer.release_opening = lambda part, env: {
+        "open": case != "closed",
+        "finite": True,
+        "driving_joint_names": ["driver"],
+        "measured_qpos": [0.024],
+        "open_qpos": [0.0],
+        "tolerance": 0.05,
+    }
+    if case == "acquire":
+        query.clause.expected = True
+    elif case == "not_detached":
+        query.expectation.relation = HeldObjectRelation.ATTACHED
+    elif case == "dropped":
+        sensor.dropped_contacts = 1
+    elif case == "nonfinite":
+        data["normal"][0, 0, 0] = float("nan")
+    elif case == "two_sides":
+        data["is_valid"][0, 1] = True
+        data["normal"][0, 1] = data["normal"][0, 0]
+    result = observer(query, context)
+    assert result.values.tolist() == [False]
+    assert result.valid.tolist() == [accepted]
+    if accepted:
+        assert observer.snapshot_trace()["trace"][-1]["rows"][0]["release_opening"][
+            "open"
+        ]
+
+
+def test_default_one_sided_release_is_still_unavailable():
+    from embodichain.lab.task_program.semantics.effects import HeldObjectRelation
+
+    observer, sensor, query, context = _observer_fixture()
+    sensor.get_data.return_value["is_valid"][0, 1] = False
+    query.clause.expected = False
+    query.expectation.relation = HeldObjectRelation.DETACHED
+    assert observer(query, context).valid.tolist() == [False]
+
+
+def test_release_opening_reads_independent_urdf_driver_and_preserves_mimic_data(
+    tmp_path,
+):
+    from embodichain.gen_sim.task_engine._task_program.grip_evidence import (
+        _open_release_reader,
+    )
+
+    path = tmp_path / "hand.urdf"
+    path.write_text(
+        '<robot><joint name="driver" type="revolute"/><joint name="follower" type="revolute"><mimic joint="driver"/></joint></robot>'
+    )
+    qpos = torch.tensor([[0.024, -0.25]])
+    robot = SimpleNamespace(
+        cfg=SimpleNamespace(fpath=path),
+        joint_names=["driver", "follower"],
+        get_joint_ids=lambda **kwargs: [0, 1],
+        get_qpos=lambda **kwargs: qpos.clone(),
+    )
+    source = SimpleNamespace(
+        control_parts=("hand",), open_qpos=(0.0, 0.0), minimum_displacement=0.05
+    )
+    reader = _open_release_reader(robot, source)
+    reading = reader("hand", 0)
+    assert reading["open"] is True
+    assert reading["driving_joint_names"] == ["driver"]
+    assert torch.equal(qpos, torch.tensor([[0.024, -0.25]]))
+    qpos[0, 0] = 0.2
+    assert reader("hand", 0)["open"] is False
+    qpos[0, 0] = float("nan")
+    assert reader("hand", 0)["finite"] is False
+
+
 def test_non_target_nonfinite_contacts_are_not_hidden_by_target_filtering() -> None:
     observer, sensor, query, context = _observer_fixture()
     sensor.get_data.return_value = {
