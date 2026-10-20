@@ -1017,6 +1017,23 @@ embodichain.lab.gym.envs.embodied_env
    EmbodiedEnvCfg
    EmbodiedEnv
 
+embodichain.lab.gym.envs.episode_context
+--------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.episode_context
+
+Row-local recording eligibility follows the buffered episode, independently of
+replaceable demo annotations. Synchronous checks retain pending and rejected
+state across internal resets, and snapshots own their JSON provenance.
+
+.. autosummary::
+   :nosignatures:
+
+   EpisodeContext
+
+.. autoclass:: EpisodeContext
+   :members:
+
 embodichain.lab.gym.envs.managers.action_manager
 ------------------------------------------------
 

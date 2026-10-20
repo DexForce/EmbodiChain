@@ -99,14 +99,15 @@ which rejects partial selections unless `allow_partial_envs=True` is explicit.
 
 ### Scene layout event
 
-`RandomizeSceneLayout` is a stateful reset event in `randomization/spatial.py`.
+`ExpandSceneLayout` is a stateful reset event in `randomization/spatial.py`.
 Configure it through ordinary `EventCfg` / `env.events`, with `SceneEntityCfg`
 selections, explicit support parents, an online or saved source and the shared
 scene policy. There is no separate environment-level scene-randomization switch.
-The adapter caches geometry, batches selected rows and writes per-row provenance
-as schema 2 with an `events` mapping keyed by configured event name. Disjoint
-layout events preserve each other's records and failure masks; selective reset
-clears only the named event's records in selected rows.
+The adapter caches geometry and batches selected rows. It reports owned layout
+provenance through `env.episode_context.check("events/<configuration name>", rows)`;
+recording eligibility is a generic environment lifecycle contract owned by
+[environment execution](../env-framework/execution.md). Disjoint events cannot
+clear each other's pending checks or previously rejected buffers.
 It does not advance physics or certify task success. Conflicting pose/scale
 randomizers for managed entities fail explicitly. Configure layout application
 after other pose initialization and before observation/state-registration events.

@@ -58,7 +58,10 @@ of exception; it does not supply an automatic retry loop.
 ## Persistence contract
 
 `env.step()` buffers frames. An explicit reset/commit reaches
-`DatasetManager.apply("save", env_ids)` before rows are cleared. Finalization
+`DatasetManager.apply("save", env_ids)` before physical reset or buffer clearing.
+Normal output rows are filtered through the environment-owned `EpisodeContext`;
+its lifecycle and rejection rules are owned by
+[environment execution](../env-framework/execution.md). Finalization
 drains committed work; it does not commit a live rollout. Final partial vector
 batches use `commit_env_ids` to select dataset rows while preserving a full
 physical reset. The recorder requires an exactly representable integer FPS.

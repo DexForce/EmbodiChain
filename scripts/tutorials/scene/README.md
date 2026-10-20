@@ -286,7 +286,7 @@ configuration switch:
 env:
   events:
     scene_layout:
-      func: RandomizeSceneLayout
+      func: ExpandSceneLayout
       mode: reset
       params:
         entity_cfg: {uid: bench}
@@ -317,11 +317,18 @@ To replay v4 layouts, use `source: {kind: saved, layout_dir: /absolute/run/path}
 Replay cycles saved candidates and never resamples. Failed preparation or writes
 block recording for the affected rows.
 
-Reset info and episode metadata use provenance schema 2. Read one event through
-`info["scene_randomization"][row]["events"]["scene_layout"]` for the event name
-above. Each named event retains its own source, variant ID, seed and ordinal.
-Disjoint layout events can coexist; resetting one clears only its selected rows
-and provenance. A success in one event cannot clear another event's failure.
+Reset info and episode metadata share `episode_context`. Read this event's layout
+through `info["episode_context"][row]["sources"]["events/scene_layout"]["metadata"]`.
+The context also reports initialization, pending checks and sticky rejection
+reasons; `recordable` is a storage qualification, not task success. A failed
+check cannot be cleared by another event, a new demo, or reseeding. Selected
+buffers must first be consumed by a successful reset. Async recorders receive
+owned snapshots. Normal videos are stored per environment; diagnostic exports
+use a separate purpose and directory.
+
+The previous class name has no compatibility alias: update Python imports and
+YAML `func` values to `ExpandSceneLayout`. Historical layout packages still read
+and replay without changes to their IDs or poses.
 
 Scene Engine generation/edit APIs accept an optional `scene_randomization` job
 or YAML policy. The combined CLI triggers it once after its final export:

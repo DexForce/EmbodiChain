@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Callable
 from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -39,10 +40,10 @@ from ..manager_base import Functor
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
 
-__all__ = ["RandomizeSceneLayout"]
+__all__ = ["ExpandSceneLayout"]
 
 
-class RandomizeSceneLayout(Functor):
+class ExpandSceneLayout(Functor):
     """Apply bounded online or saved layouts through an ordinary reset event.
 
     Args:
@@ -55,14 +56,14 @@ class RandomizeSceneLayout(Functor):
     Geometry is prepared once. Ordinary reset retains prepared geometry and
     unused candidates. EventManager explicit reseeding rewinds candidate and
     replay cursors. This functor does not step physics or certify task success.
-    Per-row provenance uses schema 2 with an ``events`` mapping keyed by the
-    configured event name, retaining every disjoint layout applied to that row.
+    Provenance and recording eligibility belong to ``env.episode_context``.
+    Each event reports under ``events/<configuration name>``.
     """
 
     def __init__(self, cfg: FunctorCfg, env: EmbodiedEnv) -> None:
         super().__init__(cfg, env)
         if getattr(cfg, "mode", None) != "reset":
-            raise ValueError("RandomizeSceneLayout currently requires mode='reset'.")
+            raise ValueError("ExpandSceneLayout currently requires mode='reset'.")
         params = cfg.params
         allowed = {
             "entity_cfg",
@@ -113,64 +114,9 @@ class RandomizeSceneLayout(Functor):
         self._available = self._next_ordinal = self._replay_cursor = 0
         self._seed_revision = None
         self._conflicts_checked = False
-        self._invalid_rows = torch.zeros(
-            env.num_envs, dtype=torch.bool, device=env.device
-        )
-        if not hasattr(env, "_scene_randomization_metadata"):
-            env._scene_randomization_metadata = [None for _ in range(env.num_envs)]
-            env._scene_randomization_invalid_rows = torch.zeros(
-                env.num_envs, dtype=torch.bool, device=env.device
-            )
 
     def reset(self, env_ids: list[int] | torch.Tensor | None = None) -> None:
-        """Clear selected transient results while preserving geometry and streams."""
-        ids = range(self.num_envs) if env_ids is None else env_ids
-        name = self._event_name()
-        for row in ids:
-            self._publish_metadata(int(row), name, None)
-
-    def _event_name(self) -> str:
-        manager = self._env.event_manager
-        names = (
-            []
-            if manager is None
-            else [
-                name
-                for name in manager.active_functors.get("reset", ())
-                if manager.get_functor_cfg(name).func is self
-            ]
-        )
-        if len(names) != 1:
-            raise ValueError(
-                "A scene layout functor must have exactly one reset event name."
-            )
-        return names[0]
-
-    def _publish_metadata(self, row: int, name: str, metadata: dict | None) -> None:
-        current = self._env._scene_randomization_metadata[row]
-        events = {} if current is None else deepcopy(current["events"])
-        if metadata is None:
-            events.pop(name, None)
-        else:
-            events[name] = deepcopy(metadata)
-        combined = {"schema_version": 2, "events": events} if events else None
-        self._env._scene_randomization_metadata[row] = combined
-        episodes = getattr(self._env, "_demo_episode_metadata", None)
-        if episodes is not None:
-            if combined is None:
-                episodes[row].pop("scene_randomization", None)
-            else:
-                episodes[row]["scene_randomization"] = deepcopy(combined)
-
-    def _mark_invalid(self, rows: list[int], invalid: bool) -> None:
-        self._invalid_rows[rows] = invalid
-        combined = self._invalid_rows[rows].clone()
-        manager = self._env.event_manager
-        for name in manager.active_functors.get("reset", ()):
-            functor = manager.get_functor_cfg(name).func
-            if isinstance(functor, RandomizeSceneLayout) and functor is not self:
-                combined |= functor._invalid_rows[rows]
-        self._env._scene_randomization_invalid_rows[rows] = combined
+        """Retain prepared geometry and streams; the host owns episode results."""
 
     def _check_conflicts(self, env: EmbodiedEnv) -> None:
         manager = env.event_manager
@@ -184,7 +130,7 @@ class RandomizeSceneLayout(Functor):
                 continue
             label = getattr(func, "__name__", type(func).__name__)
             if not (
-                label == "RandomizeSceneLayout"
+                label == "ExpandSceneLayout"
                 or ("randomize" in label and ("pose" in label or "scale" in label))
                 or label == "apply_expansion_profile_reset"
             ):
@@ -202,7 +148,7 @@ class RandomizeSceneLayout(Functor):
                         collect(item)
 
             collect(cfg.params)
-            if isinstance(func, RandomizeSceneLayout):
+            if isinstance(func, ExpandSceneLayout):
                 selected.update(func._parents)
             if label == "apply_expansion_profile_reset":
                 selected.add("cube")
@@ -288,8 +234,12 @@ class RandomizeSceneLayout(Functor):
         rows.sort()
         if not rows:
             return
-        name = self._event_name()
-        self._mark_invalid(rows, True)
+        with env.episode_context.check("events/" + self.name, rows) as finish:
+            self._apply_layouts(env, rows, finish)
+
+    def _apply_layouts(
+        self, env: EmbodiedEnv, rows: list[int], finish: Callable[..., None]
+    ) -> None:
         if not self._conflicts_checked:
             self._check_conflicts(env)
         if self._prepared is None:
@@ -356,6 +306,7 @@ class RandomizeSceneLayout(Functor):
         )
         if self._loaded is not None:
             self._replay_cursor += len(rows)
+        metadata_by_row = {}
         for row, variant in zip(rows, variants):
             metadata = {
                 "schema_version": 1,
@@ -369,8 +320,8 @@ class RandomizeSceneLayout(Functor):
                 "geometry_status": "passed",
                 "refresh_required": list(result.refresh_required),
             }
-            self._publish_metadata(row, name, metadata)
+            metadata_by_row[row] = metadata
         callback = getattr(env, "on_scene_variants_applied", None)
         if callable(callback):
             callback(result)
-        self._mark_invalid(rows, False)
+        finish(accepted=True, metadata=metadata_by_row)
