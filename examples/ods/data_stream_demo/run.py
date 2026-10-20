@@ -113,6 +113,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dataset-root", type=Path)
     parser.add_argument("--protocol", type=Path)
     parser.add_argument("--gpu-ids", nargs="+", type=int)
+    parser.add_argument(
+        "--aux-graphics-gpu-id",
+        type=int,
+        help="Suite-only reservation for a separately qualified tiny Vulkan graphics context",
+    )
     parser.add_argument("--sim-device", default="cuda:0")
     parser.add_argument("--seed", type=int, default=19001)
     parser.add_argument("--buffer-size", type=int, default=8)
@@ -169,6 +174,11 @@ def _environment() -> dict[str, Any]:
             for path in sources
         },
         "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
+        "auxiliary_graphics_gpu_uuid": os.environ.get("ODS_AUX_GRAPHICS_GPU_UUID"),
+        "headless_environment": {
+            key: os.environ.get(key)
+            for key in ("SDL_VIDEODRIVER", "DISPLAY", "WAYLAND_DISPLAY")
+        },
         "cpu_affinity": sorted(os.sched_getaffinity(0)),
         "torch_threads": torch.get_num_threads(),
         "cache_policy": "fresh processes; warm software/filesystem caches; no global cache purge",
@@ -230,6 +240,8 @@ def _initial_manifest(engine: Any, metadata: dict[str, Any]) -> list[dict[str, A
 
 
 def _validate_args(args: argparse.Namespace) -> None:
+    if getattr(args, "aux_graphics_gpu_id", None) is not None:
+        raise ValueError("--aux-graphics-gpu-id requires a supervised suite")
     for key in (
         "buffer_size",
         "producer_envs",

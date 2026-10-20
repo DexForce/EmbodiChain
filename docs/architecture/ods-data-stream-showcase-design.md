@@ -288,6 +288,21 @@ always be cancelled mid-call; trailing completion/cleanup time is disclosed.
 The ownership audit retains views of one original returned batch, including
 its full image backing allocation, and includes that cost in sampled memory.
 
+Device qualification observes both compute and graphics contexts by owned PID
+tree/process group. A CUDA mask alone does not prove graphics isolation. On the
+current host, a standalone program linking only Vulkan reproduced a 6 MiB
+graphics context on physical GPU7 after instance creation, before explicit
+device enumeration; destruction released it. This is a driver-initialization
+footprint, not evidence that ODS executed on that device. The optional
+`--aux-graphics-gpu-id` suite setting explicitly reserves a separately qualified
+idle GPU and excludes it from primary assignments. Only known pure-graphics
+contexts up to 8 MiB per owned PID are accepted there; compute contexts, larger
+or unknown allocations and other GPUs still fail. Default supervision remains
+strict. Freeze this resource scope during calibration and use it for both
+backends, include all owned GPU allocations, and report these runs as primary
+plus reserved auxiliary GPU measurements. The small footprint does not prove
+zero performance impact or establish a single-GPU result.
+
 Produce four main figures: data availability/cache-consumption timelines;
 per-source reuse distributions with the K line; first-batch/final-batch latency
 and achieved demand; and visual-load throughput/memory/storage panels. Report

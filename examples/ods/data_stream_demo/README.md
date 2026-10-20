@@ -50,17 +50,22 @@ python -m examples.ods.data_stream_demo.run --help
 Select idle physical GPUs and CPU thread settings before starting Python:
 
 ```bash
-export CUDA_VISIBLE_DEVICES="$(nvidia-smi --id=3 --query-gpu=uuid --format=csv,noheader)"
+export CUDA_VISIBLE_DEVICES="$(nvidia-smi --id=7 --query-gpu=uuid --format=csv,noheader)"
 export ODS_GPU_UUID="$CUDA_VISIBLE_DEVICES"
+export SDL_VIDEODRIVER=dummy
+unset DISPLAY WAYLAND_DISPLAY
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 ```
 
-This selects physical GPU3 by its NVML UUID. Pass logical
-`--sim-device cuda:0` for the single run, or use `--gpu-ids 3` for a suite.
-The supported matching native runtime maps the visible CUDA UUID to the same
-Vulkan UUID. Qualify that mapping with the actual ODS subprocess path before
-running the matrix; an unmasked physical-ordinal run is not a fallback.
-GPU3 is an example selection, not a reservation. Check that the selected
+This selects physical GPU7 by its NVML UUID. Pass logical
+`--sim-device cuda:0` for the single run, or use `--gpu-ids 7` for a suite.
+The matching native runtime maps the primary CUDA UUID to the primary Vulkan
+UUID. Qualify compute **and graphics** placement with the actual ODS subprocess
+path before running the matrix. On the validation host, Vulkan instance/driver
+initialization additionally creates a small graphics footprint on GPU7, so
+GPU7 is the qualified strict single-GPU example there. Other machines require
+their own device qualification; unmasked physical ordinals are not a fallback.
+GPU7 is an example selection, not a reservation. Check that the selected
 device is idle and has enough memory. Do not silently shrink an unsupported
 workload. The default dual-camera native image cache alone occupies about
 2.34 GiB; a returned RGB float32 batch contains about 1.55 GiB of image
@@ -102,7 +107,7 @@ Start with the small engineering suite before allocating the formal budget:
 
 ```bash
 python -m examples.ods.data_stream_demo.run \
-  --suite smoke --gpu-ids 3 --output outputs/ods-stream-smoke
+  --suite smoke --gpu-ids 7 --output outputs/ods-stream-smoke
 ```
 
 `--gpu-ids` accepts physical GPU IDs. If omitted, the launcher selects devices
@@ -120,6 +125,40 @@ contexts, so they supplement qualification of the matching native UUID mapping
 and do not establish an exclusive-device reservation. Previously blocked
 calibration attempts remain failed evidence and do not become a usable protocol.
 
+For the qualified validation-host driver, an optional auxiliary reservation
+allows another idle primary GPU while accounting for that graphics footprint:
+
+```bash
+python -m examples.ods.data_stream_demo.run \
+  --suite calibrate --gpu-ids 1 3 4 5 6 --aux-graphics-gpu-id 7 \
+  --output outputs/ods-stream-calibration-aux
+```
+
+The auxiliary GPU must pass the same three idle readings and 16 GiB admission,
+is excluded from every primary assignment, and is shared by this suite's jobs.
+Only its exact UUID with pure `G` type and known per-PID memory at most 8 MiB is
+allowed. Unknown memory, compute contexts, larger graphics footprints or any
+other GPU fail the job. Primary and auxiliary owned memory are both recorded,
+deduplicating `(PID, UUID)` records before summing across devices. This scope
+uses primary GPUs **plus a shared reserved auxiliary GPU**, and is not a
+single-GPU result. Low memory and `G` type alone do not prove no computation;
+the permission relies on the separate controlled native-runtime qualification.
+
+The initial 94-sample probe covered compute contexts only. It did not establish
+graphics isolation; v3's three visual guard failures remain failures. A later
+minimal libvulkan probe, without CUDA/SDL/DexSim or device/queue submission,
+reproduced the 6 MiB GPU7 footprint after `vkCreateInstance` and its disappearance
+after instance destruction. A real dual-camera ODS episode then qualified
+primary GPU3 plus the explicit GPU7 footprint with graceful process cleanup.
+These observations support a bounded **Vulkan instance/driver initialization**
+scope, not a claim of zero overhead or a general graphics exception.
+
+The default remains strict. Calibrate, report and appendix must each receive
+the same explicit auxiliary flag when opting in; the frozen protocol records
+its UUID, model, memory limit and the offscreen environment. The launcher uses
+`SDL_VIDEODRIVER=dummy` with `DISPLAY`/`WAYLAND_DISPLAY` unset. This removes the
+X11 dependency; it does not remove the Vulkan graphics footprint.
+
 Smoke checks all nine main cells with one seed, C=P=2, N=8, B=4, K=8,
 30 seconds of consumption and a 16 chunks/s offered load. Images and context
 length remain unchanged. Smoke verifies paths and cleanup, not the formal load
@@ -129,11 +168,11 @@ Calibrate capacity, then freeze the resulting protocol for the main suite:
 
 ```bash
 python -m examples.ods.data_stream_demo.run \
-  --suite calibrate --gpu-ids 3 \
+  --suite calibrate --gpu-ids 7 \
   --output outputs/ods-stream-calibration
 
 python -m examples.ods.data_stream_demo.run \
-  --suite report --gpu-ids 3 \
+  --suite report --gpu-ids 7 \
   --protocol outputs/ods-stream-calibration/calibration.json \
   --output outputs/ods-stream-main
 ```
@@ -157,7 +196,7 @@ and its seed 19001 corpora:
 
 ```bash
 python -m examples.ods.data_stream_demo.run \
-  --suite appendix --gpu-ids 3 \
+  --suite appendix --gpu-ids 7 \
   --protocol outputs/ods-stream-calibration/calibration.json \
   --dataset-root outputs/ods-stream-main \
   --output outputs/ods-stream-appendix

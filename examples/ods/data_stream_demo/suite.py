@@ -24,6 +24,7 @@ import json
 import math
 import os
 import random
+import re
 import shutil
 import signal
 import subprocess
@@ -45,6 +46,8 @@ _VISIONS = ("state", "single", "dual")
 _MAIN = ("lerobot", "streaming", "protected")
 _SEEDS = (19001, 19002, 19003)
 _ORDER_SEED = 47001
+_AUX_MAX_BYTES = 8 * 1024**2
+_HEADLESS_ENV = {"SDL_VIDEODRIVER": "dummy", "DISPLAY": None, "WAYLAND_DISPLAY": None}
 _BASE = {
     "buffer_size": 8,
     "producer_envs": 2,
@@ -62,8 +65,9 @@ _BASE = {
 }
 _LIMITATIONS = [
     "Select a physical NVML GPU UUID, set CUDA_VISIBLE_DEVICES and ODS_GPU_UUID to that UUID, and use logical cuda:0.",
-    "The matching native runtime must qualify CUDA UUID to Vulkan UUID mapping; no fallback to an unmasked or additional GPU is permitted.",
+    "The matching native runtime must qualify CUDA UUID to Vulkan UUID mapping; no fallback to an unmasked or unreserved GPU is permitted.",
     "Selected GPUs have three idle readings and at least 16GiB free. This is not an exclusive-device reservation.",
+    "An optional auxiliary graphics GPU is separately reserved and excluded from primary assignments; only known per-PID pure-G footprints up to 8 MiB are allowed there.",
     "The parent samples compute and graphics contexts attributed to its child PID tree or process group; short-lived contexts can fall between samples.",
     "No system-wide file cache is purged. Calibration is a preflight observation, not a guaranteed concurrent capacity.",
 ]
@@ -146,8 +150,59 @@ def _gpu_contexts() -> list[dict[str, Any]]:
     return contexts
 
 
+def _memory_bytes(value: str | None) -> int | None:
+    match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)\s*(B|KiB|MiB|GiB)", value or "")
+    if match is None:
+        return None
+    scale = {"B": 1, "KiB": 1024, "MiB": 1024**2, "GiB": 1024**3}[match[2]]
+    size = float(match[1]) * scale
+    return math.ceil(size) if math.isfinite(size) else None
+
+
+def _aux_scope(auxiliary: dict[str, Any] | None) -> dict[str, Any] | None:
+    if auxiliary is None:
+        return None
+    return {
+        "physical_index": auxiliary["index"],
+        "uuid": auxiliary["uuid"],
+        "model": auxiliary["name"],
+        "allowed_type": "G",
+        "max_per_pid_bytes": _AUX_MAX_BYTES,
+        "shared_by_suite_jobs": True,
+    }
+
+
+def _partition_contexts(
+    owned: list[dict[str, Any]], selected: str, auxiliary: str | None
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    totals: dict[int, int] = {}
+    invalid = set()
+    for row in owned:
+        if row["gpu_uuid"] != auxiliary:
+            continue
+        memory = _memory_bytes(row.get("used_memory"))
+        if row.get("type") != "G" or memory is None:
+            invalid.add(row["pid"])
+        else:
+            totals[row["pid"]] = max(totals.get(row["pid"], 0), memory)
+    allowed, unexpected = [], []
+    for row in owned:
+        if row["gpu_uuid"] == selected:
+            continue
+        if (
+            auxiliary is not None
+            and row["gpu_uuid"] == auxiliary
+            and row["pid"] not in invalid
+            and totals.get(row["pid"], _AUX_MAX_BYTES + 1) <= _AUX_MAX_BYTES
+        ):
+            allowed.append(row)
+        else:
+            unexpected.append(row)
+    return allowed, unexpected
+
+
 def _guard_devices(active: dict[int, dict[str, Any]]) -> None:
-    """Fail an owned job if one attributable context uses another GPU UUID."""
+    """Enforce primary placement and the optional bounded reserved graphics scope."""
     contexts = _gpu_contexts()
     owners = {}
     groups = {}
@@ -173,7 +228,28 @@ def _guard_devices(active: dict[int, dict[str, Any]]) -> None:
     now = time.monotonic()
     for index, item in active.items():
         owned = attributed[index]
-        unexpected = [row for row in owned if row["gpu_uuid"] != item["gpu_uuid"]]
+        allowed, unexpected = _partition_contexts(
+            owned, item["gpu_uuid"], item.get("aux_gpu_uuid")
+        )
+        for row in allowed:
+            if row not in item["device_guard"]["allowed_aux_contexts"]:
+                item["device_guard"]["allowed_aux_contexts"].append(row)
+        memory_by_process: dict[tuple[int, str], int | None] = {}
+        for row in owned:
+            key = (row["pid"], row["gpu_uuid"])
+            memory_by_process.setdefault(key, None)
+            value = _memory_bytes(row.get("used_memory"))
+            if value is not None:
+                memory_by_process[key] = max(memory_by_process[key] or 0, value)
+        memories = list(memory_by_process.values())
+        total_memory = (
+            sum(memories) if all(value is not None for value in memories) else None
+        )
+        if total_memory is not None:
+            item["device_guard"]["peak_known_owned_context_bytes"] = max(
+                item["device_guard"].get("peak_known_owned_context_bytes", 0),
+                total_memory,
+            )
         item["device_guard"]["samples"] += 1
         item["device_guard"]["selected_context_seen"] |= any(
             row["gpu_uuid"] == item["gpu_uuid"] for row in owned
@@ -191,7 +267,10 @@ def _guard_devices(active: dict[int, dict[str, Any]]) -> None:
                     {
                         "seconds_from_launch": now - item["started"],
                         "selected_gpu_uuid": item["gpu_uuid"],
+                        "aux_graphics_gpu_uuid": item.get("aux_gpu_uuid"),
                         "owned_contexts": owned,
+                        "owned_context_memory_bytes": total_memory,
+                        "allowed_aux_contexts": allowed,
                         "unexpected_contexts": unexpected,
                     }
                 )
@@ -200,7 +279,7 @@ def _guard_devices(active: dict[int, dict[str, Any]]) -> None:
 
 
 def _select_devices(
-    requested: list[int] | None, output: Path
+    requested: list[int] | None, output: Path, *, auxiliary_id: int | None = None
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     readings = []
     for index in range(3):
@@ -212,7 +291,27 @@ def _select_devices(
         output / "gpu-preflight.json",
         {"readings": readings, "limitations": _LIMITATIONS},
     )
-    ids = requested if requested is not None else sorted(by_id[-1])
+    auxiliary = None
+    if auxiliary_id is not None:
+        if auxiliary_id < 0 or requested is not None and auxiliary_id in requested:
+            raise ValueError(
+                "The reserved auxiliary GPU must be nonnegative and distinct from every primary GPU"
+            )
+        if not all(
+            auxiliary_id in reading
+            and reading[auxiliary_id]["utilization_percent"] == 0
+            and reading[auxiliary_id]["free_mib"] >= 16 * 1024
+            for reading in by_id
+        ):
+            raise RuntimeError(
+                "Auxiliary GPU requires three idle readings and at least 16 GiB free"
+            )
+        auxiliary = by_id[-1][auxiliary_id]
+    ids = (
+        requested
+        if requested is not None
+        else [index for index in sorted(by_id[-1]) if index != auxiliary_id]
+    )
     if len(set(ids)) != len(ids) or any(index < 0 for index in ids):
         raise ValueError("GPU IDs must be unique nonnegative physical indices")
     selected, rejected = [], []
@@ -244,6 +343,8 @@ def _select_devices(
     audit = {
         "readings": readings,
         "selected": selected,
+        "aux_graphics_gpu": auxiliary,
+        "aux_graphics_scope": _aux_scope(auxiliary),
         "rejected": rejected,
         "cpu_budget_per_job": 8,
         "limitations": _LIMITATIONS,
@@ -281,6 +382,8 @@ def _protocol(path: Path | None) -> dict[str, Any]:
         raise ValueError(
             "Calibrated observation window exceeds the 900-second protocol ceiling"
         )
+    if protocol.get("headless_environment") != _HEADLESS_ENV:
+        raise ValueError("Headless environment differs from the qualified protocol")
     return protocol
 
 
@@ -455,7 +558,9 @@ def _terminate(process: subprocess.Popen[Any]) -> None:
 
 
 def _supervise(
-    jobs: list[dict[str, Any]], devices: list[dict[str, Any]]
+    jobs: list[dict[str, Any]],
+    devices: list[dict[str, Any]],
+    auxiliary: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     pending = list(jobs)
     active: dict[int, dict[str, Any]] = {}
@@ -497,6 +602,14 @@ def _supervise(
                 supervision.mkdir(parents=True)
                 command = _command(job, gpu)
                 environment = os.environ.copy()
+                for name, value in _HEADLESS_ENV.items():
+                    if value is None:
+                        environment.pop(name, None)
+                    else:
+                        environment[name] = value
+                environment.pop("ODS_AUX_GRAPHICS_GPU_UUID", None)
+                if auxiliary is not None:
+                    environment["ODS_AUX_GRAPHICS_GPU_UUID"] = auxiliary["uuid"]
                 environment.update(
                     CUDA_VISIBLE_DEVICES=gpu["uuid"],
                     ODS_GPU_UUID=gpu["uuid"],
@@ -509,14 +622,19 @@ def _supervise(
                     "command": command,
                     "cwd": str(_ROOT),
                     "gpu": gpu,
+                    "aux_graphics_scope": _aux_scope(auxiliary),
                     "environment": {
                         name: environment.get(name)
                         for name in (
                             "CUDA_VISIBLE_DEVICES",
                             "ODS_GPU_UUID",
+                            "ODS_AUX_GRAPHICS_GPU_UUID",
                             "OMP_NUM_THREADS",
                             "MKL_NUM_THREADS",
                             "OPENBLAS_NUM_THREADS",
+                            "SDL_VIDEODRIVER",
+                            "DISPLAY",
+                            "WAYLAND_DISPLAY",
                         )
                     },
                     "timeout_seconds": _deadline(job),
@@ -556,11 +674,15 @@ def _supervise(
                     "supervision": supervision,
                     "started_ns": started_ns,
                     "gpu_uuid": gpu["uuid"],
+                    "aux_gpu_uuid": (
+                        auxiliary["uuid"] if auxiliary is not None else None
+                    ),
                     "device_error": None,
                     "device_guard": {
                         "samples": 0,
                         "selected_context_seen": False,
                         "unexpected_contexts": [],
+                        "allowed_aux_contexts": [],
                     },
                 }
                 launch["process_launch_monotonic_ns"] = started_ns
@@ -635,6 +757,12 @@ def _supervise(
                         or f"Child exit={process.returncode}, summary exists={summary_path.exists()}",
                     )
                 summary = json.loads(summary_path.read_text(encoding="utf-8"))
+                summary["device_supervision"] = {
+                    "primary_gpu_uuid": item["gpu_uuid"],
+                    "aux_graphics_scope": _aux_scope(auxiliary),
+                    "guard": item["device_guard"],
+                }
+                _write(summary_path, summary)
                 result = {
                     "output": str(job["output"]),
                     "supervision": str(item["supervision"]),
@@ -648,6 +776,7 @@ def _supervise(
                     "pgid": process.pid,
                     "process_launch_monotonic_ns": item["started_ns"],
                     "device_guard": item["device_guard"],
+                    "aux_graphics_scope": _aux_scope(auxiliary),
                 }
                 _write(job["output"] / "process.json", result)
                 results.append(result)
@@ -682,7 +811,10 @@ def _supervise(
 
 
 def _calibration(
-    output: Path, jobs: list[dict[str, Any]], devices: list[dict[str, Any]]
+    output: Path,
+    jobs: list[dict[str, Any]],
+    devices: list[dict[str, Any]],
+    auxiliary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     gamma, capacities, issues = {}, {}, []
     for job in jobs:
@@ -750,6 +882,8 @@ def _calibration(
         "generation_episodes_per_second": gamma,
         "ready_source_capacity": capacities,
         "gpu_models": sorted({gpu["name"] for gpu in devices}),
+        "aux_graphics_scope": _aux_scope(auxiliary),
+        "headless_environment": _HEADLESS_ENV,
         "order_seed": _ORDER_SEED,
         "seeds": list(_SEEDS),
         "issues": issues,
@@ -799,18 +933,24 @@ def run_suite(args: argparse.Namespace) -> dict[str, Any]:
                 for job in jobs
             ],
             "order_seed": _ORDER_SEED,
+            "aux_graphics_gpu_id": args.aux_graphics_gpu_id,
+            "headless_environment": _HEADLESS_ENV,
             "source_sha256": _hashes(),
             "limitations": _LIMITATIONS,
         },
     )
     preflight_error = None
     devices = []
+    auxiliary = None
     try:
         if shutil.which("taskset") is None:
             raise RuntimeError(
                 "taskset is required to assign eight disjoint CPUs per child"
             )
-        devices, _ = _select_devices(args.gpu_ids, args.output)
+        devices, device_audit = _select_devices(
+            args.gpu_ids, args.output, auxiliary_id=args.aux_graphics_gpu_id
+        )
+        auxiliary = device_audit["aux_graphics_gpu"]
         _gpu_contexts()  # Qualification requires compute and graphics visibility.
         if (
             protocol is not None
@@ -818,6 +958,12 @@ def run_suite(args: argparse.Namespace) -> dict[str, Any]:
         ):
             raise RuntimeError(
                 "Selected GPU models differ from the frozen calibration hardware"
+            )
+        if protocol is not None and protocol.get("aux_graphics_scope") != _aux_scope(
+            auxiliary
+        ):
+            raise RuntimeError(
+                "Auxiliary graphics reservation differs from the frozen protocol; pass the same explicit auxiliary flag/scope"
             )
     except (
         OSError,
@@ -839,7 +985,7 @@ def run_suite(args: argparse.Namespace) -> dict[str, Any]:
             for job in jobs
         ]
     else:
-        results = _supervise(jobs, devices)
+        results = _supervise(jobs, devices, auxiliary)
     summary = {
         "suite": args.suite,
         "status": (
@@ -853,9 +999,11 @@ def run_suite(args: argparse.Namespace) -> dict[str, Any]:
         "results": results,
         "preflight_error": preflight_error,
         "limitations": _LIMITATIONS,
+        "aux_graphics_scope": _aux_scope(auxiliary),
+        "requested_aux_graphics_gpu_id": args.aux_graphics_gpu_id,
     }
     if args.suite == "calibrate":
-        calibration = _calibration(args.output, jobs, devices)
+        calibration = _calibration(args.output, jobs, devices, auxiliary)
         _write(args.output / "calibration.json", calibration)
         summary["calibration_status"] = calibration["status"]
         if calibration["status"] != "complete":

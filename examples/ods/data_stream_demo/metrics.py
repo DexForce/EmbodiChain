@@ -328,7 +328,7 @@ class StreamMetrics:
 
 
 class ResourceMonitor:
-    """Sample owned-process PSS and exclusive-device NVML usage, not exact peaks."""
+    """Sample owned-process PSS and GPU contexts across devices, not exact peaks."""
 
     def __init__(self, output: Path, interval: float = 2.0) -> None:
         self._output, self._interval = output, interval
