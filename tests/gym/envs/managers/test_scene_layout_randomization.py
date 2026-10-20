@@ -377,3 +377,23 @@ def test_manager_bound_functor_name_is_read_only():
     assert functor.name == "layout"
     with pytest.raises(AttributeError):
         functor.name = "renamed"
+
+
+def test_manager_name_does_not_conflict_with_functor_private_display_name():
+    from embodichain.lab.gym.envs.managers.manager_base import Functor
+
+    class CameraStyleFunctor(Functor):
+        def __init__(self, cfg, env):
+            super().__init__(cfg, env)
+            self._name = "audience_camera"
+
+        def __call__(self, env, env_ids):
+            pass
+
+    env = make_env()
+    manager = EventManager(
+        {"camera_writer": EventCfg(func=CameraStyleFunctor, mode="reset")}, env
+    )
+    functor = manager.get_functor_cfg("camera_writer").func
+    assert functor.name == "camera_writer"
+    assert functor._name == "audience_camera"

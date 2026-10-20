@@ -5491,7 +5491,7 @@
           "symbol": "execute_scene_variant",
           "start_line": 294,
           "end_line": 296,
-          "excerpt": "segments = EmbodiedEnv.create_demo_segments("
+          "excerpt": "            segments = EmbodiedEnv.create_demo_segments("
         }
       ]
     },

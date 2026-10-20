@@ -68,7 +68,7 @@ class Functor(ABC):
         # store the inputs
         self.cfg = cfg
         self._env = env
-        self._name: str | None = None
+        self._manager_name: str | None = None
 
     """
     Properties.
@@ -77,9 +77,9 @@ class Functor(ABC):
     @property
     def name(self) -> str:
         """Return the manager-bound, read-only configuration name."""
-        if self._name is None:
+        if self._manager_name is None:
             raise RuntimeError("Functor has not been bound to a manager name.")
-        return self._name
+        return self._manager_name
 
     @property
     def num_envs(self) -> int:
@@ -476,9 +476,9 @@ class ManagerBase(ABC):
             except Exception as e:
                 logger.log_error(f"Failed to initialize functor '{functor_name}': {e}")
         if isinstance(functor_cfg.func, Functor):
-            previous = getattr(functor_cfg.func, "_name", None)
+            previous = getattr(functor_cfg.func, "_manager_name", None)
             if previous is not None and previous != functor_name:
                 raise ValueError(
                     "A class functor cannot be rebound to a different configuration name."
                 )
-            functor_cfg.func._name = functor_name
+            functor_cfg.func._manager_name = functor_name
