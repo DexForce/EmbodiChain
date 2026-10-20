@@ -214,3 +214,48 @@ def test_close_discards_uncommitted_rows(camera_env, kind, tmp_path, monkeypatch
     recorder.finalize()
     assert not any(recorder._frames_list)
     assert not list(tmp_path.rglob("*.mp4"))
+
+
+def test_async_failed_video_retries_with_owned_episode_identity(
+    camera_env, tmp_path, monkeypatch
+):
+    from embodichain.lab.gym.envs.managers import record
+
+    env, rgb = camera_env
+    calls = []
+
+    def save(frames, directory, name, fps):
+        calls.append(name)
+        if len(calls) == 1:
+            raise OSError("disk full")
+        assert np.all(frames[0] == 3)
+        (Path(directory) / (name + ".mp4")).write_bytes(b"video")
+
+    monkeypatch.setattr(record, "images_to_video", save)
+    recorder = record_camera_data_async(
+        FunctorCfg(
+            func=record_camera_data_async,
+            params={"name": "camera", "save_path": str(tmp_path)},
+        ),
+        env,
+    )
+    try:
+        recorder(env, [3], name="camera")
+        recorder.save_and_clear([3])
+        with pytest.raises(OSError, match="disk full"):
+            next(iter(recorder._futures.values())).result(timeout=5)
+        env.episode_context._begin_episode([3])
+        env.episode_context._finish_initialization([3])
+        rgb.fill_(99)
+        # The first caller observes the failed future; the explicit retry uses
+        # the owned old job even after the live environment starts episode 1.
+        with pytest.raises(OSError, match="disk full"):
+            recorder.save_and_clear([3])
+        assert len(recorder._jobs) == 1
+        recorder.save_and_clear([3])
+    finally:
+        recorder.finalize()
+    assert calls == ["episode_000000_camera", "episode_000000_camera"]
+    assert len(list(tmp_path.rglob("*.mp4"))) == 1
+    sidecar = json.loads(next(tmp_path.rglob("*.json")).read_text())
+    assert sidecar["episode_context"]["episode"] == 0
