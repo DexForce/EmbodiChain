@@ -107,3 +107,66 @@ def grid_sample_qpos_from_limits(
     if stacked.shape[0] > max_samples:
         return stacked[:max_samples]
     return stacked
+
+
+def assert_pose_ik_roundtrip(
+    robot: Robot, arm_name: str, *, safe_margin: float
+) -> None:
+    """Check both pose encodings and an unreachable target on one solver."""
+    # Test inverse kinematics (IK) with a 1x4x4 homogeneous matrix pose and a joint_seed
+
+    qpos_limit = robot.get_qpos_limits(name=arm_name)
+    # generate a small grid of qpos samples from the joint limits (low/high)
+    sample_qpos = grid_sample_qpos_from_limits(
+        safe_margin=safe_margin,
+        qpos_limits=qpos_limit,
+        steps_per_joint=8,
+        device=robot.device,
+        max_samples=65536,
+    )
+    sample_qpos = sample_qpos[None, :, :]
+
+    fk_xpos = robot.compute_batch_fk(qpos=sample_qpos, name=arm_name, to_matrix=True)
+    fk_xpos_xyzquat = robot.compute_batch_fk(
+        qpos=sample_qpos, name=arm_name, to_matrix=False
+    )
+
+    matrix_success, ik_qpos = robot.compute_batch_ik(
+        pose=fk_xpos, joint_seed=sample_qpos, name=arm_name
+    )
+
+    xyzquat_success, ik_qpos_xyzquat = robot.compute_batch_ik(
+        pose=fk_xpos_xyzquat, joint_seed=sample_qpos, name=arm_name
+    )
+
+    assert torch.equal(matrix_success, xyzquat_success)
+    assert matrix_success.all()
+    matrix_ik_xpos = robot.compute_batch_fk(qpos=ik_qpos, name=arm_name, to_matrix=True)
+    xyzquat_ik_xpos = robot.compute_batch_fk(
+        qpos=ik_qpos_xyzquat, name=arm_name, to_matrix=True
+    )
+    assert torch.allclose(
+        fk_xpos, matrix_ik_xpos, atol=5e-3, rtol=5e-3
+    ), f"Matrix-pose IK does not reconstruct FK for {arm_name}"
+    assert torch.allclose(
+        fk_xpos, xyzquat_ik_xpos, atol=5e-3, rtol=5e-3
+    ), f"XYZ-quaternion IK does not reconstruct FK for {arm_name}"
+    # test for failed xpos
+    invalid_pose = torch.tensor(
+        [
+            [
+                [1.0, 0.0, 0.0, 10.0],
+                [0.0, 1.0, 0.0, 10.0],
+                [0.0, 0.0, 1.0, 10.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        ],
+        dtype=torch.float32,
+        device=robot.device,
+    )
+    res, ik_qpos = robot.compute_ik(
+        pose=invalid_pose, joint_seed=ik_qpos[:, 0, :], name=arm_name
+    )
+    dof = ik_qpos.shape[-1]
+    assert res[0] == False
+    assert ik_qpos.shape == (1, dof)

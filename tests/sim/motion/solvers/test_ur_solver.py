@@ -19,7 +19,7 @@ from __future__ import annotations
 import torch
 import pytest
 
-from solver_support import grid_sample_qpos_from_limits
+from solver_support import assert_pose_ik_roundtrip
 import numpy as np
 import warp as wp
 
@@ -483,67 +483,8 @@ class BaseSolverTest:
         self.robot: Robot = self.sim.add_robot(cfg=cfg)
         self.sim.prepare()
 
-    def test_ik(self):
-        # Test inverse kinematics (IK) with a 1x4x4 homogeneous matrix pose and a joint_seed
-        arm_name = "arm"
-        # generate a small grid of qpos samples from the joint limits (low/high)
-        qpos_limit = self.robot.get_qpos_limits(name=arm_name)
-        sample_qpos = grid_sample_qpos_from_limits(
-            safe_margin=5 / 180 * np.pi,
-            qpos_limits=qpos_limit,
-            steps_per_joint=8,
-            device=self.robot.device,
-            max_samples=65536,
-        )
-        sample_qpos = sample_qpos[None, :, :]
-        fk_xpos = self.robot.compute_batch_fk(
-            qpos=sample_qpos, name=arm_name, to_matrix=True
-        )
-        fk_xpos_xyzquat = self.robot.compute_batch_fk(
-            qpos=sample_qpos, name=arm_name, to_matrix=False
-        )
-
-        matrix_success, ik_qpos = self.robot.compute_batch_ik(
-            pose=fk_xpos, joint_seed=sample_qpos, name=arm_name
-        )
-
-        xyzquat_success, ik_qpos_xyzquat = self.robot.compute_batch_ik(
-            pose=fk_xpos_xyzquat, joint_seed=sample_qpos, name=arm_name
-        )
-
-        assert torch.equal(matrix_success, xyzquat_success)
-        assert matrix_success.all()
-        matrix_ik_xpos = self.robot.compute_batch_fk(
-            qpos=ik_qpos, name=arm_name, to_matrix=True
-        )
-        xyzquat_ik_xpos = self.robot.compute_batch_fk(
-            qpos=ik_qpos_xyzquat, name=arm_name, to_matrix=True
-        )
-        assert torch.allclose(
-            fk_xpos, matrix_ik_xpos, atol=5e-3, rtol=5e-3
-        ), f"Matrix-pose IK does not reconstruct FK for {arm_name}"
-        assert torch.allclose(
-            fk_xpos, xyzquat_ik_xpos, atol=5e-3, rtol=5e-3
-        ), f"XYZ-quaternion IK does not reconstruct FK for {arm_name}"
-        # test for failed xpos
-        invalid_pose = torch.tensor(
-            [
-                [
-                    [1.0, 0.0, 0.0, 10.0],
-                    [0.0, 1.0, 0.0, 10.0],
-                    [0.0, 0.0, 1.0, 10.0],
-                    [0.0, 0.0, 0.0, 1.0],
-                ]
-            ],
-            dtype=torch.float32,
-            device=self.robot.device,
-        )
-        res, ik_qpos = self.robot.compute_ik(
-            pose=invalid_pose, joint_seed=ik_qpos[:, 0, :], name=arm_name
-        )
-        dof = ik_qpos.shape[-1]
-        assert res[0] == False
-        assert ik_qpos.shape == (1, dof)
+    def test_ik(self) -> None:
+        assert_pose_ik_roundtrip(self.robot, "arm", safe_margin=5 / 180 * np.pi)
 
     def teardown_method(self):
         """Clean up resources after each test method."""

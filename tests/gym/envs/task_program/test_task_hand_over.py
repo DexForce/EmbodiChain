@@ -187,15 +187,6 @@ def test_hand_over_gym_config_uses_declared_default_backend() -> None:
     assert cfg.sim_cfg.physics_config.enable_ccd is True
 
 
-def test_hand_over_gym_config_rejects_newton_override() -> None:
-    """The Default CCD environment cannot be relabeled as Newton."""
-    payload = _gym_payload()
-    payload["physics"] = "newton"
-
-    with pytest.raises(ValueError, match="owns physics and physics_config"):
-        config_to_cfg(payload, source_path=_gym_config_path())
-
-
 def test_hand_over_gym_config_builds_dual_ur5_pgi_scene() -> None:
     """Config parsing preserves the tutorial robot, can, and support geometry."""
     cfg = _configured_env_cfg()

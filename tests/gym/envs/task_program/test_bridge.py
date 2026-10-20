@@ -25,6 +25,8 @@ import pytest
 import torch
 from tensordict import TensorDict
 
+from task_program_support import completed_runtime
+
 from embodichain.lab.gym.envs.demo import execute_demo_episode
 from embodichain.lab.gym.envs.task_program.bridge import (
     TaskProgramDemoBridge,
@@ -2188,7 +2190,7 @@ def test_sequential_segment_analyzes_downstream_calls_but_executes_own_prefix() 
         RuntimeCommandFrameEncoder(_QposProvider(torch.zeros(BATCH_SIZE, ROBOT_DOF))),
         clock,
     )
-    runtime = _FakeRuntime(sink, clock, _joint_frame(duration=STEP_DT))
+    runtime = completed_runtime(torch.tensor([7, 3], dtype=torch.long))
     bridge = TaskProgramDemoBridge(_FakeProgram(first, second), runtime, sink, clock)
     segments = iter(bridge.iter_segments())
 
@@ -2196,12 +2198,16 @@ def test_sequential_segment_analyzes_downstream_calls_but_executes_own_prefix() 
     tuple(first_demo.actions)
     assert first_demo.validator().tolist() == [True, True]
 
-    assert runtime.calls == ("pick", "place")
-    assert runtime.execution_prefix_lengths == [1]
+    assert runtime.start.call_args.args[0] == ("pick", "place")
+    assert [
+        item.kwargs["execution_prefix_length"] for item in runtime.start.call_args_list
+    ] == [1]
 
     tuple(next(segments).actions)
-    assert runtime.calls == ("place",)
-    assert runtime.execution_prefix_lengths == [1, 1]
+    assert runtime.start.call_args.args[0] == ("place",)
+    assert [
+        item.kwargs["execution_prefix_length"] for item in runtime.start.call_args_list
+    ] == [1, 1]
 
 
 def test_parallel_segment_preserves_branches_barrier_and_adopts_state(

@@ -73,13 +73,16 @@ def test_feature_statistics_roundtrip_and_preserve_input_gradients():
     )
     normalizer = EmpiricalNormalizer(2).double()
     normalizer.update(features[:2])
+    assert int(normalizer.count) == 2
     normalizer.update(features[2:])
+    assert int(normalizer.count) == len(features)
     torch.testing.assert_close(normalizer.mean, features.mean(0, keepdim=True))
     torch.testing.assert_close(
         normalizer.variance, features.var(0, unbiased=False, keepdim=True)
     )
     restored = EmpiricalNormalizer(2).double().eval()
     restored.load_state_dict(deepcopy(normalizer.state_dict()))
+    assert int(restored.count) == len(features)
     before = deepcopy(restored.state_dict())
     restored.update(features * 10)
     for name, value in before.items():

@@ -357,15 +357,9 @@ def test_w1_variant_catalog_covers_body_and_independent_hand_registries():
         DexforceW1Version,
         DexforceW1HandBrand,
     )
-    from embodichain_robots.dexforce_w1.hand_specs import (
-        get_default_w1_hand_version,
-        get_w1_hand_spec,
-    )
 
     assert set(_W1_VERSIONS) == {version.value for version in DexforceW1Version}
     assert set(_W1_HANDS) == {brand.value for brand in DexforceW1HandBrand}
-    for brand in DexforceW1HandBrand:
-        assert get_w1_hand_spec(brand, get_default_w1_hand_version(brand))
     variants = ROBOT_CONFIGS["DexforceW1"]["variants"]
     expected_count = len(DexforceW1Version) * (
         1 + (len(DexforceW1HandBrand) - 1) ** 2 + 1

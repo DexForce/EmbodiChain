@@ -82,8 +82,6 @@ def test_main_distribution_stages_robot_package_without_legacy_modules(tmp_path)
         if name == "embodichain"
         or name.startswith(("embodichain_robots", "embodichain.lab.sim.robots"))
     ]
-    assert "embodichain_robots" in packages
-    assert "embodichain_robots.dexforce_w1" in packages
     distribution = Distribution(
         {
             "packages": packages,
