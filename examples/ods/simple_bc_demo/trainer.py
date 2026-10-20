@@ -198,7 +198,11 @@ def _add_error_note(error: BaseException, note: str) -> None:
     if add_note is not None:
         add_note(note)
     else:
-        print(note, file=sys.stderr)
+        notes = getattr(error, "__notes__", None)
+        if notes is None:
+            notes = []
+            error.__notes__ = notes
+        notes.append(note)
 
 
 def _timeout(args: argparse.Namespace, tracker: EfficiencyTracker) -> float:
