@@ -428,3 +428,31 @@ def test_pending_discard_attempts_every_camera_and_clears_trajectory() -> None:
     second.discard_and_clear.assert_called_once_with()
     second.finalize.assert_called_once_with()
     assert env._traj_steps.tolist() == [0, 0]
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("state", ["uninitialized", "pending", "rejected"])
+def test_direct_dataset_recorder_cannot_bypass_context(
+    asynchronous: bool, state: str
+) -> None:
+    from embodichain.lab.gym.envs.managers.datasets import LeRobotRecorder
+    from embodichain.lab.gym.envs.managers.async_datasets import AsyncLeRobotRecorder
+
+    context = EpisodeContext(2)
+    env = SimpleNamespace(episode_context=context)
+    recorder_type = AsyncLeRobotRecorder if asynchronous else LeRobotRecorder
+    recorder = recorder_type.__new__(recorder_type)
+    if state != "uninitialized":
+        context._begin_episode([0, 1])
+        context._finish_initialization([0, 1])
+    if state == "rejected":
+        with context.check("validation") as finish:
+            finish(accepted=False)
+    if state == "pending":
+        with context.check("validation") as finish:
+            # No writer or queue exists: an ineligible direct call must return
+            # before accessing the storage boundary.
+            recorder(env, None)
+            finish(accepted=True)
+    else:
+        recorder(env, None)

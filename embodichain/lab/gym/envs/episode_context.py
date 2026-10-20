@@ -167,7 +167,8 @@ class EpisodeContext:
         rows = ids.cpu().tolist()
         if self._active.get(source, set()).intersection(rows):
             raise RuntimeError(f"Check {source!r} already covers a selected row.")
-        self._active.setdefault(source, set()).update(rows)
+        if rows:
+            self._active.setdefault(source, set()).update(rows)
         self._pending[ids] += 1
         report = None
         opened = True
@@ -259,9 +260,10 @@ class EpisodeContext:
         finally:
             opened = False
             self._pending[ids] -= 1
-            self._active[source].difference_update(rows)
-            if not self._active[source]:
-                del self._active[source]
+            if rows:
+                self._active[source].difference_update(rows)
+                if not self._active[source]:
+                    del self._active[source]
 
     def _begin_episode(self, env_ids: Sequence[int] | torch.Tensor) -> None:
         ids = self._ids(env_ids)

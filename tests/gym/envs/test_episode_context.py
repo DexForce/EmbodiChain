@@ -151,3 +151,13 @@ def test_background_workers_cannot_update_context():
     with ThreadPoolExecutor(max_workers=1) as executor:
         with pytest.raises(RuntimeError, match="environment thread"):
             executor.submit(context.snapshot).result()
+
+
+def test_nested_empty_checks_leave_current_buffers_unchanged() -> None:
+    context = ready_context()
+    before = context.snapshot()
+    with context.check("empty", []) as outer:
+        with context.check("empty", []) as inner:
+            inner(accepted=True)
+        outer(accepted=False)
+    assert context.snapshot() == before

@@ -22,7 +22,6 @@ import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from copy import deepcopy
 import json
-import os
 from pathlib import Path
 import tempfile
 from typing import TYPE_CHECKING, Literal, Union, List
@@ -48,7 +47,7 @@ class record_camera_data(Functor):
     Uncommitted frames are discarded at close, never implicitly published.
     """
 
-    def __init__(self, cfg: FunctorCfg, env: EmbodiedEnv):
+    def __init__(self, cfg: FunctorCfg, env: EmbodiedEnv) -> None:
         """Initialize the functor.
 
         Args:
@@ -85,7 +84,6 @@ class record_camera_data(Functor):
         env.add_camera_group_id(self.camera.group_id)
 
         self._save_path = cfg.params.get("save_path", "./outputs/videos")
-        self._current_episode = 0
         self._num_envs = getattr(env, "num_envs", 1)
         self._frames_list: list[list[np.ndarray]] = [[] for _ in range(self._num_envs)]
         self._ep_idx = [0] * self._num_envs
@@ -299,7 +297,7 @@ class record_camera_data_async(record_camera_data):
         self._executor = ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="camera-writer"
         )
-        self._futures: dict[tuple[int, int, str], Future] = {}
+        self._futures: dict[tuple[int, int, str], Future[None]] = {}
 
     def _flush_jobs(self) -> None:
         for key, job in list(self._jobs.items()):
@@ -349,7 +347,7 @@ class validation_cameras(Functor):
     their data when called. The cameras are created once and reused for subsequent calls.
     """
 
-    def __init__(self, cfg: FunctorCfg, env: EmbodiedEnv):
+    def __init__(self, cfg: FunctorCfg, env: EmbodiedEnv) -> None:
         super().__init__(cfg, env)
         # Store camera configurations
         self.cameras_cfg = cfg.params.get("cameras", [])

@@ -645,6 +645,12 @@ class LeRobotRecorder(Functor):
                 ``DatasetManager.apply`` via ``**functor_cfg.params``. They are
                 read in :meth:`__init__` and ignored here.
         """
+        context = getattr(env, "episode_context", None)
+        if context is not None:
+            env_ids = context.filter_recordable(env_ids)
+            if len(env_ids) == 0:
+                return
+
         with self._finalize_lock:
             if self._finalized:
                 raise RuntimeError("LeRobotRecorder is already finalized")

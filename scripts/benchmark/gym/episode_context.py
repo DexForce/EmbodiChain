@@ -24,9 +24,11 @@ from __future__ import annotations
 import argparse
 from datetime import datetime
 import json
+import os
 from pathlib import Path
 import platform
 import statistics
+import tempfile
 import time
 
 import psutil
@@ -35,6 +37,26 @@ import torch
 from embodichain.lab.gym.envs.episode_context import EpisodeContext
 
 __all__ = ["main"]
+
+
+def _save_metadata(
+    context: EpisodeContext,
+    selection: list[int],
+    directory: Path,
+    *,
+    include_context: bool,
+) -> None:
+    """Publish per-row sidecars; exclude video encoding from metadata overhead."""
+    snapshots = (
+        context.snapshot(selection) if include_context else [{} for _ in selection]
+    )
+    for row, snapshot in zip(selection, snapshots, strict=True):
+        payload = {"artifact_purpose": "recording", "env_id": row, "frames": 4}
+        if include_context:
+            payload["episode_context"] = snapshot
+        staged = directory / f"row_{row}.tmp"
+        staged.write_text(json.dumps(payload, indent=2) + "\n")
+        os.replace(staged, directory / f"row_{row}.json")
 
 
 def main() -> None:
@@ -48,6 +70,15 @@ def main() -> None:
     torch.set_num_threads(1)
     devices = ["cpu"] + (["cuda:0"] if torch.cuda.is_available() else [])
     rows = []
+    with tempfile.TemporaryDirectory(prefix="episode-context-benchmark-") as temporary:
+        _measure_contexts(devices, rows, args.repeats, Path(temporary))
+    _write_report(args.output_dir, devices, rows, args.repeats)
+
+
+def _measure_contexts(
+    devices: list[str], rows: list[dict], repeats: int, directory: Path
+) -> None:
+    """Measure warmed host operations and row-wise metadata publication."""
     for device in devices:
         synchronize = (
             (lambda: torch.cuda.synchronize(device))
@@ -73,6 +104,12 @@ def main() -> None:
                     "checks": checks,
                     "filter": lambda: context.filter_recordable(selection),
                     "snapshot": lambda: context.snapshot(selection),
+                    "save_baseline_metadata": lambda: _save_metadata(
+                        context, selection, directory, include_context=False
+                    ),
+                    "save_context_metadata": lambda: _save_metadata(
+                        context, selection, directory, include_context=True
+                    ),
                 }
                 for operation, call in operations.items():
                     for _ in range(5):
@@ -80,7 +117,7 @@ def main() -> None:
                         synchronize()
                         del result
                     samples = []
-                    for _ in range(args.repeats):
+                    for _ in range(repeats):
                         synchronize()
                         start = time.perf_counter()
                         result = call()
@@ -124,18 +161,26 @@ def main() -> None:
                             "success_rate": 1.0,
                         }
                     )
-    args.output_dir.mkdir(parents=True, exist_ok=True)
+                saved = json.loads((directory / "row_0.json").read_text())
+                assert saved["episode_context"] == context.snapshot([0])[0]
+
+
+def _write_report(
+    output_dir: Path, devices: list[str], rows: list[dict], repeats: int
+) -> None:
+    """Write exactly three tables and record the measurement scope."""
+    output_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    path = args.output_dir / f"episode_context_{stamp}"
+    path = output_dir / f"episode_context_{stamp}"
     metadata = {
         "python": platform.python_version(),
         "torch": torch.__version__,
         "cpu": platform.processor(),
         "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
-        "repeats": args.repeats,
+        "repeats": repeats,
         "warmup": 5,
         "threads": 1,
-        "scope": "Completed host calls, CUDA synchronized; filtering allocates owned IDs and snapshots include JSON copies. RSS is a warmed retained delta; CUDA peaks cover the Torch allocator only.",
+        "scope": "Completed host calls, CUDA synchronized; filtering allocates owned IDs and snapshots include JSON copies. Save cases publish per-row JSON sidecars with atomic rename to the same temporary filesystem, without fsync or video encoding; baseline omits only Context. RSS is a warmed retained delta; CUDA peaks cover the Torch allocator only.",
     }
     path.with_suffix(".json").write_text(
         json.dumps({"metadata": metadata, "rows": rows}, indent=2) + "\n"
