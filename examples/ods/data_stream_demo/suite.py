@@ -29,8 +29,11 @@ import signal
 import subprocess
 import sys
 import time
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
+
+import psutil
 
 from .acquisition import CAMERA_PROFILE_VERSION
 from .report import write_report
@@ -58,9 +61,10 @@ _BASE = {
     "initialization_timeout": 1800.0,
 }
 _LIMITATIONS = [
-    "Native Vulkan uses physical GPU ordinals; CUDA_VISIBLE_DEVICES is unset in children.",
-    "Native runtime can allocate an approximately 338-MiB bootstrap context on GPU0 in addition to the selected GPU.",
-    "GPU0 is preflighted idle with at least 2GiB free; selected GPUs have three idle readings and at least 16GiB free. This is not an exclusive-device reservation.",
+    "Select a physical NVML GPU UUID, set CUDA_VISIBLE_DEVICES and ODS_GPU_UUID to that UUID, and use logical cuda:0.",
+    "The matching native runtime must qualify CUDA UUID to Vulkan UUID mapping; no fallback to an unmasked or additional GPU is permitted.",
+    "Selected GPUs have three idle readings and at least 16GiB free. This is not an exclusive-device reservation.",
+    "The parent samples compute and graphics contexts attributed to its child PID tree or process group; short-lived contexts can fall between samples.",
     "No system-wide file cache is purged. Calibration is a preflight observation, not a guaranteed concurrent capacity.",
 ]
 
@@ -116,6 +120,85 @@ def _gpu_reading() -> list[dict[str, Any]]:
     return rows
 
 
+def _gpu_contexts() -> list[dict[str, Any]]:
+    """Read compute and graphics contexts without acting on foreign processes."""
+    output = subprocess.check_output(["nvidia-smi", "-q", "-x"], text=True, timeout=10)
+    document = ET.fromstring(output)
+    contexts = []
+    gpus = document.findall("gpu")
+    if not gpus:
+        raise RuntimeError("nvidia-smi XML did not contain GPU identity records")
+    for gpu in gpus:
+        uuid = gpu.findtext("uuid")
+        if not uuid:
+            raise RuntimeError("nvidia-smi XML omitted a GPU UUID")
+        for process in gpu.findall("./processes/process_info"):
+            pid = process.findtext("pid", "")
+            if pid.isdigit():
+                contexts.append(
+                    {
+                        "pid": int(pid),
+                        "gpu_uuid": uuid,
+                        "type": process.findtext("type"),
+                        "used_memory": process.findtext("used_memory"),
+                    }
+                )
+    return contexts
+
+
+def _guard_devices(active: dict[int, dict[str, Any]]) -> None:
+    """Fail an owned job if one attributable context uses another GPU UUID."""
+    contexts = _gpu_contexts()
+    owners = {}
+    groups = {}
+    for index, item in active.items():
+        process = item["process"]
+        groups[process.pid] = index
+        owners[process.pid] = index
+        try:
+            for child in psutil.Process(process.pid).children(recursive=True):
+                owners[child.pid] = index
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+    attributed: dict[int, list[dict[str, Any]]] = {index: [] for index in active}
+    for context in contexts:
+        owner = owners.get(context["pid"])
+        if owner is None:
+            try:
+                owner = groups.get(os.getpgid(context["pid"]))
+            except ProcessLookupError:
+                continue
+        if owner is not None:
+            attributed[owner].append(context)
+    now = time.monotonic()
+    for index, item in active.items():
+        owned = attributed[index]
+        unexpected = [row for row in owned if row["gpu_uuid"] != item["gpu_uuid"]]
+        item["device_guard"]["samples"] += 1
+        item["device_guard"]["selected_context_seen"] |= any(
+            row["gpu_uuid"] == item["gpu_uuid"] for row in owned
+        )
+        if unexpected:
+            item["device_guard"]["unexpected_contexts"].extend(unexpected)
+            item["device_error"] = (
+                f"Owned GPU contexts violate selected UUID {item['gpu_uuid']}: {unexpected}"
+            )
+        with (item["supervision"] / "device-contexts.jsonl").open(
+            "a", encoding="utf-8"
+        ) as stream:
+            stream.write(
+                json.dumps(
+                    {
+                        "seconds_from_launch": now - item["started"],
+                        "selected_gpu_uuid": item["gpu_uuid"],
+                        "owned_contexts": owned,
+                        "unexpected_contexts": unexpected,
+                    }
+                )
+                + "\n"
+            )
+
+
 def _select_devices(
     requested: list[int] | None, output: Path
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -129,15 +212,6 @@ def _select_devices(
         output / "gpu-preflight.json",
         {"readings": readings, "limitations": _LIMITATIONS},
     )
-    if any(
-        0 not in reading
-        or reading[0]["utilization_percent"] != 0
-        or reading[0]["free_mib"] < 2048
-        for reading in by_id
-    ):
-        raise RuntimeError(
-            "GPU0 bootstrap prerequisite failed: three idle readings and 2GiB free required"
-        )
     ids = requested if requested is not None else sorted(by_id[-1])
     if len(set(ids)) != len(ids) or any(index < 0 for index in ids):
         raise ValueError("GPU IDs must be unique nonnegative physical indices")
@@ -301,7 +375,7 @@ def _command(job: dict[str, Any], gpu: dict[str, Any]) -> list[str]:
         "--output",
         str(job["output"]),
         "--sim-device",
-        f"cuda:{gpu['index']}",
+        "cuda:0",
         "--request-rate",
         str(job["rate"]),
         "--duration-seconds",
@@ -387,6 +461,7 @@ def _supervise(
     active: dict[int, dict[str, Any]] = {}
     results = []
     cancelled = False
+    last_guard = 0.0
 
     def cancel(signum: int, frame: Any) -> None:
         nonlocal cancelled
@@ -422,8 +497,8 @@ def _supervise(
                 supervision.mkdir(parents=True)
                 command = _command(job, gpu)
                 environment = os.environ.copy()
-                environment.pop("CUDA_VISIBLE_DEVICES", None)
                 environment.update(
+                    CUDA_VISIBLE_DEVICES=gpu["uuid"],
                     ODS_GPU_UUID=gpu["uuid"],
                     OMP_NUM_THREADS="1",
                     MKL_NUM_THREADS="1",
@@ -480,6 +555,13 @@ def _supervise(
                     "deadline": started + _deadline(job),
                     "supervision": supervision,
                     "started_ns": started_ns,
+                    "gpu_uuid": gpu["uuid"],
+                    "device_error": None,
+                    "device_guard": {
+                        "samples": 0,
+                        "selected_context_seen": False,
+                        "unexpected_contexts": [],
+                    },
                 }
                 launch["process_launch_monotonic_ns"] = started_ns
                 launch["environment"]["ODS_PROCESS_LAUNCH_MONOTONIC_NS"] = str(
@@ -490,15 +572,35 @@ def _supervise(
                     f"Started {job['suite']}: {job['arm']}/{job['vision']}/seed{job['seed']} on GPU{gpu['index']}",
                     flush=True,
                 )
+            if active and time.monotonic() - last_guard >= 2:
+                try:
+                    _guard_devices(active)
+                except (
+                    OSError,
+                    ValueError,
+                    RuntimeError,
+                    ET.ParseError,
+                    subprocess.SubprocessError,
+                ) as error:
+                    for item in active.values():
+                        item["device_error"] = (
+                            f"Cannot audit owned GPU placement: {error!r}"
+                        )
+                last_guard = time.monotonic()
             for index, item in list(active.items()):
                 process, job = item["process"], item["job"]
                 timeout = time.monotonic() >= item["deadline"]
-                if process.poll() is None and not timeout and not cancelled:
+                if (
+                    process.poll() is None
+                    and not timeout
+                    and not cancelled
+                    and item["device_error"] is None
+                ):
                     continue
-                if timeout or cancelled:
+                if timeout or cancelled or item["device_error"] is not None:
                     _terminate(process)
                 leaked_group = False
-                if not timeout and not cancelled:
+                if not timeout and not cancelled and item["device_error"] is None:
                     try:
                         os.killpg(process.pid, 0)
                     except ProcessLookupError:
@@ -509,15 +611,19 @@ def _supervise(
                 item["stream"].close()
                 summary_path = job["output"] / "summary.json"
                 reason = (
-                    "suite cancellation"
-                    if cancelled
+                    item["device_error"]
+                    if item["device_error"] is not None
                     else (
-                        "process deadline exceeded"
-                        if timeout
+                        "suite cancellation"
+                        if cancelled
                         else (
-                            "Child left an owned process group alive"
-                            if leaked_group
-                            else ""
+                            "process deadline exceeded"
+                            if timeout
+                            else (
+                                "Child left an owned process group alive"
+                                if leaked_group
+                                else ""
+                            )
                         )
                     )
                 )
@@ -541,6 +647,7 @@ def _supervise(
                     "leaked_process_group": leaked_group,
                     "pgid": process.pid,
                     "process_launch_monotonic_ns": item["started_ns"],
+                    "device_guard": item["device_guard"],
                 }
                 _write(job["output"] / "process.json", result)
                 results.append(result)
@@ -609,7 +716,7 @@ def _calibration(
             gamma[job["vision"]] = stats["successful_episodes"] / seconds
             capacities[key] = {
                 "chunks_per_second": _BASE["batch_size"] / service,
-                "scope": "observed batch-service p50 estimate under protected production, including flow waits; not an isolated maximum",
+                "scope": "successful immediate Source sampling/copy and RGB conversion p50 with concurrent production; excludes Flow retry waits; not an isolated maximum",
             }
         else:
             rate = metrics.get("delivered_chunks_per_second")
@@ -704,6 +811,7 @@ def run_suite(args: argparse.Namespace) -> dict[str, Any]:
                 "taskset is required to assign eight disjoint CPUs per child"
             )
         devices, _ = _select_devices(args.gpu_ids, args.output)
+        _gpu_contexts()  # Qualification requires compute and graphics visibility.
         if (
             protocol is not None
             and sorted({gpu["name"] for gpu in devices}) != protocol["gpu_models"]
@@ -711,7 +819,13 @@ def run_suite(args: argparse.Namespace) -> dict[str, Any]:
             raise RuntimeError(
                 "Selected GPU models differ from the frozen calibration hardware"
             )
-    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+    except (
+        OSError,
+        ValueError,
+        RuntimeError,
+        ET.ParseError,
+        subprocess.SubprocessError,
+    ) as error:
         preflight_error = repr(error)
         for job in jobs:
             job["output"].mkdir(parents=True)

@@ -662,6 +662,46 @@ def run_one(args: argparse.Namespace) -> dict[str, Any]:
             if args.arm in ("frozen", "lerobot_same_cache")
             else args.accepted_episodes
         )
+        expected_generations = expected_count // args.buffer_size
+        # Acceptance is counted before the final row is published/unlocked.
+        # Formal runs must prove the complete finite supply, not only N accepts.
+        if stats:
+            complete_supply = (
+                stats.get("completed_generation") == expected_generations
+                and stats.get("requested_generation") == expected_generations
+                and set(tracker.publications) == set(range(1, expected_generations + 1))
+                and all(
+                    len(sources) == args.buffer_size
+                    for sources in tracker.publications.values()
+                )
+                and len(
+                    {
+                        source
+                        for sources in tracker.publications.values()
+                        for source in sources
+                    }
+                )
+                == expected_count
+            )
+        else:
+            visible_ids = {
+                tuple(row["source_id"]) for row in budget.get("episodes", [])
+            }
+            corpus_rows = [
+                row
+                for row in reader.manifest["episodes"]
+                if tuple(row["source_id"]) in visible_ids
+            ]
+            complete_supply = (
+                len(corpus_rows) == expected_count
+                and len({tuple(row["source_id"]) for row in corpus_rows})
+                == expected_count
+                and all(
+                    sum(row["generation"] == generation for row in corpus_rows)
+                    == args.buffer_size
+                    for generation in range(1, expected_generations + 1)
+                )
+            )
         checks = {
             "valid_batches": bool(tracker.window_delivered),
             "cap": metrics["cap_violations"] == 0,
@@ -692,6 +732,9 @@ def run_one(args: argparse.Namespace) -> dict[str, Any]:
                 actual_count == expected_count
                 if args.suite_tag in ("report", "appendix")
                 else True
+            ),
+            "complete_publication": (
+                complete_supply if args.suite_tag in ("report", "appendix") else True
             ),
         }
         metrics["qualification_checks"] = checks

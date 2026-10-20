@@ -50,15 +50,18 @@ python -m examples.ods.data_stream_demo.run --help
 Select idle physical GPUs and CPU thread settings before starting Python:
 
 ```bash
-unset CUDA_VISIBLE_DEVICES
+export CUDA_VISIBLE_DEVICES="$(nvidia-smi --id=3 --query-gpu=uuid --format=csv,noheader)"
+export ODS_GPU_UUID="$CUDA_VISIBLE_DEVICES"
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 ```
 
-Pass physical GPU3 as `--sim-device cuda:3` for a single run, or use
-`--gpu-ids 3` for a suite. Native Vulkan does not reliably apply CUDA ordinal
-masking, so the launcher unsets `CUDA_VISIBLE_DEVICES` and passes physical
-indices directly. GPU3 is an example selection, not a reservation. Check
-that the selected device is idle and has enough memory. Do not silently shrink an unsupported
+This selects physical GPU3 by its NVML UUID. Pass logical
+`--sim-device cuda:0` for the single run, or use `--gpu-ids 3` for a suite.
+The supported matching native runtime maps the visible CUDA UUID to the same
+Vulkan UUID. Qualify that mapping with the actual ODS subprocess path before
+running the matrix; an unmasked physical-ordinal run is not a fallback.
+GPU3 is an example selection, not a reservation. Check that the selected
+device is idle and has enough memory. Do not silently shrink an unsupported
 workload. The default dual-camera native image cache alone occupies about
 2.34 GiB; a returned RGB float32 batch contains about 1.55 GiB of image
 payload, before decoder, normalization and prefetch temporaries. Shared
@@ -81,11 +84,11 @@ Use a fresh output directory for every run. The stable single-run entry is:
 
 ```bash
 python -m examples.ods.data_stream_demo.run \
-  --suite single --arm protected --vision state --sim-device cuda:3 \
+  --suite single --arm protected --vision state --sim-device cuda:0 \
   --output outputs/ods-stream/protected-state
 
 python -m examples.ods.data_stream_demo.run \
-  --suite single --arm lerobot --vision single --sim-device cuda:3 \
+  --suite single --arm lerobot --vision single --sim-device cuda:0 \
   --output outputs/ods-stream/lerobot-single
 ```
 
@@ -105,13 +108,17 @@ python -m examples.ods.data_stream_demo.run \
 `--gpu-ids` accepts physical GPU IDs. If omitted, the launcher selects devices
 with three zero-utilization readings and at least 16 GiB free, then assigns at
 most one child per selected GPU and eight disjoint CPUs per child. It sets
-`ODS_GPU_UUID` for instrumentation without masking physical ordinals.
-Reproduction does not require several GPUs.
+both `CUDA_VISIBLE_DEVICES` and `ODS_GPU_UUID` to the selected physical UUID,
+then passes logical `cuda:0`. Reproduction does not require several GPUs.
 
-The native runtime may also create an approximately 338 MiB bootstrap context
-on GPU0. GPU0 must pass three idle readings with at least 2 GiB free, even when
-another GPU is selected. This is a recorded shared-device limitation, not an
-exclusive-GPU claim. The launcher does not terminate unrelated processes.
+The parent periodically audits compute and graphics contexts belonging to
+its child PID tree or process group. An owned context on another GPU fails
+the cell and terminates only that owned process group. Context samples are
+retained below `_supervision/`; unrelated processes are never terminated.
+There is no global GPU0-idle prerequisite. Periodic checks can miss short-lived
+contexts, so they supplement qualification of the matching native UUID mapping
+and do not establish an exclusive-device reservation. Previously blocked
+calibration attempts remain failed evidence and do not become a usable protocol.
 
 Smoke checks all nine main cells with one seed, C=P=2, N=8, B=4, K=8,
 30 seconds of consumption and a 16 chunks/s offered load. Images and context

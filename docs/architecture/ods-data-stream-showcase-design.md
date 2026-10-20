@@ -237,9 +237,10 @@ difference to the memory transport. This baseline is the local finalized
 `LeRobotDataset` path, not `StreamingLeRobotDataset`, and does not establish
 that the LeRobot ecosystem cannot stream data.
 
-Use preflight ODS accepted-acquisition rates gamma_v and isolated ready-source
-capacities mu_backend,v for each visual condition, including the standard
-decoded LeRobot reader. Freeze one common nominal demand
+Use preflight ODS accepted-acquisition rates gamma_v, ODS immediate sampling
+service estimates under concurrent production, and ready-source delivery
+capacities for the standard decoded LeRobot reader in each visual condition.
+These measure different components and are labeled separately. Freeze one common nominal demand
 R=4K*max(gamma_v) and one consumption window
 T=max(180 seconds, max(4C/gamma_v)), with a 900-second ceiling. Do not reduce
 R to the slowest decoder's capacity: inability to serve offered load is a
