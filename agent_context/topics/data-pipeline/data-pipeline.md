@@ -16,6 +16,7 @@ belongs to [data-assets](../data-assets/data-assets.md).
 | Shared sequence contract and sources | `embodichain/data_pipeline/datasets/sequence.py`, `sources.py`, `_sampling.py` |
 | Bounded numeric LeRobot loading | `embodichain/data_pipeline/datasets/lerobot.py`: `LeRobotDataSource`, explicit field mapping |
 | Local Franka ChunkBC demo and offline comparisons | `examples/ods/simple_bc_demo/train.py`; local task/config/model/trainer/evaluator and evidence in the same directory |
+| Pure delivery capability and standard video decoding comparison | `examples/ods/data_stream_demo/run.py`, `suite.py`, `report.py`; no learner, real SDK/DataLoader decode and parent-owned prefetch quotas |
 | Commit/discard/finalization dispatch | `embodichain/lab/gym/envs/managers/dataset_manager.py` |
 | Synchronous LeRobot persistence | `embodichain/lab/gym/envs/managers/datasets.py`: `LeRobotRecorder` |
 | Background persistence | `embodichain/lab/gym/envs/managers/async_datasets.py`: `AsyncLeRobotRecorder` |
@@ -37,6 +38,12 @@ and [configuration/runtime checks](../../../docs/source/features/ods/configurati
 Example-local documentation owns its task binding, CLI/artifact names,
 comparison protocol and historical evidence. Keep generic operational contracts
 in the core guides.
+
+The [ODS capability-showcase design](../../../docs/architecture/ods-data-stream-showcase-design.md)
+owns the standard-decoded LeRobot/state/single/dual-camera comparison protocol.
+Its example-local decoded reader is separate from the public resident numeric
+reader. Follow it for the offline baseline, camera-profile qualification and
+timing boundaries; engineering success does not establish formal performance.
 
 `BatchSource.sample_context()` returns owned TensorDicts under a shared
 `SequenceSpecCfg`; `SequenceDataset` supplies the common iteration interface.
