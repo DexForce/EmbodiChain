@@ -71,7 +71,7 @@ The ``LeRobotRecorder`` functor enables recording robot learning episodes in the
 ``save_failed_episodes`` is a {class}`~cfg.DatasetFunctorCfg` lifecycle option,
 not a recorder constructor parameter. Place it beside ``func`` and ``mode`` in
 JSON/YAML, or pass it directly to ``DatasetFunctorCfg`` in Python. Its default
-is ``false``. During ``run-env`` expert generation:
+is ``false``. During ``run-task`` expert generation:
 
 - ``false`` discards and retries failed or truncated attempts;
 - ``true`` commits a failed/truncated attempt when every selected environment

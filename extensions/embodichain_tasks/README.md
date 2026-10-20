@@ -128,9 +128,10 @@ qualifying trajectories, seeds, or backend settings.
 
 Verified tabletop policies request explicit planning speed and acceleration
 budgets, still capped by robot joint limits. UR10 hand-over selects the slower
-0.1 speed budget, 360 motion samples and 40-step hand interpolations; the shared
-verified policy uses 0.2. This preserves physically
-qualified transfers when planner defaults follow a robot's higher nominal limits.
+0.1 speed budget, a minimum motion-sample budget of 360 and 40-step hand
+interpolations; the shared verified policy uses 0.2. Native trajectory timing is
+preserved. Verified actions allow 120 seconds, and the shared hand-over scene
+allows 3200 control steps for the full transfer and measured-effect gates.
 
 Example:
 
@@ -193,20 +194,20 @@ selected by the `"id"` field of the gym config.
 
 ```bash
 # Data expansion mode
-embodichain run-env --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml
+embodichain run-task --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml
 
 # Newton variant selected from the same deployment
-embodichain run-env --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml --physics newton
+embodichain run-task --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml --physics newton
 
 # Preview mode
-embodichain run-env --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml --preview
+embodichain run-task --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml --preview
 
 # Equivalent invocations
-python -m embodichain run-env --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml
-python -m embodichain.lab.scripts.run_env --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml
+python -m embodichain run-task --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml
+python -m embodichain.lab.scripts.run_task --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml
 
 # Newton variant selected from the same deployment
-python -m embodichain run-env --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/open_drawer/task.ur5.yaml --physics newton
+python -m embodichain run-task --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/open_drawer/task.ur5.yaml --physics newton
 ```
 
 ## How registration works
@@ -252,7 +253,7 @@ To add a task environment:
 4. **Install and run**:
    ```bash
    pip install -e .
-   embodichain run-env --gym_config path/to/your/gym_config.json
+   embodichain run-task --gym_config path/to/your/gym_config.json
    ```
 
 If your tasks need custom manager modules (observation/reward/event/action

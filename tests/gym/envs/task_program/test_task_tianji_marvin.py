@@ -148,7 +148,8 @@ def test_marvin_deployments_preflight_and_register(
     assert compiled.segment_count == segments
     assert registration.robot_profile_binding.profile_id == "tianji_marvin"
     assert isinstance(cfg.sim_cfg.physics_config, DefaultPhysicsCfg)
-    assert cfg.sensor == []
+    assert [camera.uid for camera in cfg.sensor] == ["cam_high"]
+    assert cfg.sensor[0].enable_color
     assert "init_qpos" not in payload["embodiment"].get("overrides", {})
     assert cfg.robot.init_qpos == TianjiMarvinCfg.from_dict({}).init_qpos
     assert physical.config["robot"]["init_qpos"] == cfg.robot.init_qpos

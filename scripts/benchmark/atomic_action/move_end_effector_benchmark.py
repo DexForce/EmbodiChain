@@ -18,7 +18,7 @@
 
 Measures planning latency, memory usage, trajectory success, and final TCP
 translation error for several reachable pose targets.
-Run: embodichain benchmark atomic-action --action move_end_effector
+Run: embodichain benchmark atomic-action-profile --action move_end_effector
 """
 
 from __future__ import annotations

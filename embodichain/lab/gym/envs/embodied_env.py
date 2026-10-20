@@ -2356,10 +2356,8 @@ class EmbodiedEnv(BaseEnv):
         Override this method in subclass to define task-specific logic for RL tasks.
 
         Returns:
-            Tuple of (success, fail, metrics):
-                - success: Boolean tensor of shape (num_envs,)
-                - fail: Boolean tensor of shape (num_envs,)
-                - metrics: Dict of metric tensors
+            tuple[torch.Tensor, torch.Tensor, dict[str, Any]]: Success and failure
+            masks of shape ``(num_envs,)``, followed by the metric tensor mapping.
         """
         success = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         fail = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)

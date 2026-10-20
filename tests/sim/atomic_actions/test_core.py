@@ -555,13 +555,30 @@ def test_motion_policy_rejects_invalid_planning_budgets(
         MotionPolicy(strategy="motion_gen", **{name: value})
 
 
-def test_motion_policy_rejects_ambiguous_or_unused_planning_budgets() -> None:
-    with pytest.raises(ValueError, match="motion_gen"):
-        MotionPolicy(velocity_limit=0.2)
-    with pytest.raises(ValueError, match="mutually exclusive"):
-        MotionPolicy(
-            strategy="motion_gen", velocity_limit=0.2, plan_opts=ToppraPlanOptions()
-        )
+def test_motion_policy_forwards_interpolation_planning_budgets() -> None:
+    policy = MotionPolicy(velocity_limit=0.2, acceleration_limit=0.5)
+    options = policy.to_motion_gen_options(
+        start_qpos=torch.zeros(1, 6), control_part="arm"
+    )
+    assert options.strategy == "ik_interp"
+    assert options.velocity_limit == 0.2
+    assert options.acceleration_limit == 0.5
+
+
+def test_motion_policy_preserves_existing_positional_constructor_order() -> None:
+    policy = MotionPolicy(
+        "ik_interp",
+        50,
+        "zero",
+        DynamicCollisionMode.OFF,
+        None,
+    )
+
+    assert policy.velocity_targets == "zero"
+    assert policy.dynamic_collision_mode is DynamicCollisionMode.OFF
+    assert policy.plan_opts is None
+    assert policy.velocity_limit is None
+    assert policy.acceleration_limit == pytest.approx(0.5)
 
 
 def test_motion_policy_maps_to_motion_generator_strategy() -> None:
@@ -590,7 +607,7 @@ def test_motion_policy_maps_to_motion_generator_strategy() -> None:
     assert options.control_part == "arm"
     assert options.interpolation_dt == pytest.approx(0.02)
     assert options.velocity_limit is None
-    assert options.acceleration_limit is None
+    assert options.acceleration_limit == pytest.approx(0.5)
     assert isinstance(options.plan_opts, ToppraPlanOptions)
     assert options.plan_opts.constraints == {"velocity": 0.2, "acceleration": 0.5}
 
@@ -1622,6 +1639,13 @@ def test_timed_trajectory_concatenates_metadata() -> None:
 def test_interpolation_policy_rejects_backend_options_at_construction() -> None:
     with pytest.raises(ValueError, match="plan_opts"):
         MotionPolicy(strategy="ik_interp", plan_opts=ToppraPlanOptions())
+
+
+@pytest.mark.parametrize("value", [0.0, -1.0, float("inf"), float("nan")])
+@pytest.mark.parametrize("name", ["velocity_limit", "acceleration_limit"])
+def test_motion_policy_rejects_invalid_motion_limits(name: str, value: float) -> None:
+    with pytest.raises(ValueError, match=name):
+        MotionPolicy(**{name: value})
 
 
 def test_fixed_cartesian_policy_requires_explicit_interpolation_strategy() -> None:

@@ -223,7 +223,7 @@ class _Deployment:
             return None
         path = _local_path(self.resource)
         reference = str(path) if path is not None else self.config_ref
-        return f"embodichain run-env --gym_config {shlex.quote(reference)}"
+        return f"embodichain run-task --gym_config {shlex.quote(reference)}"
 
 
 @dataclass

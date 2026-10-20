@@ -33,11 +33,8 @@ from embodichain.lab.gym.utils.registration import build_env
 from embodichain.lab.sim import SimulationManagerCfg
 from embodichain.lab.sim.cfg import RenderCfg
 from embodichain.learning.rl.env import build_learning_env
-from embodichain.learning.rl.models import (
-    build_mlp_from_cfg,
-    build_policy,
-    resolve_policy_obs_groups,
-)
+from embodichain.learning.models import build_mlp_from_cfg
+from embodichain.learning.rl.policies import build_policy, resolve_policy_obs_groups
 from embodichain.learning.rl.utils import (
     dict_to_tensordict,
     flatten_observation_groups,

@@ -420,13 +420,10 @@ def _motion_policy_to_metadata(policy: MotionPolicy) -> dict[str, object]:
     return {
         "strategy": policy.strategy,
         "sample_count": policy.sample_count,
+        "velocity_limit": _metadata_value(policy.velocity_limit),
+        "acceleration_limit": _metadata_value(policy.acceleration_limit),
         "dynamic_collision_mode": policy.dynamic_collision_mode.value,
         "plan_options": options_metadata,
-        **{
-            name: getattr(policy, name)
-            for name in ("velocity_limit", "acceleration_limit")
-            if getattr(policy, name) is not None
-        },
     }
 
 

@@ -172,8 +172,8 @@ def decode_mllm_task_program(
 
     Raises:
         TypeError: If ``integration`` is not an exact integration config.
-        TaskProgramDecodeError: If JSON, schema, or MLLM policy validation
-            fails.
+        embodichain.lab.task_program.TaskProgramDecodeError: If JSON, schema,
+            or MLLM policy validation fails.
     """
     if type(integration) is not TaskProgramIntegrationCfg:
         raise TypeError("integration must be exactly TaskProgramIntegrationCfg.")
@@ -224,8 +224,8 @@ def compile_mllm_task_program(
 
     Raises:
         TypeError: If ``adapter`` or ``integration`` has the wrong exact type.
-        TaskProgramDecodeError: If JSON, schema, or MLLM policy validation
-            fails.
+        embodichain.lab.task_program.TaskProgramDecodeError: If JSON, schema,
+            or MLLM policy validation fails.
     """
     if type(adapter) is not TaskProgramEnvironmentAdapter:
         raise TypeError("adapter must be exactly TaskProgramEnvironmentAdapter.")

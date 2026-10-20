@@ -203,8 +203,15 @@ def capture_state(view: SceneView) -> SceneState:
 
 
 def _preflight_restore(
-    view: SceneView, snapshot: SceneState
+    view: SceneView, snapshot: SceneState, *, qpos_tolerance: float = 0.0
 ) -> dict[str, tuple[object, dict[str, torch.Tensor]]]:
+    if (
+        isinstance(qpos_tolerance, bool)
+        or not isinstance(qpos_tolerance, Real)
+        or not math.isfinite(qpos_tolerance)
+        or qpos_tolerance < 0
+    ):
+        raise ValueError("qpos_tolerance must be finite and nonnegative")
     view.check_topology()
     if not isinstance(snapshot, SceneState):
         raise TypeError("snapshot must be a SceneState")
@@ -271,10 +278,11 @@ def _preflight_restore(
                     f"Entity {state.uid!r} has invalid joint position limits"
                 )
             for name in ("qpos", "target_qpos"):
+                tolerance = qpos_tolerance if name == "qpos" else 0.0
                 if bool(
                     (
-                        (tensors[name] < limits[..., 0])
-                        | (tensors[name] > limits[..., 1])
+                        (limits[..., 0] - tensors[name] > tolerance)
+                        | (tensors[name] - limits[..., 1] > tolerance)
                     ).any()
                 ):
                     raise ValueError(
@@ -284,18 +292,25 @@ def _preflight_restore(
     return prepared
 
 
-def restore_state(view: SceneView, snapshot: SceneState) -> None:
+def restore_state(
+    view: SceneView, snapshot: SceneState, *, qpos_tolerance: float = 0.0
+) -> None:
     """Restore a captured state without stepping, after complete preflight.
 
     Args:
         view: Original scene selection with unchanged bindings.
         snapshot: Owned state captured from the same simulation.
+        qpos_tolerance: Maximum allowed measured joint-position limit excursion.
+            Defaults to strict rejection. An explicit tolerance permits the
+            articulation writer to clip measured positions by that amount;
+            controller targets remain strict. Callers must verify the actual
+            restored state against their acceptance tolerances.
     Raises:
         ValueError: For unsupported topology, foreign state, or saved joint
             positions/targets outside current limits, before any writes.
         RuntimeError: For native writes that failed; partial writes are not rolled back.
     """
-    prepared = _preflight_restore(view, snapshot)
+    prepared = _preflight_restore(view, snapshot, qpos_tolerance=qpos_tolerance)
 
     try:
         for state in snapshot.batches[0]:

@@ -19,7 +19,7 @@ inactive rows still hold their measured positions.
 From the repository root, using the project's simulation Python environment:
 
 ```bash
-python -m embodichain run-env \
+python -m embodichain run-task \
   --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml
 ```
 
@@ -96,7 +96,7 @@ object-to-TCP grasp, and the dual-arm variant of the slow projected policy
 with 480 samples. The robot's base placement adapts it to the existing scene.
 
 ```bash
-python -m embodichain run-env \
+python -m embodichain run-task \
   --gym-config extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.tianji_marvin.yaml \
   --headless --viser --renderer hybrid --seed 0 --max_episodes 1 --filter-dataset-saving
 ```

@@ -30,7 +30,8 @@ from typing import Any
 import pytest
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
-_SUBPROCESS_TIMEOUT_SECONDS = 180
+# Slow transfers preserve native timing, then replay the complete command stream.
+_SUBPROCESS_TIMEOUT_SECONDS = 360
 # Keep room for the configured contact offsets on both scene assets.
 _MIN_STAND_CLEARANCE_M = 0.015
 _RUN_EPISODE = (

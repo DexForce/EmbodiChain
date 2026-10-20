@@ -107,6 +107,13 @@ Ownership is explicit rather than a generic deep merge:
   effect-assurance policy. Planner collision objects are attached from the
   selected live scene and are not serialized in the policy.
 
+Configured `motion` policies accept optional finite, strictly positive
+`velocity_limit` and `acceleration_limit` values. Configured Pour action options
+accept a finite, non-negative `dwell_duration`; unknown timing keys still fail
+the closed-field decoder. Omitting `velocity_limit` preserves the Robot's
+ordered per-joint speed caps; an explicit scalar request is intersected with
+those caps rather than replacing them.
+
 Grasp generators select toolkit-owned geometry with a string `model` ID;
 an inline mapping is a custom calibration and its `model_id` does not trigger
 catalog lookup. The catalog is owned by
@@ -177,3 +184,12 @@ parent's measured position while its offset and orientation stay in world axes.
 This distinction matters for left/right sorting after reference-object rotation.
 World-axis targets fingerprint both their frame and declared pose; static
 manifests and live registries retain the same identity.
+
+
+## Asset role requirements
+
+An integration may declare optional `asset_requirements`; decoding validates its
+closed role/relation contract without contacting providers. Offline asset
+materialization owns selection and emits a new bound deployment before ordinary
+compilation. See [asset generalization](../asset-generalization/asset-generalization.md)
+for supported adaptations, provenance and integrity boundaries.

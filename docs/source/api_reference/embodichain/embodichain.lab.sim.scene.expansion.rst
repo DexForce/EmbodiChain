@@ -80,10 +80,6 @@ checks, and task semantics remain explicit host responsibilities. To evaluate
 one proposal through the shared Task Program executor, use
 :mod:`embodichain.lab.task_program.integrations.scene_expansion`.
 
-Compatibility imports from ``embodichain.lab.sim.scene_expansion`` remain
-available and refer to the same classes and proposal identities. New code
-should use ``embodichain.lab.sim.scene.expansion``.
-
 Public contracts
 ----------------
 

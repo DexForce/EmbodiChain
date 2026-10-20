@@ -59,7 +59,7 @@ Inspect the available deployments:
 
 ```bash
 embodichain show-task embodichain_tasks:repeated_pick_place
-embodichain run-env \
+embodichain run-task \
   --gym-config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml
 ```
 
@@ -148,7 +148,7 @@ measured drop onto the support are observed before retracting.
 Run without creating a training dataset:
 
 ```bash
-python -m embodichain run-env \
+python -m embodichain run-task \
   --gym-config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.tianji_marvin.yaml \
   --headless --viser --renderer hybrid --seed 0 --max_episodes 1 --filter-dataset-saving
 ```

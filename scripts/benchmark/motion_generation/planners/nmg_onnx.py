@@ -59,6 +59,32 @@ class NmgOnnxAdapter(PlannerAdapter):
         super().__init__(spec, context)
         self.motion_generator: MotionGenerator | None = None
 
+    @property
+    def retime(self) -> bool:
+        """Whether this row re-parameterizes the rollout under dynamic limits."""
+        return bool(self.spec.config.get("retime", False))
+
+    @property
+    def timing_is_solved(self) -> bool:
+        """Whether reported timing is solved rather than nominal.
+
+        Without retiming the policy integrates a joint delta per step and never
+        solves a duration, so its ``dt`` carries no executable timing and the
+        row must be reported as N/A. Retiming replaces that constant with a
+        solved parameterization, which makes the duration comparable.
+        """
+        return self.retime
+
+    def _retiming_constraints(self) -> dict[str, object]:
+        """Use the shared suite budgets and strictest effective Robot caps."""
+        limits = self.resolve_motion_limits(require_timing=True)
+        num_joints = int(self.spec.config.get("num_arm_joints", 7))
+        if len(limits["velocity"]) != num_joints:
+            raise ValueError(
+                "NMG num_arm_joints must match the control-part joint count."
+            )
+        return {"velocity": limits["velocity"], "acceleration": limits["acceleration"]}
+
     def _resolved_model_revision(self) -> str:
         """Use an explicit revision or derive one from the runtime ONNX path."""
         configured = self.spec.config.get("model_revision")
@@ -110,6 +136,7 @@ class NmgOnnxAdapter(PlannerAdapter):
 
     def build(self) -> None:
         """Construct the ONNX-backed MotionGenerator."""
+        self.resolve_motion_limits(require_timing=self.retime)
         values = self.spec.config
         model_path = str(Path(str(values["onnx_model_path"])).expanduser())
         providers = values.get("onnx_providers")
@@ -132,6 +159,7 @@ class NmgOnnxAdapter(PlannerAdapter):
             policy_frame_from_world=values.get("policy_frame_from_world"),
             runtime_tcp_from_policy_tcp=values.get("runtime_tcp_from_policy_tcp"),
             dt=float(values.get("dt", 0.01)),
+            constraints=self._retiming_constraints() if self.retime else None,
         )
         self.motion_generator = MotionGenerator(MotionGenCfg(planner_cfg=planner_cfg))
 

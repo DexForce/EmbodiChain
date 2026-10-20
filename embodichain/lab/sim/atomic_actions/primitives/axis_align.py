@@ -381,8 +381,13 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
         )
         full[:] = context.last_qpos.unsqueeze(1)
         offset = pre_close_arm.shape[1]
+        approach_hand = interpolate_hand_qpos(
+            context.last_qpos[:, hand_joint_ids],
+            hand_open_qpos,
+            n_waypoints=offset,
+        )
         full[:, :offset, arm_joint_ids] = pre_close_arm
-        full[:, :offset, hand_joint_ids] = hand_open_qpos.unsqueeze(1)
+        full[:, :offset, hand_joint_ids] = approach_hand
         stop = offset + hand_close.shape[1]
         full[:, offset:stop, arm_joint_ids] = pre_close_arm[:, -1].unsqueeze(1)
         full[:, offset:stop, hand_joint_ids] = hand_close
@@ -533,8 +538,12 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
         )
         assert isinstance(result.success, torch.Tensor)
         assert result.positions is not None
+        assert result.dt is not None
         return result.success, resample_planned_trajectory(
-            result.positions, sample_count
+            result.positions,
+            sample_count,
+            dt=result.dt,
+            control_dt=interpolation_dt,
         )
 
     def _axis_alignment_eef_keyframes(

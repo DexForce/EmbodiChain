@@ -293,6 +293,10 @@ def interpolate_hand_qpos(
     n_waypoints: int,
 ) -> torch.Tensor:
     """Interpolate hand joint positions between two semantic commands."""
+    if isinstance(n_waypoints, bool) or not isinstance(n_waypoints, int):
+        raise TypeError("n_waypoints must be an integer.")
+    if n_waypoints < 1:
+        raise ValueError("n_waypoints must be at least one.")
     is_unbatched = start_hand_qpos.dim() == 1 and end_hand_qpos.dim() == 1
     end_hand_qpos = end_hand_qpos.to(
         device=start_hand_qpos.device,
@@ -302,12 +306,20 @@ def interpolate_hand_qpos(
         start_hand_qpos = start_hand_qpos.unsqueeze(0)
     if end_hand_qpos.dim() == 1:
         end_hand_qpos = end_hand_qpos.unsqueeze(0)
-    weights = torch.linspace(
-        0,
-        1,
-        steps=n_waypoints,
-        device=start_hand_qpos.device,
-        dtype=start_hand_qpos.dtype,
+    weights = (
+        torch.ones(
+            1,
+            device=start_hand_qpos.device,
+            dtype=start_hand_qpos.dtype,
+        )
+        if n_waypoints == 1
+        else torch.linspace(
+            0,
+            1,
+            steps=n_waypoints,
+            device=start_hand_qpos.device,
+            dtype=start_hand_qpos.dtype,
+        )
     )
     result = torch.lerp(
         start_hand_qpos.unsqueeze(1),

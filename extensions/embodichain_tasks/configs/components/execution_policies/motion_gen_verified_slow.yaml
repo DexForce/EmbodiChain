@@ -16,6 +16,8 @@ tracking:
   in_flight_max_abs_error: 1.0
   terminal_max_abs_error: 1.0
 recovery:
+  # Leave time for the full limit-aware two-arm transfer and effect gates.
+  action_timeout: 120.0
   max_replans: 3
   max_action_retries: 0
   goal_rotation_threshold: 0.5

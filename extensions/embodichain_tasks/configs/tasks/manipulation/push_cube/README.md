@@ -6,7 +6,7 @@ configuration through `trainer.gym_config`.
 
 ```bash
 embodichain show-task embodichain_tasks:push_cube
-embodichain run-env --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/push_cube/env.json
+embodichain run-task --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/push_cube/env.json
 embodichain train-rl --config extensions/embodichain_tasks/configs/tasks/manipulation/push_cube/agents/ppo.json
 ```
 

@@ -253,3 +253,13 @@ tasks can stay directly under `manipulation`.
 Do not organize task ownership around a solution method such as `rl` or
 `task_program`. Keep registration in the task-named module and do not create
 a same-named Python package for a task that has only one Python entry point.
+
+
+## Explicit local resource paths
+
+Mesh `fpath`, `urdf_path`, and `xml_path` values prefixed with `./` or `../`
+resolve from the physical environment, scene, or embodiment component that
+declares them. Inline resources resolve from the deployment file. Bare dataset
+identifiers retain the existing data registry behavior and are not probed against
+the current working directory. Asset-batch materialization uses this boundary;
+see [asset generalization](../asset-generalization/asset-generalization.md).

@@ -29,7 +29,7 @@ import torch
 import wandb
 from torch.utils.tensorboard import SummaryWriter
 
-from embodichain.learning.rl.models import get_registered_policy_names
+from embodichain.learning.rl.policies import get_registered_policy_names
 from embodichain.learning.rl.policy_evaluation.manifest import (
     write_run_manifest,
 )
@@ -703,7 +703,7 @@ def cli(argv: Sequence[str] | None = None) -> None:
     Task packages are discovered (and init hooks executed) before training so
     that task environments registered in separate packages (e.g.
     ``embodichain_tasks``) are available to ``build_env``. This mirrors the
-    ``run_env`` CLI.
+    ``run_task`` CLI.
     """
     args = parse_args(argv)
 

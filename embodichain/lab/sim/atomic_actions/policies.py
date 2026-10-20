@@ -18,10 +18,11 @@
 
 from __future__ import annotations
 
+import math
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
-import math
 from numbers import Real
 from typing import TYPE_CHECKING, Literal
 
@@ -63,7 +64,7 @@ class MotionPolicy:
     """Motion strategy: ``motion_gen`` or ``ik_interp``."""
 
     sample_count: int = 50
-    """Requested trajectory sample count when the backend does not preserve samples."""
+    """Minimum trajectory sample count when the backend does not preserve samples."""
 
     velocity_targets: Literal["auto", "zero"] = "auto"
     """Use trajectory velocities or explicit zero velocity targets."""
@@ -75,10 +76,10 @@ class MotionPolicy:
     """Optional typed planner-specific options."""
 
     velocity_limit: float | None = None
-    """Optional joint-speed budget for compatible motion planners, capped by the robot."""
+    """Optional scalar speed request, capped by effective Robot joint limits."""
 
-    acceleration_limit: float | None = None
-    """Optional joint-acceleration budget for compatible motion planners."""
+    acceleration_limit: float = 0.5
+    """Scalar planner-owned acceleration budget in joint units per second squared."""
 
     def __post_init__(self) -> None:
         valid_strategies = {"motion_gen", "ik_interp"}
@@ -91,31 +92,22 @@ class MotionPolicy:
             raise ValueError(
                 "plan_opts requires strategy='motion_gen'; ik_interp bypasses the backend."
             )
-        has_limits = any(
-            value is not None
-            for value in (self.velocity_limit, self.acceleration_limit)
-        )
-        if has_limits and self.strategy != "motion_gen":
-            raise ValueError("Joint planning limits require strategy='motion_gen'.")
-        if has_limits and self.plan_opts is not None:
-            raise ValueError(
-                "Joint planning limits and plan_opts are mutually exclusive."
-            )
-        for name in ("velocity_limit", "acceleration_limit"):
-            value = getattr(self, name)
-            if value is not None:
-                if (
-                    isinstance(value, bool)
-                    or not isinstance(value, Real)
-                    or not math.isfinite(value)
-                    or value <= 0
-                ):
-                    raise ValueError(f"{name} must be finite and positive.")
-                object.__setattr__(self, name, float(value))
         if self.velocity_targets not in {"auto", "zero"}:
             raise ValueError("velocity_targets must be auto or zero.")
         if self.sample_count < 2:
             raise ValueError("sample_count must be at least 2.")
+        for name in ("velocity_limit", "acceleration_limit"):
+            value = getattr(self, name)
+            if value is None and name == "velocity_limit":
+                continue
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, Real)
+                or not math.isfinite(value)
+                or value <= 0.0
+            ):
+                raise ValueError(f"{name} must be finite and greater than zero.")
+            object.__setattr__(self, name, float(value))
         mode = self.dynamic_collision_mode
         if isinstance(mode, str):
             try:
@@ -140,6 +132,9 @@ class MotionPolicy:
         sample_count: int | None = None,
         interpolation_dt: float | None = None,
         cartesian_linear: bool = False,
+        cartesian_path_sampler: (
+            Callable[["torch.Tensor"], "torch.Tensor"] | None
+        ) = None,
     ) -> "MotionGenOptions":
         """Translate this atomic policy into motion-generator options.
 
@@ -151,6 +146,9 @@ class MotionPolicy:
                 deterministic interpolation.
             cartesian_linear: Whether every supplied Cartesian keyframe is a
                 required linear-path sample rather than a sparse endpoint.
+            cartesian_path_sampler: Optional exact-path sampler receiving
+                normalized progress values. Use this for constrained curves
+                such as rotations about an external hinge.
 
         Returns:
             Independently owned options for :class:`MotionGenerator`.
@@ -171,15 +169,16 @@ class MotionPolicy:
         return MotionGenOptions(
             strategy=self.strategy,
             sample_count=self.sample_count if sample_count is None else sample_count,
+            velocity_limit=self.velocity_limit,
+            acceleration_limit=self.acceleration_limit,
             start_qpos=start_qpos,
             control_part=control_part,
             plan_opts=self.plan_opts,
-            velocity_limit=self.velocity_limit,
-            acceleration_limit=self.acceleration_limit,
             is_interpolate=self.strategy == "motion_gen",
             interpolation_dt=interpolation_dt,
             is_linear=cartesian_linear,
             preserve_cartesian_samples=cartesian_linear,
+            cartesian_path_sampler=cartesian_path_sampler,
         )
 
 

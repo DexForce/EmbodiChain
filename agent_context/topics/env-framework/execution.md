@@ -115,7 +115,7 @@ stable online language IDs. Language intent does not establish physical success.
 - Environments without a Task Program keep the ordinary `BaseEnv.is_task_success()`
   behavior and task-specific overrides.
 
-### Segment terminal progress (`demo.py`, `run_env.py`)
+### Segment terminal progress (`demo.py`, `run_task.py`)
 
 Every demo path reaches the same terminal `tqdm` wrapper through
 `execute_demo_episode()`. A `DemoSegment` can declare an exact
@@ -291,6 +291,6 @@ not orchestrate multiple experiments or qualify kinematic playback.
 - **Fixed action layout**: an ActionManager-backed trajectory uses the batched
   policy action space; a controller/expert trajectory uses the private
   `ExpertActionSpec` layout. One trajectory cannot mix these schemas.
-- **CLI**: `run-env --replay --replay_trajectory <path> --replay_mode {kinematic,dynamic,control}`.
+- **CLI**: `run-task --replay --replay_trajectory <path> --replay_mode {kinematic,dynamic,control}`.
 
 ---

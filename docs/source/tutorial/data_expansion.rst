@@ -174,7 +174,7 @@ route. For example, smoke-test stacking without writing a dataset:
 
 .. code-block:: bash
 
-   embodichain run-env \
+   embodichain run-task \
        --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.cobotmagic.yaml \
        --headless --filter_dataset_saving --max_episodes 1
 
@@ -256,7 +256,7 @@ runnable deployment can record directly:
 
 .. code-block:: bash
 
-   embodichain run-env \
+   embodichain run-task \
        --gym_config embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml \
        --headless \
        --max_episodes 1
@@ -330,7 +330,7 @@ The real Pour Water recorder block can be inspected directly:
 Execution, Validation, and Persistence
 --------------------------------------
 
-Without ``--preview`` or ``--replay``, ``embodichain run-env`` performs offline
+Without ``--preview`` or ``--replay``, ``embodichain run-task`` performs offline
 data expansion:
 
 1. Resolve ``create_demo_segments()`` from the handwritten task or configured
@@ -429,7 +429,7 @@ Useful modes and options are:
 * ``--max_episodes`` overrides the configured ``collection.target_episodes``.
 * ``collection.max_attempts`` controls retries for one selected batch.
 
-See :doc:`/guides/run_env` for preview, dataset recording, debug video,
+See :doc:`/guides/run_task` for preview, dataset recording, debug video,
 trajectory recording, and replay modes, and :doc:`/guides/cli` for the complete
 argument list.
 

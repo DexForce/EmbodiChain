@@ -15,6 +15,8 @@
 # ----------------------------------------------------------------------------
 
 
+from __future__ import annotations
+
 import os
 import open3d as o3d
 from embodichain.data.dataset import EmbodiChainDataset
@@ -22,6 +24,20 @@ from embodichain.data.constants import (
     EMBODICHAIN_DOWNLOAD_PREFIX,
     EMBODICHAIN_DEFAULT_DATA_ROOT,
 )
+
+__all__ = [
+    "DH_PGC_140_50",
+    "DH_PGI_140_80",
+    "DH_PGC_140_50_M",
+    "DH_AG95",
+    "ZH_CTM2F110",
+    "BrainCoHandRevo1",
+    "InspireHand",
+    "Robotiq",
+    "Robotiq2F85",
+    "WheelTecFA2F",
+    "PikaGripper",
+]
 
 eef_assets = "eef_assets"
 
@@ -332,3 +348,32 @@ class WheelTecFA2F(EmbodiChainDataset):
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
+
+
+class PikaGripper(EmbodiChainDataset):
+    """Standalone Pika parallel gripper with visual and collision meshes.
+
+    Resolve the URDF with
+    ``get_data_path("PikaGripper/PikaGripper.urdf")``. ``FINGER1_JOINT`` is
+    actuated over 0–0.05 m (closed to open); ``FINGER2_JOINT`` mimics it.
+    Mount the asset through ``GRIPPER_ROOT_LINK``.
+
+    Args:
+        data_root: Optional cache root; defaults to ``EMBODICHAIN_DATA_ROOT``.
+    """
+
+    def __init__(self, data_root: str | None = None) -> None:
+        filename = f"{eef_assets}/PikaGripper.zip"
+        hub_prefix = (
+            "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/main/"
+        )
+        urls = [f"{EMBODICHAIN_DOWNLOAD_PREFIX}{filename}"]
+        # New assets may precede mirror synchronization.
+        if EMBODICHAIN_DOWNLOAD_PREFIX != hub_prefix:
+            urls.append(f"{hub_prefix}{filename}")
+        descriptor = o3d.data.DataDescriptor(urls, "8a9d0779e7dbfa7bf5d4713175df014e")
+        super().__init__(
+            type(self).__name__,
+            descriptor,
+            EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root,
+        )

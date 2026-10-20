@@ -600,8 +600,6 @@ def main(args: argparse.Namespace | None = None) -> None:
             cfg=MotionGenCfg(
                 planner_cfg=ToppraPlannerCfg(
                     robot_uid=robot.uid,
-                    # Keep this small tutorial deterministic across platforms.
-                    max_workers=1,
                 ),
             )
         )

@@ -938,6 +938,7 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 "approach_distance",
                 "translation_distance",
                 "rotate_angle",
+                "dwell_duration",
                 "approach_height",
                 "retract_height",
                 "contact_distance",
@@ -1118,13 +1119,19 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
             value,
             path=path,
             required=frozenset({"kind"}),
-            optional=frozenset({"rotate_angle"}),
+            optional=frozenset({"rotate_angle", "dwell_duration"}),
         )
         kwargs = {}
         if "rotate_angle" in config:
             kwargs["rotate_angle"] = _real(
                 config["rotate_angle"],
                 path=f"{path}.rotate_angle",
+            )
+        if "dwell_duration" in config:
+            kwargs["dwell_duration"] = _real(
+                config["dwell_duration"],
+                path=f"{path}.dwell_duration",
+                minimum=0.0,
             )
         return PourOptions(**kwargs)
     if kind == "push_object":
@@ -1324,40 +1331,42 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
         optional=frozenset(
             {
                 "strategy",
-                "dynamic_collision_mode",
-                "velocity_targets",
                 "velocity_limit",
                 "acceleration_limit",
+                "dynamic_collision_mode",
+                "velocity_targets",
             }
         ),
     )
-    return MotionPolicy(
-        strategy=_identifier(
+    kwargs: dict[str, object] = {
+        "strategy": _identifier(
             config.get("strategy", "ik_interp"),
             path=f"{path}.strategy",
         ),
-        velocity_targets=_identifier(
+        "velocity_targets": _identifier(
             config.get("velocity_targets", "auto"),
             path=f"{path}.velocity_targets",
         ),
-        sample_count=_integer(
+        "sample_count": _integer(
             config["sample_count"],
             path=f"{path}.sample_count",
             minimum=2,
         ),
-        dynamic_collision_mode=_enum(
+        "dynamic_collision_mode": _enum(
             config.get("dynamic_collision_mode", DynamicCollisionMode.AUTO.value),
             DynamicCollisionMode,
             path=f"{path}.dynamic_collision_mode",
         ),
-        **{
-            name: _real(
-                config[name], path=f"{path}.{name}", minimum=0.0, strict_minimum=True
+    }
+    for field_name in ("velocity_limit", "acceleration_limit"):
+        if field_name in config:
+            kwargs[field_name] = _real(
+                config[field_name],
+                path=f"{path}.{field_name}",
+                minimum=0.0,
+                strict_minimum=True,
             )
-            for name in ("velocity_limit", "acceleration_limit")
-            if name in config
-        },
-    )
+    return MotionPolicy(**kwargs)
 
 
 def _decode_tracking_policy(value: object, *, path: str) -> TrackingPolicy:

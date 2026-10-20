@@ -24,7 +24,7 @@ import pathlib
 import re
 import time
 from collections.abc import Callable, Collection, Mapping, Sequence
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import torch
 
@@ -79,6 +79,9 @@ from .tcp_presets import (
     UR10_ROBOTIQ_2F_140_TCP as ROBOTIQ_2F_140_TCP,
     sample_tool_tcp,
 )
+
+if TYPE_CHECKING:
+    from embodichain.lab.sim.motion.expansion import TrajectoryVariantSet
 
 RECORD_WIDTH = 640
 RECORD_HEIGHT = 480
@@ -541,14 +544,14 @@ def _variant_arm_columns(robot: Robot, control_part: str) -> tuple[int, ...]:
 
 
 def expand_tutorial_trajectory_variants(
-    compiled,
+    compiled: CompiledTrajectory,
     robot: Robot,
     args: argparse.Namespace,
     *,
     phase_kinds: Sequence[Mapping[str, str]],
     retimable: Sequence[Collection[str]] = (),
     control_part: str = "arm",
-):
+) -> TrajectoryVariantSet:
     """Expand one compiled action into a distinct variant per simulation row.
 
     Phase boundaries come from the action's own named segments, so a tutorial
@@ -639,7 +642,9 @@ def expand_tutorial_trajectory_variants(
     )
 
 
-def log_trajectory_variant_diagnostics(result, requested: int) -> None:
+def log_trajectory_variant_diagnostics(
+    result: TrajectoryVariantSet, requested: int
+) -> None:
     """Log each accepted variant's factors and every rejected proposal.
 
     Args:
@@ -667,7 +672,9 @@ def log_trajectory_variant_diagnostics(result, requested: int) -> None:
         )
 
 
-def trajectory_variant_rows(result, num_envs: int) -> TimedTrajectory:
+def trajectory_variant_rows(
+    result: TrajectoryVariantSet, num_envs: int
+) -> TimedTrajectory:
     """Assign one accepted variant per simulation row, reusing when short.
 
     Arrival intervals are preserved so replay spends the planned number of
@@ -725,7 +732,9 @@ def _contact_phase_drift(result) -> float:
     return worst
 
 
-def save_variant_joint_plot(result, robot: Robot, path: str | pathlib.Path) -> None:
+def save_variant_joint_plot(
+    result: TrajectoryVariantSet, robot: Robot, path: str | pathlib.Path
+) -> None:
     """Plot every variant's controlled joints against time.
 
     Curves meet inside the shaded contact windows and separate between them,
@@ -1029,7 +1038,7 @@ def _draw_ground_box(axis, centre: torch.Tensor, size: Sequence[float]) -> None:
 
 def save_tool_path_view(
     robot: Robot,
-    result,
+    result: TrajectoryVariantSet,
     path: str | pathlib.Path,
     *,
     target_object: RigidObject | None = None,
@@ -1306,7 +1315,7 @@ def add_tutorial_robot(
     robot_type: TutorialRobot,
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
     init_qpos: Sequence[float] | None = None,
-    **kwargs,
+    **kwargs: object,
 ) -> Robot:
     """Add a selected tutorial robot with the shared PGI gripper.
 
@@ -2221,8 +2230,18 @@ def broadcast_waypoint_pose_batch(pose: torch.Tensor, num_envs: int) -> torch.Te
     )
 
 
-def clone_local_pose_from_first_env(entity) -> torch.Tensor:
-    """Copy the first environment's local pose onto every environment."""
+def clone_local_pose_from_first_env(entity: RigidObject) -> torch.Tensor:
+    """Copy the first environment's local pose onto every environment.
+
+    Args:
+        entity: Batched rigid object whose local pose should be shared.
+
+    Returns:
+        The shared local-pose batch written back to ``entity``.
+
+    Raises:
+        ValueError: If the entity does not return a batched matrix pose.
+    """
     pose = entity.get_local_pose(to_matrix=True)
     if pose.dim() != 3 or pose.shape[1:] != (4, 4):
         raise ValueError(
@@ -2239,7 +2258,7 @@ def create_ur5_gripper_robot_cfg(
     tcp_z: float | None = None,
     *,
     tcp_point: ToolPoint = "default",
-    **kwargs,
+    **kwargs: object,
 ) -> RobotCfg:
     """Build a UR5 arm + DH_PGI_140_80 gripper robot configuration.
 
@@ -2318,7 +2337,7 @@ def create_franka_panda_robot_cfg(
     *,
     tcp_z: float | None = None,
     tcp_point: ToolPoint = "default",
-    **kwargs,
+    **kwargs: object,
 ) -> RobotCfg:
     """Build the Franka arm + PGI gripper configuration for the tutorials.
 
@@ -2357,7 +2376,7 @@ def create_ur10_robotiq_robot_cfg(
     init_qpos: Sequence[float] | None = None,
     *,
     tcp_point: ToolPoint = "default",
-    **kwargs,
+    **kwargs: object,
 ) -> RobotCfg:
     """Build a UR10 arm with a six-DOF Robotiq 2F-140 gripper.
 
@@ -2422,7 +2441,7 @@ def create_tutorial_robot_cfg(
     robot_type: TutorialRobot,
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
     init_qpos: Sequence[float] | None = None,
-    **kwargs,
+    **kwargs: object,
 ) -> RobotCfg:
     """Build a selected tutorial arm with the common PGI gripper contract.
 

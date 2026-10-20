@@ -18,7 +18,7 @@
 
 Measures planning latency, memory usage, grasp planning success, held-object
 state creation, and trajectory length for the PickUp action.
-Run: embodichain benchmark atomic-action --action pick_up
+Run: embodichain benchmark atomic-action-profile --action pick_up
 """
 
 from __future__ import annotations

@@ -108,6 +108,10 @@ def test_compute_batch_ik_continuous_reuses_all_solver_candidates() -> None:
     assert torch.equal(qpos, selected_qpos)
     solver.get_ik.assert_called_once()
     assert solver.get_ik.call_args.kwargs["return_all_solutions"] is True
+    torch.testing.assert_close(
+        solver.get_ik.call_args.kwargs["qpos_seed"],
+        seed[:, None].expand(2, 3, 2).reshape(6, 2),
+    )
     solver._select_continuous_ik_path.assert_called_once()
 
 

@@ -68,6 +68,12 @@ from .control import (
 )
 from .core import AtomicAction, ObjectSemantics, SkillDescriptor
 from .effects import StateDelta
+from .evidence import (
+    PhysicalEvidenceBatch,
+    PhysicalEvidenceFrame,
+    PhysicalEvidenceProvider,
+    PhysicalEvidenceRequest,
+)
 from .engine import AtomicActionEngine, PlanTransform
 from .execution import (
     ExecutionEvent,
@@ -234,6 +240,9 @@ from .runner import (
     HeldObjectGuardVerifier,
     MonotonicExecutionClock,
     ObservationProvider,
+    PhysicalEffectVerifier,
+    PhysicalHeldObjectGuardVerifier,
+    PhysicalPhaseEffectGateVerifier,
     PhaseEffectGateVerifier,
     RunnerStatus,
     RunnerStep,
@@ -322,7 +331,12 @@ __all__ = [
     "EffectVerificationRequest",
     "EffectVerificationRequirement",
     "EffectVerificationResult",
+    "PhysicalEvidenceBatch",
+    "PhysicalEvidenceFrame",
+    "PhysicalEvidenceProvider",
+    "PhysicalEvidenceRequest",
     "EffectVerifier",
+    "PhysicalEffectVerifier",
     "ExecutionClock",
     "ExecutionEvent",
     "ExecutionEventKind",
@@ -338,6 +352,8 @@ __all__ = [
     "PhaseEffectGateRequirement",
     "PhaseEffectGateResult",
     "PhaseEffectGateVerifier",
+    "PhysicalPhaseEffectGateVerifier",
+    "PhysicalHeldObjectGuardVerifier",
     "HeldObjectGuardVerifier",
     "EndpointTrackingChannelBinding",
     "EndpointTrackingFeedbackAddress",

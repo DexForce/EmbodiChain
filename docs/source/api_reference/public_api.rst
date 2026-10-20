@@ -578,10 +578,10 @@ preview with managed control-part Gizmos and optional joint controls.
 .. autofunction:: main
 
 
-embodichain.lab.scripts.run_env
+embodichain.lab.scripts.run_task
 -------------------------------
 
-.. currentmodule:: embodichain.lab.scripts.run_env
+.. currentmodule:: embodichain.lab.scripts.run_task
 
 .. autosummary::
 
@@ -1198,11 +1198,17 @@ embodichain.lab.sim.motion.planners.toppra_planner
 
 .. currentmodule:: embodichain.lab.sim.motion.planners.toppra_planner
 
+Time-optimal joint-path parameterization. The planner solves timing for
+waypoint input; :func:`retime_joint_paths` applies the same parameterization to
+paths another planner already produced, such as a closed-loop policy rollout
+whose samples carry only nominal timing.
+
 .. autosummary::
 
    ToppraPlanner
    ToppraPlannerCfg
    ToppraPlanOptions
+   retime_joint_paths
 
 embodichain.lab.sim.motion.planners.se3
 ---------------------------------------
@@ -2013,28 +2019,28 @@ Row-wise action-adjoint clipping and its rollout-level diagnostics.
    BatchedGradientNormStats
    clip_batched_gradient_norm
 
-embodichain.learning.rl.models.actor_critic
--------------------------------------------
+embodichain.learning.rl.policies.actor_critic
+---------------------------------------------
 
-.. currentmodule:: embodichain.learning.rl.models.actor_critic
+.. currentmodule:: embodichain.learning.rl.policies.actor_critic
 
 .. autosummary::
 
    ActorCritic
 
-embodichain.learning.rl.models.actor_only
------------------------------------------
+embodichain.learning.rl.policies.actor_only
+-------------------------------------------
 
-.. currentmodule:: embodichain.learning.rl.models.actor_only
+.. currentmodule:: embodichain.learning.rl.policies.actor_only
 
 .. autosummary::
 
    ActorOnly
 
-embodichain.learning.rl.models.policy
--------------------------------------
+embodichain.learning.rl.policies.policy
+---------------------------------------
 
-.. currentmodule:: embodichain.learning.rl.models.policy
+.. currentmodule:: embodichain.learning.rl.policies.policy
 
 .. autosummary::
 
@@ -2370,3 +2376,12 @@ Gym uses its environment-wide sensor switch, which defaults to enabled.
 
 .. autoclass:: RobotPresetCfg
    :noindex:
+
+
+Asset generalization contracts
+------------------------------
+
+.. toctree::
+   :maxdepth: 2
+
+   asset_generalization
