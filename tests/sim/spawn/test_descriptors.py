@@ -772,7 +772,7 @@ def test_grouped_rigid_physics_overlays_usd_without_erasing_source(
     )
     scene = SimpleNamespace(materials={})
 
-    def parse_singleton(path, collection, label):
+    def parse_singleton(path, collection, label, *, prim_path=None):
         return scene, source
 
     monkeypatch.setattr(
@@ -817,7 +817,10 @@ def test_rigid_usd_can_recompute_source_inertia(
     )
     monkeypatch.setattr(
         "embodichain.lab.sim.spawn.usd._parse_singleton",
-        lambda path, collection, label: (SimpleNamespace(materials={}), source),
+        lambda path, collection, label, *, prim_path=None: (
+            SimpleNamespace(materials={}),
+            source,
+        ),
     )
     cfg = RigidObjectCfg(
         uid="cube",
@@ -850,7 +853,10 @@ def test_rigid_usd_preserves_asset_physics_by_default(
     )
     monkeypatch.setattr(
         "embodichain.lab.sim.spawn.usd._parse_singleton",
-        lambda path, collection, label: (SimpleNamespace(materials={}), source),
+        lambda path, collection, label, *, prim_path=None: (
+            SimpleNamespace(materials={}),
+            source,
+        ),
     )
     cfg = RigidObjectCfg(
         uid="cube",
@@ -1193,7 +1199,7 @@ def test_imported_rigid_gap_default_is_owned_by_embodichain(
     )
     monkeypatch.setattr(
         "embodichain.lab.sim.spawn.usd._parse_singleton",
-        lambda *_args: (SimpleNamespace(materials={}), source),
+        lambda *_args, **_kwargs: (SimpleNamespace(materials={}), source),
     )
     cfg = RigidObjectCfg(
         uid="cube", shape=MeshCfg(fpath="cube.usd"), asset_physics_mode=mode

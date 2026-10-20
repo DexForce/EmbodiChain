@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from embodichain.lab.gym.envs.episode_context import EpisodeContext
+
 from contextlib import nullcontext
 from copy import deepcopy
 from dataclasses import replace
@@ -223,7 +225,8 @@ class _Environment(EmbodiedEnv):
         self.events = []
         self.sim = _Simulation(self.events)
         self._num_envs = 1
-        self.cfg = SimpleNamespace(sim_steps_per_control=4)
+        self.episode_context = EpisodeContext(1)
+        self.cfg = SimpleNamespace(sim_steps_per_control=4, events=None)
         self.sim_cfg = SimpleNamespace(physics_dt=0.01)
         self._profiler = SimpleNamespace(section=lambda *a, **k: nullcontext())
         self._detached_uids_for_reset = []
@@ -248,8 +251,11 @@ class _Environment(EmbodiedEnv):
     def is_task_success(self) -> torch.Tensor:
         return torch.zeros(1, dtype=torch.bool)
 
+    def _before_episode_reset(self, env_ids, **kwargs) -> None:
+        pass
+
     def _initialize_episode(self, env_ids, **kwargs) -> None:
-        assert "scene_expansion_prepare" not in kwargs
+        assert "episode_prepare" not in kwargs
         self.events.append("reset_events")
         self.sim.rigid["cube"].value[:, 0] = 0.2
 
@@ -258,7 +264,7 @@ class _Environment(EmbodiedEnv):
         self.objective_initial_x = self.sim.rigid["cube"].value[0, 0].item()
 
     def get_obs(self, **kwargs) -> torch.Tensor:
-        assert "scene_expansion_prepare" not in kwargs
+        assert "episode_prepare" not in kwargs
         self.events.append("observation")
         return self.sim.rigid["cube"].value[:, :1].clone()
 
@@ -526,26 +532,26 @@ def test_fixed_robot_or_unknown_entity_pose_change_fails_before_reset() -> None:
     assert env.events == []
 
 
-@pytest.mark.parametrize("selection", [[], [1], [False], [0.0], [[0]]])
-def test_partial_or_multienv_reset_callback_rejected_before_state_writes(
-    selection: list,
-) -> None:
+@pytest.mark.parametrize("selection", [[1], [False], [0.0], [[0]]])
+def test_invalid_reset_rows_fail_before_state_writes(selection):
     env = _Environment()
-    with pytest.raises(ValueError, match="complete B=1"):
-        env.reset(
-            options={"reset_ids": selection, "scene_expansion_prepare": lambda: None}
-        )
-    env._num_envs = 2
-    with pytest.raises(ValueError, match="complete B=1"):
-        env.reset(options={"scene_expansion_prepare": lambda: None})
+    with pytest.raises(ValueError):
+        env.reset(options={"reset_ids": selection, "episode_prepare": lambda: None})
     assert env.events == []
+
+
+def test_empty_reset_does_not_advance_episode_identity():
+    env = _Environment()
+    before = env.episode_context.snapshot()
+    env.reset(options={"reset_ids": [], "episode_prepare": lambda: None})
+    assert env.episode_context.snapshot() == before
 
 
 def test_invalid_callback_rejected_before_seed_or_reset_mutation() -> None:
     env = _Environment()
     env._set_seed = lambda seed: pytest.fail("seed must not run")
     with pytest.raises(TypeError, match="must be callable"):
-        env.reset(seed=4, options={"scene_expansion_prepare": 2})
+        env.reset(seed=4, options={"episode_prepare": 2})
     assert env.events == []
 
 
@@ -564,7 +570,7 @@ def test_callback_arity_rejected_before_seed_or_reset(signature: str) -> None:
         env.reset(
             seed=4,
             options={
-                "scene_expansion_prepare": (
+                "episode_prepare": (
                     positional if signature == "positional" else keyword
                 )
             },
@@ -722,7 +728,7 @@ def test_preparation_error_prevents_final_observation_and_recorder_seeding() -> 
         raise RuntimeError("scene preparation failed")
 
     with pytest.raises(RuntimeError, match="scene preparation failed"):
-        env.reset(options={"scene_expansion_prepare": fail})
+        env.reset(options={"episode_prepare": fail})
     assert "reset_events" in env.events
     assert "objective" not in env.events
     assert "observation" not in env.events
@@ -731,9 +737,9 @@ def test_preparation_error_prevents_final_observation_and_recorder_seeding() -> 
 
 def test_reset_does_not_mutate_callers_options() -> None:
     env = _Environment()
-    options = {"scene_expansion_prepare": lambda: env.events.append("prepare")}
+    options = {"episode_prepare": lambda: env.events.append("prepare")}
     env.reset(options=options)
-    assert "scene_expansion_prepare" in options
+    assert "episode_prepare" in options
     assert (
         env.events.index("reset_events")
         < env.events.index("prepare")
@@ -836,3 +842,52 @@ def test_initial_state_hash_matches_pre_migration_golden() -> None:
         snapshot.initial_state_id
         == "scene-initial:7f9126504bb834ba77a206b262754dbb783b2cd10d816572c35016fc7b6ecbeb"
     )
+
+
+def test_previous_recording_is_consumed_before_any_physical_reset():
+    env = _Environment()
+    env.episode_context._begin_episode([0])
+    env.episode_context._finish_initialization([0])
+    original = env.sim.rigid["cube"].value.clone()
+    observed = []
+
+    def before(rows, **kwargs):
+        assert env.events == []
+        assert env.episode_context.snapshot([0])[0]["episode"] == 0
+        torch.testing.assert_close(env.sim.rigid["cube"].value, original)
+        observed.append("saved")
+
+    env._before_episode_reset = before
+    env.reset(options={"save_data": False})
+    assert observed == ["saved"]
+    assert env.episode_context.snapshot([0])[0]["episode"] == 1
+
+
+def test_failed_old_recording_does_not_advance_or_reset_scene():
+    env = _Environment()
+    env.episode_context._begin_episode([0])
+    env.episode_context._finish_initialization([0])
+    previous = env.episode_context.snapshot()
+
+    def before(rows, **kwargs):
+        raise OSError("disk full")
+
+    env._before_episode_reset = before
+    with pytest.raises(OSError, match="disk full"):
+        env.reset()
+    assert env.events == []
+    assert env.episode_context.snapshot() == previous
+
+
+def test_failed_first_frame_never_completes_initialization():
+    env = _Environment()
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("first frame failed")
+
+    env._seed_recording_state = fail
+    with pytest.raises(RuntimeError, match="first frame failed"):
+        env.reset()
+    snapshot = env.episode_context.snapshot()[0]
+    assert not snapshot["recordable"] and not snapshot["initialized"]
+    assert "reset" in snapshot["rejections"]

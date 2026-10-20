@@ -893,6 +893,39 @@ def test_relative_position_uses_live_world_axes_ignores_disabled_z_and_is_strict
     )
 
 
+def test_relative_position_parent_frame_follows_live_reference_rotation() -> None:
+    segment = _measured_object_segment(
+        [
+            {
+                "kind": "object_relative_position",
+                "object": "cube",
+                "reference": "reference",
+                "reference_frame": "parent",
+                "position_offset": [0.5, 0.0, 0.0],
+                "position_tolerance": [0.125, 0.125, None],
+            }
+        ]
+    )
+    port, objects = _measured_object_port()
+    port.begin_segment(segment=segment, active_mask=None)
+    # Local X follows world Y after a quarter turn, including after begin_segment.
+    objects["reference"]._pose[:, :3, :3] = torch.tensor(
+        [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], dtype=torch.float64
+    )
+    objects["reference"]._pose[:, :3, 3] = torch.tensor([1.0, 2.0, 3.0])
+    objects["cube"]._pose[:, :3, 3] = torch.tensor(
+        [[1.0, 2.5, 99.0], [1.0, 2.625, -99.0]], dtype=torch.float64
+    )
+    validator = segment.validators[0]
+    assert port.validate(validator, segment=segment).tolist() == [True, False]
+    evidence = port.validator_metadata(validator, segment=segment)
+    assert evidence["reference_frame"] == "parent"
+    assert evidence["position_error"][0][:2] == [0.0, 0.0]
+    objects["reference"]._pose[0, 0, 0] = float("nan")
+    assert port.validate(validator, segment=segment).tolist() == [False, False]
+    json.dumps(port.validator_metadata(validator, segment=segment), allow_nan=False)
+
+
 def test_upright_rejects_angle_boundary_and_nonfinite_rows() -> None:
     segment = _measured_object_segment(
         [{"kind": "object_upright", "object": "cube", "maximum_tilt_degrees": 90.0}]

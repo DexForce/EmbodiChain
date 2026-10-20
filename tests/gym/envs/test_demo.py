@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from embodichain.lab.gym.envs.episode_context import EpisodeContext
+
 import threading
 from types import SimpleNamespace
 from typing import Any
@@ -33,7 +35,7 @@ from embodichain.lab.gym.envs.demo import (
     DemoSegmentResult,
     execute_demo_episode,
 )
-from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.envs.expert_trajectory import build_expert_action_spec
 from embodichain.lab.gym.envs.types import ControllerAction
 
@@ -278,6 +280,65 @@ def test_policy_recorder_validates_before_manager_processing() -> None:
 
     env.dataset_manager.validate_policy_action.assert_called_once_with(action)
     env.action_manager.process_action.assert_not_called()
+
+
+def _policy_rollout_env() -> EmbodiedEnv:
+    from gymnasium.spaces import Box
+
+    env = _controller_action_env()
+    env._explicit_policy_rollout = True
+    env._record_raw_actions = True
+    env._raw_action_history = [[], []]
+    env.dataset_manager = None
+    env.action_manager.total_action_dim = 7
+    env.action_manager.single_action_space = Box(-1.0, 1.0, shape=(7,))
+
+    def process_action(action: torch.Tensor) -> None:
+        env.action_manager.action = action.clone()
+
+    env.action_manager.process_action.side_effect = process_action
+    return env
+
+
+def test_policy_request_rollout_preserves_legacy_config_default() -> None:
+    assert EmbodiedEnvCfg().rollout_action_semantics == "expert_controller_command"
+    assert (
+        EmbodiedEnvCfg(
+            rollout_action_semantics="policy_request"
+        ).rollout_action_semantics
+        == "policy_request"
+    )
+
+
+def test_explicit_policy_rollout_records_without_dataset_manager() -> None:
+    env = _policy_rollout_env()
+    action = torch.full((2, 7), 0.25)
+    prepared = env._preprocess_action(action)
+    env._step_action(prepared)
+
+    env.action_manager.process_action.assert_called_once_with(action)
+    env.action_manager.apply_action.assert_called_once_with()
+    torch.testing.assert_close(env.get_raw_action_history(0), action[:1])
+
+
+@pytest.mark.parametrize("invalid", ["nonfinite", "bounds", "shape", "dtype"])
+def test_explicit_policy_rollout_rejects_invalid_request_before_processing(
+    invalid: str,
+) -> None:
+    env = _policy_rollout_env()
+    action = torch.zeros(2, 7)
+    if invalid == "nonfinite":
+        action[0, 0] = float("nan")
+    elif invalid == "bounds":
+        action[0, -1] = 1.01
+    elif invalid == "shape":
+        action = action[:, :-1]
+    else:
+        action = action.to(torch.long)
+    with pytest.raises((TypeError, ValueError)):
+        env._preprocess_action(action)
+    env.action_manager.process_action.assert_not_called()
+    assert env.get_raw_action_history(0).shape == (0, 0)
 
 
 def test_policy_trajectory_uses_policy_action_space() -> None:
@@ -1124,6 +1185,7 @@ class _RolloutWriterStub:
     _seed_expert_observations = EmbodiedEnv._seed_expert_observations
 
     def __init__(self) -> None:
+        self.episode_context = EpisodeContext(2)
         self.rollout_buffer = _make_rollout_buffer(2, 5)
         self.rollout_steps = torch.tensor([0, 2], dtype=torch.long)
         self.current_rollout_step = 2
@@ -1192,6 +1254,36 @@ def test_policy_rollout_writer_ignores_expert_position_velocity_schema() -> None
 
     torch.testing.assert_close(env.rollout_buffer["actions"][0, 0], action[0])
     torch.testing.assert_close(env.rollout_buffer["actions"][1, 2], action[1])
+
+
+def test_seven_dimensional_policy_request_keeps_pre_action_observation_alignment() -> (
+    None
+):
+    recording_env = _policy_rollout_env()
+    request = torch.full((2, 7), 0.25)
+    prepared = recording_env._preprocess_action(request)
+    applied = recording_env._step_action(prepared)
+    writer = _RolloutWriterStub()
+    writer._record_raw_actions = True
+    writer.rollout_buffer["actions"] = torch.zeros(2, 5, 7)
+    writer.expert_action_spec = build_expert_action_spec(
+        joint_names=[f"joint_{index}" for index in range(8)],
+        joint_command_mode="position",
+    )
+    after = TensorDict({"state": torch.full((2, 2), 99.0)}, batch_size=[2])
+    EmbodiedEnv._write_episode_rollout_step(
+        writer, obs=after, action=applied, rewards=torch.zeros(2)
+    )
+
+    assert writer.expert_action_spec.width == 8
+    torch.testing.assert_close(writer.rollout_buffer["actions"][0, 0], request[0])
+    torch.testing.assert_close(writer.rollout_buffer["actions"][1, 2], request[1])
+    torch.testing.assert_close(
+        writer.rollout_buffer["obs", "state"][0, 0], torch.full((2,), 10.0)
+    )
+    torch.testing.assert_close(
+        writer.rollout_buffer["obs", "state"][0, 1], after["state"][0]
+    )
 
 
 def test_end_segment_retroactively_annotates_accepted_frame_spans() -> None:
@@ -1814,6 +1906,7 @@ def test_unknown_dynamic_snapshot_is_not_relabeled_by_metadata_retrieval() -> No
         _demo_steps=torch.tensor([0]),
         rollout_buffer=None,
     )
+    env.episode_context = EpisodeContext(1)
     metadata = EmbodiedEnv.get_demo_episode_metadata(env, 0)
     assert metadata["instruction"] == "unknown_task"
     assert metadata["instruction_source"] == "unknown"

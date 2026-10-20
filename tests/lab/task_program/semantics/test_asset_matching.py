@@ -374,3 +374,81 @@ def test_rejection_detail_limit_preserves_search_budget_summary():
     assert caught.value.budget_exhausted
     assert len([item for item in caught.value.rejections if item.asset_id]) <= 100
     assert any(item.code == "search_budget" for item in caught.value.rejections)
+
+
+def _pouring_pair(
+    *,
+    source_radius=0.02,
+    target_radius=0.03,
+    source_caps=("pour_source", "antipodal_grasp"),
+    target_caps=("container",),
+    evidence="measured rim vertices",
+):
+    source = _asset("bottle", category="bottle", size=0.20, capabilities=source_caps)
+    target = _asset("cup", category="cup", size=0.10, capabilities=target_caps)
+    source = replace(
+        source,
+        descriptor=replace(
+            source.descriptor,
+            provenance={
+                "pouring": {"mouth_radius_m": source_radius, "evidence": evidence}
+            },
+        ),
+    )
+    target = replace(
+        target,
+        descriptor=replace(
+            target.descriptor,
+            provenance={
+                "pouring": {"opening_radius_m": target_radius, "evidence": evidence}
+            },
+        ),
+    )
+    requirements = AssetRequirements(
+        {
+            "source": AssetRoleRequirement("bottle", AssetQuery("bottle")),
+            "target": AssetRoleRequirement("cup", AssetQuery("cup")),
+        },
+        (AssetRelationRequirement("pours_into", "source", "target", 0.001),),
+    )
+    return requirements, source, target
+
+
+def test_pouring_selects_compatible_aperture_without_requiring_bottle_body_containment():
+    requirements, source, target = _pouring_pair()
+    # The bottle body is twice as wide as the cup, but its mouth fits the opening.
+    narrow = replace(
+        target,
+        descriptor=replace(
+            target.descriptor,
+            asset_id="narrow",
+            provenance={
+                "pouring": {"opening_radius_m": 0.015, "evidence": "measured rim"}
+            },
+        ),
+    )
+    result = resolve_asset_set(
+        requirements, {"source": [source], "target": [narrow, target]}
+    )
+    assert result.assets["target"] == target
+
+
+@pytest.mark.parametrize(
+    "kwargs,code",
+    [
+        ({"source_radius": None}, "missing_pouring_geometry"),
+        ({"target_radius": 0}, "missing_pouring_geometry"),
+        ({"source_radius": True}, "missing_pouring_geometry"),
+        ({"evidence": ""}, "missing_pouring_geometry"),
+        ({"source_caps": ("antipodal_grasp",)}, "relation_missing_capability"),
+        ({"target_caps": ()}, "relation_missing_capability"),
+        ({"target_radius": 0.02}, "pouring_aperture_too_small"),
+    ],
+)
+def test_pouring_relation_rejects_missing_geometry_capabilities_and_tight_opening(
+    kwargs, code
+):
+    requirements, source, target = _pouring_pair(**kwargs)
+    with pytest.raises(AssetResolutionError) as captured:
+        resolve_asset_set(requirements, {"source": [source], "target": [target]})
+    assert code in {item.code for item in captured.value.rejections}

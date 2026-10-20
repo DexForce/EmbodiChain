@@ -39,6 +39,7 @@ from .articulation import (
     link_attrs_from_dict,
 )
 from .asset import AssetPhysicsMode
+from .source import UsdSourceCfg, _usd_source_from_value
 from .rigid import _rigid_body_physics_from_dict
 from .simulation import (
     PhysicsBackendCfg,
@@ -141,7 +142,9 @@ class RobotCfg(ArticulationCfg):
 
         cfg = cls()  # Create a new instance of the class (cls)
         for key, value in init_dict.items():
-            if key == "link_attrs" and isinstance(value, dict):
+            if key == "source":
+                cfg.source = _usd_source_from_value(value)
+            elif key == "link_attrs" and isinstance(value, dict):
                 cfg.link_attrs = link_attrs_from_dict(value)
             elif key == "attrs" and isinstance(value, Mapping):
                 cfg.attrs = _rigid_body_physics_from_dict(value)
@@ -182,7 +185,7 @@ class RobotCfg(ArticulationCfg):
                         },
                     )
                 elif key == "fpath":
-                    setattr(cfg, key, _get_data_path(value))
+                    setattr(cfg, key, None if value is None else _get_data_path(value))
                 elif isinstance(attr, JointDrivePropertiesCfg) and isinstance(
                     value, dict
                 ):

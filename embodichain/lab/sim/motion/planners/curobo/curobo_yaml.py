@@ -72,14 +72,15 @@ _DEFAULT_CUROBO_ACCELERATION = 15.0
 def _curobo_joint_limits(
     robot: Robot,
     *,
-    max_acceleration: float | None = None,
+    max_velocity: float | list[float] | None = None,
+    max_acceleration: float | list[float] | None = None,
 ) -> dict[str, list[float]]:
     """Export effective caps in active cspace order rather than source order."""
     ids = robot.active_joint_ids
     if not ids:
         return {"max_velocity": [], "max_acceleration": []}
     limits = _joint_velocity_limits(robot)[:, ids].amin(dim=0)
-    velocity = _merge_limit(None, limits, _DEFAULT_VELOCITY)
+    velocity = _merge_limit(max_velocity, limits, _DEFAULT_VELOCITY, allow_zero=True)
     acceleration = _merge_limit(
         max_acceleration,
         torch.full_like(limits, torch.inf),
@@ -166,7 +167,8 @@ def generate_curobo_robot_yaml(
     surface_radius: float = 0.005,
     iterations: int = 200,
     collision_sphere_buffer: float = 0.0,
-    max_acceleration: float | None = None,
+    max_velocity: float | list[float] | None = None,
+    max_acceleration: float | list[float] | None = None,
     max_jerk: float = 500.0,
     device: str = "cuda:0",
 ) -> str:
@@ -206,7 +208,11 @@ def generate_curobo_robot_yaml(
         surface_radius: Fixed radius used by MorphIt's surface fallback.
         iterations: Adam iterations for MorphIt.
         collision_sphere_buffer: Padding added to every sphere's radius (m).
-        max_acceleration: Planning acceleration budget for active cspace joints.
+        max_velocity: Optional speed request intersected with effective Robot
+            caps. Scalars apply to all active joints; lists follow
+            ``robot.active_joint_ids`` order.
+        max_acceleration: Planning acceleration budget for active cspace joints,
+            as a scalar or a list in ``robot.active_joint_ids`` order.
             ``None`` preserves cuRobo's default budget of 15.0.
         max_jerk: cspace maximum jerk.
         device: CUDA device for sphere fitting.
@@ -231,7 +237,9 @@ def generate_curobo_robot_yaml(
     if not torch.cuda.is_available():
         raise RuntimeError("generate_curobo_robot_yaml requires a CUDA GPU.")
     urdf_path = urdf_path or robot.cfg.fpath
-    limits = _curobo_joint_limits(robot, max_acceleration=max_acceleration)
+    limits = _curobo_joint_limits(
+        robot, max_velocity=max_velocity, max_acceleration=max_acceleration
+    )
     control_joints = set((robot.control_parts or {}).get(control_part, []))
     velocity_caps = dict(
         zip(

@@ -1525,6 +1525,83 @@ def test_motion_velocity_target_policy_rejects_unknown_mode(mode: str) -> None:
         )
 
 
+def test_motion_limit_policy_decodes() -> None:
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_motion_policy,
+    )
+
+    policy = _decode_motion_policy(
+        {
+            "sample_count": 40,
+            "velocity_limit": 0.2,
+            "acceleration_limit": 0.5,
+        },
+        path="motion",
+    )
+
+    assert policy.velocity_limit == pytest.approx(0.2)
+    assert policy.acceleration_limit == pytest.approx(0.5)
+
+
+def test_motion_limit_policy_preserves_omitted_velocity_limit() -> None:
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_motion_policy,
+    )
+
+    policy = _decode_motion_policy(
+        {"sample_count": 40, "acceleration_limit": 0.5},
+        path="motion",
+    )
+
+    assert policy.velocity_limit is None
+
+
+@pytest.mark.parametrize("field", ["velocity_limit", "acceleration_limit"])
+@pytest.mark.parametrize("value", [0.0, -0.1, float("inf")])
+def test_motion_limit_policy_rejects_nonpositive_or_nonfinite_values(
+    field: str,
+    value: float,
+) -> None:
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_motion_policy,
+    )
+
+    with pytest.raises(ValueError, match=field):
+        _decode_motion_policy(
+            {"sample_count": 40, field: value},
+            path="motion",
+        )
+
+
+def test_pour_dwell_duration_decodes() -> None:
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_action_options,
+    )
+
+    options = _decode_action_options(
+        {"kind": "pour", "dwell_duration": 0.75},
+        path="options",
+    )
+
+    assert isinstance(options, PourOptions)
+    assert options.dwell_duration == pytest.approx(0.75)
+
+
+@pytest.mark.parametrize("value", [-0.1, float("inf")])
+def test_pour_dwell_duration_rejects_negative_or_nonfinite_values(
+    value: float,
+) -> None:
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_action_options,
+    )
+
+    with pytest.raises(ValueError, match="dwell_duration"):
+        _decode_action_options(
+            {"kind": "pour", "dwell_duration": value},
+            path="options",
+        )
+
+
 @pytest.mark.parametrize(
     ("task_name", "backend"),
     [

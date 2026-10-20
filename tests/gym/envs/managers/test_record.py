@@ -16,6 +16,18 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+import threading
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+import torch
+
+from embodichain.lab.gym.envs.episode_context import EpisodeContext
+from embodichain.lab.gym.envs.managers.record import record_camera_data_async
+
 from embodichain.lab.gym.envs.managers import FunctorCfg
 from embodichain.lab.gym.envs.managers.record import record_camera_data
 from embodichain.lab.sim.sensors import CameraCfg
@@ -52,3 +64,235 @@ def test_record_camera_is_marked_for_visualization() -> None:
 
     assert env.sim.sensor_cfg is not None
     assert env.sim.sensor_cfg.visualization_role == "record"
+
+
+@pytest.fixture
+def camera_env():
+    context = EpisodeContext(4)
+    context._begin_episode([0, 1, 2, 3])
+    context._finish_initialization([0, 1, 2, 3])
+    rgb = torch.stack([torch.full((4, 6, 4), i, dtype=torch.uint8) for i in range(4)])
+    camera = SimpleNamespace(
+        group_id=1, update=lambda **kwargs: None, get_data=lambda: {"color": rgb}
+    )
+    env = SimpleNamespace(
+        num_envs=4,
+        device=torch.device("cpu"),
+        episode_context=context,
+        sim=SimpleNamespace(add_sensor=lambda **kwargs: camera),
+        add_camera_group_id=lambda group_id: None,
+    )
+    return env, rgb
+
+
+@pytest.mark.parametrize("kind", [record_camera_data, record_camera_data_async])
+def test_videos_commit_valid_rows_and_keep_other_live_buffers(
+    camera_env, kind, tmp_path, monkeypatch
+):
+    from embodichain.lab.gym.envs.managers import record
+
+    env, rgb = camera_env
+    writes = []
+
+    def save(frames, directory, name, fps):
+        writes.append((name, [frame.copy() for frame in frames]))
+        (Path(directory) / (name + ".mp4")).write_bytes(b"video")
+
+    monkeypatch.setattr(record, "images_to_video", save)
+    recorder = kind(
+        FunctorCfg(func=kind, params={"name": "camera", "save_path": str(tmp_path)}),
+        env,
+    )
+    recorder(env, None, name="camera")
+    rgb.fill_(99)
+    with env.episode_context.check("layout", [3]) as finish:
+        finish(accepted=False, reasons="no layout")
+    recorder.save_and_clear([1, 3])
+    assert [len(row) for row in recorder._frames_list] == [1, 0, 1, 1]
+    recorder.save_and_clear([3], purpose="diagnostic")
+    recorder.discard_and_clear([0])
+    assert len(recorder._frames_list[2]) == 1
+    recorder.finalize()
+    recorder.close()
+    assert len(writes) == 2
+    assert sorted(int(frames[0][0, 0, 0]) for _, frames in writes) == [1, 3]
+    normal = list((tmp_path / "env_001").glob("*.json"))
+    diagnostic = list((tmp_path / "diagnostics/env_003").glob("*.json"))
+    assert len(normal) == len(diagnostic) == 1
+    assert json.loads(normal[0].read_text())["episode_context"]["recordable"]
+    assert not json.loads(diagnostic[0].read_text())["episode_context"]["recordable"]
+    assert json.loads(diagnostic[0].read_text())["artifact_purpose"] == "diagnostic"
+    assert not (tmp_path / "env_002").exists()
+
+
+def test_sync_video_io_failure_retains_owned_job_for_retry(
+    camera_env, tmp_path, monkeypatch
+):
+    from embodichain.lab.gym.envs.managers import record
+
+    env, rgb = camera_env
+    recorder = record_camera_data(
+        FunctorCfg(
+            func=record_camera_data,
+            params={"name": "camera", "save_path": str(tmp_path)},
+        ),
+        env,
+    )
+    recorder(env, [3], name="camera")
+    calls = []
+
+    def save(frames, directory, name, fps):
+        calls.append(name)
+        if len(calls) == 1:
+            raise OSError("disk full")
+        assert np.all(frames[0] == 3)
+        (Path(directory) / (name + ".mp4")).write_bytes(b"video")
+
+    monkeypatch.setattr(record, "images_to_video", save)
+    with pytest.raises(OSError, match="disk full"):
+        recorder.save_and_clear([3])
+    assert len(recorder._jobs) == 1
+    rgb.fill_(99)
+    recorder.save_and_clear([3])
+    recorder.finalize()
+    assert calls[0] == calls[1]
+    assert not recorder._jobs
+    assert len(list(tmp_path.rglob("*.mp4"))) == 1
+
+
+def test_async_writer_owns_provenance_before_partial_reset(
+    camera_env, tmp_path, monkeypatch
+):
+    from embodichain.lab.gym.envs.managers import record
+
+    env, _ = camera_env
+    entered, release = threading.Event(), threading.Event()
+
+    def save(frames, directory, name, fps):
+        entered.set()
+        assert release.wait(timeout=5)
+        (Path(directory) / (name + ".mp4")).write_bytes(b"video")
+
+    monkeypatch.setattr(record, "images_to_video", save)
+    recorder = record_camera_data_async(
+        FunctorCfg(
+            func=record_camera_data_async,
+            params={"name": "camera", "save_path": str(tmp_path)},
+        ),
+        env,
+    )
+    recorder(env, [1], name="camera")
+    recorder.save_and_clear([1])
+    try:
+        assert entered.wait(timeout=5)
+        env.episode_context._begin_episode([1])
+        env.episode_context._finish_initialization([1])
+    finally:
+        release.set()
+        recorder.finalize()
+    sidecar = json.loads(next(tmp_path.rglob("*.json")).read_text())
+    assert sidecar["episode_context"]["episode"] == 0
+    assert env.episode_context.snapshot([1])[0]["episode"] == 1
+
+
+@pytest.mark.parametrize("kind", [record_camera_data, record_camera_data_async])
+def test_close_discards_uncommitted_rows(camera_env, kind, tmp_path, monkeypatch):
+    from embodichain.lab.gym.envs.managers import record
+
+    env, _ = camera_env
+    monkeypatch.setattr(
+        record,
+        "images_to_video",
+        lambda *a, **k: pytest.fail("Close committed live frames"),
+    )
+    recorder = kind(
+        FunctorCfg(func=kind, params={"name": "camera", "save_path": str(tmp_path)}),
+        env,
+    )
+    recorder(env, None, name="camera")
+    recorder.finalize()
+    recorder.finalize()
+    assert not any(recorder._frames_list)
+    assert not list(tmp_path.rglob("*.mp4"))
+
+
+def test_async_failed_video_retries_with_owned_episode_identity(
+    camera_env, tmp_path, monkeypatch
+):
+    from embodichain.lab.gym.envs.managers import record
+
+    env, rgb = camera_env
+    calls = []
+
+    def save(frames, directory, name, fps):
+        calls.append(name)
+        if len(calls) == 1:
+            raise OSError("disk full")
+        assert np.all(frames[0] == 3)
+        (Path(directory) / (name + ".mp4")).write_bytes(b"video")
+
+    monkeypatch.setattr(record, "images_to_video", save)
+    recorder = record_camera_data_async(
+        FunctorCfg(
+            func=record_camera_data_async,
+            params={"name": "camera", "save_path": str(tmp_path)},
+        ),
+        env,
+    )
+    try:
+        recorder(env, [3], name="camera")
+        recorder.save_and_clear([3])
+        with pytest.raises(OSError, match="disk full"):
+            next(iter(recorder._futures.values())).result(timeout=5)
+        env.episode_context._begin_episode([3])
+        env.episode_context._finish_initialization([3])
+        rgb.fill_(99)
+        # The first caller observes the failed future; the explicit retry uses
+        # the owned old job even after the live environment starts episode 1.
+        with pytest.raises(OSError, match="disk full"):
+            recorder.save_and_clear([3])
+        assert len(recorder._jobs) == 1
+        recorder.save_and_clear([3])
+    finally:
+        recorder.finalize()
+    assert calls == ["episode_000000_camera", "episode_000000_camera"]
+    assert len(list(tmp_path.rglob("*.mp4"))) == 1
+    sidecar = json.loads(next(tmp_path.rglob("*.json")).read_text())
+    assert sidecar["episode_context"]["episode"] == 0
+
+
+@pytest.mark.parametrize("kind", [record_camera_data, record_camera_data_async])
+def test_reset_seeds_authoritative_camera_first_frame_only_for_selected_rows(
+    camera_env, kind, tmp_path
+):
+    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+
+    env, rgb = camera_env
+    recorder = kind(
+        FunctorCfg(func=kind, params={"name": "camera", "save_path": str(tmp_path)}),
+        env,
+    )
+    try:
+        recorder(env, None, name="camera")
+        rgb[1].fill_(7)
+        rgb[3].fill_(8)
+        env.cfg = SimpleNamespace(events=True)
+        env.event_manager = SimpleNamespace(
+            _mode_functor_cfgs={
+                "interval": [SimpleNamespace(func=recorder, params={"name": "camera"})]
+            }
+        )
+        seeded = []
+        env._seed_recording_state = lambda obs, ids: seeded.append(ids.tolist())
+        EmbodiedEnv._after_episode_reset(env, object(), torch.tensor([3, 1]))
+        assert seeded == [[3, 1]]
+        assert [len(frames) for frames in recorder._frames_list] == [1, 1, 1, 1]
+        assert [int(frames[0][0, 0, 0]) for frames in recorder._frames_list] == [
+            0,
+            7,
+            2,
+            8,
+        ]
+        assert env._active_task_program_bridge is None
+    finally:
+        recorder.finalize()

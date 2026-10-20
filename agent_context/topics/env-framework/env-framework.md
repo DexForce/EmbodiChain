@@ -135,11 +135,13 @@ Optional physical objectives publish separate measured results; they do not
 change termination, program acceptance or persistence. Read [execution](execution.md)
 for snapshot/reset ordering and expert-versus-replay qualification.
 
-A trusted B=1 host can pass a zero-argument `scene_expansion_prepare` reset
+A trusted B=1 host can pass a zero-argument `episode_prepare` reset
 callback. `BaseEnv.reset` consumes it after ordinary reset events and before
 physical-objective initialization and final observations; it is not forwarded
-to functors. `EmbodiedEnv.reset` then clears the previous bridge and seeds
-recording from the final state. The concrete preparation/restore host and
+to functors. `BaseEnv` owns `EpisodeContext`; successful initialization seeds recording from
+the final observation. `EmbodiedEnv` consumes old records before physical reset.
+Failed checks remain attached to buffers until the selected rows are consumed
+and a new episode begins. Info and recorder metadata carry owned context snapshots. The concrete preparation/restore host and
 snapshot limitations belong to [scene expansion](../scene-expansion/scene-expansion.md).
 
 ## Change sites and focused validation

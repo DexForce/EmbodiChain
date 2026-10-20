@@ -97,6 +97,26 @@ settle, but requires all environments because physics advances the whole World.
 For configurable physical settling, use `wait_for_dynamic_objects_to_settle`,
 which rejects partial selections unless `allow_partial_envs=True` is explicit.
 
+### Scene layout event
+
+`ExpandSceneLayout` is a stateful reset event in `randomization/spatial.py`.
+Configure it through ordinary `EventCfg` / `env.events`, with `SceneEntityCfg`
+selections, explicit support parents, an online or saved source and the shared
+scene policy. There is no separate environment-level scene-randomization switch.
+The adapter caches geometry and batches selected rows. It reports owned layout
+provenance through `env.episode_context.check("events/<configuration name>", rows)`;
+recording eligibility is a generic environment lifecycle contract owned by
+[environment execution](../env-framework/execution.md). Disjoint events cannot
+clear each other's pending checks or previously rejected buffers.
+It does not advance physics or certify task success. Conflicting pose/scale
+randomizers for managed entities fail explicitly. Configure layout application
+after other pose initialization and before observation/state-registration events.
+
+`EventManager.seed_revision` advances for every explicit reseed, including the
+same seed value. The layout event uses this to rewind its candidate/replay cursor
+while retaining geometry. Ordinary selective reset retains unused candidates.
+A failed preparation/application blocks persistence only for the affected rows.
+
 ### Geometry (`geometry.py`)
 
 | Function | Target | Key params |
