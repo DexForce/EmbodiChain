@@ -44,7 +44,11 @@ ActionInvocation                       semantic program
 ```
 
 Planning never steps simulation and never treats command completion as proof of
-a physical effect.
+a physical effect. Runtime hosts may collect versioned physical evidence after
+each fresh observation and pass it to an evidence-aware effect verifier, phase
+gate, or held-object guard. Evidence acquisition stays outside planning and
+does not mutate symbolic task state; verification results are the only path
+that commits or invalidates observed effects.
 
 `MoveHeldObject` accepts ordered object-pose waypoints without rebasing the
 verified grasp. Its goal optionally frees only the final world yaw; default
@@ -68,6 +72,7 @@ contact or physical goal satisfaction.
 | Articulation affordance geometry adapter | `atomic_actions/articulation_geometry.py` |
 | Invocation, binding, and policies | `invocation.py`, `bindings.py`, `policies.py`, `control.py` |
 | Robot/task/scene state | `state.py`, `scene.py` |
+| Runtime physical evidence | `evidence.py`, `scene.py`, `runner.py` |
 | Plans and runtime commands | `plans.py`, `runtime_commands.py` |
 | Session state machine | `execution.py` |
 | Verification request/result values | `verification.py` |
@@ -170,10 +175,10 @@ so the other arm remains stationary even though the binding includes both.
 Original action joins and intervals are restored before replay so callbacks
 retain their source indices. MoveJoint compiles each required joint target as
 a separate invocation, preserving its ordered waypoints as action boundaries
-through control-grid retiming and spatial expansion. Pour's single
-rotation/return segment is protected from spatial perturbation because its
-required interior target has no exported
-waypoint boundary; its preceding PickUp free phases remain editable. Slide
+through control-grid retiming and spatial expansion. Pour exports rotation,
+apex dwell and return boundaries; its constrained held-object phases are
+protected from spatial perturbation while the preceding PickUp free phases
+remain editable. Slide
 replans its push from each row's robot/handle observations after pull. Every
 Slide reference remains row-local through expansion and replay, including its
 start, locked contact path, timing and sampling provenance; shared affordance
@@ -190,7 +195,10 @@ both Robotiq 2F-140 grippers. `evaluation.py` scores measured physical stages,
 separately from planning success, with fresh scenes for batches and repetitions.
 Per-row provenance records actual expansion deltas and protected-sample checks.
 Cartesian `ik_interp` paths bypass the selected planner. The explicit
-`--action` selector keeps the legacy benchmarks.
+`--action` selector keeps the legacy benchmarks. Shared, versioned suite
+comparisons remain under `benchmark motion-generation --suite atomic_*`.
+`benchmark atomic-action-profile` retains the legacy profiler's defaults even
+when no `--action` is supplied.
 See the [benchmark guide](../../../scripts/benchmark/atomic_action/README.md).
 
 ## Recommended change sites

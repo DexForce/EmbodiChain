@@ -114,6 +114,15 @@ and enforces the matching preset planner requirement. The blended Atomic
 execution-policy component is a runnable example; unsupported fields/backends
 and interpolation-only strategies fail during configuration decoding.
 
+Configured `motion` policies accept optional finite, strictly positive
+`velocity_limit` and `acceleration_limit` values. Configured Pour action options
+accept a finite, non-negative `dwell_duration`; unknown timing keys still fail
+the closed-field decoder. Omitting `velocity_limit` preserves the Robot's
+ordered per-joint speed caps; an explicit scalar request is intersected with
+those caps rather than replacing them. When `motion.plan_opts` selects typed
+Trapezoidal options, explicitly configured scalar limits also populate their
+constraints; omitted limits retain the Robot/default resolution.
+
 Grasp generators select toolkit-owned geometry with a string `model` ID;
 an inline mapping is a custom calibration and its `model_id` does not trigger
 catalog lookup. The catalog is owned by
@@ -184,3 +193,17 @@ parent's measured position while its offset and orientation stay in world axes.
 This distinction matters for left/right sorting after reference-object rotation.
 World-axis targets fingerprint both their frame and declared pose; static
 manifests and live registries retain the same identity.
+
+`object_relative_position` validators default to `reference_frame: world_axes`,
+so reference rotation does not rotate their offset or per-axis tolerances.
+Select `reference_frame: parent` to measure both in the live reference frame,
+matching a target whose relative pose composes the complete parent transform.
+
+
+## Asset role requirements
+
+An integration may declare optional `asset_requirements`; decoding validates its
+closed role/relation contract without contacting providers. Offline asset
+materialization owns selection and emits a new bound deployment before ordinary
+compilation. See [asset generalization](../asset-generalization/asset-generalization.md)
+for supported adaptations, provenance and integrity boundaries.

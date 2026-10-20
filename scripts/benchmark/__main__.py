@@ -21,8 +21,10 @@ Usage examples::
     embodichain benchmark rl --tasks push_cube --algorithms ppo --suite default
     embodichain benchmark rl --rebuild-report-only
     embodichain benchmark robotics-kinematic-solver -s pytorch
-    embodichain benchmark motion-generation --suite smoke
-    embodichain benchmark atomic-action --smoke
+    embodichain benchmark motion-generation --suite motion_panda_free_space_smoke
+    embodichain benchmark motion-generation --suite atomic_franka_pgi_smoke
+    embodichain benchmark atomic-action --robot ur5 --skill all --smoke
+    embodichain benchmark atomic-action-profile --smoke
     embodichain benchmark grasp-pose-generator --device cuda
     embodichain benchmark workspace-analyzer
     embodichain benchmark rendering --camera-count 2 --resolution 1280x720
@@ -52,14 +54,24 @@ def _run_rl_cli(_: argparse.Namespace) -> None:
 
 
 def _run_motion_generation_cli(args: argparse.Namespace) -> None:
-    """Run the shared planner and Atomic Task benchmark."""
+    """Run the shared Motion Planning and Atomic Skills benchmark."""
     from scripts.benchmark.motion_generation.run_benchmark import run_from_args
 
     run_from_args(args)
 
 
 def _run_atomic_action_cli(_: argparse.Namespace) -> None:
-    """Run atomic action benchmark CLI entrypoint."""
+    """Run reference scenes, retaining the explicit legacy action selector."""
+    if any(arg == "--action" or arg.startswith("--action=") for arg in sys.argv[1:]):
+        from scripts.benchmark.atomic_action.run_benchmark import main
+    else:
+        from scripts.benchmark.atomic_action.reference_benchmark import main
+
+    main()
+
+
+def _run_atomic_action_profile_cli(_: argparse.Namespace) -> None:
+    """Run individual atomic action profiling over preset scenes."""
     from scripts.benchmark.atomic_action.run_benchmark import main as atomic_main
 
     atomic_main()
@@ -126,7 +138,11 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     motion_generation_parser = subparsers.add_parser(
         "motion-generation",
-        help="Benchmark planners on fixed motion and Atomic Task cases.",
+        help="Compare planners with Motion Planning or Atomic Skills suites.",
+        description=(
+            "Compare planners with Motion Planning or Atomic Skills suites. "
+            "Use --suite to select the cases and robot."
+        ),
     )
     add_parser_arguments(motion_generation_parser)
     motion_generation_parser.set_defaults(func=_run_motion_generation_cli)
@@ -135,9 +151,17 @@ def main(argv: Sequence[str] | None = None) -> None:
     atomic_action_parser = subparsers.add_parser(
         "atomic-action",
         add_help=False,
-        help="Benchmark independent Atomic skills with affordance and trajectory expansion.",
+        help="Benchmark reference Atomic scenes with affordance and trajectory expansion.",
     )
     atomic_action_parser.set_defaults(func=_run_atomic_action_cli)
+
+    # -- atomic-action-profile -----------------------------------------------
+    atomic_action_profile_parser = subparsers.add_parser(
+        "atomic-action-profile",
+        add_help=False,
+        help="Profile individual atomic actions over object presets and positions.",
+    )
+    atomic_action_profile_parser.set_defaults(func=_run_atomic_action_profile_cli)
 
     # -- grasp-pose-generator -----------------------------------------------
     grasp_pose_parser = subparsers.add_parser(
@@ -174,6 +198,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     delegated_commands = {
         "rl",
         "atomic-action",
+        "atomic-action-profile",
         "grasp-pose-generator",
         "rendering",
     }

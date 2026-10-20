@@ -275,7 +275,7 @@ def test_in_tree_planner_invalid_limits_rejected_before_dispatch() -> None:
     planner.robot = _UnboundedRobot()
     planner.cfg = ToppraPlannerCfg(robot_uid="unused")
     planner.device = torch.device("cpu")
-    with pytest.raises(ValueError, match="positive"):
+    with pytest.raises(ValueError, match="nonnegative"):
         planner.plan(
             [
                 PlanState.from_qpos(torch.zeros(1, 1)),

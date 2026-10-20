@@ -14,10 +14,9 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Dispatch independent Atomic skills or legacy action benchmarks.
+"""Profile individual atomic actions over preset scenes.
 
-Run: embodichain benchmark atomic-action --robot ur5 --skill all --planner toppra
-The explicit --action selector retains the original object/position benchmarks.
+Run: embodichain benchmark atomic-action-profile --action move_end_effector
 """
 
 from __future__ import annotations
@@ -120,7 +119,7 @@ def add_benchmark_args(parser: argparse.ArgumentParser) -> None:
 def _parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="Run one or more atomic-action benchmarks."
+        description="Profile individual atomic actions over object and position presets."
     )
     add_benchmark_args(parser)
     return parser.parse_args()
@@ -318,15 +317,6 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> list[Path]:
 
 def main() -> None:
     """Run the CLI entry point."""
-    if not any(
-        arg == "--action" or arg.startswith("--action=") for arg in sys.argv[1:]
-    ):
-        from scripts.benchmark.atomic_action.reference_benchmark import (
-            main as reference_main,
-        )
-
-        reference_main()
-        return
     try:
         reports = run_all_benchmarks()
     except RuntimeError as exc:

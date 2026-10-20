@@ -98,19 +98,23 @@ class AssetRelationRequirement:
     """Geometric relation between two selected asset roles.
 
     Args:
-        kind: Containment or support relationship in aligned local coordinates.
+        kind: Containment, support, or annotated pouring-aperture compatibility.
+            ``pours_into`` compares source-mouth and target-opening radii; it
+            does not require the bottle body to fit inside the cup.
         object_role: Role of the manipulated object.
         target_role: Role of its container or support.
-        clearance_m: Required nonnegative inset on each relevant side.
+        clearance_m: Required nonnegative inset on each relevant side; for
+            ``pours_into``, add it to the source radius before comparing with
+            the target opening radius.
     """
 
-    kind: Literal["fits_inside", "supported_by"]
+    kind: Literal["fits_inside", "supported_by", "pours_into"]
     object_role: str
     target_role: str
     clearance_m: float = 0.0
 
     def __post_init__(self) -> None:
-        if self.kind not in ("fits_inside", "supported_by"):
+        if self.kind not in ("fits_inside", "supported_by", "pours_into"):
             raise ValueError("Unsupported asset relation kind.")
         _identifier(self.object_role, "object_role")
         _identifier(self.target_role, "target_role")

@@ -1,0 +1,319 @@
+schema_version: 1
+name: atomic_dual_ur5_pgi_coordinated_pickment_spatial_generalization
+suite_version: atomic_dual_ur5_pgi_coordinated_pickment_spatial_generalization_v6
+profile: coverage
+
+robot:
+  id: dual_ur5_pgi_coordinated_pickment
+  provider: dual_arm
+  config:
+    robot_type: ur5
+    uid: benchmark_dual_ur5_coordinated_pickment
+    urdf_name: benchmark_dual_ur5_coordinated_pickment
+    tcp_z: 0.121
+    solver: pytorch
+
+planners:
+  - id: toppra
+    adapter: toppra
+    role: primary_baseline
+    enabled: true
+    config: {}
+
+protocol:
+  report_schema_version: "3"
+  # Preserve the existing Atomic motion budget for every timed planner.
+  joint_velocity_limit_rad_s: 0.2
+  joint_acceleration_limit_rad_s2: 0.5
+  warmup_trials: 1
+  measured_trials: 1
+  sample_interval: 80
+  validation_samples: 512
+  position_threshold_m: 0.01
+  rotation_threshold_rad: 0.1
+  joint_limit_tolerance_rad: 0.00001
+
+tracks:
+  - id: spatial-coordinated-pickment
+    scenario: atomic_skill
+    enabled: true
+    domains:
+      - id: nominal
+        version: v1
+        kind: nominal
+        applicability: [coordinated_pickment]
+        scene_layout: dual_ur5_pgi_plastic_tray_v1
+        case_generator: fixed_scene
+        perturbations:
+          object_translation_jitter_m: [0.0, 0.0, 0.0]
+          object_yaw_jitter_rad: 0.0
+          target_translation_jitter_m: [0.0, 0.0, 0.0]
+      - id: object_xy
+        version: v1
+        kind: robustness
+        applicability: [coordinated_pickment]
+        scene_layout: dual_ur5_pgi_plastic_tray_v1
+        case_generator: deterministic_uniform_pose_batch
+        perturbations:
+          distribution: uniform
+          object_translation_jitter_m: [0.03, 0.03, 0.0]
+          object_yaw_jitter_rad: 0.0
+          target_translation_jitter_m: [0.0, 0.0, 0.0]
+          samples_per_seed: 8
+        overrides:
+          batch_sizes: [8]
+          randomization:
+            enabled: true
+            mode: translation
+            pose_batch_size: 8
+            object_translation_jitter_m: [0.03, 0.03, 0.0]
+            object_yaw_jitter_rad: 0.0
+            target_translation_jitter_m: [0.0, 0.0, 0.0]
+            seed_stride: 1
+      - id: object_yaw
+        version: v1
+        kind: robustness
+        applicability: [coordinated_pickment]
+        scene_layout: dual_ur5_pgi_plastic_tray_v1
+        case_generator: deterministic_uniform_pose_batch
+        perturbations:
+          distribution: uniform
+          object_translation_jitter_m: [0.0, 0.0, 0.0]
+          object_yaw_jitter_rad: 0.523599
+          target_translation_jitter_m: [0.0, 0.0, 0.0]
+          samples_per_seed: 8
+        overrides:
+          batch_sizes: [8]
+          randomization:
+            enabled: true
+            mode: planar_pose
+            pose_batch_size: 8
+            object_translation_jitter_m: [0.0, 0.0, 0.0]
+            object_yaw_jitter_rad: 0.523599
+            target_translation_jitter_m: [0.0, 0.0, 0.0]
+            seed_stride: 1
+      - id: target_relative_pose
+        version: v1
+        kind: robustness
+        applicability: [coordinated_pickment]
+        scene_layout: dual_ur5_pgi_plastic_tray_v1
+        case_generator: deterministic_uniform_pose_batch
+        perturbations:
+          distribution: uniform
+          object_translation_jitter_m: [0.0, 0.0, 0.0]
+          object_yaw_jitter_rad: 0.0
+          target_translation_jitter_m: [0.02, 0.02, 0.0]
+          samples_per_seed: 8
+        overrides:
+          batch_sizes: [8]
+          randomization:
+            enabled: true
+            mode: translation
+            pose_batch_size: 8
+            object_translation_jitter_m: [0.0, 0.0, 0.0]
+            object_yaw_jitter_rad: 0.0
+            target_translation_jitter_m: [0.02, 0.02, 0.0]
+            seed_stride: 1
+      - id: target_yaw
+        version: v1
+        kind: robustness
+        applicability: [coordinated_pickment]
+        scene_layout: dual_ur5_pgi_plastic_tray_v1
+        case_generator: deterministic_uniform_pose_batch
+        perturbations:
+          distribution: uniform
+          object_translation_jitter_m: [0.0, 0.0, 0.0]
+          object_yaw_jitter_rad: 0.0
+          target_translation_jitter_m: [0.0, 0.0, 0.0]
+          target_yaw_jitter_rad: 0.523599
+          samples_per_seed: 8
+        overrides:
+          batch_sizes: [8]
+          randomization:
+            enabled: true
+            mode: planar_pose
+            pose_batch_size: 8
+            object_translation_jitter_m: [0.0, 0.0, 0.0]
+            object_yaw_jitter_rad: 0.0
+            target_translation_jitter_m: [0.0, 0.0, 0.0]
+            target_yaw_jitter_rad: 0.523599
+            seed_stride: 1
+      - id: target_z
+        version: v1
+        kind: robustness
+        applicability: [coordinated_pickment]
+        scene_layout: dual_ur5_pgi_plastic_tray_v1
+        case_generator: deterministic_uniform_pose_batch
+        perturbations:
+          distribution: uniform
+          target_translation_jitter_m: [0.0, 0.0, 0.02]
+          target_yaw_jitter_rad: 0.0
+          target_roll_pitch_jitter_rad: [0.0, 0.0]
+          samples_per_seed: 8
+        overrides:
+          batch_sizes: [8]
+          randomization:
+            enabled: true
+            mode: translation
+            pose_batch_size: 8
+            target_translation_jitter_m: [0.0, 0.0, 0.02]
+            seed_stride: 1
+      - id: target_roll_pitch
+        version: v1
+        kind: robustness
+        applicability: [coordinated_pickment]
+        scene_layout: dual_ur5_pgi_plastic_tray_v1
+        case_generator: deterministic_uniform_pose_batch
+        perturbations:
+          distribution: uniform
+          target_translation_jitter_m: [0.0, 0.0, 0.0]
+          target_yaw_jitter_rad: 0.0
+          target_roll_pitch_jitter_rad: [0.174533, 0.174533]
+          samples_per_seed: 8
+        overrides:
+          batch_sizes: [8]
+          randomization:
+            enabled: true
+            mode: spatial_pose
+            pose_batch_size: 8
+            target_roll_pitch_jitter_rad: [0.174533, 0.174533]
+            seed_stride: 1
+      - id: task_frame_planar
+        version: v1
+        kind: robustness
+        applicability: [coordinated_pickment]
+        scene_layout: dual_ur5_pgi_plastic_tray_v1
+        case_generator: deterministic_stratified_pose_batch
+        perturbations:
+          distribution: stratified
+          task_frame_translation_jitter_m: [0.03, 0.03, 0.0]
+          task_frame_yaw_jitter_rad: 0.174533
+          samples_per_seed: 8
+        overrides:
+          batch_sizes: [8]
+          randomization:
+            enabled: true
+            mode: planar_pose
+            sampling_pattern: stratified
+            pose_batch_size: 8
+            task_frame_translation_jitter_m: [0.03, 0.03, 0.0]
+            task_frame_yaw_jitter_rad: 0.174533
+            seed_stride: 1
+      - id: object_target_spatial_pose
+        version: v1
+        kind: robustness
+        applicability: [coordinated_pickment]
+        scene_layout: dual_ur5_pgi_plastic_tray_v1
+        case_generator: deterministic_stratified_pose_batch
+        perturbations:
+          distribution: stratified
+          object_translation_jitter_m: [0.03, 0.03, 0.0]
+          object_yaw_jitter_rad: 0.523599
+          target_translation_jitter_m: [0.02, 0.02, 0.02]
+          target_yaw_jitter_rad: 0.523599
+          target_roll_pitch_jitter_rad: [0.174533, 0.174533]
+          samples_per_seed: 8
+        overrides:
+          batch_sizes: [8]
+          randomization:
+            enabled: true
+            mode: spatial_pose
+            sampling_pattern: stratified
+            pose_batch_size: 8
+            object_translation_jitter_m: [0.03, 0.03, 0.0]
+            object_yaw_jitter_rad: 0.523599
+            target_translation_jitter_m: [0.02, 0.02, 0.02]
+            target_yaw_jitter_rad: 0.523599
+            target_roll_pitch_jitter_rad: [0.174533, 0.174533]
+            seed_stride: 1
+      - id: target_relative_shell
+        version: v1
+        kind: robustness
+        applicability: [coordinated_pickment]
+        scene_layout: dual_ur5_pgi_plastic_tray_v1
+        case_generator: deterministic_workspace_shell_batch
+        perturbations:
+          distribution: workspace_shell
+          target_translation_jitter_m: [0.04, 0.04, 0.02]
+          workspace_buckets: [near, mid, far]
+          samples_per_seed: 8
+        overrides:
+          batch_sizes: [8]
+          randomization:
+            enabled: true
+            mode: translation
+            sampling_pattern: workspace_shell
+            pose_batch_size: 8
+            target_translation_jitter_m: [0.04, 0.04, 0.02]
+            seed_stride: 1
+      - id: bilateral_role_mirror
+        version: v1
+        kind: robustness
+        applicability: [coordinated_pickment]
+        scene_layout: dual_ur5_pgi_plastic_tray_v1
+        case_generator: mirrored_control_assignment
+        perturbations:
+          mirror_axis: y
+          left_slot_arm: right
+          right_slot_arm: left
+        overrides:
+          batch_sizes: [1]
+          control_parts:
+            left: {motion: right_arm, grasp: right_eef}
+            right: {motion: left_arm, grasp: left_eef}
+    config:
+      batch_sizes: [1]
+      seeds: [11, 23, 47]
+      physics:
+        steps_per_waypoint: 16
+        hold_steps: 80
+        hold_sim_steps: 2
+        joint_tracking_tolerance_rad: 0.05
+      grippers:
+        - control_part: left_eef
+          open_qpos: [0.0]
+          grasp_qpos: [0.026]
+        - control_part: right_eef
+          open_qpos: [0.0]
+          grasp_qpos: [0.026]
+      fixtures:
+        - id: support_surface
+          kind: cube
+          size: [0.7, 1.2, 0.02]
+          position: [0.0, 0.0, 0.54]
+          mass: 10.0
+          dynamic_friction: 0.9
+          static_friction: 0.95
+          restitution: 0.01
+      objects:
+        - id: plastic_tray
+          kind: mesh
+          asset_path: PlasticTray/plastic_tray.glb
+          rotation_deg: [0.0, 0.0, 90.0]
+          position: [-0.02, 0.02, 0.60]
+          max_convex_hull_num: 16
+          mass: 0.01
+          dynamic_friction: 0.97
+          static_friction: 0.99
+          restitution: 0.01
+          linear_damping: 0.5
+          angular_damping: 1.0
+          contact_offset: 0.001
+          rest_offset: 0.0
+          settle_steps: 300
+      skills:
+        - id: coordinated_pickment
+          sample_count: 96
+          object_motion_keyframes: 6
+          pre_grasp_distance_m: 0.11
+          lift_height_m: 0.10
+          hand_interp_steps: 10
+          hold_steps: 4
+          middle_empty_ratio: 0.7
+          grasp_sample_count: 10000
+          pre_action_settle_steps: 300
+          cases:
+            - name: spatial_plastic_tray_lift_and_move
+              object: plastic_tray
+              task_difficulty: medium
+              target_object_offset_m: [-0.12, -0.03, 0.108]

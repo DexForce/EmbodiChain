@@ -18,10 +18,14 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+import math
+from dataclasses import asdict, dataclass, field, replace
 from enum import Enum
+from typing import cast
 
 import torch
+
+from .contracts import EvaluationDomain, PhysicalEvaluation, StageOutcome
 
 __all__ = [
     "AlgorithmRole",
@@ -30,7 +34,25 @@ __all__ = [
     "PlannerMetadata",
     "TrialPhase",
     "TrialRecord",
+    "with_physical_evaluation",
 ]
+
+
+def _json_value(value: object) -> object:
+    """Convert nested benchmark values into deterministic JSON values."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, frozenset):
+        return sorted(_json_value(item) for item in value)
+    if isinstance(value, tuple):
+        return [_json_value(item) for item in value]
+    if isinstance(value, list):
+        return [_json_value(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _json_value(item) for key, item in value.items()}
+    return value
 
 
 class AlgorithmRole(str, Enum):
@@ -63,6 +85,14 @@ class PlannerMetadata:
     capabilities: frozenset[str]
     model_revision: str = "N/A"
     inference_dtype: str = "fp32"
+    timing_is_solved: bool = False
+    """Whether reported ``dt`` is solved rather than a nominal constant.
+
+    ``PlanResult`` requires ``dt`` whenever it carries positions, so a planner
+    with no time parameterization still reports intervals. Recording the
+    distinction here keeps solved-timing comparisons from treating a nominal
+    constant as a solved duration; report such rows as N/A.
+    """
     supported_robots: tuple[str, ...] = ("franka_panda",)
     parameters: dict[str, object] = field(default_factory=dict)
 
@@ -95,6 +125,10 @@ class BenchmarkCase:
     primary_success: str = "motion_valid"
     full_start_qpos: torch.Tensor | None = None
     case_parameters: dict[str, object] = field(default_factory=dict)
+    domain: EvaluationDomain | None = None
+    track_group: str | None = None
+    embodiment_id: str | None = None
+    required_capabilities: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -131,6 +165,8 @@ class CaseOutcome:
     articulation_joint_final: float | None = None
     articulation_joint_delta: float | None = None
     articulation_joint_peak_signed_delta: float | None = None
+    articulation_joint_effect_end: float | None = None
+    object_rotation_peak_signed_rad: float | None = None
     replan_count: int | None = None
     min_translation_err_mm: float | None = None
     min_rotation_err_deg: float | None = None
@@ -141,6 +177,91 @@ class CaseOutcome:
     waypoint_min_translation_err_mm_at_orientation: tuple[float | None, ...] = ()
     executed_final_translation_err_mm: float | None = None
     executed_final_rotation_err_deg: float | None = None
+    max_joint_velocity_rad_s: float | None = None
+    velocity_utilization: float | None = None
+    velocity_limit_violation: bool | None = None
+    max_joint_acceleration_rad_s2: float | None = None
+    acceleration_utilization: float | None = None
+    acceleration_limit_violation: bool | None = None
+    max_joint_jerk_rad_s3: float | None = None
+    jerk_utilization: float | None = None
+    jerk_limit_violation: bool | None = None
+    dynamic_measurement_status: str | None = None
+    """Whether trajectory dynamics were ``finite``, ``unbounded``, or unavailable."""
+    dynamic_limits_satisfied: bool | None = None
+    """Whether every applicable dynamic limit holds, or ``None`` when none apply.
+
+    Acceleration and jerk limits have no asset source, so a suite that leaves
+    them unset yields ``None`` rather than a satisfied result.
+    """
+    stages: tuple[StageOutcome, ...] = ()
+    failure_stage: str | None = None
+    physical_skill_success: bool | None = None
+    physical_failure_code: str | None = None
+    evaluation_protocol: str | None = None
+    timed_motion_valid: bool | None = None
+    """Validity under solved timing; nominal or unknown clocks remain unavailable."""
+
+    geometry_valid: bool = False
+    """Derived path validity, also accepted when reading serialized outcomes."""
+
+    def __post_init__(self) -> None:
+        """Recompute geometry validity from its authoritative component checks."""
+        object.__setattr__(
+            self,
+            "geometry_valid",
+            self.finite
+            and self.ordered_waypoints_reached
+            and not self.joint_limit_violation,
+        )
+
+    @property
+    def end_to_end_success(self) -> bool | None:
+        """Return overall success; unavailable physical evaluation stays unknown."""
+        if self.physical_skill_success is None:
+            return None
+        return (
+            self.planning_success
+            and self.motion_valid
+            and self.execution_success is True
+            and self.physical_skill_success
+        )
+
+
+def with_physical_evaluation(
+    outcome: CaseOutcome,
+    evaluation: PhysicalEvaluation,
+    *,
+    skill_id: str,
+) -> CaseOutcome:
+    """Attach physical results without gating them on motion diagnostics.
+
+    Args:
+        outcome: Motion and controller diagnostics for the same environment.
+        evaluation: Measured physical stages for that environment.
+        skill_id: Canonical skill id used to validate a versioned result.
+
+    Returns:
+        Outcome retaining independent physical success and the legacy overall alias.
+
+    Raises:
+        ValueError: Environment rows or claimed standard results disagree.
+    """
+    from .evaluation import validate_standard_evaluation
+
+    if outcome.env_index != evaluation.env_index:
+        raise ValueError("Physical evaluation belongs to a different environment row.")
+    validate_standard_evaluation(skill_id, evaluation)
+    updated = replace(
+        outcome,
+        physical_skill_success=evaluation.task_success,
+        physical_failure_code=evaluation.failure_code,
+        evaluation_protocol=evaluation.protocol_version,
+        stages=evaluation.stages,
+        failure_stage=evaluation.failure_stage,
+        failure_code=outcome.failure_code or evaluation.failure_code,
+    )
+    return replace(updated, task_success=updated.end_to_end_success)
 
 
 @dataclass(frozen=True)
@@ -180,10 +301,37 @@ class TrialRecord:
     trajectory_waypoints: int | None = None
     metadata: dict[str, object] = field(default_factory=dict)
     outcomes: tuple[CaseOutcome, ...] = ()
+    domain: EvaluationDomain | None = None
+    track_group: str | None = None
+    embodiment_id: str | None = None
+
+    @property
+    def uses_selected_planner_backend(self) -> bool:
+        """Return whether this trial exercised its attributed planner backend.
+
+        Older artifacts predate explicit motion attribution, so a missing flag
+        retains their original planner-attributed behavior.
+        """
+        return self.metadata.get("selected_planner_backend_used") is not False
+
+    @property
+    def effective_motion_algorithm(self) -> str:
+        """Return the algorithm that actually produced this trial's motion.
+
+        Planner-attributed trials retain their configured planner identity.
+        Scenario-defined motion uses its explicit metadata identity, with a
+        stable fallback for malformed or older non-planner artifacts.
+        """
+        if self.uses_selected_planner_backend:
+            return self.algorithm_id
+        value = self.metadata.get("effective_motion_algorithm")
+        if isinstance(value, str) and value.strip():
+            return value
+        return "unattributed_motion"
 
     def to_dict(self) -> dict[str, object]:
         """Return a JSON-serializable mapping while retaining numeric values."""
-        data = asdict(self)
-        data["algorithm_role"] = self.algorithm_role.value
-        data["phase"] = self.phase.value
-        return data
+        payload = cast(dict[str, object], _json_value(asdict(self)))
+        for row, outcome in zip(payload["outcomes"], self.outcomes):
+            row["end_to_end_success"] = outcome.end_to_end_success
+        return payload

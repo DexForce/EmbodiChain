@@ -1692,3 +1692,117 @@ def test_segmented_examples_preserve_overall_and_segment_instructions(
     for segment in segments:
         assert isinstance(segment.instruction, str) and segment.instruction.strip()
         assert segment.instruction != overall
+
+
+def test_motion_limit_policy_decodes() -> None:
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_motion_policy,
+    )
+
+    policy = _decode_motion_policy(
+        {
+            "sample_count": 40,
+            "velocity_limit": 0.2,
+            "acceleration_limit": 0.5,
+        },
+        path="motion",
+    )
+
+    assert policy.velocity_limit == pytest.approx(0.2)
+    assert policy.acceleration_limit == pytest.approx(0.5)
+
+
+def test_motion_limit_policy_preserves_omitted_velocity_limit() -> None:
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_motion_policy,
+    )
+
+    policy = _decode_motion_policy(
+        {"sample_count": 40, "acceleration_limit": 0.5},
+        path="motion",
+    )
+
+    assert policy.velocity_limit is None
+
+
+@pytest.mark.parametrize("field", ["velocity_limit", "acceleration_limit"])
+@pytest.mark.parametrize("value", [0.0, -0.1, float("inf")])
+def test_motion_limit_policy_rejects_nonpositive_or_nonfinite_values(
+    field: str,
+    value: float,
+) -> None:
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_motion_policy,
+    )
+
+    with pytest.raises(ValueError, match=field):
+        _decode_motion_policy(
+            {"sample_count": 40, field: value},
+            path="motion",
+        )
+
+
+def test_pour_dwell_duration_decodes() -> None:
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_action_options,
+    )
+
+    options = _decode_action_options(
+        {"kind": "pour", "dwell_duration": 0.75},
+        path="options",
+    )
+
+    assert isinstance(options, PourOptions)
+    assert options.dwell_duration == pytest.approx(0.75)
+
+
+@pytest.mark.parametrize("value", [-0.1, float("inf")])
+def test_pour_dwell_duration_rejects_negative_or_nonfinite_values(
+    value: float,
+) -> None:
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_action_options,
+    )
+
+    with pytest.raises(ValueError, match="dwell_duration"):
+        _decode_action_options(
+            {"kind": "pour", "dwell_duration": value},
+            path="options",
+        )
+
+
+@pytest.mark.parametrize(
+    "limits",
+    [
+        {"velocity_limit": 0.05},
+        {"acceleration_limit": 0.1},
+        {"velocity_limit": 0.05, "acceleration_limit": 0.1},
+    ],
+)
+def test_motion_limits_reach_explicit_blended_planner_options(
+    limits: dict[str, float],
+) -> None:
+    """Configured scalar budgets still constrain explicitly selected blending."""
+    policy = _decode_motion_policy(
+        {
+            "strategy": "motion_gen",
+            "sample_count": 40,
+            **limits,
+            "plan_opts": {
+                "kind": "trapezoidal",
+                "stop_at_waypoints": False,
+                "blend_tolerance": 0.001,
+            },
+        },
+        path="motion",
+    )
+    options = policy.to_motion_gen_options(
+        start_qpos=torch.zeros(1, 6), control_part="arm", interpolation_dt=0.01
+    )
+    assert isinstance(options.plan_opts, TrapezoidalPlanOptions)
+    assert options.plan_opts.constraints["velocity"] == limits.get("velocity_limit")
+    assert options.plan_opts.constraints["acceleration"] == limits.get(
+        "acceleration_limit"
+    )
+    assert TrapezoidalPlanOptions().constraints["velocity"] is None
+    assert TrapezoidalPlanOptions().constraints["acceleration"] is None

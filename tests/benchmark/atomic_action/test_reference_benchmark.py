@@ -312,6 +312,7 @@ def test_unavailable_runtime_skips_without_scene_construction(
 def test_cli_dispatch_preserves_explicit_legacy_action(
     monkeypatch: pytest.MonkeyPatch, legacy: bool
 ) -> None:
+    from scripts.benchmark import __main__ as benchmark_cli
     from scripts.benchmark.atomic_action import run_benchmark
 
     called = []
@@ -327,5 +328,5 @@ def test_cli_dispatch_preserves_explicit_legacy_action(
     monkeypatch.setattr(
         run_benchmark, "run_all_benchmarks", lambda: called.append("legacy")
     )
-    run_benchmark.main()
+    benchmark_cli._run_atomic_action_cli(SimpleNamespace())
     assert called == ["legacy" if legacy else "independent"]

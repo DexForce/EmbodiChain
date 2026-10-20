@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -553,3 +554,142 @@ def test_benchmark_console_resolves_checkout_without_cwd_on_import_path(
     assert "--robot" in completed.stdout
     assert "--skill" in completed.stdout
     assert "--planner" in completed.stdout
+
+
+def test_benchmark_help_distinguishes_benchmark_domains(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Benchmark categories remain discoverable at the shared command root."""
+    cli.main(["benchmark", "--help"])
+
+    output = " ".join(capsys.readouterr().out.split())
+    assert "motion-generation" in output
+    assert "Motion Planning or Atomic Skills suites" in output
+    assert "atomic-action-profile" in output
+    assert re.search(r"\batomic-action\b(?!-profile)", output)
+    assert "Profile individual atomic actions" in output
+    assert "robotics-kinematic-solver" in output
+    assert "rendering" in output
+
+
+@pytest.mark.parametrize(
+    ("suite_args", "expected_suite"),
+    [
+        ([], "motion_panda_free_space_smoke"),
+        (
+            ["--suite", "motion_ur5_free_space_coverage"],
+            "motion_ur5_free_space_coverage",
+        ),
+        (["--suite", "atomic_franka_pgi_smoke"], "atomic_franka_pgi_smoke"),
+    ],
+)
+def test_motion_generation_dispatch_selects_suite(
+    monkeypatch: pytest.MonkeyPatch,
+    suite_args: list[str],
+    expected_suite: str,
+) -> None:
+    """The domain command forwards either family and its canonical default."""
+    from scripts.benchmark.motion_generation import run_benchmark
+
+    received: dict[str, object] = {}
+
+    def fake_run_all_benchmarks(**kwargs: object) -> None:
+        received.update(kwargs)
+
+    monkeypatch.setattr(run_benchmark, "run_all_benchmarks", fake_run_all_benchmarks)
+
+    cli.main(["benchmark", "motion-generation", *suite_args, "--algorithms", "toppra"])
+
+    assert received["suite_name"] == expected_suite
+    assert received["algorithms"] == ["toppra"]
+
+
+def test_atomic_action_profile_help_uses_complete_parser(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Profiling help exposes the selected action and workload profile."""
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["benchmark", "atomic-action-profile", "--help"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "usage: embodichain benchmark atomic-action-profile" in output
+    assert "--action" in output
+    assert "--profile" in output
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_atomic_action_profile_forwards_arguments_and_restores_argv(
+    monkeypatch: pytest.MonkeyPatch,
+    fail: bool,
+) -> None:
+    """Delegated parsing preserves arguments and restores argv on either exit."""
+    from scripts.benchmark.atomic_action import run_benchmark
+
+    received: dict[str, object] = {}
+    original_argv = ["caller", "--unrelated-option"]
+    monkeypatch.setattr(sys, "argv", original_argv)
+
+    def fake_run_action_subprocess(action_name: str, args: argparse.Namespace) -> Path:
+        received.update(
+            action=action_name,
+            profile=args.profile,
+            argv=list(sys.argv),
+        )
+        if fail:
+            raise RuntimeError("profiling failed")
+        return Path("profile.md")
+
+    monkeypatch.setattr(
+        run_benchmark, "_run_action_subprocess", fake_run_action_subprocess
+    )
+    forwarded = ["--action", "move_joints", "--profile", "full"]
+
+    if fail:
+        with pytest.raises(SystemExit, match="profiling failed"):
+            cli.main(["benchmark", "atomic-action-profile", *forwarded])
+    else:
+        cli.main(["benchmark", "atomic-action-profile", *forwarded])
+
+    assert received == {
+        "action": "move_joints",
+        "profile": "full",
+        "argv": ["embodichain benchmark atomic-action-profile", *forwarded],
+    }
+    assert sys.argv is original_argv
+
+
+def test_atomic_action_reference_help_exposes_skill_selectors(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The reference scene command exposes skill and planner selectors."""
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["benchmark", "atomic-action", "--help"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "--skill" in output
+    assert "--planner" in output
+
+
+@pytest.mark.parametrize("arguments", [[], ["--smoke"]])
+def test_atomic_action_profile_keeps_legacy_default_without_action(
+    monkeypatch: pytest.MonkeyPatch, arguments: list[str]
+) -> None:
+    """Omitting --action keeps the profiler's default instead of changing hosts."""
+    from scripts.benchmark.atomic_action import run_benchmark
+
+    received: dict[str, object] = {}
+
+    def profile() -> list[Path]:
+        parsed = run_benchmark._parse_args()
+        received.update(actions=parsed.action, smoke=parsed.smoke)
+        return []
+
+    monkeypatch.setattr(run_benchmark, "run_all_benchmarks", profile)
+    cli.main(["benchmark", "atomic-action-profile", *arguments])
+
+    assert received == {
+        "actions": ["move_end_effector"],
+        "smoke": "--smoke" in arguments,
+    }

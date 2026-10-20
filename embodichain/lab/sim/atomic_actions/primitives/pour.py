@@ -37,13 +37,14 @@ from embodichain.lab.sim.atomic_actions.invocation import (
     ActionOptions,
     ResolvedActionRequest,
 )
-from embodichain.lab.sim.atomic_actions.plans import ActionPlan
+from embodichain.lab.sim.atomic_actions.plans import ActionPlan, TimedTrajectory
 from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
     make_manipulation_slot,
 )
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     arm_qpos_from_state,
     require_shared_task_state_key,
+    split_joint_trajectory_at_pose,
 )
 from embodichain.lab.sim.atomic_actions.requirements import (
     CARTESIAN_POSE_CAPABILITY,
@@ -53,7 +54,6 @@ from embodichain.lab.sim.atomic_actions.requirements import (
 from embodichain.lab.sim.atomic_actions.state import PlanningContext
 from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     build_pose_plan_states,
-    to_full_robot_trajectory,
 )
 
 
@@ -69,9 +69,14 @@ class PourOptions(ActionOptions):
     rotate_angle: float = math.pi / 4.0
     """Signed rotation about the held object's local internal axis, in radians."""
 
+    dwell_duration: float = 0.5
+    """Minimum time to remain at the poured orientation, in seconds."""
+
     def __post_init__(self) -> None:
         if not math.isfinite(self.rotate_angle):
             raise ValueError("rotate_angle must be finite.")
+        if not math.isfinite(self.dwell_duration) or self.dwell_duration < 0.0:
+            raise ValueError("dwell_duration must be finite and non-negative.")
 
 
 class Pour(AtomicAction[PourGoal, PourOptions]):
@@ -186,20 +191,36 @@ class Pour(AtomicAction[PourGoal, PourOptions]):
         assert result.dt is not None
         success = result.success & eligible
 
-        hand_grasp_qpos = grasp_endpoint.joint_positions(
-            GRASP_COMMAND,
-            num_envs=context.batch_size,
-            device=self.device,
-            dtype=context.robot.qpos.dtype,
+        control_dt = context.require_control_dt()
+        minimum_pour = max(2, request.motion_policy.sample_count // 2)
+        minimum_return = max(2, request.motion_policy.sample_count - minimum_pour)
+        pour_arm, return_arm = split_joint_trajectory_at_pose(
+            result.positions,
+            poured_eef_pose,
+            robot=self.robot,
+            control_part=control_part,
+            first_sample_count=minimum_pour,
+            second_sample_count=minimum_return,
+            dt=result.dt,
+            control_dt=control_dt,
         )
-        base_qpos = context.last_qpos.clone()
-        base_qpos[:, hand_joint_ids] = hand_grasp_qpos
-        _, timed = to_full_robot_trajectory(
-            result,
-            base_qpos=base_qpos,
-            joint_ids=arm_joint_ids,
+        dwell_steps = math.ceil(options.dwell_duration / control_dt)
+        dwell_arm = pour_arm[:, -1:].expand(-1, dwell_steps, -1)
+        return_arm = return_arm[:, 1:]
+        arm_trajectory = torch.cat((pour_arm, dwell_arm, return_arm), dim=1)
+        full = (
+            context.last_qpos.unsqueeze(1)
+            .expand(-1, arm_trajectory.shape[1], -1)
+            .clone()
+        )
+        full[:, :, arm_joint_ids] = arm_trajectory
+        # Preserve the measured contact-supported grasp instead of tightening
+        # the hand to a configured nominal value on the first frame.
+        full[:, :, hand_joint_ids] = context.last_qpos[:, hand_joint_ids].unsqueeze(1)
+        timed = TimedTrajectory.from_uniform_step(
+            full,
             env_ids=context.env_ids,
-            control_dt=context.require_control_dt(),
+            step_dt=control_dt,
         )
 
         return self.build_plan(
@@ -207,7 +228,11 @@ class Pour(AtomicAction[PourGoal, PourOptions]):
             context,
             success=success,
             trajectory=timed,
-            segment_lengths={"pour": timed.waypoint_count},
+            segment_lengths={
+                "pour": pour_arm.shape[1],
+                "dwell": dwell_steps,
+                "return": return_arm.shape[1],
+            },
         )
 
 

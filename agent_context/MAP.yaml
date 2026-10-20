@@ -210,7 +210,7 @@ topics:
     tests/sim/motion/test_motion_generator.py,
     tests/sim/motion/test_motion_generator_batched.py, embodichain/lab/sim/motion/planners/, embodichain/lab/sim/motion/expansion/,
     tests/sim/motion/expansion/, embodichain/lab/sim/utility/action_utils.py, embodichain/compute/trajectory/,
-    tests/sim/motion/planners/, tests/compute/]
+    tests/sim/motion/planners/, tests/compute/, examples/expansion/trajectory/, examples/expansion/README.md]
   related_topics: [simulation-system, robot-system, ik-solvers, atomic-actions]
   status: active
 - id: scene-services
@@ -473,12 +473,18 @@ topics:
 - id: asset-generalization
   title: Asset Generalization
   aliases: [asset generalization, asset provider, 资产泛化, 资产语义匹配]
-  keywords: [AssetDescriptor, PreparedAsset, AssetProvider, AssetRequirements, AssetRoleRequirement, ResolvedAssetSet, resolve_asset_set]
+  keywords: [AssetDescriptor, PreparedAsset, AssetProvider, AssetRequirements, AssetRoleRequirement, ResolvedAssetSet, resolve_asset_set, materialize_asset_deployment, asset_requirements, AssetGeneralizationCfg, prepare_asset_batches, collect_asset_batches, AssetPourAdaptationCfg, PouringAcceptanceMonitor, pours_into, replace_assets_from_group]
   paths: [topics/asset-generalization/asset-generalization.md]
   source_of_truth:
   - embodichain/data/asset_catalog/
   - embodichain/lab/task_program/semantics/asset_requirements.py
   - embodichain/lab/task_program/semantics/asset_matching.py
-  watch_paths: [embodichain/data/asset_catalog/, tests/data/asset_catalog/, embodichain/lab/task_program/semantics/asset_requirements.py, tests/lab/task_program/semantics/test_asset_requirements.py, embodichain/lab/task_program/semantics/asset_matching.py, tests/lab/task_program/semantics/test_asset_matching.py]
-  related_topics: [data-assets, task-programs, gen-sim, scene-services]
+  - embodichain/lab/task_program/integrations/asset_materialization.py
+  - embodichain/lab/gym/envs/asset_generalization.py
+  - embodichain/lab/gym/envs/_asset_replacement.py
+  - embodichain/lab/gym/envs/managers/events.py
+  - embodichain/lab/task_program/integrations/_asset_pouring.py
+  - embodichain/lab/task_program/integrations/simulation/asset_pouring.py
+  watch_paths: [embodichain/data/asset_catalog/, tests/data/asset_catalog/, embodichain/lab/task_program/semantics/asset_requirements.py, tests/lab/task_program/semantics/test_asset_requirements.py, embodichain/lab/task_program/semantics/asset_matching.py, tests/lab/task_program/semantics/test_asset_matching.py, embodichain/lab/task_program/integrations/asset_materialization.py, tests/gym/envs/task_program/test_asset_materialization.py, embodichain/lab/gym/envs/asset_generalization.py, tests/gym/envs/test_asset_generalization.py, examples/expansion/asset_generalization/, examples/expansion/asset_catalog/, examples/expansion/README.md]
+  related_topics: [data-assets, task-programs, gen-sim, scene-services, manager-functor, env-framework]
   status: active

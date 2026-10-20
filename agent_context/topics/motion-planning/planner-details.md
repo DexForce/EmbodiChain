@@ -21,7 +21,12 @@ Unconfirmed starts and later poses still require successful IK and FK consistenc
 `interpolate_trajectory()` raises
 on any failed row; `generate()` carries per-row success in a normalized
 `PlanResult`. Fixed Cartesian sample preservation requires explicit `ik_interp`;
-it is not an implicit fallback from backend planning.
+it is not an implicit fallback from backend planning. When velocity or
+acceleration limits expand such a path, `MotionGenOptions.cartesian_path_sampler`
+may regenerate poses from normalized minimum-jerk progress. The callback must
+end at the requested target, begin within the active IK solver's accepted pose
+tolerance, and preserve the batch, dtype, and device. Without it, the facade
+resamples the caller-supplied Cartesian polyline.
 
 Preserve these coupled result rules in `motion_generator.py`:
 
@@ -54,7 +59,10 @@ an inferred asset or physics limit. Partial-joint trajectories require an
 explicit control part when their column mapping is ambiguous. Explicit zero
 runtime speeds hold those joints; moving them must fail planning. Imported
 nonpositive speeds follow DexSim's unspecified-limit semantics, and unavailable
-runtime caps use planner fallbacks.
+runtime caps first use positive authored speeds from the assembled `cfg.fpath`
+URDF, mapped by joint name, before planner fallbacks. Valid runtime values,
+including zero, remain authoritative. The asset lookup is cached by path and
+file revision; mimic projection applies after fallback.
 
 A finite backend value does not prove that a speed was authored in the asset:
 DexSim's legacy URDF reader substitutes a positive default when the field is
@@ -66,12 +74,15 @@ cuRobo writes absolute speed caps into a cache-owned URDF copy and acceleration
 caps into YAML in active cspace order, excluding mimic followers. Keep velocity
 scales at one so loading and cloning preserve these caps. Mesh paths retain the
 source asset root. cuRobo rejects controlled zero-speed joints before loading;
-it cannot represent zero-width velocity intervals. `CuroboPlannerCfg.max_acceleration`
-sets its acceleration budget, preserving the existing 15.0 default; CPU timing
-planners retain their 0.5 default. Its YAML and backend caches include effective
-speeds and the configured acceleration budget; changing robot limits closes and rebuilds the
-affected backend. Neural policy rollout and `ik_interp`
-retain their existing timing contracts and do not consume these backend limits.
+it cannot represent zero-width velocity intervals. `CuroboPlannerCfg.max_velocity`
+optionally tightens effective Robot speeds; a request cannot loosen a valid cap.
+Both it and `max_acceleration` accept a scalar or a vector in `active_joint_ids`
+order. The default acceleration budget remains 15.0; CPU timing planners retain
+their 0.5 default. Its YAML and backend caches include resolved speed and
+acceleration vectors; changing either a request or robot limits closes and
+rebuilds the affected backend. Neural policy rollout retains its configured timing. The
+`ik_interp` path resolves robot speed caps and generic motion limits in the
+facade independently of the selected planner backend.
 
 ## Backend-specific boundaries
 
@@ -161,6 +172,14 @@ the graph. Validate complete observation-layout metadata/fingerprint before
 rollout; model dimensions and waypoint capacity belong to the export contract.
 Inspect the `policy-deploy` package extra for runtime dependencies.
 
+`NeuralPlannerCfg.dt` is bookkeeping, not solved timing: the rollout integrates
+a joint delta per step, so a saturated step implies `action_scale / dt` rad/s
+and overshoots a typical arm's velocity limit several times over. Setting
+`constraints` swaps that nominal timing for a TOPPRA parameterization through
+the shared entry point below; it resamples the path, so positions and poses
+change with the timing, and it cannot reduce the path's own jerk. Default
+remains `None`, which preserves the nominal-timing behavior.
+
 Runtime/training frame differences must be expressed through explicit policy
 frame and TCP transforms. Target/FK quaternions follow the shared
 [simulation convention](../simulation-system/simulation-system.md); do not
@@ -200,6 +219,14 @@ Control-grid retiming requires zero first-arrival intervals. It rounds each
 row's duration up to the destination clock, samples uniform source-path phase,
 and recomputes qvel with zero first/last-valid and padded-hold velocities.
 Source `PlanResult.dt` remains planner timing.
+
+`compute/trajectory/interpolation.py::interpolate_minimum_jerk()` expands joint
+keyframes onto a fixed control interval while preserving every keyframe. The
+requested sample count is a minimum; per-segment counts grow to satisfy scalar
+or ordered per-joint velocity and acceleration limits, and spare samples are
+distributed by joint displacement rather than equally across unequal moves.
+The emitted dtype is checked on the destination grid so float32 cancellation
+cannot silently violate those derivative limits.
 
 `motion/execution.py::play_joint_trajectory()` requires `control_dt` to be an
 integer multiple of `physics_dt` and advances that many unchanged substeps.
