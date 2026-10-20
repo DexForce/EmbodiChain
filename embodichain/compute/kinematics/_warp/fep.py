@@ -525,11 +525,16 @@ def solve(
     q4 = elbow_sign * bend - beta1 - dimensions[8]
     # The triangle already determines q4: reject its out-of-limit elbow
     # branch before reconstructing axes and recovering the other angles.
+    # Allow near-limit projection within the configured angular accuracy,
+    # including inverse-model error from admitted CAD-axis deviations. This
+    # only broadens candidate generation: original limits and actual URDF FK
+    # still decide whether the rounded, clamped result can be returned.
+    boundary_tolerance = wp.max(wp.float64(1e-6), rotation_tolerance)
     joint4 = q4 / scales[3] + dimensions[12]
     period4 = wp.float64(6.283185307179586) / wp.abs(scales[3])
-    if wp.ceil((wp.float64(lower[3]) - joint4 - wp.float64(1e-6)) / period4) > wp.floor(
-        (wp.float64(upper[3]) - joint4 + wp.float64(1e-6)) / period4
-    ):
+    if wp.ceil(
+        (wp.float64(lower[3]) - joint4 - boundary_tolerance) / period4
+    ) > wp.floor((wp.float64(upper[3]) - joint4 + boundary_tolerance) / period4):
         nearest4 = joint4 + period4 * wp.round(
             ((wp.float64(lower[3]) + wp.float64(upper[3])) * wp.float64(0.5) - joint4)
             / period4
@@ -624,10 +629,10 @@ def solve(
         )
         joint = angle / scales[i] + dimensions[9 + i]
         period = wp.float64(6.283185307179586) / wp.abs(scales[i])
-        # Small boundary allowance for float32 URDF/target input; the kernel
-        # verifies every rounded/clamped candidate against the actual FK.
-        first = wp.ceil((wp.float64(lower[i]) - joint - wp.float64(1e-6)) / period)
-        last = wp.floor((wp.float64(upper[i]) - joint + wp.float64(1e-6)) / period)
+        # Use the same projection allowance as elbow pruning, then verify
+        # every rounded/clamped candidate against the original URDF FK.
+        first = wp.ceil((wp.float64(lower[i]) - joint - boundary_tolerance) / period)
+        last = wp.floor((wp.float64(upper[i]) - joint + boundary_tolerance) / period)
         if first > last:
             if not guide_limits:
                 return

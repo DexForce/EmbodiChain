@@ -17,7 +17,9 @@
 
 from __future__ import annotations
 
+from itertools import product
 from pathlib import Path
+import xml.etree.ElementTree as ET
 
 import numpy as np
 import pytest
@@ -66,13 +68,18 @@ def _verify_fk_residuals(
         ),
     ]
 )
-def solver(request: pytest.FixtureRequest) -> FEPSolver:
+def fep_device(request: pytest.FixtureRequest) -> str:
+    return request.param
+
+
+@pytest.fixture
+def solver(fep_device: str) -> FEPSolver:
     return FEPSolverCfg(
         urdf_path=get_data_path("Franka/Panda/PandaWithHand.urdf"),
         root_link_name="base",
         end_link_name="fr3_hand_tcp",
         batch_size=16,
-    ).init_solver(device=request.param)
+    ).init_solver(device=fep_device)
 
 
 def _assert_pose_accuracy(
@@ -96,6 +103,77 @@ def _assert_limits(solver: FEPSolver, joints: torch.Tensor) -> None:
     assert bool(torch.isfinite(joints).all())
     assert bool((joints >= solver.lower_qpos_limits).all())
     assert bool((joints <= solver.upper_qpos_limits).all())
+
+
+def _xml_fk(solver: FEPSolver, joints: torch.Tensor) -> np.ndarray:
+    """Compose original URDF transforms in float64, independently of PK/FEP."""
+    root = ET.parse(solver.cfg.urdf_path).getroot()
+    parents = {
+        joint.find("child").get("link"): joint for joint in root.findall("joint")
+    }
+    path = []
+    link = solver.cfg.end_link_name
+    while link != solver.cfg.root_link_name:
+        joint = parents[link]
+        path.append(joint)
+        link = joint.find("parent").get("link")
+    qpos = joints.detach().cpu().numpy().astype(np.float64)
+    transform = np.broadcast_to(np.eye(4), (len(qpos), 4, 4)).copy()
+    index = 0
+    for joint in reversed(path):
+        origin = joint.find("origin")
+        offset = np.eye(4)
+        if origin is not None:
+            offset[:3, :3] = Rotation.from_euler(
+                "xyz", np.fromstring(origin.get("rpy", "0 0 0"), sep=" ")
+            ).as_matrix()
+            offset[:3, 3] = np.fromstring(origin.get("xyz", "0 0 0"), sep=" ")
+        transform = transform @ offset
+        if joint.get("type") == "fixed":
+            continue
+        assert joint.get("type") == "revolute"
+        assert joint.get("name") == solver.joint_names[index]
+        axis = np.fromstring(joint.find("axis").get("xyz"), sep=" ")
+        axis /= np.linalg.norm(axis)
+        rotation = np.broadcast_to(np.eye(4), (len(qpos), 4, 4)).copy()
+        rotation[:, :3, :3] = Rotation.from_rotvec(
+            qpos[:, index, None] * axis
+        ).as_matrix()
+        transform = transform @ rotation
+        index += 1
+    assert index == 7
+    return transform @ solver.tcp_xpos
+
+
+@pytest.mark.parametrize("position_tolerance, expected", [(1e-5, False), (1e-3, True)])
+def test_boundary_projection_obeys_original_fk_tolerances(
+    solver: FEPSolver, position_tolerance: float, expected: bool
+) -> None:
+    # A small q6 overshoot rotates a long tool enough to exceed the strict
+    # position threshold, while remaining within the angular threshold.
+    # Locking every joint leaves exactly one possible projected result.
+    seed = solver.get_default_qpos_seed()[None]
+    seed[:, 1] = 0.4
+    tcp = np.eye(4)
+    tcp[2, 3] = 5.0
+    solver.set_tcp(tcp)
+    outside = seed.clone()
+    outside[:, 5] += 4e-6
+    target = torch.as_tensor(
+        _xml_fk(solver, outside), device=solver.device, dtype=torch.float32
+    )
+    solver.set_qpos_limits(seed[0], seed[0])
+    solver.cfg.position_tolerance = position_tolerance
+    valid, result = solver.get_ik(target, seed)
+    assert valid.tolist() == [expected]
+    torch.testing.assert_close(result, seed, atol=0, rtol=0)
+    _assert_limits(solver, result)
+    if expected:
+        _assert_pose_accuracy(
+            target,
+            torch.from_numpy(_xml_fk(solver, result)),
+            position_tolerance=position_tolerance,
+        )
 
 
 @pytest.mark.parametrize("with_tcp", [False, True])
@@ -525,6 +603,49 @@ def _w1_solver(side: str, device: str = "cpu") -> FEPSolver:
         rotation_tolerance=5e-5 if side == "left" else 1e-5,
         batch_size=16,
     ).init_solver(device)
+
+
+@pytest.mark.parametrize("side", ["left", "right"])
+@pytest.mark.parametrize("search", [False, True])
+@pytest.mark.parametrize("with_tcp", [False, True])
+def test_w1_v030_boundary_projection_from_distant_seed(
+    fep_device: str, side: str, search: bool, with_tcp: bool
+) -> None:
+    solver = _w1_solver(side, fep_device)
+    solver.cfg.redundancy_search = search
+    solver.cfg.arm_angle_weight = 0.0
+    if with_tcp:
+        tcp = np.eye(4)
+        tcp[:3, :3] = Rotation.from_euler("xyz", [0.2, -0.1, 0.3]).as_matrix()
+        tcp[:3, 3] = [0.05, -0.03, 0.1]
+        solver.set_tcp(tcp)
+    lower, upper = solver.lower_qpos_limits, solver.upper_qpos_limits
+    corners = lower.new_tensor(list(product((0.0, 1.0), repeat=7)))
+    boundary = torch.where(corners.bool(), upper, lower)
+    # Include strict interior targets so this also catches model error rather
+    # than only roundoff at the exact public limits.
+    qpos = torch.cat((boundary, boundary.clamp(lower + 1e-5, upper - 1e-5)))
+    seed = lower + (upper - lower) * torch.rand(
+        len(qpos), 7, generator=torch.Generator().manual_seed(30)
+    ).to(solver.device)
+    seed[:, 6] = qpos[:, 6]
+    target = torch.as_tensor(
+        _xml_fk(solver, qpos), device=solver.device, dtype=torch.float32
+    )
+    valid, candidates = solver.get_ik(target, seed, return_all_solutions=True)
+    assert bool(valid.any(-1).all())
+    accepted = candidates[valid]
+    _assert_limits(solver, accepted)
+    _assert_pose_accuracy(
+        target[:, None].expand(-1, 8, -1, -1)[valid],
+        torch.from_numpy(_xml_fk(solver, accepted)),
+        position_tolerance=solver.cfg.position_tolerance,
+        rotation_tolerance=solver.cfg.rotation_tolerance,
+    )
+    if not search:
+        torch.testing.assert_close(
+            candidates[..., 6][valid], seed[:, 6:7].expand(-1, 8)[valid], atol=0, rtol=0
+        )
 
 
 @pytest.mark.parametrize("side", ["left", "right"])
