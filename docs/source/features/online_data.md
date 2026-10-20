@@ -20,10 +20,13 @@ delivery budgets make data use auditable. Shared APIs live in
 :maxdepth: 1
 :hidden:
 
+ods/architecture
 ods/configuration
 ods/evaluation
 ```
 
+- [Architecture and data flow](ods/architecture.md): process structure, module
+  ownership and online/offline routes.
 - [Throughput configuration](ods/configuration.md): rate units, reuse profiles,
   exact cache/rate limits and consumer enforcement responsibilities.
 - [Evaluation and offline comparison](ods/evaluation.md): exposure, quality,
@@ -94,10 +97,12 @@ with a timeout. `get_stats()` reports production/consumption counters and exclud
 the active write window from readable-frame counts.
 
 With `include_provenance=True`, each sample carries `ods_run_id`,
-`ods_episode_id`, `ods_generation`, `ods_frame_index` and `ods_accepted_at_ns`.
+`ods_episode_id`, `ods_generation`, `ods_frame_index`, `ods_accepted_at_ns` and
+`ods_published_at_monotonic_ns`.
 Frame indices are zero-based positions in the stored episode. The timestamp
 uses Unix nanoseconds when a successful episode is accepted for publication;
-it is not simulation time or a monotonic duration. The worker stamps provenance
+publication time separately uses host monotonic nanoseconds. These clocks must
+not be subtracted without an explicit alignment. The worker stamps provenance
 under the publication lock and samplers copy it with the corresponding payload.
 Invalid frames retain `-1` for every provenance field. Engine-local IDs identify
 live samples; validated offline corpus manifests provide separate content
@@ -265,8 +270,9 @@ retain the same axes across sources. Frame identity is `(source run, episode,
 frame)`; padding IDs are -1. Numeric padding is zero, and the loss mask includes
 only real current/future targets. Episodes, validity gaps, continuity changes,
 segment mode and optional generation filtering constrain eligible contexts.
-Feature conversion must preserve masks and restore zero padding if a nonlinear
-conversion maps the neutral padded input to a nonzero value.
+The public source restores canonical zero padding after feature conversion,
+including nonlinear conversions that map neutral inputs to nonzero values.
+Model-side transformations outside that adapter must also respect these masks.
 
 The following sketch assumes a truthful schema for the recorded numeric fields:
 
@@ -300,8 +306,9 @@ BC demo sidecar. Image/video and out-of-core decoding are outside this backend.
 For live data, use `OnlineDataSource(engine, schema=schema,
 observation_transform=feature_fn)` with the same truthful feature/action contract.
 The caller starts/stops the engine and schedules any refill/wait. The adapter
-owns none of those lifecycle decisions. The transform must accept copied
-observations and their `valid_mask` and produce the declared numeric features.
+owns none of those lifecycle decisions. The transform receives the copied
+observations as one argument and produces the declared numeric features. The
+adapter reapplies padding using the sampled `valid` and `loss_mask` afterward.
 
 `SequenceDataset` yields items when `batch_size=None` and complete batches when
 it is specified; use DataLoader `batch_size=None` for prebatched iteration.

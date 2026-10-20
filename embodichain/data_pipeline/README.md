@@ -9,6 +9,8 @@ Start with the [ODS user guide](../../docs/source/features/online_data.md) for
 engine lifecycle, manual refill, causal contexts, delivery budgets and source
 ownership. The reusable operational guides are:
 
+- [Architecture and data flow](../../docs/source/features/ods/architecture.md):
+  process ownership, online/offline routes and application boundaries.
 - [Throughput-based configuration](../../docs/source/features/ods/configuration.md):
   measured rates, protected reuse profiles, cache/active-rate limits and the
   host's pacing/refill responsibilities.

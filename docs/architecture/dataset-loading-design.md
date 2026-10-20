@@ -4,6 +4,7 @@ Status: the initial numeric source/loader API and local BC demo integration are 
 Updated 2026-10-19. Image/video sequence loading and out-of-core storage remain outside this implementation.
 
 For use and operation, start with the [ODS guide](../source/features/online_data.md),
+[architecture and data flow](../source/features/ods/architecture.md),
 [throughput configuration](../source/features/ods/configuration.md) and
 [evaluation methodology](../source/features/ods/evaluation.md). This document
 owns source/Dataset architecture and implementation boundaries; task parameters
@@ -37,7 +38,7 @@ The components below are exported from that package.
 
 | Component | Responsibility |
 | --- | --- |
-| `SequenceSpecCfg` | Validated history length, prediction horizon, sampling mode and padding policy; use `@configclass`. |
+| `SequenceSpecCfg` | Validated history length, prediction horizon, sampling mode and generation filter, with fixed canonical padding; use `@configclass`. |
 | `BatchSource` protocol | Expose schema and `sample_context(batch_size, spec, generator=...)`; return an independently owned TensorDict. |
 | `OnlineDataSource` | Delegate publication, locks, provenance, errors and quotas to the existing engine. |
 | `LeRobotDataSource` | Read through the official SDK, validate or explicitly map metadata, and provide bounded resident numeric storage. |
@@ -88,9 +89,12 @@ that explicitly schedule production and training.
   Apply canonical masking after any row-local feature conversion: quaternion
   conversion can map a zero input to a nonzero identity rotation. Stateful or
   stochastic transforms must declare temporal/RNG requirements separately.
-- Schema validation includes ordered names/slices, dtype, observation timing,
-  action representation, normalization, frame, rotation convention and step
-  duration. A matching vector width alone does not establish compatibility.
+- Declaration validation checks optional names/dtypes/versions, pre-action
+  observation timing, explicit action semantics and positive step duration.
+  Source adapters additionally check stored shapes and supported action
+  contracts. Units, frames, rotations, normalization and semantic truth remain
+  caller declarations; the validator performs no implicit conversions. A
+  matching vector width alone does not establish compatibility.
 - All public source constructors use the same declaration validator: explicit
   action semantics or representation and positive `step_dt` are required.
   Optional observation timing must be `pre_action`, as required by this source
