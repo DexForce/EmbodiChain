@@ -31,11 +31,11 @@ for fragment transactions, async ownership, depth output and shutdown. Read
 [offline dataset tools](offline-datasets.md) for lineage, quality filtering,
 validation, and conversion across Python/LeRobot versions.
 
-Reusable user documentation belongs to the [ODS guide](../../../docs/source/features/online_data.md),
-[throughput configuration](../../../docs/source/features/ods/configuration.md)
-and [evaluation methodology](../../../docs/source/features/ods/evaluation.md).
-Example-local documentation owns its task binding, CLI/artifact names and
-historical evidence. Keep generic operational contracts in those core guides.
+Reusable user documentation belongs to the [ODS guide](../../../docs/source/features/online_data.md)
+and [configuration/runtime checks](../../../docs/source/features/ods/configuration.md).
+Example-local documentation owns its task binding, CLI/artifact names,
+comparison protocol and historical evidence. Keep generic operational contracts
+in the core guides.
 
 `BatchSource.sample_context()` returns owned TensorDicts under a shared
 `SequenceSpecCfg`; `SequenceDataset` supplies the common iteration interface.

@@ -22,15 +22,12 @@ delivery budgets make data use auditable. Shared APIs live in
 
 ods/architecture
 ods/configuration
-ods/evaluation
 ```
 
 - [Architecture and data flow](ods/architecture.md): process structure, module
   ownership and online/offline routes.
 - [Throughput configuration](ods/configuration.md): rate units, reuse profiles,
-  exact cache/rate limits and consumer enforcement responsibilities.
-- [Evaluation and offline comparison](ods/evaluation.md): exposure, quality,
-  timing, resource metrics and fair experimental controls.
+  cache/rate limits, consumer responsibilities and runtime verification.
 - [Dataset/source architecture](https://github.com/DexForce/EmbodiChain/blob/main/docs/architecture/dataset-loading-design.md):
   public schemas, source ownership and implementation boundaries.
 - [Simple BC demo](https://github.com/DexForce/EmbodiChain/blob/main/examples/ods/simple_bc_demo/README.md):
@@ -93,8 +90,7 @@ recording continues to use `ExpertActionSpec`.
 
 With manual refill, `request_refill()` returns a target generation and coalesces
 an outstanding request; `wait_for_generation()` waits for complete publication
-with a timeout. `get_stats()` reports production/consumption counters and excludes
-the active write window from readable-frame counts.
+with a timeout.
 
 With `include_provenance=True`, each sample carries `ods_run_id`,
 `ods_episode_id`, `ods_generation`, `ods_frame_index`, `ods_accepted_at_ns` and
@@ -107,6 +103,19 @@ under the publication lock and samplers copy it with the corresponding payload.
 Invalid frames retain `-1` for every provenance field. Engine-local IDs identify
 live samples; validated offline corpus manifests provide separate content
 identities.
+
+### Statistics and accounting
+
+| Interface | Information and limits |
+| --- | --- |
+| `get_stats()` | Production counts/time, refill generations and sampled chunks. Readable-frame counts exclude the active write window. Sampled chunks count deliveries, not completed optimizer work. |
+| `get_sampling_budget_snapshot()` | With quotas enabled, retained identities and assigned/delivered/remaining allowances, plus lifetime delivered chunks. Unlocked quota is a scheduling hint; context and generation filters can further restrict eligibility. |
+| `drain_lifecycle_events()` | Optional publication/eviction records and monotonic timestamps. Enable `lifecycle_event_capacity` and drain during production and waits; a full log backpressures the producer. |
+
+The application records completed optimizer work, retired-source exposure,
+latency distributions and resource peaks. These interfaces do not generate a
+training dashboard or an evaluation report. See
+[Verify the plan](ods/configuration.md#verify-the-plan) for measurement checks.
 
 ### Causal context and padding
 

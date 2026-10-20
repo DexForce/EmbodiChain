@@ -5,9 +5,8 @@ Updated 2026-10-19. Image/video sequence loading and out-of-core storage remain 
 
 For use and operation, start with the [ODS guide](../source/features/online_data.md),
 [architecture and data flow](../source/features/ods/architecture.md),
-[throughput configuration](../source/features/ods/configuration.md) and
-[evaluation methodology](../source/features/ods/evaluation.md). This document
-owns source/Dataset architecture and implementation boundaries; task parameters
+[configuration and runtime verification](../source/features/ods/configuration.md).
+This document owns source/Dataset architecture and implementation boundaries; task parameters
 and historical run evidence remain with the demo.
 
 ## Problem and acceptance criterion

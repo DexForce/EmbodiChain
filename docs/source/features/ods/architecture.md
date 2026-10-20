@@ -100,9 +100,8 @@ training-efficiency advantage.
   live cache with a new run ID; exact replay-cache or protected offline-ledger
   recovery is not implemented.
 
-See [configuration](configuration.md) for exact rate/cache formulas,
-[evaluation](evaluation.md) for engineering/learning/performance criteria, and
-the [Dataset/source design](https://github.com/DexForce/EmbodiChain/blob/main/docs/architecture/dataset-loading-design.md)
+See [configuration](configuration.md) for rate/cache formulas and runtime checks,
+and the [Dataset/source design](https://github.com/DexForce/EmbodiChain/blob/main/docs/architecture/dataset-loading-design.md)
 for implementation detail. Image/video sequence decoding, out-of-core loading,
 DAgger, feedback-driven collection, RLinf integration and general replay
 aggregation remain outside the implemented scope.

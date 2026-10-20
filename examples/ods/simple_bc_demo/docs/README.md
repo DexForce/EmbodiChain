@@ -22,8 +22,8 @@ validation host and are not portable download links.
 [CONFIGURATION.md](CONFIGURATION.md) describes the local packet, CLI and report
 artifacts. Reusable behavior belongs to the
 [ODS overview](../../../../docs/source/features/online_data.md),
-[throughput configuration guide](../../../../docs/source/features/ods/configuration.md)
-and [evaluation guide](../../../../docs/source/features/ods/evaluation.md).
+[configuration and runtime checks](../../../../docs/source/features/ods/configuration.md).
+Experiment design remains in the [offline comparison protocol](OFFLINE_PILOT.md).
 The shared [loading design](../../../../docs/architecture/dataset-loading-design.md)
 records the public numeric Dataset/source architecture. Historical counts and
 measurements in this index retain their original revisions and limits.

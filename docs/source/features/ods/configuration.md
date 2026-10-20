@@ -8,7 +8,7 @@ sampling settings and implement the returned pacing/refill policy.
 This method applies across tasks and learners. The [Franka integration](https://github.com/DexForce/EmbodiChain/blob/main/examples/ods/simple_bc_demo/docs/CONFIGURATION.md)
 provides a worked binding; its measurements and reuse bounds are provisional
 case evidence. See [ODS](../online_data.md) for engine and source ownership and
-[evaluation](evaluation.md) for measuring the resulting behavior.
+[Verify the plan](#verify-the-plan) for checking the resulting behavior.
 
 ## Inputs and units
 
@@ -204,6 +204,30 @@ After production stops, the host may consume only remaining quotas and must
 stop when a requested full batch cannot be funded. No generic background
 controller derives a new safe K or training budget automatically.
 
+## Verify the plan
+
+Observe several complete refills under the intended concurrent workload and
+compare the resolved plan with these measurements:
+
+| Check | What to record |
+| --- | --- |
+| Supply and consumption | Accepted episodes/s, completed chunks/s, and first/full-publication latency. Keep active service rates separate from wall rates that include pacing and waits. |
+| Protected reuse | Per-source delivered chunks versus assigned K, completed optimizer chunks, generation shares and unused allowance retired on replacement. Retain source history in the application because engine snapshots contain only current rows. |
+| Frame exposure | Unique anchors and valid supervised-frame appearances through `loss_mask`; a chunk selection is not a whole-episode pass. |
+| Waiting and resources | Data/quota waits, intentional pacing, actual cache storage and total CPU/GPU memory. The cache allowance covers episode payloads only. |
+
+Use one monotonic time domain and retain counts with their interval boundaries.
+Sampled acceptance timestamps use Unix time and require explicit alignment
+before comparison with monotonic publication events. Cross-check lifetime
+deliveries against application records; prefetched or failed consumer work
+still spends delivery quota.
+
+Measure the overhead of accounting and resource sampling in the complete
+consumer. Record task quality separately: rate matching and bounded reuse do
+not establish convergence or an efficiency advantage. The BC example's
+[comparison protocol](https://github.com/DexForce/EmbodiChain/blob/main/examples/ods/simple_bc_demo/docs/OFFLINE_PILOT.md)
+defines experiment arms, checkpoint evaluation and cold-start/data-ready costs.
+
 ## Recalibration and diagnosis
 
 | Observation | Check before changing configuration |
@@ -218,5 +242,3 @@ controller derives a new safe K or training budget automatically.
 Record the resolved plan and inputs, actual accepted/delivered/completed counts,
 generation shares, retired allowances, latency observations, waits and resource
 scope. Compare predictions with measured rates after changing the schedule.
-See [evaluation and comparison](evaluation.md) for the metric definitions and
-the distinction between engineering constraints and learning quality.

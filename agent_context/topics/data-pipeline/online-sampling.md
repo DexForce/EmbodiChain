@@ -173,9 +173,8 @@ dedicated example unit tests. Expert physical qualification, small-data
 diagnostics and student learning are separate; smoke success and low loss do
 not establish a learning or efficiency advantage. The local
 [ODS configuration guide](../../../docs/source/features/ods/configuration.md)
-owns reusable rate units, planner limits and scheduling responsibilities;
-the [evaluation guide](../../../docs/source/features/ods/evaluation.md) owns
-measurement scope. The [demo binding](../../../examples/ods/simple_bc_demo/docs/CONFIGURATION.md)
+owns reusable rate units, planner limits, scheduling and measurement checks.
+The [demo binding](../../../examples/ods/simple_bc_demo/docs/CONFIGURATION.md)
 records its local CLI and artifacts; the historical
 [pilot protocol](../../../examples/ods/simple_bc_demo/docs/OFFLINE_PILOT.md)
 separates acquisition-inclusive and data-ready budgets.

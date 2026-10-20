@@ -3,8 +3,7 @@
 The reusable method now lives in the ODS documentation:
 
 - [ODS overview and source contracts](../../../../docs/source/features/online_data.md)
-- [Throughput, reuse budget and cache/refill configuration](../../../../docs/source/features/ods/configuration.md)
-- [Metrics and online/offline comparison](../../../../docs/source/features/ods/evaluation.md)
+- [Throughput, reuse budget, cache/refill and runtime checks](../../../../docs/source/features/ods/configuration.md)
 
 Those guides define rate units, exact planner limits, sampler protection and
 consumer responsibilities for any task. This page describes the demo's binding,
@@ -100,6 +99,13 @@ Compare planned versus observed rates, inspect initial/last-generation exposure,
 retired credit, maximum per-source deliveries and the actual stopping reason.
 Keep model quality separate from rate matching. The maintained small offline
 baseline may solve this task sooner than collecting a larger corpus.
+
+The [offline comparison protocol](OFFLINE_PILOT.md) owns the four experiment
+arms, matched learner/data settings, checkpoint panels, timing and resource
+accounting. It distinguishes acquisition-inclusive runs from data-ready runs
+and checkpoint availability from evaluation completion. A new study must
+predeclare its quality threshold, seed blocks and held-out scenes; the recorded
+single-seed pilot remains descriptive evidence.
 
 [Historical quota trials](ODS_QUOTA_TESTS.md), [configuration validation](ODS_CONFIGURATION_VALIDATION.json),
 [the offline pilot](OFFLINE_PILOT_RESULTS.md), and [the accounting audit](ODS_ACCOUNTING_AUDIT.md)

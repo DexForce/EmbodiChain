@@ -13,9 +13,7 @@ ownership. The reusable operational guides are:
   process ownership, online/offline routes and application boundaries.
 - [Throughput-based configuration](../../docs/source/features/ods/configuration.md):
   measured rates, protected reuse profiles, cache/active-rate limits and the
-  host's pacing/refill responsibilities.
-- [Evaluation and offline comparison](../../docs/source/features/ods/evaluation.md):
-  production/delivery/completion units, quality, timing, resources and fair controls.
+  host's pacing/refill responsibilities and runtime verification.
 - [Dataset/source architecture](../../docs/architecture/dataset-loading-design.md):
   the public `BatchSource`/`SequenceDataset` contract and numeric LeRobot loading.
 
