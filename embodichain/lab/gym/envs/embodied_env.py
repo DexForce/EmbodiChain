@@ -632,9 +632,23 @@ class EmbodiedEnv(BaseEnv):
     def _after_episode_reset(self, obs: EnvObs, env_ids: torch.Tensor) -> None:
         self._active_task_program_bridge = None
         self._seed_recording_state(obs, env_ids)
+        if not self.cfg.events or self.event_manager is None or not len(env_ids):
+            return
+        from embodichain.lab.gym.envs.managers.record import record_camera_data
+
+        for mode_cfgs in self.event_manager._mode_functor_cfgs.values():
+            for functor_cfg in mode_cfgs:
+                if isinstance(functor_cfg.func, record_camera_data):
+                    recorder = functor_cfg.func
+                    # A reset event may capture before episode_prepare restores
+                    # the final state. Replace only the newly reset live rows.
+                    recorder.discard_and_clear(env_ids=env_ids)
+                    params = dict(functor_cfg.params)
+                    params.setdefault("name", recorder._name)
+                    recorder(self, env_ids=env_ids, **params)
 
     def _seed_recording_state(self, obs: EnvObs, env_ids: torch.Tensor) -> None:
-        """Seed all enabled recorders from the current environment state."""
+        """Seed pending expert observations and trajectory states."""
         self._seed_expert_observations(obs, env_ids)
         self._seed_trajectory_states(env_ids)
 

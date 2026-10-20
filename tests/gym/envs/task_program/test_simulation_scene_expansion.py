@@ -226,7 +226,7 @@ class _Environment(EmbodiedEnv):
         self.sim = _Simulation(self.events)
         self._num_envs = 1
         self.episode_context = EpisodeContext(1)
-        self.cfg = SimpleNamespace(sim_steps_per_control=4)
+        self.cfg = SimpleNamespace(sim_steps_per_control=4, events=None)
         self.sim_cfg = SimpleNamespace(physics_dt=0.01)
         self._profiler = SimpleNamespace(section=lambda *a, **k: nullcontext())
         self._detached_uids_for_reset = []

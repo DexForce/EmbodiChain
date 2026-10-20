@@ -144,7 +144,9 @@ def _native_gym_probe(backend: str) -> None:
     from embodichain.lab.sim.cfg import RigidObjectCfg, physics_cfg_for_backend
     from embodichain.lab.sim.shapes import CubeCfg
     from embodichain.lab.sim import SimulationManager
+    from embodichain.lab.gym.envs.managers.record import record_camera_data
     from embodichain.utils.utility import load_config
+    import numpy as np
 
     class ProbeEnvironment(EmbodiedEnv):
         def get_obs(self, **kwargs):
@@ -167,7 +169,9 @@ def _native_gym_probe(backend: str) -> None:
     cfg.sim_cfg.physics_cfg = physics_cfg_for_backend(backend)
     cfg.sim_cfg.device = "cpu"
     cfg.sim_cfg.headless = True
-    cfg.sim_cfg.render_cfg.renderer = "no-render"
+    cfg.sim_cfg.render_cfg.renderer = "hybrid"
+    cfg.sim_cfg.width = 96
+    cfg.sim_cfg.height = 64
     cfg.seed = 9
     cfg.enable_sensor = False
     cfg.light.direct = []
@@ -194,7 +198,16 @@ def _native_gym_probe(backend: str) -> None:
                 "candidate_count": 4,
                 "max_attempts": 32,
             },
-        )
+        ),
+        record_camera=EventCfg(
+            func=record_camera_data,
+            mode="interval",
+            params={
+                "name": "first_frame_probe",
+                "resolution": (96, 64),
+                "intrinsics": (80.0, 80.0, 48.0, 32.0),
+            },
+        ),
     )
     env = None
     try:
@@ -204,11 +217,32 @@ def _native_gym_probe(backend: str) -> None:
             obs["probe_pose"], env.sim.get_rigid_object("cube").get_local_pose()
         )
         before = obs["probe_pose"].clone()
+        recorder = env.event_manager.get_functor_cfg("record_camera").func
+        assert [len(frames) for frames in recorder._frames_list] == [1] * 4
+        recorder(env, [0, 2], name="first_frame_probe")
+        previous_frames = [
+            tuple(frame.copy() for frame in recorder._frames_list[row])
+            for row in (0, 2)
+        ]
+        env._elapsed_steps[[0, 2]] = torch.tensor(
+            [7, 9], dtype=env._elapsed_steps.dtype
+        )
+        env.sim.update = lambda *a, **kw: pytest.fail("Reset advanced physics")
         previous = [
             m["sources"]["events/layout"]["metadata"]["variant_id"]
             for m in info["episode_context"]
         ]
         obs, info = env.reset(options={"save_data": False, "reset_ids": [3, 1]})
+        assert [len(frames) for frames in recorder._frames_list] == [2, 1, 2, 1]
+        assert env._elapsed_steps.tolist() == [7, 0, 9, 0]
+        for row, prior in zip((0, 2), previous_frames, strict=True):
+            for actual, expected in zip(recorder._frames_list[row], prior, strict=True):
+                np.testing.assert_array_equal(actual, expected)
+        native_frames = recorder.camera.get_data()["color"]
+        for row in (1, 3):
+            np.testing.assert_array_equal(
+                recorder._frames_list[row][0], native_frames[row, ..., :3].cpu().numpy()
+            )
         torch.testing.assert_close(
             obs["probe_pose"][[0, 2]], before[[0, 2]], atol=0, rtol=0
         )
@@ -237,7 +271,9 @@ def _native_gym_probe(backend: str) -> None:
 
 @pytest.mark.requires_sim
 @pytest.mark.parametrize("backend", ["default", "newton"])
-@pytest.mark.parametrize("frontend", ["sim", "gym"])
+@pytest.mark.parametrize(
+    "frontend", ["sim", pytest.param("gym", marks=pytest.mark.gpu)]
+)
 def test_native_four_row_functor_publication_is_selective(
     backend: str, frontend: str
 ) -> None:
