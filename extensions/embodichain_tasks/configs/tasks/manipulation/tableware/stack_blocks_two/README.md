@@ -52,8 +52,10 @@ configuration selection and sensor differences.
 The Tianji deployment selects the left arm and a Toppra motion policy. Its root
 position `[0.125, -0.1, 0.125]` m keeps the fixed stand behind the tabletop, with
 at least 15 mm of mesh clearance checked by the native regression. The grasp
-inclines 30 degrees about the object's Y axis and uses the object-local TCP
-translation `[-0.02, -0.003, 0.034641]` m, centering the jaw contact line while
-keeping the wrist reachable from this position. Placement restores the authored
+inclines the approach by 30 degrees and keeps the jaw closing axis horizontal,
+so both fingers stay above the support while closing. The object-local TCP
+translation `[-0.017598, 0, 0.024481]` m puts the cube deeper between the pads
+with at least 4 mm of open-finger mesh clearance above the support. The wrist
+remains reachable from this position. Placement restores the authored
 upright orientation; the 25 mm XY, 12 mm Z and 45-degree upright acceptance
 limits remain unchanged.

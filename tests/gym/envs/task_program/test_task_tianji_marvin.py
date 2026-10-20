@@ -221,6 +221,61 @@ def test_marvin_grasp_tcp_aligns_with_physical_hand_axes(
     torch.testing.assert_close(hand_to_tcp[:3, 3], torch.tensor([0.0, 0.0, 0.1125]))
 
 
+def test_marvin_stack_open_fingers_clear_the_cube_support() -> None:
+    """The inclined grasp must not drive an open finger through the table."""
+    import numpy as np
+    from scipy.spatial.transform import Rotation
+    import trimesh
+
+    path, payload, physical, deployment = _deployment("tableware/stack_blocks_two")
+    cfg = config_to_cfg(payload, source_path=path)
+    asset = Path(cfg.robot.fpath)
+    robot_xml = ET.parse(asset).getroot()
+    preset = deployment.integration.registration.robot_profile_binding.presets[0]
+    grasp = preset.action_option_templates["pick"].fixed_object_to_eef.numpy()
+
+    def origin_pose(origin: ET.Element | None) -> np.ndarray:
+        result = np.eye(4)
+        if origin is not None:
+            result[:3, :3] = Rotation.from_euler(
+                "xyz", np.fromstring(origin.get("rpy", "0 0 0"), sep=" ")
+            ).as_matrix()
+            result[:3, 3] = np.fromstring(origin.get("xyz", "0 0 0"), sep=" ")
+        return result
+
+    tool_joint = robot_xml.find("joint[@name='LEFT_HAND_TOOL']")
+    assert tool_joint is not None
+    hand_to_tcp = origin_pose(tool_joint.find("origin")) @ np.asarray(
+        cfg.robot.solver_cfg["left_arm"].tcp
+    )
+    block = next(
+        item
+        for item in physical.scene_config["rigid_object"]
+        if item["uid"] == "block_2"
+    )
+    support_z = -0.5 * block["shape"]["size"][2] * block["body_scale"][2]
+    for index in (1, 2):
+        joint = robot_xml.find(f"joint[@name='LEFT_HAND_FINGER_{index}']")
+        collision = robot_xml.find(
+            f"link[@name='left_hand_finger_{index}_link']/collision"
+        )
+        assert joint is not None and collision is not None
+        mesh = collision.find("geometry/mesh")
+        assert mesh is not None
+        fingers = trimesh.load(
+            asset.parent / mesh.attrib["filename"], force="mesh", process=False
+        )
+        fingers.apply_scale(np.fromstring(mesh.get("scale", "1 1 1"), sep=" "))
+        fingers.apply_transform(
+            grasp
+            @ np.linalg.inv(hand_to_tcp)
+            @ origin_pose(joint.find("origin"))
+            @ origin_pose(collision.find("origin"))
+        )
+        # Open jaws at the nominal grip must clear both scene contact offsets.
+        assert fingers.bounds[0, 2] - support_z > 0.004
+
+
 @pytest.mark.parametrize("side", ["left", "right"])
 def test_marvin_constraint_evidence_reads_negative_two_finger_displacement(
     side: str,
