@@ -29,13 +29,17 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
+
+if TYPE_CHECKING:
+    from ._task_program.physical_inputs import FrozenPhysicalInput
 
 from embodichain.gen_sim.task_engine.reporting import (
     EXECUTION_REPORT_FILENAME,
     validate_execution_report,
 )
 from embodichain.gen_sim.scene_engine.errors import SceneServiceError
+from embodichain.utils.utility import load_config
 
 from .agent import TaskAgent
 from .config import (
@@ -112,6 +116,121 @@ class SubprocessActionExecutor:
         dataset_saving: bool = False,
         failure_policy: str = "stop",
         open_window: bool = False,
+        acceptance_mode: str = "strict",
+    ) -> Mapping[str, Any]:
+        """Execute one task, isolating E8 resource retries from physical results.
+
+        Args:
+            bundle: Prepared Task Program bundle.
+            output_root: Fresh logical execution directory.
+            seed: Simulator random seed, unchanged on resource retries.
+            num_envs: Number of vectorized scene replicas.
+            dataset_saving: Whether to enable the Gym dataset recorder.
+            failure_policy: Whether failed dependencies stop downstream execution.
+            open_window: Whether to open the native execution window.
+
+        Returns:
+            Validated physical report from a non-interrupted execution.
+        """
+        if failure_policy not in {"stop", "continue"}:
+            raise ValueError("failure_policy must be 'stop' or 'continue'.")
+        if not isinstance(open_window, bool):
+            raise TypeError("open_window must be a boolean.")
+        acceptance_options = (
+            {"acceptance_mode": acceptance_mode} if acceptance_mode != "strict" else {}
+        )
+        from ._task_program.twist_attempts import is_twist_bundle
+
+        bundle_root = Path(bundle).expanduser().resolve()
+        if not is_twist_bundle(bundle_root):
+            return self._execute(
+                bundle,
+                output_root,
+                seed=seed,
+                num_envs=num_envs,
+                dataset_saving=dataset_saving,
+                failure_policy=failure_policy,
+                open_window=open_window,
+                **acceptance_options,
+            )
+        from .orchestration.execution_resources import (
+            ResourceAdmissionError,
+            ResourceInterruptionError,
+            wait_for_competitors,
+        )
+
+        output = Path(output_root).expanduser().resolve()
+        output.mkdir(parents=True, exist_ok=False)
+        attempts = []
+        for index in range(1, 4):
+            execution = output / "resource_attempts" / f"attempt_{index:04d}"
+            try:
+                report = self._execute(
+                    bundle_root,
+                    execution,
+                    seed=seed,
+                    num_envs=num_envs,
+                    dataset_saving=dataset_saving,
+                    failure_policy=failure_policy,
+                    open_window=open_window,
+                    **acceptance_options,
+                )
+            except ResourceAdmissionError as error:
+                attempts.append(
+                    {
+                        "attempt": index,
+                        "status": "resource_not_admitted",
+                        "receipt": str(error.receipt_path),
+                        "reason": error.reason,
+                    }
+                )
+                _write_json(output / "resource_attempts.json", attempts)
+                raise
+            except ResourceInterruptionError as error:
+                attempts.append(
+                    {
+                        "attempt": index,
+                        "status": "resource_interrupted",
+                        "receipt": str(error.receipt_path),
+                    }
+                )
+                _write_json(output / "resource_attempts.json", attempts)
+                if index == 3:
+                    raise
+                wait_for_competitors(error)
+                continue
+            attempts.append(
+                {
+                    "attempt": index,
+                    "status": "completed",
+                    "report_status": report["status"],
+                    "execution_root": str(execution),
+                }
+            )
+            _write_json(output / "resource_attempts.json", attempts)
+            _write_json(
+                output / "execution_selection.json",
+                {"selected_execution_root": str(execution), "resource_attempt": index},
+            )
+            for path in execution.iterdir():
+                if path.is_file():
+                    shutil.copy2(path, output / path.name)
+            if (execution / "videos").is_dir():
+                shutil.copytree(execution / "videos", output / "videos")
+            return report
+        raise RuntimeError("E8 resource attempt loop ended without a report.")
+
+    def _execute(
+        self,
+        bundle: str | Path,
+        output_root: str | Path,
+        *,
+        seed: int,
+        num_envs: int,
+        dataset_saving: bool = False,
+        failure_policy: str = "stop",
+        open_window: bool = False,
+        acceptance_mode: str = "strict",
     ) -> Mapping[str, Any]:
         """Run one simulator attempt and preserve its report and trajectory.
 
@@ -151,10 +270,20 @@ class SubprocessActionExecutor:
             str(seed),
         ]
         if not open_window:
-            command.extend(["--headless", "--renderer", "fast-rt"])
+            command.extend(
+                [
+                    "--headless",
+                    "--renderer",
+                    _headless_renderer_for_bundle(bundle_root),
+                ]
+            )
         if not dataset_saving:
             command.append("--filter_dataset_saving")
         command.extend(["--failure-policy", failure_policy])
+        if acceptance_mode not in {"strict", "experiment"}:
+            raise ValueError("Unknown execution acceptance mode.")
+        if acceptance_mode != "strict":
+            command.extend(["--acceptance-mode", acceptance_mode])
         log_path = attempt_root / "action.log"
         print(
             "[Task Engine] Starting "
@@ -163,7 +292,14 @@ class SubprocessActionExecutor:
             f"failure_policy={failure_policy}",
             flush=True,
         )
-        completed = _run_streaming_process(command, log_path)
+        from ._task_program.twist_attempts import is_twist_bundle
+
+        if is_twist_bundle(bundle_root):
+            from .orchestration.execution_resources import run_e8_process
+
+            completed = run_e8_process(command, log_path, emit=_write_terminal_chunk)
+        else:
+            completed = _run_streaming_process(command, log_path)
         print(
             f"[Task Engine] Completed {attempt_root.name}: "
             f"returncode={completed.returncode}",
@@ -268,6 +404,28 @@ def _run_streaming_process(
         stdout=output,
         stderr="",
     )
+
+
+def _headless_renderer_for_bundle(bundle: Path) -> str:
+    """Select the stable headless renderer for the bundle's interaction family.
+
+    Fast-RT currently hits a native ``OptiXMaterialMgr`` assertion while
+    importing some articulated E8 scenes.  Hybrid preserves the same physics
+    and recording contract while avoiding that renderer-only material path.
+    Other task families retain the historical fast-rt default.
+    """
+    program_path = bundle / "task_program/program.yaml"
+    if not program_path.is_file():
+        return "fast-rt"
+    program = load_config(program_path)
+    items = program.get("program", {}).get("items", ())
+    for item in items:
+        call = item.get("steps", {}).get("call", {})
+        if call.get("call_id") == "gen_sim.twist" or call.get("call_id", "").startswith(
+            "gen_sim.twist."
+        ):
+            return "hybrid"
+    return "fast-rt"
 
 
 def _write_terminal_chunk(chunk: bytes) -> None:
@@ -380,6 +538,12 @@ class TaskEngineWorkflow:
         state = initial_state(normalized)
         attempts: list[dict[str, Any]] = []
         output_dir = Path(normalized["output_dir"])
+        physical_input = None
+        physical_selection = None
+        if planning_cfg.physical_reference is not None:
+            physical_input, physical_selection = _load_physical_reference(
+                normalized, planning_cfg, self.scene_adapter.robot_profile
+            )
 
         with ArtifactTransaction(output_dir, overwrite=overwrite) as transaction:
             staging = transaction.staging_dir
@@ -387,6 +551,11 @@ class TaskEngineWorkflow:
             # Keep audit ownership local to this run, including early binding failures.
             scene_adapter = copy(self.scene_adapter)
             scene_adapter.audit_dir = staging / "binding_audit"
+            if physical_input is not None:
+                scene_adapter.physical_input = physical_input
+                _write_json(
+                    staging / "selected_physical_input.json", physical_selection
+                )
             coordinator = self.coordinator
             if self._owns_coordinator:
                 coordinator = copy(coordinator)
@@ -542,8 +711,17 @@ class TaskEngineWorkflow:
                 % 10
                 == 0
             )
+            if physical_input is not None:
+                _write_json(
+                    staging / "visual_grounding_status.json",
+                    {
+                        "status": "skipped_physical_reference",
+                        "reason": "Original-source images cannot qualify the selected physical model.",
+                    },
+                )
             if (
-                (selection.selected_candidate is None or spot_check)
+                physical_input is None
+                and (selection.selected_candidate is None or spot_check)
                 and analysis.input_kind == "gym_project"
                 and normalized["scene_edit_prompt"] is None
             ):
@@ -817,10 +995,23 @@ class TaskEngineWorkflow:
                 if state.stages[WorkflowStage.FINAL_INSPECTION].value == "pending":
                     state = start_stage(state, WorkflowStage.FINAL_INSPECTION)
                 try:
-                    final_inspection = self.scene_backend.inspect(
-                        revision,
-                        attempt_root / "final_scene_inspection.json",
-                    )
+                    if physical_input is None:
+                        final_inspection = self.scene_backend.inspect(
+                            revision,
+                            attempt_root / "final_scene_inspection.json",
+                        )
+                    else:
+                        from .scene.final_inspection import inspect_final_scene
+
+                        physical_input.assert_unchanged()
+                        final_inspection = inspect_final_scene(
+                            physical_input.scene,
+                            revision_id=physical_input.physical_digest,
+                        )
+                        _write_json(
+                            attempt_root / "final_scene_inspection.json",
+                            final_inspection,
+                        )
                 except Exception as exc:
                     scene_error = exc
                     inspection_error = True
@@ -853,7 +1044,34 @@ class TaskEngineWorkflow:
                         max_episodes=planning_cfg.max_episodes,
                         max_episode_steps=planning_cfg.max_episode_steps,
                         fit_grasp_assets=planning_cfg.fit_grasp_assets,
+                        **(
+                            {"twist_mass_source": True}
+                            if planning_cfg.twist_mass_source
+                            else {}
+                        ),
+                        **(
+                            {"physical_input": physical_input}
+                            if physical_input is not None
+                            else {}
+                        ),
+                        **(
+                            {"runtime_profile": planning_cfg.runtime_profile}
+                            if planning_cfg.runtime_profile != "default"
+                            else {}
+                        ),
+                        **(
+                            {
+                                "experimental_open_release": planning_cfg.experimental_open_release
+                            }
+                            if planning_cfg.experimental_open_release is not None
+                            else {}
+                        ),
                         candidate_set=candidate_set,
+                        **(
+                            {"press_extra_distance": planning_cfg.press_extra_distance}
+                            if planning_cfg.press_extra_distance is not None
+                            else {}
+                        ),
                         force_most_likely=False,
                         final_inspection=final_inspection,
                         unbound_action_plan=unbound_plan,
@@ -964,41 +1182,19 @@ class TaskEngineWorkflow:
                 for item in candidate_set["candidates"]
                 if item["candidate_id"] == final_candidate_id
             )
-            # TaskSpec is the normative, action-sequence-independent
-            # artifact.  Keep it beside the run audit after binding has chosen
-            # the final candidate; the existing bundle/runtime remains the
-            # sole execution path.
-            from .task_spec import task_spec_from_candidate
-
-            if set(final_candidate) < {
-                "candidate_id",
-                "draft",
-                "scene_request",
-                "success_spec",
-                "semantic_hash",
-                "vote_count",
-                "attempts",
-                "normalizations",
-            }:
+            # Reuse the specification consumed during planning; do not regenerate
+            # a second normative identity after final binding.
+            prepared_spec_path = preparation.output_dir / "task_spec.json"
+            if not prepared_spec_path.is_file():
                 _write_json(
                     staging / "task_spec_error.json",
                     {
-                        "error_type": "legacy_candidate_shape",
-                        "message": (
-                            "TaskSpec generation requires a complete "
-                            "TaskCandidate contract."
-                        ),
+                        "error_type": "legacy_bundle_without_task_spec",
+                        "message": "No normative companion was provided by preparation.",
                     },
                 )
             else:
-                task_spec = task_spec_from_candidate(
-                    final_candidate,
-                    metadata={
-                        "run_id": effective_run_id,
-                        "scene_attempt": attempts[-1]["scene_attempt"],
-                    },
-                )
-                _write_json(staging / "task_spec.json", task_spec.to_dict())
+                _write_json(staging / "task_spec.json", _read_json(prepared_spec_path))
             selected_attempt = attempts[-1]
             final_unbound = getattr(preparation, "unbound_action_plan", None)
             if (
@@ -1078,14 +1274,17 @@ class TaskEngineWorkflow:
                     final_bundle=final_bundle,
                 )
             state = start_stage(state, WorkflowStage.EXECUTION)
+            scene_attempt_root = preparation.output_dir.parent
 
             successful_report: Mapping[str, Any] | None = None
             successful_action_root: Path | None = None
+            successful_action_index: int | None = None
+            execution_failure_class = "action_execution"
             success_terms = _bundle_success_terms(preparation.output_dir)
             for action_index in range(1, workflow_cfg.max_action_attempts + 1):
                 action_seed = int(base_seed) + action_index - 1
                 action_root = (
-                    preparation.output_dir.parent
+                    scene_attempt_root
                     / "action_attempts"
                     / f"action_{action_index:04d}"
                 )
@@ -1104,16 +1303,30 @@ class TaskEngineWorkflow:
                         "dataset_saving": bool(dataset_saving),
                         "failure_policy": failure_policy,
                     }
+                    if execution_cfg.acceptance_mode != "strict":
+                        execution_options["acceptance_mode"] = (
+                            execution_cfg.acceptance_mode
+                        )
                     if open_window:
                         execution_options["open_window"] = True
-                    report = self.action_executor(
-                        preparation.output_dir,
-                        action_root,
-                        **execution_options,
+                    from ._task_program.twist_attempts import execute_support_candidates
+
+                    report, executed_preparation, executed_root, support_attempts = (
+                        execute_support_candidates(
+                            preparation,
+                            action_root,
+                            self.action_executor,
+                            execution_options,
+                            planning_cfg,
+                        )
                     )
+                    if support_attempts:
+                        action_record["support_attempts"] = support_attempts
                     successes = _environment_successes(
                         report,
                         required_semantic_steps=success_terms,
+                        bundle=executed_preparation.output_dir,
+                        acceptance_mode=execution_cfg.acceptance_mode,
                     )
                     if len(successes) != execution_cfg.num_envs:
                         raise ValueError(
@@ -1129,28 +1342,47 @@ class TaskEngineWorkflow:
                     _write_json(action_root / "task_engine_attempt.json", action_record)
                     selected_attempt["action_attempts"].append(deepcopy(action_record))
                     if accepted:
+                        preparation = executed_preparation
                         successful_report = deepcopy(dict(report))
-                        successful_action_root = action_root
+                        successful_action_root = executed_root
+                        successful_action_index = action_index
                         break
                 except Exception as exc:
                     action_record["status"] = "failed"
                     action_record["error"] = _error_record(exc)
+                    from .orchestration.execution_resources import (
+                        ResourceAdmissionError,
+                        ResourceInterruptionError,
+                    )
+
+                    resource_interrupted = isinstance(
+                        exc, (ResourceInterruptionError, ResourceAdmissionError)
+                    )
+                    if resource_interrupted:
+                        action_record["status"] = (
+                            "resource_not_admitted"
+                            if isinstance(exc, ResourceAdmissionError)
+                            else "resource_interrupted"
+                        )
+                        execution_failure_class = "execution_resources"
                     action_root.mkdir(parents=True, exist_ok=True)
                     _write_json(action_root / "task_engine_attempt.json", action_record)
                     selected_attempt["action_attempts"].append(deepcopy(action_record))
-                _write_json(
-                    preparation.output_dir.parent / "attempt.json", selected_attempt
-                )
+                    if resource_interrupted:
+                        break
+                _write_json(scene_attempt_root / "attempt.json", selected_attempt)
 
             if successful_report is None:
                 selected_attempt["status"] = "execution_failed"
-                _write_json(
-                    preparation.output_dir.parent / "attempt.json", selected_attempt
-                )
+                _write_json(scene_attempt_root / "attempt.json", selected_attempt)
                 state = fail_stage(
                     state,
                     WorkflowStage.EXECUTION,
-                    reason="All bounded Task Program execution attempts failed.",
+                    reason=(
+                        "E8 execution could not satisfy the available-memory policy."
+                        if execution_failure_class == "execution_resources"
+                        else "All bounded Task Program execution attempts failed."
+                    ),
                 )
                 return self._publish(
                     transaction,
@@ -1163,13 +1395,11 @@ class TaskEngineWorkflow:
                     state,
                     attempts,
                     status="failed",
-                    failure_class="action_execution",
+                    failure_class=execution_failure_class,
                 )
 
             selected_attempt["status"] = "succeeded"
-            _write_json(
-                preparation.output_dir.parent / "attempt.json", selected_attempt
-            )
+            _write_json(scene_attempt_root / "attempt.json", selected_attempt)
             state = complete_stage(state, WorkflowStage.EXECUTION)
             final_root = staging / "final"
             final_bundle = final_root / "bundle"
@@ -1180,7 +1410,7 @@ class TaskEngineWorkflow:
                 {
                     "scene_attempt": selected_attempt["scene_attempt"],
                     "candidate_id": final_candidate_id,
-                    "action_attempt": int(successful_action_root.name.split("_")[-1]),
+                    "action_attempt": successful_action_index,
                     "execution_report": successful_report,
                     "success_spec_steps": list(success_terms),
                 },
@@ -1267,6 +1497,23 @@ class TaskEngineWorkflow:
                 task_spec_manifest = {
                     "path": task_spec_path.name,
                     "semantic_hash": task_spec.get("semantic_hash"),
+                    "bundle_companions": (
+                        None
+                        if final_bundle is None
+                        else {
+                            "task_spec": (final_bundle / "task_spec.json")
+                            .relative_to(staging)
+                            .as_posix(),
+                            "coverage": (
+                                final_bundle / "semantic_graph_validation.json"
+                            )
+                            .relative_to(staging)
+                            .as_posix(),
+                            "html": (final_bundle / "semantic_graph.html")
+                            .relative_to(staging)
+                            .as_posix(),
+                        }
+                    ),
                 }
         _write_json(state_path, state.to_dict())
         _write_json(
@@ -1288,16 +1535,48 @@ class TaskEngineWorkflow:
                         "max_action_attempts": workflow_cfg.max_action_attempts,
                     },
                     "planning": {
+                        **(
+                            {"press_extra_distance": planning_cfg.press_extra_distance}
+                            if planning_cfg.press_extra_distance is not None
+                            else {}
+                        ),
                         "candidate_count": planning_cfg.candidate_count,
                         "planning_mode": planning_cfg.planning_mode,
                         "max_episodes": planning_cfg.max_episodes,
                         "max_episode_steps": planning_cfg.max_episode_steps,
                         "fit_grasp_assets": planning_cfg.fit_grasp_assets,
+                        **(
+                            {"physical_reference": planning_cfg.physical_reference}
+                            if planning_cfg.physical_reference is not None
+                            else {}
+                        ),
+                        **(
+                            {"runtime_profile": planning_cfg.runtime_profile}
+                            if planning_cfg.runtime_profile != "default"
+                            else {}
+                        ),
+                        **(
+                            {
+                                "experimental_open_release": planning_cfg.experimental_open_release
+                            }
+                            if planning_cfg.experimental_open_release is not None
+                            else {}
+                        ),
+                        **(
+                            {"twist_mass_source": True}
+                            if planning_cfg.twist_mass_source
+                            else {}
+                        ),
                     },
                     "execution": {
                         "num_envs": execution_cfg.num_envs,
                         "success_policy": execution_cfg.success_policy,
                         "min_successful_envs": execution_cfg.min_successful_envs,
+                        **(
+                            {"acceptance_mode": execution_cfg.acceptance_mode}
+                            if execution_cfg.acceptance_mode != "strict"
+                            else {}
+                        ),
                         "dataset_saving": bool(run_metadata["dataset_saving"]),
                         "failure_policy": str(run_metadata["failure_policy"]),
                     },
@@ -1332,6 +1611,72 @@ def _complete_materialized_scene(
     if state.stages[WorkflowStage.SCENE_FINALIZATION].value == "running":
         state = complete_stage(state, WorkflowStage.SCENE_FINALIZATION)
     return state
+
+
+def _load_physical_reference(
+    request: TaskRunRequest,
+    planning: TaskEnginePlanningCfg,
+    robot_profile: str,
+) -> tuple[FrozenPhysicalInput, dict[str, Any]]:
+    """Select and pin one explicit model before any model or grounding calls."""
+    from ._task_program.physical_inputs import load_frozen_physical_input
+    from .orchestration.source_scene import prepare_scene
+
+    if request["image_path"] is not None or request["scene_edit_prompt"] is not None:
+        raise ValueError("physical_reference requires an existing, unedited scene.")
+    reference = Path(planning.physical_reference).expanduser().resolve()
+    output = Path(request["output_dir"]).expanduser().resolve()
+    if reference.is_relative_to(output) or output.is_relative_to(reference):
+        raise ValueError("physical_reference and output must not overlap.")
+    source = prepare_scene(request["gym_project"])
+    physical = load_frozen_physical_input(
+        source, reference, robot_profile=robot_profile
+    )
+    for name in ("max_episodes", "max_episode_steps"):
+        if getattr(planning, name) != physical.deployment[name]:
+            raise ValueError(
+                f"physical_reference owns {name}; configure its exact value."
+            )
+    if planning.fit_grasp_assets or planning.twist_mass_source:
+        raise ValueError("physical_reference forbids physical adaptation.")
+    fields = ("init_pos", "init_rot", "init_local_pose", "body_scale", "attrs")
+
+    def objects(scene: Any) -> dict[str, Any]:
+        return {
+            item["uid"]: item
+            for item in (*scene.background, *scene.rigid_objects, *scene.articulations)
+        }
+
+    initial, selected = objects(source), objects(physical.scene)
+    differences = {
+        uid: [
+            name
+            for name in fields
+            if canonical_hash(initial[uid].get(name))
+            != canonical_hash(selected[uid].get(name))
+        ]
+        for uid in initial
+    }
+    return physical, {
+        "schema_version": "gen_sim.physical-selection/v1",
+        "reference_bundle": str(reference),
+        "source_config": str(source.source_config_path),
+        "original_scene_equivalence": "not_claimed_explicit_physical_input",
+        "historical_identity": (
+            "existing_manifest_verified"
+            if (reference / "physical_input.json").is_file()
+            else "legacy_input_pinned_now_not_historical_success_certification"
+        ),
+        "changed_instance_fields": {
+            uid: names for uid, names in differences.items() if names
+        },
+        "source_asset_sha256": dict(source.asset_hashes),
+        "selected_asset_sha256": dict(physical.scene.asset_hashes),
+        "joint_drive_props": deepcopy(
+            physical.embodiment["simulation"].get("joint_drive_props")
+        ),
+        "physical_input": physical.manifest(),
+    }
 
 
 def _scene_remediable(
@@ -1423,6 +1768,8 @@ def _environment_successes(
     report: Mapping[str, Any],
     *,
     required_semantic_steps: Sequence[str] = (),
+    bundle: Path | None = None,
+    acceptance_mode: str = "strict",
 ) -> list[bool]:
     environments = report.get("environments")
     if not isinstance(environments, Sequence) or isinstance(environments, (str, bytes)):
@@ -1444,6 +1791,45 @@ def _environment_successes(
         values.append(success)
     if not values:
         raise ValueError("Execution report must contain at least one environment.")
+    if acceptance_mode == "experiment":
+        from .experiment_policy import program_completion_mask
+
+        runtime = report.get("runtime_result") or {}
+        measured = program_completion_mask(runtime, len(values))
+        if (
+            runtime.get("acceptance_mode") != "experiment"
+            or report.get("failure") is not None
+        ):
+            return [False] * len(values)
+        return [a and b for a, b in zip(values, measured, strict=True)]
+    if acceptance_mode != "strict":
+        raise ValueError("Unknown acceptance mode.")
+    if bundle is not None and (bundle / "task_spec.json").exists():
+        from .semantic_graph_validation import (
+            verify_graph_contract,
+            _validate_runtime_evaluation,
+        )
+        from embodichain.gen_sim.task_spec import TaskSpec
+
+        graph = _read_json(bundle / "semantic_task_graph.json")
+        contract = verify_graph_contract(bundle, graph)
+        evaluation = (report.get("runtime_result") or {}).get("task_spec_evaluation")
+        if not isinstance(evaluation, Mapping) or contract is None:
+            return [False] * len(values)
+        _validate_runtime_evaluation(
+            evaluation,
+            TaskSpec.from_dict(_read_json(bundle / "task_spec.json")),
+            graph,
+            [row["env_id"] for row in environments],
+            contract=contract,
+        )
+        rows = evaluation["environments"]
+        values = [
+            success
+            and row.get("certificate_ready") is True
+            and row.get("status") == "satisfied"
+            for success, row in zip(values, rows, strict=True)
+        ]
     return values
 
 
@@ -1481,7 +1867,7 @@ def _semantic_draft(candidate: Mapping[str, Any]) -> dict[str, Any]:
     steps = draft.get("steps")
     if not isinstance(steps, Sequence) or isinstance(steps, (str, bytes)):
         raise TypeError("TaskDraft.steps must be a sequence.")
-    supported = {"E1", "E2", "E3", "E4", "E5", "E6", "E9"}
+    supported = {"E1", "E2", "E3", "E4", "E5", "E6", "E8", "E9"}
     unsupported = sorted(
         {
             str(step.get("task_type"))

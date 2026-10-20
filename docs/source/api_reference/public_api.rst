@@ -388,6 +388,37 @@ contain canonical Semantic Calls and exclude grounded action data.
    semantic_task_graph_hash
    validate_semantic_task_graph
 
+embodichain.gen_sim.task_engine.semantic_graph_html
+-------------------------------------------------
+
+Offline single-canvas HTML rendering preserves the original graph and overlays
+only identity-matched declaration coverage and execution evidence. An absent
+TaskSpec or final-state observation is not converted into certified success.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.semantic_graph_html
+
+.. autosummary::
+
+   render_semantic_task_graph_html
+   write_semantic_task_graph_html
+
+embodichain.gen_sim.task_engine.semantic_graph_validation
+-------------------------------------------------------
+
+Root-level TaskSpec companions record recomputable source-role, member,
+milestone-order and terminal-goal coverage without extending the v38 graph
+schema or changing its bundle fingerprint boundary. Declaration coverage is
+separate from measured runtime acceptance.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.semantic_graph_validation
+
+.. autosummary::
+
+   GRAPH_VALIDATION_SCHEMA
+   validate_graph_coverage
+   write_graph_contract
+   verify_graph_contract
+
 embodichain.gen_sim.task_engine.semantic_graph_visualization
 -------------------------------------------------------------
 
@@ -414,6 +445,7 @@ scene bindings into provider-free semantic task graphs.
 
 .. autosummary::
 
+   SemanticTaskPlan
    SemanticTaskPlanner
    UnsupportedSemanticCapabilityError
 

@@ -72,6 +72,7 @@ def build_hand_clearance(
     hand_part: str,
     commands: Any,
     table_z: float,
+    preshape_fraction: float | None = None,
 ) -> HandClearance:
     """Measure the whole hand subtree and Robotiq pads through public FK APIs."""
     joint_names = robot.cfg.control_parts[hand_part]
@@ -93,7 +94,8 @@ def build_hand_clearance(
     ids = [robot.joint_names.index(name) for name in joint_names]
     opened = states.new_tensor(commands["open"])
     closed = states.new_tensor(commands["grasp"])
-    fractions = torch.linspace(PRESHAPE_FRACTION, 1.0, 7, device=states.device)
+    fraction = PRESHAPE_FRACTION if preshape_fraction is None else preshape_fraction
+    fractions = torch.linspace(fraction, 1.0, 7, device=states.device)
     states[:, ids] = opened + fractions[:, None] * (closed - opened)
     fk = robot.compute_fk(
         qpos=states,
@@ -130,7 +132,7 @@ def build_hand_clearance(
 
 
 def profile_clearances(
-    registration: Any, robot: Any, table: Any
+    registration: Any, robot: Any, table: Any, *, preshape_fraction: float | None = None
 ) -> dict[str, HandClearance]:
     """Resolve arm/hand pairs from the profile rather than inferring their names."""
     pose = table.get_local_pose(to_matrix=True)[0]
@@ -150,5 +152,6 @@ def profile_clearances(
             hand_part=hand.control_part,
             commands=commands[hand.command_preset].commands,
             table_z=table_z,
+            preshape_fraction=preshape_fraction,
         )
     return result

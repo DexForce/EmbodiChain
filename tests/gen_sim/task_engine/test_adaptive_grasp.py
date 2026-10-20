@@ -30,6 +30,67 @@ from embodichain.gen_sim.task_engine._task_program.adaptive_grasp import (
 )
 
 
+def test_contact_revisions_bind_only_the_declared_pick():
+    from embodichain.gen_sim.task_engine._task_program.adaptive_grasp import (
+        bind_contact_revisions,
+    )
+    from embodichain.lab.task_program.semantics import Pick, SceneObjectRef
+
+    call = SimpleNamespace(call=Pick(SceneObjectRef("item")), segment_call_index=0)
+    segments = [
+        SimpleNamespace(name=n, segment_id=n, calls=(call,))
+        for n in ("selected", "other")
+    ]
+    program = SimpleNamespace(program_id="p", iter_segments=lambda: iter(segments))
+    assert bind_contact_revisions({}, program) == ()
+    assert bind_contact_revisions({"selected": 2}, program) == (("p/selected:0", 2),)
+    with pytest.raises(ValueError, match="missing"):
+        bind_contact_revisions({"missing": 2}, program)
+    segments[0].calls = (SimpleNamespace(call=object(), segment_call_index=0),)
+    with pytest.raises(ValueError, match="exact Pick"):
+        bind_contact_revisions({"selected": 2}, program)
+
+
+@pytest.mark.parametrize("bad", [True, False, 0, 9, 2.0, "2", None])
+def test_contact_revisions_reject_invalid_values(bad):
+    from embodichain.gen_sim.task_engine._task_program.adaptive_grasp import (
+        contact_revision_declarations,
+    )
+
+    with pytest.raises(ValueError):
+        contact_revision_declarations({"selected": bad})
+
+
+@pytest.mark.parametrize(
+    "call_id,revision,accepted",
+    [
+        ("gen_sim.pick.handover_source", 8, True),
+        ("gen_sim.pick.handover_horizontal_source.spoon", 8, True),
+        ("gen_sim.pick.handover_source", 7, False),
+        ("gen_sim.pick.other", 8, False),
+        ("gen_sim.pick.handover_horizontal_source", 8, False),
+    ],
+)
+def test_contact_revision_binds_only_native8_handover_source(
+    call_id, revision, accepted
+):
+    from embodichain.gen_sim.task_engine._task_program.adaptive_grasp import (
+        bind_contact_revisions,
+    )
+    from embodichain.lab.task_program.semantics import RegisteredSemanticCall
+
+    call = SimpleNamespace(call=RegisteredSemanticCall(call_id), segment_call_index=0)
+    segment = SimpleNamespace(name="source", segment_id="segment", calls=(call,))
+    program = SimpleNamespace(program_id="p", iter_segments=lambda: iter((segment,)))
+    if accepted:
+        assert bind_contact_revisions({"source": revision}, program) == (
+            ("p/segment:0", 8),
+        )
+    else:
+        with pytest.raises(ValueError):
+            bind_contact_revisions({"source": revision}, program)
+
+
 @pytest.mark.parametrize("axis", [(1.0, 0.0, 0.0), (-1.0, 0.0, 0.0), (0.0, 1.0, 0.0)])
 def test_horizontal_grasp_tracks_the_arm_not_axis_sign(axis):
     axis = torch.tensor([axis]).repeat(2, 1)
@@ -48,18 +109,18 @@ def test_horizontal_grasp_tracks_the_arm_not_axis_sign(axis):
     )
 
 
-def test_vertical_grasp_approaches_from_each_arm_and_has_downward_alternative():
+def test_vertical_pour_prefers_down_with_arm_relative_diagonal_fallback():
     pose = torch.eye(4).repeat(2, 1, 1)
     tcp = pose.clone()
     tcp[:, 1, 3] = torch.tensor([-1.0, 1.0])
     choices = grasp_strategies(
         torch.tensor([[0.0, 0.0, 1.0]]).repeat(2, 1), pose, tcp, ends=False
     )
-    assert choices[0].direction[:, 1].sign().tolist() == [1.0, -1.0]
-    assert (choices[0].direction[:, 2] < 0).all()
     torch.testing.assert_close(
-        choices[1].direction, torch.tensor([[0.0, 0.0, -1.0]]).repeat(2, 1)
+        choices[0].direction, torch.tensor([[0.0, 0.0, -1.0]]).repeat(2, 1)
     )
+    assert choices[1].direction[:, 1].sign().tolist() == [1.0, -1.0]
+    assert (choices[1].direction[:, 2] == -0.5).all()
     assert choices[0].axis is None
 
 
@@ -113,6 +174,9 @@ def test_candidate_fallback_keeps_successful_rows_and_reports_selected_direction
     assert sample.metadata["adaptive_grasp"]["strategy_indices"] == [0, 1]
     torch.testing.assert_close(direction[0], choices[0].direction[0])
     torch.testing.assert_close(direction[1], choices[1].direction[1])
+    torch.testing.assert_close(direction[0], torch.tensor([0.0, 0.0, -1.0]))
+    assert direction[1, 2].item() == -0.5
+    assert affordance.get_grasp_candidates.call_count == 2
 
 
 def test_pick_uses_selected_direction_for_execution_and_restores_scope(monkeypatch):
@@ -131,12 +195,13 @@ def test_pick_uses_selected_direction_for_execution_and_restores_scope(monkeypat
     monkeypatch.setattr(PickUp, "_plan", plan)
     parent = Mock(side_effect=lambda *args: args[5])
     monkeypatch.setattr(PickUp, "_get_full_pickup_trajectory", parent)
-    result = GenSimPickUp()._plan(object(), object())
+    request = SimpleNamespace(invocation_id="probe")
+    result = GenSimPickUp()._plan(request, object())
     torch.testing.assert_close(result, direction)
     assert _PICK_SELECTION.get() is None
     monkeypatch.setattr(PickUp, "_plan", Mock(side_effect=ValueError("probe")))
     with pytest.raises(ValueError, match="probe"):
-        GenSimPickUp()._plan(object(), object())
+        GenSimPickUp()._plan(request, object())
     assert _PICK_SELECTION.get() is None
 
 
@@ -290,6 +355,7 @@ def test_builtin_pick_keeps_downstream_contract_and_explicit_grasp(
     class Request:
         goal: object
         skill_options: object
+        invocation_id: str = "probe"
 
     semantics = ObjectSemantics(
         affordance=AntipodalAffordance(), geometry={}, entity_id="cup"
@@ -313,28 +379,54 @@ def test_builtin_pick_keeps_downstream_contract_and_explicit_grasp(
 
 
 @pytest.mark.parametrize("axis", [(0.0, 0.0, 1.0), (1.0, 0.0, 0.0)])
-@pytest.mark.parametrize("purpose", ["ordinary", "handover_source"])
-def test_pick_purpose_prefers_down_before_diagonal(axis, purpose):
+@pytest.mark.parametrize("purpose", ["ordinary", "pour"])
+def test_pick_prefers_down_before_diagonal(axis, purpose):
     pose = torch.eye(4)[None]
     tcp = pose.clone()
     tcp[:, :3, 3] = torch.tensor([[-1.0, 0.0, 1.0]])
-    ends = purpose == "handover_source"
     choices = grasp_strategies(
-        torch.tensor([axis]), pose, tcp, ends=ends, purpose=purpose
+        torch.tensor([axis]), pose, tcp, ends=False, purpose=purpose
     )
-    width = 2 if ends else 1
-    for choice in choices[:width]:
-        torch.testing.assert_close(choice.direction, torch.tensor([[0.0, 0.0, -1.0]]))
-    for choice in choices[width:]:
-        assert choice.direction[0, 2].item() == -0.5
-    if ends:
-        assert torch.equal(choices[0].positive, choices[2].positive)
-        assert torch.equal(choices[1].positive, ~choices[0].positive)
+    torch.testing.assert_close(choices[0].direction, torch.tensor([[0.0, 0.0, -1.0]]))
+    assert choices[1].direction[0, 2].item() == -0.5
 
 
-@pytest.mark.parametrize("purpose", ["pour", "handover_receive"])
+@pytest.mark.parametrize(
+    "axis",
+    [
+        (1.0, 0.0, 0.0),
+        (-1.0, 0.0, 0.0),
+        (0.0, 1.0, 0.0),
+        (0.0, -1.0, 0.0),
+        (0.0, 0.0, 1.0),
+        (0.0, 0.0, -1.0),
+    ],
+)
+def test_handover_source_exhausts_near_end_before_crossing(axis):
+    axis = torch.tensor([axis]).repeat(2, 1)
+    pose = torch.eye(4).repeat(2, 1, 1)
+    tcp = pose.clone()
+    tcp[:, :3, 3] = axis * torch.tensor([[-1.0], [1.0]]) + torch.tensor(
+        [[0.2, 0.3, 0.4]]
+    )
+    choices = grasp_strategies(axis, pose, tcp, ends=True, purpose="handover_source")
+
+    assert len(choices) == 4
+    assert [choice.positive.tolist() for choice in choices] == [
+        [False, True],
+        [False, True],
+        [True, False],
+        [True, False],
+    ]
+    for index in (0, 2):
+        torch.testing.assert_close(
+            choices[index].direction, torch.tensor([[0.0, 0.0, -1.0]]).repeat(2, 1)
+        )
+        assert (choices[index + 1].direction[:, 2] == -0.5).all()
+
+
 @pytest.mark.parametrize("vertical", [True, False])
-def test_pour_and_receiver_keep_orientation_dependent_order(purpose, vertical):
+def test_receiver_keeps_orientation_dependent_order(vertical):
     pose = torch.eye(4)[None]
     tcp = pose.clone()
     tcp[:, 0, 3] = 1
@@ -342,9 +434,9 @@ def test_pour_and_receiver_keep_orientation_dependent_order(purpose, vertical):
         torch.tensor([[0.0, 0.0, 1.0] if vertical else [1.0, 0.0, 0.0]]),
         pose,
         tcp,
-        ends=purpose == "handover_receive",
+        ends=True,
         positive=torch.tensor([False]),
-        purpose=purpose,
+        purpose="handover_receive",
     )
     assert choices[0].direction[0, 2].item() == (-0.5 if vertical else -1.0)
     assert choices[1].direction[0, 2].item() == (-1.0 if vertical else -0.5)
@@ -461,7 +553,10 @@ def test_generated_pick_purposes_separate_pour_and_ordinary():
 
 @pytest.mark.parametrize("vertical", [True, False])
 @pytest.mark.parametrize("failure", ["candidate", "ik", "path", "both", "none"])
-def test_receiver_retries_through_real_shared_handover(monkeypatch, vertical, failure):
+@pytest.mark.parametrize("scene_screen", [False, True])
+def test_receiver_retries_through_real_shared_handover(
+    monkeypatch, vertical, failure, scene_screen
+):
     from dataclasses import replace
     from pathlib import Path
     import runpy
@@ -558,6 +653,17 @@ def test_receiver_retries_through_real_shared_handover(monkeypatch, vertical, fa
 
     monkeypatch.setattr(HandOver, "_plan_existing_hold", record_shared)
     action = fixtures._bind_action(generator, actions.GenSimHandOver())
+    screen = SimpleNamespace(
+        inspect=Mock(return_value={"valid": True}),
+        candidate_mask=Mock(
+            side_effect=lambda _poses, eligible, **_kwargs: (
+                eligible,
+                {"scope": "nominal_fixture"},
+            )
+        ),
+    )
+    if scene_screen:
+        action.environment_screen_factory = Mock(return_value=screen)
     target = torch.eye(4)
     target[2, 3] = 0.2
     plan = fixtures._plan_action(
@@ -573,6 +679,49 @@ def test_receiver_retries_through_real_shared_handover(monkeypatch, vertical, fa
     )
     assert plan.plan_success.tolist() == [failure != "both", True]
     assert len(plans) == (1 if failure == "none" else 2)
+    if scene_screen:
+        assert screen.candidate_mask.call_count == len(plans)
+        assert screen.inspect.call_count >= 1
+    else:
+        screen.candidate_mask.assert_not_called()
+    if failure == "none":
+        for actual, original in zip(
+            plan.commands.frames, plans[0].commands.frames, strict=True
+        ):
+            assert torch.equal(actual.hold_duration, original.hold_duration)
+            assert torch.equal(actual.active_mask, original.active_mask)
+            assert torch.equal(actual.env_ids, original.env_ids)
+            for command, before in zip(actual.commands, original.commands, strict=True):
+                assert (
+                    command.target.address_fingerprint
+                    == before.target.address_fingerprint
+                )
+                assert torch.equal(command.payload.positions, before.payload.positions)
+        for name in ("positions", "dt", "env_ids"):
+            assert torch.equal(
+                getattr(plan.joint_trajectory, name),
+                getattr(plans[0].joint_trajectory, name),
+            )
+        for name in ("expected_effects", "effect_candidates"):
+            actual = getattr(plan, name).held_object_updates
+            original = getattr(plans[0], name).held_object_updates
+            assert actual.keys() == original.keys()
+            for key, value in actual.items():
+                if value is None:
+                    assert original[key] is None
+                else:
+                    for field in ("entity_id", "label", "properties", "geometry"):
+                        assert getattr(value.semantics, field) == getattr(
+                            original[key].semantics, field
+                        )
+                    assert (
+                        value.semantics.affordance.custom_config
+                        == original[key].semantics.affordance.custom_config
+                    )
+                    for field in ("object_to_eef", "grasp_xpos", "env_mask"):
+                        assert torch.equal(
+                            getattr(value, field), getattr(original[key], field)
+                        )
     assert actions._RECEIVE_SELECTION.get() is None
     torch.testing.assert_close(torch.random.get_rng_state(), rng_states[0])
     assert context.task.get_held_object("right_arm") is None

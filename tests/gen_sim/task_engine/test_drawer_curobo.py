@@ -253,6 +253,42 @@ def test_transport_failure_cleans_up_without_interpolation_fallback(
     fallback.assert_called_once()
 
 
+def test_transport_scope_is_call_local_and_clears_after_failure(monkeypatch) -> None:
+    from unittest.mock import Mock
+    from embodichain.gen_sim.task_engine._task_program import drawer_curobo as module
+
+    delegate = Mock(return_value="planned")
+    monkeypatch.setattr(module.CheckedMotionGenerator, "generate", delegate)
+    generator = object.__new__(module.DrawerMotionGenerator)
+    generator._transport = generator._placement_path = None
+    original, options = [object()], object()
+    observation, motion, context = object(), object(), object()
+
+    assert not generator.direct_transport_planning
+    assert generator.generate(original, options) == "planned"
+    assert delegate.call_args.args == (original, options)
+    with generator.transport(observation, motion, context):
+        assert generator.direct_transport_planning
+        assert generator._transport == (observation, motion, context)
+        with pytest.raises(RuntimeError, match="cannot overlap"):
+            with generator.transport(object(), object(), object()):
+                pass
+        assert generator._transport == (observation, motion, context)
+        assert generator.direct_transport_planning
+    assert not generator.direct_transport_planning
+
+    with pytest.raises(RuntimeError, match="planning failed"):
+        with generator.transport(observation, motion, context):
+            assert generator.direct_transport_planning
+            raise RuntimeError("planning failed")
+    assert generator._transport is None
+    assert not generator.direct_transport_planning
+    generator.generate(original, options)
+    assert delegate.call_count == 2
+    assert delegate.call_args.args[0] is original
+    assert delegate.call_args.args[1] is options
+
+
 def test_place_retreat_reverses_entry_and_clears_scope(monkeypatch) -> None:
     from unittest.mock import Mock
     from embodichain.gen_sim.task_engine._task_program import drawer_curobo as module

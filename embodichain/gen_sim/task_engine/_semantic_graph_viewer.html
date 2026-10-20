@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src 'none'; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Semantic Task Graph</title>
+<style>
+:root{color-scheme:light;--ink:#232a31;--muted:#626b73;--line:#d6dce0;--blue:#34669a;--teal:#247a69;--amber:#9b6b27;--red:#a84242}
+*{box-sizing:border-box;letter-spacing:0}body{margin:0;background:#fff;color:var(--ink);font:14px/1.45 system-ui,"Noto Sans CJK SC",sans-serif;display:flex;flex-direction:column;height:100dvh;overflow:hidden}
+button,input,select{font:inherit;color:inherit}button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:34px;border:1px solid var(--line);border-radius:4px;background:white;cursor:pointer;padding:6px 10px}
+button:hover{background:#f0f3f5}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--blue);outline-offset:2px}button[aria-pressed=true]{background:var(--ink);color:white;border-color:var(--ink)}
+.icon{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none}.icon-button{width:34px;padding:6px}
+header{border-bottom:1px solid var(--line);padding:12px 18px 10px;display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap}.identity{flex:1;min-width:200px}.identity h1{font-size:18px;line-height:1.3;margin:0 0 4px;font-weight:600;overflow-wrap:anywhere}.instruction{margin:0;color:var(--muted);max-height:42px;overflow:hidden;overflow-wrap:anywhere;font-size:13px}.counter{color:var(--muted);font-size:12px;white-space:nowrap;align-self:center}
+.toolbar{display:flex;align-items:center;gap:7px;padding:8px 18px;border-bottom:1px solid var(--line);flex-wrap:wrap}.search{display:flex;gap:7px;align-items:center;min-width:160px;flex:1;max-width:340px;border:1px solid var(--line);border-radius:4px;padding:5px 8px}.search input{border:0;outline:none;min-width:0;width:100%;background:transparent}.toolbar select{height:34px;border:1px solid var(--line);border-radius:4px;background:#fff;max-width:165px}.spacer{flex:1}.controls{display:flex;gap:4px}.zoom-value{font-size:12px;min-width:40px;align-self:center;text-align:center}
+.workspace{display:grid;grid-template-columns:minmax(0,1fr) 340px;flex:1;min-height:0}.canvas-wrap{position:relative;overflow:hidden;background:#fcfdfe;height:100%}.canvas{width:100%;height:100%;display:block;touch-action:none;cursor:grab}.canvas.dragging{cursor:grabbing}.legend{position:absolute;bottom:12px;left:16px;right:12px;display:flex;gap:16px;flex-wrap:wrap;font-size:11px;color:var(--muted);pointer-events:none}.legend span{display:flex;align-items:center;gap:6px}.legend i{width:24px;border-top:1.2px solid #87939f}.legend .group-edge{border-top-style:dashed}.legend .coverage-edge{border-top:1.2px dotted var(--teal)}
+.inspector{border-left:1px solid var(--line);overflow:auto;background:#fff;padding:16px;overflow-wrap:anywhere}.inspector h2{font-size:15px;margin:0 0 10px;font-weight:600}.inspector h3{font-size:12px;color:var(--muted);margin:19px 0 7px;text-transform:uppercase}.inspector p{margin:6px 0}.inspector dl{display:grid;grid-template-columns:90px minmax(0,1fr);gap:6px;margin:0;font-size:12px}.inspector dt{color:var(--muted)}.inspector dd{margin:0;overflow-wrap:anywhere}.inspector pre{white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.6 ui-monospace,monospace;margin:8px 0}.inspector details{border-top:1px solid var(--line);padding-top:9px;margin-top:15px}.inspector summary{font-size:12px;cursor:pointer}.detail-close{display:none}.tag{font-size:11px;color:var(--muted);border-left:3px solid var(--line);padding-left:7px;margin:5px 0}.tag.succeeded,.tag.satisfied{border-color:var(--teal)}.tag.failed{border-color:var(--red)}.tag.unavailable,.tag.unknown{border-color:var(--amber)}.empty{color:var(--muted);font-size:12px}
+.node{cursor:pointer}.node rect{fill:#fff;stroke:#c8d1d8;stroke-width:1.1}.node:hover rect{stroke:var(--blue)}.node.selected rect{stroke:var(--blue);stroke-width:2}.node text{fill:var(--ink);font-size:12px}.node .secondary{fill:var(--muted);font-size:11px}.node .heading{font-weight:600;font-size:13px}.node .kind{fill:var(--blue);font-size:11px}.node.goal .kind{fill:var(--teal)}.node .mark{fill:var(--muted);font-size:11px}.node .mark.succeeded,.node .mark.satisfied{fill:var(--teal)}.node .mark.failed{fill:var(--red)}.node .mark.unknown,.node .mark.unavailable{fill:var(--amber)}.group-bound{fill:none;stroke:#d8dde2;stroke-dasharray:4 4}.group-header{font-size:12px;fill:var(--muted)}.edge{fill:none;stroke:#86939f;stroke-width:1.1}.edge.group-edge{stroke-dasharray:5 4;stroke:#a6b0b8}.edge.coverage-edge{stroke:var(--teal);stroke-dasharray:2 4}.edge:hover{stroke-width:2}.lane-label{fill:#858e95;font-size:11px}.toggle{cursor:pointer}.toggle:hover{fill:#eaf0f5}.node .toggle{fill:#f0f3f5}.hidden-node{opacity:.12}
+@media(max-width:760px){header{padding:10px 12px;gap:5px}.identity h1{font-size:16px}.counter{width:100%}.toolbar{padding:7px 10px;gap:5px}.search{max-width:none;min-width:155px}.toolbar select{max-width:125px;font-size:12px}.spacer{display:none}.controls{margin-left:auto}.workspace{display:block}.inspector{display:none;position:fixed;inset:auto 0 0;height:47dvh;border:1px solid var(--line);border-radius:6px 6px 0 0;z-index:4;padding:14px 16px}.inspector.open{display:block}.detail-close{display:flex;float:right}.legend{font-size:10px;gap:10px;bottom:8px;left:10px}.icon-button{width:36px;min-height:36px}}
+</style>
+</head>
+<body>
+<!-- Lucide 0.468.0 icons, https://github.com/lucide-icons/lucide/tree/0.468.0/icons
+ISC License. Copyright (c) Lucide Contributors 2022; portions Cole Bemis 2013-2022 (Feather MIT).
+Permission to use, copy, modify, and/or distribute this software for any purpose with or without fee is hereby granted,
+provided that the above copyright notice and this permission notice appear in all copies.
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
+AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE
+OF THIS SOFTWARE. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="zoom-in" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" x2="16.65" y1="21" y2="16.65"/><line x1="11" x2="11" y1="8" y2="14"/><line x1="8" x2="14" y1="11" y2="11"/></symbol>
+<symbol id="zoom-out" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" x2="16.65" y1="21" y2="16.65"/><line x1="8" x2="14" y1="11" y2="11"/></symbol>
+<symbol id="fit" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></symbol>
+<symbol id="reset" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+<symbol id="download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></symbol>
+<symbol id="search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+<symbol id="expand" viewBox="0 0 24 24"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></symbol>
+<symbol id="chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+<symbol id="close" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+<symbol id="document" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 12a1 1 0 0 0-1 1v1a1 1 0 0 1-1 1 1 1 0 0 1 1 1v1a1 1 0 0 0 1 1"/><path d="M14 18a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1 1 1 0 0 1-1-1v-1a1 1 0 0 0-1-1"/></symbol>
+</defs></svg>
+<header><div class="identity"><h1 id="task-title"></h1><p id="instruction" class="instruction"></p></div><span id="counter" class="counter"></span></header>
+<nav class="toolbar" aria-label="图工具">
+<button id="spec-detail" title="任务规范与身份"><svg class="icon"><use href="#document"/></svg>TaskSpec</button>
+<label class="search"><svg class="icon" aria-hidden="true"><use href="#search"/></svg><input id="search-input" type="search" placeholder="ID / 对象 / 调用 / 目标" aria-label="搜索图内容"></label>
+<select id="environment" aria-label="执行环境"><option value="all">全部环境</option></select>
+<select id="status-filter" aria-label="证据状态"><option value="all">全部证据状态</option><option value="failed">失败</option><option value="succeeded">调用成功</option><option value="satisfied">规范满足</option><option value="unknown">未验证</option><option value="unavailable">证据不可用</option><option value="not_run">未运行</option></select>
+<span class="spacer"></span>
+<div class="controls">
+<button id="expand-all" class="icon-button" title="展开或折叠全部调用" aria-label="展开或折叠全部调用" aria-pressed="false"><svg class="icon"><use href="#expand"/></svg></button>
+<button id="zoom-out-button" class="icon-button" title="缩小" aria-label="缩小"><svg class="icon"><use href="#zoom-out"/></svg></button><span id="zoom" class="zoom-value"></span>
+<button id="zoom-in-button" class="icon-button" title="放大" aria-label="放大"><svg class="icon"><use href="#zoom-in"/></svg></button>
+<button id="fit-button" class="icon-button" title="适应画布" aria-label="适应画布"><svg class="icon"><use href="#fit"/></svg></button>
+<button id="reset-button" class="icon-button" title="重置布局" aria-label="重置布局"><svg class="icon"><use href="#reset"/></svg></button>
+<button id="export-svg" class="icon-button" title="导出 SVG" aria-label="导出 SVG"><svg class="icon"><use href="#download"/></svg></button>
+<button id="export-json" class="icon-button" title="导出原始数据 JSON" aria-label="导出原始数据 JSON"><svg class="icon"><use href="#document"/></svg></button>
+</div></nav>
+<main class="workspace"><section class="canvas-wrap" aria-label="语义图画布">
+<svg id="canvas" class="canvas" xmlns="http://www.w3.org/2000/svg" aria-label="语义任务依赖图">
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 1 9 5 0 9" fill="none" stroke="#87939f" stroke-width="1.3"/></marker></defs><g id="world"><g id="edges"></g><g id="nodes"></g></g></svg>
+<div class="legend"><span><i></i>调用依赖</span><span><i class="group-edge"></i>阶段依赖</span><span><i class="coverage-edge"></i>规范声明覆盖</span><span id="visibility"></span></div>
+</section><aside id="inspector" class="inspector" aria-label="所选对象详情"><button id="close-detail" class="icon-button detail-close" title="关闭详情" aria-label="关闭详情"><svg class="icon"><use href="#close"/></svg></button><div id="detail-content"></div></aside></main>
+<script type="application/json" id="graph-data">__GRAPH_DATA__</script>
+<script>
+(() => {
+"use strict";
+const data=JSON.parse(document.getElementById("graph-data").textContent);
+const graph=data.graph, spec=data.task_spec, report=data.report, coverage=data.validation?.coverage;
+const $=id=>document.getElementById(id), NS="http://www.w3.org/2000/svg";
+const svg=$("canvas"), world=$("world"), nodeLayer=$("nodes"), edgeLayer=$("edges");
+const groups=new Map(graph.task_groups.map(g=>[g.id,g])), calls=new Map(graph.nodes.map(n=>[n.id,n]));
+const owner=new Map(graph.nodes.map(n=>[n.id,n.task_instance_id]));
+const expanded=new Set(), positions=new Map(), manual=new Map(), view={x:20,y:35,scale:1};
+let selected="spec", drag=null, worldBounds={x:0,y:0,width:1000,height:500};
+const labels={succeeded:"调用成功",satisfied:"规范满足",failed:"失败",unknown:"未验证",unavailable:"证据不可用",not_run:"未运行",declared:"已声明",uncovered:"未覆盖"};
+const predicates={object_upright:"直立",semantic_goal:"规范目标",orientation:"姿态要求",held:"持有",poured:"倾倒成就",pressed:"按压成就",handover_complete:"交接成就",held_by_both_grippers:"双手持有",articulation_joint_near:"关节目标"};
+function element(tag,attrs={},parent=null){const e=document.createElementNS(NS,tag);for(const[k,v]of Object.entries(attrs))e.setAttribute(k,String(v));if(parent)parent.append(e);return e}
+function text(parent,value,x,y,cls=""){const e=element("text",{x,y,class:cls},parent);e.textContent=String(value??"");return e}
+function html(tag,value="",cls=""){const e=document.createElement(tag);e.textContent=value;e.className=cls;return e}
+function jsonView(parent,title,value){const d=html("details"),s=html("summary",title),p=html("pre",JSON.stringify(value,null,2));d.append(s,p);parent.append(d)}
+function fields(parent,values){const dl=html("dl");for(const[k,v]of values){dl.append(html("dt",k),html("dd",typeof v==="string"?v:JSON.stringify(v)))}parent.append(dl)}
+function badge(parent,status,label=""){const state=status==="succeeded"&&label.includes("组验收")?"组验收通过":status==="succeeded"&&label.includes("执行报告")?"程序执行通过":labels[status]||status;parent.append(html("div",(label?label+" · ":"")+state,"tag "+status))}
+function envRows(){return report?.environments.filter(r=>$("environment").value==="all"||String(r.env_id)===$("environment").value)||[]}
+function callStatus(node){const segment=data.call_evidence[node.id];if(!segment)return"unknown";const ids=segment.metadata?.runtime?.env_ids;if(!Array.isArray(ids)||new Set(ids).size!==ids.length||ids.some(id=>!Number.isInteger(id)||!report.environments.some(r=>r.env_id===id))||!Array.isArray(segment.successes)||!Array.isArray(segment.active)||ids.length!==segment.successes.length||ids.length!==segment.active.length||segment.active.some(v=>typeof v!=="boolean"))return"unknown";const states=envRows().map(r=>{const i=ids.indexOf(r.env_id);return i<0||segment.active[i]!==true?null:segment.successes[i]});if(states.some(v=>v===false))return"failed";return states.length&&states.every(v=>v===true)?"succeeded":"unknown"}
+function goalEvidence(predicate){return(data.task_spec_evaluation?.environments||[]).filter(r=>$("environment").value==="all"||String(r.env_id)===$("environment").value).map(r=>({env_id:r.env_id,check:r.goal.find(v=>v.predicate_id===predicate.id)}))}
+function goalStatus(predicate){const states=goalEvidence(predicate).map(r=>r.check?.status);if(states.some(v=>v==="failed"))return"failed";if(states.length&&states.every(v=>v==="satisfied"))return"satisfied";if(states.includes("unavailable")||states.includes(undefined))return"unavailable";if(states.includes("unknown"))return"unknown";return"not_run"}
+function groupStatus(group){const outcomes=envRows().map(r=>r.semantic_success?.[group.id]);if(!outcomes.length)return"unknown";return outcomes.every(v=>v===true)?"succeeded":outcomes.some(v=>v===false)?"failed":"unknown"}
+function wrap(value,max=32,maxLines=2){const chars=Array.from(String(value));const lines=[];while(chars.length&&lines.length<maxLines){lines.push(chars.splice(0,max).join(""))}if(chars.length)lines[lines.length-1]+="…";return lines}
+function caption(parent,value,x,y,cls="",max=32,limit=2){const width=Number(parent.querySelector("rect")?.getAttribute("width")||292)-24;for(const[line,i]of wrap(value,max,limit).map((v,i)=>[v,i])){const t=text(parent,line,x,y+i*17,cls);let chars=Array.from(line);while(t.getComputedTextLength()>width&&chars.length>1){chars.pop();t.textContent=chars.join("")+"…"}}}
+function nodeSubjects(group){return [...new Set(group.node_ids.map(id=>calls.get(id)).map(n=>n.call.object||n.call.arguments?.object).filter(Boolean))].join(" / ")}
+function resourceText(value){return [...new Set(Object.values(value||{}))].join(" + ")||"auto"}
+function nodeSearch(value){return JSON.stringify(value).toLocaleLowerCase()}
+function groupSearch(group){return{group,calls:group.node_ids.map(id=>calls.get(id)),targets:group.node_ids.map(id=>{const c=calls.get(id).call;return graph.targets[c.arguments?.target||c.at?.target]}).filter(Boolean)}}
+function matches(value,status){const query=$("search-input").value.trim().toLocaleLowerCase(),filter=$("status-filter").value;return(!query||nodeSearch(value).includes(query))&&(filter==="all"||status===filter)}
+function layout(){positions.clear();const levels=new Map();for(const g of graph.task_groups)levels.set(g.id,Math.max(0,...g.depends_on.map(id=>(levels.get(id)||0)+1)));const bottoms=new Map();const left=spec?320:30;
+for(const g of graph.task_groups){const level=levels.get(g.id),x=left+level*365,y=bottoms.get(level)||60,open=expanded.has(g.id),height=open?40+g.node_ids.length*98:118;const p=manual.get("group:"+g.id)||{x,y};positions.set("group:"+g.id,{...p,w:292,h:height});bottoms.set(level,Math.max(y+height+48,(bottoms.get(level)||0)));if(open)g.node_ids.forEach((id,i)=>positions.set("call:"+id,{x:p.x+14,y:p.y+36+i*98,w:264,h:86}))}
+if(spec)spec.goal.forEach((p,i)=>positions.set("goal:"+p.id,{x:22,y:60+i*124,w:256,h:106}));
+const all=[...positions.values()],x=Math.min(0,...all.map(p=>p.x-35)),y=Math.min(0,...all.map(p=>p.y-35));worldBounds={x,y,width:Math.max(700,...all.map(p=>p.x+p.w+35))-x,height:Math.max(300,...all.map(p=>p.y+p.h+50))-y};
+}
+function route(from,to,kind,raw){if(!from||!to)return;const a=positions.get(from),b=positions.get(to);if(!a||!b)return;let d;if(from.startsWith("call:")&&to.startsWith("call:")&&owner.get(from.slice(5))===owner.get(to.slice(5))){const x=a.x+a.w/2;d="M"+x+" "+(a.y+a.h)+" C"+x+" "+(a.y+a.h+12)+" "+(b.x+b.w/2)+" "+(b.y-12)+" "+(b.x+b.w/2)+" "+b.y}else{const x1=a.x+a.w,y1=a.y+Math.min(a.h/2,59),x2=b.x,y2=b.y+Math.min(b.h/2,59),mid=(x1+x2)/2;d="M"+x1+" "+y1+" C"+mid+" "+y1+" "+mid+" "+y2+" "+x2+" "+y2}const path=element("path",{d,class:"edge "+kind,"marker-end":"url(#arrow)","data-edge-kind":kind},edgeLayer);const title=element("title",{},path);title.textContent=JSON.stringify(raw)}
+function drawNode(key,p,heading,kind,body,status,raw){const matched=matches(raw,status),g=element("g",{transform:"translate("+p.x+","+p.y+")",class:"node "+(key.startsWith("goal:")?"goal ":"")+(selected===key?"selected ":"")+(matched?"":"hidden-node"),role:"button",tabindex:0,"aria-label":heading,"data-key":key},nodeLayer);element("rect",{width:p.w,height:p.h,rx:4},g);caption(g,kind,12,20,"kind",36,1);caption(g,heading,12,41,"heading",32,1);caption(g,body,12,61,"secondary",34,key.startsWith("call:")?1:2);text(g,key.startsWith("group:")&&status==="succeeded"?"组验收通过":labels[status]||status,12,p.h-10,"mark "+status);g.addEventListener("click",e=>{if(e.detail===0){selected=key;showDetail(key);draw()}});g.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();selected=key;showDetail(key);draw()}});return g}
+function draw(){layout();edgeLayer.replaceChildren();nodeLayer.replaceChildren();let hidden=0;
+for(const g of graph.task_groups){
+for(const dep of g.depends_on)route("group:"+dep,"group:"+g.id,"group-edge",{source:dep,target:g.id});
+const p=positions.get("group:"+g.id),status=groupStatus(g),search=groupSearch(g);
+if(expanded.has(g.id)){
+element("rect",{x:p.x,y:p.y,width:p.w,height:p.h,rx:3,class:"group-bound"},nodeLayer);
+const header=text(nodeLayer,g.id+" · "+g.task_type,p.x+12,p.y+22,"group-header");header.setAttribute("role","button");header.setAttribute("tabindex","0");header.addEventListener("click",()=>{selected="group:"+g.id;showDetail(selected)});header.addEventListener("keydown",e=>{if(e.key==="Enter"){selected="group:"+g.id;showDetail(selected)}});
+for(const id of g.node_ids){const n=calls.get(id),np=positions.get("call:"+id),s=callStatus(n),c=n.call;drawNode("call:"+id,np,c.call_id||c.kind,n.id+" · "+n.role,(c.object||c.arguments?.object||"")+" · "+resourceText(c.resources),s,n);if(!matches(n,s))hidden++}
+}else{drawNode("group:"+g.id,p,g.id,g.task_type+" · "+g.node_ids.length+" calls",nodeSubjects(g),status,search);if(!matches(search,status))hidden++}
+const t=element("g",{transform:"translate("+(p.x+p.w-31)+","+(p.y+9)+")",role:"button",tabindex:0,class:"toggle","aria-label":(expanded.has(g.id)?"折叠 ":"展开 ")+g.id},nodeLayer);
+element("rect",{width:22,height:22,rx:3,fill:"#eef2f4"},t);const use=element("use",{href:"#chevron",width:18,height:18,x:2,y:2,class:"icon"},t);if(!expanded.has(g.id))use.setAttribute("transform","rotate(-90 11 11)");const action=e=>{e.stopPropagation();expanded.has(g.id)?expanded.delete(g.id):expanded.add(g.id);draw()};t.addEventListener("click",action);t.addEventListener("keydown",e=>{if(e.key==="Enter")action(e)})}
+for(const n of graph.nodes)for(const dep of n.depends_on){const a=expanded.has(owner.get(dep))?"call:"+dep:"group:"+owner.get(dep),b=expanded.has(n.task_instance_id)?"call:"+n.id:"group:"+n.task_instance_id;if(a!==b)route(a,b,"call-edge",{source:dep,target:n.id})}
+if(spec){text(nodeLayer,"TERMINAL GOALS",22,32,"lane-label");for(const predicate of spec.goal){const key="goal:"+predicate.id,p=positions.get(key),argument=predicate.arguments||{},subject=predicate.subject||argument.subject,binding=coverage?.roles?.[subject],declaration=coverage?.goals.find(g=>g.id===predicate.id)?.status||"unknown";drawNode(key,p,predicates[predicate.predicate]||predicate.predicate,predicate.id+" · "+(labels[declaration]||declaration),binding?.map(v=>v.uid+(v.part_id?"::"+v.part_id:"")).join(" / ")||subject||"",goalStatus(predicate),predicate);for(const id of coverage?.goals.find(g=>g.id===predicate.id)?.groups||[])route(key,"group:"+id,"coverage-edge",{predicate:predicate.id,group:id})}}
+$("visibility").textContent=hidden?hidden+" 项已淡化":"";$("counter").textContent=graph.task_groups.length+" 阶段 · "+graph.nodes.length+" 调用 · "+graph.nodes.reduce((n,v)=>n+v.depends_on.length,0)+" 调用依赖";transform();
+}
+function transform(){world.setAttribute("transform","translate("+view.x+","+view.y+") scale("+view.scale+")");$("zoom").textContent=Math.round(view.scale*100)+"%"}
+function fit(){const box=svg.getBoundingClientRect();view.scale=Math.max(.001,Math.min(1.05,(box.width-35)/worldBounds.width,(box.height-65)/worldBounds.height));view.x=(box.width-worldBounds.width*view.scale)/2-worldBounds.x*view.scale;view.y=(box.height-worldBounds.height*view.scale)/2-worldBounds.y*view.scale;transform()}
+function zoom(factor,x,y){const box=svg.getBoundingClientRect(),cx=x??box.width/2,cy=y??box.height/2,next=Math.max(.001,Math.min(2.5,view.scale*factor));view.x=cx-(cx-view.x)*next/view.scale;view.y=cy-(cy-view.y)*next/view.scale;view.scale=next;transform()}
+function showDetail(key){const d=$("detail-content");d.replaceChildren();$("inspector").classList.add("open");if(key==="spec"){d.append(html("h2","TaskSpec / Graph"));d.append(html("p",graph.instruction));fields(d,[["Task",graph.task_id],["结构",graph.schema_version],["图身份",data.identities.graph_digest],["运行装配",graph.integration_fingerprint]]);d.append(html("h3","规范声明"));if(!spec)d.append(html("p","旧包未提供 TaskSpec，历史成功不等于新规范已验证。","empty"));else{fields(d,[["规范身份",spec.semantic_hash],["最终目标",spec.goal.length],["里程碑",spec.milestones.length],["角色",spec.roles.length],["覆盖",coverage?.status||"未提供"]]);for(const p of spec.goal){d.append(html("p",(predicates[p.predicate]||p.predicate)+" · "+p.id));fields(d,[["条件",p],["来源阶段",coverage?.goals.find(g=>g.id===p.id)?.groups||[]]])}jsonView(d,"完整 TaskSpec",spec);jsonView(d,"角色绑定 / 静态覆盖",data.validation)}d.append(html("h3","执行证据"));badge(d,report?report.status==="succeeded"?"succeeded":"failed":"unknown",report?"原执行报告":"未提供报告");if(report?.runtime_result?.task_spec_evaluation)jsonView(d,"TaskSpec 运行评估",report.runtime_result.task_spec_evaluation);else d.append(html("p","TaskSpec 运行证据未提供。","empty"));jsonView(d,"原始图 / 所有目标",graph);if(report)jsonView(d,"完整执行报告",report);return}
+if(key.startsWith("goal:")){const p=spec.goal.find(v=>v.id===key.slice(5));d.append(html("h2",predicates[p.predicate]||p.predicate));badge(d,coverage?.goals.find(v=>v.id===p.id)?.status||"unknown","声明覆盖");badge(d,goalStatus(p),"最终目标证据");fields(d,[["谓词",p],["映射",coverage?.goals.find(v=>v.id===p.id)||{}]]);jsonView(d,"当前环境评估",goalEvidence(p));jsonView(d,"原始规范",p);return}
+if(key.startsWith("group:")){const g=groups.get(key.slice(6));d.append(html("h2",g.id+" · "+g.task_type));badge(d,groupStatus(g),"原组验收");fields(d,[["前驱",g.depends_on],["Success",g.success],["调用数量",g.node_ids.length]]);for(const id of g.node_ids){const n=calls.get(id);badge(d,callStatus(n),n.id+" · "+(n.call.call_id||n.call.kind))}jsonView(d,"阶段 / 调用",g.node_ids.map(id=>calls.get(id)));return}
+const n=calls.get(key.slice(5));d.append(html("h2",n.call.call_id||n.call.kind));badge(d,callStatus(n),"调用证据");fields(d,[["ID",n.id],["所属阶段",n.task_instance_id],["角色",n.role],["直接依赖",n.depends_on],["资源",n.call.resources||{}],["调用",n.call]]);const target=n.call.arguments?.target;if(target&&graph.targets[target])jsonView(d,"目标声明",graph.targets[target]);const evidence=data.call_evidence[n.id];if(evidence){const runtime=evidence.metadata?.runtime;const actual=[...new Set((runtime?.events||[]).map(e=>e.skill_id).filter(Boolean))];if(actual.length)fields(d,[["实际 Atomic",actual]]);jsonView(d,"原始运行证据",evidence)}else d.append(html("p","无可按 ID 对应的运行证据。","empty"))}
+function download(content,name,type){const url=URL.createObjectURL(new Blob([content],{type})),a=document.createElement("a");a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
+$("task-title").textContent=graph.task_id;$("instruction").textContent=graph.instruction;
+for(const row of report?.environments||[]){const option=document.createElement("option");option.value=String(row.env_id);option.textContent="环境 "+row.env_id;$("environment").append(option)}
+$("environment").disabled=!report;$("environment").addEventListener("change",()=>{draw();showDetail(selected)});$("status-filter").addEventListener("change",draw);$("search-input").addEventListener("input",draw);
+$("spec-detail").addEventListener("click",()=>{selected="spec";showDetail(selected);draw()});$("close-detail").addEventListener("click",()=>$("inspector").classList.remove("open"));
+$("expand-all").addEventListener("click",()=>{const expand=expanded.size!==groups.size;expanded.clear();if(expand)for(const id of groups.keys())expanded.add(id);$("expand-all").setAttribute("aria-pressed",String(expand));draw();fit()});
+$("zoom-in-button").addEventListener("click",()=>zoom(1.2));$("zoom-out-button").addEventListener("click",()=>zoom(1/1.2));$("fit-button").addEventListener("click",fit);$("reset-button").addEventListener("click",()=>{manual.clear();expanded.clear();$("expand-all").setAttribute("aria-pressed","false");draw();fit()});
+$("export-json").addEventListener("click",()=>download(JSON.stringify(data,null,2),"semantic_graph_data.json","application/json"));
+$("export-svg").addEventListener("click",()=>{const clone=svg.cloneNode(true);clone.setAttribute("width",String(worldBounds.width));clone.setAttribute("height",String(worldBounds.height));clone.setAttribute("viewBox",[worldBounds.x,worldBounds.y,worldBounds.width,worldBounds.height].join(" "));clone.querySelector("#world").removeAttribute("transform");const style=document.createElementNS(NS,"style");style.textContent=document.querySelector("style").textContent;clone.prepend(style);const defs=document.querySelector("body>svg>defs").cloneNode(true);clone.prepend(defs);download(new XMLSerializer().serializeToString(clone),"semantic_graph.svg","image/svg+xml")});
+svg.addEventListener("wheel",e=>{e.preventDefault();const box=svg.getBoundingClientRect();zoom(e.deltaY<0?1.1:1/1.1,e.clientX-box.left,e.clientY-box.top)},{passive:false});
+svg.addEventListener("pointerdown",e=>{if(e.target.closest(".toggle,.group-header"))return;const node=e.target.closest(".node"),key=node?.dataset.key;const group=key?.startsWith("call:")?"group:"+owner.get(key.slice(5)):key?.startsWith("group:")?key:null;drag={x:e.clientX,y:e.clientY,viewX:view.x,viewY:view.y,key,group,position:group?{...positions.get(group)}:null,moved:false};svg.setPointerCapture(e.pointerId);svg.classList.add("dragging")});
+svg.addEventListener("pointermove",e=>{if(!drag)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;drag.moved=drag.moved||Math.hypot(dx,dy)>4;if(drag.group){manual.set(drag.group,{x:drag.position.x+dx/view.scale,y:drag.position.y+dy/view.scale});draw()}else{view.x=drag.viewX+dx;view.y=drag.viewY+dy;transform()}});
+function release(e){const selection=drag&&!drag.moved&&drag.key;drag=null;svg.classList.remove("dragging");if(svg.hasPointerCapture(e.pointerId))svg.releasePointerCapture(e.pointerId);if(selection&&e.type!=="pointercancel"){selected=selection;showDetail(selection);draw()}}svg.addEventListener("pointerup",release);svg.addEventListener("pointercancel",release);
+const resize=new ResizeObserver(()=>fit());resize.observe(svg);
+draw();fit();showDetail("spec");if(window.innerWidth<=760)$("inspector").classList.remove("open");
+window.__graphViewer={data,expanded,positions,view,counts:()=>({calls:calls.size,groups:groups.size,edges:graph.nodes.reduce((n,v)=>n+v.depends_on.length,0)}),fit};
+})();
+</script>
+</body>
+</html>

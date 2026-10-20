@@ -45,8 +45,15 @@ class TaskEngineExecutionCfg:
     num_envs: int = 1
     success_policy: str = "any"
     min_successful_envs: int = 1
+    acceptance_mode: str = "strict"
 
     def __post_init__(self) -> None:
+        if self.acceptance_mode not in {"strict", "experiment"}:
+            raise ValueError("acceptance_mode must be strict or experiment.")
+        if self.acceptance_mode == "experiment" and self.num_envs != 1:
+            raise ValueError(
+                "Experimental program acceptance currently requires one environment."
+            )
         if (
             isinstance(self.num_envs, bool)
             or not isinstance(self.num_envs, int)
@@ -110,8 +117,23 @@ class TaskEnginePlanningCfg:
     max_episodes: int = 1
     max_episode_steps: int = 10000
     fit_grasp_assets: bool = False
+    twist_mass_source: bool = False
+    physical_reference: str | None = None
+    runtime_profile: str = "default"
+    experimental_open_release: bool | None = None
+    press_extra_distance: float | None = None
 
     def __post_init__(self) -> None:
+        from .experiment_policy import validate_profile
+        from ._task_program.press_binding import validate_extra_press_distance
+
+        validate_profile(self.runtime_profile)
+        validate_extra_press_distance(self.press_extra_distance)
+        if (
+            self.experimental_open_release is not None
+            and type(self.experimental_open_release) is not bool
+        ):
+            raise TypeError("experimental_open_release must be a boolean or None.")
         for field_name in (
             "candidate_count",
             "max_episodes",
@@ -124,6 +146,19 @@ class TaskEnginePlanningCfg:
             raise ValueError("planning_mode must be offline or ab.")
         if type(self.fit_grasp_assets) is not bool:
             raise TypeError("fit_grasp_assets must be a boolean.")
+        if type(self.twist_mass_source) is not bool:
+            raise TypeError("twist_mass_source must be a boolean.")
+        if self.physical_reference is not None:
+            if not isinstance(self.physical_reference, str):
+                raise TypeError("physical_reference must be a bundle path or None.")
+            if not self.physical_reference.strip():
+                raise ValueError("physical_reference must be a non-empty bundle path.")
+            if self.runtime_profile != "default":
+                raise ValueError("physical_reference requires runtime_profile=default.")
+            if self.fit_grasp_assets or self.twist_mass_source:
+                raise ValueError(
+                    "physical_reference cannot be combined with physical adaptation."
+                )
 
 
 def load_task_engine_config(
@@ -176,15 +211,37 @@ def load_task_engine_config(
     if (
         not required_planning
         <= set(planning)
-        <= required_planning | {"fit_grasp_assets"}
+        <= required_planning
+        | {
+            "fit_grasp_assets",
+            "twist_mass_source",
+            "physical_reference",
+            "runtime_profile",
+            "experimental_open_release",
+            "press_extra_distance",
+        }
     ):
         raise ValueError("Task Engine planning configuration fields are invalid.")
-    if set(execution) != {
-        "num_envs",
-        "success_policy",
-        "min_successful_envs",
-    }:
+    if (
+        not {"num_envs", "success_policy", "min_successful_envs"}
+        <= set(execution)
+        <= {
+            "num_envs",
+            "success_policy",
+            "min_successful_envs",
+            "acceptance_mode",
+        }
+    ):
         raise ValueError("Task Engine execution configuration fields are invalid.")
+    if planning.get("physical_reference") is not None:
+        reference = planning["physical_reference"]
+        if not isinstance(reference, str) or not reference.strip():
+            raise ValueError("physical_reference must be a non-empty bundle path.")
+        reference_path = Path(reference).expanduser()
+        if not reference_path.is_absolute():
+            base = Path(path).expanduser().resolve().parent if path else Path.cwd()
+            reference_path = base / reference_path
+        planning["physical_reference"] = str(reference_path.resolve())
     return (
         TaskEngineWorkflowCfg(**workflow),
         TaskEnginePlanningCfg(**planning),

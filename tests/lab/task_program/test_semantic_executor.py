@@ -64,6 +64,7 @@ from embodichain.lab.sim.atomic_actions import (
     StateDelta,
     TaskState,
     TimedCommandSequence,
+    TimedTrajectory,
     TrackingFeedbackSourceRef,
     TrackingProjectorRef,
 )
@@ -82,6 +83,8 @@ from embodichain.lab.task_program.compiler.lowering import (
     GroundedHeldObjectGuard,
     GroundedPhaseEffectGate,
     HeldObjectGuardBaseline,
+    RegisteredHeldObjectEffect,
+    RegisteredSemanticEffect,
     SemanticCallCompiler,
 )
 from embodichain.lab.task_program.semantics.effects import (
@@ -96,6 +99,7 @@ from embodichain.lab.task_program.semantics.effects import (
     EffectMonitor,
     EffectMonitorDecision,
     EffectMonitorParam,
+    EffectMonitorRef,
     HeldObjectRelation,
     HeldObjectStateExpectation,
     JOINT_STATE_EFFECT_CHANNEL,
@@ -2014,6 +2018,195 @@ def test_phase_effect_gate_uses_independent_monitor_and_records_boundary_trace()
     assert trace.gate_id == "destination_acquired"
     assert trace.segment_name == "lift"
     assert torch.equal(system.collector.calls[0][2], torch.tensor([0, 1]))
+
+
+@pytest.mark.parametrize(
+    "lost_during_lift", [False, True], ids=["not_acquired", "lost_during_lift"]
+)
+def test_registered_acquisition_scheduler_stops_within_action_retry_budget(
+    monkeypatch: pytest.MonkeyPatch, lost_during_lift: bool
+) -> None:
+    poses = torch.eye(4).repeat(BATCH_SIZE, 1, 1)
+    unrelated = HeldObjectState(
+        semantics=ObjectSemantics(
+            affordance=Affordance(), geometry={}, entity_id="other_cube"
+        ),
+        object_to_eef=poses,
+        grasp_xpos=poses,
+        env_mask=_mask(True, True),
+    )
+    system = _workflow_recovery_system(
+        (_workflow_decision(_mask(True, True), _mask(False, False)),),
+        max_recovery_attempts=0,
+        task_state=TaskState(
+            batch_size=BATCH_SIZE,
+            device="cpu",
+            held_objects={"other_gripper": unrelated},
+        ),
+    )
+    plans = 0
+    original_plan = _WorkflowEffectAction._plan
+
+    def phased_plan(self, request, context):
+        nonlocal plans
+        plans += 1
+        original = original_plan(self, request, context)
+        return self.build_plan(
+            request,
+            context,
+            success=True,
+            trajectory=TimedTrajectory.from_uniform_step(
+                torch.tensor([0.0, 1.0, 2.0, 3.0])
+                .view(1, 4, 1)
+                .repeat(BATCH_SIZE, 1, 1),
+                env_ids=context.env_ids,
+                step_dt=0.01,
+            ),
+            expected_effects=original.expected_effects,
+            effect_candidates=original.expected_effects,
+            segment_lengths={"close": 1, "lift": 3},
+            replannable=False,
+        )
+
+    monkeypatch.setattr(_WorkflowEffectAction, "_plan", phased_plan)
+    call = RegisteredSemanticCall("test.registered_pick")
+    original_ground = system.compiler.ground
+    monitors = []
+
+    def decision(satisfied: bool) -> EffectMonitorDecision:
+        success, failure = _mask(satisfied, satisfied), _mask(
+            not satisfied, not satisfied
+        )
+        return EffectMonitorDecision(
+            success,
+            failure,
+            (EffectExpectationDecision("primary", success, failure, failure),),
+        )
+
+    def ground_registered(self, workflow, call_index, context, **kwargs):
+        grounded = original_ground(
+            replace(workflow, calls=(Pick(SceneObjectRef("cube")),)),
+            call_index,
+            context,
+            **kwargs,
+        )
+        spec = replace(
+            grounded.effect_spec,
+            semantic_id=call.semantic_id,
+            state_expectations=(
+                replace(
+                    grounded.effect_spec.state_expectations[0], expectation_id="primary"
+                ),
+            ),
+            clauses=(
+                replace(
+                    grounded.effect_spec.clauses[0],
+                    expectation_id="primary",
+                    clause_id="primary.constraint",
+                ),
+            ),
+        )
+        analyzed = SimpleNamespace(
+            **{
+                **vars(grounded.analyzed),
+                "call": call,
+                "effect_monitor_ref": EffectMonitorRef("test.monitor", "1"),
+            }
+        )
+        declaration = RegisteredSemanticEffect(
+            SemanticEffectKind.ATTACH,
+            (
+                RegisteredHeldObjectEffect(
+                    "primary",
+                    HeldObjectRelation.ATTACHED,
+                    "cube",
+                    "primary",
+                    acquire_before_segment="lift",
+                    retain_during_segments=("lift",),
+                ),
+            ),
+        )
+        self._effect_monitor_registry = SimpleNamespace(
+            create=lambda value, ref: _DecisionMonitor(value, decision(True))
+        )
+        gates = self._ground_phase_effect_gates(
+            analyzed, spec, registered_effect=declaration, path=("test",)
+        )
+        guards = self._ground_held_object_guards(
+            analyzed, spec, context, registered_effect=declaration, path=("test",)
+        )
+        gate_monitor, guard_monitor = gates[0].effect_monitor, guards[0].effect_monitor
+        if not lost_during_lift:
+            gate_monitor._decision = decision(False)
+        else:
+            original_observe = guard_monitor.observe
+
+            def lose_after_first_lift(request, evidence):
+                if guard_monitor.calls:
+                    guard_monitor._decision = decision(False)
+                return original_observe(request, evidence)
+
+            monkeypatch.setattr(guard_monitor, "observe", lose_after_first_lift)
+        terminal = _DecisionMonitor(spec, decision(True))
+        monitors.append((gate_monitor, guard_monitor, terminal))
+        return replace(
+            grounded,
+            analyzed=analyzed,
+            invocation=replace(
+                grounded.invocation,
+                phase_effect_gates=tuple(g.requirement for g in gates),
+                recovery_policy=replace(
+                    grounded.invocation.recovery_policy, max_action_retries=1
+                ),
+            ),
+            effect_spec=spec,
+            effect_monitor=terminal,
+            effect_gates=gates,
+            effect_guards=guards,
+        )
+
+    monkeypatch.setattr(
+        system.compiler, "ground", MethodType(ground_registered, system.compiler)
+    )
+    sent = []
+    original_send = system.sink.send
+
+    def record_send(command, *, timeout):
+        sent.append(float(command.commands[0].payload.positions[0, 0]))
+        return original_send(command, timeout=timeout)
+
+    monkeypatch.setattr(system.sink, "send", record_send)
+    invalidations = []
+    original_guard = system.runtime._held_object_guard_verifier
+
+    def record_guard(context, request):
+        result = original_guard(context, request)
+        if result is not None and result.failure_mask.any():
+            invalidations.append(result.state_invalidation.held_object_updates)
+        return result
+
+    monkeypatch.setattr(system.runtime, "_held_object_guard_verifier", record_guard)
+    result = system.runtime.run(call, max_steps=50)
+
+    assert result.status is SemanticExecutionStatus.FAILED
+    assert torch.equal(result.failure_mask, _mask(True, True))
+    assert plans == 2
+    assert len(monitors) == 1
+    gate_monitor, guard_monitor, terminal_monitor = monitors[0]
+    assert terminal_monitor.calls == 0
+    assert result.task_state.get_held_object("left_gripper") is None
+    assert result.task_state.get_held_object("other_gripper") is not None
+    if lost_during_lift:
+        assert 1.0 in sent and 3.0 not in sent
+        assert invalidations and all(
+            value == {"left_gripper": None} for value in invalidations
+        )
+        assert guard_monitor.calls >= 2
+    else:
+        assert sent == [0.0, 0.0]
+        assert gate_monitor.calls == 2
+        assert guard_monitor.calls == 0
+        assert invalidations == []
 
 
 def test_runtime_invokes_step_observer() -> None:

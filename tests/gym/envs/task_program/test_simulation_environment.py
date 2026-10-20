@@ -1784,9 +1784,10 @@ def test_pick_place_effects_require_physical_constraint_and_live_pose() -> None:
         analyzed: Any,
         effect_spec: Any,
         *,
+        registered_effect: Any = None,
         path: tuple[Any, ...],
     ) -> tuple[()]:
-        del self, analyzed, effect_spec, path
+        del self, analyzed, effect_spec, registered_effect, path
         return ()
 
     def without_in_flight_guards(
@@ -1795,9 +1796,10 @@ def test_pick_place_effects_require_physical_constraint_and_live_pose() -> None:
         effect_spec: Any,
         context: Any,
         *,
+        registered_effect: Any = None,
         path: tuple[Any, ...],
     ) -> tuple[()]:
-        del self, analyzed, effect_spec, context, path
+        del self, analyzed, effect_spec, context, registered_effect, path
         return ()
 
     assembly.compiler._ground_phase_effect_gates = MethodType(

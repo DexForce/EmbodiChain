@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -111,7 +112,7 @@ def _candidate_set() -> dict:
                     "count": 0,
                     "source_structure": "rigid_object",
                     "affordances": ["graspable", "orientable"],
-                    "initial_state": {"orientation": "fallen"},
+                    "initial_state": {},
                     "attributes": {},
                 }
             ],
@@ -331,7 +332,7 @@ def test_unbound_prepare_publishes_only_audit_artifacts(tmp_path: Path) -> None:
         task_agent=task_agent,
         scene_adapter=scene_adapter,
         semantic_planner=SimpleNamespace(
-            plan=lambda *_args, **_kwargs: pytest.fail(
+            plan_spec=lambda *_args, **_kwargs: pytest.fail(
                 "Semantic Task Planner must not run"
             )
         ),
@@ -415,12 +416,18 @@ def test_prepare_inherits_adapter_robot_profile_for_raw_scene_path(
     assert captured["source"].robot_profile == "ur10"
 
 
+@pytest.mark.parametrize("selected_physical", [False, True])
+@pytest.mark.parametrize("press_extra", [None, 0.0, 0.010])
 def test_bound_prepare_publishes_semantic_task_program_bundle(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    selected_physical: bool,
+    press_extra: float | None,
 ) -> None:
     candidates = _candidate_set()
     adaptation = _adaptation(tmp_path)
+    physical = SimpleNamespace() if selected_physical else None
+    adaptation = replace(adaptation, physical_input=physical)
     task_agent = SimpleNamespace(generate=lambda *args, **kwargs: candidates)
     scene_adapter = SimpleNamespace(
         robot_profile="franka",
@@ -459,8 +466,10 @@ def test_bound_prepare_publishes_semantic_task_program_bundle(
         "success": {"kind": "all_task_groups"},
     }
     generated_calls: list[dict[str, object]] = []
+    generated_scenes: list[object] = []
 
     def generate_bundle(planned_graph, _scene, output, **kwargs):
+        generated_scenes.append(_scene)
         generated_calls.append({"graph": planned_graph, **kwargs})
         root = Path(output)
         paths = TaskProgramBundlePaths(
@@ -496,16 +505,36 @@ def test_bound_prepare_publishes_semantic_task_program_bundle(
     result = TaskEngineCoordinator(
         task_agent=task_agent,
         scene_adapter=scene_adapter,
-        semantic_planner=SimpleNamespace(plan=lambda *_args, **_kwargs: graph),
+        semantic_planner=SimpleNamespace(
+            plan_spec=lambda selected, bindings, *_args, task_spec, **_kwargs: SimpleNamespace(
+                graph=graph,
+                task_spec=task_spec,
+                candidate=selected,
+                role_bindings=bindings,
+                lineage={
+                    "upright": [
+                        {
+                            "group_id": "upright",
+                            "object_uid": "red_can",
+                            "object_part_id": None,
+                        }
+                    ]
+                },
+            )
+        ),
     ).prepare(
         "upright_can",
         _UPRIGHT_CAN_INSTRUCTION,
         tmp_path / "source" / "scene_config.json",
         tmp_path / "bundle",
         candidate_count=1,
+        press_extra_distance=press_extra,
     )
 
     assert result.bound
+    assert generated_scenes[0] is (
+        physical if selected_physical else adaptation.prepared_scene
+    )
     assert generated_calls == [
         {
             "graph": graph,
@@ -513,6 +542,22 @@ def test_bound_prepare_publishes_semantic_task_program_bundle(
             "max_episodes": None,
             "max_episode_steps": None,
             "fit_grasp_assets": False,
+            **(
+                {"press_extra_distance": press_extra} if press_extra is not None else {}
+            ),
+            "verify_pick_phases": True,
+            "task_spec": generated_calls[0]["task_spec"],
+            "task_candidate": adaptation.selected_candidate,
+            "role_bindings": adaptation.role_bindings,
+            "step_lineage": {
+                "upright": [
+                    {
+                        "group_id": "upright",
+                        "object_uid": "red_can",
+                        "object_part_id": None,
+                    }
+                ]
+            },
         }
     ]
     assert result.semantic_task_graph == graph
@@ -542,7 +587,7 @@ def test_prepare_publishes_semantic_planning_failure_context(
             robot_profile="franka",
             adapt=lambda *args, **kwargs: adaptation,
         ),
-        semantic_planner=SimpleNamespace(plan=unsupported),
+        semantic_planner=SimpleNamespace(plan_spec=unsupported),
     ).prepare(
         "upright_can",
         _UPRIGHT_CAN_INSTRUCTION,
@@ -691,6 +736,9 @@ def test_unified_cli_accepts_exactly_four_modes(
     assert captured["kwargs"]["dataset_saving"] is (mode == "image")
     assert captured["kwargs"]["failure_policy"] == "stop"
     assert captured["kwargs"]["execute"] is True
+    assert captured["kwargs"]["planning_cfg"].runtime_profile == "auto"
+    assert captured["kwargs"]["execution_cfg"].acceptance_mode == "experiment"
+    assert captured["kwargs"]["planning_cfg"].experimental_open_release is False
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "succeeded"
     assert payload["run_id"].replace("_", "").isdigit()
@@ -993,6 +1041,10 @@ def test_visual_gate_blocks_execution_and_preserves_audit(
     assert code == (0 if visual_accepted else 2)
     assert len(calls) == int(visual_accepted)
     payload = json.loads(capsys.readouterr().out)
+    assert isinstance(payload["elapsed_seconds"], float)
+    assert payload["elapsed_seconds"] >= 0
+    keys = list(payload)
+    assert keys[keys.index("failure_class") + 1] == "elapsed_seconds"
     audit = json.loads(
         (Path(payload["output_dir"]) / "visual_consistency.json").read_text()
     )
@@ -1045,7 +1097,98 @@ def test_prepare_cli_stops_before_simulator_execution(
     assert captured["execute"] is False
     output = capsys.readouterr()
     assert json.loads(output.out)["video_paths"] == []
+    assert json.loads(output.out)["semantic_graph_html"] is None
     assert output.err == ""
+
+
+@pytest.mark.parametrize(
+    "status", ["succeeded", "failed", "input_conflict", "prepared"]
+)
+def test_cli_total_elapsed_includes_setup_publication_and_artifact_reporting(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    status: str,
+) -> None:
+    now = [100.0]
+    monkeypatch.setattr(cli, "perf_counter", lambda: now[0], raising=False)
+    original_parser = cli.build_parser
+
+    def parser():
+        now[0] += 2.0
+        return original_parser()
+
+    def adapter(**_kwargs):
+        now[0] += 3.0
+        return object()
+
+    class Workflow:
+        def __init__(self, **_kwargs):
+            pass
+
+        def run(self, request, **_kwargs):
+            now[0] += 10.1234
+            output = Path(request["output_dir"])
+            return SimpleNamespace(
+                status=status,
+                succeeded=status == "succeeded",
+                failure_class=None if status in {"succeeded", "prepared"} else status,
+                output_dir=output,
+                manifest_path=output / "run_manifest.json",
+                final_bundle=None,
+            )
+
+    def videos(_output):
+        now[0] += 4.0
+        return []
+
+    def html(_output, **_kwargs):
+        now[0] += 5.0
+        return None
+
+    monkeypatch.setattr(cli, "build_parser", parser)
+    monkeypatch.setattr(cli, "SceneAdapter", adapter)
+    monkeypatch.setattr(cli, "TaskEngineWorkflow", Workflow)
+    monkeypatch.setattr(cli, "_report_saved_videos", videos)
+    monkeypatch.setattr(cli, "_report_semantic_graph_html", html)
+    command = "prepare" if status == "prepared" else "run-all"
+    exit_code = cli.main(
+        [
+            command,
+            "--mode",
+            "image",
+            "--task-id",
+            "task",
+            "--instruction",
+            "lift tray",
+            "--image",
+            str(tmp_path / "input.png"),
+            "--output-root",
+            str(tmp_path / "runs"),
+        ]
+    )
+    assert exit_code == (0 if status in {"succeeded", "prepared"} else 2)
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["elapsed_seconds"] == (20.123 if status == "prepared" else 24.123)
+    keys = list(payload)
+    assert keys[keys.index("failure_class") + 1] == "elapsed_seconds"
+
+
+def test_module_cli_forwards_bootstrap_timer(monkeypatch: pytest.MonkeyPatch) -> None:
+    import runpy
+    from embodichain.gen_sim import task_engine
+
+    captured = {}
+
+    def main(*args, **kwargs):
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(cli, "main", main)
+    with pytest.raises(SystemExit) as exit_info:
+        runpy.run_module("embodichain.gen_sim.task_engine", run_name="__main__")
+    assert exit_info.value.code == 0
+    assert captured["started_at"] == task_engine._CLI_STARTED_AT
 
 
 @pytest.mark.parametrize("succeeded", [True, False])
@@ -1077,6 +1220,19 @@ def test_run_all_cli_reports_published_videos_for_every_attempt(
                     video = staging / relative_path
                     video.parent.mkdir(parents=True)
                     video.write_bytes(b"video")
+                    (video.parent.parent / "semantic_graph.html").write_text(
+                        "<html>execution evidence</html>", encoding="utf-8"
+                    )
+                if succeeded:
+                    final = staging / "final"
+                    (final / "bundle").mkdir(parents=True)
+                    (final / "bundle" / "semantic_graph.html").write_text(
+                        "<html>static graph</html>", encoding="utf-8"
+                    )
+                    (final / "selection.json").write_text(
+                        json.dumps({"scene_attempt": 1, "action_attempt": 2}),
+                        encoding="utf-8",
+                    )
                 (staging / "videos" / "directory.mp4").mkdir(parents=True)
                 (staging / "not_a_recording.mp4").write_bytes(b"unrelated asset")
                 published = transaction.commit()
@@ -1116,26 +1272,40 @@ def test_run_all_cli_reports_published_videos_for_every_attempt(
         for relative_path in relative_paths
     ]
     assert payload["video_paths"] == expected
+    html_path = (
+        Path(payload["output_dir"])
+        / relative_paths[1 if succeeded else 2].parent.parent
+        / "semantic_graph.html"
+    ).as_posix()
+    assert payload["semantic_graph_html"] == html_path
     assert all(Path(path).is_absolute() and Path(path).is_file() for path in expected)
     assert output.err.splitlines() == [
         f"[Task Engine] Video saved: {path}" for path in expected
-    ]
+    ] + [f"[Task Engine] Semantic graph HTML: {html_path}"]
     assert ".staging-" not in output.out + output.err
 
 
 @pytest.mark.parametrize("has_video", [True, False])
-def test_run_cli_executes_an_existing_bundle(
+@pytest.mark.parametrize("has_html", [True, False])
+def test_run_cli_executes_an_existing_bundle_with_strict_acceptance(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     has_video: bool,
+    has_html: bool,
 ) -> None:
+    from embodichain.gen_sim.task_engine.config import TaskEngineExecutionCfg
+
     bundle = tmp_path / "bundle"
     bundle.mkdir()
 
     class Executor:
         def __call__(self, _bundle, output, **kwargs):
             Path(output).mkdir()
+            if has_html:
+                (Path(output) / "semantic_graph.html").write_text(
+                    "<html>execution evidence</html>", encoding="utf-8"
+                )
             if has_video:
                 videos = Path(output) / "videos"
                 videos.mkdir()
@@ -1152,6 +1322,11 @@ def test_run_cli_executes_an_existing_bundle(
             }
 
     monkeypatch.setattr(cli, "SubprocessActionExecutor", Executor)
+    monkeypatch.setattr(
+        cli,
+        "load_task_engine_config",
+        lambda _: (None, None, TaskEngineExecutionCfg(acceptance_mode="strict")),
+    )
 
     result = cli.main(
         [
@@ -1174,19 +1349,58 @@ def test_run_cli_executes_an_existing_bundle(
     if has_video:
         expected = (Path(payload["output_dir"]) / "videos" / "episode_0.mp4").as_posix()
         assert payload["video_paths"] == [expected]
-        assert output.err == f"[Task Engine] Video saved: {expected}\n"
+        video_line = f"[Task Engine] Video saved: {expected}\n"
     else:
         assert payload["video_paths"] == []
-        assert output.err == "[Task Engine] No video files generated for this run.\n"
+        video_line = "[Task Engine] No video files generated for this run.\n"
+    html_path = (Path(payload["output_dir"]) / "semantic_graph.html").as_posix()
+    assert payload["semantic_graph_html"] == (html_path if has_html else None)
+    assert isinstance(payload["elapsed_seconds"], float)
+    assert payload["elapsed_seconds"] >= 0
+    assert output.err == video_line + (
+        f"[Task Engine] Semantic graph HTML: {html_path}\n"
+        if has_html
+        else "[Task Engine] No semantic graph HTML generated for this run.\n"
+    )
+
+
+def test_html_reporting_falls_back_to_published_bundle_without_inventing_a_path(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run = tmp_path / "run"
+    run.mkdir()
+    bundle = run / "final" / "bundle"
+    bundle.mkdir(parents=True)
+    html = bundle / "semantic_graph.html"
+    html.mkdir()
+    assert cli._report_semantic_graph_html(run, bundle=bundle) is None
+    assert (
+        capsys.readouterr().err
+        == "[Task Engine] No semantic graph HTML generated for this run.\n"
+    )
+    other = tmp_path / "old_run" / "semantic_graph.html"
+    other.parent.mkdir()
+    other.write_text("old graph", encoding="utf-8")
+    assert cli._report_semantic_graph_html(run) is None
+    capsys.readouterr()
+    # A different fresh bundle exercises the file fallback, not the directory.
+    fresh = tmp_path / "fresh_bundle"
+    fresh.mkdir()
+    (fresh / "semantic_graph.html").write_text("<html>static</html>", encoding="utf-8")
+    expected = (fresh / "semantic_graph.html").resolve().as_posix()
+    assert cli._report_semantic_graph_html(run, bundle=fresh) == expected
+    assert capsys.readouterr().err == f"[Task Engine] Semantic graph HTML: {expected}\n"
 
 
 @pytest.mark.parametrize("semantic_success", [{}, {"finish": False}, {"finish": True}])
-def test_run_cli_checks_bundle_semantic_success(
+def test_run_cli_checks_bundle_semantic_success_with_strict_acceptance(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     semantic_success: dict,
 ) -> None:
+    from embodichain.gen_sim.task_engine.config import TaskEngineExecutionCfg
+
     bundle = tmp_path / "bundle"
     bundle.mkdir()
     (bundle / "success_spec.json").write_text(
@@ -1204,6 +1418,11 @@ def test_run_cli_checks_bundle_semantic_success(
             }
 
     monkeypatch.setattr(cli, "SubprocessActionExecutor", Executor)
+    monkeypatch.setattr(
+        cli,
+        "load_task_engine_config",
+        lambda _: (None, None, TaskEngineExecutionCfg(acceptance_mode="strict")),
+    )
     result = cli.main(
         ["run", "--bundle", str(bundle), "--output-root", str(tmp_path / "runs")]
     )

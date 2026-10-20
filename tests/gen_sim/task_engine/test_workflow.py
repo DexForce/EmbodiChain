@@ -26,6 +26,7 @@ from embodichain.gen_sim.task_engine.config import (
     TaskEngineWorkflowCfg,
     load_task_engine_config,
 )
+from embodichain.gen_sim.task_engine.workflow import _headless_renderer_for_bundle
 from embodichain.gen_sim.task_engine.state_machine import (
     StageStatus,
     WorkflowStage,
@@ -104,6 +105,30 @@ def test_run_request_rejects_output_containing_explicit_gym_config(
 
     with pytest.raises(ValueError, match="must not overlap"):
         validate_task_run_request(request)
+
+
+def test_e8_bundle_uses_hybrid_headless_renderer(tmp_path: Path) -> None:
+    program_dir = tmp_path / "task_program"
+    program_dir.mkdir()
+    (program_dir / "program.yaml").write_text(
+        "program:\n  items:\n"
+        "    - steps:\n        call:\n"
+        "          call_id: gen_sim.twist\n",
+        encoding="utf-8",
+    )
+    assert _headless_renderer_for_bundle(tmp_path) == "hybrid"
+
+
+def test_non_e8_bundle_keeps_fast_rt_renderer(tmp_path: Path) -> None:
+    program_dir = tmp_path / "task_program"
+    program_dir.mkdir()
+    (program_dir / "program.yaml").write_text(
+        "program:\n  items:\n"
+        "    - steps:\n        call:\n"
+        "          call_id: simulation.pick\n",
+        encoding="utf-8",
+    )
+    assert _headless_renderer_for_bundle(tmp_path) == "fast-rt"
 
 
 def test_scene_history_root_allows_a_source_from_a_prior_run(
@@ -269,16 +294,22 @@ def test_workflow_configuration_rejects_non_positive_limits() -> None:
 def test_packaged_workflow_configuration_uses_recovery_defaults() -> None:
     workflow, planning, execution = load_task_engine_config()
 
-    assert workflow.max_scene_attempts == 2
+    assert workflow.max_parallel_workers == 1
+    assert workflow.max_scene_attempts == 1
     assert workflow.max_action_attempts == 1
     assert planning.candidate_count == 3
     assert planning.planning_mode == "offline"
     assert planning.max_episodes == 1
-    assert planning.max_episode_steps == 1000000
+    assert planning.max_episode_steps == 30000
     assert planning.fit_grasp_assets is True
+    assert planning.twist_mass_source is False
+    assert planning.runtime_profile == "auto"
     assert TaskEnginePlanningCfg().max_episode_steps == 10000
     assert execution.num_envs == 1
     assert execution.required_successes == 1
+    assert execution.acceptance_mode == "experiment"
+    assert planning.experimental_open_release is False
+    assert planning.press_extra_distance is None
 
 
 def test_workflow_configuration_can_be_tuned_from_yaml(tmp_path: Path) -> None:
@@ -296,6 +327,8 @@ planning:
   max_episodes: 2
   max_episode_steps: 5000
   fit_grasp_assets: true
+  twist_mass_source: true
+  press_extra_distance: 0.0
 execution:
   num_envs: 6
   success_policy: at_least
@@ -313,8 +346,18 @@ execution:
     assert planning.max_episodes == 2
     assert planning.max_episode_steps == 5000
     assert planning.fit_grasp_assets is True
+    assert planning.twist_mass_source is True
+    assert planning.press_extra_distance == 0.0
     assert execution.num_envs == 6
     assert execution.required_successes == 2
+
+
+@pytest.mark.parametrize(
+    "value", [True, -0.001, 0.011, float("inf"), float("nan"), "0"]
+)
+def test_press_extra_distance_rejects_invalid_configuration(value) -> None:
+    with pytest.raises(ValueError, match="press_extra_distance"):
+        TaskEnginePlanningCfg(press_extra_distance=value)
 
 
 def test_execution_configuration_validates_success_policy() -> None:
@@ -342,12 +385,50 @@ def test_planning_configuration_rejects_invalid_values() -> None:
         TaskEnginePlanningCfg(planning_mode="unsupported")
     with pytest.raises(TypeError, match="fit_grasp_assets"):
         TaskEnginePlanningCfg(fit_grasp_assets="true")
+    with pytest.raises(TypeError, match="twist_mass_source"):
+        TaskEnginePlanningCfg(twist_mass_source="true")
     with pytest.raises(TypeError):
         TaskEnginePlanningCfg(gripper_model="unsupported")
     with pytest.raises(TypeError):
         TaskEnginePlanningCfg(ik_solver="unsupported")
     with pytest.raises(TypeError):
         TaskEnginePlanningCfg(planner={"mode": "toppra", "dynamic_collision": True})
+
+
+def test_physical_reference_resolves_relative_to_configuration(tmp_path: Path) -> None:
+    import yaml
+
+    from embodichain.gen_sim.task_engine import config as config_module
+
+    raw = yaml.safe_load(
+        Path(config_module.__file__).with_name("defaults.yaml").read_text()
+    )
+    raw["planning"].update(
+        fit_grasp_assets=False,
+        runtime_profile="default",
+        physical_reference="models/selected_bundle",
+    )
+    config = tmp_path / "configuration" / "task_engine.yaml"
+    config.parent.mkdir()
+    config.write_text(yaml.safe_dump(raw))
+
+    _, planning, _ = load_task_engine_config(config)
+
+    assert planning.physical_reference == str(
+        (config.parent / "models/selected_bundle").resolve()
+    )
+
+
+@pytest.mark.parametrize("value", ["", " ", True, 1, {}])
+def test_physical_reference_rejects_invalid_paths(value: Any) -> None:
+    with pytest.raises((TypeError, ValueError), match="physical_reference"):
+        TaskEnginePlanningCfg(physical_reference=value)
+
+
+@pytest.mark.parametrize("option", ["fit_grasp_assets", "twist_mass_source"])
+def test_physical_reference_rejects_implicit_physical_adaptation(option: str) -> None:
+    with pytest.raises(ValueError, match="physical_reference"):
+        TaskEnginePlanningCfg(physical_reference="selected_bundle", **{option: True})
 
 
 def test_output_separation_protects_an_explicit_config_parent(tmp_path: Path) -> None:

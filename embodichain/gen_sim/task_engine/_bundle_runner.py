@@ -19,13 +19,14 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 from copy import deepcopy
 import json
 import os
 from pathlib import Path
 import random
 import sys
-from typing import Any, NoReturn, Sequence
+from typing import Any, Iterator, NoReturn, Sequence
 
 import numpy as np
 import torch
@@ -40,6 +41,25 @@ from .semantic_graph import validate_semantic_task_graph
 __all__ = ["execute_bundle", "main"]
 
 
+@contextmanager
+def _cpu_runtime_threads(env: Any) -> Iterator[None]:
+    """Avoid thread-pool overhead for one CPU episode in the isolated worker."""
+    runtime = env.unwrapped
+    if runtime.num_envs != 1 or torch.device(runtime.device).type != "cpu":
+        yield
+        return
+    from ._task_program.motion import _CPU_BATCH_THREADS
+
+    previous = torch.get_num_threads()
+    token = _CPU_BATCH_THREADS.set(min(previous, 8))
+    try:
+        torch.set_num_threads(1)
+        yield
+    finally:
+        torch.set_num_threads(previous)
+        _CPU_BATCH_THREADS.reset(token)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Parse the private runner protocol and execute one bundle."""
     parser = argparse.ArgumentParser(
@@ -48,11 +68,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--bundle", required=True)
     parser.add_argument("--execution-output", required=True)
+    parser.add_argument(
+        "--acceptance-mode", choices=("strict", "experiment"), default="strict"
+    )
     protocol, forwarded = parser.parse_known_args(argv)
     return execute_bundle(
         protocol.bundle,
         forwarded,
         execution_output=protocol.execution_output,
+        **(
+            {"acceptance_mode": protocol.acceptance_mode}
+            if protocol.acceptance_mode != "strict"
+            else {}
+        ),
     )
 
 
@@ -61,8 +89,11 @@ def execute_bundle(
     forwarded: Sequence[str] = (),
     *,
     execution_output: str | Path | None = None,
+    acceptance_mode: str = "strict",
 ) -> int:
     """Execute one semantic bundle through the ordinary Gym Task Program bridge."""
+    if acceptance_mode not in {"strict", "experiment"}:
+        raise ValueError("Unknown execution acceptance mode.")
     root = Path(bundle).expanduser().resolve()
     if not root.is_dir():
         raise FileNotFoundError(f"Bundle directory does not exist: {root}")
@@ -86,6 +117,9 @@ def execute_bundle(
         root, deployment_path, graph, fingerprint
     )
     _verify_program_projection(program_path, graph)
+    from .semantic_graph_validation import verify_graph_contract
+
+    task_spec_contract = verify_graph_contract(root, graph)
 
     args = _runner_parser().parse_args(list(forwarded))
     args.gym_config = deployment_path.as_posix()
@@ -101,6 +135,9 @@ def execute_bundle(
     row_success = [False] * int(args.num_envs)
     terminal_reasons = ["runtime_not_started"] * int(args.num_envs)
     failure: dict[str, Any] | None = None
+    feedback_evidence: dict[str, Any] = {}
+    control_evidence: list[dict[str, Any]] = []
+    grip_evidence: dict[str, Any] | None = None
     env: Any = None
     probe: dict[str, Any] | None = None
     try:
@@ -128,6 +165,8 @@ def execute_bundle(
         def configure_environment(value: dict[str, Any]) -> None:
             _configure_recording(value, output)
             routes = deployment.integration.adapter_factory.press_routes
+            twists = getattr(deployment.integration.adapter_factory, "twist_routes", ())
+            routes = twists or routes
             if routes:
                 source = load_config(root / "components/scene.yaml")["simulation"]
                 art = next(
@@ -137,9 +176,15 @@ def execute_bundle(
                 )
                 position = np.asarray(art["init_local_pose"], dtype=float)[:3, 3]
                 target = position + np.array([0.0, 0.0, 0.05])
+                if twists:
+                    pose = np.asarray(art["init_local_pose"], dtype=float)
+                    target = (
+                        pose[:3, :3] @ np.asarray(twists[0].binding.outer_point)
+                        + position
+                    )
                 camera = deepcopy(value["env"]["events"]["record_camera"])
                 camera["params"].update(
-                    name="e9_button_view",
+                    name="e8_knob_view" if twists else "e9_button_view",
                     resolution=[960, 540],
                     intrinsics=[800.0, 800.0, 480.0, 270.0],
                     eye=(target + np.array([0.30, -0.25, 0.20])).tolist(),
@@ -152,6 +197,10 @@ def execute_bundle(
         env_cfg, gym_config, action_config = build_env_cfg_from_args(
             args,
             gym_config_modifier=configure_environment,
+        )
+        _configure_twist_recorders(
+            env_cfg,
+            bool(getattr(deployment.integration.adapter_factory, "twist_routes", ())),
         )
         env_cfg.task_program = load_task_program(
             program_path,
@@ -178,23 +227,119 @@ def execute_bundle(
             )
 
         if args.plan_probe_only:
-            publish_initial_plan(
-                _isolated_initial_probe(env, deployment, env_cfg.task_program)
-            )
+            with _cpu_runtime_threads(env):
+                publish_initial_plan(
+                    _isolated_initial_probe(env, deployment, env_cfg.task_program)
+                )
             _write_terminal_robot_state(env, output)
+            grip_evidence = _snapshot_grip_contact_evidence(env, deployment)
         else:
             from ._task_program.planning_probe import capture_initial_plan
 
-            with capture_initial_plan(
-                compiled_program, publish_initial_plan, _exception_metadata
+            with (
+                _cpu_runtime_threads(env),
+                capture_initial_plan(
+                    compiled_program, publish_initial_plan, _exception_metadata
+                ),
             ):
                 result = execute_demo_episode(env, episode_index=0, attempt_id=0)
             result_metadata = result.to_metadata()
+            if task_spec_contract is not None:
+                from embodichain.gen_sim.task_spec import TaskSpec
+                from ._task_program.task_spec_runtime import (
+                    capture_final_goals,
+                    capture_placement_milestones,
+                    evaluate_runtime_evidence,
+                )
+                from ._task_program.control_evidence import capture_control_operations
+                from ._task_program.handover_evidence import capture_handover_operations
+                from ._task_program.coordinated_evidence import (
+                    capture_coordinated_holds,
+                )
+
+                spec = TaskSpec.from_dict(_read_json(root / "task_spec.json"))
+                try:
+                    final_goals = capture_final_goals(
+                        env,
+                        deployment,
+                        root,
+                        graph,
+                        task_spec_contract,
+                        len(result.success),
+                        runtime=result_metadata,
+                    )
+                except (AttributeError, TypeError, ValueError, KeyError) as error:
+                    final_goals = {p.id: {"unavailable": str(error)} for p in spec.goal}
+                placement_milestones = capture_placement_milestones(
+                    env,
+                    deployment,
+                    graph,
+                    task_spec_contract,
+                    result_metadata,
+                    len(result.success),
+                    spec=spec,
+                )
+                evaluation = evaluate_runtime_evidence(
+                    spec,
+                    task_spec_contract,
+                    graph,
+                    result_metadata,
+                    final_goals,
+                    num_envs=len(result.success),
+                    run_id=output.as_posix(),
+                    program=load_config(program_path),
+                    constraints=load_config(root / "task_program/constraints.json"),
+                    placement_milestones=placement_milestones,
+                    control_milestones=capture_control_operations(
+                        deployment,
+                        graph,
+                        result_metadata,
+                        load_config(program_path),
+                        len(result.success),
+                    )
+                    or None,
+                    handover_milestones=capture_handover_operations(
+                        env,
+                        deployment,
+                        graph,
+                        result_metadata,
+                        load_config(program_path),
+                        load_config(root / "task_program/constraints.json"),
+                        len(result.success),
+                    )
+                    or None,
+                    coordinated_milestones=capture_coordinated_holds(
+                        env,
+                        deployment,
+                        graph,
+                        result_metadata,
+                        load_config(program_path),
+                        load_config(root / "task_program/constraints.json"),
+                        len(result.success),
+                    )
+                    or None,
+                )
+                result_metadata["task_spec_evaluation"] = evaluation
+                (output / "task_spec_evaluation.json").write_text(
+                    json.dumps(
+                        evaluation, ensure_ascii=False, indent=2, allow_nan=False
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
             _write_terminal_robot_state(env, output)
             row_success = [bool(value) for value in result.success]
             terminal_reasons = list(result.terminal_reasons) or [
                 str(result.terminal_reason)
             ] * len(row_success)
+            if task_spec_contract is not None:
+                result_metadata["program_success"] = list(row_success)
+                row_success, terminal_reasons = _apply_task_spec_verdict(
+                    result_metadata,
+                    row_success,
+                    terminal_reasons,
+                    acceptance_mode=acceptance_mode,
+                )
             initial_rejected = (
                 probe is not None
                 and bool(probe["plan_success"])
@@ -218,6 +363,9 @@ def execute_bundle(
                     if not accepted and row_success[index]:
                         row_success[index] = False
                         terminal_reasons[index] = "cargo_envelope_failed"
+            feedback_evidence = _snapshot_twist_feedback_audit(env, deployment)
+            control_evidence = _snapshot_control_evidence(env, deployment)
+            grip_evidence = _snapshot_grip_contact_evidence(env, deployment)
             if result.completed and all(row_success):
                 env.reset()
             else:
@@ -228,6 +376,15 @@ def execute_bundle(
     except Exception as exc:
         failure = _exception_metadata(exc)
         if env is not None:
+            if grip_evidence is None:
+                grip_evidence = _snapshot_grip_contact_evidence(env, deployment)
+            if not feedback_evidence:
+                feedback_evidence = _snapshot_twist_feedback_audit(env, deployment)
+            try:
+                if not control_evidence:
+                    control_evidence = _snapshot_control_evidence(env, deployment)
+            except Exception as error:
+                failure["control_evidence_error"] = _exception_metadata(error)
             _write_terminal_robot_state(env, output)
             try:
                 _preserve_failed_execution_recording(
@@ -243,44 +400,43 @@ def execute_bundle(
                 failure["abort_error"] = _exception_metadata(abort_error)
     finally:
         if env is not None:
-            try:
-                from ._task_program.press_runtime import SENSOR_UID, PressContactSensor
-
-                sensor = (
-                    getattr(env, "unwrapped", env).sim.get_sensor(SENSOR_UID)
-                    if getattr(
-                        deployment.integration.adapter_factory, "press_routes", ()
-                    )
-                    else None
-                )
-                if isinstance(sensor, PressContactSensor):
-                    (output / "press_evidence.json").write_text(
+            if grip_evidence is not None:
+                try:
+                    (output / "grip_contact_evidence.json").write_text(
                         json.dumps(
                             {
-                                "route": sensor.route.payload(),
-                                "acceptance": sensor.acceptance,
-                                "target_actor_id": sensor.target_actor,
-                                "parent_actor_id": sensor.parent_actor,
-                                "contact_envelopes": sensor.contact_envelopes,
-                                "finger_actor_ids": sorted(sensor.finger_actors),
-                                "runtime_mass": sensor.art.get_mass(
-                                    sensor.route.binding.link
-                                ).tolist(),
-                                "runtime_limits": sensor.art.get_qpos_limits()[
-                                    0, sensor.joint_index
-                                ].tolist(),
-                                "runtime_drive": [
-                                    v.tolist()
-                                    for v in sensor.art.get_joint_drive(
-                                        joint_ids=[sensor.joint_index]
-                                    )
+                                **grip_evidence,
+                                "integration_fingerprint": graph[
+                                    "integration_fingerprint"
                                 ],
-                                "trace": sensor.trace,
                             },
                             indent=2,
-                        ),
+                            allow_nan=False,
+                        )
+                        + "\n",
                         encoding="utf-8",
                     )
+                except (OSError, TypeError, ValueError) as evidence_error:
+                    print(
+                        f"[Task Engine] Grip trace sidecar unavailable: {evidence_error}",
+                        file=sys.stderr,
+                    )
+            try:
+                if control_evidence:
+                    (output / "control_operations.json").write_text(
+                        json.dumps(control_evidence, indent=2), encoding="utf-8"
+                    )
+                    for family in ("twist", "press"):
+                        records = [r for r in control_evidence if r["family"] == family]
+                        if records:
+                            payload = (
+                                records[0]
+                                if len(records) == 1
+                                else {"operations": records}
+                            )
+                            (output / f"{family}_evidence.json").write_text(
+                                json.dumps(payload, indent=2), encoding="utf-8"
+                            )
             except Exception as evidence_error:
                 evidence_failure = {
                     "type": type(evidence_error).__name__,
@@ -347,7 +503,44 @@ def execute_bundle(
         failure=failure,
         trajectory_root=trajectory_root,
         cargo_report=cargo_report,
+        acceptance_mode=acceptance_mode,
     )
+    strict = report
+    experimental = report
+    if acceptance_mode == "experiment":
+        strict = _build_execution_report(
+            graph,
+            result_metadata,
+            row_success=list(
+                (result_metadata or {}).get("program_success", row_success)
+            ),
+            terminal_reasons=list(
+                (result_metadata or {}).get("terminal_reasons", terminal_reasons)
+            ),
+            failure=failure,
+            trajectory_root=trajectory_root,
+            cargo_report=cargo_report,
+        )
+        (output / "strict_execution_report.json").write_text(
+            json.dumps(strict, indent=2) + "\n"
+        )
+        if report["runtime_result"] is not None:
+            report["runtime_result"]["acceptance_mode"] = "experiment"
+    else:
+        experimental = _build_execution_report(
+            graph,
+            result_metadata,
+            row_success=list(
+                (result_metadata or {}).get("program_success", row_success)
+            ),
+            terminal_reasons=list(
+                (result_metadata or {}).get("terminal_reasons", terminal_reasons)
+            ),
+            failure=failure,
+            trajectory_root=trajectory_root,
+            cargo_report=cargo_report,
+            acceptance_mode="experiment",
+        )
     if probe is None:
         probe = {
             "scope": "initial_call",
@@ -366,7 +559,68 @@ def execute_bundle(
         for row in report["environments"]:
             row["terminal_reason"] = "initial_plan_rejected"
     write_execution_report(output, report)
-    _print_json(report)
+    from .experiment_policy import program_completion_summary
+
+    (output / "program_completion_summary.json").write_text(
+        json.dumps(
+            program_completion_summary(
+                result_metadata, strict, experimental, acceptance_mode=acceptance_mode
+            ),
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    try:
+        from ._task_group_results import task_group_results
+
+        groups = task_group_results(graph, result_metadata, num_envs=len(row_success))
+        for env_id, values in enumerate(groups):
+            for group_id, group in values.items():
+                if (
+                    group["execution_status"] == "passed"
+                    and report["environments"][env_id]["semantic_success"].get(group_id)
+                    is False
+                ):
+                    group.update(status="failed", reason="group_postcondition_failed")
+        (output / "task_group_results.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "gen_sim_task_group_results/v1",
+                    "source": "execution_report.json",
+                    "environments": groups,
+                },
+                indent=2,
+                allow_nan=False,
+            ),
+            encoding="utf-8",
+        )
+    except (OSError, TypeError, ValueError) as evidence_error:
+        print(
+            f"[Task Engine] E-group summary unavailable: {evidence_error}",
+            file=sys.stderr,
+        )
+    try:
+        (output / "recovery_summary.json").write_text(
+            json.dumps(_recovery_summary(report), indent=2, allow_nan=False) + "\n",
+            encoding="utf-8",
+        )
+    except (OSError, TypeError, ValueError) as evidence_error:
+        print(
+            f"[Task Engine] Recovery summary unavailable: {evidence_error}",
+            file=sys.stderr,
+        )
+    if task_spec_contract is not None:
+        from .semantic_graph_html import write_semantic_task_graph_html
+
+        write_semantic_task_graph_html(
+            graph,
+            output / "semantic_graph.html",
+            report,
+            task_spec=_read_json(root / "task_spec.json"),
+            validation=task_spec_contract,
+        )
+    # The parent CLI prints the run summary; the full report stays on disk.
     return 0 if report["status"] == "succeeded" else 2
 
 
@@ -427,8 +681,15 @@ def _build_execution_report(
     failure: dict[str, Any] | None,
     trajectory_root: Path,
     cargo_report: dict[str, Any] | None = None,
+    acceptance_mode: str = "strict",
 ) -> dict[str, Any]:
     """Build a report without turning row-local failure into global failure."""
+    row_success, terminal_reasons = _apply_task_spec_verdict(
+        runtime_result,
+        row_success,
+        terminal_reasons,
+        acceptance_mode=acceptance_mode,
+    )
     semantic_success = _semantic_success_by_env(
         graph,
         runtime_result,
@@ -473,6 +734,307 @@ def _build_execution_report(
         "runtime_result": deepcopy(runtime_result),
         "failure": failure,
     }
+
+
+def _apply_task_spec_verdict(
+    runtime_result: dict[str, Any] | None,
+    row_success: list[bool],
+    terminal_reasons: list[str],
+    *,
+    acceptance_mode: str = "strict",
+) -> tuple[list[bool], list[str]]:
+    """Keep legacy success unchanged; new contracts require a verified verdict."""
+    if acceptance_mode == "experiment":
+        from .experiment_policy import program_completion_mask
+
+        measured = program_completion_mask(runtime_result, len(row_success))
+        return [
+            a and b for a, b in zip(row_success, measured, strict=True)
+        ], terminal_reasons
+    if acceptance_mode != "strict":
+        raise ValueError("Unknown acceptance mode.")
+    if not runtime_result or "task_spec_evaluation" not in runtime_result:
+        return row_success, terminal_reasons
+    rows = runtime_result["task_spec_evaluation"]["environments"]
+    if [r.get("env_id") for r in rows] != list(range(len(row_success))):
+        raise ValueError("TaskSpec evaluation environment identities differ.")
+    success, reasons = list(row_success), list(terminal_reasons)
+    for row in rows:
+        index = row["env_id"]
+        if success[index] and not (
+            row.get("certificate_ready") is True and row.get("status") == "satisfied"
+        ):
+            success[index] = False
+            reasons[index] = (
+                "task_spec_failed"
+                if row.get("status") == "failed"
+                else "task_spec_unverified"
+            )
+    return success, reasons
+
+
+def _snapshot_grip_contact_evidence(env: Any, deployment: Any) -> dict[str, Any] | None:
+    """Copy the registered native observer's trace without creating or sampling it."""
+    from ._task_program.grip_evidence import (
+        NativeGripEvidenceFactory,
+        NativeGripObserver,
+        SENSOR_UID,
+    )
+
+    registration = getattr(
+        getattr(deployment, "integration", None), "registration", None
+    )
+    if not isinstance(
+        getattr(registration, "control_part_evidence_factory", None),
+        NativeGripEvidenceFactory,
+    ):
+        return None
+    try:
+        sensor = getattr(env, "unwrapped", env).sim.get_sensor(SENSOR_UID)
+        observer = getattr(sensor, "_gen_sim_grip_observer", None)
+        if not isinstance(observer, NativeGripObserver):
+            raise ValueError("Registered native grip observer is unavailable.")
+        return observer.snapshot_trace()
+    except Exception as error:
+        return {
+            "schema_version": "gen_sim.grip-contact-evidence/v1",
+            "source": "native_contact_sensor",
+            "observed": False,
+            "status": "unavailable",
+            "snapshot_error": _exception_metadata(error),
+        }
+
+
+def _recovery_summary(report: dict[str, Any]) -> dict[str, Any]:
+    """Classify real workflow recovery independently of the unchanged verdict."""
+    rows = report["environments"]
+    count = len(rows)
+    result = report.get("runtime_result") or {}
+    if not isinstance(result, dict):
+        result = {}
+    successes = result.get("program_success", result.get("success"))
+    if (
+        not isinstance(successes, list)
+        or len(successes) != count
+        or any(type(value) is not bool for value in successes)
+    ):
+        successes = [None] * count
+    segments = result.get("segments", [])
+    if not isinstance(segments, list):
+        segments = []
+    known = [bool(segments)] * count
+    covered = [False] * count
+    attempts, recovered, reacquired = [0] * count, [0] * count, [0] * count
+    traces = []
+    roles = {"retry_retained", "reacquire", "retry_reacquired"}
+    for segment in segments:
+        if not isinstance(segment, dict):
+            known = [False] * count
+            continue
+        active = segment.get("active")
+        if (
+            not isinstance(active, list)
+            or len(active) != count
+            or any(type(value) is not bool for value in active)
+        ):
+            known = [False] * count
+            continue
+        active_ids = [index for index, value in enumerate(active) if value]
+        metadata = segment.get("metadata")
+        runtime = metadata.get("runtime") if isinstance(metadata, dict) else None
+        if not isinstance(runtime, dict):
+            for env_id in active_ids:
+                known[env_id] = False
+            continue
+        env_ids = runtime.get("env_ids", [])
+        ledger = runtime.get("workflow_recoveries")
+        if (
+            runtime.get("kind") != "skill_result"
+            or runtime.get("schema_version") != 2
+            or not isinstance(env_ids, list)
+            or any(
+                type(value) is not int or value < 0 or value >= count
+                for value in env_ids
+            )
+            or len(set(env_ids)) != len(env_ids)
+            or not isinstance(ledger, list)
+        ):
+            for env_id in active_ids:
+                known[env_id] = False
+            continue
+        for env_id in active_ids:
+            covered[env_id] |= env_id in env_ids
+            known[env_id] &= env_id in env_ids
+        # Core recovery is not silently reclassified from an empty workflow ledger.
+        events, failures = runtime.get("events"), runtime.get("failures")
+        if (
+            not isinstance(events, list)
+            or not isinstance(failures, list)
+            or failures
+            or any(
+                not isinstance(event, dict)
+                or type(event.get("kind")) is not str
+                or event.get("kind")
+                in {"replanned", "recovery_required", "recovery_exhausted"}
+                for event in events or []
+            )
+        ):
+            for env_id in active_ids:
+                known[env_id] = False
+        for trace in ledger:
+            traces.append(
+                {
+                    "segment": segment.get("name"),
+                    "env_ids": list(env_ids),
+                    "trace": deepcopy(trace),
+                }
+            )
+            if not isinstance(trace, dict):
+                for env_id in active_ids:
+                    known[env_id] = False
+                continue
+            masks = trace.get("masks", {})
+            valid = (
+                type(trace.get("role")) is str
+                and trace["role"] in roles
+                and isinstance(masks, dict)
+                and all(
+                    isinstance(masks.get(name), list)
+                    and len(masks[name]) == len(env_ids)
+                    and all(type(value) is bool for value in masks[name])
+                    for name in ("entered", "completed", "failed")
+                )
+            )
+            if not valid:
+                for env_id in active_ids:
+                    known[env_id] = False
+                continue
+            for index, env_id in enumerate(env_ids):
+                entered, completed, failed = (
+                    masks[name][index] for name in ("entered", "completed", "failed")
+                )
+                if (completed or failed) and not entered or completed and failed:
+                    known[env_id] = False
+                    continue
+                if not entered:
+                    continue
+                attempts[env_id] += 1
+                call = trace.get("call")
+                commands = call.get("command_count") if isinstance(call, dict) else None
+                if completed and type(commands) is int and commands > 0:
+                    recovered[env_id] += 1
+                    reacquired[env_id] += int(trace["role"] == "reacquire")
+                else:
+                    known[env_id] = False
+    return {
+        "schema_version": "gen_sim.recovery-summary/v1",
+        "source": "runtime.workflow_recoveries",
+        "scope": "program_completion_not_taskspec_verdict",
+        "original_failure_source": "execution_report.json:runtime_result.segments[].metadata.runtime",
+        "environments": [
+            {
+                "env_id": row["env_id"],
+                "program_success": successes[index],
+                "certified_success": row["success"],
+                "completion_kind": (
+                    "not_completed"
+                    if successes[index] is False
+                    else (
+                        "recovered_completion"
+                        if successes[index] is True and recovered[index]
+                        else (
+                            "first_pass_completion"
+                            if successes[index] is True
+                            and known[index]
+                            and covered[index]
+                            and attempts[index] == 0
+                            else "unknown"
+                        )
+                    )
+                ),
+                "workflow_recovery_attempt_count": attempts[index],
+                "completed_recovery_call_count": recovered[index],
+                "completed_reacquisition_call_count": reacquired[index],
+            }
+            for index, row in enumerate(rows)
+        ],
+        "workflow_recoveries": traces,
+    }
+
+
+def _snapshot_control_evidence(env: Any, deployment: Any) -> list[dict[str, Any]]:
+    """Own all operation evidence before episode reset changes native state."""
+    from ._task_program.press_runtime import PressContactSensor
+
+    records = []
+    adapter = deployment.integration.adapter_factory
+    for family in ("twist", "press"):
+        for route in getattr(adapter, family + "_routes", ()):
+            sensor = getattr(env, "unwrapped", env).sim.get_sensor(route.sensor_uid)
+            if not isinstance(sensor, PressContactSensor):
+                continue
+            record = {
+                "family": family,
+                "operation_id": route.operation_id,
+                "route": route.payload(),
+                "acceptance": deepcopy(sensor.acceptance),
+                "target_actor_id": sensor.target_actor,
+                "parent_actor_id": sensor.parent_actor,
+                "contact_envelopes": deepcopy(sensor.contact_envelopes),
+                "finger_actor_ids": sorted(sensor.finger_actors),
+                "runtime_mass": sensor.art.get_mass(route.binding.link).tolist(),
+                "runtime_limits": sensor.art.get_qpos_limits()[
+                    0, sensor.joint_index
+                ].tolist(),
+                "runtime_drive": [
+                    v.tolist()
+                    for v in sensor.art.get_joint_drive(joint_ids=[sensor.joint_index])
+                ],
+                "trace": deepcopy(sensor.trace),
+            }
+            if family == "twist":
+                record.update(
+                    table_actor_id=sensor.table_actor,
+                    startup_evidence=sensor.startup_evidence(),
+                    geometry_evidence=sensor.geometry_evidence(),
+                )
+                feedback = getattr(sensor, "_feedback_state", None)
+                if feedback is not None:
+                    try:
+                        record["feedback_audit"] = deepcopy(list(feedback.audit))
+                    except Exception as error:
+                        record["feedback_audit_error"] = {
+                            "type": type(error).__name__,
+                            "message": str(error),
+                        }
+            records.append(record)
+    return records
+
+
+def _snapshot_twist_feedback_audit(env: Any, deployment: Any) -> dict[str, Any]:
+    """Own optional diagnostics before reset clears the episode ledger."""
+    try:
+        routes = getattr(deployment.integration.adapter_factory, "twist_routes", ())
+        audits = {}
+        for route in routes:
+            if getattr(route, "feedback_enabled", False) is not True:
+                continue
+            sensor = getattr(env, "unwrapped", env).sim.get_sensor(route.sensor_uid)
+            feedback = getattr(sensor, "_feedback_state", None)
+            if feedback is not None:
+                audits[route.operation_id] = deepcopy(list(feedback.audit))
+        return (
+            {"feedback_audit": next(iter(audits.values()))}
+            if len(audits) == 1
+            else {"feedback_audits": audits} if audits else {}
+        )
+    except Exception as error:
+        return {
+            "feedback_audit_error": {
+                "type": type(error).__name__,
+                "message": str(error),
+            }
+        }
 
 
 def _exception_metadata(exc: BaseException) -> dict[str, Any]:
@@ -560,6 +1122,7 @@ def _verify_integration_fingerprint(
 ) -> Any:
     """Recompose provider-free integration identity before simulation starts."""
     from ._task_program.assembly import ADAPTER_CONTRACT, load_deployment
+    from ._task_program.identity import bundle_registration_fingerprint
 
     if (
         fingerprint.get("schema_version") != "semantic_integration_fingerprint/v2"
@@ -599,7 +1162,9 @@ def _verify_integration_fingerprint(
             "Regenerate the GenSim bundle against the current baseline contract."
         )
     recorded_registration = fingerprint.get("registration_fingerprint")
-    actual_registration = composed.integration.registration.fingerprint
+    actual_registration = bundle_registration_fingerprint(
+        composed.integration.registration
+    )
     if recorded_registration != actual_registration:
         raise ValueError(
             "Semantic registration fingerprint drifted before execution: "
@@ -636,14 +1201,35 @@ def _verify_program_projection(
             )
         steps = item.get("steps")
         projected_call = steps.get("call") if type(steps) is dict else None
-        # Long-horizon relative-placement routes carry a runtime-only stage
-        # selector.  It is deliberately absent from the semantic graph so
-        # graph identity and old callers remain stable; strip it before
-        # checking the immutable graph-to-program projection.
+        # A runtime-only placement selector must name this graph stage before
+        # it can be omitted from the immutable call projection.
         if type(projected_call) is dict:
             projected_call = deepcopy(projected_call)
             arguments = projected_call.get("arguments")
-            if type(arguments) is dict and "stage_id" in arguments:
+            graph_arguments = node["call"].get("arguments")
+            declared_stage = (
+                type(graph_arguments) is dict and "stage_id" in graph_arguments
+            )
+            if (
+                type(arguments) is dict
+                and "stage_id" in arguments
+                and not declared_stage
+            ):
+                if (
+                    projected_call.get("kind") != "registered"
+                    or projected_call.get("call_id")
+                    not in {
+                        "simulation.place_relative",
+                        "gen_sim.place_upright",
+                        "gen_sim.stack_place",
+                    }
+                    or type(arguments["stage_id"]) is not str
+                    or arguments["stage_id"] != node["task_instance_id"]
+                ):
+                    raise ValueError(
+                        f"Task Program segment {node['id']!r} runtime stage_id "
+                        "must select its exact relative-placement task instance."
+                    )
                 arguments = dict(arguments)
                 arguments.pop("stage_id", None)
                 projected_call["arguments"] = arguments
@@ -727,6 +1313,21 @@ def _configure_recording(config: dict[str, Any], output: Path) -> None:
             "save_path": (output / "videos").as_posix(),
         },
     }
+
+
+def _configure_twist_recorders(env_cfg: Any, enabled: bool) -> None:
+    """Select the private E8 recorder after the legacy short-name parser.
+
+    The Gym YAML parser resolves only names in manager modules. Keep its normal
+    recorder declaration and replace the already decoded callable locally,
+    without modifying the shared manager registry or other task recorders.
+    """
+    if not enabled:
+        return
+    from ._task_program.twist_recording import E8CameraRecorder
+
+    for name in ("record_camera", "record_press_camera"):
+        getattr(env_cfg.events, name).func = E8CameraRecorder
 
 
 def _verify_source(bundle: Path) -> None:

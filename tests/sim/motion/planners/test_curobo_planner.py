@@ -28,6 +28,7 @@ import importlib
 import logging
 import math
 from contextlib import nullcontext
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -1582,6 +1583,49 @@ def test_dynamic_update_uses_registry_id_in_curobo_backend():
     assert [(name, env_idx) for name, _, env_idx in updates] == [("registry_cube", 0)]
 
 
+@dataclass
+class _CollisionKinematicsState:
+    robot_spheres: torch.Tensor
+    qpos: torch.Tensor
+
+
+def _typed_collision_checker(validity):
+    world_cost = SimpleNamespace(expected_shape=None, violation_sphere_index=511)
+
+    def get_kinematics(qpos):
+        spheres = qpos.new_zeros((*qpos.shape[:2], 512, 4))
+        spheres[..., 0, 0] = qpos[..., 0]
+        return _CollisionKinematicsState(spheres, qpos)
+
+    def world_forward(state, *, idxs_env_query):
+        assert isinstance(state, _CollisionKinematicsState)
+        assert state.robot_spheres.shape == world_cost.expected_shape
+        costs = state.qpos.new_zeros((*state.qpos.shape[:2], 512))
+        costs[..., world_cost.violation_sphere_index] = (
+            ~validity(state.qpos, env_query_idx=idxs_env_query)
+        ).to(state.qpos.dtype)
+        return costs
+
+    def update_num_spheres(count, *, batch_size, horizon):
+        world_cost.expected_shape = (batch_size, horizon, count, 4)
+
+    world_cost.forward = world_forward
+    world_cost.update_num_spheres = update_num_spheres
+
+    def self_cost(spheres):
+        assert isinstance(spheres, torch.Tensor)
+        return spheres.new_zeros((*spheres.shape[:2], 1))
+
+    return SimpleNamespace(
+        setup_batch_tensors=lambda batch, horizon: None,
+        get_kinematics=get_kinematics,
+        get_bound=lambda qpos: torch.zeros_like(qpos),
+        self_collision_cost=object(),
+        get_self_collision=self_cost,
+        collision_constraint=world_cost,
+    )
+
+
 def test_validate_joint_trajectory_checks_every_exact_sample_in_curobo_order():
     """The collision gate preserves samples and maps simulator joint order."""
     planner = object.__new__(CuroboPlanner)
@@ -1610,7 +1654,7 @@ def test_validate_joint_trajectory_checks_every_exact_sample_in_curobo_order():
     backend = SimpleNamespace(
         sim_joint_names=["sim_left", "sim_right"],
         sim_to_curobo_col_idx=None,
-        collision_checker=SimpleNamespace(validate=validate),
+        collision_checker=_typed_collision_checker(validate),
         profile=SimpleNamespace(
             sim_to_curobo_joint_names={
                 "sim_left": "curobo_left",
@@ -1648,6 +1692,201 @@ def test_validate_joint_trajectory_checks_every_exact_sample_in_curobo_order():
         assert torch.equal(env_query_idx, torch.tensor((0, 1), dtype=torch.int32))
     torch.testing.assert_close(joint_states[0][0], trajectory[:, 0].flip(dims=(-1,)))
     assert joint_states[0][1] == ("curobo_right", "curobo_left")
+
+
+def _runtime_checker_case(tmp_path, planner_type=CuroboPlanner):
+    path = tmp_path / "robot.yml"
+    path.write_text(
+        yaml.safe_dump({"robot_cfg": {"kinematics": {"lock_joints": {"other": 0.25}}}}),
+        encoding="utf-8",
+    )
+    planner = object.__new__(planner_type)
+    planner.cfg = CuroboPlannerCfg(robot_uid="robot")
+    planner._curobo_device = torch.device("cpu")
+    seen = []
+
+    def load_from_config(**kwargs):
+        if not isinstance(kwargs["robot_config"], dict):
+            raise ValueError("Checker requires the same runtime robot dictionary.")
+        seen.append(kwargs)
+        return SimpleNamespace()
+
+    backend = SimpleNamespace(
+        sim_joint_names=["joint"],
+        sim_to_curobo_col_idx=torch.tensor([0]),
+        collision_checker=None,
+        profile=SimpleNamespace(robot_config_path=str(path)),
+        planner=SimpleNamespace(scene_collision_checker=object()),
+    )
+    planner._get_backend = lambda *args: backend
+    planner._to_curobo_joint_state = lambda *args: None
+    planner._bindings = SimpleNamespace(
+        RobotCollisionCheckerCfg=SimpleNamespace(load_from_config=load_from_config),
+        DeviceCfg=lambda **kwargs: SimpleNamespace(**kwargs),
+        RobotCollisionChecker=lambda cfg: _typed_collision_checker(
+            lambda sample, **kwargs: torch.ones(sample.shape[:2], dtype=torch.bool)
+        ),
+    )
+    return planner, backend, seen, path
+
+
+def test_validate_joint_trajectory_loads_runtime_robot_config(tmp_path):
+    planner, backend, seen, path = _runtime_checker_case(tmp_path)
+    original = path.read_bytes()
+    for _ in range(2):
+        valid = planner.validate_joint_trajectory(
+            torch.zeros(1, 2, 1), control_part="arm"
+        )
+        assert valid.tolist() == [[True, True]]
+    assert len(seen) == 1
+    assert seen[0]["robot_config"]["robot_cfg"]["kinematics"] == {
+        "lock_joints": {"other": 0.25},
+        "self_collision_buffer": {},
+        "self_collision_ignore": {},
+    }
+    assert seen[0]["scene_collision_checker"] is backend.planner.scene_collision_checker
+    assert (
+        seen[0]["collision_activation_distance"]
+        == planner.cfg.collision_activation_distance
+    )
+    assert path.read_bytes() == original
+
+
+def test_validate_joint_trajectory_honors_runtime_config_override(tmp_path):
+    class SnapshotPlanner(CuroboPlanner):
+        def _load_runtime_robot_config(self, path):
+            config = super()._load_runtime_robot_config(path)
+            config["robot_cfg"]["kinematics"]["lock_joints"] = {"other": -0.375}
+            return config
+
+    planner, _, seen, path = _runtime_checker_case(tmp_path, SnapshotPlanner)
+    valid = planner.validate_joint_trajectory(torch.zeros(1, 2, 1), control_part="arm")
+    assert valid.all()
+    assert seen[0]["robot_config"]["robot_cfg"]["kinematics"]["lock_joints"] == {
+        "other": -0.375
+    }
+    assert yaml.safe_load(path.read_text())["robot_cfg"]["kinematics"][
+        "lock_joints"
+    ] == {"other": 0.25}
+
+
+def test_validate_joint_trajectory_malformed_runtime_config_fails_closed(tmp_path):
+    planner, backend, seen, path = _runtime_checker_case(tmp_path)
+    path.write_text("robot_cfg: {}\n", encoding="utf-8")
+    with pytest.raises(KeyError, match="kinematics"):
+        planner.validate_joint_trajectory(torch.zeros(1, 2, 1), control_part="arm")
+    assert backend.collision_checker is None
+    assert seen == []
+
+
+@pytest.mark.parametrize("gate", ("bound", "self", "world"))
+def test_validate_joint_trajectory_preserves_every_typed_cost_gate(tmp_path, gate):
+    planner, backend, _, _ = _runtime_checker_case(tmp_path)
+    checker = _typed_collision_checker(
+        lambda sample, **kwargs: torch.ones(sample.shape[:2], dtype=torch.bool)
+    )
+    backend.collision_checker = checker
+    if gate == "bound":
+        checker.get_bound = lambda qpos: (qpos > 0).to(qpos.dtype)
+    elif gate == "self":
+        checker.get_self_collision = (
+            lambda spheres: (spheres[..., 0, 0] > 0).to(spheres.dtype).unsqueeze(-1)
+        )
+    else:
+
+        def world(state, *, idxs_env_query):
+            assert isinstance(state, _CollisionKinematicsState)
+            return (
+                (state.qpos[..., 0] > 0)
+                .to(state.qpos.dtype)
+                .unsqueeze(-1)
+                .expand(-1, -1, 512)
+            )
+
+        checker.collision_constraint.forward = world
+    trajectory = torch.zeros(2, 3, 1)
+    trajectory[1, 1, 0] = 1
+    valid = planner.validate_joint_trajectory(trajectory, control_part="arm")
+    assert valid.tolist() == [[True, True, True], [True, False, True]]
+
+
+def test_validate_joint_trajectory_nonfinite_typed_scene_cost_fails_closed(tmp_path):
+    planner, backend, _, _ = _runtime_checker_case(tmp_path)
+    checker = _typed_collision_checker(
+        lambda sample, **kwargs: torch.ones(sample.shape[:2], dtype=torch.bool)
+    )
+
+    def world(state, *, idxs_env_query):
+        assert isinstance(state, _CollisionKinematicsState)
+        return state.qpos.new_full(state.robot_spheres.shape[:3], float("nan"))
+
+    checker.collision_constraint.forward = world
+    backend.collision_checker = checker
+    valid = planner.validate_joint_trajectory(torch.zeros(1, 2, 1), control_part="arm")
+    assert valid.tolist() == [[False, False]]
+
+
+@pytest.mark.parametrize("sphere", (0, 511))
+def test_validate_joint_trajectory_preserves_each_sphere_environment_and_time(
+    tmp_path, sphere
+):
+    planner, backend, _, _ = _runtime_checker_case(tmp_path)
+    checker = _typed_collision_checker(lambda sample, **kwargs: sample[..., 0] == 0)
+    checker.collision_constraint.violation_sphere_index = sphere
+    backend.collision_checker = checker
+    trajectory = torch.zeros(3, 4, 1)
+    trajectory[2, 3, 0] = 1
+    valid = planner.validate_joint_trajectory(trajectory, control_part="arm")
+    expected = torch.ones(3, 4, dtype=torch.bool)
+    expected[2, 3] = False
+    assert torch.equal(valid, expected)
+
+
+@pytest.mark.parametrize(
+    "shape",
+    ((2, 1), (2, 1, 511), (2, 1, 513), (1, 1, 1024), (2, 2, 512), (2, 1, 512, 1)),
+)
+def test_validate_joint_trajectory_rejects_undeclared_world_cost_schema(
+    tmp_path, shape
+):
+    planner, backend, _, _ = _runtime_checker_case(tmp_path)
+    checker = _typed_collision_checker(
+        lambda sample, **kwargs: torch.ones(sample.shape[:2], dtype=torch.bool)
+    )
+
+    def world(state, *, idxs_env_query):
+        assert isinstance(state, _CollisionKinematicsState)
+        return state.qpos.new_zeros(shape)
+
+    checker.collision_constraint.forward = world
+    backend.collision_checker = checker
+    with pytest.raises(ValueError, match="world cost"):
+        planner.validate_joint_trajectory(torch.zeros(2, 3, 1), control_part="arm")
+
+
+@pytest.mark.parametrize(
+    "gate,shape",
+    (
+        ("bound", (2, 1)),
+        ("bound", (2, 1, 512)),
+        ("self", (2, 1)),
+        ("self", (2, 1, 512)),
+    ),
+)
+def test_validate_joint_trajectory_rejects_undeclared_bound_self_schema(
+    tmp_path, gate, shape
+):
+    planner, backend, _, _ = _runtime_checker_case(tmp_path)
+    checker = _typed_collision_checker(
+        lambda sample, **kwargs: torch.ones(sample.shape[:2], dtype=torch.bool)
+    )
+    if gate == "bound":
+        checker.get_bound = lambda qpos: qpos.new_zeros(shape)
+    else:
+        checker.get_self_collision = lambda spheres: spheres.new_zeros(shape)
+    backend.collision_checker = checker
+    with pytest.raises(ValueError, match=f"{gate} cost"):
+        planner.validate_joint_trajectory(torch.zeros(2, 3, 1), control_part="arm")
 
 
 def test_generate_world_scene_rejects_direct_mesh_representation():

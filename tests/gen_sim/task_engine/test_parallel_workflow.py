@@ -715,6 +715,33 @@ def test_early_binding_failure_keeps_inputs_and_uses_run_local_audit_adapter(
     assert selected_adapters[0].audit_dir.name == "binding_audit"
 
 
+@pytest.mark.parametrize("extra", [None, 0.0, 0.010])
+def test_request_press_overtravel_is_forwarded_and_recorded_without_losing_zero(
+    tmp_path, extra
+):
+    candidates = _candidate_set()
+    coordinator = _Coordinator(["bound"])
+    workflow = TaskEngineWorkflow(
+        task_agent=_TaskAgent(candidates),
+        scene_backend=_SceneBackend(_selection(candidates)),
+        coordinator=coordinator,
+        action_executor=_Executor([[True]]),
+    )
+    result = workflow.run(
+        _request(tmp_path),
+        planning_cfg=TaskEnginePlanningCfg(press_extra_distance=extra),
+        execution_cfg=TaskEngineExecutionCfg(),
+    )
+    assert result.succeeded
+    planning = json.loads(result.manifest_path.read_text())["configuration"]["planning"]
+    if extra is None:
+        assert "press_extra_distance" not in coordinator.kwargs[0]
+        assert "press_extra_distance" not in planning
+    else:
+        assert coordinator.kwargs[0]["press_extra_distance"] == extra
+        assert planning["press_extra_distance"] == extra
+
+
 def test_default_coordinator_uses_run_local_adapter_without_mutating_original(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1357,6 +1384,43 @@ def test_action_retry_stops_after_first_success(tmp_path: Path) -> None:
         "failed",
         "succeeded",
     ]
+
+
+def test_height_fallback_updates_original_scene_receipt_and_publishes_selected_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from embodichain.gen_sim.task_engine._task_program import twist_attempts
+
+    candidates = _candidate_set()
+    executor = _Executor([[True, True, True, True]])
+    workflow = TaskEngineWorkflow(
+        task_agent=_TaskAgent(candidates),
+        scene_backend=_SceneBackend(_selection(candidates)),
+        coordinator=_Coordinator(["bound"]),
+        action_executor=executor,
+    )
+
+    def fallback(preparation, output, selected_executor, options, planning):
+        assert selected_executor is executor
+        candidate = output.parent / "action_0001_height_02_bundle"
+        candidate.mkdir(parents=True)
+        (candidate / "selected_height.txt").write_text("2 mm", encoding="utf-8")
+        replacement = SimpleNamespace(**vars(preparation))
+        replacement.output_dir = candidate
+        report = selected_executor(candidate, output, **options)
+        return report, replacement, output, [{"height_m": 0.002, "status": "succeeded"}]
+
+    monkeypatch.setattr(twist_attempts, "execute_support_candidates", fallback)
+    result = workflow.run(
+        _request(tmp_path), execution_cfg=TaskEngineExecutionCfg(num_envs=4)
+    )
+    assert result.succeeded
+    scene_receipt = result.output_dir / "attempts/scene_0001/attempt.json"
+    assert json.loads(scene_receipt.read_text())["status"] == "succeeded"
+    assert not (scene_receipt.parent / "action_attempts/attempt.json").exists()
+    assert (result.final_bundle / "selected_height.txt").read_text() == "2 mm"
+    selection = json.loads((result.final_bundle.parent / "selection.json").read_text())
+    assert selection["action_attempt"] == 1
 
 
 def test_existing_edit_binding_conflict_does_not_invent_scene_repair(

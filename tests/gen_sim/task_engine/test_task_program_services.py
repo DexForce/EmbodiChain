@@ -69,6 +69,70 @@ from embodichain.lab.task_program.semantics import (
     SceneObjectRef,
     SemanticEffectKind,
 )
+
+
+@pytest.mark.parametrize(
+    "rows,batch,device,scope,backend,previous,raises,parallel",
+    [
+        (506, 1, "cpu", 8, "pytorch", 1, False, True),
+        (506, 1, "cpu", 8, "pytorch", 1, True, True),
+        (100, 1, "cpu", 8, "pytorch", 1, False, True),
+        (99, 1, "cpu", 8, "pytorch", 1, False, False),
+        (506, 2, "cpu", 8, "pytorch", 1, False, False),
+        (506, 1, "cuda:0", 8, "pytorch", 1, False, False),
+        (506, 1, "cpu", None, "pytorch", 1, False, False),
+        (506, 1, "cpu", 8, "other", 1, False, False),
+        (506, 1, "cpu", 8, "pytorch", 16, False, False),
+    ],
+)
+def test_pick_batch_threads_are_scoped_without_changing_candidates(
+    monkeypatch, rows, batch, device, scope, backend, previous, raises, parallel
+):
+    from embodichain.gen_sim.task_engine._task_program import motion
+    from embodichain.gen_sim.task_engine._task_program.actions import GenSimPickUp
+    from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUp
+    from embodichain.lab.sim.motion.solvers.pytorch_solver import PytorchSolver
+
+    current = {"threads": previous}
+    changes = []
+    monkeypatch.setattr(torch, "get_num_threads", lambda: current["threads"])
+
+    def set_threads(value):
+        changes.append(value)
+        current["threads"] = value
+
+    monkeypatch.setattr(torch, "set_num_threads", set_threads)
+    solver = object.__new__(PytorchSolver) if backend == "pytorch" else object()
+    action = GenSimPickUp()
+    action._planning_services = SimpleNamespace(
+        robot=SimpleNamespace(get_solver=lambda _: solver)
+    )
+    poses = SimpleNamespace(
+        shape=(batch, rows // 2, 2, 4, 4), device=torch.device(device)
+    )
+    seed, target, result = object(), SimpleNamespace(control_part="arm"), object()
+
+    def original(_self, p, s, m):
+        assert p is poses and s is seed and m is target
+        assert current["threads"] == (8 if parallel else previous)
+        if raises:
+            raise RuntimeError("IK failure")
+        return result
+
+    monkeypatch.setattr(PickUp, "_compute_batch_candidate_ik", original)
+    token = motion._CPU_BATCH_THREADS.set(scope)
+    try:
+        if raises:
+            with pytest.raises(RuntimeError, match="IK failure"):
+                action._compute_batch_candidate_ik(poses, seed, target)
+        else:
+            assert action._compute_batch_candidate_ik(poses, seed, target) is result
+    finally:
+        motion._CPU_BATCH_THREADS.reset(token)
+    assert current["threads"] == previous
+    assert changes == ([8, previous] if parallel else [])
+
+
 from embodichain.utils.utility import load_config
 
 __all__: list[str] = []
@@ -533,7 +597,7 @@ def test_local_place_ik_preserves_targets_limits_and_rng(
         strategy="ik_interp", control_part="arm", start_qpos=seed, interpolation_dt=0.04
     )
     rng = torch.get_rng_state().clone()
-    result = motion._local_place_ik(
+    result = motion.resolve_continuous_ik_path(
         SimpleNamespace(robot=robot),
         [motion.PlanState(move_type=motion.MoveType.EEF_MOVE, xpos=pose)],
         options,
@@ -589,7 +653,7 @@ def test_place_local_ik_only_runs_after_scoped_single_env_failure(
             dt=original.dt,
         )
     )
-    monkeypatch.setattr(motion, "_local_place_ik", local)
+    monkeypatch.setattr(motion, "resolve_continuous_ik_path", local)
     options = motion.MotionGenOptions(
         strategy="ik_interp",
         control_part="arm",
@@ -652,7 +716,7 @@ def test_place_scope_preserves_noneligible_planning_requests(
     backend = Mock(return_value=original)
     local = Mock()
     monkeypatch.setattr(motion.MotionGenerator, "generate", backend)
-    monkeypatch.setattr(motion, "_local_place_ik", local)
+    monkeypatch.setattr(motion, "resolve_continuous_ik_path", local)
     options = motion.MotionGenOptions(
         strategy="motion_gen" if case == "non_ik" else "ik_interp",
         control_part="arm",
@@ -696,8 +760,54 @@ def test_place_planning_exception_does_not_leak_recovery_scope(monkeypatch):
     monkeypatch.setattr(Place, "_plan", fail)
     action = GenSimPlace()
     action._planning_services = SimpleNamespace(motion_generator=SimpleNamespace())
+    request = SimpleNamespace(
+        binding=SimpleNamespace(
+            endpoint=lambda *_: SimpleNamespace(task_state_key="arm")
+        )
+    )
     with pytest.raises(RuntimeError, match="planner failed"):
-        action._plan(object(), object())
+        action._plan(request, object())
+    assert motion._PLACE_IK_RECOVERY.get() is None
+
+
+def test_deferred_place_probe_keeps_complete_retry_route_available(monkeypatch):
+    from embodichain.gen_sim.task_engine._task_program import motion
+
+    generator = object.__new__(motion.ApproachMotionGenerator)
+    generator.robot = SimpleNamespace(compute_fk=lambda **kw: torch.eye(4)[None])
+    monkeypatch.setattr(motion, "_joint_velocity_limits", lambda *a: torch.ones(1, 1))
+    failed = motion.PlanResult(
+        success=torch.tensor([False]),
+        positions=torch.zeros(1, 5, 1),
+        dt=torch.full((1, 5), 0.04),
+    )
+    backend = Mock(return_value=failed)
+    local = Mock(return_value=None)
+    monkeypatch.setattr(motion.MotionGenerator, "generate", backend)
+    monkeypatch.setattr(motion, "resolve_continuous_ik_path", local)
+    options = motion.MotionGenOptions(
+        strategy="ik_interp",
+        control_part="arm",
+        start_qpos=torch.zeros(1, 1),
+        sample_count=5,
+        interpolation_dt=0.04,
+    )
+    targets = [
+        motion.PlanState(move_type=motion.MoveType.EEF_MOVE, xpos=torch.eye(4)[None])
+    ]
+    with motion.place_ik_recovery(defer_retries=True):
+        assert generator.generate(targets, options) is failed
+    assert [c.kwargs["options"].sample_count for c in backend.call_args_list] == [5]
+    local.assert_not_called()
+    backend.reset_mock()
+    with motion.place_ik_recovery():
+        assert generator.generate(targets, options) is failed
+    assert [c.kwargs["options"].sample_count for c in backend.call_args_list] == [
+        5,
+        260,
+        320,
+    ]
+    local.assert_called_once()
     assert motion._PLACE_IK_RECOVERY.get() is None
 
 
@@ -753,6 +863,9 @@ def test_recovered_place_checks_final_resampled_commands(
     monkeypatch.setattr(motion, "_joint_velocity_limits", lambda *a: torch.ones(1, 1))
     plan = SimpleNamespace(
         plan_success=torch.tensor([True]),
+        segments=(),
+        scene_dependencies=(),
+        expected_effects=SimpleNamespace(held_object_updates={"arm": None}),
         joint_trajectory=SimpleNamespace(
             positions=torch.tensor([[[0.0], [0.2 if unsafe else 0.02]]]),
             dt=torch.tensor([[0.0, 0.04]]),
@@ -764,7 +877,12 @@ def test_recovered_place_checks_final_resampled_commands(
         return plan
 
     monkeypatch.setattr(Place, "_plan", generate)
-    result = action._plan(object(), object())
+    request = SimpleNamespace(
+        binding=SimpleNamespace(
+            endpoint=lambda *_: SimpleNamespace(task_state_key="arm")
+        )
+    )
+    result = action._plan(request, object())
     assert result is (failed if recovered and unsafe else plan)
     assert motion._PLACE_IK_RECOVERY.get() is None
 
@@ -796,12 +914,12 @@ def test_velocity_limits_use_urdf_names_and_preserve_stricter_runtime_limits(
 
 def test_curobo_adapter_allocates_only_declared_mesh_cache(monkeypatch) -> None:
     from embodichain.gen_sim.task_engine._task_program import assembly
-    from embodichain.lab.sim.motion import motion_generator
+    from embodichain.gen_sim.task_engine._task_program import motion
     from embodichain.lab.task_program.semantics import SceneCollisionRole
 
     cfgs = []
     monkeypatch.setattr(
-        motion_generator, "MotionGenerator", lambda cfg: cfgs.append(cfg) or object()
+        motion, "CheckedMotionGenerator", lambda cfg: cfgs.append(cfg) or object()
     )
     captured = {}
 
@@ -957,6 +1075,7 @@ def test_motion_diagnostics_preserve_the_underlying_result(
     assert generator.generate(targets, options) is result
     backend.assert_called_once_with(targets, options=options)
     record = json.loads(log.call_args.args[0].removeprefix("GenSim motion plan: "))
+    assert record.pop("elapsed_seconds") >= 0
     assert record == {
         "control_part": "left_arm",
         "input_target_count": 1,
@@ -986,9 +1105,10 @@ def test_current_pose_upright_binding_preserves_each_environments_position(
     context = SimpleNamespace(
         batch_size=2,
         task=SimpleNamespace(
+            exclusive_held_object_mask=lambda _: torch.ones(2, dtype=torch.bool),
             get_held_object=lambda key: SimpleNamespace(
                 semantics=SimpleNamespace(entity_id="can")
-            )
+            ),
         ),
         scene=SimpleNamespace(
             entities={"can": SimpleNamespace(pose=poses, confidence=1.0)}
@@ -996,11 +1116,14 @@ def test_current_pose_upright_binding_preserves_each_environments_position(
     )
     bound = SimpleNamespace(
         binding=SimpleNamespace(
+            action_binding=SimpleNamespace(
+                endpoint=lambda *_: SimpleNamespace(task_state_key="left")
+            ),
             resources={
                 "primary": SimpleNamespace(
                     endpoints={"motion": SimpleNamespace(task_state_key="left")}
                 )
-            }
+            },
         )
     )
     result = lowerer.lower(
@@ -1041,15 +1164,11 @@ def test_current_pose_upright_binding_preserves_each_environments_position(
 
 @pytest.mark.parametrize("verify_retention", [False, True])
 @pytest.mark.parametrize("height", [1.3, 0.8])
-@pytest.mark.parametrize(
-    ("target_name", "staging_clearance"),
-    [("staging", 0.0), ("step_upright_target", 0.20)],
-)
+@pytest.mark.parametrize("target_name", ["staging", "step_upright_target"])
 def test_upright_alignment_lifts_before_rotating(
     verify_retention: bool,
     height: float,
     target_name: str,
-    staging_clearance: float,
 ) -> None:
     pose = torch.eye(4).unsqueeze(0)
     pose[:, :3, :3] = torch.tensor([[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]])
@@ -1083,13 +1202,19 @@ def test_upright_alignment_lifts_before_rotating(
     context = SimpleNamespace(
         batch_size=1,
         env_ids=torch.tensor([0]),
-        task=SimpleNamespace(get_held_object=lambda key: held),
+        task=SimpleNamespace(
+            get_held_object=lambda key: held,
+            exclusive_held_object_mask=lambda _: torch.ones(1, dtype=torch.bool),
+        ),
         scene=SimpleNamespace(
             entities={"can": SimpleNamespace(pose=pose, confidence=1.0)}
         ),
     )
     bound = SimpleNamespace(
         binding=SimpleNamespace(
+            action_binding=SimpleNamespace(
+                endpoint=lambda *_: SimpleNamespace(task_state_key="arm")
+            ),
             resources={
                 "primary": SimpleNamespace(
                     endpoints={
@@ -1099,7 +1224,7 @@ def test_upright_alignment_lifts_before_rotating(
                         )
                     }
                 )
-            }
+            },
         )
     )
     result = lowerer.lower(
@@ -1116,25 +1241,14 @@ def test_upright_alignment_lifts_before_rotating(
         option_template=MoveHeldObjectOptions(),
     )
     waypoints = result.goal.object_target_pose
-    expected_count = 3 if staging_clearance else 2
-    assert waypoints.shape == (1, expected_count, 4, 4)
+    assert waypoints.shape == (1, 2, 4, 4)
     torch.testing.assert_close(waypoints[:, 0, :3, :3], original[:, :3, :3])
-    stage_height = max(1.0, height + staging_clearance)
-    expected_positions = (
-        [
-            [0.1, 0.2, stage_height],
-            [0.1, 0.2, stage_height],
-            [0.1, 0.2, height],
-        ]
-        if staging_clearance
-        else [[0.1, 0.2, stage_height], [0.1, 0.2, height]]
-    )
     torch.testing.assert_close(
         waypoints[:, :, :3, 3],
-        torch.tensor([expected_positions]),
+        torch.tensor([[[0.1, 0.2, max(1.0, height)], [0.1, 0.2, height]]]),
     )
     assert result.goal.world_yaw_free
-    assert result.goal.world_yaw_free_path is bool(staging_clearance)
+    assert not result.goal.world_yaw_free_path
     torch.testing.assert_close(
         waypoints[:, 1, :3, 2], torch.tensor([[0.0, 0.0, 1.0]]), atol=1e-6, rtol=0
     )
@@ -1349,6 +1463,63 @@ def test_configured_handover_uses_baseline_timing_and_rejects_removed_wait_field
         _decode_robot_profile(payload)
 
 
+@pytest.mark.parametrize("mode", [None, "observed", "grasp_command"])
+@pytest.mark.parametrize("retreat_steps", [None, 20, 36])
+def test_gensim_composition_preserves_v38_handover_default_without_mutation(
+    monkeypatch: pytest.MonkeyPatch, mode: str | None, retreat_steps: int | None
+) -> None:
+    from embodichain.gen_sim.task_engine._task_program import configured
+
+    path = (
+        Path(__file__).parents[3]
+        / "embodichain_tasks/configs/tasks/manipulation/hand_over"
+        / "task.dual_ur5_dh_pgi_140_80.yaml"
+    )
+    physical = _resolve_gym_components(load_config(path), base_dir=path.parent)
+    program_path, task, policy = _resolve_task_program_components(
+        physical.config["task_program"], base_dir=path.parent
+    )
+    task = deepcopy(task)
+    options = task["profile"]["action_options"]["hand_over"]
+    options.pop("source_hold_mode", None)
+    options.pop("retreat_steps", None)
+    if mode is not None:
+        options["source_hold_mode"] = mode
+    if retreat_steps is not None:
+        options["retreat_steps"] = retreat_steps
+    before = deepcopy(task)
+    monkeypatch.setattr(
+        configured,
+        "_resolve_task_program_components",
+        lambda *_a, **_kw: (program_path, task, policy),
+    )
+    deployment = configured.compose_deployment(
+        task_program=physical.config["task_program"],
+        skill_profile=physical.embodiment_skill_profile,
+        base_dir=path.parent,
+    )
+    actual = deployment.integration.registration.robot_profile_binding.presets[
+        0
+    ].action_option_templates["hand_over"]
+    assert actual.source_hold_mode == (mode or "grasp_command")
+    assert actual.retreat_steps == (24 if retreat_steps is None else retreat_steps)
+    assert task == before
+    if mode is None:
+        payload = _compose_integration_payload(
+            task=task,
+            policy=policy,
+            skill_profile=physical.embodiment_skill_profile,
+            scene=task["scene_binding"],
+        )["robot_profile"]
+        generic = (
+            _decode_robot_profile(payload)
+            .presets[0]
+            .action_option_templates["hand_over"]
+        )
+        assert generic.source_hold_mode == "observed"
+        assert generic.retreat_steps == (20 if retreat_steps is None else retreat_steps)
+
+
 def test_configured_transport_binds_one_baseline_pose_without_planning() -> None:
     pose = _AbsolutePoseTarget((0.1, 0.2, 0.8), (1.0, 0.0, 0.0, 0.0))
     lowerer = _MoveHeldObjectLowerer(
@@ -1448,6 +1619,53 @@ def test_pick_decoder_rejects_removed_runtime_option_declarations() -> None:
                         "required_object_target_poses": [],
                     }
                 ],
+            },
+            path="pick",
+        )
+
+
+@pytest.mark.parametrize(
+    "call_id",
+    ["simulation.pick", "gen_sim.pick.step_01", "gen_sim.pick.handover_source"],
+)
+def test_pick_phase_contract_is_explicit_and_fingerprinted(call_id: str) -> None:
+    from embodichain.lab.task_program.integrations.catalog import _canonical_value
+
+    payload = {
+        "kind": "pick",
+        "call_id": call_id,
+        "routes": [{"object_id": "part", "target_id": "inspection"}],
+    }
+    legacy = decode_task_lowerer(payload, path="pick")
+    disabled = decode_task_lowerer({**payload, "verify_phases": False}, path="pick")
+    verified = decode_task_lowerer({**payload, "verify_phases": True}, path="pick")
+    assert _canonical_value(legacy) == _canonical_value(disabled)
+    assert _canonical_value(verified) != _canonical_value(legacy)
+    assert verified.revision == "5"
+    semantics = ObjectSemantics(
+        affordance=AntipodalAffordance(), geometry={}, entity_id="part"
+    )
+    call = RegisteredSemanticCall(
+        call_id=call_id, arguments={"object": "part", "target": "inspection"}
+    )
+    for factory, enabled in ((legacy, False), (verified, True)):
+        lowered = factory.lowerer_type(factory.routes, (semantics,)).lower(
+            call, context=None, bound=None, option_template=PickUpOptions()
+        )
+        effect = lowered.registered_effect.held_objects[0]
+        assert effect.expectation_id == "primary"
+        assert effect.acquire_before_segment == ("lift" if enabled else None)
+        assert effect.retain_during_segments == (("lift",) if enabled else ())
+
+
+@pytest.mark.parametrize("value", [1, "true", None])
+def test_pick_phase_contract_rejects_nonboolean_config(value: object) -> None:
+    with pytest.raises(TypeError, match="verify_phases"):
+        decode_task_lowerer(
+            {
+                "kind": "pick",
+                "routes": [{"object_id": "part", "target_id": "inspection"}],
+                "verify_phases": value,
             },
             path="pick",
         )

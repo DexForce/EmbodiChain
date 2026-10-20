@@ -20,15 +20,22 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
+from dataclasses import dataclass
 import math
 from typing import Any, Final
+
+from embodichain.gen_sim.task_spec import TaskSpec, validate_task_spec
 
 from .agent import derive_scene_request, derive_success_spec
 from .contracts import TaskCandidate, canonical_hash, validate_task_candidate
 from .orchestration.contracts import RoleBindings, validate_role_bindings
 from .semantic_graph import SemanticTaskGraph, validate_semantic_task_graph
 
-__all__ = ["SemanticTaskPlanner", "UnsupportedSemanticCapabilityError"]
+__all__ = [
+    "SemanticTaskPlanner",
+    "SemanticTaskPlan",
+    "UnsupportedSemanticCapabilityError",
+]
 
 _COORDINATED_TRANSPORT_CALL_ID: Final = "simulation.coordinated_transport"
 _COORDINATED_HOLD_CALL_ID: Final = "simulation.coordinated_hold"
@@ -48,6 +55,21 @@ class UnsupportedSemanticCapabilityError(ValueError):
     """Raised when a TaskSpec has no executable canonical Semantic Call route."""
 
 
+@dataclass(frozen=True, slots=True)
+class SemanticTaskPlan:
+    """A normative specification and its single semantic-graph witness.
+
+    Lineage is emitted by the same grounded-set expansion that produces calls;
+    consumers must not reconstruct it from call-ID prefixes.
+    """
+
+    graph: SemanticTaskGraph
+    task_spec: TaskSpec
+    candidate: TaskCandidate
+    role_bindings: RoleBindings
+    lineage: dict[str, list[dict[str, Any]]]
+
+
 class SemanticTaskPlanner:
     """Lower Task Engine ontology steps into one immutable semantic task DAG.
 
@@ -58,6 +80,9 @@ class SemanticTaskPlanner:
     Raises:
         ValueError: If either relation distance is not positive.
     """
+
+    reuse_pour_resource: bool = False
+    resource_lateral_positions: Mapping[str, float] | None = None
 
     def __init__(
         self,
@@ -102,7 +127,85 @@ class SemanticTaskPlanner:
             raise ValueError("RoleBindings.task_id must match the TaskCandidate.")
         if bindings["candidate_id"] != selected["candidate_id"]:
             raise ValueError("RoleBindings.candidate_id must match the TaskCandidate.")
-        selected, bindings = _expand_multi_object_steps(selected, bindings)
+        selected, bindings, _ = _expand_multi_object_steps(selected, bindings)
+        return self._plan_expanded(
+            selected,
+            bindings,
+            scene_objects,
+            planner_route=planner_route,
+            integration_fingerprint=integration_fingerprint,
+        )
+
+    def plan_spec(
+        self,
+        candidate: Mapping[str, Any],
+        role_bindings: Mapping[str, Any],
+        scene_objects: Sequence[Mapping[str, Any]],
+        *,
+        task_spec: TaskSpec | Mapping[str, Any] | None = None,
+        planner_route: str = "offline",
+        integration_fingerprint: str = "0" * 64,
+    ) -> SemanticTaskPlan:
+        """Plan one witness while retaining normative identity and exact lineage.
+
+        Args:
+            candidate: Validated semantic task draft used as a solution witness.
+            role_bindings: Grounded scene references for that candidate.
+            scene_objects: Provider-free measured scene metadata.
+            task_spec: Authoritative specification, or derive it before lowering.
+            planner_route: Provenance label, not an execution policy.
+            integration_fingerprint: Provisional or composed bundle identity.
+
+        Returns:
+            Specification, graph, source inputs and explicit expansion lineage.
+        """
+        from .task_spec import task_spec_from_candidate
+
+        source = validate_task_candidate(candidate)
+        bindings = validate_role_bindings(role_bindings)
+        if (
+            bindings["task_id"] != source["draft"]["task_id"]
+            or bindings["candidate_id"] != source["candidate_id"]
+        ):
+            raise ValueError(
+                "TaskSpec witness bindings do not match candidate identity."
+            )
+        specification = (
+            task_spec_from_candidate(source)
+            if task_spec is None
+            else TaskSpec.from_dict(task_spec)
+        )
+        validate_task_spec(specification)
+        selected, expanded_bindings, lineage = _expand_multi_object_steps(
+            source, bindings
+        )
+        graph = self._plan_expanded(
+            selected,
+            expanded_bindings,
+            scene_objects,
+            planner_route=planner_route,
+            integration_fingerprint=integration_fingerprint,
+        )
+        from .semantic_graph_validation import validate_graph_coverage
+
+        coverage = validate_graph_coverage(
+            graph, specification, source, bindings, lineage
+        )
+        if coverage["status"] != "covered":
+            raise ValueError(
+                f"TaskSpec witness is not covered: {coverage['issues']!r}."
+            )
+        return SemanticTaskPlan(graph, specification, source, bindings, lineage)
+
+    def _plan_expanded(
+        self,
+        selected: TaskCandidate,
+        bindings: RoleBindings,
+        scene_objects: Sequence[Mapping[str, Any]],
+        *,
+        planner_route: str,
+        integration_fingerprint: str,
+    ) -> SemanticTaskGraph:
 
         objects = {
             str(item.get("runtime_uid", item.get("uid", ""))): deepcopy(dict(item))
@@ -113,6 +216,7 @@ class SemanticTaskPlanner:
         steps_by_id = {str(step["id"]): step for step in steps}
         result_objects: dict[str, str] = {}
         held_by: dict[str, str] = {}
+        pour_resources: dict[str, str] = {}
         pending_cleanup: set[str] = set()
         upright_objects: set[str] = set()
         upright_staging_targets: dict[str, str] = {}
@@ -124,9 +228,9 @@ class SemanticTaskPlanner:
         for step in steps:
             step_id = str(step["id"])
             task_type = str(step["task_type"])
-            if task_type not in {"E1", "E2", "E3", "E4", "E5", "E6", "E9"}:
+            if task_type not in {"E1", "E2", "E3", "E4", "E5", "E6", "E8", "E9"}:
                 raise UnsupportedSemanticCapabilityError(
-                    f"Task Engine currently supports E1-E6 and E9, not {task_type}."
+                    f"Task Engine currently supports E1-E6 and E8-E9, not {task_type}."
                 )
             object_id = self._resolve_step_entity(
                 step,
@@ -147,7 +251,16 @@ class SemanticTaskPlanner:
                 requested = str(step.get("required_arm", "auto"))
                 resource = (
                     held_by.get(object_id)
-                    or self._nearest_resource(object_id, objects, target_id=support_id)
+                    or self._nearest_resource(
+                        object_id,
+                        objects,
+                        target_id=support_id,
+                        occupied_resources=tuple(
+                            value
+                            for value in held_by.values()
+                            if value in {"left", "right"}
+                        ),
+                    )
                     if requested in {"auto", "none"}
                     else _resource(requested, field="required_arm")
                 )
@@ -177,7 +290,6 @@ class SemanticTaskPlanner:
                             "resources": {"primary": resource},
                         }
                     )
-                # Align aloft once; Place owns the final descent and release.
                 calls.extend(
                     (
                         {
@@ -185,7 +297,7 @@ class SemanticTaskPlanner:
                             "call_id": _ALIGN_HELD_CALL_ID,
                             "arguments": {
                                 "object": object_id,
-                                "target": target_name,
+                                "target": staging_target_name,
                                 "preserve_yaw": False,
                             },
                             "resources": {"primary": resource},
@@ -206,6 +318,20 @@ class SemanticTaskPlanner:
                         },
                     )
                 )
+                # Check the free heading at release height before Place pins it.
+                calls.insert(
+                    -1,
+                    {
+                        "kind": "registered",
+                        "call_id": _ALIGN_HELD_CALL_ID,
+                        "arguments": {
+                            "object": object_id,
+                            "target": target_name,
+                            "preserve_yaw": False,
+                        },
+                        "resources": {"primary": resource},
+                    },
+                )
                 held_by.pop(object_id, None)
                 objects[object_id]["init_pos"] = upright_position
                 upright_objects.add(object_id)
@@ -221,7 +347,17 @@ class SemanticTaskPlanner:
                 )
                 requested = str(step.get("required_arm", "auto"))
                 resource = (
-                    held_by.get(object_id) or self._nearest_resource(object_id, objects)
+                    held_by.get(object_id)
+                    or self._nearest_resource(
+                        object_id,
+                        objects,
+                        target_id=target_id,
+                        occupied_resources=tuple(
+                            value
+                            for value in held_by.values()
+                            if value in {"left", "right"}
+                        ),
+                    )
                     if requested in {"auto", "none"}
                     else _resource(requested, field="required_arm")
                 )
@@ -239,6 +375,8 @@ class SemanticTaskPlanner:
                             "resources": {"primary": resource},
                         }
                     )
+                if self.reuse_pour_resource:
+                    pour_resources.update({object_id: resource, target_id: resource})
                 pour_target = f"{step_id}_pour_target"
                 return_target = f"{step_id}_return_target"
                 targets[return_target] = {
@@ -310,6 +448,14 @@ class SemanticTaskPlanner:
                     if requested_destination == "auto"
                     else _resource(requested_destination, field="receive_arm")
                 )
+                occupied_resources = {
+                    value for value in held_by.values() if value in {"left", "right"}
+                }
+                if destination in occupied_resources:
+                    raise UnsupportedSemanticCapabilityError(
+                        f"Step {step_id!r} HandOver receiver {destination!r} is "
+                        "already occupied by another held object."
+                    )
                 calls = []
                 if held_by.get(object_id) != source:
                     if object_id in held_by:
@@ -349,6 +495,7 @@ class SemanticTaskPlanner:
                         target_id=target_id,
                         relation=str(step.get("relation", "none")),
                         resource=destination,
+                        target_part=_bound_part(step, "target", bindings, steps_by_id),
                     )
                     calls.append(place_call)
                     held_by.pop(object_id, None)
@@ -362,22 +509,65 @@ class SemanticTaskPlanner:
                     steps_by_id=steps_by_id,
                 )
                 requested = str(step.get("required_arm", "auto"))
+                holder = held_by.get(object_id)
+                if holder == "coordinated":
+                    raise UnsupportedSemanticCapabilityError(
+                        f"Step {step_id!r} cannot replace the coordinated holding "
+                        f"of {object_id!r} with a single-hand placement."
+                    )
+                occupied_resources = {
+                    resource: entity
+                    for entity, owner in held_by.items()
+                    for resource in (
+                        ("left", "right") if owner == "coordinated" else (owner,)
+                    )
+                }
+                previous = pour_resources.get(object_id)
                 resource = (
-                    held_by.get(object_id)
-                    or self._nearest_resource(object_id, objects, target_id=target_id)
+                    holder
+                    or (previous if previous not in occupied_resources else None)
+                    or self._nearest_resource(
+                        object_id,
+                        objects,
+                        target_id=target_id,
+                        occupied_resources=tuple(occupied_resources),
+                    )
                     if requested in {"auto", "none"}
                     else _resource(requested, field="required_arm")
                 )
+                if resource in occupied_resources and (
+                    occupied_resources[resource] != object_id
+                ):
+                    raise UnsupportedSemanticCapabilityError(
+                        f"Step {step_id!r} resource {resource!r} is occupied by "
+                        f"{occupied_resources[resource]!r}; cannot pick {object_id!r}."
+                    )
                 relation = str(step.get("relation", "none"))
                 target_part = _bound_part(step, "target", bindings, steps_by_id)
                 calls = []
-                # Keep a receiver's handover grasp live for a subsequent
-                # stack placement.  Releasing onto the table and regrasping
-                # here sweeps the support object during long programs (and
-                # turns an otherwise upright support over).  A direct
-                # ``stack_place`` lowerer already performs the controlled
-                # alignment and descent; an explicit stack pick is still
-                # emitted below when the object is not currently held.
+                if (
+                    held_by.get(object_id) == resource
+                    and relation in {"on", "above"}
+                    and object_id in upright_objects
+                    and target_id in upright_objects
+                ):
+                    # A low receiving grasp can intersect the support during
+                    # stacking. Expose the regrasp as ordinary semantic calls.
+                    calls.append(
+                        self._placement_call(
+                            step_id=step_id,
+                            object_id=object_id,
+                            target_id="table",
+                            relation="on",
+                            resource=resource,
+                        )
+                    )
+                    held_by.pop(object_id)
+                    other_resource = "left" if resource == "right" else "right"
+                    if other_resource not in held_by.values():
+                        # Clear the former source hand only after the receiver
+                        # has safely staged its object, not during a live hold.
+                        calls.append(_park_call(other_resource))
                 if held_by.get(object_id) != resource:
                     if object_id in held_by:
                         raise UnsupportedSemanticCapabilityError(
@@ -397,16 +587,19 @@ class SemanticTaskPlanner:
                     target_id=target_id,
                     relation=relation,
                     resource=resource,
+                    target_part=target_part,
                 )
-                if relation == "inside" and target_part is not None:
-                    place_call["inside"] += f"__{target_part}"
+                if relation != "inside" and target_part is not None:
+                    from ._task_program.spatial_reference import SIDE_RELATIONS
+
+                    if relation in SIDE_RELATIONS:
+                        place_call["arguments"]["reference_part"] = target_part
                 if (
                     relation in {"on", "above"}
                     and object_id in upright_objects
                     and target_id in upright_objects
                 ):
-                    needs_regrasp = bool(calls and calls[-1]["kind"] == "pick")
-                    if needs_regrasp:
+                    if calls and calls[-1]["kind"] == "pick":
                         calls[-1] = {
                             "kind": "registered",
                             "call_id": _STACK_PICK_CALL_ID,
@@ -414,19 +607,18 @@ class SemanticTaskPlanner:
                             "resources": {"primary": resource},
                         }
                     place_call["call_id"] = _STACK_PLACE_CALL_ID
-                    if needs_regrasp:
-                        calls.append(
-                            {
-                                "kind": "registered",
-                                "call_id": _ALIGN_HELD_CALL_ID,
-                                "arguments": {
-                                    "object": object_id,
-                                    "target": upright_staging_targets[object_id],
-                                    "preserve_yaw": True,
-                                },
-                                "resources": {"primary": resource},
-                            }
-                        )
+                    calls.append(
+                        {
+                            "kind": "registered",
+                            "call_id": _ALIGN_HELD_CALL_ID,
+                            "arguments": {
+                                "object": object_id,
+                                "target": upright_staging_targets[object_id],
+                                "preserve_yaw": True,
+                            },
+                            "resources": {"primary": resource},
+                        }
+                    )
                 calls.append(place_call)
                 held_by.pop(object_id, None)
                 cleanup_resources = (resource,)
@@ -480,23 +672,82 @@ class SemanticTaskPlanner:
                     cleanup_resources = ("left", "right")
                 else:
                     held_by[object_id] = "coordinated"
-            elif task_type == "E9":
-                from ._task_program.press_binding import recipe as press_recipe
+            elif task_type == "E8":
+                from ._task_program.twist_binding import (
+                    recipe as twist_recipe,
+                    required_chunk_count,
+                )
 
+                joint = (
+                    objects[object_id]
+                    .get("attributes", {})
+                    .get("twist_control_joint", "")
+                )
+                reference = str(step["object"].get("reference", "")).lower()
+                if joint.startswith("left_") and (
+                    "右" in reference or "right" in reference
+                ):
+                    raise UnsupportedSemanticCapabilityError(
+                        "E8 right control is not calibrated; cannot substitute the left knob."
+                    )
                 requested = str(step.get("required_arm", "auto"))
                 resource = (
                     self._nearest_resource(object_id, objects)
                     if requested in {"auto", "none"}
                     else _resource(requested, field="required_arm")
                 )
-                calls = press_recipe(object_id, resource)
+                setting = step["target_setting"]
+                calibrated_angle = (
+                    objects[object_id]
+                    .get("attributes", {})
+                    .get("twist_setting_labels", {})
+                    .get(str(setting))
+                )
+                if calibrated_angle is None:
+                    raise UnsupportedSemanticCapabilityError(
+                        "E8 chunk coverage requires the source-calibrated setting angle."
+                    )
+                calls = twist_recipe(
+                    object_id,
+                    resource,
+                    setting,
+                    chunk_count=required_chunk_count(calibrated_angle),
+                    operation_id=step_id,
+                )
+            elif task_type == "E9":
+                from ._task_program.press_binding import recipe as press_recipe
+
+                requested = str(step.get("required_arm", "auto"))
+                resource = (
+                    self._nearest_resource(
+                        object_id,
+                        objects,
+                        occupied_resources=tuple(
+                            value
+                            for value in held_by.values()
+                            if value in {"left", "right"}
+                        ),
+                    )
+                    if requested in {"auto", "none"}
+                    else _resource(requested, field="required_arm")
+                )
+                calls = press_recipe(object_id, resource, operation_id=step_id)
             elif task_type == "E6":
                 from ._task_program.articulation_binding import recipe
 
                 requested = str(step.get("required_arm", "auto"))
                 part_id = _bound_part(step, "object", bindings, steps_by_id)
                 resource = (
-                    self._nearest_resource(object_id, objects, part_id=part_id)
+                    self._nearest_resource(
+                        object_id,
+                        objects,
+                        part_id=part_id,
+                        occupied_resources=tuple(
+                            value
+                            for value in held_by.values()
+                            if value in {"left", "right"}
+                        ),
+                    )
                     if requested in {"auto", "none"}
                     else _resource(requested, field="required_arm")
                 )
@@ -588,13 +839,18 @@ class SemanticTaskPlanner:
                     (
                         "cleanup"
                         if (task_type == "E6" and index > 0)
+                        or (task_type == "E8" and index == len(calls) - 1)
                         or (task_type == "E9" and index > 1)
                         else "primary"
                     ),
                 )
                 for index, call in enumerate(calls)
             ]
-            if cleanup_resources and (task_type == "E2" or requested_upright):
+            if cleanup_resources and (
+                task_type == "E2"
+                or requested_upright
+                or calls[-1].get("call_id") == _STACK_PLACE_CALL_ID
+            ):
                 call_roles.append(
                     (
                         {
@@ -713,6 +969,7 @@ class SemanticTaskPlanner:
         *,
         target_id: str | None = None,
         part_id: str | None = None,
+        occupied_resources: Sequence[str] = (),
     ) -> str:
         item = objects.get(object_id)
         if item is None:
@@ -737,7 +994,20 @@ class SemanticTaskPlanner:
         # only a preference; the runtime planning probe still checks feasibility.
         # The canonical dual-Franka embodiment faces world -X: its right arm
         # base is on +Y and its left arm base is on -Y.
-        return "right" if lateral >= 0.0 else "left"
+        preferred = "right" if lateral >= 0.0 else "left"
+        if self.resource_lateral_positions is not None:
+            preferred = min(
+                ("right", "left"),
+                key=lambda side: abs(lateral - self.resource_lateral_positions[side]),
+            )
+        if preferred not in occupied_resources:
+            return preferred
+        alternate = "left" if preferred == "right" else "right"
+        if alternate not in occupied_resources:
+            return alternate
+        raise UnsupportedSemanticCapabilityError(
+            f"No free dual-Franka resource is available for {object_id!r}."
+        )
 
     def _relation_world_offset(
         self,
@@ -805,13 +1075,15 @@ class SemanticTaskPlanner:
         target_id: str,
         relation: str,
         resource: str,
+        target_part: str | None = None,
     ) -> dict[str, Any]:
         """Build one canonical built-in or live-relative Place call."""
         if relation == "inside":
             return {
                 "kind": "place",
                 "object": object_id,
-                "inside": _inside_affordance(target_id, object_id),
+                "inside": _inside_affordance(target_id, object_id)
+                + (f"__{target_part}" if target_part is not None else ""),
                 "resources": {"primary": resource},
             }
         if relation not in {
@@ -965,12 +1237,13 @@ def _preceding_support(object_id: str, nodes: Sequence[Mapping[str, Any]]) -> st
 
 def _expand_multi_object_steps(
     candidate: TaskCandidate, bindings: RoleBindings
-) -> tuple[TaskCandidate, RoleBindings]:
+) -> tuple[TaskCandidate, RoleBindings, dict[str, list[dict[str, Any]]]]:
     """Lower independently repeatable task sets after UID grounding."""
     steps = candidate["draft"]["steps"]
     used_ids = {str(step["id"]) for step in steps}
     expanded_steps: list[dict[str, Any]] = []
     expanded_bindings = deepcopy(bindings)
+    lineage: dict[str, list[dict[str, Any]]] = {}
     changed = False
     for step in steps:
         step_id = str(step["id"])
@@ -979,6 +1252,20 @@ def _expand_multi_object_steps(
         uids = bindings["reference_bindings"].get(reference_id, [])
         if len(uids) <= 1 or object_selector["kind"] != "scene_ref":
             expanded_steps.append(deepcopy(step))
+            if object_selector["kind"] == "step_result":
+                members = lineage[str(object_selector["step_id"])]
+                if len(members) != 1:
+                    raise UnsupportedSemanticCapabilityError(
+                        "A step_result has multiple subjects."
+                    )
+                uid, part = members[0]["object_uid"], members[0]["object_part_id"]
+            else:
+                if len(uids) != 1:
+                    raise ValueError(f"{reference_id} must resolve to one subject.")
+                uid, part = uids[0], bindings["role_bindings"].get(reference_id)
+            lineage[step_id] = [
+                {"group_id": step_id, "object_uid": uid, "object_part_id": part}
+            ]
             continue
         e5_return = (
             step["task_type"] == "E5"
@@ -1023,6 +1310,7 @@ def _expand_multi_object_steps(
             )
         used_ids.update(copy_ids)
         previous_id: str | None = None
+        lineage[step_id] = []
         for copy_id, uid in zip([*copy_ids, step_id], uids):
             copy = deepcopy(step)
             copy["id"] = copy_id
@@ -1035,21 +1323,40 @@ def _expand_multi_object_steps(
             if e6_parts:
                 uid, _, part_id = uid.rpartition("::")
                 expanded_bindings["role_bindings"][f"{copy_id}.object"] = part_id
+            lineage[step_id].append(
+                {
+                    "group_id": copy_id,
+                    "object_uid": uid,
+                    "object_part_id": (
+                        part_id
+                        if e6_parts
+                        else bindings["role_bindings"].get(reference_id)
+                    ),
+                }
+            )
             expanded_bindings["reference_bindings"][f"{copy_id}.object"] = [uid]
             if step["target"]["kind"] == "scene_ref":
                 expanded_bindings["reference_bindings"][f"{copy_id}.target"] = list(
                     target_uids
                 )
+                if target_id in bindings["role_bindings"]:
+                    expanded_bindings["role_bindings"][f"{copy_id}.target"] = bindings[
+                        "role_bindings"
+                    ][target_id]
             previous_id = copy_id
         changed = True
     if not changed:
-        return candidate, bindings
+        return candidate, bindings, lineage
     expanded = deepcopy(candidate)
     expanded["draft"]["steps"] = expanded_steps
     expanded["scene_request"] = derive_scene_request(expanded["draft"])
     expanded["success_spec"] = derive_success_spec(expanded["draft"])
     expanded["semantic_hash"] = canonical_hash(expanded_steps)
-    return validate_task_candidate(expanded), validate_role_bindings(expanded_bindings)
+    return (
+        validate_task_candidate(expanded),
+        validate_role_bindings(expanded_bindings),
+        lineage,
+    )
 
 
 def _resource(value: Any, *, field: str) -> str:

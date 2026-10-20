@@ -21,7 +21,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
 import math
-from typing import Any, ClassVar
+from typing import Any, ClassVar, TYPE_CHECKING
 
 import torch
 from embodichain.utils import logger
@@ -40,7 +40,6 @@ from embodichain.lab.sim.atomic_actions import (
     PressAffordance,
     PressGoal,
     PressOptions,
-    RecoveryPolicy,
     SceneEntityPose,
 )
 from embodichain.lab.sim.sensors import (
@@ -66,6 +65,8 @@ from .press_binding import PREPARE_CALL, PRESS_CALL, PRESS_REVISION, PressRoute
 from .articulation_binding import PARK_CALL
 
 __all__: list[str] = []
+if TYPE_CHECKING:
+    from .twist_binding import TwistRoute
 SENSOR_UID = "gen_sim_press_evidence"
 
 
@@ -98,9 +99,6 @@ class GenSimPress(Press):
 def with_press_options(profile: Any, routes: tuple[PressRoute, ...]) -> Any:
     if not routes:
         return profile
-    if len(routes) != 1:
-        raise ValueError("E9 MVP requires one exact press route.")
-    route = routes[0]
     presets = []
     for preset in profile.presets:
         presets.append(
@@ -109,30 +107,30 @@ def with_press_options(profile: Any, routes: tuple[PressRoute, ...]) -> Any:
                 required_planner=preset.required_planner,
                 action_option_templates={
                     **preset.action_option_templates,
-                    PREPARE_CALL: MoveJointsOptions(),
-                    PRESS_CALL: (
-                        MoveEndEffectorOptions()
-                        if route.variant == "approach_only"
-                        else PressOptions(
-                            approach_distance=0.08,
-                            press_distance=route.binding.stroke
-                            + route.extra_press_distance,
-                            hand_interp_steps=12,
+                    **{
+                        route.call_id(PREPARE_CALL): MoveJointsOptions()
+                        for route in routes
+                    },
+                    **{
+                        route.call_id(PRESS_CALL): (
+                            MoveEndEffectorOptions()
+                            if route.variant == "approach_only"
+                            else PressOptions(
+                                approach_distance=0.08,
+                                press_distance=route.binding.stroke
+                                + route.extra_press_distance,
+                                hand_interp_steps=12,
+                            )
                         )
-                    ),
+                        for route in routes
+                    },
                 },
                 effect_assurance=preset.effect_assurance,
                 effect_monitors=preset.effect_monitors,
-                motion_policy=replace(
-                    preset.motion_policy,
-                    strategy="ik_interp",
-                    sample_count=max(260, preset.motion_policy.sample_count),
-                ),
+                motion_policy=preset.motion_policy,
                 tracking_policy=preset.tracking_policy,
-                recovery_policy=RecoveryPolicy(max_replans=0, max_action_retries=0),
-                workflow_recovery_policy=replace(
-                    preset.workflow_recovery_policy, max_recovery_attempts=0
-                ),
+                recovery_policy=preset.recovery_policy,
+                workflow_recovery_policy=preset.workflow_recovery_policy,
                 runner_cfg=preset.runner_cfg,
             )
         )
@@ -240,7 +238,7 @@ class _PressLowerer(_PrepareLowerer):
             goal=PressGoal(
                 ObjectSemantics(
                     entity_id=self.route.link_id,
-                    geometry={},
+                    geometry={"gen_sim_press_operation_id": self.route.operation_id},
                     affordance=PressAffordance(
                         press_axis=torch.tensor(b.axis, device=self.engine.device),
                         press_position=point,
@@ -292,6 +290,7 @@ def _closed_finger_tip_offset(robot: Any, context: Any, bound: Any) -> float:
 class PressPrepareFactory(RegisteredSemanticLowererFactory):
     route: PressRoute
     call_id: ClassVar[str] = PREPARE_CALL
+    lowerer_type: ClassVar[type] = _PrepareLowerer
     revision: ClassVar[str] = PRESS_REVISION
     target_descriptor = MoveJoints.descriptor()
 
@@ -300,14 +299,16 @@ class PressPrepareFactory(RegisteredSemanticLowererFactory):
     ) -> Any:
         if engine.robot is not robot:
             raise ValueError("E9 must use the integration-owned robot.")
-        return _PrepareLowerer(
+        lowerer = self.lowerer_type(
             self.route, _bind(self.route, simulation, scene_registry, engine), engine
         )
+        return lowerer
 
 
 @dataclass(frozen=True, slots=True)
 class PressFactory(PressPrepareFactory):
     call_id: ClassVar[str] = PRESS_CALL
+    lowerer_type: ClassVar[type] = _PressLowerer
 
     @property
     def target_descriptor(self) -> Any:
@@ -323,11 +324,14 @@ class PressFactory(PressPrepareFactory):
         if engine.robot is not robot:
             raise ValueError("E9 must use the integration-owned robot.")
         lowerer = (
-            _ApproachLowerer if self.route.variant == "approach_only" else _PressLowerer
+            _ApproachLowerer
+            if self.route.variant == "approach_only" and self.call_id == PRESS_CALL
+            else self.lowerer_type
         )
-        return lowerer(
+        selected = lowerer(
             self.route, _bind(self.route, simulation, scene_registry, engine), engine
         )
+        return selected
 
 
 class _ApproachLowerer(_PrepareLowerer):
@@ -358,11 +362,10 @@ class PressContactSensor(ContactSensor):
     """Record actual joint/contact substeps, including transient press events."""
 
     def __init__(self, config: ContactSensorCfg, device: Any, *, owner: Any) -> None:
-        # A single button has few contact rows. Keep their reduction on CPU
-        # rather than synchronizing CUDA separately for each scalar predicate.
-        super().__init__(config, torch.device("cpu"), owner=owner)
+        # Direct-GPU contact queries require output on the simulation device.
+        super().__init__(config, device, owner=owner)
 
-    def configure(self, route: PressRoute, robot: Any) -> None:
+    def configure(self, route: PressRoute | TwistRoute, robot: Any) -> None:
         self.route, self.robot = route, robot
         self.art = self._sim.get_articulation(route.binding.object_id)
         self.joint_index = self.art.joint_names.index(route.binding.joint)
@@ -392,6 +395,7 @@ class PressContactSensor(ContactSensor):
                 }
         self.clock = 0.0
         self.armed = False
+        self.retreat_verified = False
         self.phase = "press"
         self.samples: list[PressSample] = []
         self.trace: list[dict[str, Any]] = []
@@ -445,7 +449,7 @@ class PressContactSensor(ContactSensor):
         )
         if len(self.trace) % 200 == 0:
             logger.log_info(
-                f"E9 observed substeps={len(self.trace)}, qpos={q:.6f}, contact={contact}, valid={valid}"
+                f"{type(self).__name__} observed substeps={len(self.trace)}, qpos={q:.6f}, contact={contact}, valid={valid}"
             )
         return sample
 
@@ -453,6 +457,7 @@ class PressContactSensor(ContactSensor):
         self.samples.clear()
         self.trace.clear()
         self.acceptance = {}
+        self.retreat_verified = False
         self.phase = "press"
         self.update()
         try:
@@ -470,10 +475,11 @@ class PressContactSensor(ContactSensor):
         super().reset(env_ids)
         if hasattr(self, "route"):
             self.armed = False
+            self.retreat_verified = False
 
 
 def ensure_sensor(simulation: Any, robot: Any, route: PressRoute) -> PressContactSensor:
-    sensor = simulation.get_sensor(SENSOR_UID)
+    sensor = simulation.get_sensor(route.sensor_uid)
     if sensor is not None:
         if not isinstance(sensor, PressContactSensor) or sensor.route != route:
             raise ValueError(
@@ -489,7 +495,7 @@ def ensure_sensor(simulation: Any, robot: Any, route: PressRoute) -> PressContac
     try:
         sensor = simulation.add_sensor(
             ContactSensorCfg(
-                uid=SENSOR_UID,
+                uid=route.sensor_uid,
                 sensor_type="GenSimPressContact",
                 max_contacts_per_env=512,
                 articulation_cfg_list=[
@@ -504,6 +510,28 @@ def ensure_sensor(simulation: Any, robot: Any, route: PressRoute) -> PressContac
         simulation.SUPPORTED_SENSOR_TYPES = factories
     sensor.configure(route, robot)
     return sensor
+
+
+def _park_clearance(art: Any, finger_bounds: list[torch.Tensor]) -> float:
+    """Conservative world-space mesh-AABB separation, not an axial projection."""
+    if not finger_bounds or any(not torch.isfinite(b).all() for b in finger_bounds):
+        raise ValueError("E9 Park requires finite finger geometry.")
+    distances = []
+    for name in art.link_names:
+        vertices, _ = art.get_link_vert_face(name)
+        if vertices.numel() == 0:
+            continue
+        pose = art.get_link_pose(name, to_matrix=True)[0]
+        world = vertices.to(pose) @ pose[:3, :3].T + pose[:3, 3]
+        if not torch.isfinite(world).all():
+            raise ValueError("E9 Park requires finite target geometry.")
+        low, high = world.amin(0), world.amax(0)
+        for bounds in finger_bounds:
+            gap = torch.maximum(low - bounds[1], bounds[0] - high).clamp_min(0)
+            distances.append(float(torch.linalg.vector_norm(gap)))
+    if not distances:
+        raise ValueError("E9 Park requires measured target geometry.")
+    return min(distances)
 
 
 class PressAcceptancePort:
@@ -600,28 +628,60 @@ class PressAcceptancePort:
             )[0, :3, 3]
             tcp_clearance = float(torch.dot(point - tcp, inward))
             clearances = []
+            finger_bounds = []
             for name in sensor.finger_names:
                 pose = self.robot.get_link_pose(name, to_matrix=True)[0]
                 vertices, _ = self.robot.get_link_vert_face(name)
                 world = vertices.to(pose) @ pose[:3, :3].T + pose[:3, 3]
                 clearances.append(float(((point - world) @ inward).min()))
+                finger_bounds.append(torch.stack((world.amin(0), world.amax(0))))
             clearance = min(clearances)
+            release_steps = max(1, math.ceil(0.15 / sensor._sim.sim_config.physics_dt))
             no_contact = bool(sensor.samples) and all(
                 s.target_contact is False and s.valid
-                for s in sensor.samples[
-                    -max(1, math.ceil(0.15 / sensor._sim.sim_config.physics_dt)) :
-                ]
+                for s in sensor.samples[-release_steps:]
             )
             terminal = any(call.call.semantic_id == PARK_CALL for call in segment.calls)
+            no_housing_contact = bool(sensor.trace) and all(
+                s["parent_contact"] is False and s["valid"]
+                for s in sensor.trace[-release_steps:]
+            )
+            terminal_clearance = (
+                _park_clearance(sensor.art, finger_bounds) if terminal else None
+            )
+            required_clearance = terminal_clearance if terminal else clearance
             qpos = float(sensor.art.get_qpos()[0, sensor.joint_index])
-            good = bool(event["accepted"] and no_contact and clearance >= 0.04)
+            reason = event["reason"]
+            good = False
+            if event["accepted"]:
+                if not no_contact:
+                    reason = "contact_not_released"
+                elif terminal and not sensor.retreat_verified:
+                    reason = "retreat_not_verified"
+                elif terminal and not no_housing_contact:
+                    reason = "housing_contact_not_released"
+                elif not math.isfinite(required_clearance) or required_clearance < 0.04:
+                    reason = (
+                        "terminal_clearance_insufficient"
+                        if terminal
+                        else "retreat_clearance_insufficient"
+                    )
+                else:
+                    good = True
+            if not terminal:
+                sensor.retreat_verified = good
             result = {
                 **event,
                 "accepted": good,
+                "reason": reason,
                 "event_accepted": event["accepted"],
                 "retreat_clearance": clearance,
+                "retreat_verified": sensor.retreat_verified,
+                "terminal_clearance": terminal_clearance,
+                "terminal_clearance_metric": "world_mesh_aabb_separation",
                 "tcp_clearance": tcp_clearance,
                 "contact_released": no_contact,
+                "housing_contact_released": no_housing_contact,
                 "terminal": terminal,
                 "observed_joint_position": qpos,
             }
@@ -630,7 +690,11 @@ class PressAcceptancePort:
             sensor.phase = "cleanup"
             sensor.armed = good and not terminal
         self.results[id(policy)] = torch.full_like(active_mask, good) & active_mask
-        self.metadata[id(policy)] = result
+        from .control_evidence import stamp_control_result
+
+        self.metadata[id(policy)] = stamp_control_result(
+            result, self.route, sensor, policy.cfg.preset
+        )
 
     def post_policy_result(self, policy: Any, *, segment: Any) -> Any:
         if id(policy) in self.results:

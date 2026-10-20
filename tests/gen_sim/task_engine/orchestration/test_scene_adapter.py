@@ -422,7 +422,7 @@ def _candidate(candidate_id: str, reference: str, *, votes: int = 1) -> dict:
                     "count": 0,
                     "source_structure": "rigid_object",
                     "affordances": ["graspable", "orientable"],
-                    "initial_state": {"orientation": "fallen"},
+                    "initial_state": {},
                     "attributes": {},
                 }
             ],
@@ -1070,12 +1070,13 @@ def test_scene_adapter_accepts_direct_source_and_rejects_bad_protocol(
         ).adapt(_candidate_set([candidate]), scene_export)
 
 
-def test_explicit_scene_semantic_conflict_is_incompatible(
+def test_derived_upright_goal_rejects_incompatible_affordances(
     scene_export: Path,
 ) -> None:
     config_path = scene_export / "scene_config.json"
     config = json.loads(config_path.read_text(encoding="utf-8"))
     config["rigid_object"][0]["initial_state"]["orientation"] = "upright"
+    config["rigid_object"][0]["affordances"] = ["graspable", "placeable"]
     config_path.write_text(json.dumps(config), encoding="utf-8")
 
     result = SceneAdapter(grounding_caller=_grounder).adapt(
@@ -1086,7 +1087,96 @@ def test_explicit_scene_semantic_conflict_is_incompatible(
     assert result.binding_report["status"] == "unsatisfied"
     assert reference["status"] == "incompatible"
     assert result.binding_report["candidates"][0]["status"] == "incompatible"
-    assert "state 'orientation' conflicts" in reference["reasons"][0]
+    assert any(
+        "missing affordances ['orientable']" in reason
+        for reason in reference["reasons"]
+    )
+
+
+def test_explicit_state_constraint_is_not_ignored_by_binding_compatibility() -> None:
+    from embodichain.gen_sim.task_engine.orchestration.scene_inventory import (
+        SceneInventory,
+    )
+
+    candidate = _candidate("explicit_state", "red can")
+    request = deepcopy(candidate["scene_request"]["references"][0])
+    request["initial_state"] = {"orientation": "fallen"}
+    inventory = SceneInventory(
+        [
+            {
+                "uid": "red_can",
+                "role": "rigid_object",
+                "initial_state": {"orientation": "upright"},
+                "affordances": ["graspable", "orientable"],
+            }
+        ],
+        robot_profile="dual_franka",
+    )
+
+    reasons = scene_adapter_module._compatibility_reasons(
+        request, ["red_can"], inventory=inventory, draft=candidate["draft"]
+    )
+
+    assert reasons == ["UID 'red_can' state 'orientation' conflicts with the request."]
+
+
+@pytest.mark.parametrize("orientation", ["upright", "fallen", "unknown", None])
+def test_derived_upright_goal_binds_without_an_initial_pose_precondition(
+    scene_export: Path, orientation: str | None
+) -> None:
+    config_path = scene_export / "scene_config.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    state = config["rigid_object"][0]["initial_state"]
+    if orientation is None:
+        state.pop("orientation")
+    else:
+        state["orientation"] = orientation
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    candidate = _candidate("upright_any_pose", "red can")
+    candidate["scene_request"] = derive_scene_request(candidate["draft"])
+
+    result = SceneAdapter(grounding_caller=_grounder).adapt(
+        _candidate_set([candidate]), scene_export
+    )
+
+    assert result.binding_report["status"] == "bound"
+    assert result.role_bindings["reference_bindings"] == {"upright.object": ["red_can"]}
+    assert result.selected_candidate["success_spec"] == candidate["success_spec"]
+    source = next(
+        item
+        for item in result.prepared_scene.planner_objects
+        if item["uid"] == "red_can"
+    )
+    assert source["initial_state"] == state
+
+
+@pytest.mark.parametrize("status", ["not_found", "ambiguous"])
+def test_derived_upright_goal_does_not_bypass_unresolved_identity(
+    scene_export: Path, status: str
+) -> None:
+    candidate = _candidate("upright_any_pose", "red can")
+    candidate["scene_request"] = derive_scene_request(candidate["draft"])
+
+    def grounder(**_kwargs):
+        return {
+            "bindings": [
+                {
+                    "reference_id": "upright.object",
+                    "status": status,
+                    "uids": [] if status == "not_found" else ["red_can", "blue_can"],
+                    "confidence": 0.0 if status == "not_found" else 0.4,
+                }
+            ]
+        }
+
+    result = SceneAdapter(grounding_caller=grounder).adapt(
+        _candidate_set([candidate]), scene_export
+    )
+
+    assert result.selected_candidate is None
+    assert result.role_bindings is None
+    reference = result.binding_report["candidates"][0]["references"][0]
+    assert reference["status"] == status
 
 
 @pytest.mark.parametrize(

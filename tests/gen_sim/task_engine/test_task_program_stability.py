@@ -185,6 +185,18 @@ def _local_port(
         ),
         {preset: cfg},
         step_dt=0.04,
+        support_observers=(
+            {
+                (cfg.entity, cfg.reference): SimpleNamespace(
+                    observe=lambda obj, ref: (
+                        torch.ones(obj.shape[0], dtype=torch.bool),
+                        {"scope": "native_contact_support"},
+                    )
+                )
+            }
+            if cfg.kind in {"supported_placement", "stack"}
+            else {}
+        ),
     )
     return port, policy, segment
 

@@ -78,6 +78,7 @@ _STEP_KEYS = frozenset(
         "depends_on",
     }
 )
+_OPTIONAL_STEP_KEYS = frozenset({"pour_goal_mode"})
 _INTENT_TASK_FIELD_REGISTRY = {
     task_type: contract.applicable_intent_fields
     for task_type, contract in TASK_CONTRACTS.items()
@@ -147,6 +148,14 @@ class _MissingRequiredObjectError(ValueError):
     """Identify a missing manipulated-object selector for targeted repair."""
 
 
+class _InstructionResourceError(ValueError):
+    """Identify explicit held-resource conflicts before scene grounding."""
+
+
+class _InstructionPlacementError(ValueError):
+    """Reject a placement contradicted by literal source evidence."""
+
+
 @dataclass(frozen=True)
 class InstructionDraftResult:
     """One validated, scene-independent interpretation and its audit metadata."""
@@ -207,6 +216,7 @@ _INTENT_OUTPUT_SCHEMA = {
                         "enum": sorted(_TARGET_STATES),
                     },
                     "target_setting": {"type": "integer"},
+                    "pour_goal_mode": {"type": "string", "enum": ["fluid", "motion"]},
                     "layout": {"type": "string", "enum": sorted(_LAYOUTS)},
                     "axis": {"type": "string", "enum": sorted(_AXES)},
                     "direction": {
@@ -283,6 +293,7 @@ def interpret_instruction_draft(
                 _coerce_instruction_response(response)
             )
             intent = validate_instruction_intent(normalized)
+            _validate_instruction_placements(instruction_text, intent)
             return InstructionDraftResult(
                 intent=intent,
                 model=selected_model or "injected_caller",
@@ -297,6 +308,79 @@ def interpret_instruction_draft(
                 ) from error
             first_error = error
     raise AssertionError("unreachable")
+
+
+def _validate_instruction_placements(
+    instruction: str, intent: InstructionIntent
+) -> None:
+    """Check literal destination evidence without rewriting or guessing references."""
+    clauses = re.split(r"[，,；;。\n.!?！？]", instruction.casefold())
+    positive = [
+        clause
+        for clause in clauses
+        if not re.search(r"不要|不得|不能|别(?=把|将|放|装)|\b(?:not|never)\b", clause)
+    ]
+    previous: dict[str, dict[str, Any]] = {}
+    for step in intent["steps"]:
+        target = step["target"]
+        prior = previous.get(target.get("step_id", ""), {})
+        previous[step["id"]] = step
+        obj = step["object"]
+        if step["task_type"] not in {"E1", "E4"} or obj["kind"] != "scene_ref":
+            continue
+        object_reference = obj["reference"].casefold()
+        matched = [clause for clause in positive if object_reference in clause]
+        # A literal object mentioned in multiple commands needs semantic resolution.
+        if len(matched) != 1 or matched[0].count(object_reference) != 1:
+            continue
+        clause = matched[0]
+        active = (
+            r"^\s*(?:(?:then|next|now|finally|please|and)\s+)*(?:"
+            r"(?:(?:再|然后|最后|先|请)\s*)*(?:把|将|取出)?\s*"
+            + re.escape(object_reference)
+            + r"\s*(?:放入|放进|收进|装入)|\b(?:put|place|insert|move|drop)\s+"
+            + r"(?:the\s+)?"
+            + re.escape(object_reference)
+            + r"\s+(?:into|inside)\s+)\s*(?:the\s+)?"
+        )
+        if target["kind"] == "scene_ref":
+            reference = str(target["reference"]).casefold()
+            ending = r"(?!\w)" if reference.isascii() else ""
+            evidence = re.compile(active + re.escape(reference) + ending)
+            surface = re.compile(
+                r"(?:放在|放到|\bon\s+)\s*(?:the\s+)?" + re.escape(reference) + ending
+            )
+            if (
+                step["relation"] != "inside"
+                and evidence.search(clause)
+                and not surface.search(clause)
+            ):
+                raise _InstructionPlacementError(
+                    f"Explicit containment for {target['reference']!r} requires "
+                    f"relation=inside, not {step['relation']!r}."
+                )
+        if target["kind"] == "step_result":
+            destination = prior.get("target", {})
+            source = prior.get("object", {})
+            if destination.get("kind") == source.get("kind") == "scene_ref":
+                phrase = destination["reference"].casefold()
+                old_object = source["reference"].casefold()
+                for start in range(len(phrase)):
+                    suffix = phrase[start:]
+                    if len(suffix) < 2 or old_object.endswith(suffix):
+                        continue
+                    if suffix.isascii():
+                        if start and not phrase[start - 1].isspace():
+                            continue
+                        same = r"\bsame\s+" + re.escape(suffix) + r"(?!\w)"
+                    else:
+                        same = r"同一(?:个|只|块)?" + re.escape(suffix)
+                    if re.search(active + same, clause):
+                        raise _InstructionPlacementError(
+                            "Explicit repeated destination refers to the earlier "
+                            "target, not its manipulated object. Keep the named "
+                            "destination as scene_ref instead of step_result."
+                        )
 
 
 def _normalize_instruction_intent_fields(
@@ -316,7 +400,9 @@ def _normalize_instruction_intent_fields(
         return result, []
     changes: list[dict[str, Any]] = []
     for index, raw_step in enumerate(raw_steps):
-        if not isinstance(raw_step, dict) or set(raw_step) != _STEP_KEYS:
+        if not isinstance(raw_step, dict) or not (
+            _STEP_KEYS <= set(raw_step) <= _STEP_KEYS | _OPTIONAL_STEP_KEYS
+        ):
             continue
         task_type = raw_step.get("task_type")
         applicable = _INTENT_TASK_FIELD_REGISTRY.get(task_type)
@@ -413,7 +499,7 @@ def validate_instruction_intent(value: Mapping[str, Any]) -> dict[str, Any]:
         context = f"InstructionIntent.steps[{index}]"
         if not isinstance(raw, Mapping):
             raise ValueError(f"{context} must be a mapping.")
-        if set(raw) != _STEP_KEYS:
+        if not (_STEP_KEYS <= set(raw) <= _STEP_KEYS | _OPTIONAL_STEP_KEYS):
             raise ValueError(
                 f"{context} requires exactly fields {sorted(_STEP_KEYS)}; "
                 f"received {sorted(raw)}."
@@ -427,6 +513,12 @@ def validate_instruction_intent(value: Mapping[str, Any]) -> dict[str, Any]:
         step["task_type"] = _choice(
             step["task_type"], TASK_TYPES, f"{context}.task_type"
         )
+        if "pour_goal_mode" in step:
+            if step["task_type"] != "E3":
+                raise ValueError(f"{context}.pour_goal_mode is only valid for E3.")
+            step["pour_goal_mode"] = _choice(
+                step["pour_goal_mode"], {"fluid", "motion"}, f"{context}.pour_goal_mode"
+            )
         step["object"] = _validate_selector(step["object"], f"{context}.object")
         step["target"] = _validate_selector(step["target"], f"{context}.target")
         step["relation"] = _canonical_relation(step["relation"], f"{context}.relation")
@@ -490,7 +582,90 @@ def validate_instruction_intent(value: Mapping[str, Any]) -> dict[str, Any]:
                 f"{sorted(unknown)}."
             )
     _validate_dag(dependencies)
+    _validate_instruction_resources(steps)
     return {"steps": steps}
+
+
+def _validate_instruction_resources(steps: Sequence[Mapping[str, Any]]) -> None:
+    """Check occupancy and explicit hold continuation in compiler step order.
+
+    Auto arms retain every possible allocation. Only ``step_result`` establishes
+    subject identity; scene references may alias after grounding, so a release
+    keeps both possibilities rather than asserting noun-based ownership.
+    This is an early necessary check, not a grounded resource certificate.
+    """
+    arms = ("left_arm", "right_arm")
+    states: set[tuple[str | None, str | None]] = {(None, None)}
+    subjects: dict[str, str] = {}
+
+    def choices(requested: str) -> tuple[int, ...]:
+        return (arms.index(requested),) if requested in arms else (0, 1)
+
+    for step in steps:
+        step_id = str(step["id"])
+        selector = step["object"]
+        subject = (
+            subjects[str(selector["step_id"])]
+            if selector["kind"] == "step_result"
+            else step_id
+        )
+        subjects[step_id] = subject
+        contract = TASK_CONTRACTS[str(step["task_type"])]
+        next_states: set[tuple[str | None, str | None]] = set()
+        for state in states:
+            known_owner = tuple(
+                index for index, item in enumerate(state) if item == subject
+            )
+            if contract.resource_mode == "handover":
+                for source in choices(str(step["transfer_arm"])):
+                    for receiver in choices(str(step["receive_arm"])):
+                        if source == receiver or state[receiver] is not None:
+                            continue
+                        if known_owner and known_owner != (source,):
+                            continue
+                        updated = list(state)
+                        updated[source] = None
+                        terminal = str(step["terminal_behavior"])
+                        place = terminal == "place" or (
+                            terminal == "none" and step["target"]["kind"] != "none"
+                        )
+                        updated[receiver] = None if place else subject
+                        next_states.add(tuple(updated))
+            elif contract.resource_mode == "coordinated":
+                if any(state) and not (
+                    selector["kind"] == "step_result" and state == (subject, subject)
+                ):
+                    continue
+                next_states.add(
+                    (None, None)
+                    if step["terminal_behavior"] == "place"
+                    else (subject, subject)
+                )
+            else:
+                for resource in choices(str(step["required_arm"])):
+                    if contract.accepts_incoming_hold:
+                        if known_owner and known_owner != (resource,):
+                            continue
+                        updated = list(state)
+                        updated[resource] = None
+                        next_states.add(tuple(updated))
+                    elif state[resource] is None:
+                        next_states.add(state)
+        if not next_states:
+            if contract.resource_mode == "handover":
+                reason = (
+                    "HandOver receiver is occupied or the explicit source arm "
+                    "does not own the held step_result"
+                )
+            elif contract.resource_mode == "coordinated":
+                reason = (
+                    "E5 requires both arms, but an arm is occupied; continuation "
+                    "requires an explicit step_result jointly held by both arms"
+                )
+            else:
+                reason = "the requested arm is occupied by a held object"
+            raise _InstructionResourceError(f"Instruction step {step_id!r}: {reason}.")
+        states = next_states
 
 
 def _validate_selector(value: Any, context: str) -> dict[str, Any]:
@@ -684,7 +859,21 @@ def _instruction_prompt(instruction: str) -> str:
         "do not invent missing objects. Use step_result for cross-step pronouns "
         "and explicit references to the result of an earlier manipulation. Keep "
         "an independently selected repeated noun as scene_ref; identical text "
-        "alone does not prove object identity. "
+        "alone does not prove object identity. A same-entity continuation remains "
+        "step_result even when the later clause redescribes its changed state, "
+        "such as 'the now-empty tray'. E6 opening and later closing the same part "
+        "use the opening step's result; intermediate target references to that "
+        "same part also use its step_result. Do not merge independently selected native parts "
+        "or distinct roles merely because they belong to one cabinet or appliance. "
+        "For placement, preserve containment: placing into or inside a container "
+        "requires relation=inside, not on. A location phrase describing that "
+        "container, such as 'the bowl left of the drawer', does not change the "
+        "placement relation to left_of. A step_result identifies the manipulated object, not its destination. "
+        "When another object goes into the same bowl or container, keep that "
+        "destination as a scene_ref with the explicit repeated destination phrase; "
+        "do not stack the second object on the first. Use a prior step_result "
+        "as the target only when that manipulated object itself is the requested "
+        "destination, not when the instruction repeats its former destination. "
         "Object directions are robot-relative; arm names are robot body sides. "
         "Preserve each concrete object or target phrase from the instruction as "
         "an open scene_ref.reference. Do not classify it or emit a scene UID. "
@@ -700,11 +889,23 @@ def _instruction_prompt(instruction: str) -> str:
         "the same user intent, emit one E4 with target, relation, and "
         "terminal_behavior=place; do not emit a trailing E1. Use "
         "terminal_behavior=hold only when the receiver should keep holding the "
-        "object. The exact output keys are steps -> id, "
+        "object. Each gripper can hold only one object: a held receiver cannot "
+        "accept another handover, and an E5 pickup requires both hands free. "
+        "For multiple objects that are handed over and then placed, use per-object "
+        "transfer and placement before the next object's handover, unless the "
+        "instruction explicitly requires a different order. An E5 continuation "
+        "of the jointly held object uses step_result; it does not acquire a "
+        "second object. The exact output keys are steps -> id, "
         "task_type, object, target, relation, required_arm, transfer_arm, "
         "receive_arm, orientation_goal, target_state, target_setting, layout, "
         "axis, direction, terminal_behavior, depends_on; each selector has kind, "
         "step_id, reference, quantifier, count.\n\n"
+        "For E3 only, the optional pour_goal_mode may be 'motion' when the user "
+        "explicitly requires only a tilt-and-restore action without actual liquid "
+        "transfer. Use 'fluid' or omit the field for actual fluid-transfer intent "
+        "or an unspecified evidence mode. Never weaken fluid-transfer intent to "
+        "motion merely because fluid simulation may be unavailable. Do not emit "
+        "pour_goal_mode for other E types.\n\n"
         "Use orientation_goal=none unless the instruction explicitly requests "
         "upright orientation or preserving the original orientation. Spatial "
         "placement and handover alone do not imply preserve. "
@@ -731,6 +932,11 @@ def _instruction_prompt(instruction: str) -> str:
         "Closing or pushing in that prismatic part is also E6 with target_state=closed. "
         "Opening a hinged cabinet, appliance, or other revolute door is E7 with "
         "target_state=open. Closing a hinged door is not modeled by E6 or E7. "
+        "For E8, target_setting is the explicitly requested printed numeric label, "
+        "not a rotation angle or an inferred temperature-to-angle conversion. "
+        "For labelled OFF/LOW/MED/HIGH controls use setting codes 0/1/2/3; "
+        "execution still requires an asset-specific calibrated label map. "
+        "Do not guess an unspecified knob setting. "
         f"Instruction:\n{instruction}\n\n"
         f"E1-E9 catalog:\n{json.dumps(_intent_capability_catalog(), ensure_ascii=False, sort_keys=True)}\n\n"
         "Shape-only complete JSON example (do not copy its step count or values; "
@@ -836,6 +1042,29 @@ def _instruction_selector_rules() -> str:
 
 def _instruction_repair_guidance(error: Exception) -> str:
     """Add narrow semantic guidance for errors weak JSON-mode models repeat."""
+    if isinstance(error, _InstructionPlacementError):
+        return (
+            "\nPlacement fidelity repair: re-read the original instruction. "
+            "Explicit containment, including 放入/放进/收进/装入, is relation=inside, "
+            "not on. A container's descriptive position is not the placement "
+            "relation. For 'put A into B, then put C into the same B', both "
+            "targets select B as scene_ref; step_result of the first placement "
+            "means A, not B. Do not change objects, destinations, ordering or "
+            "containment to obtain a bindable or easier task.\n"
+        )
+    if isinstance(error, _InstructionResourceError):
+        return (
+            "\nHeld-resource repair rule: re-read the original instruction. "
+            "Do not drop objects, arm requirements, targets, or ordering. When "
+            "the instruction requests handover followed by placement for each "
+            "object, encode per-object transfer and placement as one E4 with "
+            "terminal_behavior=place and its own target/relation, or explicitly "
+            "release the held step_result before the next transfer. Use "
+            "step_result for a same-object continuation, never infer identity "
+            "from repeated noun text. Do not add a release when the instruction "
+            "requires holding, or reorder an explicitly ordered clause merely "
+            "to avoid the conflict; an impossible request must remain invalid.\n"
+        )
     if "quantifier=all requires count=0" in str(error):
         return (
             "\nQuantifier repair rule: re-read the original instruction. If it "

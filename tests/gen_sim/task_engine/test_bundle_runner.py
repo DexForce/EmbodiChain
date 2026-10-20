@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from collections import deque
 from types import SimpleNamespace
 from unittest.mock import Mock
 from typing import ClassVar
@@ -29,6 +30,246 @@ import torch
 
 from embodichain.gen_sim.task_engine import _bundle_runner
 from embodichain.gen_sim.task_engine._bundle_runner import _exception_metadata
+
+
+@pytest.mark.parametrize("raises", [False, True])
+def test_single_cpu_runtime_thread_scope_restores_caller(monkeypatch, raises):
+    from embodichain.gen_sim.task_engine._task_program.motion import _CPU_BATCH_THREADS
+
+    state = {"threads": 8}
+    calls = []
+
+    def set_threads(value):
+        calls.append(value)
+        state["threads"] = value
+
+    monkeypatch.setattr(torch, "get_num_threads", lambda: state["threads"])
+    monkeypatch.setattr(torch, "set_num_threads", set_threads)
+    env = SimpleNamespace(unwrapped=SimpleNamespace(device="cpu", num_envs=1))
+    try:
+        with _bundle_runner._cpu_runtime_threads(env):
+            assert state["threads"] == 1
+            assert _CPU_BATCH_THREADS.get() == 8
+            if raises:
+                raise RuntimeError("episode failure")
+    except RuntimeError:
+        assert raises
+    assert calls == [1, 8]
+    assert state["threads"] == 8
+    assert _CPU_BATCH_THREADS.get() is None
+
+
+@pytest.mark.parametrize("device, num_envs", [("cuda:0", 1), ("cpu", 2)])
+def test_runtime_threads_leave_gpu_and_batch_policy_unchanged(
+    monkeypatch, device, num_envs
+):
+    setter = Mock()
+    monkeypatch.setattr(torch, "set_num_threads", setter)
+    env = SimpleNamespace(unwrapped=SimpleNamespace(device=device, num_envs=num_envs))
+    with _bundle_runner._cpu_runtime_threads(env):
+        pass
+    setter.assert_not_called()
+
+
+def test_feedback_audit_snapshot_owns_rows_before_reset():
+    row = {"window_timestamps": [1.0, 1.01, 1.02], "alignment_accepted": True}
+    audit = deque([row])
+    sensor = SimpleNamespace(_feedback_state=SimpleNamespace(audit=audit))
+    env = SimpleNamespace(sim=SimpleNamespace(get_sensor=Mock(return_value=sensor)))
+    deployment = SimpleNamespace(
+        integration=SimpleNamespace(
+            adapter_factory=SimpleNamespace(
+                twist_routes=(
+                    SimpleNamespace(
+                        feedback_enabled=True,
+                        sensor_uid="gen_sim_twist_evidence",
+                        operation_id="step_01",
+                    ),
+                )
+            )
+        )
+    )
+    evidence = _bundle_runner._snapshot_twist_feedback_audit(env, deployment)
+    row["window_timestamps"][0] = 99.0
+    audit.clear()
+    assert evidence == {
+        "feedback_audit": [
+            {"window_timestamps": [1.0, 1.01, 1.02], "alignment_accepted": True}
+        ]
+    }
+
+
+@pytest.mark.parametrize("routes", [(), (SimpleNamespace(feedback_enabled=False),)])
+def test_default_feedback_snapshot_does_not_lookup_sensor_or_add_keys(routes):
+    lookup = Mock(side_effect=AssertionError("Default None may not add sensor reads"))
+    env = SimpleNamespace(sim=SimpleNamespace(get_sensor=lookup))
+    deployment = SimpleNamespace(
+        integration=SimpleNamespace(
+            adapter_factory=SimpleNamespace(twist_routes=routes)
+        )
+    )
+    assert _bundle_runner._snapshot_twist_feedback_audit(env, deployment) == {}
+    lookup.assert_not_called()
+
+
+@pytest.mark.parametrize("factory", [None, object()])
+def test_legacy_grip_capture_never_looks_up_or_samples_sensor(factory) -> None:
+    lookup = Mock(
+        side_effect=AssertionError("Legacy provider must not add sensor reads")
+    )
+    env = SimpleNamespace(sim=SimpleNamespace(get_sensor=lookup))
+    deployment = SimpleNamespace(
+        integration=SimpleNamespace(
+            registration=SimpleNamespace(control_part_evidence_factory=factory)
+        )
+    )
+    assert _bundle_runner._snapshot_grip_contact_evidence(env, deployment) is None
+    lookup.assert_not_called()
+
+
+@pytest.mark.parametrize("has_recovery", [False, True])
+def test_recovery_summary_separates_real_completion_without_changing_verdict(
+    has_recovery,
+) -> None:
+    recovery = {
+        "role": "reacquire",
+        "masks": {"entered": [True], "completed": [True], "failed": [False]},
+        "call": {"command_count": 3},
+        "message": "Original hold was lost before this real pickup.",
+    }
+    runtime = {
+        "success": [True],
+        "task_spec_evaluation": {"environments": [{"status": "failed"}]},
+        "segments": [
+            {
+                "name": "original_step",
+                "active": [True],
+                "metadata": {
+                    "runtime": {
+                        "kind": "skill_result",
+                        "schema_version": 2,
+                        "env_ids": [0],
+                        "workflow_recoveries": [recovery] if has_recovery else [],
+                        "events": [],
+                        "failures": [],
+                    }
+                },
+            }
+        ],
+    }
+    report = {
+        "environments": [{"env_id": 0, "success": False}],
+        "runtime_result": runtime,
+    }
+    snapshot = json.loads(json.dumps(report))
+    summary = _bundle_runner._recovery_summary(report)
+    row = summary["environments"][0]
+    assert row["completion_kind"] == (
+        "recovered_completion" if has_recovery else "first_pass_completion"
+    )
+    assert row["program_success"] is True and row["certified_success"] is False
+    assert report == snapshot
+    if has_recovery:
+        assert (
+            summary["workflow_recoveries"][0]["trace"]["message"] == recovery["message"]
+        )
+
+
+@pytest.mark.parametrize(
+    "damage", ["missing", "mask", "core_recovery", "prepared_only"]
+)
+def test_unknown_or_incomplete_recovery_history_is_not_called_first_pass(
+    damage,
+) -> None:
+    runtime = {
+        "kind": "skill_result",
+        "schema_version": 2,
+        "env_ids": [0],
+        "workflow_recoveries": [],
+        "events": [],
+        "failures": [],
+    }
+    if damage == "missing":
+        runtime.pop("workflow_recoveries")
+    elif damage == "mask":
+        runtime["workflow_recoveries"] = [
+            {"role": "reacquire", "masks": {"entered": [True, False]}}
+        ]
+    elif damage == "core_recovery":
+        runtime["events"] = [{"kind": "replanned", "env_mask": [True]}]
+    else:
+        runtime["workflow_recoveries"] = [
+            {
+                "role": "reacquire",
+                "masks": {"entered": [True], "completed": [False], "failed": [True]},
+                "call": None,
+            }
+        ]
+    report = {
+        "environments": [{"env_id": 0, "success": True}],
+        "runtime_result": {
+            "success": [True],
+            "segments": [{"active": [True], "metadata": {"runtime": runtime}}],
+        },
+    }
+    assert (
+        _bundle_runner._recovery_summary(report)["environments"][0]["completion_kind"]
+        == "unknown"
+    )
+
+
+@pytest.mark.parametrize("metadata", [None, [], {"runtime": None}, {"runtime": []}])
+def test_malformed_runtime_snapshot_still_publishes_unknown_summary(metadata) -> None:
+    report = {
+        "environments": [{"env_id": 0, "success": True}],
+        "runtime_result": {
+            "success": [True],
+            "segments": [{"active": [True], "metadata": metadata}],
+        },
+    }
+    summary = _bundle_runner._recovery_summary(report)
+    assert summary["environments"][0]["completion_kind"] == "unknown"
+    json.dumps(summary, allow_nan=False)
+
+
+def test_recovery_summary_uses_runtime_env_identity_not_mask_position() -> None:
+    report = {
+        "environments": [
+            {"env_id": 0, "success": True},
+            {"env_id": 1, "success": True},
+        ],
+        "runtime_result": {
+            "success": [True, True],
+            "segments": [
+                {
+                    "active": [True, True],
+                    "metadata": {
+                        "runtime": {
+                            "kind": "skill_result",
+                            "schema_version": 2,
+                            "env_ids": [1, 0],
+                            "events": [],
+                            "failures": [],
+                            "workflow_recoveries": [
+                                {
+                                    "role": "reacquire",
+                                    "masks": {
+                                        "entered": [True, False],
+                                        "completed": [True, False],
+                                        "failed": [False, False],
+                                    },
+                                    "call": {"command_count": 3},
+                                }
+                            ],
+                        }
+                    },
+                }
+            ],
+        },
+    }
+    rows = _bundle_runner._recovery_summary(report)["environments"]
+    assert rows[0]["completion_kind"] == "first_pass_completion"
+    assert rows[1]["completion_kind"] == "recovered_completion"
 
 
 @pytest.mark.parametrize(
@@ -206,16 +447,37 @@ def test_initial_capture_counts_sequential_workflows_not_segments():
 
 
 @pytest.mark.parametrize(
-    "probe_only, outcome",
+    "probe_only, outcome, evidence_mode",
     [
-        (False, "success"),
-        (True, "success"),
-        (False, "planning_failure"),
-        (False, "velocity_failure"),
-        (False, "exception"),
+        (False, "success", "none"),
+        (True, "success", "none"),
+        (False, "planning_failure", "none"),
+        (False, "velocity_failure", "none"),
+        (False, "exception", "none"),
+        (False, "success", "twist_default"),
+        (False, "exception", "twist_default"),
+        (False, "success", "twist_feedback"),
+        (False, "exception", "twist_feedback"),
+        (False, "success", "twist_audit_error"),
+        (False, "exception", "twist_audit_error"),
+        (False, "success", "grip"),
+        (False, "exception", "grip"),
+        (False, "success", "grip_nonfinite"),
     ],
 )
-def test_bundle_plans_initial_call_once(tmp_path, monkeypatch, probe_only, outcome):
+@pytest.mark.parametrize("e_results_write_fails", [False, True])
+def test_bundle_plans_initial_call_once(
+    tmp_path, monkeypatch, probe_only, outcome, evidence_mode, e_results_write_fails
+):
+    if e_results_write_fails:
+        original_write_text = Path.write_text
+
+        def write_text(path, *args, **kwargs):
+            if path.name == "task_group_results.json":
+                raise OSError("fixture E-group sidecar unavailable")
+            return original_write_text(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "write_text", write_text)
     import gymnasium
     from dataclasses import dataclass
     from embodichain.lab.gym.envs import demo
@@ -291,6 +553,8 @@ def test_bundle_plans_initial_call_once(tmp_path, monkeypatch, probe_only, outco
         invocation_id="test/segment-0:0",
         motion_policy=MotionPolicy(),
         skill_options=SimpleNamespace(),
+        skill_id="move_joints",
+        goal=None,
     )
     positions = torch.zeros(1, 2, 1)
     if outcome == "velocity_failure":
@@ -312,7 +576,89 @@ def test_bundle_plans_initial_call_once(tmp_path, monkeypatch, probe_only, outco
     if outcome == "exception":
         planning.side_effect = ValueError("fixture planning exception")
     monkeypatch.setattr(AtomicActionEngine, "_plan_request", planning)
-    env = SimpleNamespace(reset=Mock(), close=Mock())
+    env = SimpleNamespace(reset=Mock(), close=Mock(), device="cpu", num_envs=1)
+    env.unwrapped = env
+    audit_record = {
+        "decision": "tracking_window",
+        "alignment_accepted": True,
+        "angle_deg": 1.0,
+        "spread_mm": 0.2,
+        "position_error_mm": 10.0,
+        "window_timestamps": [1.0, 1.01, 1.02],
+    }
+    feedback = None
+    grip_observer = None
+    if evidence_mode in {"grip", "grip_nonfinite"}:
+        from embodichain.gen_sim.task_engine._task_program.grip_evidence import (
+            NativeGripObserver,
+            NativeGripEvidenceFactory,
+        )
+
+        sensor = SimpleNamespace(
+            update=Mock(),
+            get_data=Mock(
+                return_value={
+                    "is_valid": torch.tensor([[True, True]]),
+                    "user_ids": torch.tensor([[[1, 9], [2, 9]]]),
+                    "normal": torch.tensor([[[1.0, 0, 0], [-1.0, 0, 0]]]),
+                    "impulse": torch.tensor([[0.02, 0.03]]),
+                }
+            ),
+            dropped_contacts=0,
+        )
+        grip_observer = NativeGripObserver(
+            sensor, {"item": torch.tensor([[9]])}, {"left_eef": torch.tensor([[1, 2]])}
+        )
+        if evidence_mode == "grip_nonfinite":
+            sensor.get_data.return_value["normal"][0, 0, 0] = float("nan")
+        deployment.integration.registration.control_part_evidence_factory = (
+            NativeGripEvidenceFactory(source=object(), object_bindings=())
+        )
+        env.sim = SimpleNamespace(get_sensor=Mock(return_value=sensor))
+        env.reset.side_effect = lambda *a, **kw: grip_observer.trace.clear()
+    elif evidence_mode != "none":
+        from embodichain.gen_sim.task_engine._task_program.press_runtime import (
+            PressContactSensor,
+        )
+
+        enabled = evidence_mode != "twist_default"
+        route = SimpleNamespace(
+            operation_id="step_01",
+            sensor_uid="gen_sim_twist_evidence.step_01",
+            feedback_enabled=enabled,
+            binding=SimpleNamespace(link="rotor"),
+            payload=lambda: {"feedback_enabled": enabled},
+        )
+        deployment.integration.adapter_factory.twist_routes = (route,)
+        sensor = object.__new__(PressContactSensor)
+        sensor.route = route
+        sensor.acceptance = {"accepted": outcome == "success"}
+        sensor.target_actor, sensor.parent_actor, sensor.table_actor = 3, 4, 5
+        sensor.contact_envelopes, sensor.trace = {}, []
+        sensor.finger_actors, sensor.joint_index = {1, 2}, 0
+        sensor.art = SimpleNamespace(
+            get_mass=lambda *a: torch.tensor([[0.18]]),
+            get_qpos_limits=lambda: torch.tensor([[[-2.0, 2.0]]]),
+            get_joint_drive=lambda **kw: (torch.ones(1), torch.ones(1)),
+        )
+        sensor.startup_evidence = lambda: {"summary": {"accepted": True}}
+        sensor.geometry_evidence = lambda: {"source_edited": False}
+        feedback = SimpleNamespace(audit=deque()) if enabled else None
+        sensor._feedback_state = feedback
+        env.sim = SimpleNamespace(get_sensor=lambda uid: sensor)
+        env.reset.side_effect = lambda *a, **kw: (
+            feedback.audit.clear() if feedback is not None else None
+        )
+        monkeypatch.setattr(
+            _bundle_runner, "_configure_twist_recorders", lambda *a: None
+        )
+        if evidence_mode == "twist_audit_error":
+
+            class Uncopyable:
+                def __deepcopy__(self, memo):
+                    raise RuntimeError("fixture feedback audit snapshot error")
+
+            audit_record["uncopyable"] = Uncopyable()
     monkeypatch.setattr(gymnasium, "make", lambda **kw: env)
     monkeypatch.setattr(registration, "discover_task_packages", lambda: None)
     monkeypatch.setattr(registration, "execute_init_hooks", lambda: None)
@@ -346,9 +692,11 @@ def test_bundle_plans_initial_call_once(tmp_path, monkeypatch, probe_only, outco
     monkeypatch.setattr(
         _bundle_runner, "_preserve_failed_execution_recording", lambda *a, **kw: None
     )
-    monkeypatch.setattr(_bundle_runner, "_print_json", lambda *a: None)
+    print_json = Mock()
+    monkeypatch.setattr(_bundle_runner, "_print_json", print_json)
 
     def probe(*args):
+        assert torch.get_num_threads() == 1
         plan = engine._plan_request(request)
         return {"plan_success": plan.plan_success.tolist()}
 
@@ -358,6 +706,22 @@ def test_bundle_plans_initial_call_once(tmp_path, monkeypatch, probe_only, outco
     dispatched = []
 
     def execute(*args, **kwargs):
+        assert torch.get_num_threads() == 1
+        if feedback is not None:
+            feedback.audit.append(audit_record)
+        if grip_observer is not None:
+            grip_observer(
+                SimpleNamespace(
+                    expectation=SimpleNamespace(object_id="item"),
+                    source=SimpleNamespace(
+                        address=SimpleNamespace(control_part="left_eef")
+                    ),
+                    clause=SimpleNamespace(expected=True),
+                ),
+                SimpleNamespace(
+                    env_ids=torch.tensor([0]), timestamp=0.25, observation_revision=1
+                ),
+            )
         plan = engine._plan_request(request)
         if plan.plan_success.any():
             dispatched.append(plan)
@@ -386,6 +750,7 @@ def test_bundle_plans_initial_call_once(tmp_path, monkeypatch, probe_only, outco
     assert planning.call_count == 1
     assert probe_call.call_count == int(probe_only)
     assert execute_call.call_count == int(not probe_only)
+    assert print_json.call_count == int(probe_only)
     report = json.loads((tmp_path / "execution/planning_probe.json").read_text())
     assert report["plan_success"] == (
         [] if outcome == "exception" else [outcome == "success"]
@@ -403,6 +768,22 @@ def test_bundle_plans_initial_call_once(tmp_path, monkeypatch, probe_only, outco
         execution_report = json.loads(
             (tmp_path / "execution/execution_report.json").read_text()
         )
+        if not e_results_write_fails:
+            e_results = json.loads(
+                (tmp_path / "execution/task_group_results.json").read_text()
+            )
+            assert e_results["schema_version"] == "gen_sim_task_group_results/v1"
+            assert e_results["source"] == "execution_report.json"
+            assert len(e_results["environments"]) == 1
+            assert e_results["environments"][0]["step"]["status"] == (
+                "failed"
+                if outcome in {"planning_failure", "velocity_failure"}
+                else "unverified"
+            )
+        else:
+            assert not (tmp_path / "execution/task_group_results.json").exists()
+            assert (tmp_path / "execution/recovery_summary.json").is_file()
+        assert "task_groups" not in execution_report["environments"][0]
         assert execution_report["status"] == (
             "succeeded"
             if outcome == "success"
@@ -410,6 +791,40 @@ def test_bundle_plans_initial_call_once(tmp_path, monkeypatch, probe_only, outco
         )
     if outcome == "exception":
         assert report["failure"]["message"] == "fixture planning exception"
+    if evidence_mode in {"grip", "grip_nonfinite"}:
+        evidence = json.loads(
+            (tmp_path / "execution/grip_contact_evidence.json").read_text()
+        )
+        assert evidence["source"] == "native_contact_sensor"
+        assert (
+            evidence["retained_query_count"] == evidence["cumulative_query_count"] == 1
+        )
+        assert evidence["trace"][0]["rows"][0]["valid"] is (evidence_mode == "grip")
+        if evidence_mode == "grip_nonfinite":
+            assert evidence["finite_audit"]["valid"] is False
+            assert evidence["trace"][0]["rows"][0]["raw_contacts"]["normals"][0][0] == {
+                "nonfinite": "NaN"
+            }
+        assert not grip_observer.trace
+        assert sensor.update.call_count == sensor.get_data.call_count == 1
+    elif evidence_mode != "none":
+        evidence = json.loads((tmp_path / "execution/twist_evidence.json").read_text())
+        if evidence_mode == "twist_default":
+            assert (
+                "feedback_audit" not in evidence
+                and "feedback_audit_error" not in evidence
+            )
+        elif evidence_mode == "twist_feedback":
+            assert evidence["feedback_audit"] == [audit_record]
+            assert "feedback_audit_error" not in evidence
+        else:
+            assert "feedback_audit" not in evidence
+            assert evidence["feedback_audit_error"] == {
+                "type": "RuntimeError",
+                "message": "fixture feedback audit snapshot error",
+            }
+        if feedback is not None:
+            assert not feedback.audit
 
 
 @pytest.mark.parametrize("fails", [False, True])
@@ -750,6 +1165,38 @@ def test_module_entrypoint_flushes_protocol_before_fast_exit(
 
     assert flushes == ["stdout", "stderr"]
     assert exit_codes == [7]
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_twist_recorder_selection_follows_real_short_name_event_decode(enabled):
+    from embodichain.lab.gym.envs import managers
+    from embodichain.lab.gym.envs.managers import record
+    from embodichain.gen_sim.task_engine._task_program.twist_recording import (
+        E8CameraRecorder,
+    )
+    from embodichain.utils.module_utils import find_function_from_modules
+
+    resolved = find_function_from_modules(
+        "record_camera_data", [record], raise_if_not_found=True
+    )
+    first = managers.EventCfg(
+        func=resolved,
+        mode="interval",
+        params={"name": "task_program_audience_view"},
+        interval_step=5,
+    )
+    second = managers.EventCfg(
+        func=resolved, mode="interval", params={"name": "e8_knob_view"}, interval_step=5
+    )
+    env_cfg = SimpleNamespace(
+        events=SimpleNamespace(record_camera=first, record_press_camera=second)
+    )
+    _bundle_runner._configure_twist_recorders(env_cfg, enabled)
+    expected = E8CameraRecorder if enabled else record.record_camera_data
+    assert first.func is expected and second.func is expected
+    assert first.interval_step == second.interval_step == 5
+    assert first.params == {"name": "task_program_audience_view"}
+    assert second.params == {"name": "e8_knob_view"}
 
 
 __all__: list[str] = []

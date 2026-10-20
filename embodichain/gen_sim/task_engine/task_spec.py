@@ -34,7 +34,7 @@ from embodichain.gen_sim.task_spec import (
     validate_task_spec,
 )
 
-from .contracts import TaskCandidate, validate_task_candidate
+from .contracts import TaskCandidate, canonical_hash, validate_task_candidate
 
 __all__ = [
     "TaskSpecGenerator",
@@ -90,6 +90,11 @@ def task_spec_from_candidate(
         arguments.update(_semantic_step_arguments(steps_by_id[step_id]))
         # When grounding has no target role, retain the semantic step type but
         # do not invent a physical pose or coordinate.
+        orientation = (
+            arguments.pop("orientation_goal", None)
+            if name in {"semantic_goal", "handover_complete", "held_by_both_grippers"}
+            else None
+        )
         step_goals[step_id].append(
             Predicate(
                 name=name,
@@ -97,34 +102,84 @@ def task_spec_from_candidate(
                 expected=True,
             )
         )
+        if orientation is not None:
+            step_goals[step_id].append(
+                Predicate(
+                    "object_upright" if orientation == "upright" else "orientation",
+                    {
+                        "subject": roles["object"],
+                        "task_type": str(steps_by_id[step_id]["task_type"]),
+                        "orientation_goal": orientation,
+                    },
+                )
+            )
+        if steps_by_id[step_id]["task_type"] == "E4" and name != "handover_complete":
+            step_goals[step_id].append(Predicate("handover_complete", arguments))
+        if (
+            steps_by_id[step_id]["task_type"] == "E5"
+            and name != "held_by_both_grippers"
+        ):
+            step_goals[step_id].append(Predicate("held_by_both_grippers", arguments))
 
-    # Candidate success terms describe every intermediate achievement.  The
-    # normative ``goal`` is the final authored step; earlier achievements stay
-    # available as ordered milestones instead of being treated as simultaneous
-    # terminal state.
-    terminal_steps = [str(steps[-1]["id"])] if steps else []
-    goals = [
-        predicate
-        for step_id in terminal_steps
-        for predicate in step_goals.get(step_id, ())
-    ]
-    if not goals:
-        goals = [predicate for values in step_goals.values() for predicate in values]
+    goals, goal_sources = _terminal_goals(steps, step_roles, step_goals)
     requirements = _requirements(role_specs, steps, goals)
-    milestones = tuple(
-        MilestoneSpec(
-            milestone_id=str(step["id"]),
-            achieve=tuple(step_goals.get(str(step["id"]), ())),
-            after=tuple(str(value) for value in step.get("depends_on", ())),
+    milestones = []
+    milestone_sources = {}
+    for step in steps:
+        step_id = str(step["id"])
+        achievements = list(step_goals.get(step_id, ()))
+        after = tuple(str(value) for value in step.get("depends_on", ()))
+        # Acquisition and release are successive states, never one conjunction.
+        if step["task_type"] in {"E4", "E5"} and step["terminal_behavior"] == "place":
+            acquisition = (
+                "handover_complete"
+                if step["task_type"] == "E4"
+                else "held_by_both_grippers"
+            )
+            acquire_id = f"{step_id}.acquired"
+            milestones.append(
+                MilestoneSpec(
+                    milestone_id=acquire_id,
+                    achieve=tuple(
+                        p.with_id(f"milestone:{acquire_id}:{i}")
+                        for i, p in enumerate(achievements)
+                        if p.name == acquisition
+                    ),
+                    after=after,
+                )
+            )
+            milestone_sources[acquire_id] = step_id
+            achievements = [p for p in achievements if p.name != acquisition]
+            after = (acquire_id,)
+        milestones.append(
+            MilestoneSpec(
+                milestone_id=step_id,
+                achieve=tuple(
+                    p.with_id(f"milestone:{step_id}:{i}")
+                    for i, p in enumerate(achievements)
+                ),
+                after=after,
+            )
         )
-        for step in steps
-        if step_goals.get(str(step["id"]))
-    )
+        milestone_sources[step_id] = step_id
     source_metadata: dict[str, Any] = {
         "generator": "embodichain.gen_sim.task_engine",
         "candidate_id": selected["candidate_id"],
         "legacy_semantic_hash": selected["semantic_hash"],
         "task_candidate_schema": draft["schema_version"],
+        "terminal_goal_policy": "explicit_state_slots/v1",
+        "instruction_coverage": "validated_draft_only",
+        "step_roles": step_roles,
+        "role_references": {
+            role.name: [
+                str(ref["reference_id"])
+                for ref in references
+                if reference_roles[_reference_key(ref)] == role.name
+            ]
+            for role in role_specs
+        },
+        "goal_sources": goal_sources,
+        "milestone_sources": milestone_sources,
     }
     if metadata is not None:
         source_metadata["caller"] = dict(metadata)
@@ -136,7 +191,7 @@ def task_spec_from_candidate(
         goal=tuple(goals),
         invariants=(),
         temporal=(),
-        milestones=milestones,
+        milestones=tuple(milestones),
         requirements=requirements,
         metadata=source_metadata,
     )
@@ -179,7 +234,8 @@ def generate_task_spec(
         return template
     cached = cache.get(template.semantic_hash)
     if cached is not None:
-        return cached
+        # Cache normative identity, never another run's role/evidence metadata.
+        return template
     cache.put(template)
     return template
 
@@ -230,20 +286,18 @@ def _select_candidate(
 
 def _roles(
     references: list[Mapping[str, Any]],
-) -> tuple[tuple[RoleSpec, ...], dict[tuple[str, str, str], str]]:
-    grouped: dict[tuple[str, str, str], list[Mapping[str, Any]]] = defaultdict(list)
+) -> tuple[tuple[RoleSpec, ...], dict[tuple[str, str, str, str, int], str]]:
+    grouped: dict[tuple[str, str, str, str, int], list[Mapping[str, Any]]] = (
+        defaultdict(list)
+    )
     for reference in references:
-        key = (
-            str(reference["role"]),
-            str(reference["reference"]),
-            str(reference["source_structure"]),
-        )
+        key = _reference_key(reference)
         grouped[key].append(reference)
     roles: list[RoleSpec] = []
-    role_by_key: dict[tuple[str, str, str], str] = {}
+    role_by_key: dict[tuple[str, str, str, str, int], str] = {}
     used: set[str] = set()
     for index, key in enumerate(sorted(grouped), start=1):
-        role, reference, source_structure = key
+        role, reference, source_structure, quantifier, count = key
         # Role IDs are canonical protocol references.  The grounded natural
         # language reference remains an implementation detail of SceneAdapter
         # and must not leak into the TaskSpec semantic identity.
@@ -256,11 +310,17 @@ def _roles(
         initial_state: dict[str, Any] = {}
         attributes: dict[str, Any] = {}
         for item in items:
-            initial_state.update(item["initial_state"])
-            attributes.update(item["attributes"])
+            for target, incoming in (
+                (initial_state, item["initial_state"]),
+                (attributes, item["attributes"]),
+            ):
+                for field, value in incoming.items():
+                    if field in target and target[field] != value:
+                        raise ValueError(
+                            f"Conflicting TaskSpec role declaration: {reference!r}.{field}."
+                        )
+                    target[field] = value
         kind = _role_kind(role, source_structure)
-        quantifier = str(items[0]["quantifier"])
-        count = int(items[0]["count"])
         roles.append(
             RoleSpec(
                 name=name,
@@ -281,7 +341,7 @@ def _roles(
 def _step_roles(
     steps: list[Mapping[str, Any]],
     references: list[Mapping[str, Any]],
-    role_by_key: Mapping[tuple[str, str, str], str],
+    role_by_key: Mapping[tuple[str, str, str, str, int], str],
 ) -> dict[str, dict[str, str]]:
     result: dict[str, dict[str, str]] = {}
     for step in steps:
@@ -290,6 +350,16 @@ def _step_roles(
         for role in ("object", "target"):
             selector = step[role]
             if selector["kind"] == "step_result":
+                source = next(
+                    item for item in steps if item["id"] == selector["step_id"]
+                )
+                if (
+                    source["object"]["quantifier"] == "all"
+                    or source["object"]["count"] > 1
+                ):
+                    raise ValueError(
+                        "A step_result cannot silently select from multiple subjects."
+                    )
                 result[step_id][role] = result[str(selector["step_id"])]["object"]
                 continue
             if selector["kind"] != "scene_ref":
@@ -299,13 +369,86 @@ def _step_roles(
                 for item in references
                 if item["step_id"] == step_id and item["role"] == role
             )
-            key = (
-                str(reference["role"]),
-                str(reference["reference"]),
-                str(reference["source_structure"]),
-            )
+            key = _reference_key(reference)
             result[step_id][role] = role_by_key[key]
     return result
+
+
+def _reference_key(reference: Mapping[str, Any]) -> tuple[str, str, str, str, int]:
+    return (
+        str(reference["role"]),
+        str(reference["reference"]),
+        str(reference["source_structure"]),
+        str(reference["quantifier"]),
+        int(reference["count"]),
+    )
+
+
+def _terminal_goals(
+    steps: list[Mapping[str, Any]],
+    roles: Mapping[str, Mapping[str, str]],
+    achievements: Mapping[str, list[Predicate]],
+) -> tuple[list[Predicate], dict[str, list[str]]]:
+    # State slots can be superseded; historical achievements remain milestones.
+    slots: dict[tuple[str, str], tuple[Predicate, str]] = {}
+    events: dict[str, tuple[Predicate, str]] = {}
+    for step in steps:
+        step_id, kind = str(step["id"]), str(step["task_type"])
+        subject = roles[step_id]["object"]
+        predicates = achievements[step_id]
+        if kind in {"E1", "E3", "E4", "E5"}:
+            slots.pop((subject, "placement"), None)
+            slots.pop((subject, "attachment"), None)
+            if step["orientation_goal"] != "preserve":
+                slots.pop((subject, "orientation"), None)
+                slots.pop((subject, "orientation_preserve"), None)
+        if kind == "E2":
+            slots.pop((subject, "attachment"), None)
+            slots.pop((subject, "orientation_preserve"), None)
+            previous = slots.get((subject, "placement"))
+            if previous is not None and previous[0].arguments.get("relation") not in {
+                "on",
+                "above",
+            }:
+                slots.pop((subject, "placement"), None)
+        for predicate in predicates:
+            if predicate.name in {"poured", "pour_motion", "pressed"} or (
+                predicate.name == "semantic_goal"
+                and predicate.arguments.get("task_type") == "E8"
+            ):
+                events[canonical_hash(predicate.to_dict())] = (predicate, step_id)
+            elif predicate.name in {"object_upright", "orientation"}:
+                slot = (
+                    "orientation_preserve"
+                    if predicate.name == "orientation"
+                    and (subject, "orientation") in slots
+                    else "orientation"
+                )
+                slots[(subject, slot)] = (predicate, step_id)
+            elif predicate.name == "articulation_joint_near":
+                slots[(subject, "articulation")] = (predicate, step_id)
+            elif predicate.name == "semantic_goal":
+                slots[(subject, "placement")] = (predicate, step_id)
+            elif (
+                predicate.name == "handover_complete"
+                and step["terminal_behavior"] == "hold"
+            ):
+                arguments = dict(predicate.arguments)
+                arguments.pop("orientation_goal", None)
+                slots[(subject, "attachment")] = (Predicate("held", arguments), step_id)
+            elif (
+                predicate.name == "held_by_both_grippers"
+                and step["terminal_behavior"] == "hold"
+            ):
+                slots[(subject, "attachment")] = (predicate, step_id)
+    goals, sources = [], {}
+    for index, (predicate, step_id) in enumerate(
+        (*slots.values(), *events.values()), 1
+    ):
+        predicate = predicate.with_id(f"goal_{index:03d}")
+        goals.append(predicate)
+        sources[predicate.id] = [step_id]
+    return goals, sources
 
 
 def _role_kind(role: str, source_structure: str) -> str:
@@ -339,11 +482,13 @@ def _semantic_step_arguments(step: Mapping[str, Any]) -> dict[str, Any]:
         value = step.get(name, default)
         if value != default:
             result[name] = value
-    required_arm = str(step.get("required_arm", "none"))
-    if required_arm not in {"none", "auto"}:
+    for field in ("required_arm", "transfer_arm", "receive_arm"):
+        required_arm = str(step.get(field, "none"))
+        if required_arm in {"none", "auto"}:
+            continue
         # An explicitly requested arm is a task requirement; automatic arm
         # selection remains a witness/planner choice.
-        result["required_arm"] = required_arm
+        result[field] = required_arm
     return result
 
 
@@ -374,9 +519,10 @@ def _requirements(
         )
     required_arms = sorted(
         {
-            str(step["required_arm"])
+            str(step[field])
             for step in steps
-            if str(step.get("required_arm", "none")) not in {"none", "auto"}
+            for field in ("required_arm", "transfer_arm", "receive_arm")
+            if str(step.get(field, "none")) not in {"none", "auto"}
         }
     )
     if required_arms:

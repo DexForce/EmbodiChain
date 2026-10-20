@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import math
-from typing import Any, ClassVar, Final
+from typing import Any, ClassVar
 
 import torch
 
@@ -47,10 +47,11 @@ from embodichain.lab.task_program.semantics import (
 )
 from embodichain.utils.math import axis_angle_to_rotation_matrix
 
+from .state_handoff import GenSimStateHandoff
+
 __all__: list[str] = []
 
 ALIGN_HELD_CALL = "gen_sim.align_held"
-_UPRIGHT_STAGING_CLEARANCE: Final = 0.20
 
 
 class _AlignHeldLowerer(RegisteredSemanticLowerer):
@@ -86,11 +87,13 @@ class _AlignHeldLowerer(RegisteredSemanticLowerer):
         axis, position = self._routes[
             (args["object"], args["target"], args["preserve_yaw"])
         ]
+        handoff = GenSimStateHandoff.from_binding(
+            bound.binding.action_binding,
+            context,
+            participant="Held alignment",
+        )
         resource = bound.binding.resources["primary"]
-        key = resource.endpoints["motion"].task_state_key
-        held = context.task.get_held_object(key)
-        if held is None or held.semantics.entity_id != args["object"]:
-            raise ValueError("Held alignment requires the declared object to be held.")
+        held = handoff.require_held(entity_id=args["object"])
         effect = (
             RegisteredSemanticEffect(
                 effect_kind=SemanticEffectKind.ATTACH,
@@ -141,20 +144,7 @@ class _AlignHeldLowerer(RegisteredSemanticLowerer):
             staging_pose[:, :2, 3] = pose[:, :2, 3]
             # A lower destination must not force the old heading down before
             # the yaw-free planner can select a reachable final orientation.
-            is_upright_final_target = args["target"].endswith(
-                "_upright_target"
-            ) and not args["target"].endswith("_upright_staging_target")
-            staging_clearance = (
-                _UPRIGHT_STAGING_CLEARANCE
-                if not args["preserve_yaw"] and is_upright_final_target
-                else 0.0
-            )
-            staging_pose[:, 2, 3] = torch.maximum(
-                staging_pose[:, 2, 3],
-                pose[:, 2, 3] + pose.new_tensor(staging_clearance),
-            )
-        else:
-            is_upright_final_target = False
+            staging_pose[:, 2, 3] = torch.maximum(staging_pose[:, 2, 3], pose[:, 2, 3])
         if args["preserve_yaw"]:
             return SemanticLowering(
                 goal=HeldObjectPoseGoal(pose), registered_effect=effect
@@ -183,26 +173,11 @@ class _AlignHeldLowerer(RegisteredSemanticLowerer):
         )
         # Lift with the acquired orientation before turning the object. A
         # coupled rotation/translation can hit joint limits or sweep the table.
-        if position is not None:
-            if is_upright_final_target:
-                # Keep the old two-call motion boundary inside one semantic
-                # call: translate with the observed heading, rotate at the
-                # clearance height, and then descend with that same heading.
-                aligned_staging_pose = staging_pose.clone()
-                aligned_staging_pose[:, :3, :3] = pose[:, :3, :3]
-                target_poses = torch.stack(
-                    (staging_pose, aligned_staging_pose, pose), dim=1
-                )
-            else:
-                target_poses = torch.stack((staging_pose, pose), dim=1)
-        else:
-            target_poses = pose
+        target_poses = (
+            torch.stack((staging_pose, pose), dim=1) if position is not None else pose
+        )
         return SemanticLowering(
-            goal=HeldObjectPoseGoal(
-                target_poses,
-                world_yaw_free=True,
-                world_yaw_free_path=is_upright_final_target,
-            ),
+            goal=HeldObjectPoseGoal(target_poses, world_yaw_free=True),
             registered_effect=effect,
         )
 
@@ -217,7 +192,7 @@ class _RetainedAlignHeldLowerer(_AlignHeldLowerer):
 @dataclass(frozen=True, slots=True)
 class _AlignHeldFactory:
     call_id: ClassVar[str] = ALIGN_HELD_CALL
-    revision: ClassVar[str] = "8"
+    revision: ClassVar[str] = "10"
     target_descriptor = MoveHeldObject.descriptor()
     routes: tuple[
         tuple[str, str, bool, tuple[float, ...], tuple[float, ...] | None], ...

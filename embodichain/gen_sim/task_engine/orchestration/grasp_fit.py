@@ -142,18 +142,20 @@ def _grasp_requests(
         opening = min(openings[resource] for resource in resources)
         task_type = str(node["task_type"])
         fit_mode = "minimum_axis" if coordinated else "single_arm_transverse"
-        current = requests.setdefault(
-            object_id,
-            {
+        current = requests.get(object_id)
+        if current is None:
+            current = requests[object_id] = {
                 "opening": opening,
                 "fit_mode": fit_mode,
                 "task_types": set(),
                 "resources": set(),
-            },
-        )
-        current["opening"] = min(current["opening"], opening)
-        if fit_mode == "single_arm_transverse":
-            current["fit_mode"] = fit_mode
+            }
+        elif opening < float(current["opening"]) - 1.0e-9:
+            raise ValueError(
+                f"Grasp-fit contract for {object_id!r} becomes stricter in a "
+                "later invocation; use a separate scene revision instead of "
+                "rescaling an earlier action's asset."
+            )
         current["task_types"].add(task_type)
         current["resources"].update(resources)
     return requests

@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Task Engine-owned E1-E6/E9 service decoding and deployment composition."""
+"""Task Engine-owned E1-E6/E8/E9 service decoding and deployment composition."""
 
 from __future__ import annotations
 
@@ -49,6 +49,7 @@ from embodichain.lab.task_program.semantics import (
     builtin_semantic_call_catalog,
 )
 from ..contracts import canonical_hash
+from .identity import bundle_registration_fingerprint
 from .services import (
     _AbsolutePoseTarget,
     _SceneEntityTarget,
@@ -63,6 +64,12 @@ from .services import (
     _RelativePlaceRoute,
     _RelativePlaceLowererFactory,
     _UprightPlaceLowererFactory,
+)
+from .pour_services import (
+    PourStageRoute,
+    PourTransportFactory,
+    PourRegionTransportFactory,
+    RetainedPourFactory,
 )
 
 __all__: list[str] = []
@@ -137,23 +144,36 @@ def _decode_goal_pose(
 
 
 def decode_task_lowerer(value: object, *, path: str) -> Any:
-    """Decode only the E1-E6/E9 task-owned routes or established shared services."""
+    """Decode only the E1-E6/E8/E9 task-owned routes or shared services."""
     if type(value) is not dict:
         raise TypeError(f"{path} must be a mapping.")
     kind = _identifier(value.get("kind"), path=f"{path}.kind")
+    if kind in {"twist", "twist_prepare"}:
+        from .twist_binding import TwistRoute
+        from .twist_runtime import TwistFactory, TwistPrepareFactory
+
+        config = _mapping(value, path=path, required=frozenset({"kind", "route"}))
+        from .control_factory import make_control_factory
+
+        return make_control_factory(
+            TwistFactory if kind == "twist" else TwistPrepareFactory,
+            TwistRoute.decode(config["route"]),
+        )
     if kind in {"press", "press_prepare"}:
         from .press_binding import PressRoute
         from .press_runtime import PressFactory, PressPrepareFactory
 
         config = _mapping(value, path=path, required=frozenset({"kind", "route"}))
         factory = PressFactory if kind == "press" else PressPrepareFactory
-        return factory(PressRoute.decode(config["route"]))
+        from .control_factory import make_control_factory
+
+        return make_control_factory(factory, PressRoute.decode(config["route"]))
     if kind == "pick":
         config = _mapping(
             value,
             path=path,
             required=frozenset({"kind", "routes"}),
-            optional=frozenset({"call_id"}),
+            optional=frozenset({"call_id", "verify_phases"}),
         )
         call_id = _identifier(
             config.get("call_id", "simulation.pick"), path=f"{path}.call_id"
@@ -214,9 +234,32 @@ def decode_task_lowerer(value: object, *, path: str) -> Any:
                     ),
                 )
             )
-        return make_pick_factory(tuple(routes), call_id)
-    if kind in {"move_held_object", "drawer_transport"}:
-        config = _mapping(value, path=path, required=frozenset({"kind", "routes"}))
+        return make_pick_factory(
+            tuple(routes), call_id, verify_phases=config.get("verify_phases", False)
+        )
+    if kind in {
+        "move_held_object",
+        "drawer_transport",
+        "pour_transport",
+        "pour_region_transport",
+    }:
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset(
+                {"kind", "routes"}
+                | (
+                    {"staging_routes"}
+                    if kind in {"pour_transport", "pour_region_transport"}
+                    else set()
+                )
+                | (
+                    {"proxy_position_tolerance_m"}
+                    if kind == "pour_region_transport"
+                    else set()
+                )
+            ),
+        )
         routes: list[_MoveHeldObjectRoute] = []
         for index, raw in enumerate(_sequence(config["routes"], path=f"{path}.routes")):
             route_path = f"{path}.routes[{index}]"
@@ -236,6 +279,40 @@ def decode_task_lowerer(value: object, *, path: str) -> Any:
                     pose=_decode_goal_pose(route["pose"], path=f"{route_path}.pose"),
                 )
             )
+        if kind in {"pour_transport", "pour_region_transport"}:
+            stages = []
+            for index, raw in enumerate(
+                _sequence(config["staging_routes"], path=f"{path}.staging_routes")
+            ):
+                stage_path = f"{path}.staging_routes[{index}]"
+                stage = _mapping(
+                    raw,
+                    path=stage_path,
+                    required=frozenset(
+                        {"object_id", "target_id", "receiver_id", "clearance_m"}
+                    ),
+                )
+                stages.append(
+                    PourStageRoute(
+                        **{
+                            key: _identifier(stage[key], path=f"{stage_path}.{key}")
+                            for key in ("object_id", "target_id", "receiver_id")
+                        },
+                        clearance_m=_real(
+                            stage["clearance_m"],
+                            path=f"{stage_path}.clearance_m",
+                            minimum=0.0,
+                        ),
+                    )
+                )
+            if kind == "pour_region_transport":
+                budget = _real(
+                    config["proxy_position_tolerance_m"],
+                    path=f"{path}.proxy_position_tolerance_m",
+                    minimum=0.0,
+                )
+                return PourRegionTransportFactory(tuple(routes), tuple(stages), budget)
+            return PourTransportFactory(tuple(routes), tuple(stages))
         factory = (
             _DrawerTransportLowererFactory
             if kind == "drawer_transport"
@@ -352,7 +429,14 @@ def decode_task_lowerer(value: object, *, path: str) -> Any:
                         "world_displacement",
                     }
                 ),
-                optional=frozenset({"world_yaw_offset", "stage_id"}),
+                optional=frozenset(
+                    {
+                        "world_yaw_offset",
+                        "stage_id",
+                        "reference_link_id",
+                        "reference_part",
+                    }
+                ),
             )
             routes.append(
                 _RelativePlaceRoute(
@@ -377,12 +461,14 @@ def decode_task_lowerer(value: object, *, path: str) -> Any:
                         route.get("world_yaw_offset", 0.0),
                         path=f"{route_path}.world_yaw_offset",
                     ),
+                    reference_link_id=route.get("reference_link_id"),
+                    reference_part=route.get("reference_part"),
                     stage_id=(
                         _identifier(
                             route["stage_id"],
                             path=f"{route_path}.stage_id",
                         )
-                        if str(route.get("stage_id", "")).strip()
+                        if route.get("stage_id", "") != ""
                         else ""
                     ),
                 )
@@ -420,8 +506,18 @@ def decode_task_lowerer(value: object, *, path: str) -> Any:
             else ArticulationWithdrawFactory
         )
         return factory(bindings)
+    if kind == "retained_pour":
+        config = _mapping(value, path=path, required=frozenset({"kind", "object_id"}))
+        return RetainedPourFactory(
+            _identifier(config["object_id"], path=f"{path}.object_id")
+        )
     if kind in {"park", "pour", "axis_align"}:
         return _decode_shared_lowerer(value, path=path)
+    if kind == "idle_arm_clearance":
+        from .idle_clearance import IdleFactory, decode_routes
+
+        config = _mapping(value, path=path, required=frozenset({"kind", "routes"}))
+        return IdleFactory(decode_routes(config["routes"], path=f"{path}.routes"))
     raise ValueError(
         f"{path}: unsupported Task Engine service {kind!r}; expected E1-E6/E9 services."
     )
@@ -472,6 +568,14 @@ def compose_deployment(
     payload = _compose_integration_payload(
         task=task, policy=policy, skill_profile=skill_profile, scene=scene
     )
+    # Preserve v38 GenSim defaults without changing the shared decoder.
+    for preset in payload["robot_profile"]["presets"]:
+        options = preset["action_options"]
+        if isinstance(options, dict):
+            for option in options.values():
+                if isinstance(option, dict) and option.get("kind") == "hand_over":
+                    option.setdefault("source_hold_mode", "grasp_command")
+                    option.setdefault("retreat_steps", 24)
     raw_services = deepcopy(payload.get("runtime_services", {}))
     raw_lowerers = raw_services.pop("registered_semantic_lowerers", ())
     lowerers = tuple(
@@ -494,10 +598,14 @@ def compose_deployment(
         )
     from .press_runtime import PressFactory, with_press_options
 
-    press_routes = tuple(f.route for f in lowerers if type(f) is PressFactory)
+    press_routes = tuple(f.route for f in lowerers if isinstance(f, PressFactory))
     robot_profile = with_press_options(
         _decode_robot_profile(payload["robot_profile"]), press_routes
     )
+    from .twist_runtime import TwistFactory, with_twist_options
+
+    twist_routes = tuple(f.route for f in lowerers if isinstance(f, TwistFactory))
+    robot_profile = with_twist_options(robot_profile, twist_routes)
     registration = SimulationTaskProgramRegistration(
         scene_binding=_decode_scene(payload["scene"]),
         robot_profile_binding=robot_profile,
@@ -509,7 +617,7 @@ def compose_deployment(
     fingerprint = canonical_hash(
         {
             "local_decoder_revision": 1,
-            "registration": registration.fingerprint,
+            "registration": bundle_registration_fingerprint(registration),
             "grasp_pose_generators": {
                 key: asdict(value) for key, value in services.grasp_pose_generators
             },

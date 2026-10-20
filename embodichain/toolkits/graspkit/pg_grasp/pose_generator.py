@@ -417,8 +417,14 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         approach_direction: torch.Tensor,
         obj_longest_axis: torch.Tensor | None = None,
         is_positive_part: bool | torch.Tensor = True,
+        axis_region_policy: Literal["mesh_extent", "supported_end"] = "mesh_extent",
     ) -> list[tuple[torch.Tensor, torch.Tensor]]:
-        """Return ranked candidates, optionally from one projected axis end."""
+        """Return candidates with an explicit, invocation-local axis-end policy."""
+        region_options = (
+            {}
+            if axis_region_policy == "mesh_extent"
+            else {"axis_region_policy": axis_region_policy}
+        )
         return [
             (poses, costs)
             for poses, _, costs in self.get_grasp_candidates(
@@ -428,6 +434,7 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                 approach_direction=approach_direction,
                 obj_longest_axis=obj_longest_axis,
                 is_positive_part=is_positive_part,
+                **region_options,
             )
         ]
 
@@ -440,8 +447,20 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         approach_direction: torch.Tensor,
         obj_longest_axis: torch.Tensor | None = None,
         is_positive_part: bool | torch.Tensor = True,
+        axis_region_policy: Literal["mesh_extent", "supported_end"] = "mesh_extent",
     ) -> list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
-        """Expose candidate opening widths alongside their poses and costs."""
+        """Expose aligned candidates without changing configured region defaults.
+
+        ``supported_end`` may reinterpret a geometrically empty derived end in
+        this call only. Default calls retain the original backend keyword shape.
+        """
+        if axis_region_policy not in ("mesh_extent", "supported_end"):
+            raise ValueError("Unknown axis_region_policy.")
+        region_options = (
+            {}
+            if axis_region_policy == "mesh_extent"
+            else {"axis_region_policy": axis_region_policy}
+        )
         backend = self._backend(mesh_vertices, mesh_triangles)
         poses = self._object_poses(obj_poses, device=backend.device)
         directions = self._approach_directions(
@@ -493,6 +512,7 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                 approach_direction=directions[index],
                 obj_longest_axis=None if axes is None else axes[index],
                 is_positive_part=bool(positive_parts[index].item()),
+                **region_options,
             )
             if grasp_poses.shape == (4, 4):
                 grasp_poses = grasp_poses.unsqueeze(0)

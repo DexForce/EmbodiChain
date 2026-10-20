@@ -18,9 +18,12 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict, dataclass, replace
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
+import torch
 
 from embodichain.gen_sim.task_engine._task_program.invocation_policy import (
     GenSimActionEngine,
@@ -31,7 +34,7 @@ from embodichain.gen_sim.task_engine._task_program.invocation_policy import (
     bind_pour_receivers,
     pour_receiver_declarations,
 )
-from embodichain.lab.sim.atomic_actions import AtomicActionEngine
+from embodichain.lab.sim.atomic_actions import AtomicActionEngine, PlannerDiagnostics
 from embodichain.lab.sim.atomic_actions.policies import MotionPolicy
 
 
@@ -134,11 +137,15 @@ def test_cartesian_planning_scope_restores_on_nested_failure(monkeypatch):
     monkeypatch.setattr(AtomicActionEngine, "_plan_request", plan)
     engine = object.__new__(GenSimActionEngine)
     engine._cartesian_calls = frozenset({"special", "fails"})
+    engine._pour_return_calls = frozenset()
     engine._articulation_calls = {}
 
     def request(name):
         return SimpleNamespace(
-            invocation_id=name, motion_policy=MotionPolicy(sample_count=140)
+            invocation_id=name,
+            motion_policy=MotionPolicy(sample_count=140),
+            skill_id="move_end_effector",
+            goal=None,
         )
 
     with motion.cartesian_approach_scope(True):
@@ -153,6 +160,139 @@ def test_cartesian_planning_scope_restores_on_nested_failure(monkeypatch):
     assert (
         result.diagnostics.metadata["gen_sim_invocation_policy"]["cartesian_approach"]
         is False
+    )
+
+
+@dataclass(frozen=True)
+class _VelocityPlan:
+    plan_success: torch.Tensor
+    joint_trajectory: object
+    diagnostics: PlannerDiagnostics
+
+
+@pytest.mark.parametrize(
+    ("accepted_count", "expected_calls", "expected_attempts"),
+    [
+        (260, [140, 260], [260]),
+        (320, [140, 260, 320], [260, 320]),
+    ],
+)
+def test_velocity_failure_retries_only_this_gensim_invocation_with_denser_samples(
+    monkeypatch, tmp_path, accepted_count, expected_calls, expected_attempts
+):
+    """A coarse full-robot path retries at denser budgets without changing limits."""
+
+    robot_file = tmp_path / "robot.urdf"
+    robot_file.write_text(
+        '<robot><joint name="arm"><limit velocity="1"/></joint></robot>'
+    )
+    robot = SimpleNamespace(
+        cfg=SimpleNamespace(fpath=str(robot_file)),
+        joint_names=["arm"],
+        get_joint_ids=lambda **kwargs: [0],
+        get_qvel_limits=lambda **kwargs: torch.ones(1, 1),
+    )
+    calls = []
+
+    def plan(_self, request, context=None, *, plan_transform=None):
+        del context, plan_transform
+        sample_count = request.motion_policy.sample_count
+        calls.append(sample_count)
+        positions = torch.zeros(1, 2, 1)
+        if sample_count < accepted_count:
+            # 0.2 rad in 0.04 s is 5x the 1 rad/s limit.
+            positions[0, 1, 0] = 0.2
+        return _VelocityPlan(
+            plan_success=torch.tensor([True]),
+            joint_trajectory=SimpleNamespace(
+                positions=positions,
+                dt=torch.tensor([[0.0, 0.04]]),
+            ),
+            diagnostics=PlannerDiagnostics(backend="fixture"),
+        )
+
+    monkeypatch.setattr(AtomicActionEngine, "_plan_request", plan)
+    engine = object.__new__(GenSimActionEngine)
+    engine._motion_samples = {"task/segment:0": 140}
+    engine._pour_return_calls = frozenset()
+    engine._cartesian_calls = frozenset()
+    engine._articulation_calls = {}
+    engine._planning_services = SimpleNamespace(robot=robot)
+
+    @dataclass(frozen=True)
+    class Request:
+        invocation_id: str
+        motion_policy: MotionPolicy
+        skill_id: str = "move_joints"
+        goal: object | None = None
+
+    request = Request("task/segment:0", MotionPolicy(sample_count=140))
+    result = engine._plan_request(request)
+
+    assert calls == expected_calls
+    assert request.motion_policy.sample_count == 140
+    assert (
+        result.diagnostics.metadata["gen_sim_invocation_policy"]["sample_count"]
+        == accepted_count
+    )
+    assert (
+        result.diagnostics.metadata["gen_sim_invocation_policy"][
+            "velocity_retime_attempts"
+        ]
+        == expected_attempts
+    )
+    assert robot.get_qvel_limits()[0, 0] == 1
+
+
+def test_valid_gensim_plan_does_not_pay_for_velocity_retry(monkeypatch, tmp_path):
+    """A valid default path is planned once and keeps the 140-sample budget."""
+
+    robot_file = tmp_path / "robot.urdf"
+    robot_file.write_text(
+        '<robot><joint name="arm"><limit velocity="1"/></joint></robot>'
+    )
+    robot = SimpleNamespace(
+        cfg=SimpleNamespace(fpath=str(robot_file)),
+        joint_names=["arm"],
+        get_joint_ids=lambda **kwargs: [0],
+        get_qvel_limits=lambda **kwargs: torch.ones(1, 1),
+    )
+    calls = []
+
+    def plan(_self, request, context=None, *, plan_transform=None):
+        del context, plan_transform
+        calls.append(request.motion_policy.sample_count)
+        return _VelocityPlan(
+            plan_success=torch.tensor([True]),
+            joint_trajectory=SimpleNamespace(
+                positions=torch.zeros(1, 2, 1),
+                dt=torch.tensor([[0.0, 0.04]]),
+            ),
+            diagnostics=PlannerDiagnostics(backend="fixture"),
+        )
+
+    monkeypatch.setattr(AtomicActionEngine, "_plan_request", plan)
+    engine = object.__new__(GenSimActionEngine)
+    engine._motion_samples = {"task/segment:0": 140}
+    engine._pour_return_calls = frozenset()
+    engine._cartesian_calls = frozenset()
+    engine._articulation_calls = {}
+    engine._planning_services = SimpleNamespace(robot=robot)
+
+    @dataclass(frozen=True)
+    class Request:
+        invocation_id: str
+        motion_policy: MotionPolicy
+        skill_id: str = "move_joints"
+        goal: object | None = None
+
+    result = engine._plan_request(
+        Request("task/segment:0", MotionPolicy(sample_count=140))
+    )
+
+    assert calls == [140]
+    assert (
+        result.diagnostics.metadata["gen_sim_invocation_policy"]["sample_count"] == 140
     )
 
 
@@ -190,6 +330,7 @@ def test_resolution_owns_policies_and_cannot_leak_between_same_skill_calls(monke
     monkeypatch.setattr(AtomicActionEngine, "_resolve", lambda self, value: value)
     engine = object.__new__(GenSimActionEngine)
     engine._motion_samples = {"first": 140, "second": 260}
+    engine._pour_return_calls = frozenset()
     base = MotionPolicy(sample_count=140)
     first = Invocation("first", base)
     second = Invocation("second", base)
@@ -219,11 +360,171 @@ def test_resolution_failure_does_not_mutate_another_calls_policy(monkeypatch):
     monkeypatch.setattr(AtomicActionEngine, "_resolve", resolve)
     engine = object.__new__(GenSimActionEngine)
     engine._motion_samples = {"failed": 260, "next": 140}
+    engine._pour_return_calls = frozenset()
     policy = MotionPolicy(sample_count=140)
     with pytest.raises(RuntimeError, match="injected"):
         engine._resolve(Invocation("failed", policy))
     assert engine._resolve(Invocation("next", policy)).motion_policy.sample_count == 140
     assert policy.sample_count == 140
+
+
+def test_pour_return_declarations_follow_only_the_matching_prior_pour():
+    from embodichain.gen_sim.task_engine._task_program.invocation_policy import (
+        pour_return_call_declarations,
+    )
+
+    def entry(name, kind, *, family="E3", group="pour", object_id="vessel"):
+        call = (
+            {
+                "kind": "registered",
+                "call_id": "simulation.pour",
+                "arguments": {"object": object_id},
+            }
+            if kind == "pour"
+            else {
+                "kind": "place",
+                "object": object_id,
+                "at": {"kind": "target_ref", "target": "home"},
+            }
+        )
+        return {
+            "id": name,
+            "task_type": family,
+            "task_instance_id": group,
+            "call": call,
+        }
+
+    graph = {
+        "nodes": [
+            entry("before", "place"),
+            entry("pour", "pour"),
+            entry("ordinary", "place", family="E1"),
+            entry("other_group", "place", group="other"),
+            entry("other_object", "place", object_id="cup"),
+            entry("return", "place"),
+            entry("later", "place"),
+            entry("second_pour", "pour"),
+            entry("second_return", "place"),
+        ]
+    }
+    assert pour_return_call_declarations(graph) == ["return", "second_return"]
+
+
+def _pour_scope_program(call=None):
+    from embodichain.lab.task_program.semantics.calls import Place, SemanticPose
+    from embodichain.lab.task_program.semantics.scene import SceneObjectRef
+
+    if call is None:
+        call = Place(
+            object=SceneObjectRef("vessel"), at=SemanticPose((0, 0, 1), (0, 0, 0, 1))
+        )
+    segment = SimpleNamespace(
+        name="return",
+        segment_id="segment-return",
+        calls=(SimpleNamespace(segment_call_index=0, call=call),),
+    )
+    return SimpleNamespace(program_id="task", iter_segments=lambda: iter((segment,)))
+
+
+@pytest.mark.parametrize(
+    "declaration", [None, {}, (), [True], ["return", "return"], ["missing"]]
+)
+def test_pour_return_binding_rejects_invalid_or_unknown_declarations(declaration):
+    from embodichain.gen_sim.task_engine._task_program.invocation_policy import (
+        bind_pour_return_calls,
+    )
+
+    with pytest.raises(ValueError):
+        bind_pour_return_calls(declaration, _pour_scope_program())
+
+
+@pytest.mark.parametrize("kind", ["pick", "registered", "inside"])
+def test_pour_return_binding_requires_exact_builtin_absolute_place(kind):
+    from embodichain.gen_sim.task_engine._task_program.invocation_policy import (
+        bind_pour_return_calls,
+    )
+    from embodichain.lab.task_program.semantics.calls import (
+        Pick,
+        Place,
+        RegisteredSemanticCall,
+    )
+    from embodichain.lab.task_program.semantics.scene import SceneObjectRef
+
+    obj = SceneObjectRef("vessel")
+    call = (
+        Pick(object=obj)
+        if kind == "pick"
+        else (
+            RegisteredSemanticCall(call_id="simulation.place_relative")
+            if kind == "registered"
+            else Place(object=obj, inside=SceneObjectRef("tray"))
+        )
+    )
+    with pytest.raises(ValueError, match="Place"):
+        bind_pour_return_calls(["return"], _pour_scope_program(call))
+
+
+def test_pour_return_binding_uses_canonical_invocation_identity():
+    from embodichain.gen_sim.task_engine._task_program.invocation_policy import (
+        bind_pour_return_calls,
+    )
+
+    assert bind_pour_return_calls(["return"], _pour_scope_program()) == (
+        "task/segment-return:0",
+    )
+    assert bind_pour_return_calls([], _pour_scope_program()) == ()
+
+
+@pytest.mark.parametrize("legacy_height", [0.05, 0.12])
+def test_pour_return_resolution_clones_only_the_selected_place_options(
+    monkeypatch, legacy_height
+):
+    from embodichain.lab.sim.atomic_actions.primitives.place import PlaceOptions
+
+    @dataclass(frozen=True)
+    class Invocation:
+        invocation_id: str
+        skill_id: str
+        skill_options: PlaceOptions
+        motion_policy: MotionPolicy
+        goal: object
+
+    monkeypatch.setattr(AtomicActionEngine, "_resolve", lambda self, value: value)
+    engine = object.__new__(GenSimActionEngine)
+    engine._motion_samples = {}
+    engine._pour_return_calls = frozenset({"return"})
+    options = PlaceOptions(lift_height=legacy_height)
+    policy, goal = MotionPolicy(sample_count=140), object()
+    ordinary = Invocation("ordinary", "place", options, policy, goal)
+    returning = replace(ordinary, invocation_id="return")
+    result = engine._resolve(returning)
+    assert result.skill_options.lift_height == 0.12
+    assert result.skill_options is not options
+    assert asdict(replace(result.skill_options, lift_height=legacy_height)) == asdict(
+        options
+    )
+    assert result.goal is goal and result.motion_policy is policy
+    assert result.invocation_id == returning.invocation_id
+    assert engine._resolve(ordinary) is ordinary
+    assert options.lift_height == legacy_height
+    engine._pour_return_calls = frozenset()
+    assert engine._resolve(returning) is returning
+
+
+@pytest.mark.parametrize("skill,options", [("pick_up", None), ("place", None)])
+def test_pour_return_resolution_rejects_foreign_skill_or_missing_options(
+    monkeypatch, skill, options
+):
+    monkeypatch.setattr(AtomicActionEngine, "_resolve", lambda self, value: value)
+    engine = object.__new__(GenSimActionEngine)
+    engine._motion_samples = {}
+    engine._pour_return_calls = frozenset({"return"})
+    with pytest.raises(ValueError, match="Place"):
+        engine._resolve(
+            SimpleNamespace(
+                invocation_id="return", skill_id=skill, skill_options=options
+            )
+        )
 
 
 def test_two_pours_of_the_same_object_keep_distinct_receiver_bindings():
@@ -280,3 +581,314 @@ def test_two_pours_of_the_same_object_keep_distinct_receiver_bindings():
         action._receiver_id("unknown")
     with pytest.raises(ValueError, match="exact receiver"):
         bind_pour_receivers({"first_pour": "receiver_a"}, program)
+
+
+@dataclass(frozen=True)
+class _PickTransformPlan:
+    plan_success: torch.Tensor
+    joint_trajectory: object
+    commands: object
+    diagnostics: PlannerDiagnostics
+
+
+@pytest.fixture
+def pick_transform_inputs(monkeypatch):
+    from embodichain.gen_sim.task_engine._task_program import (
+        actions,
+        articulation_collision,
+        motion,
+    )
+    from embodichain.lab.sim.atomic_actions import (
+        JointPositionTarget,
+        ObjectSemantics,
+        PickUpOptions,
+        TimedTrajectory,
+    )
+    from embodichain.lab.sim.atomic_actions.affordance import AntipodalAffordance
+    from embodichain.lab.sim.atomic_actions.primitives.pick_up import GraspGoal, PickUp
+
+    affordance = AntipodalAffordance()
+    affordance.set_custom_config(actions._PICK_GRASP_RULE, ("can", "upright"))
+    targets = (JointPositionTarget("arm", (0,)), JointPositionTarget("hand", (1,)))
+    endpoints = tuple(
+        SimpleNamespace(task_state_key="held", require_target=lambda _, t=t: t)
+        for t in targets
+    )
+    request = SimpleNamespace(
+        invocation_id="test/pick:0",
+        skill_id="pick_up",
+        goal=GraspGoal(
+            ObjectSemantics(affordance=affordance, geometry={}, entity_id="can")
+        ),
+        skill_options=PickUpOptions(),
+        motion_policy=MotionPolicy(strategy="ik_interp", dynamic_collision_mode="off"),
+        binding=SimpleNamespace(
+            endpoint=lambda _, name: endpoints[name == "grasp"], endpoints=endpoints
+        ),
+    )
+    context = SimpleNamespace(
+        batch_size=1,
+        env_ids=torch.tensor([0]),
+        robot=SimpleNamespace(qpos=torch.zeros(1, 2)),
+    )
+    robot = SimpleNamespace(
+        device=torch.device("cpu"),
+        get_qpos_limits=lambda **kwargs: torch.tensor([[[-1.0, 1.0]]]),
+    )
+    engine = object.__new__(GenSimActionEngine)
+    engine._motion_samples = {}
+    engine._cartesian_calls = frozenset()
+    engine._pour_return_calls = frozenset()
+    engine._articulation_calls = {}
+    engine._actions = {"pick_up": actions.GenSimPickUp()}
+    engine._planning_services = SimpleNamespace(
+        robot=robot, motion_generator=SimpleNamespace(direct_transport_planning=False)
+    )
+    engine.initial_context = Mock(return_value=context)
+
+    def make_plan(positions):
+        trajectory = TimedTrajectory.from_uniform_step(
+            positions, env_ids=context.env_ids, step_dt=0.04
+        )
+        commands = PickUp._joint_command_sequence(
+            object.__new__(PickUp),
+            request,
+            trajectory,
+            active_mask=torch.tensor([True]),
+        )
+        return _PickTransformPlan(
+            torch.tensor([True]),
+            trajectory,
+            commands,
+            PlannerDiagnostics(backend="transform_fixture"),
+        )
+
+    first = make_plan(torch.zeros(1, 3, 2))
+
+    def shared_plan(self, selected, current=None, *, plan_transform=None):
+        return (
+            first
+            if plan_transform is None
+            else plan_transform(
+                selected, context if current is None else current, first
+            )
+        )
+
+    monkeypatch.setattr(AtomicActionEngine, "_plan_request", shared_plan)
+    monkeypatch.setattr(
+        motion, "_joint_velocity_limits", lambda *args: torch.ones(1, 2)
+    )
+    collision = Mock(
+        side_effect=lambda robot, positions, part: {
+            "valid": bool((positions[:, 0] == 0).all())
+        }
+    )
+    monkeypatch.setattr(articulation_collision, "check_robot_motion", collision)
+    return SimpleNamespace(
+        engine=engine,
+        request=request,
+        context=context,
+        first=first,
+        make_plan=make_plan,
+        collision=collision,
+    )
+
+
+@pytest.mark.parametrize("failure", ["other_arm", "velocity"])
+@pytest.mark.parametrize("implicit_context", [False, True])
+def test_pick_transform_rechecks_final_full_commands_and_fails_closed(
+    pick_transform_inputs, failure, implicit_context
+):
+    probe = pick_transform_inputs
+
+    def transform(request, context, plan):
+        positions = plan.joint_trajectory.positions.clone()
+        positions[:, 1:, 0] = 0.01 if failure == "other_arm" else 0.2
+        return probe.make_plan(positions)
+
+    result = probe.engine._plan_request(
+        probe.request,
+        None if implicit_context else probe.context,
+        plan_transform=transform,
+    )
+    assert result.plan_success.tolist() == [False]
+    assert result.diagnostics.failure.code == "pick_robot_safety_failed"
+    assert result.diagnostics.failure.retryable is False
+    assert probe.engine.initial_context.call_count == int(implicit_context)
+
+
+def test_pick_without_transform_does_not_repeat_robotproxy_inspection(
+    monkeypatch, pick_transform_inputs
+):
+    from embodichain.gen_sim.task_engine._task_program import pick_safety
+
+    probe = pick_transform_inputs
+    monkeypatch.setattr(
+        pick_safety,
+        "_inspect_pick_plan",
+        lambda *args: pytest.fail("unexpected second inspection"),
+    )
+    result = probe.engine._plan_request(probe.request)
+    assert result.plan_success.tolist() == [True]
+    assert result.joint_trajectory is probe.first.joint_trajectory
+    probe.engine.initial_context.assert_not_called()
+
+
+@pytest.mark.parametrize("valid", [False, True])
+@pytest.mark.parametrize("implicit_context", [False, True])
+@pytest.mark.parametrize("ends", [False, True])
+def test_explicit_native_closing_contract_rechecks_transformed_pick(
+    monkeypatch, pick_transform_inputs, valid, implicit_context, ends
+):
+    probe = pick_transform_inputs
+    probe.request.goal.semantics.affordance.custom_config.clear()
+    if ends:
+        probe.request.goal.semantics.affordance.set_custom_config(
+            "gen_sim.adaptive_grasp", "ends"
+        )
+    action = probe.engine._actions["pick_up"]
+    action.closing_geometry_factory = object()
+    inspection = Mock(return_value={"valid": valid, "scope": "exact_close_tcp"})
+    monkeypatch.setattr(action, "inspect_closing_plan", inspection)
+    positions = probe.first.joint_trajectory.positions.clone()
+    positions[:, 1:, 0] = 0.001
+    transformed = probe.make_plan(positions)
+    probe.collision.side_effect = None
+    probe.collision.return_value = {"valid": True}
+    result = probe.engine._plan_request(
+        probe.request,
+        None if implicit_context else probe.context,
+        plan_transform=lambda *args: transformed,
+    )
+    inspection.assert_called_once()
+    request, context, inspected = inspection.call_args.args
+    assert request is probe.request and context is probe.context
+    assert inspected.joint_trajectory is transformed.joint_trajectory
+    assert result.plan_success.tolist() == [valid]
+    assert probe.engine.initial_context.call_count == int(implicit_context)
+    assert (
+        result.diagnostics.metadata["gen_sim_pick_final_contact_check"]["valid"]
+        is valid
+    )
+    if not valid:
+        assert result.diagnostics.failure.code == "pick_contact_geometry_failed"
+        assert result.diagnostics.failure.retryable is False
+
+
+def test_native_closing_transform_rejects_command_trajectory_mismatch(
+    monkeypatch, pick_transform_inputs
+):
+    probe = pick_transform_inputs
+    probe.request.goal.semantics.affordance.custom_config.clear()
+    action = probe.engine._actions["pick_up"]
+    action.closing_geometry_factory = object()
+    inspection = Mock(
+        side_effect=AssertionError("mismatched commands reached geometry")
+    )
+    monkeypatch.setattr(action, "inspect_closing_plan", inspection)
+    frames = list(probe.first.commands.frames)
+    commands = list(frames[1].commands)
+    commands[1] = replace(
+        commands[1],
+        payload=replace(
+            commands[1].payload, positions=commands[1].payload.positions + 0.01
+        ),
+    )
+    frames[1] = replace(frames[1], commands=tuple(commands))
+    transformed = replace(
+        probe.first, commands=replace(probe.first.commands, frames=tuple(frames))
+    )
+    result = probe.engine._plan_request(
+        probe.request, probe.context, plan_transform=lambda *args: transformed
+    )
+    inspection.assert_not_called()
+    assert result.plan_success.tolist() == [False]
+    assert result.diagnostics.failure.code == "pick_contact_geometry_failed"
+    assert (
+        result.diagnostics.metadata["gen_sim_pick_final_contact_check"][
+            "command_validation"
+        ]["valid"]
+        is False
+    )
+
+
+@pytest.mark.parametrize(
+    "exemption",
+    [
+        "shared_action",
+        "explicit",
+        "fixed",
+        "upright",
+        "downstream",
+        "unmarked",
+        "batch",
+        "collision",
+        "motion_gen",
+    ],
+)
+def test_pick_transform_keeps_other_owner_contracts_unchanged(
+    monkeypatch, pick_transform_inputs, exemption
+):
+    from embodichain.gen_sim.task_engine._task_program import pick_safety
+    from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUp
+
+    probe = pick_transform_inputs
+    request = probe.request
+    if exemption == "shared_action":
+        probe.engine._actions["pick_up"] = PickUp()
+    elif exemption == "explicit":
+        request.goal = replace(request.goal, grasp_xpos=torch.eye(4))
+    elif exemption == "unmarked":
+        request.goal.semantics.affordance.custom_config.clear()
+    elif exemption == "batch":
+        probe.context.batch_size = 2
+    elif exemption in {"collision", "motion_gen"}:
+        request.motion_policy = replace(
+            request.motion_policy,
+            **(
+                {"dynamic_collision_mode": "required"}
+                if exemption == "collision"
+                else {"strategy": "motion_gen"}
+            ),
+        )
+    else:
+        field, value = {
+            "fixed": ("fixed_object_to_eef", torch.eye(4)),
+            "upright": ("rotate_upright", 0.0),
+            "downstream": ("downstream_object_target_poses", (torch.eye(4),)),
+        }[exemption]
+        request.skill_options = replace(request.skill_options, **{field: value})
+    monkeypatch.setattr(
+        pick_safety,
+        "_inspect_pick_plan",
+        lambda *args: pytest.fail("owner exemption was ignored"),
+    )
+    result = probe.engine._plan_request(
+        request, probe.context, plan_transform=lambda *args: probe.first
+    )
+    assert result.plan_success.tolist() == [True]
+    assert result.joint_trajectory is probe.first.joint_trajectory
+
+
+def test_transport_transform_preserves_shared_result_without_removed_mesh_gate(
+    monkeypatch, pick_transform_inputs
+):
+    from embodichain.gen_sim.task_engine._task_program import articulation_collision
+    from embodichain.gen_sim.task_engine._task_program.actions import (
+        GenSimMoveHeldObject,
+    )
+
+    probe = pick_transform_inputs
+    probe.engine._actions = {"move_held_object": GenSimMoveHeldObject()}
+    probe.request.skill_id = "move_held_object"
+    probe.request.goal = SimpleNamespace(world_yaw_free=False)
+    collision = Mock(side_effect=AssertionError("removed transport mesh check"))
+    monkeypatch.setattr(articulation_collision, "check_robot_motion", collision)
+    transformed = probe.make_plan(torch.full((1, 3, 2), 0.001))
+    result = probe.engine._plan_request(
+        probe.request, probe.context, plan_transform=lambda *args: transformed
+    )
+    collision.assert_not_called()
+    assert result.plan_success.tolist() == [True]
+    assert result.joint_trajectory is transformed.joint_trajectory
+    assert "gen_sim_held_path" not in result.diagnostics.metadata

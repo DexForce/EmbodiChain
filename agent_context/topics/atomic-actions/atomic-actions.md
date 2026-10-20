@@ -51,6 +51,26 @@ verified grasp. Its goal optionally frees only the final world yaw; default
 goals remain exact. Heading alternatives are checked as complete motion paths,
 with accepted rows retained independently and selected offsets in diagnostics.
 
+Existing-hold `HandOver` resolves its internal exchange object pose and receiving
+grasp together through `_resolve_existing_hold_receive`. The default retains
+the original root-midpoint construction and grasp selection. A specialization
+must return a consistent pair: source transport and the receiving attachment
+are derived from that same pose; the hook never commits effects or steps physics.
+
+Grasp generation defaults to the original `mesh_extent` axis partition. Its
+optional `supported_end` request is call-local and reserved for derived region
+hints: it preserves an already viable region and can reinterpret only an empty
+pre-IK geometry pool using qualified grasp support. Callers must keep authored
+top/bottom restrictions on `mesh_extent`; the policy does not recover IK,
+trajectory, closing or acquisition failure.
+The shared default does not forward a new keyword to existing custom services.
+
+Pick projects downstream targets through the protected lazy
+`_iter_downstream_eef_targets` hook before choosing between TCP-roll variants.
+The default preserves object-target ordering, normalization, lift-seeded IK and
+RNG behavior. Specializations may supply candidate-dependent target geometry;
+they do not own IK, roll selection, execution or physical verification.
+
 `SlideGoal.joint_target` optionally supplies a public `SlideJointTarget` with an
 absolute prismatic coordinate and a calibrated axis sign. Slide resolves the
 remaining distance from same-timestamp joint/robot observations per planning row;

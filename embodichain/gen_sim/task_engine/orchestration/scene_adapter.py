@@ -25,9 +25,14 @@ import hashlib
 import json
 from pathlib import Path
 from tempfile import mkdtemp
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+
+from ..robot_profiles import _canonical_robot_profile
+
+if TYPE_CHECKING:
+    from .._task_program.physical_inputs import FrozenPhysicalInput
 
 from embodichain.gen_sim.task_engine.orchestration.grounding import (
     GroundingCaller,
@@ -402,6 +407,7 @@ class SceneAdaptation:
     conservative_scene_graph: ConservativeSceneGraph
     static_scene_manifest: StaticSceneManifest | None = None
     candidate_bindings: dict[str, RoleBindings] = field(default_factory=dict)
+    physical_input: FrozenPhysicalInput | None = None
 
     @property
     def selected_candidate_id(self) -> str | None:
@@ -430,6 +436,7 @@ class SceneAdapter:
         robot_profile: str = "dual_franka",
         scene_engine_adapter: SceneEngineV1Adapter | None = None,
         audit_dir: str | Path | None = None,
+        physical_input: FrozenPhysicalInput | None = None,
     ) -> None:
         self.model = model
         self.grounding_caller = grounding_caller
@@ -437,6 +444,7 @@ class SceneAdapter:
         self.robot_profile = robot_profile
         self.scene_engine_adapter = scene_engine_adapter or SceneEngineV1Adapter()
         self.audit_dir = None if audit_dir is None else Path(audit_dir)
+        self.physical_input = physical_input
 
     def adapt(
         self,
@@ -447,6 +455,7 @@ class SceneAdapter:
         adjudicator: Adjudicator | None = None,
         force_most_likely: bool = False,
         final_inspection: Mapping[str, Any] | None = None,
+        physical_input: FrozenPhysicalInput | None = None,
     ) -> SceneAdaptation:
         """Ground all candidates, then deterministically choose a bindable one."""
         task_id, instruction, candidates = _coerce_candidates(candidate_set)
@@ -458,11 +467,51 @@ class SceneAdapter:
             body_scale_policy=source_ref.body_scale_policy,
             body_scale=source_ref.body_scale,
         )
+        selected_physical = physical_input or self.physical_input
+        if selected_physical is not None:
+            selected_physical.assert_unchanged()
+            if _canonical_robot_profile(
+                selected_physical.robot_profile
+            ) != _canonical_robot_profile(source_ref.robot_profile):
+                raise ValueError("Selected physical input owns the robot profile.")
+            if (
+                source_ref.z_rotation_degrees is not None
+                and source_ref.z_rotation_degrees
+                != selected_physical.scene.z_rotation_degrees
+            ) or (
+                source_ref.body_scale_policy != "preserve"
+                or tuple(source_ref.body_scale) != (1.0, 1.0, 1.0)
+            ):
+                raise ValueError("Selected physical input owns source transforms.")
+            if (
+                prepared.source_config_path.resolve()
+                != selected_physical.scene.source_config_path.resolve()
+            ):
+                raise ValueError(
+                    "Selected physical input belongs to a different source."
+                )
+            prepared = deepcopy(selected_physical.scene)
+            from ..scene.final_inspection import inspect_final_scene
+
+            measured = inspect_final_scene(
+                prepared, revision_id=selected_physical.physical_digest
+            )
+            if (
+                final_inspection is not None
+                and validate_final_scene_inspection(final_inspection) != measured
+            ):
+                raise ValueError(
+                    "FinalSceneInspection does not describe the adapted scene revision/model."
+                )
+            final_inspection = measured
         if final_inspection is not None:
             normalized_inspection = validate_final_scene_inspection(final_inspection)
-            if normalized_inspection["scene_revision_id"] != scene_revision_id(
-                source_ref
-            ):
+            expected_revision = (
+                selected_physical.physical_digest
+                if selected_physical is not None
+                else scene_revision_id(source_ref)
+            )
+            if normalized_inspection["scene_revision_id"] != expected_revision:
                 raise ValueError(
                     "FinalSceneInspection does not describe the adapted scene revision."
                 )
@@ -533,6 +582,8 @@ class SceneAdapter:
                 for item in prepared.planner_objects
             ),
         )
+        if selected_physical is not None:
+            selected_physical.assert_unchanged()
         return SceneAdaptation(
             scene_manifest=manifest,
             role_bindings=selection.role_bindings,
@@ -543,6 +594,7 @@ class SceneAdapter:
             conservative_scene_graph=conservative_scene_graph,
             static_scene_manifest=static_manifest,
             candidate_bindings=selection.candidate_bindings,
+            physical_input=selected_physical,
         )
 
     def select_objects(

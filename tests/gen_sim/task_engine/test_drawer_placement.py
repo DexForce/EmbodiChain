@@ -22,15 +22,21 @@ import trimesh
 import torch
 
 from embodichain.gen_sim.task_engine._task_program.drawer_geometry import (
+    drawer_containment_report,
     placement_region,
     placement_pose,
+    placement_pose_candidates,
 )
 
 
 @pytest.mark.parametrize("has_drawers", [False, True])
 @pytest.mark.parametrize("coordinated", [False, True])
+@pytest.mark.parametrize("handover_clearance", [False, True])
 def test_factory_selects_runtime_without_shadowing_drawer_engine(
-    monkeypatch: pytest.MonkeyPatch, has_drawers: bool, coordinated: bool
+    monkeypatch: pytest.MonkeyPatch,
+    has_drawers: bool,
+    coordinated: bool,
+    handover_clearance: bool,
 ) -> None:
     from types import SimpleNamespace
     from unittest.mock import Mock
@@ -53,13 +59,22 @@ def test_factory_selects_runtime_without_shadowing_drawer_engine(
     constructor = Mock(return_value=drawer)
     monkeypatch.setattr(assembly, "GenSimActionEngine", parent)
     monkeypatch.setattr(drawer_runtime, "DrawerPlacementEngine", constructor)
-    registration = SimpleNamespace(validate_engine=Mock())
+    registration = SimpleNamespace(
+        validate_engine=Mock(), scene_binding=SimpleNamespace(rigid_objects=())
+    )
     factory = object.__new__(_TaskFactory)
     factory._drawers = (object(),) if has_drawers else ()
     factory._pour_receivers = {}
+    factory._pour_return_calls = ()
+    factory._pour_continuations = ()
+    factory._held_command_sources = ()
+    factory._staging_contract = assembly.StagingContract.empty()
     factory._adaptive_pick = False
+    factory._pick_contact_revision = None
+    factory._pick_continuations = ()
     factory._pick_purposes = ()
     factory._coordinated_motion = coordinated
+    factory._handover_scene_clearance = handover_clearance
     factory._motion_samples = (("call", 260),)
     factory._cartesian_calls = ("drawer_call",)
     factory._articulation_calls = (("drawer_call", "slide"),)
@@ -69,6 +84,9 @@ def test_factory_selects_runtime_without_shadowing_drawer_engine(
         return_value=SimpleNamespace(robot=factory._robot)
     )
     factory._press_routes = ()
+    factory._clearance_routes = ()
+    factory._alignment_continuation_routes = ()
+    factory._twist_routes = ()
     factory._grasp_pose_generators = {}
     factory._registration = registration
     profile = Mock(spec=RobotSkillProfile, profile_id="profile")
@@ -99,6 +117,8 @@ def test_factory_selects_runtime_without_shadowing_drawer_engine(
         GenSimPour,
     ] + ([GenSimCoordinatedPickment] if coordinated else [])
     assert all(c.kwargs == {"replace": True} for c in result.register.call_args_list)
+    handover = result.register.call_args_list[1].args[0]
+    assert (handover.environment_screen_factory is not None) is handover_clearance
 
 
 def test_close_resource_rewrite_is_scoped_to_bound_drawer() -> None:
@@ -195,6 +215,49 @@ def test_oversize_object_still_gets_a_place_target() -> None:
     assert pose[2, 3] > high[2]
 
 
+def test_placement_candidates_erode_payload_footprint_and_rotate() -> None:
+    low = np.asarray([-0.16, -0.21, 0.01])
+    high = np.asarray([0.16, 0.21, 0.15])
+    vertices = trimesh.creation.box(extents=[0.08, 0.04, 0.06]).vertices
+    candidates = placement_pose_candidates(vertices, np.eye(3), np.eye(4), low, high)
+    assert len(candidates) >= 2
+    reports = [
+        drawer_containment_report(vertices, pose, np.eye(4), low, high)
+        for pose in candidates
+    ]
+    assert all(report["accepted"] for report in reports)
+    assert any(
+        not np.allclose(candidate[:3, :3], candidates[0][:3, :3])
+        for candidate in candidates[1:]
+    )
+
+
+def test_placement_candidates_keep_oversize_payload_for_runtime_attempt() -> None:
+    low = np.asarray([-0.05, -0.05, 0.01])
+    high = np.asarray([0.05, 0.05, 0.15])
+    vertices = trimesh.creation.box(extents=[0.2, 0.2, 0.04]).vertices
+    candidates = placement_pose_candidates(vertices, np.eye(3), np.eye(4), low, high)
+    assert candidates
+    assert any(
+        not drawer_containment_report(vertices, pose, np.eye(4), low, high)["accepted"]
+        for pose in candidates
+    )
+
+
+def test_drawer_containment_checks_all_payload_vertices() -> None:
+    low = np.asarray([-0.1, -0.1, 0.0])
+    high = np.asarray([0.1, 0.1, 0.1])
+    vertices = trimesh.creation.box(extents=[0.05, 0.05, 0.05]).vertices
+    inside_pose = np.eye(4)
+    inside_pose[2, 3] = 0.025
+    inside = drawer_containment_report(vertices, inside_pose, np.eye(4), low, high)
+    outside_pose = inside_pose.copy()
+    outside_pose[0, 3] = 0.09
+    outside = drawer_containment_report(vertices, outside_pose, np.eye(4), low, high)
+    assert inside["accepted"] is True
+    assert outside["accepted"] is False
+
+
 def test_live_link_pose_and_object_rotation_define_target() -> None:
     low, high = placement_region(drawer_meshes())
     vertices = trimesh.creation.box(extents=[0.08, 0.04, 0.06]).vertices
@@ -206,6 +269,102 @@ def test_live_link_pose_and_object_rotation_define_target() -> None:
     next_target = placement_pose(vertices, np.eye(3), moved, low, high)
     np.testing.assert_allclose(next_target[:3, 3] - target[:3, 3], [0.12, 0, 0])
     np.testing.assert_allclose(target[:3, :3], np.eye(3))
+
+
+def test_candidate_rotations_follow_drawer_local_axes() -> None:
+    low = np.asarray([-0.16, -0.21, 0.01])
+    high = np.asarray([0.16, 0.21, 0.15])
+    vertices = trimesh.creation.box(extents=[0.08, 0.04, 0.06]).vertices
+    link = trimesh.transformations.rotation_matrix(np.pi / 2, [0, 0, 1])
+    candidates = placement_pose_candidates(vertices, np.eye(3), link, low, high)
+    assert len(candidates) >= 2
+    local_rotations = [link[:3, :3].T @ pose[:3, :3] for pose in candidates]
+    np.testing.assert_allclose(local_rotations[0][:, 2], local_rotations[1][:, 2])
+
+
+def test_drawer_prefilter_warm_starts_and_caps_full_candidates() -> None:
+    from types import SimpleNamespace
+
+    from embodichain.gen_sim.task_engine._task_program.drawer_runtime import (
+        _prefilter_place_candidates,
+    )
+    from embodichain.lab.sim.atomic_actions import PlaceGoal
+
+    class Robot:
+        qpos = torch.zeros(1, 2)
+
+        def __init__(self) -> None:
+            self.calls = []
+
+        def compute_ik(self, *, pose, name, joint_seed):
+            x = float(pose[0, 0, 3])
+            self.calls.append((x, joint_seed.clone()))
+            if x == 1.0:
+                return torch.tensor([False]), joint_seed.clone()
+            step = 0.01 if x == 2.0 else 0.2
+            return torch.tensor([True]), joint_seed + step
+
+    robot = Robot()
+    # PlanningContext.robot is a state snapshot, not the live IK-capable Robot.
+    context = SimpleNamespace(
+        batch_size=1, robot=SimpleNamespace(qpos=robot.qpos.clone())
+    )
+    motion = SimpleNamespace(
+        joint_ids=(0, 1), control_part="arm", require_target=lambda _: motion
+    )
+    request = SimpleNamespace(
+        binding=SimpleNamespace(endpoint=lambda *_: motion),
+    )
+
+    candidates = []
+    for x in (0.0, 1.0, 2.0):
+        xpos = torch.eye(4).repeat(1, 3, 1, 1)
+        xpos[:, :, 0, 3] = x
+        candidates.append(SimpleNamespace(goal=PlaceGoal(xpos)))
+
+    selected, records = _prefilter_place_candidates(
+        request, context, tuple(candidates), robot
+    )
+    assert [index for index, _ in selected] == [2, 0]
+    assert records[0]["accepted"] is True
+    assert records[1]["failure_stage"] == "outside"
+    assert len(robot.calls) == 7
+    assert torch.equal(robot.calls[1][1], torch.full((1, 2), 0.2))
+
+
+def test_drawer_velocity_rejection_keeps_typed_failed_plan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dataclasses import dataclass
+
+    from embodichain.gen_sim.task_engine._task_program import planning_probe
+    from embodichain.gen_sim.task_engine._task_program.drawer_runtime import (
+        _validate_drawer_plan_velocity,
+    )
+
+    @dataclass(frozen=True)
+    class Diagnostics:
+        failure: object
+        metadata: dict
+
+    @dataclass(frozen=True)
+    class Plan:
+        plan_success: torch.Tensor
+        diagnostics: Diagnostics
+
+    plan = Plan(torch.tensor([True]), Diagnostics(None, {}))
+    monkeypatch.setattr(
+        planning_probe,
+        "_validate_final_plan_velocity",
+        lambda plan, robot: {
+            "valid_mask": torch.tensor([False]),
+            "diagnostics": [{"speed_ratio": 2.0}],
+        },
+    )
+    result = _validate_drawer_plan_velocity(plan, object())
+    assert result is not None
+    assert result.plan_success.tolist() == [False]
+    assert result.diagnostics.failure.code == "drawer_place_velocity_limit"
 
 
 def test_transport_stages_outside_opening_along_calibrated_slide_axis() -> None:

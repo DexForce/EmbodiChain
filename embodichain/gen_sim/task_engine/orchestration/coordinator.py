@@ -23,7 +23,10 @@ from copy import deepcopy
 from dataclasses import dataclass
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .._task_program.physical_inputs import FrozenPhysicalInput
 
 from embodichain.gen_sim.task_engine import (
     TaskAgent,
@@ -43,6 +46,7 @@ from embodichain.gen_sim.task_engine.task_program_bundle import (
     TaskProgramBundlePaths,
     generate_task_program_bundle,
 )
+from .._task_program.policy_selection import select_manipulation_policy
 
 from .artifacts import (
     ArtifactTransaction,
@@ -116,6 +120,10 @@ class TaskEngineCoordinator:
         max_episodes: int | None = None,
         max_episode_steps: int | None = None,
         fit_grasp_assets: bool = False,
+        twist_mass_source: bool = False,
+        runtime_profile: str = "default",
+        experimental_open_release: bool | None = None,
+        press_extra_distance: float | None = None,
         planner_policy: Mapping[str, Any] | None = None,
         randomize_scene: bool = False,
         randomize_table_material: bool = False,
@@ -123,6 +131,7 @@ class TaskEngineCoordinator:
         force_most_likely: bool = False,
         final_inspection: Mapping[str, Any] | None = None,
         unbound_action_plan: Mapping[str, Any] | None = None,
+        physical_input: FrozenPhysicalInput | None = None,
     ) -> PreparationResult:
         """Publish a graph and configured Task Program as one transaction.
 
@@ -139,7 +148,53 @@ class TaskEngineCoordinator:
             randomize_scene,
             randomize_table_material,
         )
+        from ..experiment_policy import validate_profile
+
+        validate_profile(runtime_profile)
+        from .._task_program.press_binding import validate_extra_press_distance
+
+        validate_extra_press_distance(press_extra_distance)
+        if (
+            experimental_open_release is not None
+            and type(experimental_open_release) is not bool
+        ):
+            raise TypeError("experimental_open_release must be a boolean or None.")
         normalized_source = self._coerce_source(source)
+        selected_physical = physical_input or getattr(
+            self.scene_adapter, "physical_input", None
+        )
+        if selected_physical is not None:
+            if runtime_profile != "default":
+                raise ValueError(
+                    "Selected physical input requires runtime_profile=default."
+                )
+            selected_physical.assert_unchanged()
+            output = Path(output_dir).expanduser().resolve()
+            inputs = [Path(name).resolve() for name in selected_physical.input_files]
+            references = [
+                item.parent
+                for item in inputs
+                if item.name == "task_program_deployment.yaml"
+            ]
+            if any(item.is_relative_to(output) for item in inputs) or any(
+                output.is_relative_to(root) for root in references
+            ):
+                raise ValueError("Selected physical input and output must not overlap.")
+            if fit_grasp_assets or twist_mass_source:
+                raise ValueError("Selected physical input forbids physical adaptation.")
+            for name, value in (
+                ("max_episodes", max_episodes),
+                ("max_episode_steps", max_episode_steps),
+            ):
+                if value is not None and value != selected_physical.deployment[name]:
+                    raise ValueError(f"Selected physical input owns {name}.")
+            if final_inspection is None:
+                from ..scene.final_inspection import inspect_final_scene
+
+                final_inspection = inspect_final_scene(
+                    selected_physical.scene,
+                    revision_id=selected_physical.physical_digest,
+                )
         validate_scene_output_separation(normalized_source.path, output_dir)
         with ArtifactTransaction(output_dir, overwrite=overwrite) as transaction:
             staging = transaction.staging_dir
@@ -159,10 +214,18 @@ class TaskEngineCoordinator:
                     raise ValueError(
                         "TaskCandidateSet.instruction must match instruction."
                     )
+            from ..task_spec import task_spec_from_candidate
+
+            specifications = {
+                candidate["candidate_id"]: task_spec_from_candidate(candidate)
+                for candidate in normalized_candidates["candidates"]
+            }
 
             adaptation_kwargs: dict[str, Any] = {"force_most_likely": force_most_likely}
             if final_inspection is not None:
                 adaptation_kwargs["final_inspection"] = final_inspection
+            if selected_physical is not None:
+                adaptation_kwargs["physical_input"] = selected_physical
             adaptation = self.scene_adapter.adapt(
                 normalized_candidates,
                 normalized_source,
@@ -198,21 +261,123 @@ class TaskEngineCoordinator:
                 "status": "running",
             }
             try:
-                graph = self.semantic_planner.plan(
+                planner = self.semantic_planner
+                from ..robot_profiles import _NEW_PROFILES, _profile_lateral_positions
+
+                robot_profile = str(adaptation.scene_manifest["robot_profile"])
+                lateral_positions = _profile_lateral_positions(
+                    robot_profile,
+                    (
+                        adaptation.physical_input.embodiment
+                        if robot_profile in _NEW_PROFILES
+                        and adaptation.physical_input is not None
+                        else None
+                    ),
+                )
+                if runtime_profile != "default" or lateral_positions is not None:
+                    from copy import copy
+
+                    planner = copy(planner)
+                if runtime_profile != "default":
+                    planner.reuse_pour_resource = True
+                if lateral_positions is not None:
+                    planner.resource_lateral_positions = lateral_positions
+                plan = planner.plan_spec(
                     selected,
                     role_bindings,
                     adaptation.prepared_scene.planner_objects,
+                    task_spec=specifications[selected["candidate_id"]],
                     planner_route=planning_mode,
                 )
-                graph, generated = generate_task_program_bundle(
-                    graph,
-                    adaptation.prepared_scene,
-                    staging,
-                    robot_profile=str(adaptation.scene_manifest["robot_profile"]),
-                    max_episodes=max_episodes,
-                    max_episode_steps=max_episode_steps,
-                    fit_grasp_assets=fit_grasp_assets,
+                graph = plan.graph
+                from .._task_program.twist_support import TwistSupportPenetrationError
+
+                is_twist = any(node["task_type"] == "E8" for node in graph["nodes"])
+                height_candidates = (
+                    (0.001, 0.002, 0.003, 0.004)
+                    if is_twist and adaptation.physical_input is None
+                    else (None,)
                 )
+                for height in height_candidates:
+                    try:
+                        extra = (
+                            {"twist_support_lift_m": height}
+                            if height is not None
+                            else {}
+                        )
+                        if runtime_profile != "default":
+                            extra["runtime_profile"] = runtime_profile
+                        if experimental_open_release is not None:
+                            extra["experimental_open_release"] = (
+                                experimental_open_release
+                            )
+                        if press_extra_distance is not None:
+                            extra["press_extra_distance"] = press_extra_distance
+                        if twist_mass_source:
+                            extra["twist_mass_source"] = True
+                        if str(adaptation.scene_manifest["robot_profile"]) in {
+                            "dual_franka",
+                            "dual_franka_robotiq_arg2f_140",
+                        }:
+                            selection = select_manipulation_policy(
+                                graph, plan.candidate, adaptation.prepared_scene
+                            )
+                            extra.update(selection)
+                            (staging / "manipulation_policy_selection.json").write_text(
+                                json.dumps(
+                                    {
+                                        "schema_version": "gen_sim.manipulation-policy-selection/v1",
+                                        "source": "typed_unconstrained_rigid_inside_recipe",
+                                        "selected_calls": selection,
+                                        "physical_input_modified": False,
+                                    },
+                                    indent=2,
+                                    ensure_ascii=False,
+                                )
+                                + "\n",
+                                encoding="utf-8",
+                            )
+                        if any(n["task_type"] == "E3" for n in graph["nodes"]):
+                            from .._task_program.pour_continuation import (
+                                supports_ordinary_pour,
+                            )
+
+                            if supports_ordinary_pour(graph, plan.candidate):
+                                extra["pour_geometry_revision"] = (
+                                    2 if runtime_profile != "default" else 1
+                                )
+                                if runtime_profile != "default":
+                                    extra["pour_proxy_position_tolerance_m"] = 0.02
+                        graph, generated = generate_task_program_bundle(
+                            graph,
+                            adaptation.physical_input or adaptation.prepared_scene,
+                            staging,
+                            robot_profile=str(
+                                adaptation.scene_manifest["robot_profile"]
+                            ),
+                            max_episodes=max_episodes,
+                            max_episode_steps=max_episode_steps,
+                            fit_grasp_assets=fit_grasp_assets,
+                            verify_pick_phases=True,
+                            task_spec=plan.task_spec,
+                            task_candidate=plan.candidate,
+                            role_bindings=plan.role_bindings,
+                            step_lineage=plan.lineage,
+                            **extra,
+                        )
+                        break
+                    except TwistSupportPenetrationError as error:
+                        planning_attempt.setdefault(
+                            "support_preflight_attempts", []
+                        ).append(
+                            {
+                                "height_m": height,
+                                "status": "geometric_penetration",
+                                "error": str(error),
+                            }
+                        )
+                        if height == height_candidates[-1]:
+                            raise
             except (TypeError, ValueError, UnsupportedSemanticCapabilityError) as exc:
                 planning_attempt["status"] = "failed"
                 planning_attempt["error"] = _error_record(exc)
@@ -242,6 +407,9 @@ class TaskEngineCoordinator:
                     "semantic_task_graph_hash": semantic_task_graph_hash(graph),
                     "semantic_call_count": len(graph["nodes"]),
                     "integration_fingerprint": graph["integration_fingerprint"],
+                    "task_spec_semantic_hash": plan.task_spec.semantic_hash,
+                    "semantic_graph_validation": "semantic_graph_validation.json",
+                    "semantic_graph_html": "semantic_graph.html",
                 }
             )
             _write_json(staging / "planner_report.json", planning_attempt)

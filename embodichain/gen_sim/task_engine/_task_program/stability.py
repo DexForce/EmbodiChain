@@ -32,6 +32,68 @@ from embodichain.utils.math import pose_inv
 __all__: list[str] = []
 
 
+def _contact_support_heights(
+    supported: torch.Tensor,
+    observation: Mapping[str, Any],
+    like: torch.Tensor,
+) -> torch.Tensor:
+    """Refine heights only from NativeSupportObservation's qualified patch.
+
+    Its contact points already require positive upward load and COM support.
+    Keep the highest qualified point so penetration is not hidden by averaging.
+    Unavailable rows cannot replace the existing conservative mesh envelope.
+    """
+    heights = torch.full_like(like, torch.nan)
+    rows = observation.get("rows")
+    if (
+        supported.dtype != torch.bool
+        or supported.shape != like.shape
+        or observation.get("scope") != "native_contact_support"
+        or not isinstance(rows, list)
+        or len(rows) != like.shape[0]
+    ):
+        return heights
+    for index, row in enumerate(rows):
+        if not supported[index] or not isinstance(row, Mapping):
+            continue
+        values = tuple(
+            row.get(name)
+            for name in ("com_patch_distance_m", "com_tolerance_m", "upward_impulse")
+        )
+        if any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            for value in values
+        ):
+            continue
+        distance, tolerance, impulse = values
+        if tolerance <= 0 or not 0 <= distance <= tolerance or impulse <= 0:
+            continue
+        if row.get("contacts_world") is None or row.get("center_of_mass_world") is None:
+            continue
+        try:
+            points = torch.as_tensor(
+                row["contacts_world"], device=like.device, dtype=like.dtype
+            )
+            center = torch.as_tensor(
+                row["center_of_mass_world"], device=like.device, dtype=like.dtype
+            )
+        except (TypeError, ValueError):
+            continue
+        if (
+            points.ndim != 2
+            or points.shape[1] != 3
+            or not points.shape[0]
+            or center.shape != (3,)
+            or not torch.isfinite(points).all()
+            or not torch.isfinite(center).all()
+        ):
+            continue
+        heights[index] = points[:, 2].amax()
+    return heights
+
+
 @dataclass(frozen=True, slots=True)
 class StabilityConstraint:
     """Immutable, fingerprinted definition of one task-owned stability preset."""
@@ -55,14 +117,29 @@ class StabilityConstraint:
     rotation_drift: float = math.pi / 18.0
     motion_parts: tuple[str, ...] = ()
     world_axis: tuple[float, float, float] | None = None
+    support_contract_revision: int | None = None
+    com_tolerance: float | None = None
 
     def __post_init__(self) -> None:
+        if self.com_tolerance is not None and (
+            type(self.com_tolerance) not in (int, float)
+            or not math.isfinite(self.com_tolerance)
+            or self.com_tolerance <= 0
+        ):
+            raise ValueError("COM tolerance must be finite and positive.")
+        if self.support_contract_revision is not None and (
+            type(self.support_contract_revision) is not int
+            or self.support_contract_revision != 1
+            or self.kind not in {"stack", "supported_placement", "supported_region"}
+        ):
+            raise ValueError("Unsupported native support contract declaration.")
         if self.kind not in {
             "upright",
             "stack",
             "hold",
             "placement",
             "supported_placement",
+            "supported_region",
         }:
             raise ValueError(f"Unsupported task stability kind {self.kind!r}.")
         for name in ("entity", "reference"):
@@ -154,6 +231,14 @@ class StabilityConstraint:
             raise ValueError(
                 "Supported placement requires an explicit relative target."
             )
+        if self.kind == "supported_region" and (
+            self.reference is None
+            or self.support_contract_revision is None
+            and (self.displacement is not None or self.target_position is not None)
+        ):
+            raise ValueError(
+                "Supported region requires an exact reference and no point target."
+            )
         if self.target_position is not None and self.displacement is not None:
             raise ValueError(
                 "Task stability cannot combine absolute and relative targets."
@@ -173,7 +258,7 @@ class StabilityConstraint:
             raise ValueError("A world-axis hold requires its object-local axis.")
         if (self.reference is None) != (
             self.displacement is None
-        ) and self.kind != "stack":
+        ) and self.kind not in {"stack", "supported_region"}:
             raise ValueError("Relative targets require a reference and displacement.")
 
     @classmethod
@@ -182,6 +267,43 @@ class StabilityConstraint:
         if type(value) is not dict or set(value) - {item.name for item in fields(cls)}:
             raise ValueError("Task stability constraint has unknown fields.")
         return cls(**value)
+
+
+def _constraint_pose_flags(
+    cfg: StabilityConstraint,
+    pose: torch.Tensor,
+    reference: torch.Tensor,
+) -> torch.Tensor:
+    """Recheck the unchanged static targets independently of a past stable mask."""
+    valid = torch.isfinite(pose).all(dim=-1).all(dim=-1) & torch.isfinite(
+        reference
+    ).all(dim=-1).all(dim=-1)
+    if cfg.local_axis is not None:
+        axis = pose.new_tensor(cfg.world_axis or (0.0, 0.0, 1.0))
+        valid &= ((pose[:, :3, :3] @ pose.new_tensor(cfg.local_axis)) * axis).sum(
+            -1
+        ) >= cfg.minimum_alignment
+    target = None
+    if cfg.target_position is not None:
+        target = pose.new_tensor(cfg.target_position)
+    elif cfg.displacement is not None:
+        target = reference[:, :3, 3] + pose.new_tensor(cfg.displacement)
+    if target is not None:
+        valid &= (
+            torch.linalg.vector_norm(pose[:, :3, 3] - target, dim=-1)
+            <= cfg.position_tolerance
+        )
+    if cfg.kind == "stack":
+        valid &= (reference[:, :3, :3] @ pose.new_tensor(cfg.reference_axis))[
+            :, 2
+        ] >= cfg.minimum_alignment
+        gap = pose[:, 2, 3] + cfg.object_bottom - reference[:, 2, 3] - cfg.reference_top
+        valid &= gap.abs() <= cfg.support_tolerance
+        valid &= (
+            (pose[:, :2, 3] - reference[:, :2, 3]).abs()
+            <= pose.new_tensor(cfg.reference_half_extents)
+        ).all(-1)
+    return valid
 
 
 class TaskStabilityPort:
@@ -200,6 +322,7 @@ class TaskStabilityPort:
         constraints: Mapping[str, StabilityConstraint],
         *,
         step_dt: float,
+        support_observers: Mapping[tuple[str, str], Any] | None = None,
     ) -> None:
         if not math.isfinite(step_dt) or step_dt <= 0:
             raise ValueError("step_dt must be finite and positive.")
@@ -207,6 +330,11 @@ class TaskStabilityPort:
         self._robot = robot
         self._dt = float(step_dt)
         self._constraints = dict(constraints)
+        self._simulation = simulation
+        self._rigid_bindings = {
+            binding.entity_id: binding for binding in scene_binding.rigid_objects
+        }
+        self._support_observers = dict(support_observers or {})
         self._objects = {
             binding.entity_id: simulation.get_rigid_object(binding.simulation_uid)
             for binding in scene_binding.rigid_objects
@@ -218,6 +346,17 @@ class TaskStabilityPort:
                 for binding in scene_binding.articulations
             },
         }
+        articulation_bindings = {b.entity_id: b for b in scene_binding.articulations}
+        self._link_references = {
+            b.entity_id: (
+                simulation.get_articulation(
+                    articulation_bindings[b.articulation_id].simulation_uid
+                ),
+                b.native_link_name,
+            )
+            for b in getattr(scene_binding, "links", ())
+            if any(c.reference == b.entity_id for c in self._constraints.values())
+        }
         for cfg in self._constraints.values():
             if cfg.entity not in self._objects:
                 raise ValueError(
@@ -225,19 +364,25 @@ class TaskStabilityPort:
                 )
             for entity in (cfg.entity, cfg.reference):
                 if entity is not None and (
-                    entity not in self._references or self._references[entity] is None
+                    entity not in self._references
+                    and entity not in self._link_references
+                    or entity in self._references
+                    and self._references[entity] is None
+                    or entity in self._link_references
+                    and self._link_references[entity][0] is None
                 ):
                     raise ValueError(f"Task stability entity {entity!r} is not bound.")
             if cfg.reference not in self._objects and cfg.kind in {
                 "stack",
                 "supported_placement",
+                "supported_region",
             }:
                 raise ValueError(
                     "Articulated support acceptance requires qualified link geometry."
                 )
         self._support_vertices: dict[str, torch.Tensor] = {}
         for cfg in self._constraints.values():
-            if cfg.kind != "supported_placement":
+            if cfg.kind not in {"supported_placement", "supported_region"}:
                 continue
             for entity in (cfg.entity, cfg.reference):
                 if entity in self._support_vertices:
@@ -255,8 +400,69 @@ class TaskStabilityPort:
                         "Support geometry requires finite per-environment vertices."
                     )
                 self._support_vertices[entity] = vertices.detach().clone()
+        from .placement_evidence import _prepare_placement_geometry
+
+        self._region_geometry = {}
+        for cfg in self._constraints.values():
+            key = (cfg.entity, cfg.reference)
+            if cfg.kind != "supported_region" or key in self._region_geometry:
+                continue
+            geometry = _prepare_placement_geometry(
+                simulation,
+                self._rigid_bindings[cfg.entity],
+                self._rigid_bindings[cfg.reference],
+                self._pose(cfg.entity).shape[0],
+            )
+            self._region_geometry[key] = geometry
         self._results: dict[int, torch.Tensor] = {}
+        from .support_evidence import NativeSupportObservation
+
+        for cfg in self._constraints.values():
+            if cfg.kind not in {"stack", "supported_placement", "supported_region"}:
+                continue
+            key = (cfg.entity, cfg.reference)
+            if key not in self._support_observers:
+                self._support_observers[key] = NativeSupportObservation(
+                    simulation,
+                    self._objects[cfg.entity],
+                    self._objects[cfg.reference],
+                    entity_id=cfg.entity,
+                    reference_id=cfg.reference,
+                )
         self._metadata: dict[int, dict[str, Any]] = {}
+        self._clock: Any = None
+
+    def bind_clock(self, clock: Any) -> None:
+        """Bind strong support readers to the already-owned execution clock."""
+        if any(
+            cfg.support_contract_revision == 1 for cfg in self._constraints.values()
+        ) and (
+            clock is None
+            or not math.isclose(clock.step_dt, self._dt, rel_tol=0, abs_tol=1e-9)
+        ):
+            raise ValueError("Strong support clock differs from the control cadence.")
+        self._clock = clock
+        for cfg in self._constraints.values():
+            if cfg.support_contract_revision == 1:
+                self._support_observers[(cfg.entity, cfg.reference)].bind_clock(clock)
+
+    def _support(
+        self, cfg: StabilityConstraint, pose: torch.Tensor, reference: torch.Tensor
+    ) -> tuple[torch.Tensor, dict[str, Any]]:
+        observer = self._support_observers[(cfg.entity, cfg.reference)]
+        if cfg.com_tolerance is None:
+            if cfg.support_contract_revision == 1:
+                return observer.observe(pose, reference, support_contract_revision=1)
+            return observer.observe(pose, reference)
+        previous = observer.tolerance
+        try:
+            if cfg.com_tolerance is not None:
+                observer.tolerance = cfg.com_tolerance
+            if cfg.support_contract_revision == 1:
+                return observer.observe(pose, reference, support_contract_revision=1)
+            return observer.observe(pose, reference)
+        finally:
+            observer.tolerance = previous
 
     def validate_policy(self, policy: Any, *, segment: Any) -> None:
         """Validate declared identity and membership without reading live state."""
@@ -272,7 +478,11 @@ class TaskStabilityPort:
             raise ValueError("Task stability declaration and compiled policy disagree.")
 
     def _pose(self, entity: str) -> torch.Tensor:
-        pose = self._references[entity].get_local_pose(to_matrix=True)
+        if entity in self._link_references:
+            articulation, link = self._link_references[entity]
+            pose = articulation.get_link_pose(link, to_matrix=True)
+        else:
+            pose = self._references[entity].get_local_pose(to_matrix=True)
         if (
             not isinstance(pose, torch.Tensor)
             or pose.ndim != 3
@@ -322,6 +532,11 @@ class TaskStabilityPort:
             return
         cfg = self._constraints[policy.cfg.preset]
         initial = self._pose(cfg.entity)
+        if cfg.support_contract_revision == 1 and self._clock is None:
+            raise ValueError("Strong support requires the canonical execution clock.")
+        clock_start = (
+            None if self._clock is None else (self._clock.step_index, self._clock.now())
+        )
         if active_mask.dtype != torch.bool or active_mask.shape != initial.shape[:1]:
             raise ValueError(
                 "Task stability active rows must match the observed batch."
@@ -333,12 +548,24 @@ class TaskStabilityPort:
         anchor = initial.clone()
         reference_anchor = (
             self._pose(cfg.reference)
-            if cfg.kind in {"stack", "supported_placement"}
+            if cfg.kind in {"stack", "supported_placement", "supported_region"}
             else None
         )
         initial_attachments = self._attachments(initial, cfg.motion_parts)
         failed = torch.zeros_like(active)
         for elapsed in range(maximum + 1):
+            if cfg.support_contract_revision == 1 and (
+                self._clock.step_index != clock_start[0] + elapsed
+                or not math.isclose(
+                    self._clock.now(),
+                    clock_start[1] + elapsed * self._dt,
+                    rel_tol=0,
+                    abs_tol=1e-8,
+                )
+            ):
+                raise ValueError(
+                    "Strong stability requires acknowledged environment steps."
+                )
             pose = self._pose(cfg.entity)
             valid = torch.isfinite(pose).all(dim=-1).all(dim=-1)
             measurements: dict[str, Any] = {}
@@ -359,6 +586,13 @@ class TaskStabilityPort:
                 error = torch.linalg.vector_norm(pose[:, :3, 3] - target, dim=-1)
                 valid &= error <= cfg.position_tolerance
                 measurements["position_error"] = error.tolist()
+                if cfg.reference in self._link_references:
+                    measurements.update(
+                        entity=cfg.entity,
+                        reference=cfg.reference,
+                        object_pose=pose.tolist(),
+                        reference_pose=reference.tolist(),
+                    )
             if cfg.kind == "stack":
                 assert (
                     reference is not None
@@ -393,7 +627,7 @@ class TaskStabilityPort:
                     reference_translation_drift=reference_translation.tolist(),
                     reference_rotation_drift=reference_rotation.tolist(),
                 )
-            if cfg.kind == "supported_placement":
+            if cfg.kind in {"supported_placement", "supported_region"}:
                 assert reference is not None and reference_anchor is not None
                 vertices = self._support_vertices[cfg.entity].to(pose)
                 support_vertices = self._support_vertices[cfg.reference].to(reference)
@@ -405,13 +639,46 @@ class TaskStabilityPort:
                     + reference[:, None, :3, 3]
                 )
                 top = support_world[:, :, 2].amax(-1)
+                supported, support = self._support(cfg, pose, reference)
+                contact_heights = _contact_support_heights(supported, support, top)
+                top = torch.where(torch.isfinite(contact_heights), contact_heights, top)
                 gap = bottom - top
                 # Preserve the support-envelope check using observed geometry.
                 # Projected mesh bounds alone are not contact evidence.
                 lower = support_world[:, :, :2].amin(1) + 0.002
                 upper = support_world[:, :, :2].amax(1) - 0.002
                 inside = ((pose[:, :2, 3] >= lower) & (pose[:, :2, 3] <= upper)).all(-1)
-                valid &= (gap.abs() <= cfg.support_tolerance) & inside
+                if cfg.kind == "supported_region":
+                    from .placement_evidence import measure_planar_placement
+
+                    planar, landing = measure_planar_placement(
+                        self._simulation,
+                        self._rigid_bindings[cfg.entity],
+                        self._rigid_bindings[cfg.reference],
+                        pose,
+                        reference,
+                        _geometry=self._region_geometry[(cfg.entity, cfg.reference)],
+                    )
+                    full = torch.tensor(
+                        landing["full_footprint_inside"],
+                        device=pose.device,
+                        dtype=torch.bool,
+                    )
+                    valid &= torch.isfinite(contact_heights)
+                    valid &= (
+                        torch.tensor(planar, device=pose.device, dtype=torch.bool)
+                        & full
+                    )
+                    measurements.update(
+                        landing_region=landing,
+                        full_footprint_inside=full.tolist(),
+                        support_tolerance_m=cfg.support_tolerance,
+                        origin_inside_support_aabb=inside.tolist(),
+                    )
+                else:
+                    valid &= inside
+                    measurements["support_footprint"] = inside.tolist()
+                valid &= (gap.abs() <= cfg.support_tolerance) & supported
                 reference_translation, reference_rotation = self._drift(
                     reference, reference_anchor
                 )
@@ -420,10 +687,14 @@ class TaskStabilityPort:
                 )
                 measurements.update(
                     support_gap=gap.tolist(),
-                    support_footprint=inside.tolist(),
                     reference_translation_drift=reference_translation.tolist(),
                     reference_rotation_drift=reference_rotation.tolist(),
+                    native_support=support,
                 )
+            if cfg.kind == "stack":
+                supported, support = self._support(cfg, pose, reference)
+                valid &= supported
+                measurements["native_support"] = support
             translation, rotation = self._drift(pose, anchor)
             valid &= (translation <= cfg.translation_drift) & (
                 rotation <= cfg.rotation_drift
@@ -461,6 +732,19 @@ class TaskStabilityPort:
                 "failed_mask": failed.tolist(),
                 "measurements": measurements,
             }
+            if cfg.support_contract_revision == 1:
+                self._metadata[id(policy)].update(
+                    support_contract_revision=1,
+                    entity=cfg.entity,
+                    reference=cfg.reference,
+                    clock_started_at=clock_start[1],
+                    clock_ended_at=self._clock.now(),
+                    start_step=clock_start[0],
+                    end_step=self._clock.step_index,
+                    stable_seconds=[
+                        int(value) * self._dt for value in consecutive.tolist()
+                    ],
+                )
             if not (active & ~accepted & ~failed).any() or elapsed == maximum:
                 return
             targets = self._robot.get_qpos(target=True)

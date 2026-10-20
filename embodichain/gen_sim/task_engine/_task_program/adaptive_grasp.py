@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import math
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 import torch
 
@@ -31,7 +31,63 @@ from embodichain.lab.sim.atomic_actions.affordance_sampling import (
 __all__: list[str] = []
 
 ADAPTIVE_GRASP = "gen_sim.adaptive_grasp"
-ADAPTIVE_GRASP_REVISION = 2
+ADAPTIVE_GRASP_REVISION = 4
+HANDOVER_END_REGION_REVISION = 1
+
+
+def is_handover_source_call_id(value: object) -> bool:
+    """Recognize only the registered end-grasp source aliases owned by GenSim."""
+    return isinstance(value, str) and (
+        value == "gen_sim.pick.handover_source"
+        or value.startswith("gen_sim.pick.handover_horizontal_source.")
+        and bool(value.removeprefix("gen_sim.pick.handover_horizontal_source."))
+    )
+
+
+def contact_revision_declarations(value: object) -> dict[str, int]:
+    """Validate explicit Pick-segment overrides without changing other calls."""
+    if type(value) is not dict or any(
+        type(name) is not str
+        or not name
+        or type(revision) is not int
+        or revision not in range(1, 9)
+        for name, revision in value.items()
+    ):
+        raise ValueError(
+            "Pick contact revisions must map segment names to revisions 1-8."
+        )
+    return dict(value)
+
+
+def bind_contact_revisions(value: object, program: Any) -> tuple[tuple[str, int], ...]:
+    """Bind explicit Pick calls or native8 GenSim handover-source aliases."""
+    from embodichain.lab.task_program.semantics import Pick, RegisteredSemanticCall
+
+    remaining = contact_revision_declarations(value)
+    routes = []
+    for segment in program.iter_segments():
+        if segment.name not in remaining:
+            continue
+        if len(segment.calls) != 1:
+            raise ValueError("Pick contact revision requires one exact Pick segment.")
+        call = segment.calls[0]
+        if type(call.call) is not Pick and not (
+            type(call.call) is RegisteredSemanticCall
+            and remaining[segment.name] == 8
+            and is_handover_source_call_id(call.call.call_id)
+        ):
+            raise ValueError(
+                "Pick contact revision requires one exact Pick segment or native8 handover source."
+            )
+        routes.append(
+            (
+                f"{program.program_id}/{segment.segment_id}:{call.segment_call_index}",
+                remaining.pop(segment.name),
+            )
+        )
+    if remaining:
+        raise ValueError("Pick contact revision references a missing Pick segment.")
+    return tuple(routes)
 
 
 def bind_pick_purposes(
@@ -133,7 +189,7 @@ def grasp_strategies(
     vertical = axis[:, 2:3].abs() >= math.sqrt(0.5)
     directions = (
         (down, diagonal)
-        if purpose in {"ordinary", "handover_source"}
+        if purpose in {"ordinary", "pour", "handover_source"}
         else (
             torch.where(vertical, diagonal, down),
             torch.where(vertical, down, diagonal),
@@ -145,6 +201,13 @@ def grasp_strategies(
         if positive is not None
         else ((nearest, ~nearest) if ends else (nearest,))
     )
+    if purpose == "handover_source":
+        # Preserve the source-side end before trying a crossed handover layout.
+        return tuple(
+            GraspStrategy(direction, axis if ends else None, part)
+            for part in parts
+            for direction in directions
+        )
     return tuple(
         GraspStrategy(direction, axis if ends else None, part)
         for direction in directions
@@ -162,18 +225,36 @@ def select_grasp(
     feasible: (
         Callable[[torch.Tensor, torch.Tensor], tuple[torch.Tensor, torch.Tensor]] | None
     ) = None,
+    candidate_observer: Callable[[AffordancePoseCandidates], None] | None = None,
+    raw_candidate_observer: Callable[[AffordancePoseCandidates], None] | None = None,
+    axis_region_policy: Literal["mesh_extent", "supported_end"] = "mesh_extent",
+    candidate_pool: AffordancePoseCandidates | None = None,
 ) -> tuple[Any, torch.Tensor]:
     """Keep the first feasible strategy per row and the normal branch sampler."""
+    if axis_region_policy not in ("mesh_extent", "supported_end"):
+        raise ValueError("Unknown axis_region_policy.")
+    if candidate_pool is not None and len(choices) != 1:
+        raise ValueError("A cached candidate pool belongs to exactly one strategy.")
+    policy = (
+        {"axis_region_policy": axis_region_policy}
+        if axis_region_policy != "mesh_extent"
+        else {}
+    )
     covered = torch.zeros(pose.shape[0], dtype=torch.bool, device=pose.device)
     pools, directions, strategies, counts = [], [], [], []
     for index, choice in enumerate(choices):
-        candidates = affordance.get_grasp_candidates(
-            generator,
-            pose,
-            choice.direction,
-            obj_longest_axis=choice.axis,
-            is_positive_part=choice.positive,
-        )
+        candidates = candidate_pool
+        if candidates is None:
+            candidates = affordance.get_grasp_candidates(
+                generator,
+                pose,
+                choice.direction,
+                obj_longest_axis=choice.axis,
+                is_positive_part=choice.positive,
+                **policy,
+            )
+        if raw_candidate_observer is not None:
+            raw_candidate_observer(candidates)
         poses, valid = (
             (candidates.poses, candidates.valid)
             if feasible is None
@@ -197,6 +278,8 @@ def select_grasp(
         costs=torch.cat([p.costs for p in pools], 1),
         valid=torch.cat([p.valid for p in pools], 1),
     )
+    if candidate_observer is not None:
+        candidate_observer(combined)
     sample = affordance.sample_candidates(
         combined,
         sampling=context.affordance_sampling,
@@ -216,6 +299,7 @@ def select_grasp(
             metadata={
                 **sample.metadata,
                 "adaptive_grasp": {
+                    **policy,
                     "strategy_indices": torch.where(
                         sample.success, strategy, -1
                     ).tolist(),

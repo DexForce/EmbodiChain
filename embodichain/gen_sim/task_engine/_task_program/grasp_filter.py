@@ -18,10 +18,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from functools import partial
+
 from dataclasses import dataclass
 import hashlib
 import math
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import torch
 
@@ -34,9 +37,12 @@ from embodichain.utils import logger
 from embodichain.utils.math import pose_inv
 from .e6_clearance import HandClearance
 
+if TYPE_CHECKING:
+    from .pick_contact import ClosingContactScreen
+
 __all__: list[str] = []
 
-GRASP_FILTER_REVISION = 4
+GRASP_FILTER_REVISION = 6
 
 
 def opening_envelope_mask(
@@ -137,6 +143,41 @@ class TaskGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         self._delegate = delegate
         self._rules = rules
         self._active_rules: tuple[GraspRule, ...] = ()
+        self._native_closing = False
+        self._native_proposal_screen: ClosingContactScreen | None = None
+
+    def for_native_closing(self, screen: Any) -> TaskGraspPoseGenerator:
+        """Bind local proposals to mandatory native closing qualification.
+
+        Revision 8 also defers the approximate source proxy in this view only.
+        Transformed candidates and emitted close commands still require native
+        qualification by the owning action.
+        """
+        from .pick_contact import ClosingContactScreen
+
+        if not isinstance(screen, ClosingContactScreen) or screen.revision not in (
+            5,
+            6,
+            7,
+            8,
+        ):
+            raise ValueError(
+                "Local grasp proposals require native closing revision 5, 6, 7 or 8."
+            )
+        if self._active_rules:
+            raise ValueError("Constrained grasp rules retain their opening contract.")
+        view = TaskGraspPoseGenerator(self._delegate, self._rules)
+        view._native_closing = True
+        if screen.revision == 8:
+            view._native_proposal_screen = screen
+        return view
+
+    @property
+    def native_proposal_limit(self) -> int | None:
+        """Keep native center ranking bounded by the existing provider policy."""
+        if self._native_proposal_screen is None:
+            return None
+        return self._delegate.algorithm_cfg.max_candidates
 
     def require_rule(
         self,
@@ -173,6 +214,52 @@ class TaskGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         scoped._active_rules = matches[:1]
         return scoped
 
+    def accepts_grasp_poses(
+        self,
+        poses: torch.Tensor,
+        object_poses: torch.Tensor,
+        mesh_vertices: torch.Tensor,
+        mesh_triangles: torch.Tensor,
+    ) -> torch.Tensor:
+        """Recheck explicit alternatives against this Pick's immutable filters.
+
+        Args:
+            poses: One world-frame gripper pose per environment, shape (B, 4, 4).
+            object_poses: Matching observed object poses.
+            mesh_vertices: Target-local vertices used to bind the filter.
+            mesh_triangles: Matching target-local triangle indices.
+
+        Returns:
+            Opening, region and release-clearance acceptance per environment.
+        """
+        if (
+            poses.ndim != 3
+            or poses.shape[1:] != (4, 4)
+            or object_poses.shape != poses.shape
+        ):
+            raise ValueError("Explicit grasp filter requires matching (B, 4, 4) poses.")
+        if not self._active_rules or any(
+            rule.geometry != geometry_key(mesh_vertices, mesh_triangles)
+            for rule in self._active_rules
+        ):
+            raise ValueError("Explicit grasp filter requires matching scoped geometry.")
+        accepted = torch.isfinite(poses).all(-1).all(-1)
+        for row in range(len(poses)):
+            accepted[row] &= opening_envelope_mask(
+                mesh_vertices,
+                poses[row : row + 1],
+                object_poses[row].to(poses),
+                self.gripper_model.max_opening_width,
+            )[0]
+            for rule in self._active_rules:
+                accepted[row] &= accepted_candidates(
+                    poses[row : row + 1],
+                    object_poses[row].to(poses),
+                    rule,
+                    self.gripper_model,
+                )[0]
+        return accepted
+
     def get_valid_grasp_poses(
         self,
         *,
@@ -182,15 +269,50 @@ class TaskGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         approach_direction: torch.Tensor,
         obj_longest_axis: torch.Tensor | None = None,
         is_positive_part: bool | torch.Tensor = True,
+        axis_region_policy: Literal["mesh_extent", "supported_end"] = "mesh_extent",
     ) -> list[tuple[torch.Tensor, torch.Tensor]]:
-        results = self._delegate.get_valid_grasp_poses(
-            mesh_vertices=mesh_vertices,
-            mesh_triangles=mesh_triangles,
-            obj_poses=obj_poses,
-            approach_direction=approach_direction,
-            obj_longest_axis=obj_longest_axis,
-            is_positive_part=is_positive_part,
-        )
+        if axis_region_policy not in ("mesh_extent", "supported_end"):
+            raise ValueError("Unknown axis_region_policy.")
+        native_proposals = False
+        if (
+            self._native_proposal_screen is not None
+            and obj_longest_axis is None
+            and axis_region_policy == "mesh_extent"
+        ):
+            from embodichain.toolkits.graspkit.pg_grasp import (
+                AntipodalGraspPoseGenerator,
+            )
+
+            if not isinstance(self._delegate, AntipodalGraspPoseGenerator):
+                raise ValueError(
+                    "Native source proposals require an Antipodal provider."
+                )
+            native_proposals = True
+        if native_proposals:
+            from .pick_proposals import native_center_proposals
+
+            results = native_center_proposals(
+                self._delegate,
+                mesh_vertices=mesh_vertices,
+                mesh_triangles=mesh_triangles,
+                obj_poses=obj_poses,
+                approach_direction=approach_direction,
+            )
+            self._native_proposal_screen.deferred_source_proposal_calls += 1
+        else:
+            results = self._delegate.get_valid_grasp_poses(
+                mesh_vertices=mesh_vertices,
+                mesh_triangles=mesh_triangles,
+                obj_poses=obj_poses,
+                approach_direction=approach_direction,
+                obj_longest_axis=obj_longest_axis,
+                is_positive_part=is_positive_part,
+                **(
+                    {"axis_region_policy": axis_region_policy}
+                    if axis_region_policy != "mesh_extent"
+                    else {}
+                ),
+            )
         rules = self._active_rules
         if rules and (
             obj_longest_axis is not None
@@ -215,12 +337,13 @@ class TaskGraspPoseGenerator(ParallelJawGraspPoseGenerator):
             costs = costs.to(poses.device)
             accepted = torch.isfinite(costs)
             raw_count = int(accepted.sum())
-            accepted &= opening_envelope_mask(
-                mesh_vertices,
-                poses,
-                obj_poses[row].to(poses),
-                self.gripper_model.max_opening_width,
-            )
+            if not self._native_closing:
+                accepted &= opening_envelope_mask(
+                    mesh_vertices,
+                    poses,
+                    obj_poses[row].to(poses),
+                    self.gripper_model.max_opening_width,
+                )
             opening_count = int(accepted.sum())
             for rule in rules:
                 accepted &= accepted_candidates(
@@ -251,9 +374,23 @@ class TaskGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         """Retain the baseline articulation-service protocol, not used by GenSim Pick."""
         return self._delegate.get_best_grasp_poses(**kwargs)
 
-    def get_grasp_candidates(self, **kwargs: Any) -> Any:
+    def get_grasp_candidates(
+        self,
+        *,
+        axis_region_policy: Literal["mesh_extent", "supported_end"] = "mesh_extent",
+        **kwargs: Any,
+    ) -> Any:
         """Forward articulation metadata; Pick uses the filtered pose protocol."""
-        return self._delegate.get_grasp_candidates(**kwargs)
+        if axis_region_policy not in ("mesh_extent", "supported_end"):
+            raise ValueError("Unknown axis_region_policy.")
+        return self._delegate.get_grasp_candidates(
+            **kwargs,
+            **(
+                {"axis_region_policy": axis_region_policy}
+                if axis_region_policy != "mesh_extent"
+                else {}
+            ),
+        )
 
     def get_dual_arm_valid_grasp_poses(self, **kwargs: Any) -> Any:
         """Coordinated grasps have a separate, unchanged paired-contact contract."""
@@ -273,11 +410,13 @@ class E6ApproachGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         geometry_keys: frozenset[str],
         *,
         clearance: HandClearance | None = None,
+        clearance_factory: Callable[[float], HandClearance] | None = None,
     ) -> None:
         super().__init__(delegate.gripper_model)
         self._delegate = delegate
         self._geometry_keys = geometry_keys
         self._clearance = clearance
+        self._clearance_factory = clearance_factory
 
     def _approach_direction(
         self,
@@ -369,8 +508,12 @@ class E6ApproachGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                 [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
             )
             augmented = []
+            from .e6_preshape import filter_candidates
+
             for row, (poses, widths, costs) in enumerate(rows):
-                filtered = self._clearance.filter(poses, widths, costs)
+                filtered = filter_candidates(
+                    self, self._clearance, poses, widths, costs
+                )
                 if torch.isfinite(filtered[2]).any():
                     augmented.append(filtered)
                     continue
@@ -406,7 +549,9 @@ class E6ApproachGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                     long_axis_candidates, costs, torch.full_like(costs, torch.inf)
                 )
                 augmented.append(
-                    self._clearance.filter(rotated, rotated_widths, rotated_costs)
+                    filter_candidates(
+                        self, self._clearance, rotated, rotated_widths, rotated_costs
+                    )
                 )
             rows = augmented
         return rows
@@ -420,6 +565,7 @@ def install_e6_approach_filters(
     geometry_keys: frozenset[str],
     *,
     clearances: dict[str, HandClearance] | None = None,
+    clearance_factory: Callable[[str, float], HandClearance] | None = None,
 ) -> dict[str, Any]:
     """Install the task-scoped E6 approach policy by handle geometry key."""
     if not geometry_keys:
@@ -429,6 +575,9 @@ def install_e6_approach_filters(
             generator,
             geometry_keys,
             clearance=None if clearances is None else clearances[name],
+            clearance_factory=(
+                None if clearance_factory is None else partial(clearance_factory, name)
+            ),
         )
         for name, generator in generators.items()
     }

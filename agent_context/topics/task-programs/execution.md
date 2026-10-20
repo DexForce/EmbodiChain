@@ -73,6 +73,13 @@ its call ID, revision, and target Atomic Skill descriptor. Use this extension
 to expose shared Atomic Skills; do not place task-local motion generators in a
 lowerer.
 
+Registered held effects remain terminal-only unless the lowerer explicitly
+declares an acquisition boundary and retention segments. The canonical compiler
+then binds the existing pre-motion gate and planned-effect holding guard to that
+effect's exact expectation and resource; missing verified monitoring is rejected.
+Only one phased held relation is supported per registered call. This does not
+infer phases from a skill name or certify other transport/release segments.
+
 ## MLLM boundary
 
 `embodichain.agents.mllm.task_program` accepts untrusted JSON, reuses the

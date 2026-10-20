@@ -242,7 +242,8 @@ def derive_scene_request(draft: Mapping[str, Any]) -> dict[str, Any]:
             if role == "object":
                 structure = contract.source_structure
                 affordances = sorted(contract.scene_affordances)
-                initial_state = {"orientation": "fallen"} if task_type == "E2" else {}
+                # Upright is a step goal; earlier actions may change the object's pose.
+                initial_state = {}
                 attributes: dict[str, Any] = {}
             else:
                 structure = _target_structure(task_type, str(step["relation"]))

@@ -899,9 +899,10 @@ class CuroboPlanner(BasePlanner):
         The samples are not replanned or replaced. They are mapped from the
         simulator's control-part order into the exact cuRobo model, then checked
         against joint bounds, self-collision, and the live world collision
-        checker. Calling the configuration validator once per horizon sample
-        works around cuRobo 0.8's configuration-only ``validate`` contract while
-        retaining batched environments.
+        checker. Each horizon sample uses the configured SDK bound, self and
+        scene costs directly: scene collision consumes a ``KinematicsState``,
+        while self collision consumes its sphere tensor. Cost feature axes are
+        reduced only after checking their complete batch/horizon/feature schema.
         """
         if (
             not isinstance(trajectory, torch.Tensor)
@@ -949,7 +950,9 @@ class CuroboPlanner(BasePlanner):
 
         if backend.collision_checker is None:
             checker_cfg = self._bindings.RobotCollisionCheckerCfg.load_from_config(
-                robot_config=backend.profile.robot_config_path,
+                robot_config=self._load_runtime_robot_config(
+                    backend.profile.robot_config_path
+                ),
                 scene_collision_checker=backend.planner.scene_collision_checker,
                 device_cfg=self._bindings.DeviceCfg(device=self._curobo_device),
                 num_envs=batch_size,
@@ -970,6 +973,19 @@ class CuroboPlanner(BasePlanner):
             if self.cfg.world.multi_env
             else None
         )
+
+        def reduce_cost(value: torch.Tensor, width: int, name: str) -> torch.Tensor:
+            expected = (batch_size, 1, width)
+            if (
+                not isinstance(value, torch.Tensor)
+                or not value.is_floating_point()
+                or value.shape != expected
+            ):
+                raise ValueError(
+                    f"cuRobo {name} cost must have floating shape {expected}."
+                )
+            return value.sum(dim=-1)
+
         samples: list[torch.Tensor] = []
         device_context = (
             torch.cuda.device(self._curobo_device)
@@ -979,10 +995,32 @@ class CuroboPlanner(BasePlanner):
         with device_context:
             for sample_index in range(horizon):
                 sample = curobo_trajectory[:, sample_index : sample_index + 1]
-                valid = backend.collision_checker.validate(
-                    sample,
-                    env_query_idx=env_query_idx,
-                )
+                checker = backend.collision_checker
+                checker.setup_batch_tensors(batch_size, 1)
+                state = checker.get_kinematics(sample)
+                costs = [reduce_cost(checker.get_bound(sample), dof, "bound")]
+                if checker.self_collision_cost is not None:
+                    costs.append(
+                        reduce_cost(
+                            checker.get_self_collision(state.robot_spheres), 1, "self"
+                        )
+                    )
+                if checker.collision_constraint is not None:
+                    checker.collision_constraint.update_num_spheres(
+                        state.robot_spheres.shape[-2],
+                        batch_size=batch_size,
+                        horizon=1,
+                    )
+                    costs.append(
+                        reduce_cost(
+                            checker.collision_constraint.forward(
+                                state, idxs_env_query=env_query_idx
+                            ),
+                            state.robot_spheres.shape[-2],
+                            "world",
+                        )
+                    )
+                valid = torch.stack(costs, dim=-1).sum(dim=-1) == 0.0
                 samples.append(valid[:, 0].to(torch.bool))
         return torch.stack(samples, dim=1).to(trajectory.device)
 

@@ -61,6 +61,7 @@ from .articulation_binding import (
     inspect_prismatic_part,
     validate_placement,
 )
+from .state_handoff import GenSimStateHandoff
 
 __all__: list[str] = []
 
@@ -203,7 +204,9 @@ class _SlideLowerer(RegisteredSemanticLowerer):
     def __init__(self, bindings: dict, robot: Any) -> None:
         self.bindings, self.robot = bindings, robot
 
-    def _selection(self, call: Any, context: Any, bound: Any) -> tuple:
+    def _selection(
+        self, call: Any, context: Any, bound: Any, *, require_grasp: bool = True
+    ) -> tuple:
         args = dict(call.arguments)
         if set(args) not in ({"object", "state"}, {"object", "state", "part"}):
             raise ValueError(
@@ -219,18 +222,13 @@ class _SlideLowerer(RegisteredSemanticLowerer):
         binding, semantics, art = self.bindings[key]
         target = binding.target(args["state"])
         endpoint = bound.binding.action_binding.endpoint("primary", "motion")
-        held = context.task.get_held_object(endpoint.task_state_key)
-        if held is not None and (held.env_mask is None or held.env_mask.any()):
-            raise ValueError(
-                "Articulation interaction cannot reuse a hand holding another object."
-            )
-        for resources, held in context.task.coordinated_held_objects.items():
-            if endpoint.task_state_key in resources and (
-                held.env_mask is None or held.env_mask.any()
-            ):
-                raise ValueError(
-                    "Articulation interaction cannot reuse a coordinated holding hand."
-                )
+        handoff = GenSimStateHandoff.from_binding(
+            bound.binding.action_binding,
+            context,
+            participant="Articulation interaction",
+            require_grasp=require_grasp,
+        )
+        handoff.require_free(participant="Articulation interaction")
         return binding, semantics, art, target, endpoint
 
     def lower(
@@ -253,6 +251,15 @@ class _SlideLowerer(RegisteredSemanticLowerer):
         )
 
 
+def _withdrawal_targets(current: torch.Tensor, outward: torch.Tensor) -> torch.Tensor:
+    """Share the unchanged cleanup geometry with terminal-branch qualification."""
+    raised = current.clone()
+    raised[:, 2, 3] += 0.12
+    withdrawn = raised.clone()
+    withdrawn[:, :3, 3] += 0.10 * outward
+    return torch.stack((current, raised, withdrawn), dim=1)
+
+
 class _WithdrawLowerer(_SlideLowerer):
     call_id: ClassVar[str] = WITHDRAW_CALL
     target_descriptor = MoveEndEffector.descriptor()
@@ -262,7 +269,9 @@ class _WithdrawLowerer(_SlideLowerer):
     ) -> SemanticLowering:
         if type(option_template) is not MoveEndEffectorOptions:
             raise TypeError("Articulation withdrawal requires MoveEndEffectorOptions.")
-        binding, _, art, target, endpoint = self._selection(call, context, bound)
+        binding, _, art, target, endpoint = self._selection(
+            call, context, bound, require_grasp=False
+        )
         qpos = art.get_qpos()[
             context.env_ids.tolist(), art.joint_names.index(binding.joint)
         ]
@@ -273,27 +282,29 @@ class _WithdrawLowerer(_SlideLowerer):
             ).any()
         ):
             raise ValueError("Articulation target was lost before withdrawal.")
-        hand = bound.binding.resources["primary"].endpoints["grasp"]
-        command = hand.commands.get("open")
-        if type(command) is not JointPositionCommand:
-            raise ValueError(
-                "Articulation withdrawal requires a declared hand-open command."
+        primary = getattr(bound.binding, "resources", {}).get("primary")
+        hand = getattr(primary, "endpoints", {}).get("grasp")
+        if hand is not None:
+            command = hand.commands.get("open")
+            if type(command) is not JointPositionCommand:
+                raise ValueError(
+                    "Articulation withdrawal requires a declared hand-open command."
+                )
+            ids = list(hand.runtime_target.joint_ids)
+            observed = context.robot.qpos[:, ids]
+            expected = command.resolve(
+                num_envs=observed.shape[0],
+                control_dof=len(ids),
+                device=observed.device,
+                dtype=observed.dtype,
             )
-        ids = list(hand.runtime_target.joint_ids)
-        observed = context.robot.qpos[:, ids]
-        expected = command.resolve(
-            num_envs=observed.shape[0],
-            control_dof=len(ids),
-            device=observed.device,
-            dtype=observed.dtype,
-        )
-        if (
-            not torch.isfinite(observed).all()
-            or (observed - expected).abs().amax() > 0.08
-        ):
-            raise ValueError(
-                "The hand has not reached its open posture before withdrawal."
-            )
+            if (
+                not torch.isfinite(observed).all()
+                or (observed - expected).abs().amax() > 0.08
+            ):
+                raise ValueError(
+                    "The hand has not reached its open posture before withdrawal."
+                )
         motion = endpoint.require_target(JointPositionTarget)
         current = self.robot.compute_fk(
             qpos=context.robot.qpos[:, list(motion.joint_ids)],
@@ -306,12 +317,8 @@ class _WithdrawLowerer(_SlideLowerer):
         outward = (
             -(link[:, :3, :3] @ current.new_tensor(binding.axis)) * binding.axis_sign
         )
-        raised = current.clone()
-        raised[:, 2, 3] += 0.12
-        withdrawn = raised.clone()
-        withdrawn[:, :3, 3] += 0.10 * outward
         return SemanticLowering(
-            goal=EndEffectorPoseGoal(torch.stack((current, raised, withdrawn), dim=1))
+            goal=EndEffectorPoseGoal(_withdrawal_targets(current, outward))
         )
 
 

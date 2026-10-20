@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +35,7 @@ class ArticulationGeometry:
     root_link: str
     vertices: np.ndarray
     link_poses: dict[str, np.ndarray]
+    link_vertices: dict[str, np.ndarray] = field(default_factory=dict)
 
     def world_vertices(self, config: Mapping[str, Any]) -> np.ndarray:
         scale = _vector(config.get("body_scale", [1, 1, 1]), "body_scale")
@@ -163,6 +164,7 @@ def read_articulation_geometry(path: str | Path) -> ArticulationGeometry:
         for body in bodies.values()
     }
     vertices = []
+    link_vertices: dict[str, list[np.ndarray]] = {}
     for prim in prims:
         if not prim.IsA(UsdGeom.Mesh) or not prim.HasAPI(UsdPhysics.CollisionAPI):
             continue
@@ -179,7 +181,12 @@ def read_articulation_geometry(path: str | Path) -> ArticulationGeometry:
         ):
             raise ValueError("Articulation collision mesh has invalid vertices.")
         transform = inverse @ np.asarray(cache.GetLocalToWorldTransform(prim)).T
-        vertices.append(points @ transform[:3, :3].T + transform[:3, 3])
+        transformed = points @ transform[:3, :3].T + transform[:3, 3]
+        vertices.append(transformed)
+        owner = prim
+        while owner.GetPath() not in bodies:
+            owner = owner.GetParent()
+        link_vertices.setdefault(owner.GetName(), []).append(transformed)
     if not vertices:
         raise ValueError("Articulation geometry has no measurable collision meshes.")
     combined = np.concatenate(vertices)
@@ -188,7 +195,12 @@ def read_articulation_geometry(path: str | Path) -> ArticulationGeometry:
             "Articulation transforms produced nonfinite collision geometry."
         )
     combined.setflags(write=False)
-    return ArticulationGeometry(bodies[base_path].GetName(), combined, link_poses)
+    by_link = {name: np.concatenate(items) for name, items in link_vertices.items()}
+    for points in by_link.values():
+        points.setflags(write=False)
+    return ArticulationGeometry(
+        bodies[base_path].GetName(), combined, link_poses, by_link
+    )
 
 
 def fit_articulation_to_proxy(

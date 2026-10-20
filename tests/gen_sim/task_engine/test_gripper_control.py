@@ -111,6 +111,49 @@ def test_lower_existing_effort_is_not_increased() -> None:
     )
 
 
+@pytest.mark.parametrize("other_family", ["E6", "E8", "E9"])
+@pytest.mark.parametrize("other_resource", ["left", "right"])
+def test_unrelated_hand_does_not_disable_light_pick_effort(
+    other_family, other_resource
+):
+    embodiment, scene, graph = _inputs()
+    graph["nodes"][0]["call"]["resources"]["primary"] = "right"
+    graph["nodes"].insert(
+        0,
+        {
+            "task_type": other_family,
+            "call": {
+                "kind": "registered",
+                "call_id": "other.operation",
+                "resources": {"primary": other_resource},
+            },
+        },
+    )
+    _calibrate_task_gripper_effort(embodiment, scene, graph)
+    limits = embodiment["simulation"]["joint_drive_props"]["max_effort"]
+    assert limits["left_eef"] == 500.0
+    assert limits["right_eef"] == (0.5 if other_resource == "left" else 500.0)
+
+
+def test_heavy_payload_on_one_hand_does_not_disable_other_light_hand():
+    embodiment, scene, graph = _inputs()
+    scene.rigid_objects += ({"uid": "heavy", "attrs": {"mass_props": {"mass": 1.0}}},)
+    graph["nodes"].append(
+        {
+            "task_type": "E1",
+            "call": {
+                "kind": "pick",
+                "object": "heavy",
+                "resources": {"primary": "right"},
+            },
+        }
+    )
+    _calibrate_task_gripper_effort(embodiment, scene, graph)
+    limits = embodiment["simulation"]["joint_drive_props"]["max_effort"]
+    assert limits["left_eef"] == 0.5
+    assert limits["right_eef"] == 500.0
+
+
 @pytest.mark.parametrize("carrier_mass", [None, 0.01, 0.2])
 @pytest.mark.parametrize("resource", ["left", "right"])
 def test_light_pick_in_e5_sequence_requires_qualified_carrier(
