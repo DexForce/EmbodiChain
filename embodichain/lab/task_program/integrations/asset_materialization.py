@@ -37,6 +37,12 @@ from typing import TYPE_CHECKING
 
 import yaml
 
+from ._asset_pouring import (
+    AssetPourAdaptationCfg,
+    prepare_pour_adaptation,
+    finish_pour_adaptation,
+)
+
 from embodichain.utils import configclass
 from embodichain.utils.config_paths import resolve_config_path
 from embodichain.utils.utility import load_config
@@ -49,6 +55,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AssetAdaptationCfg",
+    "AssetPourAdaptationCfg",
     "MaterializedAssetDeployment",
     "load_asset_requirements_from_deployment",
     "materialize_asset_deployment",
@@ -59,6 +66,9 @@ __all__ = [
 @configclass
 class AssetAdaptationCfg:
     """Explicit geometry adaptation for source templates without primitive bounds."""
+
+    pour: AssetPourAdaptationCfg | None = None
+    """Explicit selected-asset calibration for the four-segment PourWater task."""
 
     initial_bottom_z_m: dict[str, float] = {}
     """World height of each role's initial bottom; upright poses only."""
@@ -390,6 +400,18 @@ def materialize_asset_deployment(
     program = _read(program_path)
     policy = _read(policy_path)
     embodiment = _read(embodiment_path)
+    prepared_pour = None
+    if adaptations.pour is not None:
+        if not isinstance(adaptations.pour, AssetPourAdaptationCfg):
+            raise TypeError("pour adaptation must be AssetPourAdaptationCfg")
+        prepared_pour = prepare_pour_adaptation(
+            adaptations.pour,
+            requirements,
+            resolved_assets,
+            physical.embodiment_skill_profile,
+            integration,
+            program,
+        )
     for document in (integration, program, embodiment):
         for node in _walk(document):
             if "fixed_object_to_eef" in node or "internal_axis" in node:
@@ -525,7 +547,19 @@ def materialize_asset_deployment(
         adapted_affordances = {}
         adapted_pairs = set()
         relative_offsets = {}
+        if prepared_pour is not None:
+            pour_pairs, pour_offsets = finish_pour_adaptation(
+                prepared_pour, integration, entities, objects
+            )
+            adapted_pairs.update(pour_pairs)
+            relative_offsets.update(pour_offsets)
         for relation in requirements.relations:
+            if relation.kind == "pours_into":
+                if prepared_pour is None:
+                    raise ValueError(
+                        "pours_into requires an explicit PourWater adaptation"
+                    )
+                continue
             source_asset = resolved_assets.assets[relation.object_role].descriptor
             target_asset = resolved_assets.assets[relation.target_role].descriptor
             kind = "container" if relation.kind == "fits_inside" else "support_surface"

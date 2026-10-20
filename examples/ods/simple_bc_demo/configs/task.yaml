@@ -1,0 +1,8 @@
+id: examples.ods.simple_bc_demo.environment:SimpleBCPickPlace-Franka-v1
+enable_sensor: false
+environment:
+  component: env.yaml
+embodiment:
+  component: franka.yaml
+  overrides:
+    init_rot: [0.0, 0.0, 180.0]

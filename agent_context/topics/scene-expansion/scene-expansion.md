@@ -1,11 +1,26 @@
 # Scene expansion
 
-Scene expansion proposes changes before a new Task Program execution. The core
+Scene expansion proposes layouts before host execution or environment reset. The core
 is independent of Task Program, GenSim and Gym; injected host callbacks own the
 actual scene preparation and measured task evidence. General composition,
 layout and physical state services are owned by
 [scene services](../scene-services/scene-services.md). Proposal contracts are
 provided by `sim.scene.expansion`.
+
+The source-independent layout APIs accept `SceneLayoutInput` with scaled local
+meshes, authored arena poses, an explicit support tree and movable permissions.
+`prepare_scene_randomization` owns cold geometry work; `generate_scene_variants`
+returns addressed CPU/CUDA candidates; `apply_scene_variants` preflights all
+selected rows and publishes rigid poses without stepping. This batched application
+does not extend the separate B=1 physical snapshot/settling host.
+
+V4 JSON/packed packages own source, policy and prepared geometry snapshots.
+Loading checks every candidate before exposing a lazy sequence and does not
+repeat mesh extraction or support rasterization. GenSim keeps legacy v1-v3
+readers and migration, while shared loading never imports GenSim. Imported
+fixed-orientation group certificates preserve their original conservative proxy
+rather than being reinterpreted by the hierarchical sampler. V3 migration retains
+the validated legacy support grids and height rules without re-extraction.
 
 ## Entry points
 
@@ -76,7 +91,8 @@ joint seeds and scores; actual pose IK also checks targets absent from the
 cache and verifies joint limits and full-pose FK residuals. Recheck settled or modified poses. Support, collision planning between
 phases and measured success remain separate gates.
 
-The attempt guard spans preparation, execution and measurement. It suppresses
+An `EpisodeContext.check("scene_expansion/task_program", [0])` scope spans
+preparation, execution and measurement. It suppresses
 automatic reset and blocks persistence during explicit callback resets, even
 when those resets replace episode annotations. Rejected recording buffers must
 be discarded by reset before retrying; beginning another demo or replacing its

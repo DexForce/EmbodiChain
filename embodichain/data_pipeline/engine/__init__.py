@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from .data import (
+    OnlineDataBudgetExhaustedError,
     OnlineDataEngine,
     OnlineDataEngineCfg,
     OnlineDataEngineState,
@@ -28,6 +29,7 @@ from .data import (
 from .language import SharedLanguageRegistry
 
 __all__ = [
+    "OnlineDataBudgetExhaustedError",
     "OnlineDataEngine",
     "OnlineDataEngineCfg",
     "OnlineDataEngineState",

@@ -348,13 +348,9 @@ class SimulationSceneExpansionHost:
                 raise RuntimeError("Scene preparation reset hook must run exactly once")
             results.append(callback())
 
-        self._env.reset(
-            options={"save_data": False, "scene_expansion_prepare": prepare}
-        )
+        self._env.reset(options={"save_data": False, "episode_prepare": prepare})
         if len(results) != 1:
-            raise RuntimeError(
-                "Environment reset did not invoke scene_expansion_prepare"
-            )
+            raise RuntimeError("Environment reset did not invoke episode_prepare")
         return results[0]
 
     def _result(

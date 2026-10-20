@@ -136,7 +136,7 @@ allows 3200 control steps for the full transfer and measured-effect gates.
 Example:
 
 ```bash
-python -m embodichain run-env --gym_config \
+python -m embodichain run-task --gym_config \
   extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.dual_ur5_dh_pgi_140_80.yaml
 ```
 

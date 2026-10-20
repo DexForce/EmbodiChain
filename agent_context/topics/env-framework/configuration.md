@@ -33,6 +33,14 @@ class MyTaskEnv(EmbodiedEnv):
 Format: `<TaskName>-v<N>` (e.g. `PourWater-v1`, `PushCubeRL`).
 RL tasks sometimes drop the `-v<N>` suffix (`CartPoleRL`, `PushCubeRL`).
 
+### Render-only scene objects
+
+`visual_object` lists `VisualObjectCfg` declarations in inline configs or the
+physical environment component. The production loader resolves mesh assets and
+`EmbodiedEnv` declares them alongside background objects. Their state participates
+in selected-environment reset, while physical background/collision semantics stay
+with `background` and `rigid_object`. See the [simulation object boundary](../simulation-system/simulation-system.md).
+
 ### Component ownership
 
 | File / component | Owns | Must not own |
@@ -52,7 +60,7 @@ Gym configs remain supported when no conflicting component selector is used.
 
 ### Reusable Gym deployment components
 
-`config_to_cfg()` resolves optional `environment.component`,
+`config_to_cfg()` resolves optional `environment`,
 `embodiment.component`, and `scene.component` selections before ordinary Gym
 parsing. This is not
 coupled to Task Program: an import-registered handwritten-demo task can reuse
@@ -69,7 +77,7 @@ without `base_dir` retains its ordinary filesystem/CWD behavior.
 Component-owned fields and their
 inline counterparts are mutually exclusive; without a selector, the original
 inline `robot`, `sensor`, and scene fields continue to parse unchanged.
-`build_env_cfg_from_args()` expands `environment.component` before applying
+`build_env_cfg_from_args()` expands the selected environment before applying
 launcher arguments so environment-owned run controls such as `max_episodes`
 remain visible to the run loop while explicit CLI values retain precedence.
 New offline collection configs should use `collection.target_episodes`; the
@@ -79,9 +87,17 @@ An inline runnable config must declare exactly one
 `physics: default|newton` backend. A reusable environment component also owns
 exactly one backend and its optional `physics_config`; the thin deployment
 cannot repeat either field. `config_to_cfg()` constructs the backend-specific
-typed physics config and rejects fields from the other backend. Launcher
-`--physics` may confirm the declared value but cannot switch the file-owned
-backend. Use separate environment files when one logical task needs both.
+typed physics config and rejects fields from the other backend.
+
+An `environment` selection may name one `component`, or declare separate
+`default` / `newton` component paths (also accepted inside `variants`). These
+forms are mutually exclusive. `build_env_cfg_from_args()` first uses
+`--physics` to select a declared variant, defaulting to `default` when omitted.
+It then loads that concrete file and checks the CLI value against its owned
+backend. With an explicit `environment.component` or inline config, the CLI
+only confirms the declared backend; it cannot rewrite it. Each variant still
+owns exactly one backend in a separate environment file. Backend selection
+does not rename the deployment's Gym `id`.
 
 `renderer: auto` resolves from environment render demand before World creation.
 For cameras or native visual resources created by custom Python code, select

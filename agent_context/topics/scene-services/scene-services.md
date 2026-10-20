@@ -75,14 +75,30 @@ Scene strategies still run on CPU and use Shapely, Trimesh and SciPy. Their
 Torch-kernel calls do not offload polygon search or SLSQP to CUDA. CUDA kernel
 support does not enable B>1 physics capture, edits or host stepping.
 
+`compute.geometry._sampling` additionally supplies counter-addressed rectangular
+AABB rejection batches on CPU/CUDA. It returns numeric XY proposals and validity
+masks only. GenSim owns their group/asset adaptation, candidate materialization
+and persistence; this sampler does not replace the constrained SLSQP strategy.
+`_hierarchical` adds integer-indexed postorder subtree XY/yaw batches with whole
+support-cell coverage certificates and dynamic outer envelopes. It consumes
+numeric geometry only; fixed-order matrix reductions and area scans preserve batch-prefix
+reproducibility on CUDA. `_support_grid.py` owns the parent-local CPU policy:
+explicit support transforms, child-contact-guided near-planar layers, unions with
+holes/islands, evidence-checked overrides, conservative layer height bounds and
+whole-cell rasterization. The hierarchical sampler partitions free AABB center
+rectangles and samples by area without placement retries.
+The table detector retains its default outer-contour behavior. Shared scene
+expansion enables `SupportSurfaceConfig.preserve_holes` and caches a rectangle
+covered by the selected mesh component, excluding openings during preparation.
+
 ## Frames and runtime invariants
 
 - Geometry is already scaled/oriented in arena-local Z-up metres. Rigid poses
   use proper 4x4 transforms or position plus `xyzw`; replication offsets do not
   enter proposals. [GenSim](../gen-sim/gen-sim.md) owns its Y-up conversion and
   editable scene model.
-- Mesh support detection currently selects the largest outer contour at one
-  main horizontal level. Explicit polygon support inputs retain holes and
+- Mesh support detection selects the largest contour at one main horizontal
+  level; `preserve_holes` retains its mesh openings. Explicit polygon inputs retain holes and
   disconnected regions. Group translation and height alignment preserve
   relative poses; independent AABB separation uses a separate strategy.
 - `SceneView` wraps existing rigid objects, robots and articulations. The current

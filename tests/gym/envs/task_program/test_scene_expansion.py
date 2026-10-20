@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from embodichain.lab.gym.envs.episode_context import EpisodeContext
+
 from collections.abc import Iterator
 from contextlib import nullcontext
 from dataclasses import replace
@@ -192,8 +194,9 @@ class _CandidateEnv(EmbodiedEnv):
         self._demo_active_rollout_start_steps = self.rollout_steps.clone()
         self._demo_episode_metadata = [self._new_demo_episode_metadata(0)]
         self._active_task_program_bridge = None
-        self._scene_expansion_attempt_active = False
-        self._scene_expansion_recording_rejected = False
+        self.episode_context = EpisodeContext(1)
+        self.episode_context._begin_episode([0])
+        self.episode_context._finish_initialization([0])
         self._demo_no_auto_reset = False
         self.episode_success_status = torch.zeros(1, dtype=torch.bool)
         self._task_success = torch.zeros(1, dtype=torch.bool)
@@ -245,7 +248,7 @@ class _CandidateEnv(EmbodiedEnv):
         return "fixture.pt"
 
     def prepare(self, variant: SceneVariant) -> ScenePreparationResult:
-        self._initialize_episode(save_data=False)
+        self.persist_via_reset(save_data=False)
         self._active_task_program_bridge = None
         self.object_x = variant.pose_changes[0].arena_pose[0][3]
         return ScenePreparationResult(
@@ -261,7 +264,11 @@ class _CandidateEnv(EmbodiedEnv):
     def persist_via_reset(self, **kwargs: Any) -> None:
         # BaseEnv.reset computes task success before _initialize_episode.
         self._task_success = self.is_task_success()
-        self._initialize_episode(**kwargs)
+        rows = kwargs.pop("env_ids", [0])
+        self._before_episode_reset(env_ids=rows, **kwargs)
+        self.episode_context._begin_episode(rows)
+        self._initialize_episode(env_ids=rows, **kwargs)
+        self.episode_context._finish_initialization(rows)
         self._active_task_program_bridge = None
 
 
@@ -285,7 +292,9 @@ def test_fixed_candidate_uses_fresh_bridge_and_actual_recording_metadata() -> No
     assert env.bridge_initial_positions == [_START_X]
     assert env.first_observations == [_START_X]
     assert env.dataset_manager.saved == []
-    provenance = env.get_demo_episode_metadata(0)["scene_expansion"]
+    provenance = env.get_demo_episode_metadata(0)["episode_context"]["sources"][
+        "scene_expansion/task_program"
+    ]["metadata"]
     assert provenance["variant"]["variant_id"] == variant.variant_id
     assert provenance["variant"]["parent_scene_id"] == variant.parent_scene_id
     assert provenance["initial_state_id"] == result.preparation.initial_state_id
@@ -295,7 +304,12 @@ def test_fixed_candidate_uses_fresh_bridge_and_actual_recording_metadata() -> No
     env.persist_via_reset()
 
     assert len(env.dataset_manager.saved) == 1
-    assert env.dataset_manager.saved[0]["scene_expansion"] == provenance
+    assert (
+        env.dataset_manager.saved[0]["episode_context"]["sources"][
+            "scene_expansion/task_program"
+        ]["metadata"]
+        == provenance
+    )
     assert env.camera_recorder.saved == 1
     assert env.trajectory_saves == 1
 
@@ -390,7 +404,12 @@ def test_validator_rejects_arbitrary_truthy_values_and_blocks_saving(
             measured_validator=lambda: value,
         )
 
-    assert env.get_demo_episode_metadata(0)["scene_expansion"]["accepted"] is False
+    assert (
+        env.get_demo_episode_metadata(0)["episode_context"]["sources"][
+            "scene_expansion/task_program"
+        ]["metadata"]["accepted"]
+        is False
+    )
     env.persist_via_reset()
     assert env.dataset_manager.saved == []
     assert env.camera_recorder.saved == 0
@@ -413,7 +432,9 @@ def test_measurement_exception_marks_completed_program_ineligible_for_saving() -
 
     assert env.is_task_success().tolist() == [True]
     assert (
-        env.get_demo_episode_metadata(0)["scene_expansion"]["error_type"]
+        env.get_demo_episode_metadata(0)["episode_context"]["sources"][
+            "scene_expansion/task_program"
+        ]["metadata"]["error_type"]
         == "RuntimeError"
     )
     env.persist_via_reset(commit_env_ids=[0])
@@ -472,7 +493,12 @@ def test_execution_error_fails_closed_after_begin_recording_replaced_metadata() 
         )
 
     assert str(error.value.__cause__) == "physics port failed"
-    assert env.get_demo_episode_metadata(0)["scene_expansion"]["accepted"] is False
+    assert (
+        env.get_demo_episode_metadata(0)["episode_context"]["sources"][
+            "scene_expansion/task_program"
+        ]["metadata"]["accepted"]
+        is False
+    )
     env.persist_via_reset(commit_env_ids=[0])
     assert env.dataset_manager.saved == []
     assert env.camera_recorder.saved == 0
@@ -516,7 +542,7 @@ def test_normal_demo_recording_is_unchanged_without_scene_expansion() -> None:
     result = execute_demo_episode(env)
 
     assert result.all_success
-    assert "scene_expansion" not in env.get_demo_episode_metadata(0)
+    assert env.get_demo_episode_metadata(0)["episode_context"]["recordable"]
     env.persist_via_reset()
     assert len(env.dataset_manager.saved) == 1
     assert env.camera_recorder.saved == 1
@@ -548,7 +574,12 @@ def test_rejected_scene_does_not_poison_the_next_fresh_attempt() -> None:
     assert env.bridge_initial_positions == [_START_X, _START_X]
     assert len(env.dataset_manager.saved) == 1
     assert env.dataset_manager.saved[0]["attempt_id"] == 1
-    assert env.dataset_manager.saved[0]["scene_expansion"]["accepted"] is True
+    assert (
+        env.dataset_manager.saved[0]["episode_context"]["sources"][
+            "scene_expansion/task_program"
+        ]["metadata"]["accepted"]
+        is True
+    )
 
 
 def test_preparation_callback_requires_an_explicit_validation_contract() -> None:
@@ -970,7 +1001,7 @@ def test_preparation_settling_cannot_auto_reset_and_commit_unverified_data() -> 
     assert env.camera_recorder.saved == 0
     assert env.trajectory_saves == 0
     assert not env._demo_no_auto_reset
-    assert not env._scene_expansion_attempt_active
+    assert not env.episode_context.snapshot()[0]["pending_sources"]
 
 
 @pytest.mark.parametrize("phase", ("prepare", "measure"))
@@ -1016,7 +1047,7 @@ def test_rejected_buffers_remain_blocked_after_ordinary_demo_replaces_metadata(
     env.physics_moves = True
     retry = execute_demo_episode(env)
     assert retry.all_success
-    assert "scene_expansion" not in env.get_demo_episode_metadata(0)
+    assert not env.get_demo_episode_metadata(0)["episode_context"]["recordable"]
     env.persist_via_reset(**({"commit_env_ids": [0]} if explicit_commit else {}))
 
     assert env.dataset_manager.saved == []
@@ -1061,7 +1092,7 @@ def test_empty_reset_cannot_clear_rejected_buffer_eligibility() -> None:
     execute_scene_variant(
         env, _variant(), prepare_scene=env.prepare, measured_validator=env.measure
     )
-    env._initialize_episode(env_ids=[], save_data=False)
+    env.persist_via_reset(env_ids=[], save_data=False)
     env.physics_moves = True
     execute_demo_episode(env)
     env.persist_via_reset(commit_env_ids=[0])
@@ -1075,7 +1106,7 @@ def test_empty_reset_during_preparation_does_not_reject_a_fresh_recording() -> N
     env = _CandidateEnv()
 
     def prepare(variant: SceneVariant) -> ScenePreparationResult:
-        env._initialize_episode(env_ids=[], save_data=False)
+        env.persist_via_reset(env_ids=[], save_data=False)
         env.object_x = variant.pose_changes[0].arena_pose[0][3]
         return ScenePreparationResult("fresh-recording", _checks())
 
@@ -1126,13 +1157,19 @@ def test_attempt_flags_restore_after_success_and_each_error_boundary(
     env.fail_step = failure_phase == "execute"
 
     def prepare(variant: SceneVariant) -> ScenePreparationResult:
-        assert env._scene_expansion_attempt_active and env._demo_no_auto_reset
+        assert (
+            bool(env.episode_context.snapshot()[0]["pending_sources"])
+            and env._demo_no_auto_reset
+        )
         if failure_phase == "prepare":
             raise RuntimeError("preparation failed")
         return env.prepare(variant)
 
     def measure() -> ValidationResult:
-        assert env._scene_expansion_attempt_active and env._demo_no_auto_reset
+        assert (
+            bool(env.episode_context.snapshot()[0]["pending_sources"])
+            and env._demo_no_auto_reset
+        )
         if failure_phase == "measure":
             raise RuntimeError("measurement failed")
         return env.measure()
@@ -1146,10 +1183,10 @@ def test_attempt_flags_restore_after_success_and_each_error_boundary(
             execute_scene_variant(
                 env, _variant(), prepare_scene=prepare, measured_validator=measure
             )
-        assert env._scene_expansion_recording_rejected
+        assert bool(env.episode_context.snapshot()[0]["rejections"])
 
     assert env._demo_no_auto_reset is previous_no_auto_reset
-    assert not env._scene_expansion_attempt_active
+    assert not env.episode_context.snapshot()[0]["pending_sources"]
 
 
 def test_measurement_interrupt_restores_flags_and_keeps_buffers_ineligible() -> None:
@@ -1164,7 +1201,7 @@ def test_measurement_interrupt_restores_flags_and_keeps_buffers_ineligible() -> 
         )
 
     assert not env._demo_no_auto_reset
-    assert not env._scene_expansion_attempt_active
+    assert not env.episode_context.snapshot()[0]["pending_sources"]
     execute_demo_episode(env)
     env.persist_via_reset(commit_env_ids=[0])
     assert env.dataset_manager.saved == []
@@ -1245,3 +1282,17 @@ def test_scene_program_override_preserves_selected_language_snapshot() -> None:
     assert result.execution.instruction_source == "task_program"
     assert result.execution.segments[0].instruction == "Selected scene task"
     assert result.execution.segments[0].instruction_source == "task_fallback"
+
+
+def test_layout_preparation_failure_blocks_even_explicit_recording_commit() -> None:
+    env = _CandidateEnv()
+    result = execute_scene_variant(
+        env, _variant(), prepare_scene=env.prepare, measured_validator=env.measure
+    )
+    assert result.accepted
+    with env.episode_context.check("layout", [0]) as finish:
+        finish(accepted=False)
+    env.persist_via_reset(save_data=True, commit_env_ids=[0])
+    assert env.dataset_manager.saved == []
+    assert env.camera_recorder.saved == 0
+    assert env.trajectory_saves == 0

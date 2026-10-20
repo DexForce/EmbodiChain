@@ -20,7 +20,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
@@ -52,6 +52,8 @@ def preview_scene_export(
     visualization: VisualizationCfg | None = None,
     joint_control: bool = True,
     use_usd: bool = False,
+    on_frame: Callable[[SimulationManager], bool] | None = None,
+    advance_physics: bool = True,
 ) -> None:
     """Preview a Scene Engine export or its materialized whole-scene USD.
 
@@ -64,6 +66,10 @@ def preview_scene_export(
         joint_control: Expose supported articulation joints in Viser.
         use_usd: Load ``scene_usd/scene.usda`` through its manifest instead of
             assembling the source GLB/USDC assets.
+        on_frame: Optional callback on the preview thread before each frame.
+            Return ``True`` when scene changes require immediate publication.
+        advance_physics: Whether preview frames also integrate physics. Disable
+            this for playback that directly restores object poses.
     """
     if usd_file is not None and output_root is not None:
         raise ValueError("Specify either output_root or usd_file, not both.")
@@ -137,7 +143,19 @@ def preview_scene_export(
                 # Browser commands are applied on the simulation thread before capture.
                 if joint_controller is not None:
                     joint_controller.update()
-            sim.update(step=1)
+            changed = on_frame(sim) if on_frame is not None else False
+            if advance_physics:
+                sim.update(step=1)
+                if changed and is_viser:
+                    sim.capture_visualization_safely(
+                        force=True, capture_camera_images=False
+                    )
+            else:
+                with sim.render_frame(
+                    force_visualization=changed,
+                    capture_camera_images=False,
+                ):
+                    pass
             time.sleep(0.01)
     except KeyboardInterrupt:
         print("Stopping preview.")

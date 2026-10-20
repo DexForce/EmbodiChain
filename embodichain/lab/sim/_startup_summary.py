@@ -262,6 +262,11 @@ def scene_rows(sim: SimulationManager) -> list[Row]:
             ("Scene / env", "Robots", str(len(sim._robots))),
             ("Scene / env", "Articulations", str(len(sim._articulations))),
             ("Scene / env", "Rigid objects", str(len(sim._rigid_objects))),
+            (
+                "Scene / env",
+                "Visual objects",
+                str(len(getattr(sim, "_visual_objects", {}))),
+            ),
             ("Scene / env", "Object groups", str(len(sim._rigid_object_groups))),
             ("Scene / env", "Deformables", str(len(sim._deformable_objects))),
             ("Scene / env", "Sensors", str(len(sim._sensors))),
