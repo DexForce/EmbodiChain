@@ -133,15 +133,16 @@ EmbodiedEnv.__init__(cfg)
   ├── init manager slots to None
   ├── super().__init__(cfg)  →  BaseEnv.__init__
   │     ├── set seed, compute frequencies
-  │     ├── _setup_scene()
-  │     │     ├── create SimulationManager
-  │     │     ├── _setup_robot()  → Robot + single_action_space
-  │     │     ├── _prepare_scene()  → lights, background, objects
-  │     │     └── _setup_sensors() → sensors dict
+  │     ├── EmbodiedEnv._setup_scene()
+  │     │     ├── filter functors and resolve ground visibility
+  │     │     └── BaseEnv._setup_scene()
+  │     │           ├── resolve render demand → create SimulationManager
+  │     │           ├── _setup_robot() → Robot + single_action_space
+  │     │           ├── _prepare_scene() → lights, background, objects
+  │     │           └── _setup_sensors() → sensors dict
   │     ├── SimulationManager.prepare() (backend-neutral readiness boundary)
   │     ├── open window (if not headless)
   │     └── _init_sim_state()
-  │           ├── _apply_functor_filter() (strip visual rand if configured)
   │           ├── create EventManager   (if cfg.events)
   │           │     └── apply "startup" mode
   │           ├── create ObservationManager (if cfg.observations)
@@ -208,7 +209,7 @@ wire one in. Each manager follows the Functor/FunctorCfg pattern (see
 | `ObservationManager` | `cfg.observations` | `_init_sim_state()` | `_extend_obs()` on every `get_obs()` |
 | `RewardManager` | `cfg.rewards` | `_init_sim_state()` | `_extend_reward()` on every step |
 | `ActionManager` | `cfg.actions` | `_init_sim_state()` | overrides `single_action_space` |
-| `DatasetManager` | `cfg.dataset` | `__init__` (after super) | `_initialize_episode()` save mode |
+| `DatasetManager` | `cfg.dataset` | `__init__` (after super) | `_before_episode_reset()`; see the reset lifecycle above |
 
 ### Event manager modes
 
