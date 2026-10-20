@@ -19,7 +19,12 @@ from __future__ import annotations
 import os
 import random
 import threading
-from collections import deque
+from concurrent.futures import Future, ThreadPoolExecutor
+from copy import deepcopy
+import json
+import os
+from pathlib import Path
+import tempfile
 from typing import TYPE_CHECKING, Literal, Union, List
 
 import numpy as np
@@ -36,20 +41,11 @@ __all__ = ["record_camera_data", "record_camera_data_async", "validation_cameras
 
 
 class record_camera_data(Functor):
-    """Record camera data in the environment. The camera is usually setup with third-person view, and
-    is used to record the scene during the episode. It is helpful for debugging and visualization.
+    """Record independent environment videos, committed explicitly before reset.
 
-    Note:
-        Currently, the functor is implemented in `interval' mode such that, it can only save the
-        recorded frames when in :meth:`env.step()` function call. For example:
-        ```python
-        env.step()
-        # perform multiple steps in the same episode
-        env.reset()
-        env.step()  # the video of the first episode will be saved here.
-        ```
-        The final episode frames will not be saved in the current implementation.
-        We may improve it in the future.
+    Frames and provenance are owned per row. Normal commits obey the environment's
+    EpisodeContext; ``purpose="diagnostic"`` labels isolated audit exports.
+    Uncommitted frames are discarded at close, never implicitly published.
     """
 
     def __init__(self, cfg: FunctorCfg, env: EmbodiedEnv):
@@ -90,7 +86,12 @@ class record_camera_data(Functor):
 
         self._save_path = cfg.params.get("save_path", "./outputs/videos")
         self._current_episode = 0
-        self._frames: List[np.ndarray] = []
+        self._num_envs = getattr(env, "num_envs", 1)
+        self._frames_list: list[list[np.ndarray]] = [[] for _ in range(self._num_envs)]
+        self._ep_idx = [0] * self._num_envs
+        self._jobs: dict[tuple[int, int, str], tuple] = {}
+        self._receipts: dict[tuple[int, int, str], int] = {}
+        self._finalize_error: BaseException | None = None
         self._finalize_lock = threading.Lock()
         self._finalized = False
 
@@ -137,199 +138,209 @@ class record_camera_data(Functor):
 
         return result
 
-    def save_and_clear(self, env_ids: Union[torch.Tensor, None] = None) -> None:
-        """Save recorded frames as video and clear the buffer.
+    def _normalize_env_ids(self, env_ids: torch.Tensor | list[int] | None) -> list[int]:
+        if env_ids is None:
+            return list(range(self._num_envs))
+        values = (
+            env_ids.detach().cpu().tolist()
+            if isinstance(env_ids, torch.Tensor)
+            else list(env_ids)
+        )
+        if any(
+            type(row) is not int or not 0 <= row < self._num_envs for row in values
+        ) or len(set(values)) != len(values):
+            raise ValueError("Camera row IDs must be unique valid integers.")
+        return values
 
-        This method is called from :meth:`EmbodiedEnv._initialize_episode` to ensure
-        frames are saved before the episode is reset. This avoids the issue where the
-        final episode's frames are lost because the save previously relied on detecting
-        a reset inside :meth:`__call__`.
+    def _write_job(self, key: tuple[int, int, str], job: tuple) -> None:
+        frames, metadata = job
+        row, episode, purpose = key
+        directory = Path(self._save_path)
+        if purpose == "diagnostic":
+            directory /= "diagnostics"
+        directory /= f"env_{row:03d}"
+        directory.mkdir(parents=True, exist_ok=True)
+        name = f"episode_{episode:06d}_{self._name}"
+        # Publish complete files only. Failed jobs retain their frames and name.
+        with tempfile.TemporaryDirectory(prefix=".camera-", dir=directory) as temporary:
+            images_to_video(frames, temporary, name, fps=20)
+            staged = Path(temporary)
+            (staged / (name + ".json")).write_text(
+                json.dumps(metadata, indent=2) + "\n"
+            )
+            os.replace(staged / (name + ".mp4"), directory / (name + ".mp4"))
+            os.replace(staged / (name + ".json"), directory / (name + ".json"))
+
+    def _flush_jobs(self) -> None:
+        for key, job in list(self._jobs.items()):
+            self._write_job(key, job)
+            self._receipts[key] = len(job[0])
+            del self._jobs[key]
+
+    def save_and_clear(
+        self,
+        env_ids: torch.Tensor | list[int] | None = None,
+        *,
+        purpose: str = "recording",
+    ) -> None:
+        """Commit selected eligible rows, retaining failed writes for retry.
+
+        Args:
+            env_ids: Environment rows to commit; None selects all rows.
+            purpose: ``recording`` obeys eligibility; ``diagnostic`` writes
+                explicitly labeled artifacts under a separate diagnostics directory.
         """
         self._ensure_open()
-        if len(self._frames) > 0:
-            video_name = f"episode_{self._current_episode}_{self._name}"
-            images_to_video(self._frames, self._save_path, video_name, fps=20)
+        if purpose not in ("recording", "diagnostic"):
+            raise ValueError("Camera purpose must be recording or diagnostic.")
+        rows = self._normalize_env_ids(env_ids)
+        context = getattr(self._env, "episode_context", None)
+        if purpose == "recording" and context is not None:
+            rows = context.filter_recordable(rows).cpu().tolist()
+        snapshots = (
+            context.snapshot(rows) if context is not None else [{} for _ in rows]
+        )
+        for row, snapshot in zip(rows, snapshots, strict=True):
+            frames = self._frames_list[row]
+            if not frames:
+                continue
+            episode = snapshot.get("episode", self._ep_idx[row])
+            key = (row, episode, purpose)
+            if key in self._jobs or key in self._receipts:
+                raise RuntimeError(
+                    "A camera episode is already committed; reset before recording another fragment."
+                )
+            metadata = {
+                "artifact_purpose": purpose,
+                "env_id": row,
+                "episode_context": deepcopy(snapshot),
+                "frames": len(frames),
+            }
+            self._jobs[key] = (tuple(frame.copy() for frame in frames), metadata)
+            self._frames_list[row] = []
+            self._ep_idx[row] += 1
+        self._flush_jobs()
 
-            self._current_episode += 1
-            self._frames = []
+    def discard_and_clear(
+        self, env_ids: torch.Tensor | list[int] | None = None
+    ) -> None:
+        """Discard selected live frames while preserving committed jobs.
 
-    def discard_and_clear(self, env_ids: Union[torch.Tensor, None] = None) -> None:
-        """Discard recorded frames without creating an episode video."""
-        self._frames = []
+        Args:
+            env_ids: Environment rows to discard; None selects all rows.
+        """
+        for row in self._normalize_env_ids(env_ids):
+            self._frames_list[row] = []
 
     def finalize(self) -> None:
-        """Discard uncommitted frames and close the recorder exactly once."""
-        if not hasattr(self, "_finalize_lock"):
-            self._finalize_lock = threading.Lock()
+        """Flush committed jobs and discard live frames; never commit on close."""
         with self._finalize_lock:
-            if getattr(self, "_finalized", False):
+            if self._finalized:
+                if self._finalize_error is not None:
+                    raise self._finalize_error
                 return
-            self.discard_and_clear()
-            self._finalized = True
+            try:
+                self._flush_jobs()
+            except BaseException as error:
+                self._finalize_error = error
+                raise
+            finally:
+                self.discard_and_clear()
+                self._finalized = True
 
     def close(self) -> None:
-        """Finalize the recorder; repeated calls are safe."""
+        """Finalize committed jobs and discard uncommitted frames."""
         self.finalize()
 
     def __call__(
         self,
         env: EmbodiedEnv,
-        env_ids: Union[torch.Tensor, None],
+        env_ids: torch.Tensor | list[int] | None,
         name: str,
         resolution: tuple[int, int] = (640, 480),
         eye: tuple[float, float, float] = (0, 0, 2),
         target: tuple[float, float, float] = (0, 0, 0),
         up: tuple[float, float, float] = (0, 0, 1),
-        intrinsics: tuple[float, float, float, float] = (
-            600,
-            600,
-            320,
-            240,
-        ),
+        intrinsics: tuple[float, float, float, float] = (600, 600, 320, 240),
         max_env_num: int = 16,
         save_path: str = "./outputs/videos",
-    ):
+    ) -> None:
+        """Copy selected camera rows without consuming any other row's frames.
+
+        Args:
+            env: Owning environment.
+            env_ids: Selected rows; None captures all rows up to max_env_num.
+            name: Camera name from construction parameters.
+            resolution: Construction-only image size.
+            eye: Construction-only camera position.
+            target: Construction-only look-at point.
+            up: Construction-only vertical direction.
+            intrinsics: Construction-only camera calibration.
+            max_env_num: Upper bound on captured row indices.
+            save_path: Construction-only output directory.
+        """
         self._ensure_open()
         self.camera.update(fetch_only=True)
-        data = self.camera.get_data()
-        rgb = data["color"]
-
-        num_frames = max(rgb.shape[0], max_env_num)
-        rgb = rgb[:num_frames]
-        rgb = self._draw_frames_into_one_image(rgb)[..., :3].cpu().numpy()
-        self._frames.append(rgb)
+        rgb = self.camera.get_data()["color"]
+        for row in self._normalize_env_ids(env_ids):
+            if row >= max_env_num:
+                continue
+            frame = rgb[row, ..., :3]
+            if isinstance(frame, torch.Tensor):
+                frame = frame.detach().cpu().numpy()
+            self._frames_list[row].append(np.array(frame, copy=True))
 
 
 class record_camera_data_async(record_camera_data):
-    """Record camera data for multiple environments, merge and save as a single video at episode end."""
+    """Persist independent row snapshots through one background video writer."""
 
-    def __init__(self, cfg: FunctorCfg, env: EmbodiedEnv):
+    def __init__(self, cfg: FunctorCfg, env: EmbodiedEnv) -> None:
         super().__init__(cfg, env)
-        self._num_envs = min(4, getattr(env, "num_envs", 1))
-        self._frames_list = [[] for _ in range(self._num_envs)]
-        self._ep_idx = [0 for _ in range(self._num_envs)]
-        self._committed_env_episodes = [deque() for _ in range(self._num_envs)]
-        self._async_camera_finalize_lock = threading.Lock()
-        self._async_camera_finalized = False
-        self._async_camera_finalize_error: str | None = None
+        self._executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="camera-writer"
+        )
+        self._futures: dict[tuple[int, int, str], Future] = {}
 
-    def _normalize_env_ids(self, env_ids: Union[torch.Tensor, None]) -> list[int]:
-        """Return recorder-local environment IDs for a transaction boundary."""
-        if env_ids is None:
-            return list(range(self._num_envs))
-        if isinstance(env_ids, torch.Tensor):
-            values = env_ids.reshape(-1).cpu().tolist()
-        else:
-            values = list(env_ids)
-        return [int(env_id) for env_id in values if int(env_id) < self._num_envs]
-
-    def _flush_committed_episodes(self) -> None:
-        """Persist every complete FIFO set of explicitly committed env episodes."""
-        while all(self._committed_env_episodes):
-            episode_frames = [queue[0] for queue in self._committed_env_episodes]
-            min_len = min(len(frames) for frames in episode_frames)
-            big_frames = []
-            for frame_id in range(min_len):
-                frames = [frames[frame_id] for frames in episode_frames]
-                frames_tensor = torch.from_numpy(np.stack(frames)).to(torch.uint8)
-                big_frame = (
-                    self._draw_frames_into_one_image(frames_tensor)[..., :3]
-                    .cpu()
-                    .numpy()
-                )
-                big_frames.append(big_frame)
-
-            video_name = f"ep{self._current_episode}_{self._name}_allenvs"
-            # Peek above and pop only after persistence succeeds. A failed
-            # write therefore remains observable and retryable at finalize().
-            images_to_video(big_frames, self._save_path, video_name, fps=20)
-            for queue in self._committed_env_episodes:
-                queue.popleft()
-            self._current_episode += 1
-
-    def save_and_clear(self, env_ids: Union[torch.Tensor, None] = None) -> None:
-        """Commit selected rows immediately instead of waiting for a later step."""
-        self._ensure_open()
-        for env_id in self._normalize_env_ids(env_ids):
-            frames = self._frames_list[env_id]
-            if frames:
-                self._committed_env_episodes[env_id].append(frames)
-                self._frames_list[env_id] = []
-                self._ep_idx[env_id] += 1
-        self._flush_committed_episodes()
-
-    def discard_and_clear(self, env_ids: Union[torch.Tensor, None] = None) -> None:
-        """Discard live frames while preserving already committed episodes."""
-        super().discard_and_clear()
-        for env_id in self._normalize_env_ids(env_ids):
-            self._frames_list[env_id] = []
+    def _flush_jobs(self) -> None:
+        for key, job in list(self._jobs.items()):
+            future = self._futures.get(key)
+            if future is not None:
+                if not future.done():
+                    continue
+                try:
+                    future.result()
+                except BaseException:
+                    # Report the failed write once; its owned job remains available
+                    # for the next explicit retry under the original episode ID.
+                    del self._futures[key]
+                    raise
+                self._receipts[key] = len(job[0])
+                del self._jobs[key]
+                del self._futures[key]
+            else:
+                self._futures[key] = self._executor.submit(self._write_job, key, job)
 
     def finalize(self) -> None:
-        """Flush committed frame sets and reject incomplete committed batches."""
-        if not hasattr(self, "_async_camera_finalize_lock"):
-            self._async_camera_finalize_lock = threading.Lock()
-            self._async_camera_finalized = False
-            self._async_camera_finalize_error = None
-        with self._async_camera_finalize_lock:
-            if self._async_camera_finalized:
-                if self._async_camera_finalize_error is not None:
-                    raise RuntimeError(self._async_camera_finalize_error)
+        """Wait for every committed row; independent rows never wait for a mosaic."""
+        with self._finalize_lock:
+            if self._finalized:
+                if self._finalize_error is not None:
+                    raise self._finalize_error
                 return
-
-            errors: list[str] = []
             try:
-                self._flush_committed_episodes()
-            except Exception as error:  # noqa: BLE001 - finish recorder cleanup
-                errors.append(f"video persistence: {error}")
-
-            pending_counts = [len(queue) for queue in self._committed_env_episodes]
-            if any(pending_counts):
-                errors.append(
-                    "incomplete committed environment batch "
-                    f"(pending episodes per env: {pending_counts})"
-                )
-
-            try:
-                super().finalize()
-            except Exception as error:  # noqa: BLE001 - aggregate cleanup
-                errors.append(f"recorder cleanup: {error}")
-
-            self._async_camera_finalized = True
-            if errors:
-                self._async_camera_finalize_error = (
-                    "Async camera recorder finalization failed: " + "; ".join(errors)
-                )
-                raise RuntimeError(self._async_camera_finalize_error)
-
-    def __call__(
-        self,
-        env: EmbodiedEnv,
-        env_ids: Union[torch.Tensor, None],
-        name: str,
-        resolution: tuple[int, int] = (640, 480),
-        eye: tuple[float, float, float] = (0, 0, 2),
-        target: tuple[float, float, float] = (0, 0, 0),
-        up: tuple[float, float, float] = (0, 0, 1),
-        intrinsics: tuple[float, float, float, float] = (
-            600,
-            600,
-            320,
-            240,
-        ),
-        max_env_num: int = 16,
-        save_path: str = "./outputs/videos",
-    ):
-        self._ensure_open()
-        self.camera.update(fetch_only=True)
-        data = self.camera.get_data()
-        rgb = data["color"]  # shape: (num_envs, H, W, 4)
-        if isinstance(rgb, torch.Tensor):
-            rgb_np = rgb.cpu().numpy()
-        else:
-            rgb_np = rgb
-        # Only collect frames for the first 4 environments
-        for i in range(self._num_envs):
-            self._frames_list[i].append(rgb_np[i][..., :])
+                self._flush_jobs()
+                for key, future in list(self._futures.items()):
+                    future.result()
+                    self._receipts[key] = len(self._jobs[key][0])
+                    del self._jobs[key]
+                    del self._futures[key]
+            except BaseException as error:
+                self._finalize_error = error
+                raise
+            finally:
+                self._executor.shutdown(wait=True)
+                self.discard_and_clear()
+                self._finalized = True
 
 
 class validation_cameras(Functor):

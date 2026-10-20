@@ -41,7 +41,7 @@ topics:
   title: Environment Framework
   aliases: [env framework, environment framework, task registration, list task, expert trajectory, 环境框架, 任务环境,
     专家轨迹]
-  keywords: [BaseEnv, EmbodiedEnv, EnvCfg, register_env, list-task, run-task, target_control_frequency,
+  keywords: [BaseEnv, EmbodiedEnv, EpisodeContext, EnvCfg, register_env, list-task, run-task, target_control_frequency,
     sim_steps_per_control, step_dt, environment.component, embodiment.component, file-owned physics backend,
     physics_config, ControllerAction, EnvProfiler, startup_summary, dexsim_startup_info,
     ExpertTrajectoryCfg, joint_command_mode, position_velocity, qpos qvel, expert action schema,
@@ -62,10 +62,11 @@ topics:
   - embodichain/lab/gym/envs/base_env.py
   - embodichain/lab/gym/envs/_startup_summary.py
   - embodichain/lab/gym/envs/embodied_env.py
+  - embodichain/lab/gym/envs/episode_context.py
   - embodichain/lab/gym/envs/expert_trajectory.py
   - embodichain/lab/gym/envs/demo.py
   - embodichain/lab/gym/utils/profiler.py
-  watch_paths: [embodichain/lab/gym/envs/base_env.py, embodichain/lab/gym/envs/embodied_env.py, embodichain/lab/gym/envs/expert_trajectory.py,
+  watch_paths: [embodichain/lab/gym/envs/episode_context.py, embodichain/lab/gym/envs/base_env.py, embodichain/lab/gym/envs/embodied_env.py, embodichain/lab/gym/envs/expert_trajectory.py,
     embodichain/lab/gym/envs/demo.py,
     embodichain/lab/gym/utils/, embodichain/lab/gym/envs/task_program/, embodichain/cli/, embodichain/lab/scripts/run_task.py,
     extensions/embodichain_tasks/, tests/gym/envs/, embodichain/lab/gym/envs/objectives/,
@@ -235,7 +236,7 @@ topics:
   aliases: [scene expansion, scene augmentation, scene variant, 场景扩增, 场景变体]
   keywords: [SceneLayoutInput, SceneRandomizationPolicyCfg, prepare_scene_randomization, generate_scene_variants, apply_scene_variants, load_scene_variants, SceneExpansionCfg, ScenePoseChange, SceneVariant, FixedSceneCandidateSource,
     ScenePreparationResult, SceneVariantEpisodeResult, execute_scene_variant,
-    SimulationSceneExpansionHost, SimulationSceneInitialState, scene_expansion_prepare]
+    SimulationSceneExpansionHost, SimulationSceneInitialState, episode_prepare]
   paths: [topics/scene-expansion/scene-expansion.md]
   source_of_truth:
   - embodichain/lab/sim/scene/expansion/
@@ -327,7 +328,7 @@ topics:
 - id: randomization
   title: Domain Randomization
   aliases: [domain randomization, randomization, 域随机化, 随机化, 随机种子]
-  keywords: [RandomizeSceneLayout, seed_revision, EventCfg, randomize_rigid_object_pose, randomize_visual_material, randomize_robot_qpos, set_seed,
+  keywords: [ExpandSceneLayout, seed_revision, EventCfg, randomize_rigid_object_pose, randomize_visual_material, randomize_robot_qpos, set_seed,
     _scoped_random_seed, _derive_functor_seed, interval_step]
   paths: [topics/randomization/randomization.md]
   source_of_truth:

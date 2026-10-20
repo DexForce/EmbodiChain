@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from embodichain.lab.gym.envs.episode_context import EpisodeContext
+
 import threading
 from types import SimpleNamespace
 from typing import Any
@@ -1124,6 +1126,7 @@ class _RolloutWriterStub:
     _seed_expert_observations = EmbodiedEnv._seed_expert_observations
 
     def __init__(self) -> None:
+        self.episode_context = EpisodeContext(2)
         self.rollout_buffer = _make_rollout_buffer(2, 5)
         self.rollout_steps = torch.tensor([0, 2], dtype=torch.long)
         self.current_rollout_step = 2
@@ -1814,6 +1817,7 @@ def test_unknown_dynamic_snapshot_is_not_relabeled_by_metadata_retrieval() -> No
         _demo_steps=torch.tensor([0]),
         rollout_buffer=None,
     )
+    env.episode_context = EpisodeContext(1)
     metadata = EmbodiedEnv.get_demo_episode_metadata(env, 0)
     assert metadata["instruction"] == "unknown_task"
     assert metadata["instruction_source"] == "unknown"

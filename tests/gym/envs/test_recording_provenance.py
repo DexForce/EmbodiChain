@@ -18,12 +18,15 @@
 
 from __future__ import annotations
 
+from embodichain.lab.gym.envs.episode_context import EpisodeContext
+
 import copy
 from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import UUID
 
+import pytest
 import torch
 from tensordict import TensorDict
 
@@ -64,6 +67,9 @@ def make_env() -> SimpleNamespace:
         env._demo_episode_metadata[row]
     )
     env._trajectory_action_metadata = lambda: {"action_kind": "expert"}
+    env.episode_context = EpisodeContext(1)
+    env.episode_context._begin_episode([0])
+    env.episode_context._finish_initialization([0])
     return env
 
 
@@ -224,3 +230,17 @@ def test_fragment_retries_keep_stable_identity_and_source_replay(
     assert fragment["source_start_step"] == 1
     assert fragment["replay_artifact"]["initial_state_step"] == 0
     assert fragment["source_trajectory_path"] == metadata["trajectory_path"]
+
+
+def test_diagnostic_export_does_not_make_rejected_buffers_normal_recordings(tmp_path):
+    env = make_env()
+    with env.episode_context.check("task_spec", [0]) as finish:
+        finish(accepted=False, reasons="unverified")
+    path = tmp_path / "diagnostics.pt"
+    EmbodiedEnv.save_trajectory(env, str(path), env_ids=[0], purpose="diagnostic")
+    payload = torch.load(path, weights_only=False)
+    assert payload["meta"]["artifact_purpose"] == "diagnostic"
+    assert "trajectory_path" not in env._demo_episode_metadata[0]
+    with pytest.raises(RuntimeError, match="rejected"):
+        EmbodiedEnv.save_trajectory(env, str(tmp_path / "normal.pt"), env_ids=[0])
+    assert not (tmp_path / "normal.pt").exists()

@@ -91,7 +91,8 @@ joint seeds and scores; actual pose IK also checks targets absent from the
 cache and verifies joint limits and full-pose FK residuals. Recheck settled or modified poses. Support, collision planning between
 phases and measured success remain separate gates.
 
-The attempt guard spans preparation, execution and measurement. It suppresses
+An `EpisodeContext.check("scene_expansion/task_program", [0])` scope spans
+preparation, execution and measurement. It suppresses
 automatic reset and blocks persistence during explicit callback resets, even
 when those resets replace episode annotations. Rejected recording buffers must
 be discarded by reset before retrying; beginning another demo or replacing its

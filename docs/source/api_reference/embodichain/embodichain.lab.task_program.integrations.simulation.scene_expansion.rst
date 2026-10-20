@@ -17,7 +17,7 @@ robot, and articulation state of a fixed scene.
 Reset ordering and recording
 ----------------------------
 
-The callable host passes a trusted zero-argument ``scene_expansion_prepare``
+The callable host passes a trusted zero-argument ``episode_prepare``
 callback to ``BaseEnv.reset``. The callback runs after normal reset and reset
 events, before physical-objective initialization and the final observation.
 ``EmbodiedEnv.reset`` then clears the old bridge and seeds recording from that

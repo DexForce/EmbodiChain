@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from embodichain.lab.gym.envs.episode_context import EpisodeContext
+
 import threading
 from collections import deque
 from types import SimpleNamespace
@@ -76,7 +78,18 @@ def make_env_for_episode_selection(
         reward_manager=None,
         rollout_buffer=None,
     )
+    env.episode_context = EpisodeContext(num_envs)
+    env.episode_context._begin_episode(list(range(num_envs)))
+    env.episode_context._finish_initialization(list(range(num_envs)))
     return env, manager
+
+
+def reset_recording_rows(env, env_ids=None, **kwargs):
+    rows = env.episode_context._ids(env_ids)
+    EmbodiedEnv._before_episode_reset(env, env_ids=rows, **kwargs)
+    env.episode_context._begin_episode(rows)
+    EmbodiedEnv._initialize_episode(env, env_ids=env_ids, **kwargs)
+    env.episode_context._finish_initialization(rows)
 
 
 def test_save_failed_episodes_reads_typed_functor_config() -> None:
@@ -250,7 +263,7 @@ def test_initialize_episode_limits_successes_to_reset_envs(
     elif action_manager_state == "configured":
         env.action_manager = SimpleNamespace(reset=MagicMock())
 
-    EmbodiedEnv._initialize_episode(env, env_ids=[1, 2])
+    reset_recording_rows(env, env_ids=[1, 2])
 
     assert torch.equal(manager.saved_env_ids, torch.tensor([1]))
     if action_manager_state == "configured":
@@ -263,7 +276,7 @@ def test_initialize_episode_saves_failed_reset_envs_when_enabled() -> None:
         successful_env_ids=[1],
     )
 
-    EmbodiedEnv._initialize_episode(env, env_ids=[1, 2])
+    reset_recording_rows(env, env_ids=[1, 2])
 
     assert torch.equal(manager.saved_env_ids, torch.tensor([1, 2]))
 
@@ -289,7 +302,7 @@ def test_initialize_episode_saves_row_with_accepted_segment_fragment() -> None:
         "segments": [],
     }
 
-    EmbodiedEnv._initialize_episode(env, env_ids=[1, 2])
+    reset_recording_rows(env, env_ids=[1, 2])
 
     assert torch.equal(manager.saved_env_ids, torch.tensor([1]))
 
@@ -301,7 +314,8 @@ def test_initialize_episode_commits_only_explicit_vector_rows() -> None:
         successful_env_ids=[],
     )
     recorder = record_camera_data.__new__(record_camera_data)
-    recorder._frames = [object()]
+    recorder._num_envs = 3
+    recorder._frames_list = [[object()], [], []]
     recorder.save_and_clear = MagicMock()
     env.cfg.events = object()
     env.event_manager = SimpleNamespace(
@@ -314,7 +328,7 @@ def test_initialize_episode_commits_only_explicit_vector_rows() -> None:
     env.cfg.trajectory_auto_save = True
     env._save_trajectory_for_env = MagicMock()
 
-    EmbodiedEnv._initialize_episode(
+    reset_recording_rows(
         env,
         env_ids=[0, 1, 2],
         save_data=False,
@@ -323,7 +337,7 @@ def test_initialize_episode_commits_only_explicit_vector_rows() -> None:
 
     assert torch.equal(manager.saved_env_ids, torch.tensor([1]))
     recorder.save_and_clear.assert_not_called()
-    assert recorder._frames == []
+    assert recorder._frames_list[0] == []
     env._save_trajectory_for_env.assert_not_called()
     assert env._traj_steps.tolist() == [0, 0, 0]
 
@@ -339,7 +353,7 @@ def test_discard_reset_does_not_auto_save_trajectory() -> None:
     env.cfg.trajectory_auto_save = True
     env._save_trajectory_for_env = MagicMock()
 
-    EmbodiedEnv._initialize_episode(env, env_ids=[0], save_data=False)
+    reset_recording_rows(env, env_ids=[0], save_data=False)
 
     env._save_trajectory_for_env.assert_not_called()
     assert env._traj_steps.tolist() == [0, 2, 1]
@@ -357,7 +371,7 @@ def test_committed_trajectory_write_failure_preserves_buffer_and_raises() -> Non
     env._save_trajectory_for_env = MagicMock(side_effect=OSError("disk full"))
 
     with pytest.raises(OSError, match="disk full"):
-        EmbodiedEnv._initialize_episode(env, env_ids=[0], save_data=True)
+        reset_recording_rows(env, env_ids=[0], save_data=True)
 
     assert env._traj_steps.tolist() == [3, 2, 1]
 
@@ -369,7 +383,8 @@ def test_discard_reset_clears_camera_frames_without_saving() -> None:
         successful_env_ids=[],
     )
     recorder = record_camera_data.__new__(record_camera_data)
-    recorder._frames = [object()]
+    recorder._num_envs = 3
+    recorder._frames_list = [[object()], [], []]
     recorder.save_and_clear = MagicMock()
     env.cfg.events = object()
     env.event_manager = SimpleNamespace(
@@ -378,118 +393,10 @@ def test_discard_reset_clears_camera_frames_without_saving() -> None:
         available_modes=[],
     )
 
-    EmbodiedEnv._initialize_episode(env, env_ids=[0], save_data=False)
+    reset_recording_rows(env, env_ids=[0], save_data=False)
 
     recorder.save_and_clear.assert_not_called()
-    assert recorder._frames == []
-
-
-def test_camera_finalize_discards_uncommitted_frames_idempotently() -> None:
-    """Closing a camera recorder cannot resurrect an explicitly discarded episode."""
-    recorder = record_camera_data.__new__(record_camera_data)
-    recorder._name = "test"
-    recorder._save_path = "/tmp/test-camera-recorder"
-    recorder._current_episode = 0
-    recorder._frames = [object()]
-    recorder._finalize_lock = threading.Lock()
-    recorder._finalized = False
-
-    recorder.discard_and_clear()
-    with patch(
-        "embodichain.lab.gym.envs.managers.record.images_to_video"
-    ) as save_video:
-        recorder.finalize()
-        recorder.close()
-
-    save_video.assert_not_called()
-    assert recorder._frames == []
-    assert recorder._current_episode == 0
-    with pytest.raises(RuntimeError, match="already finalized"):
-        recorder.save_and_clear()
-
-
-def test_camera_explicit_commit_is_not_repeated_by_finalize() -> None:
-    """Only save_and_clear commits frames; finalize merely closes the empty buffer."""
-    recorder = record_camera_data.__new__(record_camera_data)
-    frame = object()
-    recorder._name = "test"
-    recorder._save_path = "/tmp/test-camera-recorder"
-    recorder._current_episode = 0
-    recorder._frames = [frame]
-    recorder._finalize_lock = threading.Lock()
-    recorder._finalized = False
-
-    with patch(
-        "embodichain.lab.gym.envs.managers.record.images_to_video"
-    ) as save_video:
-        recorder.save_and_clear()
-        recorder.finalize()
-        recorder.close()
-
-    save_video.assert_called_once_with(
-        [frame],
-        "/tmp/test-camera-recorder",
-        "episode_0_test",
-        fps=20,
-    )
-    assert recorder._frames == []
-    assert recorder._current_episode == 1
-
-
-def _make_async_camera_recorder(num_envs: int = 2) -> record_camera_data_async:
-    """Build an async camera recorder without constructing simulation sensors."""
-    recorder = record_camera_data_async.__new__(record_camera_data_async)
-    recorder._name = "test"
-    recorder._save_path = "/tmp/test-async-camera-recorder"
-    recorder._current_episode = 0
-    recorder._frames = []
-    recorder._finalize_lock = threading.Lock()
-    recorder._finalized = False
-    recorder._num_envs = num_envs
-    recorder._frames_list = [[] for _ in range(num_envs)]
-    recorder._ep_idx = [0 for _ in range(num_envs)]
-    recorder._committed_env_episodes = [deque() for _ in range(num_envs)]
-    recorder._async_camera_finalize_lock = threading.Lock()
-    recorder._async_camera_finalized = False
-    recorder._async_camera_finalize_error = None
-    return recorder
-
-
-def test_async_camera_commit_persists_without_a_later_step() -> None:
-    """The final committed vector episode is durable before close/finalize."""
-    recorder = _make_async_camera_recorder()
-    recorder._frames_list = [
-        [np.zeros((2, 2, 4), dtype=np.uint8)],
-        [np.ones((2, 2, 4), dtype=np.uint8)],
-    ]
-
-    with patch(
-        "embodichain.lab.gym.envs.managers.record.images_to_video"
-    ) as save_video:
-        recorder.save_and_clear(env_ids=torch.tensor([0, 1]))
-        recorder.finalize()
-
-    save_video.assert_called_once()
-    _, save_path, video_name = save_video.call_args.args
-    assert save_path == "/tmp/test-async-camera-recorder"
-    assert video_name == "ep0_test_allenvs"
-    assert save_video.call_args.kwargs == {"fps": 20}
-    assert recorder._current_episode == 1
-    assert all(not queue for queue in recorder._committed_env_episodes)
-
-
-def test_async_camera_finalize_rejects_incomplete_committed_batch() -> None:
-    """A partial vector commit is reported instead of silently discarded."""
-    recorder = _make_async_camera_recorder()
-    recorder._frames_list[0] = [np.zeros((2, 2, 4), dtype=np.uint8)]
-    recorder.save_and_clear(env_ids=torch.tensor([0]))
-    recorder.discard_and_clear(env_ids=torch.tensor([1]))
-
-    with pytest.raises(RuntimeError, match="pending episodes per env: \\[1, 0\\]"):
-        recorder.finalize()
-
-    with pytest.raises(RuntimeError, match="incomplete committed environment batch"):
-        recorder.close()
+    assert recorder._frames_list[0] == []
 
 
 def test_pending_discard_attempts_every_camera_and_clears_trajectory() -> None:

@@ -400,8 +400,6 @@ class EmbodiedEnv(BaseEnv):
         self.affordance_datas = {}
         self._task_program_adapter: TaskProgramEnvironmentAdapter | None = None
         self._active_task_program_bridge: TaskProgramDemoBridge | None = None
-        self._scene_expansion_attempt_active = False
-        self._scene_expansion_recording_rejected = False
 
         extensions = getattr(cfg, "extensions", {}) or {}
 
@@ -545,9 +543,6 @@ class EmbodiedEnv(BaseEnv):
             self._close_error: BaseException | None = None
             self._close_lock = threading.RLock()
 
-            all_env_ids = torch.arange(self.num_envs, device=self.device)
-            self._seed_recording_state(self._init_raw_obs, all_env_ids)
-
             self._log_initialization_summary()
         except Exception:
             if self.dataset_manager is not None:
@@ -634,34 +629,9 @@ class EmbodiedEnv(BaseEnv):
         names = [str(name) for name in active_functors]
         return [("terms", names)] if names else []
 
-    def reset(
-        self, seed: int | None = None, options: dict | None = None
-    ) -> tuple[EnvObs, Dict]:
-        """Reset environments and seed pre-action recording state.
-
-        Expert frames must pair the observation before an action with that
-        action. The base reset computes the authoritative post-reset
-        observation, so recording is seeded only after it returns.
-
-        Args:
-            seed: Optional random seed forwarded to :class:`BaseEnv`.
-            options: Reset options. ``reset_ids`` may select only some vector
-                environment rows. ``commit_env_ids`` may select a subset of
-                the reset rows whose pending dataset episodes are persisted.
-
-        Returns:
-            The reset observation and info dictionary.
-        """
-        obs, info = super().reset(seed=seed, options=options)
+    def _after_episode_reset(self, obs: EnvObs, env_ids: torch.Tensor) -> None:
         self._active_task_program_bridge = None
-        if options is None or "reset_ids" not in options:
-            reset_ids = torch.arange(self.num_envs, device=self.device)
-        else:
-            reset_ids = torch.as_tensor(
-                options["reset_ids"], dtype=torch.long, device=self.device
-            ).reshape(-1)
-        self._seed_recording_state(obs, reset_ids)
-        return obs, info
+        self._seed_recording_state(obs, env_ids)
 
     def _seed_recording_state(self, obs: EnvObs, env_ids: torch.Tensor) -> None:
         """Seed all enabled recorders from the current environment state."""
@@ -1142,7 +1112,7 @@ class EmbodiedEnv(BaseEnv):
         if objective is not None:
             objective.reset(env_ids)
 
-    def _initialize_episode(
+    def _before_episode_reset(
         self, env_ids: Sequence[int] | None = None, **kwargs
     ) -> None:
         if logger.logger.isEnabledFor(logging.DEBUG):
@@ -1186,40 +1156,11 @@ class EmbodiedEnv(BaseEnv):
                     "commit_env_ids must be a subset of the rows being reset."
                 )
 
-        # Scene eligibility follows the recording buffers, not replaceable demo
-        # annotations. Preparation and measurement resets cannot commit an
-        # active attempt; rejected buffers stay blocked until a full row reset.
-        episode_metadata = getattr(self, "_demo_episode_metadata", None)
-        if self.num_envs == 1:
-            scene_attempt_active = getattr(
-                self, "_scene_expansion_attempt_active", False
-            )
-            if episode_metadata:
-                scene_expansion = episode_metadata[0].get("scene_expansion")
-                if (
-                    not scene_attempt_active
-                    and isinstance(scene_expansion, Mapping)
-                    and scene_expansion.get("accepted") is not True
-                ):
-                    self._scene_expansion_recording_rejected = True
-            if scene_attempt_active or getattr(
-                self, "_scene_expansion_recording_rejected", False
-            ):
-                save_data = False
-                env_ids_to_commit = torch.empty(
-                    0, device=status_device, dtype=torch.long
-                )
-
         # Persist replay state before the dataset recorder snapshots metadata
         # (including asynchronous snapshots). The existing state buffer retains
         # the source episode's initial state even when training exports fragments.
         _traj_buffer = getattr(self, "_traj_buffer", None)
-        scene_invalid_rows = getattr(self, "_scene_randomization_invalid_rows", None)
-        valid_recording_ids = env_ids_to_process
-        if scene_invalid_rows is not None:
-            valid_recording_ids = env_ids_to_process[
-                ~scene_invalid_rows.to(status_device)[env_ids_to_process]
-            ]
+        valid_recording_ids = self.episode_context.filter_recordable(env_ids_to_process)
         if (
             save_data
             and _traj_buffer is not None
@@ -1252,10 +1193,9 @@ class EmbodiedEnv(BaseEnv):
                         successful_envs[env_ids_to_process] | fragment_envs
                     ]
 
-                if scene_invalid_rows is not None:
-                    env_ids_to_save = env_ids_to_save[
-                        ~scene_invalid_rows.to(status_device)[env_ids_to_save]
-                    ]
+                env_ids_to_save = self.episode_context.filter_recordable(
+                    env_ids_to_save
+                )
                 if env_ids_to_save.numel() > 0:
                     with self._profiler.section("dataset_save"):
                         self.dataset_manager.apply(
@@ -1271,25 +1211,19 @@ class EmbodiedEnv(BaseEnv):
                 for mode_cfgs in self.event_manager._mode_functor_cfgs.values():
                     for functor_cfg in mode_cfgs:
                         if isinstance(functor_cfg.func, record_camera_data):
-                            if save_data:
-                                if valid_recording_ids.numel() > 0:
-                                    functor_cfg.func.save_and_clear(
-                                        env_ids=valid_recording_ids
-                                    )
-                                if scene_invalid_rows is not None:
-                                    invalid_ids = env_ids_to_process[
-                                        scene_invalid_rows.to(status_device)[
-                                            env_ids_to_process
-                                        ]
-                                    ]
-                                    if invalid_ids.numel():
-                                        functor_cfg.func.discard_and_clear(
-                                            env_ids=invalid_ids
-                                        )
-                            else:
-                                functor_cfg.func.discard_and_clear(
-                                    env_ids=env_ids_to_process
+                            if save_data and valid_recording_ids.numel():
+                                functor_cfg.func.save_and_clear(
+                                    env_ids=valid_recording_ids
                                 )
+                            discard_ids = (
+                                env_ids_to_process[
+                                    ~torch.isin(env_ids_to_process, valid_recording_ids)
+                                ]
+                                if save_data
+                                else env_ids_to_process
+                            )
+                            if discard_ids.numel():
+                                functor_cfg.func.discard_and_clear(env_ids=discard_ids)
 
         _traj_steps = getattr(self, "_traj_steps", None)
         if _traj_steps is not None:
@@ -1304,10 +1238,6 @@ class EmbodiedEnv(BaseEnv):
                 rollout_steps[rollout_ids] = 0
                 self.current_rollout_step = int(rollout_steps.max().item())
 
-        episode_metadata = getattr(self, "_demo_episode_metadata", None)
-        if episode_metadata is not None:
-            for env_id in env_ids_to_process.cpu().tolist():
-                episode_metadata[env_id] = self._new_demo_episode_metadata(env_id)
         active_segment_ids = getattr(self, "_demo_active_segment_ids", None)
         if active_segment_ids is not None:
             demo_ids = env_ids_to_process.to(active_segment_ids.device)
@@ -1320,6 +1250,14 @@ class EmbodiedEnv(BaseEnv):
 
         self.episode_success_status.index_fill_(0, env_ids_to_process, False)
 
+    def _initialize_episode(
+        self, env_ids: Sequence[int] | torch.Tensor | None = None, **kwargs: Any
+    ) -> None:
+        env_ids_to_process = self.episode_context._ids(env_ids)
+        episode_metadata = getattr(self, "_demo_episode_metadata", None)
+        if episode_metadata is not None:
+            for env_id in env_ids_to_process.cpu().tolist():
+                episode_metadata[env_id] = self._new_demo_episode_metadata(env_id)
         # Stateful managers reset selected rows before reset-mode events run.
         action_manager = getattr(self, "action_manager", None)
         if action_manager is not None:
@@ -1358,13 +1296,6 @@ class EmbodiedEnv(BaseEnv):
             for env_id in env_ids_to_process.cpu().tolist():
                 if 0 <= env_id < len(executed_qpos_history):
                     executed_qpos_history[env_id].clear()
-
-        if (
-            self.num_envs == 1
-            and env_ids_to_process.numel() == 1
-            and int(env_ids_to_process[0].item()) == 0
-        ):
-            self._scene_expansion_recording_rejected = False
 
     def _clear_expert_rollout_rows(self, env_ids: torch.Tensor) -> None:
         """Invalidate selected expert-buffer rows without clearing large frames."""
@@ -1461,9 +1392,6 @@ class EmbodiedEnv(BaseEnv):
         expert_action_spec = getattr(self, "expert_action_spec", None)
         if expert_action_spec is not None:
             metadata.update(expert_action_spec.metadata(step_dt=self.step_dt))
-        scene_metadata = getattr(self, "_scene_randomization_metadata", None)
-        if scene_metadata is not None and scene_metadata[env_id] is not None:
-            metadata["scene_randomization"] = copy.deepcopy(scene_metadata[env_id])
         return metadata
 
     def _begin_demo_episode_recording(
@@ -1668,7 +1596,8 @@ class EmbodiedEnv(BaseEnv):
         Returns:
             A JSON-compatible metadata dictionary.
         """
-        metadata = dict(self._demo_episode_metadata[env_id])
+        metadata = copy.deepcopy(self._demo_episode_metadata[env_id])
+        metadata["episode_context"] = self.episode_context.snapshot([env_id])[0]
         metadata["segments"] = [
             dict(segment)
             for segment in self._demo_episode_metadata[env_id].get("segments", [])
@@ -2405,12 +2334,7 @@ class EmbodiedEnv(BaseEnv):
         objective = getattr(self, "physical_objective", None)
         if objective is not None:
             info["physical_objective"] = objective.snapshot()
-        scene_metadata = getattr(self, "_scene_randomization_metadata", None)
-        if scene_metadata is not None:
-            info["scene_randomization"] = copy.deepcopy(scene_metadata)
-            info["scene_randomization_valid"] = (
-                ~self._scene_randomization_invalid_rows.clone()
-            )
+        info["episode_context"] = self.episode_context.snapshot()
         return info
 
     def evaluate(self, **kwargs) -> Dict[str, Any]:
@@ -3092,7 +3016,13 @@ class EmbodiedEnv(BaseEnv):
             return None
         return (DemoSegment(actions=actions, name="legacy"),)
 
-    def save_trajectory(self, path: str, env_ids: Sequence[int] | None = None) -> str:
+    def save_trajectory(
+        self,
+        path: str,
+        env_ids: Sequence[int] | None = None,
+        *,
+        purpose: str = "recording",
+    ) -> str:
         """Save a causally aligned trajectory to a ``.pt`` file.
 
         ``states[t]`` is the state immediately before ``actions[t]`` is applied,
@@ -3102,6 +3032,7 @@ class EmbodiedEnv(BaseEnv):
             path: Destination ``.pt`` file path.
             env_ids: Env indices to save (default: all). Each saved env's actual
                 recorded length is stored in ``meta["lengths"]``.
+            purpose: Normal recording or explicitly labeled diagnostic export.
 
         Raises:
             RuntimeError: If trajectory recording was never enabled.
@@ -3113,6 +3044,14 @@ class EmbodiedEnv(BaseEnv):
         if env_ids is None:
             env_ids = list(range(self.num_envs))
         env_ids = list(env_ids)
+        if purpose not in ("recording", "diagnostic"):
+            raise ValueError("Trajectory purpose must be recording or diagnostic.")
+        if purpose == "recording" and len(
+            self.episode_context.filter_recordable(env_ids)
+        ) != len(env_ids):
+            raise RuntimeError(
+                "Cannot save uninitialized, pending or rejected recording rows."
+            )
         if not env_ids:
             raise ValueError("env_ids must contain at least one environment row.")
         env_ids_t = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
@@ -3122,6 +3061,7 @@ class EmbodiedEnv(BaseEnv):
         states = sub["states"][:, :max_len].clone()
         actions = sub["actions"][:, :max_len].clone()
         meta = {
+            "artifact_purpose": purpose,
             "lengths": lengths.tolist(),
             "num_steps": max_len,
             "num_envs": int(len(env_ids)),
@@ -3192,10 +3132,13 @@ class EmbodiedEnv(BaseEnv):
                 os.close(directory)
         finally:
             Path(temporary).unlink(missing_ok=True)
-        for env_id, episode in zip(env_ids, meta["demo_episodes"]):
-            live_metadata = self._demo_episode_metadata[env_id]
-            live_metadata["trajectory_path"] = replay_path
-            live_metadata["replay_artifact"] = copy.deepcopy(episode["replay_artifact"])
+        if purpose == "recording":
+            for env_id, episode in zip(env_ids, meta["demo_episodes"]):
+                live_metadata = self._demo_episode_metadata[env_id]
+                live_metadata["trajectory_path"] = replay_path
+                live_metadata["replay_artifact"] = copy.deepcopy(
+                    episode["replay_artifact"]
+                )
         return path
 
     def _save_trajectory_for_env(self, env_id: int) -> str | None:

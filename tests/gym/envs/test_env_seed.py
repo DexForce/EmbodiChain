@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from embodichain.lab.gym.envs.episode_context import EpisodeContext
+
 from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -43,6 +45,7 @@ class _ResetEnv(BaseEnv):
         self.reset_events: list[str] = []
         self.cfg = SimpleNamespace(seed=None)
         self._num_envs = 1
+        self.episode_context = EpisodeContext(1)
         self.sim = SimpleNamespace(
             device=torch.device("cpu"),
             is_window_opened=False,

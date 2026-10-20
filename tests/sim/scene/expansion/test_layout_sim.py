@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from embodichain.lab.gym.envs.episode_context import EpisodeContext
+
 from types import SimpleNamespace
 from pathlib import Path
 import os
@@ -32,7 +34,7 @@ def _native_layout_probe(backend: str) -> None:
     from embodichain.lab.sim.shapes import CubeCfg
     from embodichain.lab.gym.envs.managers import EventCfg, SceneEntityCfg
     from embodichain.lab.gym.envs.managers.event_manager import EventManager
-    from embodichain.lab.gym.envs.managers.randomization import RandomizeSceneLayout
+    from embodichain.lab.gym.envs.managers.randomization import ExpandSceneLayout
 
     cfg = SimulationManagerCfg(
         headless=True,
@@ -72,6 +74,7 @@ def _native_layout_probe(backend: str) -> None:
         env = SimpleNamespace(
             sim=sim,
             num_envs=4,
+            episode_context=EpisodeContext(4),
             device=sim.device,
             cfg=SimpleNamespace(seed=12),
             _profiler=None,
@@ -79,7 +82,7 @@ def _native_layout_probe(backend: str) -> None:
             _demo_episode_metadata=[{} for _ in range(4)],
         )
         event = EventCfg(
-            func=RandomizeSceneLayout,
+            func=ExpandSceneLayout,
             mode="reset",
             params={
                 "entity_cfg": SceneEntityCfg(uid="bench"),
@@ -101,8 +104,10 @@ def _native_layout_probe(backend: str) -> None:
         sim.update = lambda *args, **kwargs: pytest.fail(
             "Layout application advanced physics"
         )
+        env.episode_context._begin_episode([3, 1])
         env.event_manager.reset(env_ids=[3, 1])
         env.event_manager.apply("reset", env_ids=[3, 1])
+        env.episode_context._finish_initialization([3, 1])
         after = sim.get_rigid_object("part").get_local_pose(to_matrix=True)
         torch.testing.assert_close(after[[0, 2]], before[[0, 2]], rtol=0, atol=0)
         assert not torch.allclose(after[1], after[3])
@@ -115,12 +120,10 @@ def _native_layout_probe(backend: str) -> None:
             rtol=0,
             atol=2e-6,
         )
-        assert env._scene_randomization_metadata[0] is None
-        assert env._scene_randomization_metadata[2] is None
+        metadata = env.episode_context.snapshot()
+        assert not metadata[0]["initialized"] and not metadata[2]["initialized"]
         assert all(
-            env._demo_episode_metadata[row]["scene_randomization"]["events"]["layout"][
-                "geometry_status"
-            ]
+            metadata[row]["sources"]["events/layout"]["metadata"]["geometry_status"]
             == "passed"
             for row in (1, 3)
         )
@@ -137,7 +140,7 @@ def _native_gym_probe(backend: str) -> None:
     from embodichain.lab.gym.envs import EmbodiedEnv
     from embodichain.lab.gym.utils.gym_utils import config_to_cfg
     from embodichain.lab.gym.envs.managers import EventCfg, SceneEntityCfg
-    from embodichain.lab.gym.envs.managers.randomization import RandomizeSceneLayout
+    from embodichain.lab.gym.envs.managers.randomization import ExpandSceneLayout
     from embodichain.lab.sim.cfg import RigidObjectCfg, physics_cfg_for_backend
     from embodichain.lab.sim.shapes import CubeCfg
     from embodichain.lab.sim import SimulationManager
@@ -182,7 +185,7 @@ def _native_gym_probe(backend: str) -> None:
     )
     cfg.events = SimpleNamespace(
         layout=EventCfg(
-            func=RandomizeSceneLayout,
+            func=ExpandSceneLayout,
             mode="reset",
             params={
                 "entity_cfg": SceneEntityCfg(uid="bench"),
@@ -202,7 +205,8 @@ def _native_gym_probe(backend: str) -> None:
         )
         before = obs["probe_pose"].clone()
         previous = [
-            m["events"]["layout"]["variant_id"] for m in info["scene_randomization"]
+            m["sources"]["events/layout"]["metadata"]["variant_id"]
+            for m in info["episode_context"]
         ]
         obs, info = env.reset(options={"save_data": False, "reset_ids": [3, 1]})
         torch.testing.assert_close(
@@ -212,11 +216,15 @@ def _native_gym_probe(backend: str) -> None:
             obs["probe_pose"], env.sim.get_rigid_object("cube").get_local_pose()
         )
         assert [
-            info["scene_randomization"][i]["events"]["layout"]["variant_id"]
+            info["episode_context"][i]["sources"]["events/layout"]["metadata"][
+                "variant_id"
+            ]
             for i in (0, 2)
         ] == [previous[i] for i in (0, 2)]
         assert all(
-            info["scene_randomization"][i]["events"]["layout"]["variant_id"]
+            info["episode_context"][i]["sources"]["events/layout"]["metadata"][
+                "variant_id"
+            ]
             != previous[i]
             for i in (1, 3)
         )

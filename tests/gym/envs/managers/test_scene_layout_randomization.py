@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from embodichain.lab.gym.envs.episode_context import EpisodeContext
 from types import SimpleNamespace
 
 import pytest
@@ -24,7 +25,7 @@ import torch
 
 from embodichain.lab.gym.envs.managers import EventCfg, SceneEntityCfg
 from embodichain.lab.gym.envs.managers.event_manager import EventManager
-from embodichain.lab.gym.envs.managers.randomization import RandomizeSceneLayout
+from embodichain.lab.gym.envs.managers.randomization import ExpandSceneLayout
 from embodichain.lab.sim.scene.expansion import (
     generate_scene_variants,
     prepare_scene_randomization,
@@ -124,6 +125,7 @@ def make_env(*, source: dict | None = None, extra: bool = False) -> SimpleNamesp
     scene = make_source()
     env = SimpleNamespace(
         num_envs=4,
+        episode_context=EpisodeContext(4),
         device=torch.device("cpu"),
         cfg=SimpleNamespace(seed=17),
         sim=SimPort(scene),
@@ -133,7 +135,7 @@ def make_env(*, source: dict | None = None, extra: bool = False) -> SimpleNamesp
     )
     config = {
         "layout": EventCfg(
-            func=RandomizeSceneLayout,
+            func=ExpandSceneLayout,
             mode="reset",
             params={
                 "entity_cfg": SceneEntityCfg(uid=scene.support_uid),
@@ -155,21 +157,23 @@ def make_env(*, source: dict | None = None, extra: bool = False) -> SimpleNamesp
 
 
 def apply(env, rows=(1, 3)) -> list:
+    env.episode_context._begin_episode(list(rows))
     env.event_manager.reset(env_ids=list(rows))
     env.event_manager.apply("reset", env_ids=list(rows))
-    return deepcopy(env._scene_randomization_metadata)
+    env.episode_context._finish_initialization(list(rows))
+    return env.episode_context.snapshot()
 
 
 def test_event_handles_partial_reset_without_task_program() -> None:
     env = make_env()
     metadata = apply(env)
-    assert metadata[0] is None and metadata[2] is None
+    assert not metadata[0]["initialized"] and not metadata[2]["initialized"]
     assert (
-        metadata[1]["events"]["layout"]["variant_id"]
-        != metadata[3]["events"]["layout"]["variant_id"]
+        metadata[1]["sources"]["events/layout"]["metadata"]["variant_id"]
+        != metadata[3]["sources"]["events/layout"]["metadata"]["variant_id"]
     )
-    assert env._demo_episode_metadata[1]["scene_randomization"] == metadata[1]
-    assert not env._scene_randomization_invalid_rows.any()
+    assert env._demo_episode_metadata[1] == {}
+    assert env.episode_context.filter_recordable().tolist() == [1, 3]
     assert env.sim.time == 0
 
 
@@ -181,14 +185,14 @@ def test_repeated_seed_rewinds_candidates_without_reextracting_geometry() -> Non
     geometry = functor._prepared
     second = apply(env)
     assert (
-        first[1]["events"]["layout"]["variant_id"]
-        != second[1]["events"]["layout"]["variant_id"]
+        first[1]["sources"]["events/layout"]["metadata"]["variant_id"]
+        != second[1]["sources"]["events/layout"]["metadata"]["variant_id"]
     )
     revision = env.event_manager.seed_revision
     env.event_manager.set_seed(17)
     assert env.event_manager.seed_revision == revision + 1
     repeated = apply(env)
-    assert first == repeated
+    assert [r["sources"] for r in first] == [r["sources"] for r in repeated]
     assert functor._prepared is geometry
 
 
@@ -211,10 +215,8 @@ def make_disjoint_layout_env() -> SimpleNamespace:
     }
     env.event_manager = EventManager(
         {
-            "tableware": EventCfg(
-                func=RandomizeSceneLayout, mode="reset", params=first
-            ),
-            "target": EventCfg(func=RandomizeSceneLayout, mode="reset", params=second),
+            "tableware": EventCfg(func=ExpandSceneLayout, mode="reset", params=first),
+            "target": EventCfg(func=ExpandSceneLayout, mode="reset", params=second),
         },
         env,
     )
@@ -224,23 +226,18 @@ def make_disjoint_layout_env() -> SimpleNamespace:
 def test_disjoint_layout_events_retain_each_named_provenance() -> None:
     env = make_disjoint_layout_env()
     metadata = apply(env)
-    assert metadata[0] is None and metadata[2] is None
+    assert not metadata[0]["initialized"] and not metadata[2]["initialized"]
     for row in (1, 3):
-        assert set(metadata[row]["events"]) == {"tableware", "target"}
+        assert set(metadata[row]["sources"]) == {"events/tableware", "events/target"}
         for name in ("tableware", "target"):
-            event = metadata[row]["events"][name]
+            event = metadata[row]["sources"]["events/" + name]["metadata"]
             assert event["variant_id"] and event["source_sha256"]
             assert event["geometry_status"] == "passed"
-        assert env._demo_episode_metadata[row]["scene_randomization"] == metadata[row]
+        assert env._demo_episode_metadata[row] == {}
     env.event_manager.get_functor_cfg("tableware").func.reset([1])
-    assert set(env._scene_randomization_metadata[1]["events"]) == {"target"}
-    assert (
-        env._demo_episode_metadata[1]["scene_randomization"]
-        == env._scene_randomization_metadata[1]
-    )
-    assert env._scene_randomization_metadata[3] == metadata[3]
+    assert env.episode_context.snapshot() == metadata
     env.event_manager.set_seed(17)
-    assert apply(env) == metadata
+    assert [r["sources"] for r in apply(env)] == [r["sources"] for r in metadata]
 
 
 def test_one_layout_success_cannot_clear_another_layout_failure() -> None:
@@ -256,9 +253,9 @@ def test_one_layout_success_cannot_clear_another_layout_failure() -> None:
     tableware = env.event_manager.get_functor_cfg("tableware").func
     tableware.reset([1, 3])
     tableware(env, [1, 3])
-    assert env._scene_randomization_invalid_rows.tolist() == [False, True, False, True]
+    assert env.episode_context.filter_recordable().tolist() == []
     for row in (1, 3):
-        assert set(env._scene_randomization_metadata[row]["events"]) == {"tableware"}
+        assert not env.episode_context.snapshot([row])[0]["recordable"]
 
 
 def test_saved_source_cycles_without_sampling(tmp_path, monkeypatch) -> None:
@@ -276,8 +273,11 @@ def test_saved_source_cycles_without_sampling(tmp_path, monkeypatch) -> None:
     )
     first = apply(env)
     second = apply(env)
-    assert first == second
-    assert first[1]["events"]["layout"]["variant_id"] == result.variants[0].variant_id
+    assert [r["sources"] for r in first] == [r["sources"] for r in second]
+    assert (
+        first[1]["sources"]["events/layout"]["metadata"]["variant_id"]
+        == result.variants[0].variant_id
+    )
 
 
 def test_budget_failure_blocks_selected_recordings() -> None:
@@ -287,7 +287,10 @@ def test_budget_failure_blocks_selected_recordings() -> None:
     functor._candidate_count = 1
     with pytest.raises(ValueError, match="max_attempts"):
         apply(env, rows=(0, 1, 3))
-    assert env._scene_randomization_invalid_rows.tolist() == [True, True, False, True]
+    assert not len(env.episode_context.filter_recordable())
+    assert set(
+        row["env_id"] for row in env.episode_context.snapshot() if row["rejections"]
+    ) == {0, 1, 3}
     assert not any(entity.writes for entity in env.sim.entities.values())
 
 
@@ -305,7 +308,7 @@ def test_duplicate_pose_event_is_rejected_before_application() -> None:
     cfg = {"layout": env.event_manager.get_functor_cfg("layout")}
     # Use a fresh declaration, rather than copying a live native-bound functor.
     cfg["layout"] = EventCfg(
-        func=RandomizeSceneLayout, mode="reset", params=deepcopy(cfg["layout"].params)
+        func=ExpandSceneLayout, mode="reset", params=deepcopy(cfg["layout"].params)
     )
     cfg["pose"] = conflicting
     env.event_manager = EventManager(cfg, env)
@@ -335,7 +338,7 @@ def test_yaml_event_decodes_through_production_environment_loader(tmp_path) -> N
     ]
     physical["env"]["events"] = {
         "layout": {
-            "func": "RandomizeSceneLayout",
+            "func": "ExpandSceneLayout",
             "mode": "reset",
             "params": {
                 "entity_cfg": {"uid": "bench"},
@@ -353,9 +356,24 @@ def test_yaml_event_decodes_through_production_environment_loader(tmp_path) -> N
     deployment["environment"] = {"component": str(env_file)}
     cfg = config_to_cfg(deployment, source_path=task)
     assert cfg.task_program is None
-    assert cfg.events.layout.func is RandomizeSceneLayout
+    assert cfg.events.layout.func is ExpandSceneLayout
     assert isinstance(cfg.events.layout.params["entity_cfg"], SceneEntityCfg)
     assert all(
         isinstance(item, SceneEntityCfg)
         for item in cfg.events.layout.params["entity_cfgs"]
     )
+
+
+def test_old_layout_functor_name_is_not_exported():
+    import embodichain.lab.gym.envs.managers.randomization as randomization
+
+    assert hasattr(randomization, "ExpandSceneLayout")
+    assert not hasattr(randomization, "RandomizeSceneLayout")
+
+
+def test_manager_bound_functor_name_is_read_only():
+    env = make_env()
+    functor = env.event_manager.get_functor_cfg("layout").func
+    assert functor.name == "layout"
+    with pytest.raises(AttributeError):
+        functor.name = "renamed"
