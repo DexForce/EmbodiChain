@@ -1,30 +1,39 @@
-policy_id: motion_gen_verified_slow_v1
+policy_id: motion_gen_verified_tabletop_v1
 preset_id: safe
+
 requires:
   embodiment_contract: dual_arm_parallel_gripper
+
 planner:
   type: toppra
   config: {}
+
 motion:
   strategy: motion_gen
-  sample_count: 360
-  velocity_limit: 0.1
+  sample_count: 140
+  # Bound tabletop motion explicitly without stretching short moves to 0.2 rad/s.
+  velocity_limit: 0.5
   acceleration_limit: 0.5
   dynamic_collision_mode: auto
+
 tracking:
   kind: joint_position
   in_flight_max_abs_error: 1.0
   terminal_max_abs_error: 1.0
+
 recovery:
-  # Leave time for the full limit-aware two-arm transfer and effect gates.
+  # Composite transfers retain native timing and can exceed 30 seconds.
   action_timeout: 120.0
   max_replans: 3
   max_action_retries: 0
   goal_rotation_threshold: 0.5
+
 workflow_recovery:
   max_recovery_attempts: 2
+
 runner:
   minimum_cycle_time: 0.04
   hold_on_completion: false
   hold_during_effect_verification: false
+
 effect_assurance: verified

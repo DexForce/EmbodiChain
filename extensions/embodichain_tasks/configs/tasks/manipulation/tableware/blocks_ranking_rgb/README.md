@@ -43,7 +43,7 @@ XY placement and linear/angular stability, independently of program completion.
 These observations cover those seeds and execution settings, not every randomized
 scene or renderer.
 
-The dual-UR5, dual-UR10 and Tianji Marvin deployments reuse this same program,
+The dual-UR5 and Tianji Marvin deployments reuse this same program,
 reset distribution and measured acceptance gates. Their task-local integrations
 select the corresponding calibrated grasp and dual-arm policy. See the
 [deployment matrix](../../../../../README.md#dual-arm-task-deployments) for

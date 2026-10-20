@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Production deployment coverage for the three supported dual-arm embodiments."""
+"""Production deployment coverage for the two supported dual-arm embodiments."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ from embodichain.utils.utility import load_config
 _CONFIG_ROOT = (
     Path(__file__).resolve().parents[4] / "extensions/embodichain_tasks/configs"
 )
-_VARIANTS = ("dual_ur5_dh_pgi_140_80", "dual_ur10_dh_pgi_140_80", "tianji_marvin")
+_VARIANTS = ("dual_ur5_dh_pgi_140_80", "tianji_marvin")
 _BASELINES = (
     "blocks_ranking_size",
     "match_object_container",
@@ -83,7 +83,7 @@ def test_dual_arm_deployment_decodes_and_registers(task: str, variant: str) -> N
 
 
 def test_variant_catalogs_cover_all_tasks_with_unique_ids() -> None:
-    """Discovery exposes all three embodiments without shadowing other deployments."""
+    """Discovery exposes both embodiments without shadowing other deployments."""
     identifiers = []
     for task in _TASKS:
         directory = _CONFIG_ROOT / "tasks/manipulation" / task

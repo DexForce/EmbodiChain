@@ -27,7 +27,6 @@ __all__ = ["StackCupsEnv"]
 
 
 @register_env("StackCups-DualUR5-v1", max_episode_steps=600)
-@register_env("StackCups-DualUR10-v1", max_episode_steps=600)
 @register_env("StackCups-TianjiMarvin-v1", max_episode_steps=600)
 @register_env("StackCups-v1", max_episode_steps=600)
 class StackCupsEnv(EmbodiedEnv):

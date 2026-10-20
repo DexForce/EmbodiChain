@@ -4,7 +4,7 @@ environment:
 task_program:
   program: task_program/program.tabletop.yaml
   integration: task_program/integration.dual_ur.yaml
-  execution_policy: ../../../components/execution_policies/motion_gen_verified.yaml
+  execution_policy: ../../../components/execution_policies/motion_gen_verified_tabletop.yaml
 embodiment:
   component: ../../../components/embodiments/dual_ur5_dh_pgi_140_80.yaml
   overrides:

@@ -43,7 +43,7 @@ the target during approach. The existing randomization ranges and physical
 acceptance thresholds remain unchanged; this task does not claim reliable success
 across those ranges.
 
-The dual-UR5, dual-UR10 and Tianji Marvin deployments reuse this same program,
+The dual-UR5 and Tianji Marvin deployments reuse this same program,
 reset distribution and measured acceptance gates. Their task-local integrations
 select the corresponding calibrated grasp and dual-arm policy. See the
 [deployment matrix](../../../../../README.md#dual-arm-task-deployments) for

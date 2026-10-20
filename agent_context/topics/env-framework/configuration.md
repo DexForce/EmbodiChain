@@ -117,7 +117,7 @@ task integration's nested `scene_binding`. The shared
 the right arm as primary and the left arm as a secondary resource. Its selected
 `CobotMagicCfg` owns the two mounted wrist cameras. Tableware Task Program
 deployments reuse the combined suite.
-The dual-UR5, dual-UR10 and Marvin embodiments also own the shared `cam_high`
+The dual-UR5 and Marvin embodiments also own the shared `cam_high`
 view; Marvin retains its robot-owned wrist cameras. Their `left` / `right`
 resources expose primary/secondary manipulator aliases as composite resources
 with the same physical leaves, so both program naming conventions retain

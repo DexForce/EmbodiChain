@@ -648,7 +648,7 @@ def test_pour_water_uses_shared_calibrated_embodiment(
     preset = _tableware_deployment(
         "pour_water"
     ).integration.registration.robot_profile_binding.presets[0]
-    assert preset.motion_policy.sample_count == 480
+    assert preset.motion_policy.sample_count == 160
     assert preset.effect_assurance.value == "projected"
 
 
@@ -1604,7 +1604,7 @@ def test_pour_dwell_duration_rejects_negative_or_nonfinite_values(
 
 @pytest.mark.parametrize(
     ("variant", "arm_dof", "velocity"),
-    [("dual_ur10_dh_pgi_140_80", 6, 0.1), ("tianji_marvin", 7, 0.2)],
+    [("dual_ur5", 6, 0.5), ("tianji_marvin", 7, 0.5)],
 )
 def test_configured_motion_budgets_reach_planner_options_and_metadata(
     variant: str, arm_dof: int, velocity: float

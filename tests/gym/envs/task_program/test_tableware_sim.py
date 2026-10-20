@@ -242,12 +242,10 @@ def _assert_physical_goal(task_name: str, state: dict[str, Any]) -> None:
         for variant in (
             "cobotmagic",
             "dual_ur5_dh_pgi_140_80",
-            "dual_ur10_dh_pgi_140_80",
             "tianji_marvin",
         )
     ]
     + [
-        ("hand_over", "dual_ur10_dh_pgi_140_80"),
         ("hand_over", "tianji_marvin"),
     ],
 )

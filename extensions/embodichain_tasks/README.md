@@ -88,8 +88,8 @@ compatibility `version` field.
 
 ## Dual-arm task deployments
 
-The following tasks provide `dual_ur5_dh_pgi_140_80`,
-`dual_ur10_dh_pgi_140_80`, and `tianji_marvin` catalog deployments:
+The following tasks provide `dual_ur5_dh_pgi_140_80` and
+`tianji_marvin` catalog deployments:
 
 | Task under `configs/tasks/manipulation/` | Execution |
 | --- | --- |
@@ -112,8 +112,8 @@ pick/place deployments remain available. The baseline JSON files select shared
 physical `env.yaml` components; adding a robot variant does not add an expert
 to an environment-only task. `ScoopIce-v1` remains retired.
 
-All three embodiments provide `cam_high`; Marvin additionally provides its two
-wrist RGB-D cameras. UR deployments have one camera, so downstream datasets
+Both embodiments provide `cam_high`; Marvin additionally provides its two
+wrist RGB-D cameras. UR5 deployments have one camera, so downstream datasets
 must use the selected embodiment's sensor and action layout. Shared tableware
 observations normalize named end-effector control parts instead of fixed joint
 indices. Robot-specific installation poses live in deployment overrides.
@@ -127,17 +127,17 @@ composition, not physical completion; use the task's measured validators when
 qualifying trajectories, seeds, or backend settings.
 
 Verified tabletop policies request explicit planning speed and acceleration
-budgets, still capped by robot joint limits. UR10 hand-over selects the slower
-0.1 speed budget, a minimum motion-sample budget of 360 and 40-step hand
-interpolations; the shared verified policy uses 0.2. Native trajectory timing is
-preserved. Verified actions allow 120 seconds, and the shared hand-over scene
+budgets, still capped by robot joint limits. The tabletop verified policy uses
+a 0.5 rad/s speed budget with 0.5 rad/s² acceleration. Native trajectory timing is
+preserved. The legacy UR5 hand-over keeps its original policy. Verified actions
+allow 120 seconds, and the shared hand-over scene
 allows 3200 control steps for the full transfer and measured-effect gates.
 
 Example:
 
 ```bash
 python -m embodichain run-env --gym_config \
-  extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.dual_ur10_dh_pgi_140_80.yaml
+  extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.dual_ur5_dh_pgi_140_80.yaml
 ```
 
 ## Migrating from the solution-first layout
@@ -273,10 +273,10 @@ boundary and current compatibility notes.
 ## Dual-arm qualification scope
 
 Local checks use the Default physics backend, one CPU simulation environment,
-and seed 0 with the configured reset randomization. All fifteen Task Program
-combinations completed their measured program checks. The twelve baseline
+and seed 0 with the configured reset randomization. The Task Program
+combinations use measured program checks. The eight baseline
 combinations were constructed, reset and stepped; they do not gain expert
 programs. PourWater uses Hybrid for its glTF asset loader. Other motion checks
 run headlessly without sensors; an additional Hybrid check verified the shared
-UR10 top camera at 960 by 540 pixels. These checks do not qualify every random
+UR5 top camera at 960 by 540 pixels. These checks do not qualify every random
 seed, physics backend or sensor configuration.

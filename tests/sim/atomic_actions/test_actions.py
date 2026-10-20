@@ -1439,6 +1439,11 @@ def test_move_held_object_uses_exact_projected_attachment_target() -> None:
     target_states = generator.generate.call_args.args[0]
     assert len(target_states) == 1
     assert torch.allclose(target_states[0].xpos, held.object_to_eef)
+    trajectory = _joint_trajectory(plan)
+    torch.testing.assert_close(
+        trajectory.positions[:, :, ARM_DOF:],
+        torch.ones(NUM_ENVS, trajectory.waypoint_count, HAND_DOF),
+    )
 
 
 def test_move_held_object_preserves_ordered_object_waypoints() -> None:
@@ -1480,9 +1485,7 @@ def test_move_held_object_preserves_ordered_object_waypoints() -> None:
     trajectory = _joint_trajectory(plan)
     torch.testing.assert_close(
         trajectory.positions[..., ARM_DOF:],
-        context.robot.qpos[:, ARM_DOF:]
-        .unsqueeze(1)
-        .expand(-1, trajectory.waypoint_count, -1),
+        torch.ones(NUM_ENVS, trajectory.waypoint_count, HAND_DOF),
     )
 
 
@@ -1632,6 +1635,7 @@ def test_pour_rotates_held_object_about_internal_axis_and_returns() -> None:
         held_objects={"arm": _held(semantics)},
     )
     context = _context(task)
+    context.robot.qpos[:, ARM_DOF:] = torch.tensor([[0.3], [0.6]])
 
     plan = _plan_action(
         action,
@@ -1684,9 +1688,7 @@ def test_pour_rotates_held_object_about_internal_axis_and_returns() -> None:
     assert torch.allclose(solved_poses[1], current_eef_pose, atol=1.0e-6)
     torch.testing.assert_close(
         trajectory.positions[:, :, ARM_DOF:],
-        context.robot.qpos[:, ARM_DOF:]
-        .unsqueeze(1)
-        .expand(-1, trajectory.waypoint_count, -1),
+        torch.ones(NUM_ENVS, trajectory.waypoint_count, HAND_DOF),
     )
     assert plan.expected_effects.is_empty
     assert context.task is task
@@ -1890,7 +1892,7 @@ def test_move_held_object_moves_only_exclusively_held_rows() -> None:
     assert not torch.allclose(trajectory.positions[1], context.robot.qpos[1])
     torch.testing.assert_close(
         trajectory.positions[1, :, ARM_DOF:],
-        context.robot.qpos[1, ARM_DOF:].expand(trajectory.waypoint_count, -1),
+        torch.ones(trajectory.waypoint_count, HAND_DOF),
     )
 
 

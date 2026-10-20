@@ -88,12 +88,13 @@ include fluid simulation.
 the table, bottle, cup and all absolute task targets by 125 mm from the
 CobotMagic scene, giving the compact ready pose elbow clearance. Assets,
 lighting, four program segments, 100 Hz control and the 60-degree object-space
-tilt remain the same; the original CobotMagic deployment is unchanged.
+tilt remain the same; CobotMagic retains its separate 875 mm tabletop scene.
 Both arms inherit the shared compact ready pose. The right arm carries the
 bottle while the left arm retains its initial target. The deployment selects
 the reusable Marvin embodiment, a calibrated
 object-to-TCP grasp, and the dual-arm variant of the slow projected policy
-with 480 samples. The robot's base placement adapts it to the existing scene.
+with a 160-sample lower bound. Native velocity/acceleration timing is retained,
+and the environment allows 3200 steps (32 s) for the complete program. The robot's base placement adapts it to the existing scene.
 
 ```bash
 python -m embodichain run-task \
@@ -277,3 +278,21 @@ use the glTF Y-up root frame, which the native loader converts to simulation
 Z-up. In the current DexSim runtime, the NoRender mesh path does not apply that
 conversion. Disabling sensor acquisition therefore retains Hybrid; explicitly
 forcing NoRender is not qualified for this asset bundle.
+
+## Grasp retention and UR5 deployment
+
+Held-object transport and pouring retain the binding's configured `grasp`
+command through rotation, dwell and return. A contact-blocked measured finger
+position is not a substitute for the closing target: it can remove the force
+needed to hold the bottle as gravity changes direction. The bottle is released
+only in the Place action.
+
+`task.dual_ur5_dh_pgi_140_80.yaml` uses the same low table and program, with
+`integration.dual_ur5.yaml` owning its PGI-specific bottle grasp. The deeper
+grip places the bottle between the pads instead of at their tips. This is a
+simulation calibration, not a factory grasp specification.
+
+The physical regression in `tests/gym/envs/task_program/test_pour_water_sim.py`
+checks the measured bottle path during pouring: at least 45 degrees of actual
+tilt, no more than 20 mm displacement from the pour center, and all four
+program segments including the existing bottle/cup return validators.

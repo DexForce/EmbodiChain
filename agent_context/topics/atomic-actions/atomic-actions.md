@@ -54,6 +54,8 @@ that commits or invalidates observed effects.
 verified grasp. Its goal optionally frees only the final world yaw; default
 goals remain exact. Heading alternatives are checked as complete motion paths,
 with accepted rows retained independently and selected offsets in diagnostics.
+Held-object transport and Pour keep the binding's configured grasp command; a
+contact-blocked measured aperture does not retain closing effort.
 
 `SlideGoal.joint_target` optionally supplies a public `SlideJointTarget` with an
 absolute prismatic coordinate and a calibrated axis sign. Slide resolves the

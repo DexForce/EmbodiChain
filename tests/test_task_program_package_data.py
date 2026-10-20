@@ -138,7 +138,6 @@ _DEPLOYMENTS = {
 }
 _DUAL_ARM_VARIANTS = (
     "dual_ur5_dh_pgi_140_80",
-    "dual_ur10_dh_pgi_140_80",
     "tianji_marvin",
 )
 _DUAL_ARM_PROGRAMS = {
@@ -166,10 +165,11 @@ _DEPLOYMENTS[Path("tasks/manipulation/hand_over/task.dual_ur5.yaml")] = (
     "dual_ur5_dh_pgi_140_80",
 )
 _DUAL_ARM_RESOURCES = {
-    Path("components/execution_policies/motion_gen_verified_slow.yaml"),
-    Path("tasks/manipulation/hand_over/task_program/integration.dual_ur10.yaml"),
+    Path("components/execution_policies/motion_gen_verified_tabletop.yaml"),
+    Path(
+        "tasks/manipulation/tableware/pour_water/task_program/integration.dual_ur5.yaml"
+    ),
     Path("components/execution_policies/motion_gen_projected_manipulation.yaml"),
-    Path("components/embodiments/dual_ur10_dh_pgi_140_80.yaml"),
     Path(
         "components/execution_policies/trajectory_open_loop_dual_arm_manipulation.yaml"
     ),
