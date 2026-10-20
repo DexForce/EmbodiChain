@@ -25,18 +25,20 @@ import pytest
 import torch
 import yaml
 
-from scripts.benchmark.motion_generation.config import (
+from embodichain.benchmarks.motion_generation.config import (
     BENCHMARK_ROOT,
     DomainCfg,
     SuiteCfg,
     load_suite,
 )
-from scripts.benchmark.motion_generation.models import BenchmarkCase
-from scripts.benchmark.motion_generation.planners.base import (
+from embodichain.benchmarks.motion_generation.models import BenchmarkCase
+from embodichain.benchmarks.motion_generation.planners.base import (
     PlannerAdapter,
     PlannerContext,
 )
-from scripts.benchmark.motion_generation.scenarios.free_space import FreeSpaceScenario
+from embodichain.benchmarks.motion_generation.scenarios.free_space import (
+    FreeSpaceScenario,
+)
 
 pytestmark = pytest.mark.no_sim
 

@@ -64,6 +64,7 @@ from .atomic_case_utils import (
 )
 
 if TYPE_CHECKING:
+    from ..planners.base import PlannerAdapter
     from .atomic_skill import AtomicSkillScenario
 
 __all__ = ["PickUpCases", "HeldObjectCases", "MoveHeldObjectCases", "PlaceCases"]

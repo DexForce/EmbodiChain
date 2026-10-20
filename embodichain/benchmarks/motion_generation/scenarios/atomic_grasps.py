@@ -390,7 +390,7 @@ class ActiveCaseGraspPoseGenerator(GraspPoseGenerator):
 
 def parallel_jaw_sampler(n_sample: int) -> ParallelJawGraspPoseGenerator:
     """Build the PGI grasp sampler a self-sampling case compiles with."""
-    from scripts.tutorials.atomic_action.tutorial_utils import (
+    from embodichain.lab.scripts._atomic_action.support import (
         create_parallel_jaw_grasp_pose_generator,
     )
 

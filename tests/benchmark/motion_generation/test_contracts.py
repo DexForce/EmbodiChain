@@ -26,17 +26,17 @@ import pytest
 import torch
 import yaml
 
-from scripts.benchmark.motion_generation import contracts
-from scripts.benchmark.motion_generation.artifacts import (
+from embodichain.benchmarks.motion_generation import contracts
+from embodichain.benchmarks.motion_generation.artifacts import (
     TrialJsonlWriter,
     write_case_manifest,
 )
-from scripts.benchmark.motion_generation.config import (
+from embodichain.benchmarks.motion_generation.config import (
     SuiteCfg,
     load_suite,
     suite_to_dict,
 )
-from scripts.benchmark.motion_generation.models import (
+from embodichain.benchmarks.motion_generation.models import (
     AlgorithmRole,
     BenchmarkCase,
     CaseOutcome,

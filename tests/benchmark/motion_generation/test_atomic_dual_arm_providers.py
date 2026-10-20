@@ -32,28 +32,28 @@ from embodichain.toolkits.graspkit import (
     ParallelJawGripperModelCfg,
 )
 from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
-from scripts.benchmark.motion_generation.config import load_suite
-from scripts.benchmark.motion_generation.contracts import (
+from embodichain.benchmarks.motion_generation.config import load_suite
+from embodichain.benchmarks.motion_generation.contracts import (
     ReplayObservationTrace,
     ReplayObservationWindow,
 )
-from scripts.benchmark.motion_generation.models import BenchmarkCase, CaseOutcome
-from scripts.benchmark.motion_generation import robots as _robots  # noqa: F401
-from scripts.benchmark.motion_generation.registry import create_robot_provider
-from scripts.benchmark.motion_generation.scenarios import (
+from embodichain.benchmarks.motion_generation.models import BenchmarkCase, CaseOutcome
+from embodichain.benchmarks.motion_generation import robots as _robots  # noqa: F401
+from embodichain.benchmarks.motion_generation.registry import create_robot_provider
+from embodichain.benchmarks.motion_generation.scenarios import (
     atomic_dual_arm_providers as dual,
 )
-from scripts.benchmark.motion_generation.scenarios import atomic_case_utils
-from scripts.benchmark.motion_generation.scenarios import atomic_skill
-from scripts.benchmark.motion_generation.scenarios.atomic_skill import (
+from embodichain.benchmarks.motion_generation.scenarios import atomic_case_utils
+from embodichain.benchmarks.motion_generation.scenarios import atomic_skill
+from embodichain.benchmarks.motion_generation.scenarios.atomic_skill import (
     AtomicSkillScenario,
 )
-from scripts.benchmark.motion_generation.scenarios.atomic_grasps import (
+from embodichain.benchmarks.motion_generation.scenarios.atomic_grasps import (
     ActiveCaseGraspPoseGenerator,
     CaseSampleCountGraspPoseGenerator,
 )
-from scripts.benchmark.motion_generation.contracts import ExecutionObservation
-from scripts.benchmark.motion_generation.atomic_skill import (
+from embodichain.benchmarks.motion_generation.contracts import ExecutionObservation
+from embodichain.benchmarks.motion_generation.atomic_skill import (
     create_atomic_skill_provider,
 )
 

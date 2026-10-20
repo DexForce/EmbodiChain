@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -65,9 +66,23 @@ def planner_adapter_names() -> tuple[str, ...]:
 
 
 def create_planner_adapter(
-    spec: "PlannerSpecCfg", context: "PlannerContext"
+    spec: "PlannerSpecCfg",
+    context: "PlannerContext",
+    *,
+    adapters: Mapping[str, type[PlannerAdapter]] | None = None,
 ) -> "PlannerAdapter":
-    """Construct the adapter selected by a planner specification."""
+    """Construct an adapter, preferring the current run's explicit mapping.
+
+    Args:
+        spec: Algorithm identity and backend configuration.
+        context: Robot and shared evaluation budgets.
+        adapters: Overrides local to this run. The global registry is unchanged.
+
+    Returns:
+        A new adapter owned by the caller.
+    """
+    if adapters is not None and spec.adapter in adapters:
+        return adapters[spec.adapter](spec=spec, context=context)
     try:
         adapter_cls = _PLANNER_ADAPTERS[spec.adapter]
     except KeyError as exc:

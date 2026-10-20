@@ -1351,7 +1351,7 @@ class AtomicSkillScenario(ScenarioProvider):
             )
         if not 0.0 < alignment_max_angle_deg <= 90.0:
             raise ValueError("grasp_alignment_max_angle_deg must be in (0, 90].")
-        from scripts.tutorials.atomic_action.tutorial_utils import (
+        from embodichain.lab.scripts._atomic_action.support import (
             create_antipodal_semantics,
             create_parallel_jaw_grasp_pose_generator,
         )
@@ -1536,7 +1536,7 @@ class AtomicSkillScenario(ScenarioProvider):
             )
         if not 0.0 < alignment_max_angle_deg <= 90.0:
             raise ValueError("grasp_alignment_max_angle_deg must be in (0, 90].")
-        from scripts.tutorials.atomic_action.tutorial_utils import (
+        from embodichain.lab.scripts._atomic_action.support import (
             create_parallel_jaw_grasp_pose_generator,
         )
 

@@ -178,7 +178,7 @@ topics:
   status: active
 - id: motion-planning
   title: Motion Planning
-  aliases: [motion planning, trajectory planning, trajectory playback, fixed-cadence trajectory playback, motion expansion,
+  aliases: [motion planning, motion generation benchmark, motion benchmark, 运动生成评测, trajectory planning, trajectory playback, fixed-cadence trajectory playback, motion expansion,
     trajectory expansion, trajectory augmentation, expansion profile, configured trajectory expansion,
     fixed scene trajectory augmentation, trajectory variants, trajectory variant expansion,
     轨迹播放, 轨迹扩增, 轨迹扩增配置, 运动规划, 轨迹规划, 轨迹变体]
@@ -195,6 +195,8 @@ topics:
   source_of_truth:
   - embodichain/lab/sim/motion/planners/base_planner.py
   - embodichain/lab/sim/motion/motion_generator.py
+  - embodichain/benchmarks/motion_generation/
+  - embodichain/cli/benchmark.py
   - embodichain/lab/sim/motion/execution.py
   - embodichain/lab/sim/motion/planners/utils.py
   - embodichain/lab/sim/motion/planners/toppra_planner.py
@@ -208,7 +210,7 @@ topics:
   - embodichain/lab/sim/motion/expansion/
   - embodichain/compute/trajectory/
   - embodichain/lab/sim/utility/action_utils.py
-  watch_paths: [embodichain/lab/sim/motion/motion_generator.py, embodichain/lab/sim/motion/execution.py,
+  watch_paths: [embodichain/benchmarks/motion_generation/, tests/benchmark/motion_generation/, tests/test_benchmark_package.py, embodichain/lab/sim/motion/motion_generator.py, embodichain/lab/sim/motion/execution.py,
     tests/sim/motion/test_motion_generator.py,
     tests/sim/motion/test_motion_generator_batched.py, embodichain/lab/sim/motion/planners/, embodichain/lab/sim/motion/expansion/,
     tests/sim/motion/expansion/, embodichain/lab/sim/utility/action_utils.py, embodichain/compute/trajectory/,

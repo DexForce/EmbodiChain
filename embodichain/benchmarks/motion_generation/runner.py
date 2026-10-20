@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
@@ -121,10 +122,17 @@ class BenchmarkRunner:
         headless: bool = True,
         output_root: str | Path = "outputs/benchmarks",
         video: VideoRecordCfg | None = None,
+        adapters: Mapping[str, type[PlannerAdapter]] | None = None,
     ) -> None:
+        self.adapters = dict(adapters or {})
+        for name, adapter in self.adapters.items():
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError("Adapter names must be non-empty strings.")
+            if not isinstance(adapter, type) or not issubclass(adapter, PlannerAdapter):
+                raise TypeError(f"Adapter {name!r} must be a PlannerAdapter subclass.")
         self.suite = deepcopy(suite)
         suite = self.suite
-        self.planner_specs = planner_specs
+        self.planner_specs = deepcopy(planner_specs)
         self.device = resolve_device(device)
         self.headless = headless
         self.output_root = Path(output_root)
@@ -163,7 +171,14 @@ class BenchmarkRunner:
                 arena_space=2.0,
             )
         )
-        robot = self.robot_provider.add_robot(sim)
+        try:
+            robot = self.robot_provider.add_robot(sim)
+        except BaseException:
+            try:
+                sim.destroy(exit_process=False)
+            finally:
+                SimulationManager.flush_cleanup_queue()
+            raise
         return sim, robot
 
     def _append(self, writer: TrialJsonlWriter, record: TrialRecord) -> None:
@@ -488,7 +503,11 @@ class BenchmarkRunner:
             ),
             joint_jerk_limit_rad_s3=self.suite.protocol.joint_jerk_limit_rad_s3,
         )
-        adapter = create_planner_adapter(spec, context)
+        adapter = (
+            create_planner_adapter(spec, context, adapters=self.adapters)
+            if self.adapters
+            else create_planner_adapter(spec, context)
+        )
         metadata = adapter.metadata
         self.metadata.setdefault(metadata.algorithm_id, metadata)
         supported_cases = []
@@ -676,9 +695,11 @@ class BenchmarkRunner:
                         repeat=repeat,
                     )
         finally:
-            if scenario_prepared:
-                provider.close_planner(adapter)
-            adapter.close()
+            try:
+                if scenario_prepared:
+                    provider.close_planner(adapter)
+            finally:
+                adapter.close()
 
     def run(self) -> BenchmarkRunResult:
         """Run the suite and write all required artifacts."""
@@ -711,8 +732,8 @@ class BenchmarkRunner:
                 runtime_configured = False
                 try:
                     sim, robot = self._create_simulation(batch_size)
-                    provider.create_runtime_entities(sim, self.suite, track)
                     runtime_configured = True
+                    provider.create_runtime_entities(sim, self.suite, track)
                     # GPU physics topology must be complete before its first
                     # update; scenario entities cannot be appended afterwards.
                     sim.update(step=1)
@@ -779,14 +800,16 @@ class BenchmarkRunner:
                             provider,
                         )
                 finally:
-                    if runtime_configured:
-                        provider.close_runtime()
-                    if sim is not None:
-                        # Benchmarks must aggregate and report after simulator
-                        # teardown; the SimulationManager default exits the whole
-                        # process, so opt into deferred in-process cleanup here.
-                        sim.destroy(exit_process=False)
-                        SimulationManager.flush_cleanup_queue()
+                    try:
+                        if runtime_configured:
+                            provider.close_runtime()
+                    finally:
+                        if sim is not None:
+                            # Let the caller continue after simulator teardown.
+                            try:
+                                sim.destroy(exit_process=False)
+                            finally:
+                                SimulationManager.flush_cleanup_queue()
 
         write_case_manifest(
             run_dir / "case_manifest.json",

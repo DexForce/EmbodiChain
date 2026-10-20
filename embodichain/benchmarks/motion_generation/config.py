@@ -24,6 +24,7 @@ import math
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
+from importlib.resources import as_file, files
 from pathlib import Path
 from typing import Any
 
@@ -1063,16 +1064,30 @@ def _validate_atomic_skill_track(track: TrackCfg) -> None:
         raise ValueError("atomic-skill seeds must not contain duplicate values.")
 
 
-def load_suite(name_or_path: str = "motion_panda_free_space_smoke") -> SuiteCfg:
-    """Load a suite by short name or explicit YAML path."""
+def load_suite(name_or_path: str | Path = "motion_panda_free_space_smoke") -> SuiteCfg:
+    """Load an installed suite or an external YAML file.
+
+    Args:
+        name_or_path: Installed suite stem or path to an external YAML file.
+
+    Returns:
+        A validated suite with component paths resolved relative to its file.
+
+    Raises:
+        FileNotFoundError: No file or installed suite matches the request.
+    """
     requested = Path(name_or_path)
-    path = (
-        requested
-        if requested.is_file()
-        else BENCHMARK_ROOT / "suites" / f"{name_or_path}.yaml"
-    )
-    if not path.is_file():
-        raise FileNotFoundError(f"Benchmark suite not found: {path}")
+    if requested.is_file():
+        return _load_suite_path(requested)
+    resource = files(__package__).joinpath("suites", f"{name_or_path}.yaml")
+    if not resource.is_file():
+        raise FileNotFoundError(f"Benchmark suite not found: {name_or_path}")
+    with as_file(resource) as path:
+        return _load_suite_path(path)
+
+
+def _load_suite_path(path: Path) -> SuiteCfg:
+    """Decode a suite while its resource or external file is available."""
     with path.open("r", encoding="utf-8") as file:
         data = yaml.safe_load(file) or {}
     if not isinstance(data, dict):

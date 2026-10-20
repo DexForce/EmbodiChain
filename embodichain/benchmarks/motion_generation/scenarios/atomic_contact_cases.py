@@ -62,6 +62,7 @@ from .atomic_case_utils import (
 from .atomic_policy import benchmark_motion_policy
 
 if TYPE_CHECKING:
+    from ..planners.base import PlannerAdapter
     from .atomic_skill import AtomicSkillScenario
 
 __all__ = ["PressCases", "SlideCases", "TwistCases"]

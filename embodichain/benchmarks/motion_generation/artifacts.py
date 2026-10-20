@@ -65,13 +65,20 @@ def _package_version(package: str) -> str | None:
 
 
 def _git_commit() -> str | None:
-    """Return the current repository commit without failing outside git."""
-    result = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    """Return the framework checkout revision, independent of caller cwd."""
+    repository = Path(__file__).resolve().parents[3]
+    if not (repository / ".git").exists():
+        return None
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repository,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        return None
     return result.stdout.strip() or None
 
 

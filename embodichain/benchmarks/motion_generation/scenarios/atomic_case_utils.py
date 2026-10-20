@@ -34,6 +34,7 @@ from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
 from ..models import BenchmarkCase
 
 if TYPE_CHECKING:
+    from embodichain.lab.sim.objects import Robot
     from .atomic_skill import AtomicSkillScenario
 
 __all__ = [

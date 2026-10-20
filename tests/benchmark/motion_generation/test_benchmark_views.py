@@ -24,14 +24,14 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from scripts.benchmark.motion_generation.aggregation import aggregate_results
-from scripts.benchmark.motion_generation.config import SuiteCfg
-from scripts.benchmark.motion_generation.contracts import EvaluationDomain
-from scripts.benchmark.motion_generation.metrics.trajectory import (
+from embodichain.benchmarks.motion_generation.aggregation import aggregate_results
+from embodichain.benchmarks.motion_generation.config import SuiteCfg
+from embodichain.benchmarks.motion_generation.contracts import EvaluationDomain
+from embodichain.benchmarks.motion_generation.metrics.trajectory import (
     compute_case_outcomes,
     make_failure_outcomes,
 )
-from scripts.benchmark.motion_generation.models import (
+from embodichain.benchmarks.motion_generation.models import (
     AlgorithmRole,
     BenchmarkCase,
     CaseOutcome,
@@ -39,7 +39,7 @@ from scripts.benchmark.motion_generation.models import (
     TrialPhase,
     TrialRecord,
 )
-from scripts.benchmark.motion_generation.reporting import write_markdown_report
+from embodichain.benchmarks.motion_generation.reporting import write_markdown_report
 
 
 def _case(track: str = "neutral", *, atomic: bool = False) -> BenchmarkCase:

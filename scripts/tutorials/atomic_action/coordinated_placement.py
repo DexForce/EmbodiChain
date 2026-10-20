@@ -53,6 +53,24 @@ from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.utils import logger
+
+from embodichain.lab.scripts._atomic_action.placement_geometry import (
+    PAN_BASIN_LOCAL_Z_MAX,
+    PAN_HANDLE_LOCAL_Z_MIN,
+    PAN_HANDLE_ROOT_OFFSET,
+    PAN_TARGET_CENTER_XY,
+    TABLE_TOP_Z,
+    PAN_TARGET_Z_LIFT,
+    BREAD_TARGET_WORLD_YAW_DEG,
+    BREAD_PLACE_TARGET_OFFSET_XY,
+    BREAD_ON_PAN_CLEARANCE,
+    get_pan_basin_vertices,
+    build_top_down_tcp_pose,
+    build_flat_object_grasp_pose,
+    build_pan_handle_grasp_pose,
+    build_support_object_target_pose,
+    build_placing_object_target_pose,
+)
 from scripts.tutorials.atomic_action.scenario_utils import (
     add_dual_tutorial_robot,
     compute_local_bounds,
@@ -121,7 +139,6 @@ GRIPPER_TCP_Z = 0.121
 PICK_SAMPLE_INTERVAL = 100
 COORDINATED_SAMPLE_INTERVAL = 120
 ROBOT_INIT_POS = (1.85, 0.0, 0.1)
-TABLE_TOP_Z = 0.65
 BASELINE_TABLE_TOP_Z = 0.3621708124799265
 SCENE_Z_OFFSET = TABLE_TOP_Z - BASELINE_TABLE_TOP_Z
 BASELINE_TABLE_INIT_POS = (
@@ -172,19 +189,11 @@ PAN_INIT_POS, PAN_INIT_ROT = transform_baseline_pose(
     world_yaw_correction_deg=PAN_WORLD_YAW_CORRECTION_DEG,
 )
 PAN_INIT_POS = (PAN_INIT_POS[0], PAN_INIT_POS[1], TABLE_TOP_Z + 0.001)
-PAN_TARGET_CENTER_XY = (-0.06, 0.0)
-PAN_TARGET_Z_LIFT = 0.06
-BREAD_PLACE_TARGET_OFFSET_XY = (-0.06, -0.16)
-BREAD_ON_PAN_CLEARANCE = 0.006
 BREAD_GRASP_Z_CLEARANCE = 0.018
 PAN_GRASP_Z_CLEARANCE = 0.0
-PAN_HANDLE_LOCAL_Z_MIN = 0.04
-PAN_BASIN_LOCAL_Z_MAX = 0.04
-PAN_HANDLE_ROOT_OFFSET = 0.035
 PAN_HANDLE_CLOSE_QPOS = 0.045
 PAN_PICK_SAMPLE_INTERVAL = 130
 PAN_PICK_HAND_INTERP_STEPS = 32
-BREAD_TARGET_WORLD_YAW_DEG = 0.0
 BREAD_TARGET_HEIGHT_OFFSET = 0.1
 SUPPORT_TARGET_HEIGHT_OFFSET = 0.0
 PICK_APPROACH_DISTANCE = 0.12
@@ -304,146 +313,6 @@ def create_pan(sim: SimulationManager) -> RigidObject:
             init_rot=list(PAN_INIT_ROT),
         )
     )
-
-
-def get_pan_basin_vertices(pan_vertices: torch.Tensor) -> torch.Tensor:
-    """Select pan vertices that belong to the basin instead of the long handle."""
-    basin_vertices = pan_vertices[pan_vertices[:, 2] <= PAN_BASIN_LOCAL_Z_MAX]
-    if basin_vertices.numel() == 0:
-        logger.log_warning("Pan basin vertex mask is empty; falling back to full mesh.")
-        return pan_vertices
-    return basin_vertices
-
-
-def build_top_down_tcp_pose(
-    position: torch.Tensor, device: torch.device
-) -> torch.Tensor:
-    """Build a simple top-down TCP pose for manually grasping flat objects."""
-    pose = torch.eye(4, dtype=torch.float32, device=device)
-    pose[:3, :3] = torch.tensor(
-        [
-            [-0.0539, -0.9985, -0.0022],
-            [-0.9977, 0.0540, -0.0401],
-            [0.0401, 0.0000, -0.9992],
-        ],
-        dtype=torch.float32,
-        device=device,
-    )
-    pose[:3, 3] = position
-    return pose
-
-
-def build_flat_object_grasp_pose(
-    object_pose: torch.Tensor,
-    local_vertices: torch.Tensor,
-    local_min: torch.Tensor,
-    local_max: torch.Tensor,
-    device: torch.device,
-    *,
-    world_xy_offset: tuple[float, float] = (0.0, 0.0),
-    z_clearance: float = 0.02,
-) -> torch.Tensor:
-    """Build a hand-tuned top-down grasp TCP pose over a flat object."""
-    local_center = 0.5 * (local_min + local_max)
-    local_center = local_center.to(device=device, dtype=torch.float32)
-    grasp_position = object_pose[:3, 3] + object_pose[:3, :3] @ local_center
-    _, world_max = compute_world_bounds(object_pose, local_vertices)
-    grasp_position[0] += world_xy_offset[0]
-    grasp_position[1] += world_xy_offset[1]
-    grasp_position[2] = world_max[2] + z_clearance
-    return build_top_down_tcp_pose(grasp_position, device)
-
-
-def build_pan_handle_grasp_pose(
-    pan_pose: torch.Tensor,
-    pan_vertices: torch.Tensor,
-    device: torch.device,
-    *,
-    z_clearance: float = 0.006,
-) -> torch.Tensor:
-    """Build a top-down TCP pose that pinches the pan handle."""
-    handle_vertices = pan_vertices[pan_vertices[:, 2] > PAN_HANDLE_LOCAL_Z_MIN]
-    if handle_vertices.numel() == 0:
-        logger.log_warning(
-            "Pan handle vertex mask is empty; falling back to full mesh."
-        )
-        handle_vertices = pan_vertices
-
-    handle_world = transform_points(pan_pose, handle_vertices)
-    handle_min = handle_world.min(dim=0).values
-    handle_max = handle_world.max(dim=0).values
-    grasp_position = 0.5 * (handle_min + handle_max)
-
-    pan_world = transform_points(pan_pose, pan_vertices)
-    pan_center_xy = pan_world[:, :2].mean(dim=0)
-    handle_dir_xy = grasp_position[:2] - pan_center_xy
-    handle_axis = normalize_vector(
-        torch.tensor(
-            [handle_dir_xy[0], handle_dir_xy[1], 0.0],
-            dtype=torch.float32,
-            device=device,
-        ),
-        torch.tensor([1.0, -0.2, 0.0], dtype=torch.float32, device=device),
-    )
-    grasp_position[:2] -= handle_axis[:2] * PAN_HANDLE_ROOT_OFFSET
-    grasp_position[2] = handle_max[2] + z_clearance
-
-    y_axis = handle_axis
-    z_axis = torch.tensor([0.0, 0.0, -1.0], dtype=torch.float32, device=device)
-    x_axis = normalize_vector(
-        torch.cross(y_axis, z_axis, dim=0),
-        torch.tensor([1.0, 0.0, 0.0], dtype=torch.float32, device=device),
-    )
-    y_axis = normalize_vector(
-        torch.cross(z_axis, x_axis, dim=0),
-        y_axis,
-    )
-
-    pose = torch.eye(4, dtype=torch.float32, device=device)
-    pose[:3, 0] = x_axis
-    pose[:3, 1] = y_axis
-    pose[:3, 2] = z_axis
-    pose[:3, 3] = grasp_position
-    return pose
-
-
-def build_support_object_target_pose(
-    pan_pose: torch.Tensor,
-    device: torch.device,
-) -> torch.Tensor:
-    """Build target pose for the support pan."""
-    pose = pan_pose.clone().to(device=device, dtype=torch.float32)
-    pose[0, 3] = PAN_TARGET_CENTER_XY[0]
-    pose[1, 3] = PAN_TARGET_CENTER_XY[1]
-    pose[2, 3] = TABLE_TOP_Z + 0.001 + PAN_TARGET_Z_LIFT
-    return pose
-
-
-def build_placing_object_target_pose(
-    bread_pose: torch.Tensor,
-    bread_vertices: torch.Tensor,
-    pan_vertices: torch.Tensor,
-    support_target_pose: torch.Tensor,
-    device: torch.device,
-) -> torch.Tensor:
-    """Build target bread pose aligned above the pan."""
-    pose = rotate_pose_about_world_z(
-        bread_pose.clone().to(device=device, dtype=torch.float32),
-        BREAD_TARGET_WORLD_YAW_DEG,
-    )
-    pan_basin_world = transform_points(
-        support_target_pose, get_pan_basin_vertices(pan_vertices)
-    )
-    basin_center_xy = 0.5 * (
-        pan_basin_world[:, :2].min(dim=0).values
-        + pan_basin_world[:, :2].max(dim=0).values
-    )
-    pose[0, 3] = basin_center_xy[0] + BREAD_PLACE_TARGET_OFFSET_XY[0]
-    pose[1, 3] = basin_center_xy[1] + BREAD_PLACE_TARGET_OFFSET_XY[1]
-    pan_top_z = pan_basin_world[:, 2].max()
-    bread_bottom_z = compute_world_bounds(pose, bread_vertices)[0][2]
-    pose[2, 3] += pan_top_z + BREAD_ON_PAN_CLEARANCE - bread_bottom_z
-    return pose
 
 
 def compute_actual_held_state(

@@ -11,6 +11,7 @@
 | Cartesian geometry and scalar timing | `embodichain/lab/sim/motion/planners/se3.py`, `bezier.py`, `_scalar_time_law.py`, `_blend_constraints.py` in that directory |
 | Collision planning and scene conversion | `embodichain/lab/sim/motion/planners/curobo/` |
 | NMG policy rollout and export metadata | `embodichain/lab/sim/motion/planners/neural_planner.py` |
+| Installable evaluation suites and external planner adapters | `embodichain/benchmarks/motion_generation/api.py`, `planners/base.py` in that package |
 | Pure interpolation, resampling and retiming | `embodichain/compute/trajectory/` |
 | Standalone playback and B=1 expansion host lifecycle | `embodichain/lab/sim/motion/execution.py` |
 | Expansion Profile loading, source adapters, candidate coordination and coverage | `embodichain/lab/sim/motion/expansion/` |
@@ -174,6 +175,19 @@ collection budget; and `ExpansionSession` classifies bands from the measured
 postures only: path, dynamic and task validation stay separate.
 
 ## Focused validation
+
+The installed benchmark host lives in `embodichain.benchmarks.motion_generation`.
+`run_benchmark()` accepts a packaged suite, external YAML or assembled `SuiteCfg`,
+optional explicit planner specs and a run-local adapter mapping. It copies caller
+configuration; explicit planners replace the suite list and are enabled.
+`PlannerAdapter` owns build/prepare/plan/close and returns `PlanResult` for
+free-space evaluation; Atomic Skills also require an exposed `MotionGenerator`.
+The host owns simulation lifetime, seeded cases, evaluation, and artifacts.
+Run calls serially within a process. Suite resources ship in the wheel; the
+installed CLI dispatches through `embodichain/cli/benchmark.py`. Source launchers
+under `scripts/benchmark/` only forward motion-generation evaluation.
+`tests/benchmark/motion_generation/` covers contracts and lifecycle, while
+`tests/test_benchmark_package.py` builds and installs the wheel outside the checkout.
 
 | Changed boundary | Existing coverage |
 |---|---|

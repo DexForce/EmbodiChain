@@ -146,6 +146,7 @@ def main():
         package_dir=get_package_dir(),
         package_data={
             "embodichain": ["VERSION"],
+            "embodichain.benchmarks.motion_generation": ["suites/*.yaml"],
             "embodichain.gen_sim.simready_pipeline.configs": ["*.json"],
             "embodichain.lab.scripts._atomic_action": ["README.md"],
             "embodichain_tasks.configs": [

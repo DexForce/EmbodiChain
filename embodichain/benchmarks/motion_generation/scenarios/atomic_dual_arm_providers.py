@@ -636,7 +636,7 @@ def _compile_reference(
 
 def _antipodal_semantics(handle: AtomicObjectHandle) -> ObjectSemantics:
     """Return whole-object antipodal semantics for one configured object."""
-    from scripts.tutorials.atomic_action.tutorial_utils import (
+    from embodichain.lab.scripts._atomic_action.support import (
         create_antipodal_semantics,
     )
 
@@ -1280,10 +1280,10 @@ def _placement_pose_row(
     support_target_frame_pose: torch.Tensor | None = None,
 ) -> dict[str, torch.Tensor]:
     """Build one row of coordinated-placement grasps and targets."""
-    from scripts.tutorials.atomic_action import coordinated_placement as tutorial
+    from embodichain.lab.scripts._atomic_action import placement_geometry
 
     device = placing_pose.device
-    placing_grasp = tutorial.build_flat_object_grasp_pose(
+    placing_grasp = placement_geometry.build_flat_object_grasp_pose(
         placing_pose,
         placing_vertices,
         local_min,
@@ -1291,7 +1291,7 @@ def _placement_pose_row(
         device,
         z_clearance=float(config.get("placing_grasp_z_clearance_m", 0.018)),
     )
-    support_grasp = tutorial.build_pan_handle_grasp_pose(
+    support_grasp = placement_geometry.build_pan_handle_grasp_pose(
         support_pose,
         support_vertices,
         device,
@@ -1301,10 +1301,10 @@ def _placement_pose_row(
         placing_target_frame_pose = placing_pose
     if support_target_frame_pose is None:
         support_target_frame_pose = support_pose
-    support_target = tutorial.build_support_object_target_pose(
+    support_target = placement_geometry.build_support_object_target_pose(
         support_target_frame_pose, device
     )
-    placing_target = tutorial.build_placing_object_target_pose(
+    placing_target = placement_geometry.build_placing_object_target_pose(
         placing_target_frame_pose,
         placing_vertices,
         support_vertices,
@@ -1325,7 +1325,7 @@ def _placement_geometry(
     device: torch.device,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Load local meshes and bounds used by the tutorial pose builders."""
-    from scripts.tutorials.atomic_action.scenario_utils import (
+    from embodichain.lab.scripts._atomic_action.scenario import (
         compute_local_bounds,
         get_local_vertices,
     )

@@ -23,27 +23,27 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from scripts.benchmark.motion_generation.config import (
+from embodichain.benchmarks.motion_generation.config import (
     TrackCfg,
     load_suite,
     resolve_atomic_batch_sizes,
     resolve_atomic_pose_randomization,
 )
-from scripts.benchmark.motion_generation.scenarios.atomic_skill import (
+from embodichain.benchmarks.motion_generation.scenarios.atomic_skill import (
     AtomicSkillScenario,
 )
-from scripts.benchmark.motion_generation.scenarios.atomic_case_utils import (
+from embodichain.benchmarks.motion_generation.scenarios.atomic_case_utils import (
     apply_target_rotation_randomization,
     randomization_parameters,
     randomized_vector_batch,
     seeded_jitter,
     workspace_shell_profile,
 )
-from scripts.benchmark.motion_generation.atomic_skill import (
+from embodichain.benchmarks.motion_generation.atomic_skill import (
     atomic_skill_provider_names,
     create_atomic_skill_provider,
 )
-from scripts.benchmark.motion_generation.scenarios.atomic_dual_arm_providers import (
+from embodichain.benchmarks.motion_generation.scenarios.atomic_dual_arm_providers import (
     _support_randomization_config,
 )
 

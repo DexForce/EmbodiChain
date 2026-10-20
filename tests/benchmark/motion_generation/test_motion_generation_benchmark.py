@@ -42,19 +42,19 @@ from embodichain.lab.sim.atomic_actions import (
 from embodichain.lab.sim.motion.planners.curobo.curobo_planner import CuroboPlanner
 from embodichain.lab.sim.motion.planners.utils import MoveType, PlanResult
 from embodichain.toolkits.graspkit import GraspPoseGenerator
-from scripts.benchmark.motion_generation.aggregation import aggregate_results
-from scripts.benchmark.motion_generation.config import DomainCfg, load_suite
-from scripts.benchmark.motion_generation.metrics.trajectory import (
+from embodichain.benchmarks.motion_generation.aggregation import aggregate_results
+from embodichain.benchmarks.motion_generation.config import DomainCfg, load_suite
+from embodichain.benchmarks.motion_generation.metrics.trajectory import (
     _trajectory_derivatives,
     compute_case_outcomes,
     compute_waypoint_errors,
     match_ordered_joint_waypoints,
     match_ordered_waypoints,
 )
-from scripts.benchmark.motion_generation import (
+from embodichain.benchmarks.motion_generation import (
     scenarios as _scenarios,
 )  # noqa: F401
-from scripts.benchmark.motion_generation.models import (
+from embodichain.benchmarks.motion_generation.models import (
     AlgorithmRole,
     BenchmarkCase,
     CaseOutcome,
@@ -62,26 +62,26 @@ from scripts.benchmark.motion_generation.models import (
     TrialPhase,
     TrialRecord,
 )
-from scripts.benchmark.motion_generation.registry import (
+from embodichain.benchmarks.motion_generation.registry import (
     create_scenario_provider,
     scenario_provider_names,
 )
-from scripts.benchmark.motion_generation.reporting import (
+from embodichain.benchmarks.motion_generation.reporting import (
     write_markdown_report,
 )
-from scripts.benchmark.motion_generation.run_benchmark import (
+from embodichain.benchmarks.motion_generation.cli import (
     _apply_overrides,
 )
-from scripts.benchmark.motion_generation.scenarios.atomic_skill import (
+from embodichain.benchmarks.motion_generation.scenarios.atomic_skill import (
     AtomicSkillScenario,
 )
-from scripts.benchmark.motion_generation.scenarios.atomic_grasps import (
+from embodichain.benchmarks.motion_generation.scenarios.atomic_grasps import (
     FrozenArticulationGraspPoseGenerator,
 )
-from scripts.benchmark.motion_generation.scenarios.atomic_evaluation import (
+from embodichain.benchmarks.motion_generation.scenarios.atomic_evaluation import (
     executed_final_pose_errors,
 )
-from scripts.benchmark.motion_generation.atomic_skill import (
+from embodichain.benchmarks.motion_generation.atomic_skill import (
     create_atomic_skill_provider,
 )
 
@@ -493,7 +493,7 @@ def _json_round_tripped_outcomes(trial: TrialRecord) -> tuple[CaseOutcome, ...]:
 
 
 def test_motion_across_a_zero_interval_is_an_unbounded_velocity_violation(tmp_path):
-    from scripts.benchmark.motion_generation.artifacts import (
+    from embodichain.benchmarks.motion_generation.artifacts import (
         TrialJsonlWriter,
         write_json,
     )
@@ -610,9 +610,11 @@ def test_suite_stated_velocity_limit_overrides_a_placeholder_asset():
 
 def _nmg_adapter(**config):
     """Build an NMG adapter against a stub context, without loading a policy."""
-    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
-    from scripts.benchmark.motion_generation.planners.base import PlannerContext
-    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+    from embodichain.benchmarks.motion_generation.config import PlannerSpecCfg
+    from embodichain.benchmarks.motion_generation.planners.base import PlannerContext
+    from embodichain.benchmarks.motion_generation.planners.nmg_onnx import (
+        NmgOnnxAdapter,
+    )
 
     robot = Mock(device=torch.device("cpu"))
     robot.get_qvel_limits = Mock(
@@ -694,7 +696,7 @@ def test_nmg_cli_overrides_reach_every_nmg_row():
     # A checkpoint supplied on the command line must reach the paired row too;
     # otherwise its availability check skips it and no comparison runs.
     suite = load_suite(
-        "scripts/benchmark/motion_generation/suites/motion_panda_free_space_smoke.yaml"
+        "embodichain/benchmarks/motion_generation/suites/motion_panda_free_space_smoke.yaml"
     )
     _apply_overrides(suite, nmg_onnx_path="/tmp/policy.onnx", nmg_pos_eps=0.02)
     rows = {
@@ -710,7 +712,9 @@ def test_nmg_cli_overrides_reach_every_nmg_row():
     "suite_name", ["motion_panda_free_space_coverage", "motion_panda_free_space_smoke"]
 )
 def test_free_space_suites_pair_a_nominal_and_a_retimed_nmg_row(suite_name):
-    suite = load_suite(f"scripts/benchmark/motion_generation/suites/{suite_name}.yaml")
+    suite = load_suite(
+        f"embodichain/benchmarks/motion_generation/suites/{suite_name}.yaml"
+    )
     rows = {
         spec.id: bool(spec.config.get("retime", False))
         for spec in suite.planners
@@ -923,12 +927,12 @@ def test_dynamic_limit_tolerance_must_be_finite_and_non_negative(tolerance):
 
 
 def test_only_planners_that_solve_timing_declare_it():
-    from scripts.benchmark.motion_generation.planners.base import PlannerAdapter
-    from scripts.benchmark.motion_generation.planners.curobo import CuroboAdapter
-    from scripts.benchmark.motion_generation.planners.ik_interpolate import (
+    from embodichain.benchmarks.motion_generation.planners.base import PlannerAdapter
+    from embodichain.benchmarks.motion_generation.planners.curobo import CuroboAdapter
+    from embodichain.benchmarks.motion_generation.planners.ik_interpolate import (
         IkInterpolateAdapter,
     )
-    from scripts.benchmark.motion_generation.planners.toppra import ToppraAdapter
+    from embodichain.benchmarks.motion_generation.planners.toppra import ToppraAdapter
 
     # An adapter that declares nothing is not judged on an unsolved clock.
     assert PlannerAdapter.timing_is_solved is False
@@ -1104,9 +1108,11 @@ def test_nmg_precision_and_external_accuracy_are_independently_configurable():
 
 
 def test_nmg_model_revision_is_derived_from_runtime_model_path():
-    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
-    from scripts.benchmark.motion_generation.planners.base import PlannerContext
-    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+    from embodichain.benchmarks.motion_generation.config import PlannerSpecCfg
+    from embodichain.benchmarks.motion_generation.planners.base import PlannerContext
+    from embodichain.benchmarks.motion_generation.planners.nmg_onnx import (
+        NmgOnnxAdapter,
+    )
 
     adapter = NmgOnnxAdapter(
         PlannerSpecCfg(
@@ -1127,9 +1133,11 @@ def test_nmg_model_revision_is_derived_from_runtime_model_path():
 
 
 def test_nmg_over_capacity_case_is_explicitly_unsupported_without_truncation():
-    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
-    from scripts.benchmark.motion_generation.planners.base import PlannerContext
-    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+    from embodichain.benchmarks.motion_generation.config import PlannerSpecCfg
+    from embodichain.benchmarks.motion_generation.planners.base import PlannerContext
+    from embodichain.benchmarks.motion_generation.planners.nmg_onnx import (
+        NmgOnnxAdapter,
+    )
 
     adapter = NmgOnnxAdapter(
         PlannerSpecCfg(
@@ -1161,9 +1169,11 @@ def test_nmg_over_capacity_case_is_explicitly_unsupported_without_truncation():
 
 
 def test_nmg_case_budget_is_thirty_steps_per_waypoint():
-    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
-    from scripts.benchmark.motion_generation.planners.base import PlannerContext
-    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+    from embodichain.benchmarks.motion_generation.config import PlannerSpecCfg
+    from embodichain.benchmarks.motion_generation.planners.base import PlannerContext
+    from embodichain.benchmarks.motion_generation.planners.nmg_onnx import (
+        NmgOnnxAdapter,
+    )
 
     adapter = NmgOnnxAdapter(
         PlannerSpecCfg(
@@ -1186,9 +1196,11 @@ def test_nmg_case_budget_is_thirty_steps_per_waypoint():
 
 
 def test_nmg_joint_case_uses_joint_constraint_waypoints():
-    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
-    from scripts.benchmark.motion_generation.planners.base import PlannerContext
-    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+    from embodichain.benchmarks.motion_generation.config import PlannerSpecCfg
+    from embodichain.benchmarks.motion_generation.planners.base import PlannerContext
+    from embodichain.benchmarks.motion_generation.planners.nmg_onnx import (
+        NmgOnnxAdapter,
+    )
 
     adapter = NmgOnnxAdapter(
         PlannerSpecCfg(
@@ -1236,9 +1248,9 @@ def test_nmg_joint_case_uses_joint_constraint_waypoints():
 
 
 def _curobo_adapter():
-    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
-    from scripts.benchmark.motion_generation.planners.base import PlannerContext
-    from scripts.benchmark.motion_generation.planners.curobo import CuroboAdapter
+    from embodichain.benchmarks.motion_generation.config import PlannerSpecCfg
+    from embodichain.benchmarks.motion_generation.planners.base import PlannerContext
+    from embodichain.benchmarks.motion_generation.planners.curobo import CuroboAdapter
 
     adapter = CuroboAdapter(
         PlannerSpecCfg(
@@ -1330,9 +1342,11 @@ def test_curobo_joint_case_uses_reference_joint_waypoints():
 
 
 def test_nmg_rejects_unknown_motion_validity():
-    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
-    from scripts.benchmark.motion_generation.planners.base import PlannerContext
-    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+    from embodichain.benchmarks.motion_generation.config import PlannerSpecCfg
+    from embodichain.benchmarks.motion_generation.planners.base import PlannerContext
+    from embodichain.benchmarks.motion_generation.planners.nmg_onnx import (
+        NmgOnnxAdapter,
+    )
 
     adapter = NmgOnnxAdapter(
         PlannerSpecCfg(
@@ -1382,7 +1396,7 @@ def test_seed_override_adds_missing_atomic_track_seeds():
 
 
 def test_free_space_overrides_reach_each_configured_track():
-    from scripts.benchmark.motion_generation.config import SuiteCfg
+    from embodichain.benchmarks.motion_generation.config import SuiteCfg
 
     suite = SuiteCfg.from_dict(
         {
@@ -2734,9 +2748,9 @@ def test_curobo_prepare_backend_exposes_actual_graph_mode():
 
 
 def test_toppra_adapter_close_releases_planner():
-    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
-    from scripts.benchmark.motion_generation.planners.base import PlannerContext
-    from scripts.benchmark.motion_generation.planners.toppra import ToppraAdapter
+    from embodichain.benchmarks.motion_generation.config import PlannerSpecCfg
+    from embodichain.benchmarks.motion_generation.planners.base import PlannerContext
+    from embodichain.benchmarks.motion_generation.planners.toppra import ToppraAdapter
 
     planner = Mock()
     adapter = ToppraAdapter(
@@ -2855,7 +2869,7 @@ def test_success_table_uses_case_macro_and_counts_cases_not_env_slots():
 
 
 def test_timed_call_reports_null_peak_gpu_without_cuda(monkeypatch):
-    from scripts.benchmark.motion_generation.metrics import performance
+    from embodichain.benchmarks.motion_generation.metrics import performance
 
     monkeypatch.setattr(performance.torch.cuda, "is_available", lambda: False)
     measured = performance.timed_call(lambda: 42)
@@ -2865,18 +2879,18 @@ def test_timed_call_reports_null_peak_gpu_without_cuda(monkeypatch):
 
 def test_runner_capability_gate_and_fake_adapter_lifecycle(tmp_path):
     """Exercise AVAILABILITY gating and MEASURED aggregation without DexSim."""
-    from scripts.benchmark.motion_generation.artifacts import TrialJsonlWriter
-    from scripts.benchmark.motion_generation.config import (
+    from embodichain.benchmarks.motion_generation.artifacts import TrialJsonlWriter
+    from embodichain.benchmarks.motion_generation.config import (
         PlannerSpecCfg,
         ProtocolCfg,
         SuiteCfg,
     )
-    from scripts.benchmark.motion_generation.planners.base import PlannerAdapter
-    from scripts.benchmark.motion_generation.registry import (
+    from embodichain.benchmarks.motion_generation.planners.base import PlannerAdapter
+    from embodichain.benchmarks.motion_generation.registry import (
         register_planner_adapter,
         unregister_planner_adapter,
     )
-    from scripts.benchmark.motion_generation.runner import BenchmarkRunner
+    from embodichain.benchmarks.motion_generation.runner import BenchmarkRunner
 
     prepared_case_sets: list[tuple[str, ...]] = []
 
@@ -3117,18 +3131,18 @@ def test_runner_preserves_case_attribution_across_lifecycle_failures(
     tmp_path, failure_mode, failure_phase, failure_code
 ):
     """Every early exit preserves planner attribution for every case."""
-    from scripts.benchmark.motion_generation.artifacts import TrialJsonlWriter
-    from scripts.benchmark.motion_generation.config import (
+    from embodichain.benchmarks.motion_generation.artifacts import TrialJsonlWriter
+    from embodichain.benchmarks.motion_generation.config import (
         PlannerSpecCfg,
         ProtocolCfg,
         SuiteCfg,
     )
-    from scripts.benchmark.motion_generation.planners.base import PlannerAdapter
-    from scripts.benchmark.motion_generation.registry import (
+    from embodichain.benchmarks.motion_generation.planners.base import PlannerAdapter
+    from embodichain.benchmarks.motion_generation.registry import (
         register_planner_adapter,
         unregister_planner_adapter,
     )
-    from scripts.benchmark.motion_generation.runner import BenchmarkRunner
+    from embodichain.benchmarks.motion_generation.runner import BenchmarkRunner
 
     adapter_name = "fake_lifecycle_failure"
 
@@ -3228,7 +3242,7 @@ def test_scenario_reset_publishes_frozen_start_without_stepping(
     full_state: bool,
 ) -> None:
     from types import SimpleNamespace
-    from scripts.benchmark.motion_generation.scenarios.base import ScenarioProvider
+    from embodichain.benchmarks.motion_generation.scenarios.base import ScenarioProvider
 
     class Provider(ScenarioProvider):
         def batch_sizes(self, *args):

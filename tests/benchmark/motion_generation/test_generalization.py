@@ -23,11 +23,13 @@ from dataclasses import replace
 import pytest
 import torch
 
-from scripts.benchmark.motion_generation.aggregation import aggregate_results
-from scripts.benchmark.motion_generation.config import SuiteCfg
-from scripts.benchmark.motion_generation.contracts import EvaluationDomain
-from scripts.benchmark.motion_generation.generalization import aggregate_generalization
-from scripts.benchmark.motion_generation.models import (
+from embodichain.benchmarks.motion_generation.aggregation import aggregate_results
+from embodichain.benchmarks.motion_generation.config import SuiteCfg
+from embodichain.benchmarks.motion_generation.contracts import EvaluationDomain
+from embodichain.benchmarks.motion_generation.generalization import (
+    aggregate_generalization,
+)
+from embodichain.benchmarks.motion_generation.models import (
     AlgorithmRole,
     BenchmarkCase,
     CaseOutcome,

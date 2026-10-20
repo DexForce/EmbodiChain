@@ -26,20 +26,20 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from scripts.benchmark.motion_generation.config import PlannerSpecCfg, load_suite
-from scripts.benchmark.motion_generation.limits import (
+from embodichain.benchmarks.motion_generation.config import PlannerSpecCfg, load_suite
+from embodichain.benchmarks.motion_generation.limits import (
     resolve_dynamic_limit,
     resolve_robot_velocity_limits,
     resolve_velocity_limits,
 )
-from scripts.benchmark.motion_generation.models import BenchmarkCase
-from scripts.benchmark.motion_generation.planners.base import PlannerContext
-from scripts.benchmark.motion_generation.planners.curobo import CuroboAdapter
-from scripts.benchmark.motion_generation.planners.ik_interpolate import (
+from embodichain.benchmarks.motion_generation.models import BenchmarkCase
+from embodichain.benchmarks.motion_generation.planners.base import PlannerContext
+from embodichain.benchmarks.motion_generation.planners.curobo import CuroboAdapter
+from embodichain.benchmarks.motion_generation.planners.ik_interpolate import (
     IkInterpolateAdapter,
 )
-from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
-from scripts.benchmark.motion_generation.planners.toppra import ToppraAdapter
+from embodichain.benchmarks.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+from embodichain.benchmarks.motion_generation.planners.toppra import ToppraAdapter
 
 
 def _robot() -> SimpleNamespace:
@@ -219,7 +219,7 @@ def test_explicit_zero_speed_cap_is_preserved_and_moving_path_fails() -> None:
 
 @pytest.mark.parametrize(
     "path",
-    sorted(Path("scripts/benchmark/motion_generation/suites").glob("*.yaml")),
+    sorted(Path("embodichain/benchmarks/motion_generation/suites").glob("*.yaml")),
     ids=lambda path: path.stem,
 )
 def test_shipped_suites_share_explicit_timed_planning_budgets(path: Path) -> None:
@@ -240,7 +240,9 @@ def test_shipped_suites_share_explicit_timed_planning_budgets(path: Path) -> Non
 
 def test_atomic_migration_preserves_existing_toppra_budgets() -> None:
     """Moving budgets to protocol must not accelerate existing Atomic tasks."""
-    for path in Path("scripts/benchmark/motion_generation/suites").glob("atomic*.yaml"):
+    for path in Path("embodichain/benchmarks/motion_generation/suites").glob(
+        "atomic*.yaml"
+    ):
         suite = load_suite(path)
         if any(spec.adapter == "toppra" for spec in suite.planners):
             assert suite.protocol.joint_velocity_limit_rad_s == pytest.approx(0.2)

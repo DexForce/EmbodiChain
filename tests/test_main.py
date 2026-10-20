@@ -599,7 +599,7 @@ def test_motion_generation_dispatch_selects_suite(
     expected_suite: str,
 ) -> None:
     """The domain command forwards either family and its canonical default."""
-    from scripts.benchmark.motion_generation import run_benchmark
+    from embodichain.benchmarks.motion_generation import cli as run_benchmark
 
     received: dict[str, object] = {}
 

@@ -38,35 +38,35 @@ from embodichain.lab.sim.atomic_actions import (
 from embodichain.lab.sim.motion.planners import MoveType, ToppraPlanOptions
 from embodichain.lab.sim.motion.planners.utils import TrajectorySampleMethod
 from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
-from scripts.benchmark.motion_generation.config import PlannerSpecCfg, load_suite
-from scripts.benchmark.motion_generation.contracts import (
+from embodichain.benchmarks.motion_generation.config import PlannerSpecCfg, load_suite
+from embodichain.benchmarks.motion_generation.contracts import (
     ReplayObservationTrace,
     ReplayObservationWindow,
 )
-from scripts.benchmark.motion_generation.models import (
+from embodichain.benchmarks.motion_generation.models import (
     AlgorithmRole,
     BenchmarkCase,
     CaseOutcome,
 )
-from scripts.benchmark.motion_generation.planners.base import PlannerContext
-from scripts.benchmark.motion_generation.planners.toppra import ToppraAdapter
-from scripts.benchmark.motion_generation.scenarios import (
+from embodichain.benchmarks.motion_generation.planners.base import PlannerContext
+from embodichain.benchmarks.motion_generation.planners.toppra import ToppraAdapter
+from embodichain.benchmarks.motion_generation.scenarios import (
     atomic_skill_providers as providers,
 )
-from scripts.benchmark.motion_generation.scenarios.atomic_skill import (
+from embodichain.benchmarks.motion_generation.scenarios.atomic_skill import (
     AtomicSkillScenario,
 )
-from scripts.benchmark.motion_generation.scenarios.atomic_grasps import (
+from embodichain.benchmarks.motion_generation.scenarios.atomic_grasps import (
     ActiveCaseGraspPoseGenerator,
 )
-from scripts.benchmark.motion_generation.contracts import ExecutionObservation
-from scripts.benchmark.motion_generation.scenarios.atomic_evaluation import (
+from embodichain.benchmarks.motion_generation.contracts import ExecutionObservation
+from embodichain.benchmarks.motion_generation.scenarios.atomic_evaluation import (
     signed_rotation_about_axis,
 )
-from scripts.benchmark.motion_generation.scenarios.atomic_policy import (
+from embodichain.benchmarks.motion_generation.scenarios.atomic_policy import (
     with_plan_options,
 )
-from scripts.benchmark.motion_generation.atomic_skill import (
+from embodichain.benchmarks.motion_generation.atomic_skill import (
     create_atomic_skill_provider,
 )
 
