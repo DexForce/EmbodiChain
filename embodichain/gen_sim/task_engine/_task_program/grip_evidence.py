@@ -23,6 +23,7 @@ from copy import deepcopy
 from dataclasses import dataclass, replace
 import math
 from typing import Any, ClassVar
+import xml.etree.ElementTree as ET
 
 import torch
 
@@ -39,6 +40,7 @@ from embodichain.lab.task_program.semantics.evidence import (
     CONTROL_PART_EVIDENCE_PROVIDER_ID,
     CONTROL_PART_EVIDENCE_PROVIDER_REVISION,
 )
+from embodichain.lab.task_program.semantics.effects import HeldObjectRelation
 
 __all__: list[str] = []
 
@@ -121,6 +123,7 @@ class NativeGripObserver:
         self.nonfinite_query_count = 0
         self.dropped_query_count = 0
         self.maximum_dropped_contacts = 0
+        self.release_opening: Any = None
         sensor._gen_sim_grip_observer = self
 
     def snapshot_trace(self) -> dict[str, Any]:
@@ -191,6 +194,35 @@ class NativeGripObserver:
             value, ok = classify_contacts(
                 pairs, normals, impulses, target=target, pads=pads
             )
+            opening = None
+            if (
+                self.release_opening is not None
+                and query.clause.expected is False
+                and query.expectation.relation is HeldObjectRelation.DETACHED
+                and not value
+                and not ok
+                and finite
+                and self.sensor.dropped_contacts == 0
+                and bool((torch.linalg.vector_norm(normals, dim=-1) > 1e-8).all())
+                and bool((impulses >= 0).all())
+            ):
+                touching = [
+                    bool(
+                        (
+                            (
+                                ((pairs[:, 0] == target) & (pairs[:, 1] == pad))
+                                | ((pairs[:, 1] == target) & (pairs[:, 0] == pad))
+                            )
+                            & (impulses > 0)
+                        ).any()
+                    )
+                    for pad in pads
+                ]
+                if sum(touching) == 1:
+                    opening = self.release_opening(part, env)
+                    finite &= opening["finite"]
+                    finite_query &= finite
+                    ok = opening["open"] is True and finite
             ok &= self.sensor.dropped_contacts == 0
             values.append(value)
             valid.append(ok)
@@ -215,6 +247,7 @@ class NativeGripObserver:
                         "normals": normals.tolist(),
                         "impulses": impulses.tolist(),
                     },
+                    **({"release_opening": opening} if opening is not None else {}),
                 }
             )
         if self.trace.maxlen is not None and len(self.trace) == self.trace.maxlen:
@@ -310,11 +343,70 @@ class NativeGripEvidenceFactory:
                 for part, names in names_by_part.items()
             },
         )
+        if self.algorithm_revision == 2:
+            observer.release_opening = _open_release_reader(robot, self.source)
+        elif self.algorithm_revision != 1:
+            raise ValueError("Unsupported native grip algorithm revision.")
         provider._binary_observers[BinaryEvidenceKind.CONSTRAINT] = observer
         return provider
 
 
-def with_native_grip_evidence(registration: Any) -> Any:
+def _open_release_reader(robot: Any, source: Any) -> Any:
+    """Observe driving joints, not compliant mimic-joint errors, at release time."""
+    joints = {
+        j.attrib["name"]: j
+        for j in ET.parse(robot.cfg.fpath).getroot().findall("joint")
+    }
+    drivers = {}
+    for part in source.control_parts:
+        names = [robot.joint_names[int(i)] for i in robot.get_joint_ids(name=part)]
+        if len(names) != len(source.open_qpos) or any(
+            name not in joints for name in names
+        ):
+            raise ValueError(
+                "Release opening requires the exact configured joint order."
+            )
+        indices = [
+            i
+            for i, name in enumerate(names)
+            if joints[name].find("mimic") is None
+            and joints[name].attrib["type"] != "fixed"
+        ]
+        if not indices:
+            raise ValueError("Release opening has no independent driving joint.")
+        drivers[part] = (names, indices)
+
+    def observe(part: str, env: int) -> dict[str, Any]:
+        names, indices = drivers[part]
+        qpos = robot.get_qpos(name=part)
+        if (
+            qpos.ndim != 2
+            or qpos.shape[1] != len(names)
+            or not 0 <= env < qpos.shape[0]
+        ):
+            raise ValueError(
+                "Release joint observation has an invalid shape or environment."
+            )
+        measured = qpos[env, indices]
+        target = measured.new_tensor(source.open_qpos)[indices]
+        finite = bool(torch.isfinite(qpos[env]).all())
+        return {
+            "finite": finite,
+            "open": finite
+            and bool(((measured - target).abs() < source.minimum_displacement).all()),
+            "driving_joint_names": [names[i] for i in indices],
+            "measured_qpos": measured.detach().cpu().tolist(),
+            "open_qpos": target.detach().cpu().tolist(),
+            "tolerance": source.minimum_displacement,
+            "scope": "experimental_open_hand_without_bilateral_grip_not_contact_free_separation",
+        }
+
+    return observe
+
+
+def with_native_grip_evidence(
+    registration: Any, *, experimental_open_release: bool = False
+) -> Any:
     source = registration.control_part_evidence_factory
     if not isinstance(source, _JointPositionConstraintEvidenceProviderFactory):
         return registration
@@ -327,5 +419,6 @@ def with_native_grip_evidence(registration: Any) -> Any:
                 (b.entity_id, b.simulation_uid)
                 for b in registration.scene_binding.rigid_objects
             ),
+            algorithm_revision=2 if experimental_open_release else 1,
         ),
     )

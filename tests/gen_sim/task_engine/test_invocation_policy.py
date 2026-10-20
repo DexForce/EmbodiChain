@@ -736,11 +736,16 @@ def test_pick_without_transform_does_not_repeat_robotproxy_inspection(
 
 @pytest.mark.parametrize("valid", [False, True])
 @pytest.mark.parametrize("implicit_context", [False, True])
-def test_explicit_native_closing_contract_rechecks_transformed_ordinary_pick(
-    monkeypatch, pick_transform_inputs, valid, implicit_context
+@pytest.mark.parametrize("ends", [False, True])
+def test_explicit_native_closing_contract_rechecks_transformed_pick(
+    monkeypatch, pick_transform_inputs, valid, implicit_context, ends
 ):
     probe = pick_transform_inputs
     probe.request.goal.semantics.affordance.custom_config.clear()
+    if ends:
+        probe.request.goal.semantics.affordance.set_custom_config(
+            "gen_sim.adaptive_grasp", "ends"
+        )
     action = probe.engine._actions["pick_up"]
     action.closing_geometry_factory = object()
     inspection = Mock(return_value={"valid": valid, "scope": "exact_close_tcp"})

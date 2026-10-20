@@ -37,7 +37,11 @@ from embodichain.lab.sim.atomic_actions.goals import SceneEntityPose, resolve_po
 from embodichain.lab.sim.atomic_actions.trajectory_ops import interpolate_hand_qpos
 from embodichain.lab.task_program.semantics import Pick, Place, SceneAffordanceRef
 
-from ._search_cost import PlanningBudgetExceeded, measure_search
+from ._search_cost import (
+    PLANNING_WALL_SECONDS,
+    PlanningBudgetExceeded,
+    measure_search,
+)
 from .alignment_continuation import _PREVIEW
 from .motion import _joint_velocity_limits
 from .pick_contact import _native_meshes, build_closing_contact_screen
@@ -352,9 +356,10 @@ class MeasuredRigidPolicy:
                     raise ValueError(
                         "Measured rigid policy received a mismatched skill."
                     )
-                if time.perf_counter() - started > 60:
+                if time.perf_counter() - started > PLANNING_WALL_SECONDS:
                     raise ValueError(
-                        "Measured rigid planning exceeded its unchanged 60-second budget."
+                        "Measured rigid planning exceeded its "
+                        f"{PLANNING_WALL_SECONDS:g}-second budget."
                     )
             return (
                 plan

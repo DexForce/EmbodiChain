@@ -31,6 +31,8 @@ from embodichain.utils.utility import load_config
 from ..contracts import canonical_hash
 from .stability import StabilityConstraint
 from .placement_evidence import (
+    _placement_predicate,
+    _require_handover_receiver,
     measure_planar_placement,
     measured_release,
     placement_node,
@@ -202,10 +204,7 @@ def capture_final_goals(
                         "joint_position": values.tolist(),
                         "joint_target": expected,
                     }
-                elif (
-                    predicate.name == "semantic_goal"
-                    and predicate.arguments.get("task_type") == "E1"
-                ):
+                elif _placement_predicate(predicate):
                     if runtime is None:
                         raise ValueError(
                             "Placement requires measured execution release evidence."
@@ -1032,8 +1031,7 @@ def _strong_placement_matches(
         if (
             metrics.get("scope") != "native_supported_placement"
             or metrics.get("support_contract_revision") != 1
-            or predicate.name != "semantic_goal"
-            or predicate.arguments.get("task_type") != "E1"
+            or not _placement_predicate(predicate)
             or cfg.get("support_contract_revision") != 1
             or cfg.get("kind")
             not in {"stack", "supported_placement", "supported_region"}
@@ -1042,9 +1040,9 @@ def _strong_placement_matches(
             or len(references) != 1
             or references[0].get("part_id") is not None
             or record.get("part_id") is not None
-            or group["task_type"] != "E1"
+            or group["task_type"] != predicate.arguments.get("task_type")
             or node["id"] not in group["node_ids"]
-            or node.get("task_type") != "E1"
+            or node.get("task_type") != group["task_type"]
             or raw_call.get("object", raw_call.get("arguments", {}).get("object"))
             != uid
             or not any(
@@ -1386,6 +1384,11 @@ def _placement_record(
         relation=predicate.arguments["relation"],
         released=released,
     )
+    if predicate.arguments.get("task_type") == "E4":
+        metrics.update(
+            placement_node_id=node["id"],
+            observation_kind="recorded" if recorded else "final",
+        )
     if recorded:
         metrics["boundary_frames"] = list(frames)
     return {
@@ -1407,7 +1410,7 @@ def capture_placement_milestones(
     *,
     spec: TaskSpec,
 ) -> dict[str, Any]:
-    """Measure E1 at its recorded group boundary, not at a later terminal state."""
+    """Measure placement at its own boundary, not at a later terminal state."""
     target = getattr(env, "unwrapped", env)
     segments = _segments(runtime)
     groups = {v["id"]: v for v in graph["task_groups"]}
@@ -1416,17 +1419,14 @@ def capture_placement_milestones(
     for coverage in contract["coverage"]["milestones"]:
         milestone = declarations[coverage["id"]]
         for predicate in milestone.achieve:
-            if (
-                predicate.name == "semantic_goal"
-                and predicate.arguments.get("task_type") == "E1"
-            ):
+            if _placement_predicate(predicate):
                 for group_id in coverage["groups"]:
                     predicates[group_id] = predicate
     result = {}
     for entries in contract["coverage"]["lineage"].values():
         for member in entries:
             group = groups[member["group_id"]]
-            if group["task_type"] != "E1":
+            if group["task_type"] not in {"E1", "E4"}:
                 continue
             terminal = segments.get(group["node_ids"][-1])
             if terminal is None:
@@ -1538,7 +1538,53 @@ def _placement_measurement_matches(
     constraints: Mapping[str, Any],
     segments: Mapping[str, Any],
 ) -> bool:
-    """Do not accept a generic success/alignment record as E1 relation evidence."""
+    """Do not accept a generic success/alignment record as relation evidence."""
+    if predicate.arguments.get("task_type") == "E4":
+        try:
+            metrics = record["measurements"]
+            group = next(
+                g for g in graph["task_groups"] if g["id"] == record["group_id"]
+            )
+            nodes = {n["id"]: n for n in graph["nodes"]}
+            node = nodes[metrics["placement_node_id"]]
+            _require_handover_receiver(group, nodes, predicate, record["uid"], node)
+            if not _placement_predicate(predicate):
+                return False
+            references = roles.get(predicate.arguments.get("reference"), [])
+            if len(references) != 1 or references[0].get("part_id") is not None:
+                return False
+            reference, relation = references[0]["uid"], predicate.arguments["relation"]
+            raw_call = node["call"]
+            if raw_call.get("kind") == "place":
+                if (
+                    raw_call.get(relation)
+                    != f"{relation}__{reference}__{record['uid']}"
+                ):
+                    return False
+            elif (
+                raw_call.get("call_id")
+                not in {
+                    "simulation.place_relative",
+                    "gen_sim.place_upright",
+                    "gen_sim.stack_place",
+                }
+                or raw_call.get("arguments", {}).get("reference") != reference
+                or raw_call.get("arguments", {}).get("relation") != relation
+            ):
+                return False
+            if metrics.get("observation_kind") not in {"recorded", "final"}:
+                return False
+            boundary = (
+                segments[group["node_ids"][-1]]
+                if metrics["observation_kind"] == "recorded"
+                else next(reversed(segments.values()))
+            )
+            if metrics.get("released") != measured_release(
+                node, record["uid"], segments, boundary, num_envs
+            ):
+                return False
+        except (KeyError, ValueError, TypeError, StopIteration, AttributeError):
+            return False
     if constraints.get("support_contract_revision") == 1 or any(
         cfg.get("support_contract_revision") == 1
         for cfg in constraints.get("presets", {}).values()
@@ -1897,6 +1943,26 @@ def evaluate_runtime_evidence(
     }
     groups = {v["id"]: v for v in graph["task_groups"]}
     segments = {}
+    e4_placement_milestones = {
+        m.id
+        for m in spec.milestones
+        if any(
+            _placement_predicate(p) and p.arguments.get("task_type") == "E4"
+            for p in m.achieve
+        )
+    }
+    e4_placement_groups = {
+        group_id
+        for coverage in contract["coverage"]["milestones"]
+        if coverage["id"] in e4_placement_milestones
+        for group_id in coverage["groups"]
+    }
+    transfer_prefixes = {}
+    for group_id in e4_placement_groups:
+        for index, key in enumerate(groups[group_id]["node_ids"]):
+            if nodes[key]["call"].get("kind") == "hand_over":
+                transfer_prefixes[group_id] = groups[group_id]["node_ids"][: index + 1]
+                break
     handover_matches = None
     if any(g["task_type"] == "E4" for g in groups.values()):
         from .handover_evidence import handover_record_matches
@@ -1984,8 +2050,7 @@ def evaluate_runtime_evidence(
                         )
                     )
                     and (
-                        predicate.name != "semantic_goal"
-                        or predicate.arguments.get("task_type") != "E1"
+                        not _placement_predicate(predicate)
                         or _placement_measurement_matches(
                             v,
                             predicate,
@@ -2105,13 +2170,19 @@ def evaluate_runtime_evidence(
                         and metrics.get("boundary_frames") == segment.get("end_steps")
                     ):
                         measured_placements[group["id"]] = record
-            if node["id"] != group["node_ids"][-1]:
-                continue
-            complete_groups[group["id"]] = (
-                measured_groups.get(group["id"], set())
-                if set(group["node_ids"]).issubset(successful_nodes)
-                else set()
+            terminal_boundary = node["id"] == group["node_ids"][-1]
+            transfer_boundary = (
+                group["id"] in e4_placement_groups
+                and node["call"].get("kind") == "hand_over"
             )
+            if not terminal_boundary and not transfer_boundary:
+                continue
+            if terminal_boundary:
+                complete_groups[group["id"]] = (
+                    measured_groups.get(group["id"], set())
+                    if set(group["node_ids"]).issubset(successful_nodes)
+                    else set()
+                )
             snapshot = {}
             for milestone in spec.milestones:
                 record = next(
@@ -2125,6 +2196,12 @@ def evaluate_runtime_evidence(
                 if record and record["groups"]:
                     for predicate in milestone.achieve:
                         if _needs_universe(spec, predicate):
+                            continue
+                        if not terminal_boundary and (
+                            predicate.arguments.get("task_type") != "E4"
+                            or predicate.name != "handover_complete"
+                            or group["id"] not in record["groups"]
+                        ):
                             continue
                         if predicate.arguments.get(
                             "task_type"
@@ -2140,7 +2217,12 @@ def evaluate_runtime_evidence(
                                 for id in record["groups"]
                             ]
                             if observations and all(
-                                set(groups[id]["node_ids"]).issubset(successful_nodes)
+                                set(
+                                    transfer_prefixes[id]
+                                    if predicate.name == "handover_complete"
+                                    and id in transfer_prefixes
+                                    else groups[id]["node_ids"]
+                                ).issubset(successful_nodes)
                                 and value.get("group_id") == id
                                 and value.get("uid") == members[id]["object_uid"]
                                 and value.get("part_id")
@@ -2255,10 +2337,7 @@ def evaluate_runtime_evidence(
                             ):
                                 snapshot[predicate.observation or predicate.id] = True
                             continue
-                        if (
-                            predicate.name == "semantic_goal"
-                            and predicate.arguments.get("task_type") == "E1"
-                        ):
+                        if _placement_predicate(predicate):
                             records = [
                                 measured_placements.get(id, {})
                                 for id in record["groups"]
@@ -2322,9 +2401,13 @@ def evaluate_runtime_evidence(
     return {
         "schema_version": "task_spec_evaluation/v1",
         "observer_revision": (
-            6
-            if any(g["task_type"] == "E5" for g in groups.values())
-            else (5 if any(g["task_type"] == "E4" for g in groups.values()) else 4)
+            7
+            if e4_placement_groups
+            else (
+                6
+                if any(g["task_type"] == "E5" for g in groups.values())
+                else (5 if any(g["task_type"] == "E4" for g in groups.values()) else 4)
+            )
         ),
         "run_id": run_id,
         "task_spec_digest": contract["task_spec_digest"],

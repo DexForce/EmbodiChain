@@ -116,6 +116,7 @@ def test_engine_gates_recovery_before_touching_other_planning(
 ):
     generator = object()
     engine = object.__new__(GenSimActionEngine)
+    engine._actions = {}
     engine._planning_services = NS(motion_generator=generator)
     engine._articulation_calls = {"bound": "withdraw"}
     engine._cartesian_calls = {call} if enabled else set()

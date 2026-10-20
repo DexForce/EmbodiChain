@@ -139,6 +139,173 @@ def test_serial_mixed_repeated_controls_compose_with_task_spec(mixed_scene, tmp_
         )
 
 
+@pytest.mark.parametrize("source_scale", [0.5, 0.25, 1.0])
+def test_shared_knob_and_button_keep_one_gripper_qualified_scale(
+    knob_scene, tmp_path, source_scale
+):
+    import hashlib
+    import json
+    from pathlib import Path
+
+    import trimesh
+    from pxr import Gf, Usd, UsdGeom, UsdPhysics
+
+    art = deepcopy(knob_scene.articulations[0])
+    path = Path(art["fpath"])
+    stage = Usd.Stage.Open(str(path))
+    body = UsdGeom.Xform.Define(stage, "/Control/button").GetPrim()
+    UsdPhysics.RigidBodyAPI.Apply(body)
+    mass = UsdPhysics.MassAPI.Apply(body)
+    mass.CreateMassAttr(0.02)
+    mass.CreateCenterOfMassAttr(Gf.Vec3f(0))
+    mass.CreateDiagonalInertiaAttr(Gf.Vec3f(0.01, 0.02, 0.03))
+    mass.CreatePrincipalAxesAttr(Gf.Quatf(1, Gf.Vec3f(0)))
+    geometry = trimesh.creation.box(extents=[0.03, 0.03, 0.01])
+    geometry.apply_translation([0.07, -0.06, 0.01])
+    mesh = UsdGeom.Mesh.Define(stage, "/Control/button/button_cap")
+    mesh.CreatePointsAttr(geometry.vertices.tolist())
+    mesh.CreateFaceVertexCountsAttr([3] * len(geometry.faces))
+    mesh.CreateFaceVertexIndicesAttr(geometry.faces.reshape(-1).tolist())
+    UsdPhysics.CollisionAPI.Apply(mesh.GetPrim())
+    joint = UsdPhysics.PrismaticJoint.Define(stage, "/Control/press_joint")
+    joint.CreateBody0Rel().SetTargets(["/Control/base"])
+    joint.CreateBody1Rel().SetTargets(["/Control/button"])
+    joint.CreateAxisAttr("Z")
+    joint.CreateLowerLimitAttr(-0.005)
+    joint.CreateUpperLimitAttr(0)
+    stage.GetRootLayer().Save()
+    sidecar = path.with_suffix(".twist.json")
+    declaration = json.loads(sidecar.read_text())
+    declaration["source_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+    sidecar.write_text(json.dumps(declaration))
+    original = path.read_bytes()
+    art["body_scale"] = [source_scale] * 3
+    scene = replace(
+        knob_scene,
+        articulations=(art,),
+        planner_objects=(
+            {**deepcopy(art), "runtime_uid": "control", "role": "articulation"},
+            *[
+                item
+                for item in knob_scene.planner_objects
+                if item["runtime_uid"] != "control"
+            ],
+        ),
+    )
+    enrich_twist_inventory(list(scene.planner_objects), list(scene.articulations))
+    selected = candidate(
+        step("E8", "control", target_setting=90, required_arm="right_arm"),
+        step("E9", "control", target_state="activated", required_arm="left_arm"),
+    )
+    bindings = {
+        "schema_version": ROLE_BINDINGS_SCHEMA,
+        "task_id": "demo",
+        "candidate_id": selected["candidate_id"],
+        "reference_bindings": {
+            f"{item['id']}.object": ["control"] for item in selected["draft"]["steps"]
+        },
+        "role_bindings": {},
+    }
+    plan = SemanticTaskPlanner().plan_spec(selected, bindings, scene.planner_objects)
+    _, paths = generate_task_program_bundle(
+        plan.graph,
+        scene,
+        tmp_path / "shared_control",
+        robot_profile="dual_franka",
+        task_spec=plan.task_spec,
+        task_candidate=plan.candidate,
+        role_bindings=plan.role_bindings,
+        step_lineage=plan.lineage,
+    )
+    deployment = load_deployment(
+        task_program=load_config(paths.deployment)["task_program"],
+        skill_profile=load_config(paths.embodiment)["skill_profile"],
+        base_dir=paths.root,
+    )
+    adapter = deployment.integration.adapter_factory
+    expected_scale = max(0.5, source_scale)
+    assert adapter.twist_routes[0].binding.scale == pytest.approx(expected_scale)
+    assert adapter.press_routes[0].binding.scale == pytest.approx(expected_scale)
+    runtime = load_config(paths.scene)["simulation"]["articulation"]
+    assert len(runtime) == 1
+    assert runtime[0]["body_scale"] == pytest.approx([expected_scale] * 3)
+    assert "gen_sim_press_density" not in runtime[0].get("link_attrs", {})
+    calibration = load_config(paths.root / "press_calibration.json")["routes"][0]
+    assert calibration["mass_policy"] == "qualified_fixed_mass_source"
+    assert calibration["runtime_mass"] == pytest.approx(0.02)
+    assert calibration["calibration_scale"] == source_scale
+    assert art["body_scale"] == [source_scale] * 3
+    assert path.read_bytes() == original
+
+    from embodichain.gen_sim.task_engine._task_program.press_binding import (
+        calibrate_scene,
+        discover_press,
+    )
+    from pxr import Sdf
+
+    press = replace(
+        adapter.press_routes[0],
+        binding=replace(
+            adapter.press_routes[0].binding, source_path=runtime[0]["fpath"]
+        ),
+    )
+    source_press = discover_press(art)
+    lineage = adapter.twist_routes[0].binding.mass_lineage_sha256
+    wrong_scale = replace(
+        press, binding=replace(press.binding, scale=expected_scale + 0.1)
+    )
+    payload = {"simulation": {"articulation": [{"uid": "control"}]}}
+    with pytest.raises(ValueError, match="source changed"):
+        calibrate_scene(
+            payload,
+            (wrong_scale,),
+            source_routes=(source_press,),
+            fixed_mass_lineages={"control": lineage},
+        )
+    with pytest.raises(ValueError, match="source changed"):
+        calibrate_scene(
+            payload,
+            (press,),
+            source_routes=(
+                replace(
+                    source_press,
+                    binding=replace(source_press.binding, source_sha256="0" * 64),
+                ),
+            ),
+        )
+
+    # Re-sealing hashes cannot authorize a changed button joint in a mass copy.
+    runtime_path = Path(runtime[0]["fpath"])
+    changed = Usd.Stage.Open(Sdf.Layer.OpenAsAnonymous(str(runtime_path)))
+    slider = UsdPhysics.PrismaticJoint(changed.GetPrimAtPath("/Control/press_joint"))
+    slider.GetLowerLimitAttr().Set(-0.004)
+    changed.GetRootLayer().Export(str(runtime_path))
+    runtime_sidecar = runtime_path.with_suffix(".twist.json")
+    roles = json.loads(runtime_sidecar.read_text())
+    roles["source_sha256"] = hashlib.sha256(runtime_path.read_bytes()).hexdigest()
+    runtime_sidecar.write_text(json.dumps(roles))
+    manifest_path = runtime_path.with_suffix(".mass.json")
+    mass_manifest = json.loads(manifest_path.read_text())
+    mass_manifest["runtime_sha256"] = roles["source_sha256"]
+    mass_manifest["runtime_sidecar_sha256"] = hashlib.sha256(
+        runtime_sidecar.read_bytes()
+    ).hexdigest()
+    manifest_path.write_text(json.dumps(mass_manifest))
+    forged = discover_press(
+        {**art, "fpath": str(runtime_path), "body_scale": runtime[0]["body_scale"]}
+    )
+    with pytest.raises(ValueError, match="allowed MassAPI"):
+        calibrate_scene(
+            payload,
+            (forged,),
+            source_routes=(source_press,),
+            fixed_mass_lineages={
+                "control": hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+            },
+        )
+    assert path.read_bytes() == original
+
+
 def test_repeated_twist_uses_nonzero_initial_state_and_truthful_coarse_metrics():
     route = SimpleNamespace(
         binding=SimpleNamespace(target_qpos=1.0, limits=(-2.0, 2.0)),

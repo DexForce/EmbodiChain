@@ -97,6 +97,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
     _pick_continuations: tuple = ()
     _pick_contact_revisions: tuple[tuple[str, int], ...] = ()
     _world_yaw_free_places: tuple[str, ...] = ()
+    _post_handover_places: tuple = ()
 
     def __init__(
         self,
@@ -127,6 +128,8 @@ class _TaskFactory(SimulationTaskProgramFactory):
         pick_contact_revisions: tuple[tuple[str, int], ...] = (),
         world_yaw_free_places: tuple[str, ...] = (),
         measured_rigid_calls: tuple = (),
+        post_handover_places: tuple = (),
+        idle_invocations: tuple[tuple[str, str], ...] = (),
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -153,6 +156,8 @@ class _TaskFactory(SimulationTaskProgramFactory):
         self._pick_contact_revisions = pick_contact_revisions
         self._world_yaw_free_places = world_yaw_free_places
         self._measured_rigid_calls = measured_rigid_calls
+        self._post_handover_places = post_handover_places
+        self._idle_invocations = idle_invocations
         self._task_post_port = TaskStabilityPort(
             self.segment_policy_port,
             self._simulation,
@@ -262,6 +267,13 @@ class _TaskFactory(SimulationTaskProgramFactory):
                 articulation_followups=self._articulation_followups,
                 pour_return_calls=self._pour_return_calls,
             )
+        if self._idle_invocations:
+            from .idle_clearance import IdleGuardMoveJoints
+
+            idle = IdleGuardMoveJoints()
+            idle.idle_invocations = dict(self._idle_invocations)
+            idle.idle_simulation = self._simulation
+            engine.register(idle, replace=True)
         pick = GenSimPickUp()
         pick.adaptive_unconstrained = self._adaptive_pick
         pick.pick_purposes = dict(self._pick_purposes)
@@ -308,6 +320,10 @@ class _TaskFactory(SimulationTaskProgramFactory):
             pick.closing_geometry_factory = closing_geometry
         engine.register(pick, replace=True)
         handover = GenSimHandOver()
+        handover.post_place_exits = {
+            route.handover_id: (route.subject, route.source, route.receiver)
+            for route in self._post_handover_places
+        }
         if self._handover_scene_clearance:
             from .handover_safety import build_handover_environment_screen
 
@@ -345,6 +361,10 @@ class _TaskFactory(SimulationTaskProgramFactory):
         engine.register(transport, replace=True)
         place = GenSimPlace()
         place.recovery_scene_vertices = meshes
+        place.post_handover_places = {
+            route.place_id: (route.subject, route.receiver, route.reference)
+            for route in self._post_handover_places
+        }
         from .place_branch import bind_on_invocations
 
         place.ordinary_on_invocations = bind_on_invocations(
@@ -535,6 +555,8 @@ class TaskAdapterFactory:
     pick_contact_revisions: tuple[tuple[str, int], ...] = ()
     world_yaw_free_places: tuple[str, ...] = ()
     measured_rigid_calls: tuple = ()
+    post_handover_places: tuple = ()
+    idle_invocations: tuple[tuple[str, str], ...] = ()
     pour_return_calls: tuple[str, ...] = ()
     held_command_sources: tuple = ()
     upright_container_picks: tuple = ()
@@ -782,6 +804,8 @@ class TaskAdapterFactory:
             pick_contact_revisions=self.pick_contact_revisions,
             world_yaw_free_places=self.world_yaw_free_places,
             measured_rigid_calls=self.measured_rigid_calls,
+            post_handover_places=self.post_handover_places,
+            idle_invocations=self.idle_invocations,
         )
         support = [
             cfg
@@ -849,6 +873,9 @@ def load_deployment(
             "pick_contact_revisions",
             "world_yaw_free_places",
             "measured_rigid_calls",
+            "post_handover_places",
+            "runtime_profile",
+            "experimental_open_release",
         }
         or payload["schema_version"] != "gen_sim_task_constraints/v1"
     ):
@@ -856,6 +883,20 @@ def load_deployment(
             "Unsupported GenSim task constraint format; regenerate the bundle."
         )
     presets = payload["presets"]
+    from ..experiment_policy import validate_profile, experimental_release_enabled
+
+    validate_profile(payload.get("runtime_profile", "default"))
+    if payload.get("runtime_profile") == "auto":
+        raise ValueError("Bundle constraints require a concrete runtime profile.")
+    if (
+        "experimental_open_release" in payload
+        and type(payload["experimental_open_release"]) is not bool
+    ):
+        raise ValueError("Bundle experimental_open_release must be a boolean.")
+    release_experiment = experimental_release_enabled(
+        payload.get("runtime_profile", "default"),
+        payload.get("experimental_open_release"),
+    )
     support_revision = payload.get("support_contract_revision")
     pick_contact_revision = payload.get("pick_contact_revision")
     if pick_contact_revision is not None and (
@@ -1034,7 +1075,10 @@ def load_deployment(
     registration = with_release_clearance(registration, program=program)
     from .grip_evidence import with_native_grip_evidence
 
-    registration = with_native_grip_evidence(registration)
+    registration = with_native_grip_evidence(
+        registration,
+        experimental_open_release=release_experiment,
+    )
     if any(cfg.kind == "stack" for cfg in constraints.values()):
         from .stack_place import with_stack_placement
 
@@ -1054,6 +1098,16 @@ def load_deployment(
         )
     )
     pick_purposes = bind_pick_purposes(payload.get("pick_purposes", {}), compiled)
+    from .idle_clearance import IdleFactory, bind_invocations
+
+    idle_invocations = bind_invocations(
+        compiled,
+        tuple(
+            f
+            for f in registration.registered_semantic_lowerer_factories
+            if isinstance(f, IdleFactory)
+        ),
+    )
     from .adaptive_grasp import bind_contact_revisions
 
     pick_contact_revisions = bind_contact_revisions(
@@ -1063,6 +1117,11 @@ def load_deployment(
 
     world_yaw_free_places = bind_yaw_calls(
         payload.get("world_yaw_free_places", []), compiled
+    )
+    from .place_branch import bind_handover_places
+
+    post_handover_places = bind_handover_places(
+        payload.get("post_handover_places", []), compiled, registration.scene_binding
     )
     if world_yaw_free_places and not adaptive_pick:
         raise ValueError("World yaw freedom requires ordinary Pick/Place binding.")
@@ -1329,6 +1388,8 @@ def load_deployment(
         pick_contact_revisions=pick_contact_revisions,
         world_yaw_free_places=world_yaw_free_places,
         measured_rigid_calls=measured_rigid_calls,
+        post_handover_places=post_handover_places,
+        idle_invocations=idle_invocations,
     )
     integration = replace(
         base.integration,

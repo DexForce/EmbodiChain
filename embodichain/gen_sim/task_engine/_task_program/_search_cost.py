@@ -28,6 +28,8 @@ from time import perf_counter
 
 __all__: list[str] = []
 
+PLANNING_WALL_SECONDS = 90.0
+
 
 class PlanningBudgetExceeded(Exception):
     """A planning-only stop; never evidence of physical impossibility."""

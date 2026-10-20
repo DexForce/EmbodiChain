@@ -520,12 +520,22 @@ class GenSimActionEngine(AtomicActionEngine):
     ) -> Any:
         from ._search_cost import (
             _COST,
+            PLANNING_WALL_SECONDS,
             PlanningBudgetExceeded,
             measure_search,
             search_cost_scope,
         )
 
         previews = {}
+        action = (
+            self.actions.get(request.skill_id) if plan_transform is not None else None
+        )
+        idle_transform = (
+            plan_transform is not None
+            and request.invocation_id in getattr(action, "idle_invocations", {})
+        )
+        if idle_transform and context is None:
+            context = self.initial_context()
         if request.skill_id in {"pick_up", "place"}:
             previews = (
                 getattr(self.actions.get("pick_up"), "continuation_previews", None)
@@ -547,7 +557,7 @@ class GenSimActionEngine(AtomicActionEngine):
         paired = paired and getattr(context, "batch_size", None) == 1
         parent = _COST.get()
         with search_cost_scope(
-            wall_seconds=60.0 if paired or owns_measured else None
+            wall_seconds=PLANNING_WALL_SECONDS if paired or owns_measured else None
         ) as cost:
             try:
                 with measure_search("complete_plan_request"):
@@ -568,6 +578,8 @@ class GenSimActionEngine(AtomicActionEngine):
                         if owns_measured
                         else build(request)
                     )
+                    if idle_transform:
+                        plan = action.inspect_final_plan(request, context, plan)
             except PlanningBudgetExceeded as error:
                 if parent is not None:
                     raise

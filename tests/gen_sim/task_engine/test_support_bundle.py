@@ -123,6 +123,19 @@ def _constraints(graph: dict, scene: PreparedScene, *, revision: int | None) -> 
     )
 
 
+@pytest.mark.parametrize("inside", [False, True])
+def test_explicit_e4_placement_support_is_not_skipped(support_scene, inside):
+    graph = _placement_graph(inside=inside, reference="tray")
+    for node in graph["nodes"]:
+        node["task_type"] = "E4"
+    graph["task_groups"][0]["task_type"] = "E4"
+    legacy = _constraints(graph, support_scene, revision=None)
+    strong = _constraints(graph, support_scene, revision=1)
+    assert "support_contract_revision" not in legacy
+    assert strong["presets"]["gen_sim.place.stable"]["support_contract_revision"] == 1
+    assert strong["presets"]["gen_sim.place.stable"]["reference"] == "tray"
+
+
 def _load_bundle(paths: Any) -> Any:
     return load_deployment(
         task_program=load_config(paths.deployment)["task_program"],
@@ -483,6 +496,133 @@ def test_per_call_contact_revision_survives_strict_bundle_loading(
                 robot_profile="dual_franka",
                 pick_contact_revisions={name: 2},
             )
+
+
+@pytest.mark.parametrize("revision", [7, 8])
+def test_e4_source_native8_round_trips_without_enabling_other_calls(
+    support_scene: PreparedScene, tmp_path: Path, revision: int
+) -> None:
+    from .test_semantic_graph import _fresh_handover_graph
+
+    graph = _fresh_handover_graph()
+    graph["nodes"][0]["call"]["arguments"]["object"] = "bottle"
+    graph["nodes"][1]["call"]["object"] = "bottle"
+    kwargs = dict(
+        robot_profile="dual_franka",
+        verify_pick_phases=True,
+        pick_contact_revisions={"pick_cube": revision},
+    )
+    if revision != 8:
+        with pytest.raises(ValueError, match="explicit Pick"):
+            bundle.generate_task_program_bundle(
+                graph, support_scene, tmp_path / "bad_e4", **kwargs
+            )
+        return
+    _, paths = bundle.generate_task_program_bundle(
+        graph, support_scene, tmp_path / "e4", **kwargs
+    )
+    constraints = load_config(paths.root / "task_program/constraints.json")
+    assert constraints["pick_contact_revisions"] == {"pick_cube": 8}
+    assert "pick_contact_revision" not in constraints
+    loaded = _load_bundle(paths).integration.adapter_factory
+    assert loaded.pick_contact_revision is None
+    assert len(loaded.pick_contact_revisions) == 1
+    assert loaded.pick_contact_revisions[0][1] == 8
+
+
+def test_regenerating_e4_does_not_lower_or_rotate_existing_transfer_targets(
+    support_scene: PreparedScene, tmp_path: Path
+) -> None:
+    from .test_semantic_graph import _fresh_handover_graph
+
+    graph = _fresh_handover_graph()
+    graph["nodes"][0]["call"]["arguments"]["object"] = "bottle"
+    graph["nodes"][1]["call"]["object"] = "bottle"
+    first, paths = bundle.generate_task_program_bundle(
+        graph,
+        support_scene,
+        tmp_path / "first_e4",
+        robot_profile="dual_franka",
+        verify_pick_phases=True,
+    )
+    frozen = load_frozen_physical_input(
+        support_scene, paths.root, robot_profile="dual_franka"
+    )
+    second, regenerated = bundle.generate_task_program_bundle(
+        first,
+        frozen,
+        tmp_path / "regenerated_e4",
+        robot_profile="dual_franka",
+        verify_pick_phases=True,
+        pick_contact_revisions={"pick_cube": 8},
+    )
+    assert second["targets"] == first["targets"]
+    assert load_config(paths.program) == load_config(regenerated.program)
+
+
+def test_post_handover_place_permission_survives_strict_loading(
+    support_scene, tmp_path
+):
+    from .test_semantic_graph import _fresh_handover_graph
+
+    graph = _fresh_handover_graph()
+    graph["nodes"][0]["call"]["arguments"]["object"] = "bottle"
+    graph["nodes"][1]["call"]["object"] = "bottle"
+    graph["nodes"].append(
+        {
+            "id": "receive_place",
+            "task_type": "E1",
+            "task_instance_id": "landing",
+            "role": "primary",
+            "depends_on": ["place_cube"],
+            "call": {
+                "kind": "registered",
+                "call_id": "simulation.place_relative",
+                "arguments": {
+                    "object": "bottle",
+                    "reference": "tray",
+                    "relation": "on",
+                },
+                "resources": {"primary": "right"},
+            },
+        }
+    )
+    graph["task_groups"].append(
+        {
+            "id": "landing",
+            "task_type": "E1",
+            "node_ids": ["receive_place"],
+            "depends_on": ["exchange"],
+            "success": {"kind": "call_completed"},
+        }
+    )
+    _, paths = bundle.generate_task_program_bundle(
+        graph,
+        support_scene,
+        tmp_path / "post",
+        robot_profile="dual_franka",
+        post_handover_places=["receive_place"],
+    )
+    loaded = _load_bundle(paths).integration.adapter_factory
+    assert len(loaded.post_handover_places) == 1
+    route = loaded.post_handover_places[0]
+    assert (route.subject, route.receiver, route.reference) == (
+        "bottle",
+        "right",
+        "tray",
+    )
+    assert route.place_id != route.handover_id
+    assert load_config(paths.root / "task_program/constraints.json")[
+        "post_handover_places"
+    ] == ["receive_place"]
+    with pytest.raises(ValueError):
+        bundle.generate_task_program_bundle(
+            graph,
+            support_scene,
+            tmp_path / "badpost",
+            robot_profile="dual_franka",
+            post_handover_places=["pick_cube"],
+        )
 
 
 @pytest.mark.parametrize("revision", [True, False, 0, 9, 3.0, 4.0, "3", "4"])

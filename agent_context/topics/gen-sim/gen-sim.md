@@ -111,9 +111,10 @@ Ordinary single-environment Place with preserved target orientation screens its
 unchanged required keyframes with finite IK/FK before dense path planning.
 An unqualified screen is not a proof of global unreachability; explicit height
 caps, multi-waypoint goals and protected Cartesian/pour routes keep their prior
-path. Owned adjacent Pick/Place calls share one 60-second cooperative wall ledger
-across nested previews and recovery. It rejects overdue planning at instrumented
-boundaries, not by preempting a native operation, so elapsed time may exceed that
+path. Owned adjacent Pick/Place calls share one 90-second cooperative wall ledger
+across nested previews and recovery; measured rigid planning uses the same
+threshold from `_task_program/_search_cost.py`. It rejects overdue planning at
+instrumented boundaries, not by preempting a native operation, so elapsed time may exceed that
 deadline until the next check. These search receipts neither prove acquisition
 or release nor replace final TaskSpec qualification.
 The normal coordinator derives call-local manipulation permissions from typed,
@@ -213,8 +214,9 @@ additional complete paths share the existing four-recovery budget. Extra depths
 reuse the original geometric pools, branch keys and IK random states rather than
 regenerating approach proposals or advancing unrelated random streams. Ordinary
 Pick checks its already-required open-hand endpoint scene clearance before accepting a
-depth; this introduces no new scene gate for Pour. Constraints, explicit grasps,
-handover end regions and owned Cartesian routes retain their original depth.
+depth; this introduces no new scene gate for Pour. Constraints and explicit grasps
+retain their original depth. Handover end regions and owned Cartesian routes also
+retain it unless the native8 source contract described below is explicitly enabled.
 These opt-ins do not replace native acquisition, retention or final path checks.
 Revision 7 also screens the fixed-arm nominal pre-contact closure against the scene
 for ordinary native B1/env0 Picks, both during candidate choice and on emitted
@@ -267,6 +269,99 @@ remains separately owned; the existing robot/articulation/proxy checks remain.
 The scene snapshot is invocation-local and read-only. Emitted and transformed
 closing plans repeat this qualification; it does not predict post-contact
 dynamics or certify a physical grip. Revisions 1--7 retain their existing checks.
+
+Per-call `pick_contact_revisions` also accepts revision 8 for generated E4
+handover-source registered Picks. The lowerer's `ends` contract opts these calls
+into the same open/precontact and emitted/transformed closing-scene checks.
+Bounded depth search reuses the selected `supported_end` candidate pools and
+shares the existing four-path budget, including owned Cartesian source routes;
+it does not switch to ordinary center proposals or relax receiver selection.
+Other registered calls, legacy E4 without this opt-in, Pour, and shared PickUp
+defaults are unchanged. Geometry qualification still requires physical
+acquisition, holding and subsequent HandOver verification during execution.
+Regenerating an expanded E4 graph preserves its declared MoveHeldObject transfer
+poses; upright landing refinement must not lower or rotate those transfer targets.
+
+Explicit `post_handover_places` permissions bind only adjacent sequential
+HandOver-to-relative-on Place calls with the same rigid object and exact receiver.
+On real-held planning failure, the declared Place may reuse the existing
+goal-conditioned waypoint branch with its observed `ends` grasp and preserved
+release orientation. The normal Place attempt and successful plans remain unchanged.
+For a singleton release goal with two Cartesian keyframes per translation, the
+recovery distinguishes the generated free-transport midpoint from the original
+preplace/contact/release targets. A fresh payload-aware cuRobo connection replaces
+only that midpoint; continuous seeded IK retains the exact Cartesian descent and
+reverse empty-hand retract. Explicit phase composition preserves passive and
+release commands/effects, remaps phase-boundary monitors, and may extend only the
+approach within the original action timeout. Final FK, velocity, robot mesh and
+scene-envelope checks still qualify the emitted commands. Other waypoint branches
+retain their fixed phase grids and fail closed when duration is insufficient.
+The same explicit route also binds the preceding HandOver: an `ends` grip keeps
+its inverse-grasp withdrawal before the final two waypoints move outward toward
+the source arm's side by the existing retreat distance; a planned exit robot-mesh
+gate participates in the existing bounded direction retry. Ordinary/default calls
+remain unchanged. These planning receipts do not certify physical acquisition,
+release or task success; complete native execution and TaskSpec remain required.
+
+The packaged Task Engine CLI defaults select
+`planning.runtime_profile: auto` and
+`execution.acceptance_mode: experiment`, including when `--config` is omitted.
+Explicit YAML overrides may select `default`/`strict` or
+`composition_experiment`; omitted fields in override YAML and direct Python
+configuration construction retain their legacy defaults. The CLI defaults and
+both packaged experiment YAML files bound preparation to one worker, one scene
+attempt and one action attempt. Experimental acceptance requires one environment;
+vectorized legacy execution needs an explicit strict configuration.
+Only the contact profile adds a material-only Robotiq pad
+overlay (static/dynamic friction 2.85/2.70); composition retains original materials.
+Automatic selection uses the validated recipe: any E3/Pour selects composition,
+otherwise contact. It never tests task IDs, object UIDs or text-name heuristics.
+The generated constraints bind the concrete profile; `runtime_profile_selection.json`
+records the request and selection. Explicit profile overrides remain unchanged.
+One bundle has one material policy, not dynamic per-call switching; mixed recipes
+containing Pour retain composition and require their own physical qualification.
+Both profiles use 100/100/30 mm COM/position/support tolerances
+for supported on-placement, independently of final TaskSpec acceptance.
+Generated handover contact revisions compose with existing occurrence permissions;
+different revisions for the same call reject rather than replacing an earlier
+selection. It derives horizontal end-grasp HandOver/Place
+permissions from exact adjacent occurrences, not task IDs.
+Authorized horizontal-transfer receiver Places retain ordinary 140-point free
+transport even if the model groups them inside E4; they cannot inherit the
+transfer group's Cartesian approach. HandOver and its source/staging stay
+unchanged, and terminal descent/release/withdrawal checks remain required.
+Related auto-arm Pour source/receiver reuse and terminal same-object reacquisition may add a
+visible empty-arm clearance/restore pair. Its finite proximal-joint proposals
+are ranked by FK endpoint separation, screened against the current scene and
+rechecked on emitted (including transformed) MoveJoints trajectories. This is
+a bounded heuristic, not a complete bimanual planner or stability guarantee.
+Composition keeps original Pick closure and total sample counts. Contact also
+retains its qualified 24-point ordinary Pick closure with 12 extra total samples,
+leaving approach/lift counts unchanged. Frozen physical inputs reject these opt-ins.
+`planning.experimental_open_release` independently selects the release observer;
+packaged defaults set false, while both explicit experiment configurations set true.
+Old bundles and direct builder callers that omit the marker retain their original
+profile-based release selection. Its native grip observer revision 2 permits an experimental detached
+observation when the measured independent URDF driving joints are within the
+profile's existing open tolerance and exactly one pad remains in contact.
+Acquisition and holding still require native opposed bilateral contact;
+nonfinite, dropped, bilateral or non-opposing two-pad observations cannot use
+this release rule. Raw contacts and measured opening are recorded. This means
+open-hand loss of bilateral grip, not contact-free separation; actual retract,
+placement and settling still execute. Default revision 1 remains unchanged.
+Frozen physical references require runtime_profile=default and reject incompatible
+profiles before any model calls; coordinator and bundle checks remain in place.
+
+Explicit experimental acceptance requires complete native program execution,
+all original segment/post-policy/validator checks and cargo acceptance; only
+the outer TaskSpec certificate is advisory. The canonical runner preserves
+`task_spec_evaluation.json` and publishes `strict_execution_report.json` beside
+the clearly marked experimental report. Both `run` and `run-all` use this same
+production path, without importing artifact-directory workers. Every execution
+also writes program_completion_summary.json, separating program completion from
+strict success without re-executing or replacing the selected verdict. The CLI
+default reports experimental program completion; strict TaskSpec certification
+remains separate and can still be selected explicitly.
 
 `generate_task_program_bundle(verify_pick_phases=True)` explicitly enables
 registered Pick acquisition/lift verification through its fingerprinted lowerer
@@ -859,6 +954,12 @@ an undeclared hold window is not added. Historical milestones use their own
 recorded boundary, while final holding also checks fresh receiver-relative pose.
 Missing receipts or unsupported later execution remain unavailable, not inferred
 from command completion. This changes observation, not HandOver execution.
+E4 `place` outcomes with rigid `on`/`inside` targets also collect exact receiver
+release and placement evidence, separately from the earlier native TRANSFER
+milestone. Observer revision 7 records those two boundaries in execution order;
+final geometry cannot fill a missing transfer or historical placement. Explicit
+support revision 1 applies the same native support contract to these E4 placements
+without weakening legacy E1 or terminal E4-hold behavior.
 `task_engine/_task_program/identity.py` owns v38 bundle identity for both
 generation and verification. It projects only equivalent default HandOver and
 empty relative-route stage fields at validated declaration slots; explicit new
@@ -1095,7 +1196,12 @@ the normal Task Engine route. Regenerate E9 bundles after lowerer revisions.
 E9 preserves the declared/native button, housing and finger contact envelopes;
 it does not override contact or rest offsets. Normal E9 generation sets only
 the selected button assembly to unit body scale, preserving XY, rotation and
-the original support bottom. Other objects and source USD remain unchanged.
+the original support bottom. When E8 and E9 share an articulation, E8 alone owns
+its scale/support adaptation and both controls rebind to that geometry. E9 accepts
+the derived mass source only with E8's pinned, fully revalidated source lineage,
+original/runtime hashes and deployment scale. It then calibrates drives against
+the fixed source mass without a second mass/inertia overlay. Independent E9
+controls retain their original scaled-mass calibration. Other objects and source USD remain unchanged.
 Table-footprint or object-AABB conflicts reject the deployment. The audit in
 press_adaptation.json records original and deployed geometry; mass and release
 drive retain their pre-resize calibration. This explicit deployment policy is

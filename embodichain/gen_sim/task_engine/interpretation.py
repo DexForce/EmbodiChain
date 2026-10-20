@@ -78,6 +78,7 @@ _STEP_KEYS = frozenset(
         "depends_on",
     }
 )
+_OPTIONAL_STEP_KEYS = frozenset({"pour_goal_mode"})
 _INTENT_TASK_FIELD_REGISTRY = {
     task_type: contract.applicable_intent_fields
     for task_type, contract in TASK_CONTRACTS.items()
@@ -211,6 +212,7 @@ _INTENT_OUTPUT_SCHEMA = {
                         "enum": sorted(_TARGET_STATES),
                     },
                     "target_setting": {"type": "integer"},
+                    "pour_goal_mode": {"type": "string", "enum": ["fluid", "motion"]},
                     "layout": {"type": "string", "enum": sorted(_LAYOUTS)},
                     "axis": {"type": "string", "enum": sorted(_AXES)},
                     "direction": {
@@ -320,7 +322,9 @@ def _normalize_instruction_intent_fields(
         return result, []
     changes: list[dict[str, Any]] = []
     for index, raw_step in enumerate(raw_steps):
-        if not isinstance(raw_step, dict) or set(raw_step) != _STEP_KEYS:
+        if not isinstance(raw_step, dict) or not (
+            _STEP_KEYS <= set(raw_step) <= _STEP_KEYS | _OPTIONAL_STEP_KEYS
+        ):
             continue
         task_type = raw_step.get("task_type")
         applicable = _INTENT_TASK_FIELD_REGISTRY.get(task_type)
@@ -417,7 +421,7 @@ def validate_instruction_intent(value: Mapping[str, Any]) -> dict[str, Any]:
         context = f"InstructionIntent.steps[{index}]"
         if not isinstance(raw, Mapping):
             raise ValueError(f"{context} must be a mapping.")
-        if set(raw) != _STEP_KEYS:
+        if not (_STEP_KEYS <= set(raw) <= _STEP_KEYS | _OPTIONAL_STEP_KEYS):
             raise ValueError(
                 f"{context} requires exactly fields {sorted(_STEP_KEYS)}; "
                 f"received {sorted(raw)}."
@@ -431,6 +435,12 @@ def validate_instruction_intent(value: Mapping[str, Any]) -> dict[str, Any]:
         step["task_type"] = _choice(
             step["task_type"], TASK_TYPES, f"{context}.task_type"
         )
+        if "pour_goal_mode" in step:
+            if step["task_type"] != "E3":
+                raise ValueError(f"{context}.pour_goal_mode is only valid for E3.")
+            step["pour_goal_mode"] = _choice(
+                step["pour_goal_mode"], {"fluid", "motion"}, f"{context}.pour_goal_mode"
+            )
         step["object"] = _validate_selector(step["object"], f"{context}.object")
         step["target"] = _validate_selector(step["target"], f"{context}.target")
         step["relation"] = _canonical_relation(step["relation"], f"{context}.relation")
@@ -803,6 +813,12 @@ def _instruction_prompt(instruction: str) -> str:
         "receive_arm, orientation_goal, target_state, target_setting, layout, "
         "axis, direction, terminal_behavior, depends_on; each selector has kind, "
         "step_id, reference, quantifier, count.\n\n"
+        "For E3 only, the optional pour_goal_mode may be 'motion' when the user "
+        "explicitly requires only a tilt-and-restore action without actual liquid "
+        "transfer. Use 'fluid' or omit the field for actual fluid-transfer intent "
+        "or an unspecified evidence mode. Never weaken fluid-transfer intent to "
+        "motion merely because fluid simulation may be unavailable. Do not emit "
+        "pour_goal_mode for other E types.\n\n"
         "Use orientation_goal=none unless the instruction explicitly requests "
         "upright orientation or preserving the original orientation. Spatial "
         "placement and handover alone do not imply preserve. "

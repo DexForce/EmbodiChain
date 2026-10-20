@@ -121,6 +121,8 @@ class TaskEngineCoordinator:
         max_episode_steps: int | None = None,
         fit_grasp_assets: bool = False,
         twist_mass_source: bool = False,
+        runtime_profile: str = "default",
+        experimental_open_release: bool | None = None,
         planner_policy: Mapping[str, Any] | None = None,
         randomize_scene: bool = False,
         randomize_table_material: bool = False,
@@ -145,11 +147,23 @@ class TaskEngineCoordinator:
             randomize_scene,
             randomize_table_material,
         )
+        from ..experiment_policy import validate_profile
+
+        validate_profile(runtime_profile)
+        if (
+            experimental_open_release is not None
+            and type(experimental_open_release) is not bool
+        ):
+            raise TypeError("experimental_open_release must be a boolean or None.")
         normalized_source = self._coerce_source(source)
         selected_physical = physical_input or getattr(
             self.scene_adapter, "physical_input", None
         )
         if selected_physical is not None:
+            if runtime_profile != "default":
+                raise ValueError(
+                    "Selected physical input requires runtime_profile=default."
+                )
             selected_physical.assert_unchanged()
             output = Path(output_dir).expanduser().resolve()
             inputs = [Path(name).resolve() for name in selected_physical.input_files]
@@ -243,7 +257,13 @@ class TaskEngineCoordinator:
                 "status": "running",
             }
             try:
-                plan = self.semantic_planner.plan_spec(
+                planner = self.semantic_planner
+                if runtime_profile != "default":
+                    from copy import copy
+
+                    planner = copy(planner)
+                    planner.reuse_pour_resource = True
+                plan = planner.plan_spec(
                     selected,
                     role_bindings,
                     adaptation.prepared_scene.planner_objects,
@@ -266,6 +286,12 @@ class TaskEngineCoordinator:
                             if height is not None
                             else {}
                         )
+                        if runtime_profile != "default":
+                            extra["runtime_profile"] = runtime_profile
+                        if experimental_open_release is not None:
+                            extra["experimental_open_release"] = (
+                                experimental_open_release
+                            )
                         if twist_mass_source:
                             extra["twist_mass_source"] = True
                         if str(adaptation.scene_manifest["robot_profile"]) in {
@@ -296,7 +322,11 @@ class TaskEngineCoordinator:
                             )
 
                             if supports_ordinary_pour(graph, plan.candidate):
-                                extra["pour_geometry_revision"] = 1
+                                extra["pour_geometry_revision"] = (
+                                    2 if runtime_profile != "default" else 1
+                                )
+                                if runtime_profile != "default":
+                                    extra["pour_proxy_position_tolerance_m"] = 0.02
                         graph, generated = generate_task_program_bundle(
                             graph,
                             adaptation.physical_input or adaptation.prepared_scene,

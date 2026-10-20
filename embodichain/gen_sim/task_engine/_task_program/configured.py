@@ -513,6 +513,11 @@ def decode_task_lowerer(value: object, *, path: str) -> Any:
         )
     if kind in {"park", "pour", "axis_align"}:
         return _decode_shared_lowerer(value, path=path)
+    if kind == "idle_arm_clearance":
+        from .idle_clearance import IdleFactory, decode_routes
+
+        config = _mapping(value, path=path, required=frozenset({"kind", "routes"}))
+        return IdleFactory(decode_routes(config["routes"], path=f"{path}.routes"))
     raise ValueError(
         f"{path}: unsupported Task Engine service {kind!r}; expected E1-E6/E9 services."
     )

@@ -200,10 +200,14 @@ def generate_task_program_bundle(
     pick_contact_revisions: Mapping[str, int] | None = None,
     world_yaw_free_places: Sequence[str] | None = None,
     measured_rigid_calls: Sequence[str] | None = None,
+    post_handover_places: Sequence[str] | None = None,
     verify_pick_phases: bool = False,
     pour_geometry_revision: int | None = None,
     pour_proxy_position_tolerance_m: float | None = None,
     upright_container_picks: Mapping[str, float] | None = None,
+    idle_clearance_routes: Sequence[Mapping[str, Any]] | None = None,
+    runtime_profile: str = "default",
+    experimental_open_release: bool | None = None,
 ) -> tuple[SemanticTaskGraph, TaskProgramBundlePaths]:
     """Write, compose, and provider-free preflight one semantic deployment.
 
@@ -228,7 +232,7 @@ def generate_task_program_bundle(
         twist_mass_source: Opt in to the Default-only deployment MassAPI copy
             instead of the Lab mass conversion. This is also selected when the
             unmodified Lab loader does not expose the mass policy capability.
-        support_contract_revision: Explicit native E1 support contract; None
+        support_contract_revision: Explicit native E1/E4 placement support contract; None
             preserves legacy bundles, while 1 requires scoped physical evidence.
         pick_contact_revision: Explicit native rigid Pick closing screen. None
             preserves legacy sampling; 1 rejects nonpad-rest-first closure;
@@ -256,16 +260,25 @@ def generate_task_program_bundle(
             position budget for revision 2, shared with its pose-proxy observer.
             Forbidden for other revisions; no tolerance is invented implicitly.
         pick_contact_revisions: Explicit Pick node IDs mapped to native closing
-            revisions. Unlisted calls retain ``pick_contact_revision`` or legacy behavior.
+            revisions; registered handover-source Picks require revision 8.
+            Unlisted calls retain ``pick_contact_revision`` or legacy behavior.
         world_yaw_free_places: Explicit ordinary inside Place node IDs whose object
             heading may change on real-held planning failure. Omitted preserves
             legacy behavior; hypothetical Pick previews never use this recovery.
+        post_handover_places: Explicit receiver relative-on Place node IDs granted
+            failure-only goal-conditioned recovery. Targets and grasp stay fixed.
+        idle_clearance_routes: Explicit empty-arm joint offsets and paired Park
+            segments. No helper is inserted or enabled when omitted.
         upright_container_picks: Explicit E3 Pick node IDs mapped to maximum pad-axis
             tilt above the Z-up horizontal plane, in degrees. Omitted preserves
             legacy behavior. The caller declares these as upright-container Picks.
         measured_rigid_calls: Explicit ordinary Pick and rigid-inside Place node
             IDs opting into measured preshape, carry and occupied-floor proposals.
             Omitted preserves legacy behavior and shared executor defaults.
+        runtime_profile: Explicit task-independent experimental contact policy.
+            Omission preserves legacy physics, sampling and route declarations.
+        experimental_open_release: Explicit release-evidence policy. None retains
+            legacy profile selection; False keeps the original release gate.
 
     Returns:
         Final fingerprint-bound graph and all generated paths.
@@ -275,6 +288,17 @@ def generate_task_program_bundle(
             integration cannot be composed and preflighted.
     """
     selected_graph = validate_semantic_task_graph(graph)
+    from .experiment_policy import (
+        resolve_profile,
+        AUTO_PROFILE,
+        CONTACT_PROFILE,
+        experimental_release_enabled,
+    )
+
+    requested_runtime_profile = runtime_profile
+    runtime_profile = resolve_profile(runtime_profile, selected_graph)
+    experiment = runtime_profile != "default"
+    experimental_release_enabled(runtime_profile, experimental_open_release)
     if pour_geometry_revision is not None:
         if type(pour_geometry_revision) is not int or pour_geometry_revision not in (
             1,
@@ -322,6 +346,7 @@ def generate_task_program_bundle(
             raise ValueError("Frozen physical input owns its robot-profile selection.")
         if (
             fit_grasp_assets
+            or experiment
             or twist_mass_source
             or twist_grip_depth_m is not None
             or twist_support_lift_m != 0.001
@@ -386,6 +411,20 @@ def generate_task_program_bundle(
     task_program_root = root / "task_program"
     component_root.mkdir(parents=True, exist_ok=True)
     task_program_root.mkdir(parents=True, exist_ok=True)
+    if requested_runtime_profile == AUTO_PROFILE:
+        _write_json(
+            root / "runtime_profile_selection.json",
+            {
+                "schema_version": "gen_sim_runtime_profile_selection/v1",
+                "requested": requested_runtime_profile,
+                "selected": runtime_profile,
+                "rule": (
+                    "pour_recipe"
+                    if runtime_profile != CONTACT_PROFILE
+                    else "non_pour_recipe"
+                ),
+            },
+        )
 
     from embodichain.gen_sim.task_engine.orchestration.scene_assets import (
         normalize_scene_assets,
@@ -406,6 +445,10 @@ def generate_task_program_bundle(
         if normalized_profile == "dual_franka_pgi":
             _apply_pgi_experiment_embodiment(embodiment_payload)
         _calibrate_task_gripper_opening(embodiment_payload)
+    if runtime_profile == CONTACT_PROFILE:
+        from .experiment_policy import apply_contact_embodiment
+
+        apply_contact_embodiment(embodiment_payload)
     adaptation = None
     if fit_grasp_assets:
         from .orchestration.grasp_fit import fit_grasp_assets as fit_assets
@@ -432,7 +475,14 @@ def generate_task_program_bundle(
     )
     press_adaptation = ()
     if frozen is None:
-        scene, press_adaptation = prepare_press_scene(scene, source_press_routes)
+        twist_uids = {route.binding.object_id for route in source_twist_routes}
+        # A shared articulation has one scale owner; E8 rebinds both controls below.
+        press_scale_routes = tuple(
+            route
+            for route in source_press_routes
+            if route.binding.object_id not in twist_uids
+        )
+        scene, press_adaptation = prepare_press_scene(scene, press_scale_routes)
     scene_uids = {
         str(item.get("runtime_uid"))
         for item in scene.planner_objects
@@ -652,6 +702,35 @@ def generate_task_program_bundle(
         if node["call"].get("call_id") == _PICK_CALL_ID:
             node["call"]["call_id"] = f"gen_sim.pick.{node['task_instance_id']}"
     selected_graph = _add_handover_staging(selected_graph, scene)
+    if experiment:
+        from .experiment_policy import (
+            horizontal_handover_permissions,
+            add_reacquisition_clearance,
+            merge_contact_revisions,
+        )
+
+        generated_places, generated_revisions = horizontal_handover_permissions(
+            selected_graph
+        )
+        pick_contact_revisions = merge_contact_revisions(
+            pick_contact_revisions, generated_revisions
+        )
+        from ._task_program.place_branch import handover_place_declarations
+
+        declared_places = handover_place_declarations(
+            post_handover_places if post_handover_places is not None else ()
+        )
+        post_handover_places = tuple(
+            sorted(set(declared_places) | set(generated_places))
+        )
+        if idle_clearance_routes is not None:
+            raise ValueError(
+                "Contact profile owns its generated clearance declarations."
+            )
+        selected_graph, generated_idle = add_reacquisition_clearance(
+            selected_graph, embodiment_payload
+        )
+        idle_clearance_routes = generated_idle or None
     paths = TaskProgramBundlePaths(
         root=root,
         deployment=root / "task_program_deployment.yaml",
@@ -710,6 +789,7 @@ def generate_task_program_bundle(
         pick_contact_revisions=pick_contact_revisions,
         world_yaw_free_places=world_yaw_free_places,
         measured_rigid_calls=measured_rigid_calls,
+        post_handover_places=post_handover_places,
         upright_container_picks=upright_container_picks,
     )
     drawer_targets = {route.affordance for route in drawers}
@@ -722,9 +802,22 @@ def generate_task_program_bundle(
     stability["motion_samples"] = motion_sample_declarations(
         selected_graph, drawer_groups=drawer_groups
     )
+    if runtime_profile == CONTACT_PROFILE:
+        for node in selected_graph["nodes"]:
+            if node["call"]["kind"] == "pick":
+                stability["motion_samples"][node["id"]] += 12
     stability["cartesian_calls"] = cartesian_call_declarations(
         selected_graph, drawer_groups=drawer_groups
     )
+    if experiment and post_handover_places:
+        # Receiver placement is not part of the transfer's Cartesian motion.
+        for identity in post_handover_places:
+            stability["motion_samples"][identity] = 140
+        stability["cartesian_calls"] = [
+            identity
+            for identity in stability["cartesian_calls"]
+            if identity not in post_handover_places
+        ]
     stability["pour_receivers"] = pour_receiver_declarations(selected_graph)
     pour_returns = pour_return_call_declarations(selected_graph)
     if pour_returns:
@@ -739,34 +832,42 @@ def generate_task_program_bundle(
     ) = _staging_contract_payload(selected_graph, scene, program_id)
     if drawers:
         stability["drawers"] = [route.payload() for route in drawers]
-    save_config(
-        paths.program,
-        _program_payload(
-            selected_graph,
-            program_id,
-            scene,
-            stability_presets=stability["presets"],
-        ),
+    program_payload = _program_payload(
+        selected_graph,
+        program_id,
+        scene,
+        stability_presets=stability["presets"],
     )
+    if experiment:
+        from .experiment_policy import apply_placement_tolerances
+
+        apply_placement_tolerances(stability, program_payload)
+        stability["runtime_profile"] = runtime_profile
+    if experimental_open_release is not None:
+        stability["experimental_open_release"] = experimental_open_release
+    save_config(paths.program, program_payload)
     _write_json(
         task_program_root / "constraints.json",
         stability,
     )
-    save_config(
-        paths.integration,
-        _integration_payload(
-            selected_graph,
-            scene,
-            program_id=program_id,
-            scene_contract=scene_contract,
-            collision_world=policy_payload["motion"]["strategy"] == "motion_gen",
-            embodiment=embodiment_payload,
-            twist_contact_feedback=twist_contact_feedback,
-            verify_pick_phases=verify_pick_phases,
-            pour_geometry_revision=pour_geometry_revision,
-            pour_proxy_position_tolerance_m=pour_proxy_position_tolerance_m,
-        ),
+    integration_payload = _integration_payload(
+        selected_graph,
+        scene,
+        program_id=program_id,
+        scene_contract=scene_contract,
+        collision_world=policy_payload["motion"]["strategy"] == "motion_gen",
+        embodiment=embodiment_payload,
+        twist_contact_feedback=twist_contact_feedback,
+        verify_pick_phases=verify_pick_phases,
+        pour_geometry_revision=pour_geometry_revision,
+        pour_proxy_position_tolerance_m=pour_proxy_position_tolerance_m,
+        idle_clearance_routes=idle_clearance_routes,
     )
+    if runtime_profile == CONTACT_PROFILE:
+        from .experiment_policy import apply_contact_options
+
+        apply_contact_options(integration_payload)
+    save_config(paths.integration, integration_payload)
     scene_payload = _scene_payload(scene, program_id=program_id)
     if frozen is not None:
         scene_payload["simulation"] = deepcopy(frozen.scene_simulation)
@@ -779,7 +880,14 @@ def generate_task_program_bundle(
             )
             art["asset_physics_mode"] = "overlay"
         press_calibration = calibrate_scene(
-            scene_payload, press_routes, source_routes=source_press_routes
+            scene_payload,
+            press_routes,
+            source_routes=source_press_routes,
+            fixed_mass_lineages={
+                route.binding.object_id: route.binding.mass_lineage_sha256
+                for route in twist_routes
+                if route.binding.mass_lineage_sha256
+            },
         )
         if press_calibration:
             _write_json(root / "press_calibration.json", {"routes": press_calibration})
@@ -975,6 +1083,7 @@ def _task_stability_payload(
     pick_contact_revisions: Mapping[str, int] | None = None,
     world_yaw_free_places: Sequence[str] | None = None,
     measured_rigid_calls: Sequence[str] | None = None,
+    post_handover_places: Sequence[str] | None = None,
     upright_container_picks: Mapping[str, float] | None = None,
 ) -> dict[str, Any]:
     """Declare task conditions without adding public validator or runtime types."""
@@ -1247,7 +1356,7 @@ def _task_stability_payload(
         from ._task_program.drawer_binding import inside_parts
 
         for node in graph["nodes"]:
-            if node["task_type"] != "E1":
+            if node["task_type"] not in {"E1", "E4"}:
                 continue
             call = node["call"]
             args = call.get("arguments", {})
@@ -1289,17 +1398,29 @@ def _task_stability_payload(
     if pick_contact_revision is not None:
         result["pick_contact_revision"] = pick_contact_revision
     if pick_contact_revisions is not None:
-        from ._task_program.adaptive_grasp import contact_revision_declarations
+        from ._task_program.adaptive_grasp import (
+            contact_revision_declarations,
+            is_handover_source_call_id,
+        )
 
         if not isinstance(pick_contact_revisions, Mapping):
             raise ValueError("Pick contact revisions must be an explicit mapping.")
         revisions = contact_revision_declarations(dict(pick_contact_revisions))
         nodes = {n["id"]: n for n in graph["nodes"]}
         if any(
-            name not in nodes or nodes[name]["call"]["kind"] != "pick"
-            for name in revisions
+            name not in nodes
+            or not (
+                nodes[name]["call"]["kind"] == "pick"
+                or revision == 8
+                and nodes[name]["task_type"] == "E4"
+                and nodes[name]["call"]["kind"] == "registered"
+                and is_handover_source_call_id(nodes[name]["call"].get("call_id"))
+            )
+            for name, revision in revisions.items()
         ):
-            raise ValueError("Pick contact revision must name explicit Pick nodes.")
+            raise ValueError(
+                "Pick contact revision must name explicit Pick nodes or native8 E4 source Picks."
+            )
         if revisions:
             result["pick_contact_revisions"] = revisions
     if world_yaw_free_places is not None:
@@ -1337,6 +1458,12 @@ def _task_stability_payload(
             )
         if names:
             result["measured_rigid_calls"] = list(names)
+    if post_handover_places is not None:
+        from ._task_program.place_branch import handover_place_declarations
+
+        names = handover_place_declarations(post_handover_places)
+        if names:
+            result["post_handover_places"] = list(names)
     if upright_container_picks is not None:
         from ._task_program.pick_closure_quality import declarations
 
@@ -1841,7 +1968,16 @@ def _integration_payload(
     verify_pick_phases: bool = False,
     pour_geometry_revision: int | None = None,
     pour_proxy_position_tolerance_m: float | None = None,
+    idle_clearance_routes: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    from dataclasses import asdict
+    from ._task_program.idle_clearance import CALL_ID as IDLE_CALL, decode_routes
+
+    idle_routes = (
+        decode_routes(idle_clearance_routes, path="idle_clearance_routes")
+        if idle_clearance_routes is not None
+        else ()
+    )
     scene_objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
     articulation_bindings = graph_bindings(graph, scene)
     from ._task_program.press_binding import graph_routes, PREPARE_CALL, PRESS_CALL
@@ -2203,6 +2339,11 @@ def _integration_payload(
             referenced_objects.add(str(call["arguments"]["object"]))
         elif call["kind"] == "registered" and call["call_id"] == "simulation.park":
             has_park_call = True
+        elif call["kind"] == "registered" and call["call_id"] == IDLE_CALL:
+            if not idle_routes:
+                raise ValueError(
+                    "Idle clearance requires an explicit registered route."
+                )
         elif call["kind"] == "registered" and call["call_id"] == PARK_CALL:
             has_articulation_park_call = True
         elif call["kind"] == "registered" and call["call_id"] in {
@@ -2591,6 +2732,7 @@ def _integration_payload(
                     if has_park_call
                     else {}
                 ),
+                **({IDLE_CALL: {"kind": "move_joints"}} if idle_routes else {}),
                 **(
                     {PARK_CALL: {"kind": "move_joints"}}
                     if has_articulation_park_call
@@ -2846,6 +2988,16 @@ def _integration_payload(
                     else []
                 ),
                 *([{"kind": "park"}] if has_park_call else []),
+                *(
+                    [
+                        {
+                            "kind": "idle_arm_clearance",
+                            "routes": [asdict(r) for r in idle_routes],
+                        }
+                    ]
+                    if idle_routes
+                    else []
+                ),
                 *(
                     [{"kind": "articulation_park"}]
                     if has_articulation_park_call
@@ -4254,8 +4406,34 @@ def _refine_upright_targets(
     target_routes: dict[str, tuple[str, str]] = {}
     target_heights: dict[str, float] = {}
     upright_staging_targets: set[str] = set()
+    transfer_sources = {
+        (
+            node["task_instance_id"],
+            node["depends_on"][0],
+            node["call"]["object"],
+            node["call"]["resources"]["source"],
+        )
+        for node in selected["nodes"]
+        if node["task_type"] == "E4"
+        and node["call"]["kind"] == "hand_over"
+        and len(node["depends_on"]) == 1
+    }
     for node in selected["nodes"]:
         call = node["call"]
+        # A transfer pose is not an upright landing target, including when an
+        # already expanded E4 graph is regenerated with a new Pick policy.
+        if (
+            node.get("task_type") == "E4"
+            and call.get("call_id") == _MOVE_HELD_OBJECT_CALL_ID
+            and (
+                node["task_instance_id"],
+                node["id"],
+                call.get("arguments", {}).get("object"),
+                call.get("resources", {}).get("primary"),
+            )
+            in transfer_sources
+        ):
+            continue
         if (
             node.get("task_type") not in {"E1", "E2", "E4"}
             or call.get("kind") != "registered"

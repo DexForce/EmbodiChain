@@ -165,7 +165,9 @@ def test_nested_preview_budget_failure_returns_one_nonretryable_outer_failure(
                 SimpleNamespace(skill_id="place", invocation_id="place-1"),
                 context,
             )
-        now[0] = 61.0
+        now[0] = 89.0
+        costs.record_search("within_extended_budget")
+        now[0] = 90.0
         costs.record_search("next_preview_ik")
         pytest.fail("Expired child planning returned")
 
@@ -186,7 +188,13 @@ def test_nested_preview_budget_failure_returns_one_nonretryable_outer_failure(
     assert failures[0][1]["retryable"] is False
     assert (
         result.diagnostics.metadata["gen_sim_search_cost"]["wall_budget_seconds"]
-        == 60.0
+        == 90.0
+    )
+    assert (
+        result.diagnostics.metadata["gen_sim_search_cost"]["counters"][
+            "within_extended_budget"
+        ]
+        == 1
     )
     assert costs._COST.get() is None
     assert len(captured) == int(omit_context)

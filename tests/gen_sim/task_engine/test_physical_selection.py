@@ -292,7 +292,11 @@ def test_cli_does_not_compare_source_image_to_a_selected_model(
 
     scene, _, reference = physical_case
     config = load_config(Path(config_module.__file__).with_name("defaults.yaml"))
-    config["planning"].update(physical_reference=str(reference), fit_grasp_assets=False)
+    config["planning"].update(
+        physical_reference=str(reference),
+        fit_grasp_assets=False,
+        runtime_profile="default",
+    )
     path = tmp_path / "selected.yaml"
     save_config(path, config)
     monkeypatch.setattr(

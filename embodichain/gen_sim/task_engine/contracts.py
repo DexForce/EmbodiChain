@@ -57,7 +57,8 @@ TaskCandidate: TypeAlias = dict[str, Any]
 TaskCandidateSet: TypeAlias = dict[str, Any]
 
 _SUCCESS_TYPES = frozenset(
-    {contract.success_type for contract in TASK_CONTRACTS.values()} | {"semantic_goal"}
+    {contract.success_type for contract in TASK_CONTRACTS.values()}
+    | {"semantic_goal", "pour_motion"}
 )
 _DRAFT_KEYS = frozenset({"schema_version", "task_id", "instruction", "steps"})
 _SCENE_REQUEST_KEYS = frozenset({"schema_version", "task_id", "references"})

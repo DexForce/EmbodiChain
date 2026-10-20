@@ -35,6 +35,15 @@ ADAPTIVE_GRASP_REVISION = 4
 HANDOVER_END_REGION_REVISION = 1
 
 
+def is_handover_source_call_id(value: object) -> bool:
+    """Recognize only the registered end-grasp source aliases owned by GenSim."""
+    return isinstance(value, str) and (
+        value == "gen_sim.pick.handover_source"
+        or value.startswith("gen_sim.pick.handover_horizontal_source.")
+        and bool(value.removeprefix("gen_sim.pick.handover_horizontal_source."))
+    )
+
+
 def contact_revision_declarations(value: object) -> dict[str, int]:
     """Validate explicit Pick-segment overrides without changing other calls."""
     if type(value) is not dict or any(
@@ -51,17 +60,25 @@ def contact_revision_declarations(value: object) -> dict[str, int]:
 
 
 def bind_contact_revisions(value: object, program: Any) -> tuple[tuple[str, int], ...]:
-    """Bind only explicitly named single Pick calls to their invocation IDs."""
-    from embodichain.lab.task_program.semantics import Pick
+    """Bind explicit Pick calls or native8 GenSim handover-source aliases."""
+    from embodichain.lab.task_program.semantics import Pick, RegisteredSemanticCall
 
     remaining = contact_revision_declarations(value)
     routes = []
     for segment in program.iter_segments():
         if segment.name not in remaining:
             continue
-        if len(segment.calls) != 1 or type(segment.calls[0].call) is not Pick:
+        if len(segment.calls) != 1:
             raise ValueError("Pick contact revision requires one exact Pick segment.")
         call = segment.calls[0]
+        if type(call.call) is not Pick and not (
+            type(call.call) is RegisteredSemanticCall
+            and remaining[segment.name] == 8
+            and is_handover_source_call_id(call.call.call_id)
+        ):
+            raise ValueError(
+                "Pick contact revision requires one exact Pick segment or native8 handover source."
+            )
         routes.append(
             (
                 f"{program.program_id}/{segment.segment_id}:{call.segment_call_index}",

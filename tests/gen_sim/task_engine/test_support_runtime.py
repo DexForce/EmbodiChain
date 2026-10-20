@@ -673,19 +673,27 @@ def test_real_native_load_does_not_replace_full_planar_relation(tmp_path, change
     assert _evaluate(case, final, history)["certificate_ready"] is False
 
 
-def _repeated_case(tmp_path):
+def _repeated_case(tmp_path, *, task_type="E1"):
     from embodichain.gen_sim.task_engine.semantic_planner import SemanticTaskPlanner
     from .test_task_spec_generation import candidate, selector, step
 
-    case = _strong_case(tmp_path)
+    case = _strong_case(tmp_path, task_type=task_type)
     source = candidate(
         *[
             step(
-                "E1",
+                task_type,
                 "cube",
                 target=selector("tray"),
                 relation="inside",
-                required_arm="left_arm",
+                **(
+                    {"required_arm": "left_arm"}
+                    if task_type == "E1"
+                    else {
+                        "transfer_arm": "right_arm",
+                        "receive_arm": "left_arm",
+                        "terminal_behavior": "place",
+                    }
+                ),
             )
             for _ in range(2)
         ]
@@ -743,7 +751,12 @@ def _repeated_case(tmp_path):
                 for sample in receipt["evidence"].values():
                     sample["timestamp"] = receipt["timestamp"]
         if (index + 1) % width == 0:
-            place = plan.graph["nodes"][index - 1]
+            place = next(
+                candidate
+                for candidate in plan.graph["nodes"][index - width + 1 : index + 1]
+                if candidate["call"].get("kind") == "place"
+                or candidate["call"].get("call_id") == "simulation.place_relative"
+            )
             preset = f"gen_sim.{place['id']}.stable"
             presets[preset] = asdict(cfg)
             adapter_constraints.append((preset, cfg))

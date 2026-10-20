@@ -73,6 +73,106 @@ def _setup(monkeypatch, outcomes, *, mode="ends"):
     return action, screen, factory, context, held, plans, rng
 
 
+def _post_place_selection(action, *, listed=True, mode="ends"):
+    action.post_place_exits = (
+        {"exchange:0": ("spoon", "right", "left")} if listed else {}
+    )
+    resources = SimpleNamespace(
+        first=SimpleNamespace(task_state_key="right"),
+        second=SimpleNamespace(
+            task_state_key="left", arm=SimpleNamespace(control_part="left_arm")
+        ),
+    )
+    held = SimpleNamespace(
+        semantics=SimpleNamespace(
+            entity_id="spoon",
+            affordance=SimpleNamespace(get_custom_config=lambda _: mode),
+        )
+    )
+    source, receiver = torch.eye(4)[None], torch.eye(4)[None]
+    source[:, 1, 3], receiver[:, 1, 3] = 0.4, -0.4
+    return actions._ReceiveSelection(
+        resources,
+        held,
+        torch.tensor([False]),
+        SimpleNamespace(invocation_id="exchange:0"),
+        None,
+        root_poses=(source, receiver),
+    )
+
+
+@pytest.mark.parametrize(
+    "damage", [None, "unlisted", "object", "source", "receiver", "ordinary"]
+)
+def test_only_explicit_same_object_post_place_exit_gets_source_side_withdrawal(damage):
+    action = actions.GenSimHandOver()
+    selection = _post_place_selection(
+        action,
+        listed=damage != "unlisted",
+        mode="ordinary" if damage == "ordinary" else "ends",
+    )
+    if damage == "object":
+        selection.held.semantics.entity_id = "other"
+    elif damage in {"source", "receiver"}:
+        selected = (
+            selection.resources.first
+            if damage == "source"
+            else selection.resources.second
+        )
+        selected.task_state_key = "wrong"
+    pose = torch.eye(4)[None]
+    kwargs = dict(
+        source_fallback=selection.root_poses[0],
+        destination_fallback=selection.root_poses[1],
+        retreat_distance=0.1,
+        lift_height=0.0,
+    )
+    old = HandOver._source_retreat_waypoints(pose, pose, **kwargs)
+    token = actions._RECEIVE_SELECTION.set(selection)
+    try:
+        new = action._source_retreat_waypoints(pose, pose, **kwargs)
+    finally:
+        actions._RECEIVE_SELECTION.reset(token)
+    assert torch.equal(new[:, :3], old[:, :3])
+    assert torch.equal(new[..., :3, :3], old[..., :3, :3])
+    if damage is None:
+        assert (new[0, -2:, 1, 3] - old[0, -2:, 1, 3]).tolist() == pytest.approx(
+            [0.05, 0.1]
+        )
+    else:
+        assert torch.equal(new, old)
+
+
+@pytest.mark.parametrize(
+    "exit_valid,screen_valid", [(True, True), (False, True), (True, False)]
+)
+def test_post_place_exit_mesh_gate_is_additive_not_a_release_certificate(
+    monkeypatch, exit_valid, screen_valid
+):
+    action = actions.GenSimHandOver()
+    action._planning_services = SimpleNamespace(robot=object())
+    selection = _post_place_selection(action)
+    plan = _Plan(
+        torch.tensor([True]),
+        PlannerDiagnostics("fixture"),
+        object(),
+        SimpleNamespace(positions=torch.zeros(1, 3, 4)),
+    )
+    inspect = Mock(return_value={"valid": exit_valid, "physical_evidence": False})
+    monkeypatch.setattr(actions, "_inspect_pick_motion", inspect)
+    token = actions._RECEIVE_SELECTION.set(selection)
+    try:
+        result = action._qualify_receiver_environment(
+            plan, SimpleNamespace(inspect=lambda _: {"valid": screen_valid})
+        )
+    finally:
+        actions._RECEIVE_SELECTION.reset(token)
+    assert bool(result.plan_success.all()) == (exit_valid and screen_valid)
+    inspect.assert_called_once()
+    assert result.commands is plan.commands
+    assert result.joint_trajectory is plan.joint_trajectory
+
+
 def test_safe_receiver_keeps_original_commands_and_has_no_direction_retry(monkeypatch):
     action, screen, factory, context, held, plans, rng = _setup(monkeypatch, [True])
     result = action._plan_existing_hold(object(), context, object(), held)

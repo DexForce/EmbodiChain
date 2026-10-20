@@ -80,6 +80,7 @@ KNOWN_PREDICATES: Final = frozenset(
         "semantic_goal",
         "object_upright",
         "poured",
+        "pour_motion",
         "handover_complete",
         "held_by_both_grippers",
         "articulation_joint_near",

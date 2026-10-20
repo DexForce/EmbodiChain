@@ -74,6 +74,7 @@ from embodichain.lab.task_program.integrations._configured_services import (
 )
 
 from .grasp_filter import TaskGraspPoseGenerator
+from .adaptive_grasp import is_handover_source_call_id
 
 __all__: list[str] = []
 
@@ -499,9 +500,7 @@ def make_pick_factory(
         raise ValueError("Task Pick aliases must use the gen_sim.pick namespace.")
     identity = call_id + ("|acquisition-v1" if verify_phases else "")
     suffix = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
-    handover = call_id == "gen_sim.pick.handover_source" or call_id.startswith(
-        "gen_sim.pick.handover_horizontal_source."
-    )
+    handover = is_handover_source_call_id(call_id)
     adaptive = handover
     lowerer_type = type(
         f"_TaskPickLowerer_{suffix}",

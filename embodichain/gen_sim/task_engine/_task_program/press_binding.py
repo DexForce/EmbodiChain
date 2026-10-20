@@ -18,10 +18,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from copy import deepcopy
 from dataclasses import asdict, dataclass, fields, replace
 import math
+from pathlib import Path
 import re
 from typing import Any
 
@@ -605,8 +606,9 @@ def calibrate_scene(
     routes: tuple[PressRoute, ...],
     *,
     source_routes: tuple[PressRoute, ...] | None = None,
+    fixed_mass_lineages: Mapping[str, str] | None = None,
 ) -> list[dict]:
-    """Apply only selected button physics in the generated scene, never the source."""
+    """Calibrate buttons; pinned shared E8 mass sources retain their fixed inertia."""
     audits = []
     sources = {
         r.binding.object_id: r
@@ -619,7 +621,21 @@ def calibrate_scene(
             continue
         calibrated.add(b.object_id)
         source = sources[b.object_id]
-        if source.binding.source_sha256 != b.source_sha256:
+        mass_copy = None
+        lineage = (fixed_mass_lineages or {}).get(b.object_id)
+        if lineage is not None:
+            from .twist_mass_source import qualify_mass_source_copy
+
+            mass_copy = qualify_mass_source_copy(
+                Path(b.source_path), manifest_sha256=lineage
+            )
+            if (
+                mass_copy.source_sha256 != source.binding.source_sha256
+                or mass_copy.runtime_sha256 != b.source_sha256
+                or mass_copy.scale != b.scale
+            ):
+                raise ValueError("E9 source changed during unit-scale deployment.")
+        elif source.binding.source_sha256 != b.source_sha256:
             raise ValueError("E9 source changed during unit-scale deployment.")
         art = next(
             a for a in payload["simulation"]["articulation"] if a["uid"] == b.object_id
@@ -628,7 +644,11 @@ def calibrate_scene(
             raise ValueError(
                 "E9 cannot silently replace authored runtime drive/limit overrides."
             )
-        mass = source.moving_mass * source.binding.scale**3
+        mass = (
+            source.moving_mass
+            if mass_copy is not None
+            else source.moving_mass * source.binding.scale**3
+        )
         stiffness = max(500.0, mass * 9.81 / (0.04 * source.binding.stroke))
         damping = 2.0 * math.sqrt(stiffness * mass)
         art["asset_physics_mode"] = "overlay"
@@ -657,17 +677,22 @@ def calibrate_scene(
             "damping": {b.joint: damping},
             "max_effort": {b.joint: max(5.0, 2.0 * stiffness * source.binding.stroke)},
         }
-        art.setdefault("link_attrs", {})["gen_sim_press_density"] = {
-            "link_names_expr": [b.link],
-            "attrs": {"mass_props": {"mass": mass, "recompute_inertia": True}},
-        }
+        if mass_copy is None:
+            art.setdefault("link_attrs", {})["gen_sim_press_density"] = {
+                "link_names_expr": [b.link],
+                "attrs": {"mass_props": {"mass": mass, "recompute_inertia": True}},
+            }
         audits.append(
             {
                 **route.payload(),
                 "schema": "gen_sim.press_calibration/v1",
                 "model_origin": "generated_release_bias_not_source_mechanism",
                 "success_criterion": "contact_press_0.05mm_not_activation",
-                "mass_policy": "preserve_pre_resize_calibration",
+                "mass_policy": (
+                    "qualified_fixed_mass_source"
+                    if mass_copy is not None
+                    else "preserve_pre_resize_calibration"
+                ),
                 "calibration_scale": source.binding.scale,
                 "source_mass": route.moving_mass,
                 "runtime_mass": mass,
@@ -676,6 +701,14 @@ def calibrate_scene(
                 "runtime_limits": list(b.limits),
                 "contact_policy": "native_contact_envelope",
                 "source_edited": False,
+                **(
+                    {
+                        "mass_lineage_sha256": mass_copy.manifest_sha256,
+                        "origin_source_sha256": mass_copy.source_sha256,
+                    }
+                    if mass_copy is not None
+                    else {}
+                ),
             }
         )
     return audits

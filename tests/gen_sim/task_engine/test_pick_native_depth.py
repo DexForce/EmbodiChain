@@ -33,11 +33,21 @@ def setup(
     path_success: bool = True,
     consume_rng: bool = False,
     native_limit: int | None = None,
+    ends: bool = False,
+    choice_count: int = 1,
 ):
     action = actions.GenSimPickUp()
     action.pick_purposes = {"probe": "ordinary"}
     action._planning_services = SimpleNamespace(device=torch.device("cpu"))
     direction = torch.tensor([[0.0, 0.0, -1.0]])
+    choices = tuple(
+        SimpleNamespace(
+            direction=direction,
+            axis=None,
+            positive=torch.tensor([index < max(1, choice_count // 2)]),
+        )
+        for index in range(choice_count)
+    )
     calls = []
     options = PickUpOptions()
 
@@ -49,6 +59,9 @@ def setup(
     action._select_feasible_grasp_variants = feasible
 
     def choose(*args, **kwargs):
+        if ends:
+            assert kwargs["axis_region_policy"] == "supported_end"
+            assert any(args[3][0] is choice for choice in choices)
         pool = kwargs.get(
             "candidate_pool",
             AffordancePoseCandidates(
@@ -92,6 +105,13 @@ def setup(
         binding=SimpleNamespace(endpoint=lambda *a: grasp),
         motion_policy=object(),
         invocation_id="probe",
+        goal=SimpleNamespace(
+            semantics=SimpleNamespace(
+                affordance=SimpleNamespace(
+                    get_custom_config=lambda key: "ends" if ends else None
+                )
+            )
+        ),
     )
     screen = SimpleNamespace(
         revision=6, depth_offsets=lambda: (0.0, 0.015, 0.03, 0.045, 0.06, 0.075)
@@ -114,15 +134,56 @@ def setup(
             options,
             context,
             "probe",
-            (
-                SimpleNamespace(
-                    direction=direction, axis=None, positive=torch.tensor([True])
-                ),
-            ),
+            choices,
             selection,
+            **({"axis_region_policy": "supported_end"} if ends else {}),
         )
 
     return action, selection, options, calls, run
+
+
+@pytest.mark.parametrize("revision,enabled", [(7, False), (8, True)])
+def test_handover_depth_keeps_end_pool_and_only_explicit_native8(
+    monkeypatch, revision, enabled
+):
+    action, selection, options, calls, run = setup(
+        monkeypatch, endpoint_clear=False, ends=True
+    )
+    action.pick_purposes = {}
+    action.path_excluded_invocations = frozenset({"probe"})
+    selection.closing_geometry.revision = revision
+    before = options.grasp_frame_to_eef.clone()
+    sample = run()
+    assert sample.success.all()
+    assert calls == pytest.approx([0.0, 0.015] if enabled else [0.0])
+    assert torch.equal(before, options.grasp_frame_to_eef)
+    assert selection.depth_recovery_attempts == int(enabled)
+
+
+def test_handover_native8_rejects_all_blocked_depths_with_existing_budget(monkeypatch):
+    action, selection, _, calls, run = setup(
+        monkeypatch, endpoint_clear=False, ends=True
+    )
+    action.pick_purposes = {}
+    action.path_excluded_invocations = frozenset({"probe"})
+    selection.closing_geometry.revision = 8
+    action._native_pick_endpoint_clear = lambda *args: False
+    assert not run().success.any()
+    assert len(calls) == 5
+    assert selection.depth_recovery_attempts == 4
+
+
+def test_four_handover_choices_share_one_depth_budget(monkeypatch):
+    action, selection, _, calls, run = setup(
+        monkeypatch, endpoint_clear=False, ends=True, choice_count=4
+    )
+    action.pick_purposes = {}
+    action.path_excluded_invocations = frozenset({"probe"})
+    selection.closing_geometry.revision = 8
+    action._native_pick_endpoint_clear = lambda *args: False
+    assert not run().success.any()
+    assert calls == pytest.approx([0.0] * 4 + [0.015] * 4)
+    assert selection.depth_recovery_attempts == 4
 
 
 def test_depth_search_selects_first_safe_endpoint_and_keeps_same_path(monkeypatch):

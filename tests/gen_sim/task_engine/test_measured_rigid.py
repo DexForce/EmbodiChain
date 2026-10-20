@@ -204,7 +204,7 @@ def test_capture_publishes_final_and_budget_failure_and_restores_scope(monkeypat
     assert policy.plan(engine, request, context, Mock()) is result
     capture.accept.assert_called_once_with(request, result, engine.robot)
     policy._place = Mock(
-        side_effect=gate.PlanningBudgetExceeded("deadline", 60.0, 61.0)
+        side_effect=gate.PlanningBudgetExceeded("deadline", 90.0, 91.0)
     )
     with pytest.raises(gate.PlanningBudgetExceeded):
         policy.plan(engine, request, context, Mock())
@@ -219,9 +219,22 @@ def test_geometry_failure_is_nonretryable_and_late_success_cannot_dispatch(monke
     assert not policy.plan(engine, request, context, Mock()).plan_success.any()
     assert engine.actions["place"].failed_plan.call_args.kwargs["retryable"] is False
     policy._place = lambda *_: (request, result)
-    clock = iter((0.0, 61.0))
+    clock = iter((0.0, 91.0))
     monkeypatch.setattr(gate, "time", NS(perf_counter=lambda: next(clock)))
     assert not policy.plan(engine, request, context, Mock()).plan_success.any()
+
+
+@pytest.mark.parametrize("elapsed", [61.0, 89.0])
+def test_measured_rigid_accepts_planning_within_extended_wall_budget(
+    monkeypatch, elapsed
+):
+    policy, request, context, engine, result = fixture()
+    monkeypatch.setattr(gate, "initial_plan_capture", lambda _: None)
+    policy._place = lambda *_: (request, result)
+    clock = iter((0.0, elapsed))
+    monkeypatch.setattr(gate, "time", NS(perf_counter=lambda: next(clock)))
+    assert policy.plan(engine, request, context, Mock()) is result
+    engine.actions["place"].failed_plan.assert_not_called()
 
 
 @pytest.mark.parametrize("accept_at", [0, 1, 3, None])
