@@ -859,6 +859,8 @@ def load_deployment(
     from ..experiment_policy import validate_profile
 
     validate_profile(payload.get("runtime_profile", "default"))
+    if payload.get("runtime_profile") == "auto":
+        raise ValueError("Bundle constraints require a concrete runtime profile.")
     support_revision = payload.get("support_contract_revision")
     pick_contact_revision = payload.get("pick_contact_revision")
     if pick_contact_revision is not None and (

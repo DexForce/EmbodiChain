@@ -272,16 +272,31 @@ gate participates in the existing bounded direction retry. Ordinary/default call
 remain unchanged. These planning receipts do not certify physical acquisition,
 release or task success; complete native execution and TaskSpec remain required.
 
-The standard Task Engine `--config` may explicitly select
-`planning.runtime_profile: composition_experiment|contact_experiment` and
-`execution.acceptance_mode: experiment`; both packaged experiment YAML files
-bound preparation to a single scene and action attempt. Default configuration
-remains unchanged. Only the contact profile adds a material-only Robotiq pad
+The packaged Task Engine CLI defaults select
+`planning.runtime_profile: auto` and
+`execution.acceptance_mode: experiment`, including when `--config` is omitted.
+Explicit YAML overrides may select `default`/`strict` or
+`composition_experiment`; omitted fields in override YAML and direct Python
+configuration construction retain their legacy defaults. The CLI defaults and
+both packaged experiment YAML files bound preparation to one worker, one scene
+attempt and one action attempt. Experimental acceptance requires one environment;
+vectorized legacy execution needs an explicit strict configuration.
+Only the contact profile adds a material-only Robotiq pad
 overlay (static/dynamic friction 2.85/2.70); composition retains original materials.
+Automatic selection uses the validated recipe: any E3/Pour selects composition,
+otherwise contact. It never tests task IDs, object UIDs or text-name heuristics.
+The generated constraints bind the concrete profile; `runtime_profile_selection.json`
+records the request and selection. Explicit profile overrides remain unchanged.
+One bundle has one material policy, not dynamic per-call switching; mixed recipes
+containing Pour retain composition and require their own physical qualification.
 Both profiles use 100/100/30 mm COM/position/support tolerances
 for supported on-placement. It derives horizontal end-grasp HandOver/Place
-permissions from exact adjacent occurrences, not task IDs. Related auto-arm
-Pour source/receiver reuse and terminal same-object reacquisition may add a
+permissions from exact adjacent occurrences, not task IDs.
+Authorized horizontal-transfer receiver Places retain ordinary 140-point free
+transport even if the model groups them inside E4; they cannot inherit the
+transfer group's Cartesian approach. HandOver and its source/staging stay
+unchanged, and terminal descent/release/withdrawal checks remain required.
+Related auto-arm Pour source/receiver reuse and terminal same-object reacquisition may add a
 visible empty-arm clearance/restore pair. Its finite proximal-joint proposals
 are ranked by FK endpoint separation, screened against the current scene and
 rechecked on emitted (including transformed) MoveJoints trajectories. This is
@@ -303,8 +318,8 @@ all original segment/post-policy/validator checks and cargo acceptance; only
 the outer TaskSpec certificate is advisory. The canonical runner preserves
 `task_spec_evaluation.json` and publishes `strict_execution_report.json` beside
 the clearly marked experimental report. Both `run` and `run-all` use this same
-production path, without importing artifact-directory workers. This opt-in
-outcome is not default-parameter success or strict TaskSpec certification.
+production path, without importing artifact-directory workers. The CLI default
+outcome is experimental program success, not strict TaskSpec certification.
 
 `generate_task_program_bundle(verify_pick_phases=True)` explicitly enables
 registered Pick acquisition/lift verification through its fingerprinted lowerer
@@ -1093,7 +1108,12 @@ the normal Task Engine route. Regenerate E9 bundles after lowerer revisions.
 E9 preserves the declared/native button, housing and finger contact envelopes;
 it does not override contact or rest offsets. Normal E9 generation sets only
 the selected button assembly to unit body scale, preserving XY, rotation and
-the original support bottom. Other objects and source USD remain unchanged.
+the original support bottom. When E8 and E9 share an articulation, E8 alone owns
+its scale/support adaptation and both controls rebind to that geometry. E9 accepts
+the derived mass source only with E8's pinned, fully revalidated source lineage,
+original/runtime hashes and deployment scale. It then calibrates drives against
+the fixed source mass without a second mass/inertia overlay. Independent E9
+controls retain their original scaled-mass calibration. Other objects and source USD remain unchanged.
 Table-footprint or object-AABB conflicts reject the deployment. The audit in
 press_adaptation.json records original and deployed geometry; mass and release
 drive retain their pre-resize calibration. This explicit deployment policy is

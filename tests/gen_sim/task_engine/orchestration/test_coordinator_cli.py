@@ -720,6 +720,8 @@ def test_unified_cli_accepts_exactly_four_modes(
     assert captured["kwargs"]["dataset_saving"] is (mode == "image")
     assert captured["kwargs"]["failure_policy"] == "stop"
     assert captured["kwargs"]["execute"] is True
+    assert captured["kwargs"]["planning_cfg"].runtime_profile == "auto"
+    assert captured["kwargs"]["execution_cfg"].acceptance_mode == "experiment"
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "succeeded"
     assert payload["run_id"].replace("_", "").isdigit()
@@ -1268,13 +1270,15 @@ def test_run_all_cli_reports_published_videos_for_every_attempt(
 
 @pytest.mark.parametrize("has_video", [True, False])
 @pytest.mark.parametrize("has_html", [True, False])
-def test_run_cli_executes_an_existing_bundle(
+def test_run_cli_executes_an_existing_bundle_with_strict_acceptance(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     has_video: bool,
     has_html: bool,
 ) -> None:
+    from embodichain.gen_sim.task_engine.config import TaskEngineExecutionCfg
+
     bundle = tmp_path / "bundle"
     bundle.mkdir()
 
@@ -1301,6 +1305,11 @@ def test_run_cli_executes_an_existing_bundle(
             }
 
     monkeypatch.setattr(cli, "SubprocessActionExecutor", Executor)
+    monkeypatch.setattr(
+        cli,
+        "load_task_engine_config",
+        lambda _: (None, None, TaskEngineExecutionCfg(acceptance_mode="strict")),
+    )
 
     result = cli.main(
         [
@@ -1367,12 +1376,14 @@ def test_html_reporting_falls_back_to_published_bundle_without_inventing_a_path(
 
 
 @pytest.mark.parametrize("semantic_success", [{}, {"finish": False}, {"finish": True}])
-def test_run_cli_checks_bundle_semantic_success(
+def test_run_cli_checks_bundle_semantic_success_with_strict_acceptance(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     semantic_success: dict,
 ) -> None:
+    from embodichain.gen_sim.task_engine.config import TaskEngineExecutionCfg
+
     bundle = tmp_path / "bundle"
     bundle.mkdir()
     (bundle / "success_spec.json").write_text(
@@ -1390,6 +1401,11 @@ def test_run_cli_checks_bundle_semantic_success(
             }
 
     monkeypatch.setattr(cli, "SubprocessActionExecutor", Executor)
+    monkeypatch.setattr(
+        cli,
+        "load_task_engine_config",
+        lambda _: (None, None, TaskEngineExecutionCfg(acceptance_mode="strict")),
+    )
     result = cli.main(
         ["run", "--bundle", str(bundle), "--output-root", str(tmp_path / "runs")]
     )

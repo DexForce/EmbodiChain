@@ -294,17 +294,20 @@ def test_workflow_configuration_rejects_non_positive_limits() -> None:
 def test_packaged_workflow_configuration_uses_recovery_defaults() -> None:
     workflow, planning, execution = load_task_engine_config()
 
-    assert workflow.max_scene_attempts == 2
+    assert workflow.max_parallel_workers == 1
+    assert workflow.max_scene_attempts == 1
     assert workflow.max_action_attempts == 1
     assert planning.candidate_count == 3
     assert planning.planning_mode == "offline"
     assert planning.max_episodes == 1
-    assert planning.max_episode_steps == 1000000
+    assert planning.max_episode_steps == 30000
     assert planning.fit_grasp_assets is True
     assert planning.twist_mass_source is False
+    assert planning.runtime_profile == "auto"
     assert TaskEnginePlanningCfg().max_episode_steps == 10000
     assert execution.num_envs == 1
     assert execution.required_successes == 1
+    assert execution.acceptance_mode == "experiment"
 
 
 def test_workflow_configuration_can_be_tuned_from_yaml(tmp_path: Path) -> None:

@@ -25,13 +25,27 @@ __all__: list[str] = []
 
 CONTACT_PROFILE = "contact_experiment"
 COMPOSITION_PROFILE = "composition_experiment"
+AUTO_PROFILE = "auto"
 
 
 def validate_profile(value: str) -> None:
-    if value not in {"default", CONTACT_PROFILE, COMPOSITION_PROFILE}:
+    if value not in {"default", AUTO_PROFILE, CONTACT_PROFILE, COMPOSITION_PROFILE}:
         raise ValueError(
-            "runtime_profile must be default, contact_experiment or composition_experiment."
+            "runtime_profile must be default, auto, contact_experiment or composition_experiment."
         )
+
+
+def resolve_profile(value: str, graph: Mapping[str, Any]) -> str:
+    """Select one bundle-owned policy from recipe semantics, never object identities."""
+    validate_profile(value)
+    if value != AUTO_PROFILE:
+        return value
+    pouring = any(
+        node.get("task_type") == "E3"
+        or node.get("call", {}).get("call_id") == "simulation.pour"
+        for node in graph["nodes"]
+    )
+    return COMPOSITION_PROFILE if pouring else CONTACT_PROFILE
 
 
 def program_completion_mask(

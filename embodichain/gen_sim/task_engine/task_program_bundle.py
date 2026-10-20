@@ -281,9 +281,10 @@ def generate_task_program_bundle(
             integration cannot be composed and preflighted.
     """
     selected_graph = validate_semantic_task_graph(graph)
-    from .experiment_policy import validate_profile, CONTACT_PROFILE
+    from .experiment_policy import resolve_profile, AUTO_PROFILE, CONTACT_PROFILE
 
-    validate_profile(runtime_profile)
+    requested_runtime_profile = runtime_profile
+    runtime_profile = resolve_profile(runtime_profile, selected_graph)
     experiment = runtime_profile != "default"
     if pour_geometry_revision is not None:
         if type(pour_geometry_revision) is not int or pour_geometry_revision not in (
@@ -397,6 +398,20 @@ def generate_task_program_bundle(
     task_program_root = root / "task_program"
     component_root.mkdir(parents=True, exist_ok=True)
     task_program_root.mkdir(parents=True, exist_ok=True)
+    if requested_runtime_profile == AUTO_PROFILE:
+        _write_json(
+            root / "runtime_profile_selection.json",
+            {
+                "schema_version": "gen_sim_runtime_profile_selection/v1",
+                "requested": requested_runtime_profile,
+                "selected": runtime_profile,
+                "rule": (
+                    "pour_recipe"
+                    if runtime_profile != CONTACT_PROFILE
+                    else "non_pour_recipe"
+                ),
+            },
+        )
 
     from embodichain.gen_sim.task_engine.orchestration.scene_assets import (
         normalize_scene_assets,
@@ -447,7 +462,14 @@ def generate_task_program_bundle(
     )
     press_adaptation = ()
     if frozen is None:
-        scene, press_adaptation = prepare_press_scene(scene, source_press_routes)
+        twist_uids = {route.binding.object_id for route in source_twist_routes}
+        # A shared articulation has one scale owner; E8 rebinds both controls below.
+        press_scale_routes = tuple(
+            route
+            for route in source_press_routes
+            if route.binding.object_id not in twist_uids
+        )
+        scene, press_adaptation = prepare_press_scene(scene, press_scale_routes)
     scene_uids = {
         str(item.get("runtime_uid"))
         for item in scene.planner_objects
@@ -761,6 +783,15 @@ def generate_task_program_bundle(
     stability["cartesian_calls"] = cartesian_call_declarations(
         selected_graph, drawer_groups=drawer_groups
     )
+    if experiment and post_handover_places:
+        # Receiver placement is not part of the transfer's Cartesian motion.
+        for identity in post_handover_places:
+            stability["motion_samples"][identity] = 140
+        stability["cartesian_calls"] = [
+            identity
+            for identity in stability["cartesian_calls"]
+            if identity not in post_handover_places
+        ]
     stability["pour_receivers"] = pour_receiver_declarations(selected_graph)
     pour_returns = pour_return_call_declarations(selected_graph)
     if pour_returns:
@@ -821,7 +852,14 @@ def generate_task_program_bundle(
             )
             art["asset_physics_mode"] = "overlay"
         press_calibration = calibrate_scene(
-            scene_payload, press_routes, source_routes=source_press_routes
+            scene_payload,
+            press_routes,
+            source_routes=source_press_routes,
+            fixed_mass_lineages={
+                route.binding.object_id: route.binding.mass_lineage_sha256
+                for route in twist_routes
+                if route.binding.mass_lineage_sha256
+            },
         )
         if press_calibration:
             _write_json(root / "press_calibration.json", {"routes": press_calibration})

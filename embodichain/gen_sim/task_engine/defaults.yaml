@@ -17,8 +17,8 @@
 schema_version: embodichain.task-engine-defaults/v1
 
 workflow:
-  max_parallel_workers: 2
-  max_scene_attempts: 2
+  max_parallel_workers: 1
+  max_scene_attempts: 1
   max_action_attempts: 1
 
 planning:
@@ -27,8 +27,10 @@ planning:
   max_episodes: 1
   max_episode_steps: 30000
   fit_grasp_assets: true
+  runtime_profile: auto
 
 execution:
   num_envs: 1
   success_policy: any
   min_successful_envs: 1
+  acceptance_mode: experiment
