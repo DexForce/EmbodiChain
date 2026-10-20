@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -38,6 +39,12 @@ _LANE_ORDER = ("docs", "fast", "distributed", "gpu", "sim")
 _SLOW_LANE_PREFIX = "slow-"
 _DISTRIBUTED_TEST = "tests/learning/test_rl_distributed.py"
 _PLAN_MODES = {"partial", "docs-only", "full-pr", "full"}
+_CPU_THREAD_ENVIRONMENTS = (
+    "OMP_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+)
 
 
 def _load_plan(path: Path) -> dict[str, Any]:
@@ -228,6 +235,9 @@ def run_plan(
     Pytest exit code 5 means that a marker-filtered lane had no matching tests;
     an empty optional lane is reported and treated as successful. Collection
     errors and test failures retain their non-zero exit code.
+
+    Parallel CPU lanes default native thread pools to one thread per worker,
+    preserving caller overrides and the parent process environment.
     """
     repository_root = Path(root).resolve()
     commands = build_commands(
@@ -244,8 +254,15 @@ def run_plan(
         print(f"\n[CI] {lane}: {shlex.join(command)}", flush=True)
         if dry_run:
             continue
+        environment = None
+        if lane in {"fast", "slow-fast"}:
+            environment = os.environ.copy()
+            for variable in _CPU_THREAD_ENVIRONMENTS:
+                environment.setdefault(variable, "1")
         started = time.monotonic()
-        result = subprocess.run(command, cwd=repository_root, check=False)
+        result = subprocess.run(
+            command, cwd=repository_root, check=False, env=environment
+        )
         elapsed = time.monotonic() - started
         print(
             f"[CI] {lane}: completed in {elapsed:.1f}s (exit {result.returncode}).",

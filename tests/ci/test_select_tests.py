@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -907,6 +908,82 @@ def test_runner_rejects_unexpanded_globs() -> None:
 
     with pytest.raises(RuntimeError, match="unexpanded"):
         build_commands(plan)
+
+
+@pytest.mark.parametrize("slow", [False, True], ids=["fast", "slow-fast"])
+@pytest.mark.parametrize("override", [None, "3"], ids=["default", "override"])
+def test_runner_budgets_cpu_threads_without_changing_parent_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, slow: bool, override: str | None
+) -> None:
+    variables = (
+        "OMP_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+    )
+    for variable in variables:
+        if override is None:
+            monkeypatch.delenv(variable, raising=False)
+        else:
+            monkeypatch.setenv(variable, override)
+    monkeypatch.setenv("EMBODICHAIN_TEST_ENV_SENTINEL", "inherited")
+    parent_environment = dict(os.environ)
+    environments: list[dict[str, str] | None] = []
+
+    def run(
+        *_args: object, env: dict[str, str] | None = None, **_kwargs: object
+    ) -> SimpleNamespace:
+        environments.append(env)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(run_test_plan.subprocess, "run", run)
+    plan = {
+        "version": 1,
+        "mode": "partial",
+        "lanes": {} if slow else {"fast": ["tests/test_sample.py"]},
+        "slow_lanes": {"slow-fast": ["tests/test_sample.py"]} if slow else {},
+    }
+
+    assert run_test_plan.run_plan(plan, root=tmp_path, lanes=["fast"]) == 0
+    assert len(environments) == 1
+    assert environments[0] == {
+        **parent_environment,
+        **{
+            variable: override if override is not None else "1"
+            for variable in variables
+        },
+    }
+    assert environments[0] is not os.environ
+    assert dict(os.environ) == parent_environment
+
+
+def test_runner_preserves_environment_in_serial_resource_lanes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    environments: list[dict[str, str] | None] = []
+
+    def run(
+        *_args: object, env: dict[str, str] | None = None, **_kwargs: object
+    ) -> SimpleNamespace:
+        environments.append(env)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(run_test_plan.subprocess, "run", run)
+    selectors = {
+        "docs": ["tests/docs/test_sample.py"],
+        "distributed": ["tests/learning/test_rl_distributed.py"],
+        "gpu": ["tests/test_sample.py"],
+        "sim": ["tests/test_sample.py"],
+    }
+    plan = {
+        "version": 1,
+        "mode": "partial",
+        "lanes": selectors,
+        "slow_lanes": {f"slow-{lane}": paths for lane, paths in selectors.items()},
+    }
+
+    assert run_test_plan.run_plan(plan, root=tmp_path) == 0
+    assert environments == [None] * 8
 
 
 def test_runner_distinguishes_empty_optional_lane_from_docs(
