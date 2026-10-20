@@ -259,3 +259,40 @@ def test_async_failed_video_retries_with_owned_episode_identity(
     assert len(list(tmp_path.rglob("*.mp4"))) == 1
     sidecar = json.loads(next(tmp_path.rglob("*.json")).read_text())
     assert sidecar["episode_context"]["episode"] == 0
+
+
+@pytest.mark.parametrize("kind", [record_camera_data, record_camera_data_async])
+def test_reset_seeds_authoritative_camera_first_frame_only_for_selected_rows(
+    camera_env, kind, tmp_path
+):
+    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+
+    env, rgb = camera_env
+    recorder = kind(
+        FunctorCfg(func=kind, params={"name": "camera", "save_path": str(tmp_path)}),
+        env,
+    )
+    try:
+        recorder(env, None, name="camera")
+        rgb[1].fill_(7)
+        rgb[3].fill_(8)
+        env.cfg = SimpleNamespace(events=True)
+        env.event_manager = SimpleNamespace(
+            _mode_functor_cfgs={
+                "interval": [SimpleNamespace(func=recorder, params={"name": "camera"})]
+            }
+        )
+        seeded = []
+        env._seed_recording_state = lambda obs, ids: seeded.append(ids.tolist())
+        EmbodiedEnv._after_episode_reset(env, object(), torch.tensor([3, 1]))
+        assert seeded == [[3, 1]]
+        assert [len(frames) for frames in recorder._frames_list] == [1, 1, 1, 1]
+        assert [int(frames[0][0, 0, 0]) for frames in recorder._frames_list] == [
+            0,
+            7,
+            2,
+            8,
+        ]
+        assert env._active_task_program_bridge is None
+    finally:
+        recorder.finalize()
