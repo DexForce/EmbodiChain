@@ -111,6 +111,11 @@ Use the narrowest test type that proves the behavior:
   cannot reveal that requirement (for example, a hidden CUDA helper or an
   end-to-end toolkit test).
 
+Slow CPU cases that do not launch simulation can run on separate workers. Keep
+them independent of test order and shared mutable module state, or declare an
+explicit `xdist_group` when cases must stay together. Ordinary CPU modules and
+native resource groups retain their existing grouping.
+
 GPU tests are skipped by default to keep normal test runs within the shared VRAM budget. Run them explicitly and serially:
 
 ```bash

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+import hashlib
 import inspect
 import os
 import re
@@ -179,17 +180,26 @@ def pytest_collection_modifyitems(config, items):
     """Classify real-simulation tests for fast and resource-aware test selection."""
     for item in items:
         nodeid = item.nodeid.lower()
+        if "cuda" in nodeid or "gpu" in nodeid:
+            item.add_marker(pytest.mark.gpu)
         requires_sim = _requires_real_sim(item)
         if requires_sim:
             item.add_marker(pytest.mark.requires_sim)
             item.add_marker(pytest.mark.xdist_group(name="simulation"))
         else:
             module_name = getattr(item.module, "__name__", "unknown")
-            item.add_marker(
-                pytest.mark.xdist_group(name=f"module-{module_name.replace('.', '-')}")
-            )
-        if "cuda" in nodeid or "gpu" in nodeid:
-            item.add_marker(pytest.mark.gpu)
+            group = f"module-{module_name.replace('.', '-')}"
+            if (
+                item.get_closest_marker("slow") is not None
+                and item.get_closest_marker("requires_sim") is None
+                and item.get_closest_marker("subprocess_sim") is None
+                and item.get_closest_marker("gpu") is None
+                and item.get_closest_marker("xdist_group") is None
+            ):
+                # Slow CPU cases are independent; distribute large reference
+                # matrices while preserving explicit resource-sharing groups.
+                group = f"slow-cpu-{hashlib.sha256(item.nodeid.encode()).hexdigest()}"
+            item.add_marker(pytest.mark.xdist_group(name=group))
         if requires_sim and (
             "/sensors/" in nodeid or "hybrid" in nodeid or "fastrt" in nodeid
         ):

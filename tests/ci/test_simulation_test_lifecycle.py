@@ -81,3 +81,87 @@ class TestClassScopedScene:
 """)
     result = pytester.runpytest_subprocess("--renderer", renderer, "-q")
     result.assert_outcomes(**{"skipped" if skipped else "passed": 1})
+
+
+def test_slow_cpu_groups_preserve_resource_constraints(
+    pytester: pytest.Pytester,
+) -> None:
+    """Only independent slow CPU nodes leave their module's shared group."""
+    source = Path(__file__).parents[1] / "conftest.py"
+    pytester.makeconftest(source.read_text() + """
+def _initialize_sim_engine(renderer):
+    raise AssertionError('collection must not initialize a native world')
+
+def pytest_collection_finish(session):
+    groups = {}
+    for item in session.items:
+        groups[item.name] = {
+            marker.kwargs['name'] for marker in item.iter_markers('xdist_group')
+        }
+    shared = groups['test_plain_cpu_a']
+    assert len(shared) == 1
+    assert next(iter(shared)).startswith('module-')
+    assert groups['test_plain_cpu_b'] == shared
+    for index in (1, 2):
+        cpu = groups[f'test_slow_cpu[{index}]']
+        assert len(cpu) == 1
+        group = next(iter(cpu))
+        assert group.startswith('slow-cpu-') and '@' not in group
+        assert cpu != shared
+        assert groups[f'test_slow_gpu[{index}]'] == shared
+        assert groups[f'test_slow_cuda_name[{index}]'] == shared
+        assert groups[f'test_slow_sim[{index}]'] == {'simulation'}
+        assert groups[f'test_slow_subprocess_sim[{index}]'] == shared
+        assert groups[f'test_explicit_group[{index}]'] == shared | {'explicit-resource'}
+    assert groups['test_slow_cpu[1]'] != groups['test_slow_cpu[2]']
+""")
+    pytester.makeini("""[pytest]
+markers =
+    slow: independent CPU reference or resource-intensive test
+    requires_sim: native simulation test
+    no_sim: pure test
+    subprocess_sim: child-owned simulation
+    gpu: GPU test
+    renderer: native rendering test
+    requires_tasks: task discovery test
+    xdist_group: resource group
+""")
+    pytester.makepyfile("""
+import pytest
+
+@pytest.mark.slow
+@pytest.mark.parametrize('value', [1, 2])
+def test_slow_cpu(value): pass
+
+def test_plain_cpu_a(): pass
+def test_plain_cpu_b(): pass
+
+@pytest.mark.slow
+@pytest.mark.gpu
+@pytest.mark.parametrize('value', [1, 2])
+def test_slow_gpu(value): pass
+
+@pytest.mark.slow
+@pytest.mark.parametrize('value', [1, 2])
+def test_slow_cuda_name(value): pass
+
+@pytest.mark.slow
+@pytest.mark.requires_sim
+@pytest.mark.parametrize('value', [1, 2])
+def test_slow_sim(value): pass
+
+@pytest.mark.slow
+@pytest.mark.subprocess_sim
+@pytest.mark.parametrize('value', [1, 2])
+def test_slow_subprocess_sim(value): pass
+
+@pytest.mark.slow
+@pytest.mark.xdist_group(name='explicit-resource')
+@pytest.mark.parametrize('value', [1, 2])
+def test_explicit_group(value): pass
+""")
+    result = pytester.runpytest_subprocess(
+        "--collect-only", "--run-gpu", "-q", "-m", "slow or not slow"
+    )
+    assert result.ret == 0
+    result.stdout.fnmatch_lines(["*14 tests collected*"])
