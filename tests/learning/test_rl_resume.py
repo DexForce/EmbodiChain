@@ -19,11 +19,13 @@ from __future__ import annotations
 import json
 import random
 from copy import deepcopy
+from datetime import date
 from pathlib import Path
 
 import numpy as np
 import pytest
 import torch
+import yaml
 
 from embodichain.learning.rl.algo import build_algo
 from embodichain.learning.rl.checkpoint import _atomic_write
@@ -277,6 +279,111 @@ def test_cli_contract_resumes_all_algorithms(tmp_path, monkeypatch, algorithm, s
     assert second["global_step"] == 48
     assert second["num_updates"] == 3
     assert Path(second["latest_checkpoint_path"]).resolve().parents[1] != run
+
+
+@pytest.mark.parametrize("algorithm", ["ppo", "grpo", "apg"])
+def test_cli_and_public_trainer_checkpoints_interoperate(
+    tmp_path, monkeypatch, algorithm
+):
+    from embodichain.learning.rl.differentiable_trainer import (
+        DifferentiableTrainer,
+        DifferentiableTrainerCfg,
+    )
+    from embodichain.learning.rl.runtime import build_learning_policy_runtime
+
+    monkeypatch.chdir(tmp_path)
+    config = _config(algorithm)
+    config_path = tmp_path / "train.json"
+    config_path.write_text(json.dumps(config))
+    first = train_from_config(str(config_path))
+    runtime = build_learning_policy_runtime(
+        config, num_envs=4, device=torch.device("cpu")
+    )
+    algo = build_algo(
+        algorithm, config["algorithm"]["cfg"], runtime.policy, torch.device("cpu")
+    )
+    if algorithm == "apg":
+        trainer = DifferentiableTrainer(
+            DifferentiableTrainerCfg(segment_length=2, update_horizon=4),
+            runtime.env,
+            runtime.policy,
+            algo,
+        )
+    else:
+        trainer = Trainer(
+            runtime.policy,
+            runtime.env,
+            algo,
+            buffer_size=4,
+            batch_size=8,
+            writer=None,
+            eval_freq=0,
+            save_freq=0,
+            checkpoint_dir=str(tmp_path / "api"),
+            exp_name="api",
+            use_wandb=False,
+        )
+    try:
+        with pytest.warns(UserWarning, match="CLI configuration context"):
+            trainer.load_checkpoint(first["latest_checkpoint_path"])
+        trainer.train(32)
+        api_path = trainer.save_checkpoint(tmp_path / "api.pt")
+    finally:
+        runtime.close()
+    config["trainer"]["iterations"] = 3
+    config_path.write_text(json.dumps(config))
+    with pytest.warns(UserWarning, match="CLI configuration context"):
+        resumed = train_from_config(str(config_path), resume=api_path)
+    assert resumed["global_step"] == 48
+    assert resumed["num_updates"] == 3
+
+
+def test_periodic_saves_reuse_frozen_configs_and_final_checkpoint(
+    tmp_path, monkeypatch
+):
+    import embodichain.learning.rl.train as training
+
+    monkeypatch.chdir(tmp_path)
+    config = _config("ppo")
+    config["trainer"]["iterations"] = 2
+    config["notes"] = {"recorded_at": date(2026, 10, 20), "tags": {"resume", "cpu"}}
+    config_path = tmp_path / "train.yaml"
+    config_path.write_text(yaml.safe_dump(config))
+    collect = Trainer._collect_rollout
+    atomic_write = training._atomic_write
+    snapshot_writes = []
+    checkpoint_writes = []
+    save = Trainer.save_checkpoint
+
+    def record_snapshot(path, write):
+        snapshot_writes.append(Path(path))
+        return atomic_write(path, write)
+
+    def remove_source_after_first_update(self):
+        if self.num_updates == 1:
+            config_path.unlink()
+        return collect(self)
+
+    def record_checkpoint(self, path=None):
+        checkpoint_writes.append(self.num_updates)
+        return save(self, path)
+
+    monkeypatch.setattr(training, "_atomic_write", record_snapshot)
+    monkeypatch.setattr(Trainer, "_collect_rollout", remove_source_after_first_update)
+    monkeypatch.setattr(Trainer, "save_checkpoint", record_checkpoint)
+    result = train_from_config(str(config_path))
+    run = Path(result["latest_checkpoint_path"]).resolve().parents[1]
+    manifest = RunManifest.load(run)
+    assert yaml.safe_load(manifest.configs["train"].read_text()) == config
+    assert len(snapshot_writes) == 1
+    assert checkpoint_writes == [1, 2]
+    assert len(list((run / "checkpoints").glob("*.pt"))) == 2
+
+    config_path.write_text(yaml.safe_dump(config))
+    unchanged = train_from_config(str(config_path), resume="latest", run=run)
+    assert unchanged["num_updates"] == 2
+    assert Path(unchanged["latest_checkpoint_path"]).resolve().parents[1] != run
+    assert checkpoint_writes == [1, 2, 2]
 
 
 def test_periodic_manifest_survives_interrupted_update(tmp_path, monkeypatch):

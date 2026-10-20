@@ -508,15 +508,28 @@ fields. Existing standard checkpoints and APG schema-v1 checkpoints load their
 available state; missing metadata and RNG are reported. GRPO with KL requires
 its saved reference policy.
 
+CLI and programmatic trainers can exchange checkpoints. When either trainer
+lacks CLI configuration context, loading reports that limitation and checks
+the runtime policy, algorithm, spaces, and available trainer metadata.
+APG additionally checks its effective rollout, gradient-accumulation, and
+action settings. Older schema-v2 files without APG settings load with a warning.
+
 ``restore`` preserves the original scheduler horizon. Extending a zero-ending
 linear curve past that horizon requires ``restart``; an unspecified new horizon
 is bound to the remaining update budget. Subsequent checkpoints preserve the
 restarted curve. ``best`` falls back to ``latest`` when no best checkpoint exists
 and prints the selected file.
 
+Variable-horizon APG accepts an update budget or an explicit scheduler horizon.
+With a transition budget, the restored linear horizon is checked before each
+actual optimizer update.
+
 Periodic and best saves update ``run-manifest.json`` after atomically writing
-a completed-update checkpoint. An interrupted update retains the preceding
-checkpoint. Distributed resume requires the same process count; every rank
+a completed-update checkpoint. Configuration snapshots are frozen from the
+loaded configuration on the first save and reused by subsequent saves. A final
+save reuses a periodic or best checkpoint from the same update. An interrupted
+update retains the preceding checkpoint. Distributed resume requires the same
+process count; every rank
 participates in saving and loading, while rank zero owns file writes. Each rank
 restores its own RNG and observation-normalization buffers.
 

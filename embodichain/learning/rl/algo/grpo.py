@@ -20,6 +20,7 @@ from copy import deepcopy
 from typing import Any, Dict
 
 import torch
+from embodichain.learning.rl.checkpoint import _validate_state_layout
 from tensordict import TensorDict
 
 from embodichain.learning.rl.buffer import iterate_minibatches, transition_view
@@ -91,23 +92,15 @@ class GRPO(BaseAlgorithm[TensorDict]):
         if self.ref_policy is not None:
             if "ref_policy" not in state:
                 raise ValueError("GRPO with KL requires checkpoint ref_policy state.")
-            current = self.ref_policy.state_dict()
-            saved = state["ref_policy"]
-            if current.keys() != saved.keys() or any(
-                current[k].shape != saved[k].shape for k in current
-            ):
-                raise ValueError("Incompatible GRPO reference policy state.")
+            _validate_state_layout(
+                self.ref_policy.state_dict(),
+                state["ref_policy"],
+                "GRPO reference policy",
+            )
 
-    def load_state_dict(
-        self, state: dict[str, Any], *, resume_scheduler: str = "restore"
-    ) -> None:
-        """Restore optimization state and the original KL reference policy.
-
-        Args:
-            state: Optimization and reference-policy checkpoint fields.
-            resume_scheduler: Restore the saved curve or restart configuration.
-        """
-        super().load_state_dict(state, resume_scheduler=resume_scheduler)
+    def _load_state_dict(self, state: dict[str, Any], *, resume_scheduler: str) -> None:
+        """Apply validated optimization and fixed KL reference state."""
+        super()._load_state_dict(state, resume_scheduler=resume_scheduler)
         if self.ref_policy is not None:
             self.ref_policy.load_state_dict(state["ref_policy"])
 

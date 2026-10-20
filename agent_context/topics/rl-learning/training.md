@@ -27,11 +27,18 @@ output run remain separate. Budgets are absolute targets and environments start
 fresh episodes. `restore` keeps the saved LR horizon; `restart` preserves
 optimizer momentum and binds the configured curve to remaining updates.
 Zero-ending linear curves cannot resume beyond their horizon in restore mode.
-The loader checks semantic and structural compatibility before updating state;
-old standard/APG-v1 files restore available fields and report missing metadata
+The loader checks semantic and structural compatibility before updating state,
+including effective APG rollout, gradient-accumulation and action settings.
+CLI and Python API checkpoints interoperate; absent shared CLI context or older
+v2 APG settings produce a warning while available runtime metadata is checked.
+Variable-horizon APG transition budgets use the actual update count to check
+an explicit restored LR horizon.
+Legacy standard/APG-v1 files restore available fields and report missing metadata
 or RNG. `checkpoint.py` owns shared validation and atomic persistence.
-Every successful save updates the run manifest; interrupted updates retain the
-previous complete checkpoint. Evaluation reuses the frozen training
+Configuration snapshots are frozen from loaded data on the first save; later
+saves update the run manifest without rewriting those snapshots. Final saves
+reuse the current update's periodic or best checkpoint. Interrupted updates retain
+the previous complete checkpoint. Evaluation reuses the frozen training
 normalizer without updating its statistics.
 
 `trainer.seed` seeds Python, NumPy, Torch, CUDA, and Warp before environment

@@ -24,11 +24,14 @@ import shutil
 import tempfile
 import warnings
 from collections.abc import Mapping
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import torch
+
+from embodichain.learning.rl.env import ScheduledDifferentiableVecEnv
 
 __all__: list[str] = []
 
@@ -111,12 +114,30 @@ def _space_layout(space: Any) -> Any:
     return result
 
 
-def _policy_normalizers(policy: torch.nn.Module) -> dict[str, torch.Tensor]:
+def _policy_normalizers(policy: torch.nn.Module) -> dict[str, Any]:
     return {
-        key: value.detach().cpu()
+        key: (
+            value.detach().cpu() if isinstance(value, torch.Tensor) else deepcopy(value)
+        )
         for key, value in policy.state_dict().items()
         if "normalizer" in key.split(".")[0]
     }
+
+
+def _validate_state_layout(
+    current: Mapping[str, Any], saved: Mapping[str, Any], name: str
+) -> None:
+    """Check tensor layout while leaving module extra state to PyTorch."""
+    if current.keys() != saved.keys() or any(
+        not isinstance(saved[key], torch.Tensor)
+        or value.shape != saved[key].shape
+        or value.dtype != saved[key].dtype
+        for key, value in current.items()
+        if isinstance(value, torch.Tensor)
+    ):
+        raise ValueError(
+            f"Incompatible checkpoint {name} state keys, shapes, or dtypes."
+        )
 
 
 def _metadata(trainer: Any) -> dict[str, Any]:
@@ -145,8 +166,29 @@ def _metadata(trainer: Any) -> dict[str, Any]:
             "type": _type_name(normalizer),
             "normalize_mask": _plain(normalizer.normalize_mask),
         }
+    trainer_config = {}
+    if hasattr(trainer, "_rollout_index"):
+        trainer_config = {
+            name: getattr(trainer.cfg, name)
+            for name in (
+                "rollout_mode",
+                "deterministic_actions",
+                "clip_actions_to_space",
+                "action_adjoint_max_norm",
+            )
+        }
+        if trainer.cfg.rollout_mode == "segmented":
+            trainer_config["segment_length"] = trainer.cfg.segment_length
+            trainer_config["update_horizon"] = trainer.update_horizon
+        else:
+            trainer_config["gradient_accumulation_steps"] = (
+                trainer.cfg.gradient_accumulation_steps
+            )
+            if not isinstance(trainer.env, ScheduledDifferentiableVecEnv):
+                trainer_config["update_horizon"] = trainer.update_horizon
     return {
         "trainer": _type_name(trainer),
+        "trainer_config": trainer_config,
         "algorithm": _type_name(algorithm),
         "algorithm_config": _plain(
             {
@@ -264,18 +306,21 @@ def _validate(trainer: Any, payload: Any, scheduler: str) -> list[str]:
     if int(payload["global_step"]) < 0 or int(payload["num_updates"]) < 0:
         raise ValueError("Checkpoint training counters cannot be negative.")
     policy = getattr(trainer.policy, "module", trainer.policy)
-    current_state = policy.state_dict()
-    saved_state = payload["policy"]
-    if current_state.keys() != saved_state.keys() or any(
-        current_state[key].shape != saved_state[key].shape
-        or current_state[key].dtype != saved_state[key].dtype
-        for key in current_state
-    ):
-        raise ValueError(
-            "Incompatible checkpoint policy state keys, shapes, or dtypes."
-        )
+    _validate_state_layout(policy.state_dict(), payload["policy"], "policy")
+    unavailable = []
     if version == _SCHEMA_VERSION:
-        differences = _differences(payload["metadata"], _metadata(trainer))
+        saved_metadata = dict(payload["metadata"])
+        current_metadata = _metadata(trainer)
+        if not saved_metadata.get("context") or not current_metadata["context"]:
+            if bool(saved_metadata.get("context")) != bool(current_metadata["context"]):
+                unavailable.append("shared CLI configuration context")
+            saved_metadata.pop("context", None)
+            current_metadata.pop("context")
+        if "trainer_config" not in saved_metadata:
+            if current_metadata["trainer_config"]:
+                unavailable.append("APG trainer configuration")
+            current_metadata.pop("trainer_config")
+        differences = _differences(saved_metadata, current_metadata)
         if differences:
             raise ValueError(
                 "Incompatible checkpoint configuration: " + ", ".join(differences)
@@ -310,10 +355,7 @@ def _validate(trainer: Any, payload: Any, scheduler: str) -> list[str]:
             )
         normalizers = payload["normalizer_by_rank"][rank]
         expected = _policy_normalizers(policy)
-        if normalizers.keys() != expected.keys() or any(
-            normalizers[k].shape != expected[k].shape for k in expected
-        ):
-            raise ValueError("Checkpoint rank normalizer state is incompatible.")
+        _validate_state_layout(expected, normalizers, "rank normalizer")
     normalizer = getattr(trainer, "observation_normalizer", None)
     saved_normalizer = payload.get("observation_normalizer")
     if (normalizer is None) != (saved_normalizer is None):
@@ -337,7 +379,7 @@ def _validate(trainer: Any, payload: Any, scheduler: str) -> list[str]:
             raise ValueError("Checkpoint observation normalization mask differs.")
     trainer.algorithm.validate_state_dict(payload, resume_scheduler=scheduler)
     return (
-        []
+        unavailable
         if version == _SCHEMA_VERSION
         else ["configuration metadata", "per-rank RNG", "per-rank normalizers"]
     )
@@ -375,7 +417,6 @@ def _save(trainer: Any, path: str | Path, extra: Mapping[str, Any]) -> str:
                 "global_step": trainer.global_step,
                 "num_updates": trainer.num_updates,
                 "policy": policy.state_dict(),
-                "config_snapshot": _plain(getattr(trainer, "_checkpoint_config", None)),
                 **trainer.algorithm.state_dict(),
                 "best_eval_value": trainer.best_eval_value,
                 "best_checkpoint": (
@@ -396,6 +437,7 @@ def _save(trainer: Any, path: str | Path, extra: Mapping[str, Any]) -> str:
         except Exception as exc:
             error = exc
     _sync_errors(error, distributed)
+    trainer._last_saved_update = trainer.num_updates
     return str(path)
 
 
@@ -421,7 +463,7 @@ def _load(trainer: Any, path: str | Path, scheduler: str) -> dict[str, Any]:
     try:
         policy = getattr(trainer.policy, "module", trainer.policy)
         policy.load_state_dict(payload["policy"])
-        trainer.algorithm.load_state_dict(payload, resume_scheduler=scheduler)
+        trainer.algorithm._load_state_dict(payload, resume_scheduler=scheduler)
         rank = getattr(trainer, "rank", 0)
         if "normalizer_by_rank" in payload:
             policy.load_state_dict(payload["normalizer_by_rank"][rank], strict=False)
@@ -432,6 +474,7 @@ def _load(trainer: Any, path: str | Path, scheduler: str) -> dict[str, Any]:
         trainer.num_updates = int(payload["num_updates"])
         trainer.best_eval_value = payload.get("best_eval_value")
         trainer.latest_checkpoint_path = str(path)
+        trainer._last_saved_update = None
         if rank == 0:
             _restore_best(trainer, payload, Path(path))
         if hasattr(trainer.collector, "obs_td"):
@@ -459,7 +502,11 @@ def _load(trainer: Any, path: str | Path, scheduler: str) -> dict[str, Any]:
     _sync_errors(error, distributed)
     if missing and getattr(trainer, "rank", 0) == 0:
         warnings.warn(
-            "Legacy checkpoint has no "
+            (
+                "Legacy checkpoint has no "
+                if payload.get("schema_version") != _SCHEMA_VERSION
+                else "Checkpoint cannot validate "
+            )
             + ", ".join(missing)
             + "; restoring available learning state.",
             UserWarning,

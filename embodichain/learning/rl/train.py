@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import random
 import time
@@ -27,9 +28,14 @@ from pathlib import Path
 import numpy as np
 import torch
 import wandb
+import yaml
 from torch.utils.tensorboard import SummaryWriter
 
-from embodichain.learning.rl.checkpoint import _resolve_resume, _sync_errors
+from embodichain.learning.rl.checkpoint import (
+    _atomic_write,
+    _resolve_resume,
+    _sync_errors,
+)
 from embodichain.learning.rl.policies import get_registered_policy_names
 from embodichain.learning.rl.policy_evaluation.manifest import (
     write_run_manifest,
@@ -342,7 +348,7 @@ def _train_learning_env(
         else:
             total_timesteps = int(trainer_cfg.get("total_timesteps", default_steps))
             trainer.train(total_timesteps)
-        trainer.save_checkpoint()
+        _save_final_checkpoint(trainer)
         summary = trainer.get_summary()
     finally:
         writer.close()
@@ -692,7 +698,7 @@ def train_from_config(
         )
         _resume_training(trainer, resume, run, resume_scheduler)
         trainer.train(total_steps)
-        trainer.save_checkpoint()
+        _save_final_checkpoint(trainer)
     except KeyboardInterrupt:
         if rank == 0:
             logger.log_info("Training interrupted by user")
@@ -748,14 +754,45 @@ def _configure_checkpoints(
     gym_config: str | Path | None = None,
     gym_data: dict | None = None,
 ) -> None:
-    trainer._checkpoint_context = _checkpoint_context(cfg_data, gym_data)
+    trainer._checkpoint_context = deepcopy(_checkpoint_context(cfg_data, gym_data))
     trainer._checkpoint_config = deepcopy(cfg_data)
-    trainer._checkpoint_callback = lambda summary: _write_policy_run_manifest(
-        run_base,
-        config_path,
-        summary,
-        gym_config=gym_config,
+    if getattr(trainer, "rank", 0) != 0:
+        return
+    config_dir = Path(run_base) / "configs"
+    train_path = config_dir / f"train{Path(config_path).suffix.lower() or '.yaml'}"
+    gym_path = (
+        config_dir / f"gym{Path(gym_config or 'gym.yaml').suffix.lower() or '.yaml'}"
+        if gym_data is not None
+        else None
     )
+    snapshots = {train_path: trainer._checkpoint_config}
+    if gym_path is not None:
+        snapshots[gym_path] = deepcopy(gym_data)
+
+    def update_manifest(summary: dict) -> None:
+        for path, data in snapshots.items():
+            contents = (
+                json.dumps(data, indent=2)
+                if path.suffix == ".json"
+                else yaml.safe_dump(data, sort_keys=False)
+            ).encode("utf-8")
+            _atomic_write(path, lambda stream: stream.write(contents))
+        snapshots.clear()
+        write_run_manifest(
+            run_base,
+            train_config=train_path,
+            gym_config=gym_path,
+            latest_checkpoint=summary["latest_checkpoint_path"],
+            best_checkpoint=summary["best_checkpoint_path"],
+        )
+
+    trainer._checkpoint_callback = update_manifest
+
+
+def _save_final_checkpoint(trainer) -> None:
+    """Write the final update only if periodic/best saving has not written it."""
+    if getattr(trainer, "_last_saved_update", None) != trainer.num_updates:
+        trainer.save_checkpoint()
 
 
 def _resume_training(trainer, resume, run, scheduler: str) -> None:
@@ -774,26 +811,6 @@ def _resume_training(trainer, resume, run, scheduler: str) -> None:
                 f"learning_rate={trainer.algorithm.current_learning_rate():.6g}, "
                 f"scheduler={scheduler}"
             )
-
-
-def _write_policy_run_manifest(
-    run_base: str | Path,
-    config_path: str | Path,
-    summary: dict,
-    *,
-    gym_config: str | Path | None = None,
-) -> Path:
-    """Write the checkpoint and configuration index for policy evaluation."""
-    latest = summary.get("latest_checkpoint_path")
-    if latest is None:
-        raise RuntimeError("Training finished without a checkpoint")
-    return write_run_manifest(
-        run_base,
-        train_config=config_path,
-        gym_config=gym_config,
-        latest_checkpoint=latest,
-        best_checkpoint=summary.get("best_checkpoint_path"),
-    )
 
 
 def cli(argv: Sequence[str] | None = None) -> None:

@@ -192,17 +192,26 @@ class DifferentiableTrainer:
         if total_updates is not None and total_updates < 0:
             raise ValueError("total_updates cannot be negative.")
 
+        scheduled = self.cfg.rollout_mode == "complete" and isinstance(
+            self.env, ScheduledDifferentiableVecEnv
+        )
         if total_updates is not None:
             estimated_updates = total_updates
             remaining_updates = max(0, total_updates - self.num_updates)
-        else:
-            assert total_timesteps is not None
-            if isinstance(
-                self.env, ScheduledDifferentiableVecEnv
-            ) and scheduler_needs_horizon(self.algorithm._lr_scheduler_cfg):
+        elif scheduled:
+            if self.global_step < total_timesteps and scheduler_needs_horizon(
+                self.algorithm._lr_scheduler_cfg
+            ):
                 raise ValueError(
                     "Variable-horizon APG requires total_updates or an explicit scheduler horizon."
                 )
+            # Environment-provided horizons are known only when collecting.
+            # Check the explicit LR horizon before each actual update.
+            estimated_updates = remaining_updates = int(
+                self.global_step < total_timesteps
+            )
+        else:
+            assert total_timesteps is not None
             steps_per_update = (
                 self.update_horizon
                 * self.env.num_envs
@@ -226,6 +235,7 @@ class DifferentiableTrainer:
             if total_updates is not None
             else self.global_step < total_timesteps
         ):
+            self.algorithm._check_schedule_horizon(1)
             if self.cfg.rollout_mode == "complete":
                 collected_steps, metrics = self._complete_rollout_update()
             else:

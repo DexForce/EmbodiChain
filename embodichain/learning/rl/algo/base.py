@@ -169,6 +169,10 @@ class BaseAlgorithm(ABC, Generic[RolloutT]):
                 configured curve while retaining optimizer momentum.
         """
         self.validate_state_dict(state, resume_scheduler=resume_scheduler)
+        self._load_state_dict(state, resume_scheduler=resume_scheduler)
+
+    def _load_state_dict(self, state: dict[str, Any], *, resume_scheduler: str) -> None:
+        """Apply optimization state after checkpoint-wide validation."""
         self.lr_scheduler = None
         if resume_scheduler == "restore":
             if state.get("lr_scheduler_cfg") is not None:
@@ -201,6 +205,10 @@ class BaseAlgorithm(ABC, Generic[RolloutT]):
             total_updates=remaining_updates if self._restart_schedule else total_updates
         )
         self._restart_schedule = False
+        self._check_schedule_horizon(remaining_updates)
+
+    def _check_schedule_horizon(self, remaining_updates: int) -> None:
+        """Reject restored zero-ending schedules before exceeding their horizon."""
         cfg = self._lr_scheduler_cfg
         if (
             self._checkpoint_loaded
