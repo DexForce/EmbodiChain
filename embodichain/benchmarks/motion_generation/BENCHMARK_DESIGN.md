@@ -340,6 +340,6 @@ These are not current benchmark capabilities:
   refinement with both quality gain and added cost reported.
 - Observation-driven recovery under moving targets, noise, disturbances and
   slip. FK rollout alone is not closed-loop recovery.
-- General per-row antipodal grasp sampling, release-scale profiles and packaged
-  benchmark resources. Multiple configured robots alone do not establish
-  unseen-embodiment generalization.
+- General per-row antipodal grasp sampling and release-scale profiles.
+  Multiple configured robots alone do not establish unseen-embodiment
+  generalization.

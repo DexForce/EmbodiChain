@@ -130,9 +130,9 @@ class BenchmarkRunner:
                 raise ValueError("Adapter names must be non-empty strings.")
             if not isinstance(adapter, type) or not issubclass(adapter, PlannerAdapter):
                 raise TypeError(f"Adapter {name!r} must be a PlannerAdapter subclass.")
-        self.suite = deepcopy(suite)
+        # One copy preserves shared planner references within the owned config.
+        self.suite, self.planner_specs = deepcopy((suite, planner_specs))
         suite = self.suite
-        self.planner_specs = deepcopy(planner_specs)
         self.device = resolve_device(device)
         self.headless = headless
         self.output_root = Path(output_root)

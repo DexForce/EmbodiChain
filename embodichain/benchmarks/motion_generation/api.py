@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -47,8 +46,10 @@ def run_benchmark(
 
     Args:
         suite: Installed suite name, YAML path, or assembled configuration.
-            Paths inside a suite file resolve relative to that file; paths in
-            an assembled configuration resolve relative to the working directory.
+            Embodiment component paths in YAML resolve relative to that file;
+            component paths in an assembled configuration use the working
+            directory. Adapter-specific paths follow the adapter's rules;
+            relative NMG model paths use the working directory.
         planners: Algorithms to evaluate, replacing the suite's planner list.
             Every explicitly supplied planner is enabled. When omitted, use
             the enabled planners declared by the suite.
@@ -75,19 +76,17 @@ def run_benchmark(
     if isinstance(suite, (str, Path)):
         resolved = load_suite(suite)
     elif isinstance(suite, SuiteCfg):
-        resolved = deepcopy(suite)
+        resolved = suite
     else:
         raise TypeError("suite must be a suite name, YAML path, or SuiteCfg.")
 
-    if planners is not None:
-        selected = deepcopy(list(planners))
-        if any(not isinstance(spec, PlannerSpecCfg) for spec in selected):
-            raise TypeError("planners must contain PlannerSpecCfg instances.")
-        for spec in selected:
-            spec.enabled = True
-        resolved.planners = selected
-    resolved.validate_benchmark()
-    selected = [spec for spec in resolved.planners if spec.enabled]
+    selected = (
+        list(planners)
+        if planners is not None
+        else [spec for spec in resolved.planners if spec.enabled]
+    )
+    if any(not isinstance(spec, PlannerSpecCfg) for spec in selected):
+        raise TypeError("planners must contain PlannerSpecCfg instances.")
     if not selected:
         raise ValueError("No algorithms were selected for the benchmark.")
 
@@ -102,7 +101,7 @@ def run_benchmark(
                 f"available adapters: {sorted(known_adapters)}."
             )
 
-    return BenchmarkRunner(
+    runner = BenchmarkRunner(
         resolved,
         selected,
         adapters=adapters,
@@ -110,4 +109,10 @@ def run_benchmark(
         headless=headless,
         output_root=output_root,
         video=video,
-    ).run()
+    )
+    if planners is not None:
+        runner.suite.planners = runner.planner_specs
+        for spec in runner.planner_specs:
+            spec.enabled = True
+    runner.suite.validate_benchmark()
+    return runner.run()

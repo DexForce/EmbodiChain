@@ -187,16 +187,27 @@ def test_adapter_mapping_is_local_to_each_run(fake_runtime, tmp_path: Path) -> N
 def test_default_selection_uses_enabled_suite_planners(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    factory = Mock()
-    monkeypatch.setattr(runner_module, "BenchmarkRunner", factory)
+    observed: list[runner_module.BenchmarkRunner] = []
+    result_value = object()
+
+    def record_run(runner: runner_module.BenchmarkRunner) -> object:
+        observed.append(runner)
+        return result_value
+
+    monkeypatch.setattr(runner_module.BenchmarkRunner, "run", record_run)
     suite = load_suite()
+    original = suite_to_dict(suite)
     result = run_benchmark(suite, output_root=tmp_path)
-    assert result is factory.return_value.run.return_value
-    selected = factory.call_args.args[1]
+    assert result is result_value
+    runner = observed[0]
+    selected = runner.planner_specs
     assert [spec.id for spec in selected] == [
         spec.id for spec in suite.planners if spec.enabled
     ]
-    assert factory.call_args.args[0] is not suite
+    assert suite_to_dict(runner.suite) == original
+    runner.suite.protocol.measured_trials += 1
+    selected[0].config["caller_isolation_probe"] = True
+    assert suite_to_dict(suite) == original
 
 
 def test_suite_with_no_enabled_planners_fails_before_simulation(fake_runtime) -> None:

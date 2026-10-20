@@ -55,17 +55,7 @@ from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.utils import logger
 
 from embodichain.lab.scripts._atomic_action.placement_geometry import (
-    PAN_BASIN_LOCAL_Z_MAX,
-    PAN_HANDLE_LOCAL_Z_MIN,
-    PAN_HANDLE_ROOT_OFFSET,
-    PAN_TARGET_CENTER_XY,
     TABLE_TOP_Z,
-    PAN_TARGET_Z_LIFT,
-    BREAD_TARGET_WORLD_YAW_DEG,
-    BREAD_PLACE_TARGET_OFFSET_XY,
-    BREAD_ON_PAN_CLEARANCE,
-    get_pan_basin_vertices,
-    build_top_down_tcp_pose,
     build_flat_object_grasp_pose,
     build_pan_handle_grasp_pose,
     build_support_object_target_pose,
@@ -74,16 +64,12 @@ from embodichain.lab.scripts._atomic_action.placement_geometry import (
 from scripts.tutorials.atomic_action.scenario_utils import (
     add_dual_tutorial_robot,
     compute_local_bounds,
-    compute_world_bounds,
     create_manual_object_semantics,
     get_local_vertices,
     invert_pose,
     log_action_plan,
-    normalize_vector,
     resolve_cached_data_path,
-    rotate_pose_about_world_z,
     settle_object,
-    transform_points,
 )
 from scripts.tutorials.atomic_action.tutorial_utils import (
     TutorialRobot,

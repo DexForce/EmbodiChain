@@ -95,6 +95,18 @@ def installed_benchmark(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path,
         timeout=60,
     )
     assert created.returncode == 0, created.stdout + created.stderr
+    # Expose this exact version as an inherited installation. The consumer
+    # must install its own copy rather than reuse that distribution.
+    inherited = workspace / "inherited"
+    with zipfile.ZipFile(wheel) as archive:
+        archive.extractall(inherited)
+    site_packages = (
+        target
+        / "lib"
+        / f"python{sys.version_info.major}.{sys.version_info.minor}"
+        / "site-packages"
+    )
+    (site_packages / "inherited_benchmark.pth").write_text(str(inherited) + "\n")
     interpreter = target / "bin/python"
     installed = subprocess.run(
         [
@@ -104,6 +116,7 @@ def installed_benchmark(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path,
             "pip",
             "--isolated",
             "install",
+            "--ignore-installed",
             "--no-deps",
             "--no-compile",
             str(wheel),
@@ -154,9 +167,8 @@ suite_names = sorted(path.name[:-5] for path in resources.iterdir() if path.name
 for name in suite_names:
     suite = load_suite(name)
     assert suite.name
-assert len(suite_names) >= 16
+assert load_suite().name == "motion_panda_free_space_smoke"
 from embodichain.benchmarks.motion_generation import PlannerAdapter
-assert PlannerAdapter
 from embodichain.benchmarks.motion_generation.scenarios.atomic_grasps import parallel_jaw_sampler
 assert parallel_jaw_sampler(2)
 from embodichain.lab.scripts._atomic_action.placement_geometry import build_support_object_target_pose

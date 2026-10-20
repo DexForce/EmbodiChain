@@ -27,7 +27,6 @@ with ``--suite atomic_franka_pgi_smoke``.
 from __future__ import annotations
 
 import argparse
-from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -175,7 +174,7 @@ def _resolve_planners(
             selected_ids.append(planner_id)
     if not selected_ids:
         raise ValueError("No algorithms were selected for the benchmark.")
-    return [deepcopy(_planner_by_id(suite, planner_id)) for planner_id in selected_ids]
+    return [_planner_by_id(suite, planner_id) for planner_id in selected_ids]
 
 
 def _apply_overrides(

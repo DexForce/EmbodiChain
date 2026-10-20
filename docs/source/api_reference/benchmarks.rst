@@ -73,7 +73,6 @@ Public entry points
 
 .. autoclass:: embodichain.benchmarks.motion_generation.PlannerAdapter
    :members:
-   :no-index:
 
 Implementation reference
 ------------------------
@@ -89,27 +88,32 @@ schema are persisted together with each report.
 embodichain.benchmarks.motion_generation.aggregation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Aggregate raw planner trials and build a complete benchmark leaderboard.
-
 .. automodule:: embodichain.benchmarks.motion_generation.aggregation
    :members:
    :undoc-members:
+   :exclude-members: aggregate_generalization
+
+.. currentmodule:: embodichain.benchmarks.motion_generation.aggregation
+
+.. autosummary::
+
+   aggregate_generalization
 
 
 embodichain.benchmarks.motion_generation.api
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Programmatic evaluation of installed suites and external planner adapters.
-
 .. automodule:: embodichain.benchmarks.motion_generation.api
-   :members:
-   :undoc-members:
+
+.. currentmodule:: embodichain.benchmarks.motion_generation.api
+
+.. autosummary::
+
+   run_benchmark
 
 
 embodichain.benchmarks.motion_generation.artifacts
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Reproducibility and raw-result artifacts for planner benchmarks.
 
 .. automodule:: embodichain.benchmarks.motion_generation.artifacts
    :members:
@@ -119,8 +123,6 @@ Reproducibility and raw-result artifacts for planner benchmarks.
 embodichain.benchmarks.motion_generation.atomic_skill
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Case construction contract for Atomic Skill benchmark integrations.
-
 .. automodule:: embodichain.benchmarks.motion_generation.atomic_skill
    :members:
    :undoc-members:
@@ -128,8 +130,6 @@ Case construction contract for Atomic Skill benchmark integrations.
 
 embodichain.benchmarks.motion_generation.cli
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Run Motion Planning and Atomic Skills suites through the shared benchmark.
 
 .. automodule:: embodichain.benchmarks.motion_generation.cli
    :members:
@@ -139,17 +139,20 @@ Run Motion Planning and Atomic Skills suites through the shared benchmark.
 embodichain.benchmarks.motion_generation.config
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Configuration loading and hashing for motion-generation benchmark suites.
-
 .. automodule:: embodichain.benchmarks.motion_generation.config
    :members:
    :undoc-members:
+   :exclude-members: load_suite
+
+.. currentmodule:: embodichain.benchmarks.motion_generation.config
+
+.. autosummary::
+
+   load_suite
 
 
 embodichain.benchmarks.motion_generation.contracts
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Simulator-independent contracts shared by Atomic Skill benchmark owners.
 
 .. automodule:: embodichain.benchmarks.motion_generation.contracts
    :members:
@@ -159,8 +162,6 @@ Simulator-independent contracts shared by Atomic Skill benchmark owners.
 embodichain.benchmarks.motion_generation.embodiments
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Resolve official embodiment components for benchmark metadata and runtime.
-
 .. automodule:: embodichain.benchmarks.motion_generation.embodiments
    :members:
    :undoc-members:
@@ -168,8 +169,6 @@ Resolve official embodiment components for benchmark metadata and runtime.
 
 embodichain.benchmarks.motion_generation.evaluation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Versioned Atomic Skill criteria applied to measured, row-local evidence.
 
 .. automodule:: embodichain.benchmarks.motion_generation.evaluation
    :members:
@@ -179,8 +178,6 @@ Versioned Atomic Skill criteria applied to measured, row-local evidence.
 embodichain.benchmarks.motion_generation.generalization
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Domain-aware aggregation for configuration-driven benchmark suites.
-
 .. automodule:: embodichain.benchmarks.motion_generation.generalization
    :members:
    :undoc-members:
@@ -188,8 +185,6 @@ Domain-aware aggregation for configuration-driven benchmark suites.
 
 embodichain.benchmarks.motion_generation.limits
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Shared benchmark motion budgets for planning and independent validation.
 
 .. automodule:: embodichain.benchmarks.motion_generation.limits
    :members:
@@ -199,17 +194,23 @@ Shared benchmark motion budgets for planning and independent validation.
 embodichain.benchmarks.motion_generation.metrics
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Metric evaluators for motion-generation benchmarks.
-
 .. automodule:: embodichain.benchmarks.motion_generation.metrics
-   :members:
-   :undoc-members:
+
+.. currentmodule:: embodichain.benchmarks.motion_generation.metrics
+
+.. autosummary::
+
+   TimedCall
+   compute_case_outcomes
+   compute_waypoint_errors
+   get_pose_err
+   make_failure_outcomes
+   match_ordered_waypoints
+   timed_call
 
 
 embodichain.benchmarks.motion_generation.metrics.performance
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Wall-clock and process-memory measurement helpers.
 
 .. automodule:: embodichain.benchmarks.motion_generation.metrics.performance
    :members:
@@ -219,8 +220,6 @@ Wall-clock and process-memory measurement helpers.
 embodichain.benchmarks.motion_generation.metrics.stats
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Shared numeric helpers for benchmark metric aggregation.
-
 .. automodule:: embodichain.benchmarks.motion_generation.metrics.stats
    :members:
    :undoc-members:
@@ -229,17 +228,21 @@ Shared numeric helpers for benchmark metric aggregation.
 embodichain.benchmarks.motion_generation.metrics.trajectory
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Ordered waypoint and free-space trajectory validity metrics.
-
 .. automodule:: embodichain.benchmarks.motion_generation.metrics.trajectory
    :members:
    :undoc-members:
+   :exclude-members: resolve_dynamic_limit, resolve_velocity_limits
+
+.. currentmodule:: embodichain.benchmarks.motion_generation.metrics.trajectory
+
+.. autosummary::
+
+   resolve_dynamic_limit
+   resolve_velocity_limits
 
 
 embodichain.benchmarks.motion_generation.models
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Typed records shared by the motion-generation benchmark modules.
 
 .. automodule:: embodichain.benchmarks.motion_generation.models
    :members:
@@ -249,27 +252,37 @@ Typed records shared by the motion-generation benchmark modules.
 embodichain.benchmarks.motion_generation.planners
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Built-in planner adapters and their registry side effects.
-
 .. automodule:: embodichain.benchmarks.motion_generation.planners
-   :members:
-   :undoc-members:
+
+.. currentmodule:: embodichain.benchmarks.motion_generation.planners
+
+.. autosummary::
+
+   CuroboAdapter
+   IkInterpolateAdapter
+   NmgOnnxAdapter
+   PlannerAdapter
+   PlannerContext
+   ToppraAdapter
 
 
 embodichain.benchmarks.motion_generation.planners.base
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Backend-independent planner adapter contract.
-
 .. automodule:: embodichain.benchmarks.motion_generation.planners.base
    :members:
    :undoc-members:
+   :exclude-members: PlannerAdapter
+
+.. currentmodule:: embodichain.benchmarks.motion_generation.planners.base
+
+.. autosummary::
+
+   PlannerAdapter
 
 
 embodichain.benchmarks.motion_generation.planners.curobo
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-cuRobo primary-baseline adapter for an empty collision world.
 
 .. automodule:: embodichain.benchmarks.motion_generation.planners.curobo
    :members:
@@ -279,8 +292,6 @@ cuRobo primary-baseline adapter for an empty collision world.
 embodichain.benchmarks.motion_generation.planners.ik_interpolate
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Sequential IK plus joint interpolation diagnostic adapter.
-
 .. automodule:: embodichain.benchmarks.motion_generation.planners.ik_interpolate
    :members:
    :undoc-members:
@@ -288,8 +299,6 @@ Sequential IK plus joint interpolation diagnostic adapter.
 
 embodichain.benchmarks.motion_generation.planners.nmg_onnx
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-NMG ONNX benchmark adapter.
 
 .. automodule:: embodichain.benchmarks.motion_generation.planners.nmg_onnx
    :members:
@@ -299,8 +308,6 @@ NMG ONNX benchmark adapter.
 embodichain.benchmarks.motion_generation.planners.toppra
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-IK plus TOPPRA time-parameterization diagnostic adapter.
-
 .. automodule:: embodichain.benchmarks.motion_generation.planners.toppra
    :members:
    :undoc-members:
@@ -308,8 +315,6 @@ IK plus TOPPRA time-parameterization diagnostic adapter.
 
 embodichain.benchmarks.motion_generation.registry
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Planner and scenario registries used by the generic benchmark runner.
 
 .. automodule:: embodichain.benchmarks.motion_generation.registry
    :members:
@@ -319,8 +324,6 @@ Planner and scenario registries used by the generic benchmark runner.
 embodichain.benchmarks.motion_generation.reporting
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Render separate planning and skill views with three tables per view.
-
 .. automodule:: embodichain.benchmarks.motion_generation.reporting
    :members:
    :undoc-members:
@@ -329,17 +332,22 @@ Render separate planning and skill views with three tables per view.
 embodichain.benchmarks.motion_generation.robots
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Built-in robot providers for motion-generation benchmarks.
-
 .. automodule:: embodichain.benchmarks.motion_generation.robots
-   :members:
-   :undoc-members:
+
+.. currentmodule:: embodichain.benchmarks.motion_generation.robots
+
+.. autosummary::
+
+   DualArmProvider
+   FrankaPandaProvider
+   FrankaPgiProvider
+   RobotProvider
+   UR5PgiProvider
+   UR5Provider
 
 
 embodichain.benchmarks.motion_generation.robots.base
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Robot-provider contract for planner benchmark suites.
 
 .. automodule:: embodichain.benchmarks.motion_generation.robots.base
    :members:
@@ -349,8 +357,6 @@ Robot-provider contract for planner benchmark suites.
 embodichain.benchmarks.motion_generation.robots.dual_arm
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Dual-arm robot provider for coordinated Atomic Skill benchmarks.
-
 .. automodule:: embodichain.benchmarks.motion_generation.robots.dual_arm
    :members:
    :undoc-members:
@@ -358,8 +364,6 @@ Dual-arm robot provider for coordinated Atomic Skill benchmarks.
 
 embodichain.benchmarks.motion_generation.robots.franka
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Built-in Franka robot providers.
 
 .. automodule:: embodichain.benchmarks.motion_generation.robots.franka
    :members:
@@ -369,8 +373,6 @@ Built-in Franka robot providers.
 embodichain.benchmarks.motion_generation.robots.ur5
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-UR5 robot provider for motion-generation benchmarks.
-
 .. automodule:: embodichain.benchmarks.motion_generation.robots.ur5
    :members:
    :undoc-members:
@@ -379,27 +381,43 @@ UR5 robot provider for motion-generation benchmarks.
 embodichain.benchmarks.motion_generation.runner
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Generic lifecycle runner for motion-generation benchmark tracks.
-
 .. automodule:: embodichain.benchmarks.motion_generation.runner
    :members:
    :undoc-members:
+   :exclude-members: BenchmarkRunResult
+
+.. currentmodule:: embodichain.benchmarks.motion_generation.runner
+
+.. autosummary::
+
+   BenchmarkRunResult
 
 
 embodichain.benchmarks.motion_generation.scenarios
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Scenario providers for motion-generation benchmarks.
-
 .. automodule:: embodichain.benchmarks.motion_generation.scenarios
-   :members:
-   :undoc-members:
+
+.. currentmodule:: embodichain.benchmarks.motion_generation.scenarios
+
+.. autosummary::
+
+   AtomicObjectHandle
+   AtomicSkillCaseProvider
+   AtomicSkillScenario
+   atomic_object_kind_names
+   atomic_skill_provider_names
+   create_atomic_object
+   create_atomic_skill_provider
+   FreeSpaceScenario
+   register_atomic_object_kind
+   register_atomic_skill_provider
+   ScenarioEvaluation
+   ScenarioProvider
 
 
 embodichain.benchmarks.motion_generation.scenarios.atomic_case_utils
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Deterministic case identity, pose randomization, and goal construction.
 
 .. automodule:: embodichain.benchmarks.motion_generation.scenarios.atomic_case_utils
    :members:
@@ -409,8 +427,6 @@ Deterministic case identity, pose randomization, and goal construction.
 embodichain.benchmarks.motion_generation.scenarios.atomic_contact_cases
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Press, slide, and twist benchmark cases.
-
 .. automodule:: embodichain.benchmarks.motion_generation.scenarios.atomic_contact_cases
    :members:
    :undoc-members:
@@ -418,8 +434,6 @@ Press, slide, and twist benchmark cases.
 
 embodichain.benchmarks.motion_generation.scenarios.atomic_evaluation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Measured physical stage evaluators and observation-only evidence helpers.
 
 .. automodule:: embodichain.benchmarks.motion_generation.scenarios.atomic_evaluation
    :members:
@@ -429,8 +443,6 @@ Measured physical stage evaluators and observation-only evidence helpers.
 embodichain.benchmarks.motion_generation.scenarios.atomic_grasps
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Frozen and case-scoped grasp generators for reproducible skill cases.
-
 .. automodule:: embodichain.benchmarks.motion_generation.scenarios.atomic_grasps
    :members:
    :undoc-members:
@@ -438,8 +450,6 @@ Frozen and case-scoped grasp generators for reproducible skill cases.
 
 embodichain.benchmarks.motion_generation.scenarios.atomic_manipulation_cases
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Pickup, held-object motion, and placement benchmark cases.
 
 .. automodule:: embodichain.benchmarks.motion_generation.scenarios.atomic_manipulation_cases
    :members:
@@ -449,8 +459,6 @@ Pickup, held-object motion, and placement benchmark cases.
 embodichain.benchmarks.motion_generation.scenarios.atomic_motion_cases
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Representative end-effector and joint-motion integration cases.
-
 .. automodule:: embodichain.benchmarks.motion_generation.scenarios.atomic_motion_cases
    :members:
    :undoc-members:
@@ -458,8 +466,6 @@ Representative end-effector and joint-motion integration cases.
 
 embodichain.benchmarks.motion_generation.scenarios.atomic_objects
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Config-driven scene objects for Atomic Skill benchmark cases.
 
 .. automodule:: embodichain.benchmarks.motion_generation.scenarios.atomic_objects
    :members:
@@ -469,8 +475,6 @@ Config-driven scene objects for Atomic Skill benchmark cases.
 embodichain.benchmarks.motion_generation.scenarios.atomic_policy
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Benchmark motion policy, attribution, and shared motion budgets.
-
 .. automodule:: embodichain.benchmarks.motion_generation.scenarios.atomic_policy
    :members:
    :undoc-members:
@@ -478,8 +482,6 @@ Benchmark motion policy, attribution, and shared motion budgets.
 
 embodichain.benchmarks.motion_generation.scenarios.atomic_replay
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Physical replay and observation collection for Atomic Skill benchmarks.
 
 .. automodule:: embodichain.benchmarks.motion_generation.scenarios.atomic_replay
    :members:
@@ -489,8 +491,6 @@ Physical replay and observation collection for Atomic Skill benchmarks.
 embodichain.benchmarks.motion_generation.scenarios.atomic_skill
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Physics-backed Atomic Skill scenario orchestration.
-
 .. automodule:: embodichain.benchmarks.motion_generation.scenarios.atomic_skill
    :members:
    :undoc-members:
@@ -498,8 +498,6 @@ Physics-backed Atomic Skill scenario orchestration.
 
 embodichain.benchmarks.motion_generation.scenarios.base
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Scenario provider contract for motion-generation tracks.
 
 .. automodule:: embodichain.benchmarks.motion_generation.scenarios.base
    :members:
@@ -509,8 +507,6 @@ Scenario provider contract for motion-generation tracks.
 embodichain.benchmarks.motion_generation.scenarios.free_space
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Deterministic reachable cases for the ``free-space-common`` track.
-
 .. automodule:: embodichain.benchmarks.motion_generation.scenarios.free_space
    :members:
    :undoc-members:
@@ -519,8 +515,6 @@ Deterministic reachable cases for the ``free-space-common`` track.
 embodichain.benchmarks.motion_generation.video
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Optional Atomic Skill replay recording helpers.
-
 .. automodule:: embodichain.benchmarks.motion_generation.video
    :members:
    :undoc-members:
@@ -528,8 +522,6 @@ Optional Atomic Skill replay recording helpers.
 
 embodichain.cli.benchmark
 ~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Unified benchmark CLI.
 
 .. automodule:: embodichain.cli.benchmark
    :members:
