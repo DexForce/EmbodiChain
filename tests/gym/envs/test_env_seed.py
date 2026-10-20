@@ -24,11 +24,16 @@ from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
 import torch
 
 import embodichain.lab.gym.envs.base_env as base_env_module
 from embodichain.lab.gym.envs import BaseEnv
 from embodichain.lab.sim import SimulationManager
+
+# This module calls one unbound manager method on registry stubs; no World is
+# constructed. Keep these reset-contract cases in the fast CPU CI lane.
+pytestmark = pytest.mark.no_sim
 
 
 class _ProfilerStub:
@@ -41,11 +46,11 @@ class _ProfilerStub:
 class _ResetEnv(BaseEnv):
     """BaseEnv reset surface without constructing a simulator."""
 
-    def __init__(self) -> None:
+    def __init__(self, num_envs: int = 1) -> None:
         self.reset_events: list[str] = []
         self.cfg = SimpleNamespace(seed=None)
-        self._num_envs = 1
-        self.episode_context = EpisodeContext(1)
+        self._num_envs = num_envs
+        self.episode_context = EpisodeContext(num_envs)
         self.sim = SimpleNamespace(
             device=torch.device("cpu"),
             is_window_opened=False,
@@ -61,9 +66,9 @@ class _ResetEnv(BaseEnv):
         )
         self.sim.render_frame = self._render_frame
         self._profiler = _ProfilerStub()
-        self._task_success = torch.zeros(1, dtype=torch.bool)
+        self._task_success = torch.zeros(num_envs, dtype=torch.bool)
         self._detached_uids_for_reset: list[str] = []
-        self._elapsed_steps = torch.zeros(1, dtype=torch.int32)
+        self._elapsed_steps = torch.zeros(num_envs, dtype=torch.int32)
         self.event_manager = MagicMock()
         self.initial_random_value = 0.0
 
@@ -76,7 +81,7 @@ class _ResetEnv(BaseEnv):
 
     def is_task_success(self, **kwargs) -> torch.Tensor:
         del kwargs
-        return torch.zeros(1, dtype=torch.bool)
+        return torch.zeros(self.num_envs, dtype=torch.bool)
 
     def _initialize_episode(self, env_ids: torch.Tensor, **kwargs) -> None:
         del env_ids, kwargs
@@ -148,9 +153,27 @@ def test_headless_reset_leaves_publication_to_visual_consumers() -> None:
     ]
 
 
-def test_reset_keeps_sensor_uid_exclusions_out_of_physical_registries() -> None:
-    """A sensor sharing a robot UID resets once without skipping the robot."""
-    env = _ResetEnv()
+@pytest.mark.parametrize(
+    ("reset_ids", "selected_rows"),
+    [
+        pytest.param(None, [0, 1, 2, 3], id="all"),
+        pytest.param([3, 1], [3, 1], id="partial-list"),
+        pytest.param(
+            torch.tensor([3, 1], dtype=torch.int32), [3, 1], id="partial-int32"
+        ),
+        pytest.param(
+            torch.tensor([3, 1], dtype=torch.int64), [3, 1], id="partial-int64"
+        ),
+        pytest.param([], [], id="empty"),
+    ],
+)
+def test_reset_keeps_sensor_uid_exclusions_out_of_physical_registries(
+    reset_ids: list[int] | torch.Tensor | None, selected_rows: list[int]
+) -> None:
+    """Shared UIDs preserve both resets with canonical row IDs and row isolation."""
+    env = _ResetEnv(num_envs=4)
+    prior_steps = torch.tensor([7, 8, 9, 10], dtype=torch.int32)
+    env._elapsed_steps.copy_(prior_steps)
     robot = MagicMock()
     sensor = MagicMock(uid="shared")
     manager_sensor = MagicMock(uid="manager_only")
@@ -170,17 +193,22 @@ def test_reset_keeps_sensor_uid_exclusions_out_of_physical_registries() -> None:
         lambda **kwargs: SimulationManager.reset_objects_state(env.sim, **kwargs)
     )
 
-    env.reset()
+    _, info = env.reset(options={"reset_ids": reset_ids})
 
     assert robot.reset.call_count == 1
     assert sensor.reset.call_count == 1
     assert manager_sensor.reset.call_count == 1
-    torch.testing.assert_close(
-        robot.reset.call_args.args[0], torch.tensor([0], dtype=torch.int32)
-    )
-    torch.testing.assert_close(
-        sensor.reset.call_args.kwargs["env_ids"], torch.tensor([0], dtype=torch.int32)
-    )
+    # EpisodeContext owns the normalized selection, independent of input dtype.
+    expected_ids = torch.tensor(selected_rows, dtype=torch.long)
+    torch.testing.assert_close(robot.reset.call_args.args[0], expected_ids)
+    torch.testing.assert_close(sensor.reset.call_args.kwargs["env_ids"], expected_ids)
+    torch.testing.assert_close(manager_sensor.reset.call_args.args[0], expected_ids)
+    expected_steps = prior_steps.clone()
+    expected_steps[expected_ids] = 0
+    torch.testing.assert_close(env._elapsed_steps, expected_steps)
+    assert [row["episode"] for row in info["episode_context"]] == [
+        0 if row in selected_rows else -1 for row in range(env.num_envs)
+    ]
 
 
 def test_named_component_stream_rewinds_on_explicit_seed_and_is_independent():
