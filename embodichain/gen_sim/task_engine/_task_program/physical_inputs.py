@@ -33,6 +33,7 @@ from embodichain.lab.gym.utils._component_composition import _resolve_gym_compon
 from embodichain.utils.utility import load_config
 
 from ..contracts import canonical_hash
+from ..robot_profiles import _canonical_robot_profile
 from ..orchestration.scene_source import _asset_dependency_files
 from ..orchestration.source_scene import (
     PreparedScene,
@@ -209,10 +210,9 @@ def load_frozen_physical_input(
     """
     root = Path(bundle).expanduser().resolve()
     existing = verify_physical_input_manifest(root)
-    if (
-        existing is not None
-        and existing.get("robot_profile", robot_profile) != robot_profile
-    ):
+    if existing is not None and _canonical_robot_profile(
+        existing.get("robot_profile", robot_profile)
+    ) != _canonical_robot_profile(robot_profile):
         raise ValueError("Frozen reference robot profile differs from the request.")
     input_files = {str(root / name): _sha(root / name) for name in _COMPONENTS.values()}
     if existing is not None:
@@ -221,7 +221,9 @@ def load_frozen_physical_input(
         )
     scene_manifest = root / "static_scene_manifest.json"
     if scene_manifest.is_file():
-        if load_config(scene_manifest).get("robot_profile") != robot_profile:
+        if _canonical_robot_profile(
+            load_config(scene_manifest).get("robot_profile")
+        ) != _canonical_robot_profile(robot_profile):
             raise ValueError("Frozen reference robot profile differs from the request.")
         input_files[str(scene_manifest)] = _sha(scene_manifest)
     deployment = load_config(root / _COMPONENTS["deployment"])

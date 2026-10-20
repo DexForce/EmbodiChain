@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -357,12 +358,28 @@ def _preview_place(
         }
     placed = engine.plan(grounded.invocation, future)
     if not placed.plan_success.all():
-        probe = placed.diagnostics.metadata.get("gen_sim_place_waypoint_probe", {})
+        diagnostics = placed.diagnostics
+        keyframes = diagnostics.metadata.get("gen_sim_place_keyframe_preflight", {})
+        probe = diagnostics.metadata.get("gen_sim_place_waypoint_probe", {})
+        qualified = keyframes.get("valid", probe.get("kinematic_valid"))
         return {
             "valid": False,
             "status": "unqualified",
             "reason": "place_planning_failed",
-            "unreachable_waypoints": probe.get("kinematic_valid") is False,
+            "unreachable_waypoints": None if qualified is None else not qualified,
+            "place_diagnostics": {
+                "backend": diagnostics.backend,
+                "messages": list(diagnostics.messages),
+                "metadata": deepcopy(dict(diagnostics.metadata)),
+                "failure": (
+                    None
+                    if diagnostics.failure is None
+                    else {
+                        "code": diagnostics.failure.code,
+                        "retryable": diagnostics.failure.retryable,
+                    }
+                ),
+            },
         }
     if not _validate_final_plan_velocity(placed, action.robot)["valid_mask"].all():
         return {

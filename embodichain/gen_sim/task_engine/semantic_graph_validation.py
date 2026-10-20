@@ -425,11 +425,17 @@ def validate_graph_coverage(
 
 
 def _identities(root: Path, graph: Mapping[str, Any], spec: TaskSpec) -> dict[str, Any]:
+    from .robot_profiles import _robot_asset_digest
+
+    robot_assets = _robot_asset_digest(
+        load_config(root / _FILES["embodiment_digest"]), root
+    )
     return {
         "task_spec_semantic_hash": spec.semantic_hash,
         "task_spec_digest": canonical_hash(spec.to_dict()),
         "graph_digest": canonical_hash(graph),
         "integration_fingerprint": graph["integration_fingerprint"],
+        **({"robot_asset_digest": robot_assets} if robot_assets is not None else {}),
         "source_manifest_digest": (
             canonical_hash(load_config(root / "static_scene_manifest.json"))
             if (root / "static_scene_manifest.json").is_file()
@@ -589,12 +595,13 @@ def verify_graph_contract(
         )
     spec = TaskSpec.from_dict(load_config(spec_path))
     envelope = load_config(validation_path)
+    identities = _identities(root, graph, spec)
     keys = {
         "schema_version",
         "checker_revision",
         "source",
         "coverage",
-        *_identities(root, graph, spec),
+        *identities,
     }
     if (
         type(envelope) is not dict
@@ -603,9 +610,7 @@ def verify_graph_contract(
         or envelope["checker_revision"] != _CHECKER_REVISION
     ):
         raise ValueError("Unsupported TaskSpec coverage envelope.")
-    if any(
-        envelope[key] != value for key, value in _identities(root, graph, spec).items()
-    ):
+    if any(envelope[key] != value for key, value in identities.items()):
         raise ValueError(
             "TaskSpec coverage identity drifted; declarations are not interchangeable."
         )

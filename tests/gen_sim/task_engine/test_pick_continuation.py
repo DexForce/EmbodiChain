@@ -30,6 +30,7 @@ from embodichain.lab.sim.atomic_actions import (
     PlannerDiagnostics,
 )
 from embodichain.lab.sim.atomic_actions.state import EntityState
+from embodichain.lab.sim.atomic_actions.plans import PlanningFailure
 from embodichain.lab.task_program.semantics import (
     Pick,
     Place,
@@ -698,6 +699,40 @@ def test_preview_uses_emitted_pick_fk_and_private_state_not_intended_lift(
     assert torch.equal(predicted.scene.entities["item"].pose, data.fk)
     assert torch.equal(data.context.scene.entities["item"].pose, data.pose)
     assert torch.equal(data.context.last_qpos, torch.zeros(1, 3))
+
+
+@pytest.mark.parametrize("qualified", [False, True, None])
+def test_failed_place_preview_preserves_child_diagnostics(
+    monkeypatch, qualified
+) -> None:
+    data = _preview_fixture(monkeypatch)
+    metadata = {"child_detail": {"candidate": 4}}
+    if qualified is not None:
+        metadata["gen_sim_place_keyframe_preflight"] = {"valid": qualified}
+    data.placed.plan_success = torch.tensor([False])
+    data.placed.diagnostics = PlannerDiagnostics(
+        backend="test",
+        messages=("Required release waypoint failed.",),
+        failure=PlanningFailure("child_place_rejected", retryable=False),
+        metadata=metadata,
+    )
+
+    result = gate.preview_place(
+        data.action, data.request, data.context, data.picked, data.preview
+    )
+
+    assert result["status"] == "unqualified"
+    assert result["unreachable_waypoints"] is (
+        None if qualified is None else not qualified
+    )
+    child = result["place_diagnostics"]
+    assert child["messages"] == ["Required release waypoint failed."]
+    assert child["failure"] == {"code": "child_place_rejected", "retryable": False}
+    assert child["metadata"] == metadata
+    child["metadata"]["child_detail"]["candidate"] = 99
+    assert metadata["child_detail"]["candidate"] == 4
+    assert data.placed.diagnostics.metadata["child_detail"]["candidate"] == 4
+    assert not gate._PREVIEW.get()
 
 
 @pytest.mark.parametrize("damage", ["key", "target"])

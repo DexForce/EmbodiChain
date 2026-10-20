@@ -45,7 +45,11 @@ def resolve_profile(value: str, graph: Mapping[str, Any]) -> str:
         or node.get("call", {}).get("call_id") == "simulation.pour"
         for node in graph["nodes"]
     )
-    return COMPOSITION_PROFILE if pouring else CONTACT_PROFILE
+    if pouring:
+        return COMPOSITION_PROFILE
+    if all(node.get("task_type") in {"E1", "E2", "E6"} for node in graph["nodes"]):
+        return "default"
+    return CONTACT_PROFILE
 
 
 def experimental_release_enabled(profile: str, override: bool | None) -> bool:

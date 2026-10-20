@@ -50,6 +50,7 @@ from .motion import _CARTESIAN_APPROACH, _joint_velocity_limits
 from .pick_path import _pose_path_valid
 from .pick_safety import _PICK_GRASP_RULE
 from . import place_recovery
+from .solver_tolerances import _pose_validation_parameters
 
 __all__: list[str] = []
 
@@ -298,7 +299,7 @@ def capture_keyframes(action: Any, poses: torch.Tensor) -> torch.Tensor:
 
 
 def _tolerances(robot: Any, part: str) -> tuple[float, float]:
-    params = robot.get_solver(part).get_iteration_params()
+    params = _pose_validation_parameters(robot.get_solver(part))
     result = params["pos_eps"], params["rot_eps"]
     if any(not math.isfinite(value) or value <= 0 for value in result):
         raise ValueError("Place requires the original finite solver tolerances.")

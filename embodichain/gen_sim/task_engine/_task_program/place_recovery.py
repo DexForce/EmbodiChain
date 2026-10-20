@@ -32,6 +32,7 @@ from .planning_probe import _validate_final_plan_velocity
 from .held_alignment_recovery import _RandomState, _cuda_devices
 from .adaptive_grasp import ADAPTIVE_GRASP
 from .scene_geometry import capture_scene_vertices, scene_components, world_bounds
+from .solver_tolerances import _pose_validation_parameters
 
 __all__: list[str] = []
 
@@ -174,7 +175,7 @@ def inspect(action: Any, request: Any, context: Any, plan: Any) -> dict[str, Any
     reference = rotations[:1].expand_as(rotations)
     rotation_max = float(quat_error_magnitude(rotations, reference).max())
     rotation_path = float(quat_error_magnitude(rotations[1:], rotations[:-1]).sum())
-    rot_eps = action.robot.get_solver(arm.control_part).get_iteration_params()[
+    rot_eps = _pose_validation_parameters(action.robot.get_solver(arm.control_part))[
         "rot_eps"
     ]
     poses = fk @ pose_inv(held.object_to_eef)[:, None]
@@ -331,9 +332,9 @@ def preflight(action: Any, request: Any, context: Any) -> dict[str, Any] | None:
                 fk = action.robot.compute_batch_fk(
                     qpos=qpos, name=arm.control_part, to_matrix=True
                 )
-                params = action.robot.get_solver(
-                    arm.control_part
-                ).get_iteration_params()
+                params = _pose_validation_parameters(
+                    action.robot.get_solver(arm.control_part)
+                )
                 record["fk_valid"] = _pose_path_valid(
                     fk, poses, params["pos_eps"], params["rot_eps"]
                 )

@@ -262,11 +262,26 @@ class TaskEngineCoordinator:
             }
             try:
                 planner = self.semantic_planner
-                if runtime_profile != "default":
+                from ..robot_profiles import _NEW_PROFILES, _profile_lateral_positions
+
+                robot_profile = str(adaptation.scene_manifest["robot_profile"])
+                lateral_positions = _profile_lateral_positions(
+                    robot_profile,
+                    (
+                        adaptation.physical_input.embodiment
+                        if robot_profile in _NEW_PROFILES
+                        and adaptation.physical_input is not None
+                        else None
+                    ),
+                )
+                if runtime_profile != "default" or lateral_positions is not None:
                     from copy import copy
 
                     planner = copy(planner)
+                if runtime_profile != "default":
                     planner.reuse_pour_resource = True
+                if lateral_positions is not None:
+                    planner.resource_lateral_positions = lateral_positions
                 plan = planner.plan_spec(
                     selected,
                     role_bindings,

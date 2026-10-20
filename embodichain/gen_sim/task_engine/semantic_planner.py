@@ -82,6 +82,7 @@ class SemanticTaskPlanner:
     """
 
     reuse_pour_resource: bool = False
+    resource_lateral_positions: Mapping[str, float] | None = None
 
     def __init__(
         self,
@@ -994,6 +995,11 @@ class SemanticTaskPlanner:
         # The canonical dual-Franka embodiment faces world -X: its right arm
         # base is on +Y and its left arm base is on -Y.
         preferred = "right" if lateral >= 0.0 else "left"
+        if self.resource_lateral_positions is not None:
+            preferred = min(
+                ("right", "left"),
+                key=lambda side: abs(lateral - self.resource_lateral_positions[side]),
+            )
         if preferred not in occupied_resources:
             return preferred
         alternate = "left" if preferred == "right" else "right"

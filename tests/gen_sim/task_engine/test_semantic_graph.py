@@ -941,6 +941,47 @@ def test_dual_franka_mount_is_bound_to_the_scene_table() -> None:
     assert embodiment["simulation"]["init_pos"] == pytest.approx([-0.7, 0.0, 0.704499])
 
 
+@pytest.mark.parametrize("robot_profile", ["dual_franka", "dual_ur10"])
+def test_selected_robot_bundle_composes_and_keeps_identity(
+    tmp_path: Path,
+    robot_profile: str,
+) -> None:
+    graph = _graph()
+    graph["nodes"][0]["call"] = {
+        "kind": "pick",
+        "object": "bottle",
+        "resources": {"primary": "left"},
+    }
+    graph["nodes"][1]["call"] = {
+        "kind": "registered",
+        "call_id": "simulation.place_relative",
+        "arguments": {"object": "bottle", "reference": "table", "relation": "on"},
+        "resources": {"primary": "left"},
+    }
+    for group in graph["task_groups"]:
+        group["success"] = {"kind": "call_completed"}
+    generated, paths = generate_task_program_bundle(
+        graph,
+        _prepared_axis_scene(tmp_path),
+        tmp_path / "bundle",
+        robot_profile=robot_profile,
+    )
+    record = load_config(paths.integration_fingerprint)
+    _verify_program_projection(paths.program, generated)
+    integration = _verify_integration_fingerprint(
+        paths.root,
+        paths.deployment,
+        generated,
+        record,
+    )
+    integration.integration.registration.assert_unchanged()
+    embodiment = load_config(paths.embodiment)
+    assert embodiment["embodiment_id"].startswith(robot_profile)
+    assert len(embodiment["simulation"]["control_parts"]["left_arm"]) == (
+        6 if robot_profile == "dual_ur10" else 7
+    )
+
+
 def test_reset_settles_the_scene_owned_rigid_object_set() -> None:
     scene = SimpleNamespace(
         rigid_objects=(

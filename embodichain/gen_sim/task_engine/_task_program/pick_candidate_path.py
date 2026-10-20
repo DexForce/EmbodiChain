@@ -44,6 +44,7 @@ from .adaptive_grasp import ADAPTIVE_GRASP
 from .motion import _cartesian_samples, resolve_continuous_ik_path
 from .pick_path import _pose_path_valid
 from .pick_safety import _PICK_GRASP_RULE
+from .solver_tolerances import _pose_validation_parameters
 
 __all__: list[str] = []
 
@@ -146,7 +147,7 @@ def geometric_variants(
 
 
 def _tolerances(robot: Any, part: str) -> tuple[float, float]:
-    parameters = robot.get_solver(part).get_iteration_params()
+    parameters = _pose_validation_parameters(robot.get_solver(part))
     values = parameters["pos_eps"], parameters["rot_eps"]
     if any(not math.isfinite(value) or value <= 0 for value in values):
         raise ValueError("Pick IK pose tolerances are unavailable.")

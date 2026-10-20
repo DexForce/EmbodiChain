@@ -198,6 +198,169 @@ def test_prompt_same_part_continuation_does_not_merge_nouns() -> None:
     assert "empty" in prompt
 
 
+def test_prompt_preserves_containment_and_repeated_destination() -> None:
+    prompt = interpretation_module._instruction_prompt(
+        "Place the fruit inside a bowl, then put another fruit in the same bowl."
+    )
+    assert "relation=inside, not on" in prompt
+    assert (
+        "step_result identifies the manipulated object, not its destination" in prompt
+    )
+    assert "same bowl" in prompt
+    assert "do not stack the second object on the first" in prompt
+
+
+def _placement_step(step_id: str, obj: str, target: str, relation: str) -> dict:
+    step = interpretation_module._instruction_shape_example()["steps"][0]
+    step.update(id=step_id, task_type="E1", orientation_goal="none", relation=relation)
+    step["object"]["reference"] = obj
+    step["target"] = dict(step["object"], reference=target)
+    return step
+
+
+def test_literal_containment_conflict_requests_model_repair_without_rewriting() -> None:
+    invalid = {"steps": [_placement_step("a", "fruit", "the bowl", "on")]}
+    repaired = deepcopy(invalid)
+    repaired["steps"][0]["relation"] = "inside"
+    responses = iter((invalid, repaired))
+    prompts = []
+
+    def caller(**kwargs):
+        prompts.append(kwargs["prompt"])
+        return deepcopy(next(responses))
+
+    result = interpretation_module.interpret_instruction_draft(
+        "Put the fruit into the bowl.", caller=caller
+    )
+    assert result.attempts == 2
+    assert result.intent == repaired
+    assert invalid["steps"][0]["relation"] == "on"
+    assert "Explicit containment" in prompts[1]
+
+
+def test_persistent_literal_containment_conflict_fails_before_grounding() -> None:
+    caller = Mock(return_value={"steps": [_placement_step("a", "fruit", "bowl", "on")]})
+    with pytest.raises(ValueError, match="after one repair.*containment"):
+        interpretation_module.interpret_instruction_draft(
+            "Place fruit inside bowl.", caller=caller
+        )
+    assert caller.call_count == 2
+
+
+@pytest.mark.parametrize(
+    "instruction,obj",
+    [
+        ("Place fruit on the bowl.", "fruit"),
+        ("Do not put fruit into the bowl; place it on the bowl.", "fruit"),
+        ("Put fruit into a box, then place a cup on the bowl.", "cup"),
+        ("Put fruit into bowl, then place a cup on bowl.", "cup"),
+        ("Put fruit into bowl, then place fruit on bowl.", "fruit"),
+    ],
+)
+def test_containment_guard_does_not_reinterpret_explicit_on(instruction, obj) -> None:
+    intent = {"steps": [_placement_step("a", obj, "bowl", "on")]}
+    result = interpretation_module.interpret_instruction_draft(
+        instruction, caller=Mock(return_value=intent)
+    )
+    assert result.attempts == 1
+    assert result.intent == intent
+
+
+def test_chinese_literal_containment_and_same_target_request_repair() -> None:
+    first = _placement_step("a", "苹果", "抽屉左侧的果盘", "on")
+    second = _placement_step("b", "橙子", "同一果盘", "on")
+    second["depends_on"] = ["a"]
+    invalid = {"steps": [first, second]}
+    repaired = deepcopy(invalid)
+    for step in repaired["steps"]:
+        step["relation"] = "inside"
+    responses = iter((invalid, repaired))
+    result = interpretation_module.interpret_instruction_draft(
+        "把苹果放入抽屉左侧的果盘，再把橙子放入同一果盘。",
+        caller=lambda **_: deepcopy(next(responses)),
+    )
+    assert result.attempts == 2
+    assert result.intent == repaired
+
+
+def test_same_destination_cannot_reference_prior_manipulated_object() -> None:
+    first = _placement_step("a", "fruit", "large bowl", "inside")
+    second = _placement_step("b", "cup", "same bowl", "inside")
+    second.update(target=_result_selector("a"), depends_on=["a"])
+    invalid = {"steps": [first, second]}
+    repaired = deepcopy(invalid)
+    repaired["steps"][1]["target"] = dict(first["target"], reference="same bowl")
+    responses = iter((invalid, repaired))
+    result = interpretation_module.interpret_instruction_draft(
+        "Put fruit into large bowl, then put cup into the same bowl.",
+        caller=lambda **_: deepcopy(next(responses)),
+    )
+    assert result.attempts == 2
+    assert result.intent == repaired
+
+
+def test_previous_manipulated_container_remains_valid_step_result_target() -> None:
+    first = _placement_step("a", "bowl", "tray", "inside")
+    second = _placement_step("b", "fruit", "same bowl", "inside")
+    second.update(target=_result_selector("a"), depends_on=["a"])
+    intent = {"steps": [first, second]}
+    result = interpretation_module.interpret_instruction_draft(
+        "Put bowl into tray, then put fruit into the same bowl.",
+        caller=Mock(return_value=intent),
+    )
+    assert result.attempts == 1
+    assert result.intent == intent
+
+
+@pytest.mark.parametrize("result_object", [False, True])
+def test_prior_containment_does_not_override_later_relative_placement(result_object):
+    first = _placement_step("a", "fruit", "bowl", "inside")
+    second = _placement_step("b", "fruit", "bowl", "left_of")
+    second["depends_on"] = ["a"]
+    if result_object:
+        second["object"] = _result_selector("a")
+    intent = {"steps": [first, second]}
+    result = interpretation_module.interpret_instruction_draft(
+        "Put fruit into bowl, then move fruit to the left of bowl.",
+        caller=Mock(return_value=intent),
+    )
+    assert result.attempts == 1
+    assert result.intent == intent
+
+
+@pytest.mark.parametrize(
+    "instruction",
+    [
+        "Move fruit previously put inside bowl to the left of bowl.",
+        "I put fruit into bowl yesterday; now move it to the left of bowl.",
+        "If I put fruit into bowl, move it to the left of bowl.",
+    ],
+)
+def test_historical_inside_description_is_not_a_current_containment_command(
+    instruction,
+):
+    intent = {"steps": [_placement_step("a", "fruit", "bowl", "left_of")]}
+    result = interpretation_module.interpret_instruction_draft(
+        instruction,
+        caller=Mock(return_value=intent),
+    )
+    assert result.attempts == 1
+    assert result.intent == intent
+
+
+def test_same_container_location_description_does_not_replace_step_result_target():
+    first = _placement_step("a", "tray", "bowl", "inside")
+    second = _placement_step("b", "cup", "tray", "on")
+    second.update(target=_result_selector("a"), depends_on=["a"])
+    intent = {"steps": [first, second]}
+    result = interpretation_module.interpret_instruction_draft(
+        "Put tray into bowl, then put cup on the tray beside the same bowl.",
+        caller=Mock(return_value=intent),
+    )
+    assert result.attempts == 1
+    assert result.intent == intent
+
+
 def test_e6_coreference_keeps_order_and_final_closed_state() -> None:
     from embodichain.gen_sim.task_engine.agent import TaskAgent
     from embodichain.gen_sim.task_engine.task_spec import task_spec_from_candidate

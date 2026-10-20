@@ -20,6 +20,7 @@ Paths below are relative to `embodichain/gen_sim/` unless qualified.
 | General asset ingest | `asset_engine/pipeline/ingest.py`: `ingest_one_asset()` |
 | Articulated asset generation | `asset_engine/clients/articulated_generation.py`, `asset_engine/utils/articulated_usdc_utils.py` |
 | Generated task semantics | `embodichain/gen_sim/task_spec/` and `task_engine/task_spec.py`: compact TaskSpec generation and cache adapter |
+| Robot profile selection | `task_engine/robot_profiles.py`: shared Robotiq hands, robot-specific arm assembly and mounting |
 | Web app configuration | `gradio_ui/gradio_app.py`, `app_env.py` |
 | Session-owned subprocesses | `gradio_ui/app_processes.py`: `SessionProcessRegistry` |
 
@@ -28,6 +29,21 @@ generation → placement refinement → export. Segmentation and Asset Engine
 clients are closed in `finally` blocks; VLM lifetime is separate.
 Edit: import export → validate graph/typed edit plan → generate additions
 → change layout → overwrite export. Combined image/edit mode generates first.
+
+Task Engine `prepare`/`run-all --robot-profile` selects `dual_franka`,
+`dual_ur10` or `dual_tianji`; `tianji_marvin` remains a compatible selector alias
+without changing existing serialized model IDs or frozen-reference receipts.
+The latter two robots retain the canonical complete Robotiq hands. Marvin uses
+its registered bare whole-body asset, not two copies of that robot.
+Source-asset preflight precedes provider calls, while an explicit
+physical reference owns its frozen model and arm anchors. Robot switching
+requires a new bundle; `run --bundle` never replaces its embodiment. New-profile
+TaskSpec envelopes seal robot assets as well as component declarations. Static
+assembly/preflight is not collision, contact or complete-task qualification.
+UR10 ready/Park shoulder pan faces the table under the shared mount; its zero
+pan pose faces away. `_task_program/solver_tolerances.py` preserves iterative
+solver budgets and supplies explicit analytic-UR FK validation budgets without
+requiring or mutating an iteration API on the shared solver.
 
 Read [pipeline details](pipeline-details.md) for stage contracts, parser resume
 behavior, Gradio artifact ownership and focused failure diagnosis.
@@ -73,6 +89,10 @@ ordered intermediate achievements as acyclic `milestones`.
 Interpretation checks explicit held-resource conflicts before grounding using
 the existing bounded repair. Only `step_result` proves cross-step identity;
 unknown scene aliases remain uncertain, not an identity or resource certificate.
+The same two-attempt boundary rejects literal containment/repeated-destination
+contradictions only when one current placement clause names its object and target.
+Historical descriptions, prior-result objects and ambiguous repeated commands are
+not locally reinterpreted; the guard never rewrites model output or task goals.
 Completion evaluation requires trajectory evidence for those achievements and
 their predecessor order; incomplete `always` windows cannot certify success.
 Scene output is a scene-binding and measured-state input to that protocol; it
@@ -315,7 +335,10 @@ vectorized legacy execution needs an explicit strict configuration.
 Only the contact profile adds a material-only Robotiq pad
 overlay (static/dynamic friction 2.85/2.70); composition retains original materials.
 Automatic selection uses the validated recipe: any E3/Pour selects composition,
-otherwise contact. It never tests task IDs, object UIDs or text-name heuristics.
+pure E1/E2/E6 recipes retain the original default grip policy, and other recipes
+retain contact. It never tests task IDs, object UIDs or text-name heuristics.
+The automatic ordinary policy still uses the authorized 100/100/30 mm supported
+placement tolerances. Explicit profile overrides remain unchanged.
 E3 auto-arm preference uses the existing source/receiver midpoint rule; explicit
 arm requests and the owner of an already-held source keep precedence. This is
 only a preference, not a reachability certificate; native continuation and

@@ -29,6 +29,7 @@ from typing import Any, Final, Sequence
 from .config import load_task_engine_config
 from .orchestration.scene_adapter import SceneAdapter
 from .run_directory import reserve_run_directory
+from .robot_profiles import _CLI_PROFILES, _require_robot_assets
 from .workflow import (
     SubprocessActionExecutor,
     TaskEngineWorkflow,
@@ -44,15 +45,7 @@ from .workflow_contracts import (
 __all__ = ["build_parser", "main"]
 
 
-_ROBOT_PROFILES = (
-    "ur5",
-    "ur10",
-    "dual_ur5",
-    "dual_ur10",
-    "franka",
-    "dual_franka",
-    "dual_franka_pgi",
-)
+_ROBOT_PROFILES = _CLI_PROFILES
 _MODES: Final = ("image", "image-edit", "scene", "scene-edit")
 
 
@@ -135,6 +128,7 @@ def _add_workflow_arguments(parser: argparse.ArgumentParser) -> None:
         "--robot-profile",
         choices=_ROBOT_PROFILES,
         default="dual_franka",
+        help="Robot deployment selector; tianji_marvin is a legacy alias of dual_tianji.",
     )
     _add_failure_policy_argument(parser)
 
@@ -315,9 +309,14 @@ def _run_workflow(
     reference_image = getattr(args, "reference_image", None)
     if reference_image and args.mode != "scene":
         parser.error("--reference-image requires --mode scene.")
+    workflow_cfg, planning_cfg, execution_cfg = load_task_engine_config(args.config)
+    if planning_cfg.physical_reference is None:
+        try:
+            _require_robot_assets(args.robot_profile)
+        except ValueError as exc:
+            parser.error(str(exc))
     adapter = SceneAdapter(model=args.model, robot_profile=args.robot_profile)
     workflow = TaskEngineWorkflow(scene_adapter=adapter)
-    workflow_cfg, planning_cfg, execution_cfg = load_task_engine_config(args.config)
     if reference_image and planning_cfg.physical_reference is not None:
         parser.error(
             "--reference-image cannot qualify a different physical_reference model."

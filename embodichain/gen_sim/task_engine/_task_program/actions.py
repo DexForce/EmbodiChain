@@ -74,6 +74,7 @@ from .adaptive_grasp import (
 )
 from .articulation_collision import robot_collision_scope
 from .held_alignment_recovery import _RandomState, _cuda_devices
+from .solver_tolerances import _pose_validation_parameters
 from .pick_safety import (
     _PICK_GRASP_RULE,
     _inspect_pick_motion,
@@ -2752,7 +2753,9 @@ class GenSimPlace(Place):
             "valid"
         ]:
             return first
-        parameters = self.robot.get_solver(arm.control_part).get_iteration_params()
+        parameters = _pose_validation_parameters(
+            self.robot.get_solver(arm.control_part)
+        )
         state = _RandomState.capture(
             _cuda_devices(self.robot.device, context.robot.qpos.device)
         )

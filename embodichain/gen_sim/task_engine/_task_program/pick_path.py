@@ -39,6 +39,7 @@ from .articulation_collision import check_free_motion
 from .held_alignment_recovery import _RandomState, _cuda_devices
 from .motion import _joint_velocity_limits, resolve_continuous_ik_path
 from .pick_safety import _inspect_pick_plan
+from .solver_tolerances import _pose_validation_parameters
 
 __all__: list[str] = []
 
@@ -228,7 +229,7 @@ def rebuild(action: Any, request: Any, context: Any, first: Any, selection: Any)
             torch.linalg.vector_norm(fk[0, :, :3, 3] - pre[0, :3, 3], dim=-1).argmin()
         )
         solver = action.robot.get_solver(arm.control_part)
-        parameters = solver.get_iteration_params()
+        parameters = _pose_validation_parameters(solver)
         pos_eps, rot_eps = parameters["pos_eps"], parameters["rot_eps"]
         if any(not math.isfinite(v) or v <= 0 for v in (pos_eps, rot_eps)):
             raise ValueError("Pick IK pose tolerances are unavailable.")

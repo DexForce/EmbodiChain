@@ -152,6 +152,10 @@ class _InstructionResourceError(ValueError):
     """Identify explicit held-resource conflicts before scene grounding."""
 
 
+class _InstructionPlacementError(ValueError):
+    """Reject a placement contradicted by literal source evidence."""
+
+
 @dataclass(frozen=True)
 class InstructionDraftResult:
     """One validated, scene-independent interpretation and its audit metadata."""
@@ -289,6 +293,7 @@ def interpret_instruction_draft(
                 _coerce_instruction_response(response)
             )
             intent = validate_instruction_intent(normalized)
+            _validate_instruction_placements(instruction_text, intent)
             return InstructionDraftResult(
                 intent=intent,
                 model=selected_model or "injected_caller",
@@ -303,6 +308,79 @@ def interpret_instruction_draft(
                 ) from error
             first_error = error
     raise AssertionError("unreachable")
+
+
+def _validate_instruction_placements(
+    instruction: str, intent: InstructionIntent
+) -> None:
+    """Check literal destination evidence without rewriting or guessing references."""
+    clauses = re.split(r"[，,；;。\n.!?！？]", instruction.casefold())
+    positive = [
+        clause
+        for clause in clauses
+        if not re.search(r"不要|不得|不能|别(?=把|将|放|装)|\b(?:not|never)\b", clause)
+    ]
+    previous: dict[str, dict[str, Any]] = {}
+    for step in intent["steps"]:
+        target = step["target"]
+        prior = previous.get(target.get("step_id", ""), {})
+        previous[step["id"]] = step
+        obj = step["object"]
+        if step["task_type"] not in {"E1", "E4"} or obj["kind"] != "scene_ref":
+            continue
+        object_reference = obj["reference"].casefold()
+        matched = [clause for clause in positive if object_reference in clause]
+        # A literal object mentioned in multiple commands needs semantic resolution.
+        if len(matched) != 1 or matched[0].count(object_reference) != 1:
+            continue
+        clause = matched[0]
+        active = (
+            r"^\s*(?:(?:then|next|now|finally|please|and)\s+)*(?:"
+            r"(?:(?:再|然后|最后|先|请)\s*)*(?:把|将|取出)?\s*"
+            + re.escape(object_reference)
+            + r"\s*(?:放入|放进|收进|装入)|\b(?:put|place|insert|move|drop)\s+"
+            + r"(?:the\s+)?"
+            + re.escape(object_reference)
+            + r"\s+(?:into|inside)\s+)\s*(?:the\s+)?"
+        )
+        if target["kind"] == "scene_ref":
+            reference = str(target["reference"]).casefold()
+            ending = r"(?!\w)" if reference.isascii() else ""
+            evidence = re.compile(active + re.escape(reference) + ending)
+            surface = re.compile(
+                r"(?:放在|放到|\bon\s+)\s*(?:the\s+)?" + re.escape(reference) + ending
+            )
+            if (
+                step["relation"] != "inside"
+                and evidence.search(clause)
+                and not surface.search(clause)
+            ):
+                raise _InstructionPlacementError(
+                    f"Explicit containment for {target['reference']!r} requires "
+                    f"relation=inside, not {step['relation']!r}."
+                )
+        if target["kind"] == "step_result":
+            destination = prior.get("target", {})
+            source = prior.get("object", {})
+            if destination.get("kind") == source.get("kind") == "scene_ref":
+                phrase = destination["reference"].casefold()
+                old_object = source["reference"].casefold()
+                for start in range(len(phrase)):
+                    suffix = phrase[start:]
+                    if len(suffix) < 2 or old_object.endswith(suffix):
+                        continue
+                    if suffix.isascii():
+                        if start and not phrase[start - 1].isspace():
+                            continue
+                        same = r"\bsame\s+" + re.escape(suffix) + r"(?!\w)"
+                    else:
+                        same = r"同一(?:个|只|块)?" + re.escape(suffix)
+                    if re.search(active + same, clause):
+                        raise _InstructionPlacementError(
+                            "Explicit repeated destination refers to the earlier "
+                            "target, not its manipulated object. Keep the named "
+                            "destination as scene_ref instead of step_result."
+                        )
 
 
 def _normalize_instruction_intent_fields(
@@ -787,6 +865,15 @@ def _instruction_prompt(instruction: str) -> str:
         "use the opening step's result; intermediate target references to that "
         "same part also use its step_result. Do not merge independently selected native parts "
         "or distinct roles merely because they belong to one cabinet or appliance. "
+        "For placement, preserve containment: placing into or inside a container "
+        "requires relation=inside, not on. A location phrase describing that "
+        "container, such as 'the bowl left of the drawer', does not change the "
+        "placement relation to left_of. A step_result identifies the manipulated object, not its destination. "
+        "When another object goes into the same bowl or container, keep that "
+        "destination as a scene_ref with the explicit repeated destination phrase; "
+        "do not stack the second object on the first. Use a prior step_result "
+        "as the target only when that manipulated object itself is the requested "
+        "destination, not when the instruction repeats its former destination. "
         "Object directions are robot-relative; arm names are robot body sides. "
         "Preserve each concrete object or target phrase from the instruction as "
         "an open scene_ref.reference. Do not classify it or emit a scene UID. "
@@ -955,6 +1042,16 @@ def _instruction_selector_rules() -> str:
 
 def _instruction_repair_guidance(error: Exception) -> str:
     """Add narrow semantic guidance for errors weak JSON-mode models repeat."""
+    if isinstance(error, _InstructionPlacementError):
+        return (
+            "\nPlacement fidelity repair: re-read the original instruction. "
+            "Explicit containment, including 放入/放进/收进/装入, is relation=inside, "
+            "not on. A container's descriptive position is not the placement "
+            "relation. For 'put A into B, then put C into the same B', both "
+            "targets select B as scene_ref; step_result of the first placement "
+            "means A, not B. Do not change objects, destinations, ordering or "
+            "containment to obtain a bindable or easier task.\n"
+        )
     if isinstance(error, _InstructionResourceError):
         return (
             "\nHeld-resource repair rule: re-read the original instruction. "

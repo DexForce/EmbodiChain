@@ -33,6 +33,7 @@ from embodichain.lab.task_program.language import load_task_program
 from embodichain.utils.utility import load_config, save_config
 
 from .config import TaskEnginePlanningCfg
+from .robot_profiles import _canonical_robot_profile
 from .semantic_graph import SemanticTaskGraph, validate_semantic_task_graph
 from ._task_program.assembly import ADAPTER_CONTRACT, load_deployment
 from ._task_program.articulation_binding import (
@@ -64,16 +65,9 @@ from embodichain.gen_sim.task_spec import TaskSpec
 
 __all__ = ["TaskProgramBundlePaths", "generate_task_program_bundle"]
 
-_EMBODIMENT_COMPONENTS: Final = {
-    "dual_franka": "dual_franka_robotiq_arg2f_140.yaml",
-    "dual_franka_robotiq_arg2f_140": "dual_franka_robotiq_arg2f_140.yaml",
-    # Experiment-only profile; the production default remains Robotiq.
-    "dual_franka_pgi": "dual_franka_robotiq_arg2f_140.yaml",
-}
-
-# The generated ``move forward`` task intent has no metric distance.  Phase one
-# supports only the dual-Franka embodiment, whose two-arm top-down tray grasp
-# retains a reachable continuation over 0.14 m.  Keep this semantic route
+# The generated ``move forward`` task intent has no metric distance. This goal
+# was qualified with dual-Franka over 0.14 m; other robots retain the exact goal
+# subject to the same planning and safety gates. Keep this semantic route
 # target in the integration builder: the Atomic Action must execute the exact
 # grounded goal and must not silently clamp an unreachable caller request.
 _DUAL_FRANKA_COORDINATED_TRANSPORT_DISTANCE: Final = 0.14
@@ -219,8 +213,8 @@ def generate_task_program_bundle(
             whose scene must also be used before semantic planning. Frozen
             inputs bypass all graph-selected physical adaptation and calibration.
         output_dir: Fresh bundle staging directory.
-        robot_profile: Task Engine robot-profile selector. Phase one supports
-            only the canonical dual-Franka embodiment.
+        robot_profile: Task Engine robot-profile selector. New arm variants
+            retain the complete canonical Robotiq hand contract.
         max_episodes: Optional Gym episode limit.
         max_episode_steps: Optional Gym step limit. E8 caps this limit at 15000
             without increasing a smaller requested limit.
@@ -347,11 +341,13 @@ def generate_task_program_bundle(
     frozen = prepared_scene if isinstance(prepared_scene, FrozenPhysicalInput) else None
     if frozen is not None:
         frozen.assert_unchanged()
-        if str(robot_profile).strip() != frozen.robot_profile:
+        if _canonical_robot_profile(
+            str(robot_profile).strip()
+        ) != _canonical_robot_profile(frozen.robot_profile):
             raise ValueError("Frozen physical input owns its robot-profile selection.")
         if (
             fit_grasp_assets
-            or experiment
+            or requested_runtime_profile != "default"
             or twist_mass_source
             or twist_grip_depth_m is not None
             or twist_support_lift_m != 0.001
@@ -406,13 +402,9 @@ def generate_task_program_bundle(
     if twist_grip_depth_m is not None and not source_twist_routes:
         raise ValueError("Explicit knob depth candidates require an E8 deployment.")
     normalized_profile = str(robot_profile).strip()
-    try:
-        embodiment_filename = _EMBODIMENT_COMPONENTS[normalized_profile]
-    except KeyError as exc:
-        raise ValueError(
-            "Phase-one semantic bundle generation supports only dual_franka; "
-            f"received robot_profile={normalized_profile!r}."
-        ) from exc
+    from .robot_profiles import _validate_robot_profile
+
+    _validate_robot_profile(normalized_profile)
     root = Path(output_dir).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
     component_root = root / "components"
@@ -427,9 +419,13 @@ def generate_task_program_bundle(
                 "requested": requested_runtime_profile,
                 "selected": runtime_profile,
                 "rule": (
-                    "pour_recipe"
-                    if runtime_profile != CONTACT_PROFILE
-                    else "non_pour_recipe"
+                    "ordinary_rigid_recipe"
+                    if runtime_profile == "default"
+                    else (
+                        "pour_recipe"
+                        if runtime_profile != CONTACT_PROFILE
+                        else "non_pour_recipe"
+                    )
                 ),
             },
         )
@@ -439,15 +435,12 @@ def generate_task_program_bundle(
     )
 
     project_root = Path(__file__).resolve().parents[3]
-    embodiment_source = (
-        project_root
-        / "embodichain_tasks/configs/components/embodiments"
-        / embodiment_filename
-    )
+    from .robot_profiles import _load_robotiq_embodiment
+
     embodiment_payload = (
         deepcopy(frozen.embodiment)
         if frozen is not None
-        else load_config(embodiment_source)
+        else _load_robotiq_embodiment(normalized_profile, component_root)
     )
     if frozen is None:
         if normalized_profile == "dual_franka_pgi":
@@ -849,7 +842,7 @@ def generate_task_program_bundle(
         scene,
         stability_presets=stability["presets"],
     )
-    if experiment:
+    if experiment or requested_runtime_profile == AUTO_PROFILE:
         from .experiment_policy import apply_placement_tolerances
 
         apply_placement_tolerances(stability, program_payload)
@@ -3375,7 +3368,7 @@ def _bind_embodiment_to_scene(
 ) -> None:
     """Bind the generated deployment's robot mount to the current tabletop."""
     if table_top_z is None or not math.isfinite(float(table_top_z)):
-        raise ValueError("Dual-Franka deployment requires a derived tabletop height.")
+        raise ValueError("GenSim robot deployment requires a derived tabletop height.")
     simulation = embodiment.get("simulation")
     if not isinstance(simulation, dict):
         raise ValueError("Embodiment component has no simulation mapping.")
@@ -3383,6 +3376,10 @@ def _bind_embodiment_to_scene(
     for solver in simulation.get("solver_cfg", {}).values():
         if solver.get("class_type") == "PytorchSolver":
             solver.setdefault("pos_eps", 5e-3)
+    from .robot_profiles import _bind_new_mount
+
+    if _bind_new_mount(embodiment, float(table_top_z)):
+        return
     init_pos = simulation.get("init_pos")
     if not isinstance(init_pos, list) or len(init_pos) != 3:
         raise ValueError("Embodiment simulation.init_pos must contain three values.")
@@ -4604,7 +4601,14 @@ def _container_target_pose(
         None,
     )
     if mount is None:
-        return None
+        if not simulation.get("fpath"):
+            return None
+        from .robot_profiles import _arm_base_position
+
+        mount = {"transform": np.eye(4).tolist()}
+        position = _arm_base_position(embodiment, resource)
+        for axis in range(3):
+            mount["transform"][axis][3] = float(position[axis])
 
     def pose(source: dict[str, Any]) -> np.ndarray:
         if source.get("init_local_pose") is not None:

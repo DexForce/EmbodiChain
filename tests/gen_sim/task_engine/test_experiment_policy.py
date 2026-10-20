@@ -138,21 +138,20 @@ def test_packaged_defaults_enable_automatic_qualified_policy():
     assert execution.acceptance_mode == "experiment"
 
 
-def test_packaged_contact_defaults_reach_generated_bundle(support_scene, tmp_path):
+def test_explicit_contact_profile_reaches_generated_bundle(support_scene, tmp_path):
     from .test_support_bundle import _placement_graph, _load_bundle
     from embodichain.gen_sim.task_engine.task_program_bundle import (
         generate_task_program_bundle,
     )
     from embodichain.utils.utility import load_config
 
-    _, planning, _ = load_task_engine_config()
     _, paths = generate_task_program_bundle(
         _placement_graph(reference="tray"),
         support_scene,
         tmp_path / "default_contact",
         robot_profile="dual_franka",
-        runtime_profile=planning.runtime_profile,
-        experimental_open_release=planning.experimental_open_release,
+        runtime_profile="contact_experiment",
+        experimental_open_release=False,
     )
     _load_bundle(paths)
     assert load_config(paths.embodiment)["simulation"]["link_attrs"][
@@ -170,9 +169,7 @@ def test_packaged_contact_defaults_reach_generated_bundle(support_scene, tmp_pat
     constraints = load_config(paths.root / "task_program/constraints.json")
     assert constraints["runtime_profile"] == "contact_experiment"
     assert set(constraints["motion_samples"].values()) == {140, 152}
-    assert load_config(paths.root / "runtime_profile_selection.json")["selected"] == (
-        "contact_experiment"
-    )
+    assert not (paths.root / "runtime_profile_selection.json").exists()
 
 
 @pytest.mark.parametrize(
@@ -214,8 +211,14 @@ def test_composition_keeps_canonical_gripper_effort_without_changing_other_profi
 @pytest.mark.parametrize(
     ("task_type", "selected"),
     [
-        ("E1", "contact_experiment"),
+        ("E1", "default"),
+        ("E2", "default"),
+        ("E6", "default"),
         ("E4", "contact_experiment"),
+        ("E5", "contact_experiment"),
+        ("E7", "contact_experiment"),
+        ("E8", "contact_experiment"),
+        ("E9", "contact_experiment"),
         ("E3", "composition_experiment"),
     ],
 )
@@ -234,6 +237,70 @@ def test_auto_profile_uses_recipe_semantics_not_task_or_object_ids(task_type, se
     graph["task_id"] = "another-task"
     graph["nodes"][0]["call"]["object"] = "another-object"
     assert resolve_profile("auto", graph) == selected
+
+
+def test_auto_ordinary_bundle_preserves_grip_recipe_and_authorized_tolerances(
+    support_scene, tmp_path
+):
+    from .test_support_bundle import _placement_graph, _load_bundle
+    from embodichain.gen_sim.task_engine.task_program_bundle import (
+        generate_task_program_bundle,
+    )
+    from embodichain.utils.utility import load_config
+
+    _, paths = generate_task_program_bundle(
+        _placement_graph(reference="tray"),
+        support_scene,
+        tmp_path / "ordinary_auto",
+        robot_profile="dual_franka",
+        runtime_profile="auto",
+        experimental_open_release=False,
+    )
+    _load_bundle(paths)
+    simulation = load_config(paths.embodiment)["simulation"]
+    assert "gen_sim_contact_pads" not in simulation.get("link_attrs", {})
+    assert (
+        load_config(paths.integration)["profile"]["action_options"]["pick"][
+            "hand_interp_steps"
+        ]
+        == 12
+    )
+    constraints = load_config(paths.root / "task_program/constraints.json")
+    assert constraints["runtime_profile"] == "default"
+    assert set(constraints["motion_samples"].values()) == {140}
+    assert constraints["experimental_open_release"] is False
+    placements = [
+        value
+        for value in constraints["presets"].values()
+        if value.get("kind") == "supported_placement"
+    ]
+    assert placements
+    assert all(
+        (
+            value["position_tolerance"],
+            value["com_tolerance"],
+            value["support_tolerance"],
+        )
+        == (0.10, 0.10, 0.03)
+        for value in placements
+    )
+    assert load_config(paths.root / "runtime_profile_selection.json") == {
+        "schema_version": "gen_sim_runtime_profile_selection/v1",
+        "requested": "auto",
+        "selected": "default",
+        "rule": "ordinary_rigid_recipe",
+    }
+
+
+def test_mixed_contact_and_pour_recipes_keep_existing_profile_selection():
+    from embodichain.gen_sim.task_engine.experiment_policy import resolve_profile
+
+    graph = {"nodes": [{"task_type": t, "call": {}} for t in ("E1", "E2", "E6")]}
+    assert resolve_profile("auto", graph) == "default"
+    graph["nodes"].append({"task_type": "E4", "call": {}})
+    assert resolve_profile("auto", graph) == "contact_experiment"
+    graph["nodes"].append({"task_type": "E3", "call": {}})
+    assert resolve_profile("auto", graph) == "composition_experiment"
 
 
 @pytest.mark.parametrize(
@@ -608,7 +675,7 @@ def test_release_override_is_independent_of_contact_strategy_and_tolerances(
         experimental_open_release=override,
     )
     _load_bundle(paths)
-    expected = override if override is not None else True
+    expected = override if override is not None else False
     assert observed and all(value is expected for value in observed)
     constraints = load_config(paths.root / "task_program/constraints.json")
     if override is None:
@@ -630,7 +697,7 @@ def test_release_override_is_independent_of_contact_strategy_and_tolerances(
         load_config(paths.integration)["profile"]["action_options"]["pick"][
             "hand_interp_steps"
         ]
-        == 24
+        == 12
     )
 
 

@@ -29,6 +29,8 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from ..robot_profiles import _canonical_robot_profile
+
 if TYPE_CHECKING:
     from .._task_program.physical_inputs import FrozenPhysicalInput
 
@@ -468,7 +470,9 @@ class SceneAdapter:
         selected_physical = physical_input or self.physical_input
         if selected_physical is not None:
             selected_physical.assert_unchanged()
-            if selected_physical.robot_profile != source_ref.robot_profile:
+            if _canonical_robot_profile(
+                selected_physical.robot_profile
+            ) != _canonical_robot_profile(source_ref.robot_profile):
                 raise ValueError("Selected physical input owns the robot profile.")
             if (
                 source_ref.z_rotation_degrees is not None
