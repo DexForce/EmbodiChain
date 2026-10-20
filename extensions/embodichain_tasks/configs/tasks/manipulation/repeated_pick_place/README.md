@@ -1,33 +1,5 @@
 # Repeated Pick and Place
 
-## Asset selection with a startup event
-
-`task.dual_ur5.assets.yaml` uses the same tabletop Pick/Place flow for a
-procedural cube and a Rubik's cube. Set
-`env.events.select_object.params.asset` to `cube` or `rubiks_cube` before loading
-the config. The `select_rigid_object_asset` startup functor replaces the physical
-object while retaining its `cube` UID. Each launch selects one asset for the
-whole vector environment; the event rejects partial rows and changes after a
-Task Program adapter has bound the scene.
-
-The Rubik's cube selection derives a centered, single-body USD at the source's
-authored rest pose. It retains source geometry/materials, removes joint DOFs,
-and uses the declared rigid-object physics. The original articulation asset
-and its separate task deployment remain available. Derived assets are cached
-under the configured EmbodiChain data root.
-
-The shared `program.assets.yaml` uses literal `{cube}` tokens in its overall
-and Pick/Place instructions. They are bound to the selected asset's `label`
-when an episode is described or a program is compiled. Labels do not change
-object IDs, targets, calls, or the source program template. Recording metadata
-includes the selected asset/source and the resolved overall/segment text.
-
-```bash
-python -m embodichain run-env --gym_config \
-  extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.dual_ur5.assets.yaml \
-  --headless --disable-sensor --device cpu --seed 0
-```
-
 The Task Program repeats cube transfers between two authored target poses. The
 configuration directory separates the physical environment, robot deployments,
 and expansion settings:

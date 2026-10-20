@@ -666,16 +666,12 @@ def resolve_demo_instruction(
         _config_value(selected, "instruction"), field_name="Task Program instruction"
     )
     if text is not None:
-        from ._asset_instructions import _render_asset_instruction
-
-        return _render_asset_instruction(target, text), "task_program"
+        return text, "task_program"
     text = _instruction_text(
         _config_value(config, "task_instruction"), field_name="task_instruction"
     )
     if text is not None:
-        from ._asset_instructions import _render_asset_instruction
-
-        return _render_asset_instruction(target, text), "task"
+        return text, "task"
 
     # Read legacy config even when online generation disables DatasetManager.
     descriptions: set[str] = set()
