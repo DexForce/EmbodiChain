@@ -186,21 +186,6 @@ branch identity does not imply equivalent measured states. Output status records
 planning/playback completion, with no measured physical-success authority or
 Gym dataset collection. Usage lives in the host's `README.md`.
 
-`embodichain benchmark atomic-action --robot ... --skill ... --planner ...`
-uses independent scenes and direct Atomic invocations through
-`scripts/benchmark/atomic_action/reference_benchmark.py`, `scenes.py` and
-`execution.py`, without a Gym or Task Program host. Shared sample helpers own
-assets, robot compatibility and protected expansion phases; Handover retains
-both Robotiq 2F-140 grippers. `evaluation.py` scores measured physical stages,
-separately from planning success, with fresh scenes for batches and repetitions.
-Per-row provenance records actual expansion deltas and protected-sample checks.
-Cartesian `ik_interp` paths bypass the selected planner. The explicit
-`--action` selector keeps the legacy benchmarks. Shared, versioned suite
-comparisons remain under `benchmark motion-generation --suite atomic_*`.
-`benchmark atomic-action-profile` retains the legacy profiler's defaults even
-when no `--action` is supplied.
-See the [benchmark guide](../../../scripts/benchmark/atomic_action/README.md).
-
 ## Recommended change sites
 
 | Change | Owning location |

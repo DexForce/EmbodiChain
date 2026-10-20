@@ -16,6 +16,7 @@
 
 """Profile individual atomic actions over preset scenes.
 
+Run one action or several actions in sequence, with optional replay videos.
 Run: embodichain benchmark atomic-action-profile --action move_end_effector
 """
 

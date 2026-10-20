@@ -23,7 +23,6 @@ import importlib
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 
 from embodichain import __version__
 
@@ -175,15 +174,6 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _load_handler(target: str) -> Callable[[Sequence[str] | None], None]:
     """Load a command handler from a ``module:attribute`` target."""
-    if target.startswith("scripts.benchmark."):
-        # Console entry points omit the checkout from sys.path. Resolve these
-        # source-only tools next to the selected core, including editable installs
-        # where another checkout has also registered a scripts namespace.
-        root = Path(__file__).resolve().parents[2]
-        if (root / "scripts/benchmark/__main__.py").is_file() and (
-            not sys.path or sys.path[0] != str(root)
-        ):
-            sys.path.insert(0, str(root))
     module_name, attribute = target.split(":", maxsplit=1)
     module = importlib.import_module(module_name)
     return getattr(module, attribute)

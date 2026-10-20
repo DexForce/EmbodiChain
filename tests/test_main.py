@@ -532,30 +532,6 @@ def test_nested_benchmark_help_uses_suite_parser(
     assert "--rebuild-report-only" in output
 
 
-def test_benchmark_console_resolves_checkout_without_cwd_on_import_path(
-    tmp_path: Path,
-) -> None:
-    """Editable console launchers find source benchmarks from outside the checkout."""
-    import subprocess
-
-    completed = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            "from embodichain.cli.main import main; main(['benchmark', 'atomic-action', '--help'])",
-        ],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
-    assert completed.returncode == 0, completed.stderr
-    assert "--robot" in completed.stdout
-    assert "--skill" in completed.stdout
-    assert "--planner" in completed.stdout
-
-
 def test_benchmark_help_distinguishes_benchmark_domains(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -566,7 +542,7 @@ def test_benchmark_help_distinguishes_benchmark_domains(
     assert "motion-generation" in output
     assert "Motion Planning or Atomic Skills suites" in output
     assert "atomic-action-profile" in output
-    assert re.search(r"\batomic-action\b(?!-profile)", output)
+    assert not re.search(r"\batomic-action\b(?!-profile)", output)
     assert "Profile individual atomic actions" in output
     assert "robotics-kinematic-solver" in output
     assert "rendering" in output
@@ -659,37 +635,12 @@ def test_atomic_action_profile_forwards_arguments_and_restores_argv(
     assert sys.argv is original_argv
 
 
-def test_atomic_action_reference_help_exposes_skill_selectors(
+def test_atomic_action_benchmark_name_is_rejected(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """The reference scene command exposes skill and planner selectors."""
+    """The former command is removed rather than retained as an alias."""
     with pytest.raises(SystemExit) as exc_info:
-        cli.main(["benchmark", "atomic-action", "--help"])
+        cli.main(["benchmark", "atomic-action", "--smoke"])
 
-    assert exc_info.value.code == 0
-    output = capsys.readouterr().out
-    assert "--skill" in output
-    assert "--planner" in output
-
-
-@pytest.mark.parametrize("arguments", [[], ["--smoke"]])
-def test_atomic_action_profile_keeps_legacy_default_without_action(
-    monkeypatch: pytest.MonkeyPatch, arguments: list[str]
-) -> None:
-    """Omitting --action keeps the profiler's default instead of changing hosts."""
-    from scripts.benchmark.atomic_action import run_benchmark
-
-    received: dict[str, object] = {}
-
-    def profile() -> list[Path]:
-        parsed = run_benchmark._parse_args()
-        received.update(actions=parsed.action, smoke=parsed.smoke)
-        return []
-
-    monkeypatch.setattr(run_benchmark, "run_all_benchmarks", profile)
-    cli.main(["benchmark", "atomic-action-profile", *arguments])
-
-    assert received == {
-        "actions": ["move_end_effector"],
-        "smoke": "--smoke" in arguments,
-    }
+    assert exc_info.value.code == 2
+    assert "invalid choice: 'atomic-action'" in capsys.readouterr().err

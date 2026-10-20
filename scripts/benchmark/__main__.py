@@ -23,7 +23,6 @@ Usage examples::
     embodichain benchmark robotics-kinematic-solver -s pytorch
     embodichain benchmark motion-generation --suite motion_panda_free_space_smoke
     embodichain benchmark motion-generation --suite atomic_franka_pgi_smoke
-    embodichain benchmark atomic-action --robot ur5 --skill all --smoke
     embodichain benchmark atomic-action-profile --smoke
     embodichain benchmark grasp-pose-generator --device cuda
     embodichain benchmark workspace-analyzer
@@ -58,16 +57,6 @@ def _run_motion_generation_cli(args: argparse.Namespace) -> None:
     from scripts.benchmark.motion_generation.run_benchmark import run_from_args
 
     run_from_args(args)
-
-
-def _run_atomic_action_cli(_: argparse.Namespace) -> None:
-    """Run reference scenes, retaining the explicit legacy action selector."""
-    if any(arg == "--action" or arg.startswith("--action=") for arg in sys.argv[1:]):
-        from scripts.benchmark.atomic_action.run_benchmark import main
-    else:
-        from scripts.benchmark.atomic_action.reference_benchmark import main
-
-    main()
 
 
 def _run_atomic_action_profile_cli(_: argparse.Namespace) -> None:
@@ -147,14 +136,6 @@ def main(argv: Sequence[str] | None = None) -> None:
     add_parser_arguments(motion_generation_parser)
     motion_generation_parser.set_defaults(func=_run_motion_generation_cli)
 
-    # -- atomic-action -------------------------------------------------------
-    atomic_action_parser = subparsers.add_parser(
-        "atomic-action",
-        add_help=False,
-        help="Benchmark reference Atomic scenes with affordance and trajectory expansion.",
-    )
-    atomic_action_parser.set_defaults(func=_run_atomic_action_cli)
-
     # -- atomic-action-profile -----------------------------------------------
     atomic_action_profile_parser = subparsers.add_parser(
         "atomic-action-profile",
@@ -197,7 +178,6 @@ def main(argv: Sequence[str] | None = None) -> None:
     # that each sub-command's entry point can call ``parse_args()`` normally.
     delegated_commands = {
         "rl",
-        "atomic-action",
         "atomic-action-profile",
         "grasp-pose-generator",
         "rendering",
