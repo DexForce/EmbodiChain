@@ -95,6 +95,7 @@ def load_run(path: Path | str) -> dict[str, Any]:
     timeline = _read(path / "timeline.json")
     data_manifest = _read(path / "data_manifest.json")
     environment = _read(path / "environment.json")
+    splits = _read(path / "splits.json")
     if not any((summary, efficiency, config)):
         raise FileNotFoundError(f"No run artifacts in {path}")
     seed = summary.get("training_seed", summary.get("seed", config.get("seed")))
@@ -121,6 +122,7 @@ def load_run(path: Path | str) -> dict[str, Any]:
             "timeline.json",
             "data_manifest.json",
             "environment.json",
+            "splits.json",
         )
         if not (path / name).exists()
     ]
@@ -173,6 +175,7 @@ def load_run(path: Path | str) -> dict[str, Any]:
         "config": config,
         "data_manifest": data_manifest,
         "environment": environment,
+        "splits": splits,
     }
 
 
@@ -206,6 +209,40 @@ def _gpu_models(run: dict[str, Any]) -> list[tuple[str, str]] | None:
     return sorted((row[2].strip(), row[3].strip()) for row in rows)
 
 
+def _evaluation_panels(run: dict[str, Any]) -> dict[str, list[int]] | None:
+    """Identify scored scenes; retain explicit ranges from historical runs."""
+    if run["stage"] != "showcase":
+        # Small-data gates also override reset positions, so seeds are not a
+        # complete scene identity for these diagnostic evaluations.
+        return None
+    config, splits = run["config"], run.get("splits", {})
+    panels = {}
+    for name, base_field, count_field, minimum in (
+        ("development_seeds", "dev_seed_base", "dev_scenes", 1),
+        ("test_seeds", "test_seed_base", "final_test_scenes", 0),
+    ):
+        base, count = config.get(base_field), config.get(count_field)
+        configured = (
+            list(range(base, base + count))
+            if type(base) is int and type(count) is int and count >= minimum
+            else None
+        )
+        seeds = splits.get(name, configured)
+        if (
+            not isinstance(seeds, list)
+            or len(seeds) < minimum
+            or any(type(seed) is not int for seed in seeds)
+            or len(set(seeds)) != len(seeds)
+            or (count is not None and (type(count) is not int or len(seeds) != count))
+            or (configured is not None and seeds != configured)
+        ):
+            return None
+        panels[name] = seeds
+    if set(panels["development_seeds"]) & set(panels["test_seeds"]):
+        return None
+    return panels
+
+
 def _fingerprint(run: dict[str, Any]) -> dict[str, Any]:
     config, environment = run["config"], run["environment"]
     schema = run["data_manifest"].get("schema", {})
@@ -218,6 +255,7 @@ def _fingerprint(run: dict[str, Any]) -> dict[str, Any]:
     threads = environment.get("torch_num_threads")
     learning_rate = _number(config.get("learning_rate"))
     result = {
+        "evaluation_panels": _evaluation_panels(run),
         "learning_rate": (
             learning_rate if learning_rate is not None and learning_rate > 0 else None
         ),

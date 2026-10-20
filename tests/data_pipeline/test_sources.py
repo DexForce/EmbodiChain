@@ -156,6 +156,35 @@ def test_live_and_resident_sources_share_windows_masks_and_rng(
     assert not (resident.data["obs"] == -100).any()
 
 
+@pytest.mark.parametrize("with_continuity", [False, True])
+@pytest.mark.parametrize("generations", [None, (1,)])
+def test_segment_filter_preserves_source_validity_and_episode_anchors(
+    with_continuity, generations
+):
+    data = _data()[:1].exclude("continuity_id")
+    if with_continuity:
+        data["continuity_id"] = torch.zeros(data.batch_size, dtype=torch.int64)
+    source = TensorDataSource(data, schema=_SCHEMA, source_id="segment-filter")
+    original = source.data.clone()
+    history_length = 2
+    segment_batch = source.sample_context(
+        32,
+        SequenceSpecCfg(history_length, 4, "segment", generations),
+        generator=torch.Generator().manual_seed(210),
+    )
+    assert segment_batch["segment_accepted"][segment_batch["valid"]].all()
+    assert all(torch.equal(source.data[key], original[key]) for key in original.keys())
+
+    episode_batch = source.sample_context(
+        64,
+        SequenceSpecCfg(history_length, 4),
+        generator=torch.Generator().manual_seed(210),
+    )
+    # Frame 3 is rejected only by the segment filter; episode mode retains it.
+    anchors = episode_batch["frame_ids"][:, history_length - 1, 2]
+    assert (anchors == 3).any()
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [

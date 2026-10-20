@@ -21,15 +21,20 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-import numpy as np
 
 if __package__ in {None, ""}:
-    repository = Path(__file__).resolve().parents[3]
-    sys.path[:0] = [
+    example_directory = Path(__file__).resolve().parent
+    repository = example_directory.parents[2]
+    # Direct-file startup otherwise lets our lerobot.py shadow the SDK. Keep
+    # the sanitized path when multiprocessing copies it into child processes.
+    sys.path[:] = [
         str(repository),
         str(repository / "extensions"),
         str(repository / "extensions/embodichain_tasks"),
+        *(entry for entry in sys.path if Path(entry).resolve() != example_directory),
     ]
+
+import numpy as np
 
 
 def _parse_args() -> argparse.Namespace:

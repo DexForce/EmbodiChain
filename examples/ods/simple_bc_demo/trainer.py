@@ -30,6 +30,7 @@ import sys
 import threading
 import time
 from collections import deque
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -191,6 +192,15 @@ class _BudgetExpired(Exception):
     pass
 
 
+def _add_error_note(error: BaseException, note: str) -> None:
+    """Retain secondary errors without replacing the original on Python 3.10."""
+    add_note = getattr(error, "add_note", None)
+    if add_note is not None:
+        add_note(note)
+    else:
+        print(note, file=sys.stderr)
+
+
 def _timeout(args: argparse.Namespace, tracker: EfficiencyTracker) -> float:
     if args.wall_time_budget is None:
         return 1800
@@ -219,9 +229,28 @@ def _wait(
     generation: int,
     args: argparse.Namespace,
     tracker: EfficiencyTracker,
+    *,
+    progress: Callable[[], Any] | None = None,
 ) -> None:
+    """Bound the full generation wait while draining events and checking health."""
+    timeout = _timeout(args, tracker)
+    deadline = time.monotonic() + timeout
     try:
-        engine.wait_for_generation(generation, timeout=_timeout(args, tracker))
+        while True:
+            if progress is not None:
+                progress()
+            remaining = min(deadline - time.monotonic(), _timeout(args, tracker))
+            if remaining <= 0:
+                raise TimeoutError(
+                    f"ODS generation {generation} was not published in {timeout}s"
+                )
+            try:
+                engine.wait_for_generation(generation, timeout=min(0.1, remaining))
+            except TimeoutError:
+                continue
+            if progress is not None:
+                progress()
+            return
     except TimeoutError:
         if args.wall_time_budget and tracker.elapsed_seconds() >= args.wall_time_budget:
             raise _BudgetExpired from None
@@ -651,6 +680,8 @@ def run(args: argparse.Namespace) -> None:
     if usage is not None:
         tracker.unique_frames = CompactFrameSet(usage.targets, accumulate=False)
     sampling_rng = SamplingRNG(args.sampling_seed)
+    checkpoint_save_times: dict[Path, float] = {}
+    selection_budget = args.wall_time_budget
 
     def save_training_checkpoint(
         path: Path,
@@ -668,6 +699,14 @@ def run(args: argparse.Namespace) -> None:
             config_args,
             run_id,
             sampling_rng_state=sampling_rng.state,
+        )
+        saved_at = tracker.elapsed_seconds()
+        tracker.record_checkpoint(str(path), policy_step=step, elapsed=saved_at)
+        checkpoint_save_times[path] = saved_at
+
+    def checkpoint_in_budget(path: Path) -> bool:
+        return (
+            selection_budget is None or checkpoint_save_times[path] <= selection_budget
         )
 
     def drain_usage() -> list[dict[str, Any]]:
@@ -1146,7 +1185,6 @@ def run(args: argparse.Namespace) -> None:
 
         baseline = args.output / f"initial_step_{step}.pt"
         save_training_checkpoint(baseline, model, optimizer, step, args, source_run)
-        tracker.record_checkpoint(str(baseline), policy_step=step)
         deferred_checkpoints: list[tuple[Path, str]] = []
         generation_checkpoint_paths: list[Path] = []
         if args.defer_evaluation:
@@ -1159,8 +1197,7 @@ def run(args: argparse.Namespace) -> None:
         else:
             initial_report = evaluate(baseline, "initial_dev")
         best_report, best_path = initial_report, baseline
-        initial_published = tracker.elapsed_seconds()
-        if args.wall_time_budget and initial_published > args.wall_time_budget:
+        if not checkpoint_in_budget(baseline):
             best_path = None
         train_steps = 0
         pending_ids: list[torch.Tensor] = []
@@ -1235,9 +1272,6 @@ def run(args: argparse.Namespace) -> None:
                         save_training_checkpoint(
                             generation_path, model, optimizer, step, args, source_run
                         )
-                        tracker.record_checkpoint(
-                            str(generation_path), policy_step=step
-                        )
                         generation_checkpoint_paths.append(generation_path)
                         deferred_checkpoints.append(
                             (
@@ -1310,18 +1344,7 @@ def run(args: argparse.Namespace) -> None:
                 if barrier is not None and update_index == barrier:
                     before = tracker.elapsed_seconds()
                     try:
-                        if usage is None:
-                            _wait(engine, generation, args, tracker)
-                        else:
-                            while (
-                                engine.get_stats()["completed_generation"] < generation
-                            ):
-                                drain_usage()
-                                _timeout(args, tracker)
-                                if engine.state is not OnlineDataEngineState.READY:
-                                    engine.wait_for_generation(generation, timeout=0.1)
-                                time.sleep(0.02)
-                            drain_usage()
+                        _wait(engine, generation, args, tracker, progress=drain_usage)
                     finally:
                         tracker.record_interval(
                             "data_wait", before, tracker.elapsed_seconds()
@@ -1446,19 +1469,22 @@ def run(args: argparse.Namespace) -> None:
                     save_training_checkpoint(
                         checkpoint, model, optimizer, step, args, source_run
                     )
-                    tracker.record_checkpoint(str(checkpoint), policy_step=step)
                     if args.defer_evaluation:
                         deferred_checkpoints.append((checkpoint, f"step_{step}_dev"))
                         report = initial_report
                     else:
                         report = evaluate(checkpoint, f"step_{step}_dev")
-                    in_budget = (
-                        not args.wall_time_budget
+                    in_budget = checkpoint_in_budget(checkpoint) and (
+                        args.wall_time_budget is None
                         or tracker.elapsed_seconds() <= args.wall_time_budget
                     )
-                    if in_budget and (
-                        best_path is None
-                        or _selection(report) > _selection(best_report)
+                    if (
+                        not args.defer_evaluation
+                        and in_budget
+                        and (
+                            best_path is None
+                            or _selection(report) > _selection(best_report)
+                        )
                     ):
                         best_report, best_path = report, checkpoint
                     print(
@@ -1483,7 +1509,6 @@ def run(args: argparse.Namespace) -> None:
                 save_training_checkpoint(
                     latest_path, model, optimizer, step, args, source_run
                 )
-                tracker.record_checkpoint(str(latest_path), policy_step=step)
                 deferred_checkpoints.append((latest_path, f"step_{step}_dev"))
             if latest_path != baseline:
                 deferred_checkpoints = [
@@ -1557,6 +1582,7 @@ def run(args: argparse.Namespace) -> None:
                 deferred_checkpoints, generation_checkpoint_paths
             )
             panel_manifest: list[dict[str, Any]] = []
+            best_path = None
             try:
                 for path, name in deferred_checkpoints:
                     panel_process = restart_evaluator()
@@ -1566,19 +1592,25 @@ def run(args: argparse.Namespace) -> None:
                             "checkpoint": str(path),
                             "name": name,
                             "seeds": dev_request["seeds"],
+                            "save_completed_seconds": checkpoint_save_times[path],
+                            "budget_eligible": checkpoint_in_budget(path),
                             **panel_process,
                         }
                     )
                     if path == baseline:
                         initial_report = report
-                        best_report, best_path = report, path
-                    elif _selection(report) > _selection(best_report):
+                    if checkpoint_in_budget(path) and (
+                        best_path is None
+                        or _selection(report) > _selection(best_report)
+                    ):
                         best_report, best_path = report, path
                 (args.output / "deferred_evaluation.json").write_text(
                     json.dumps(
                         {
                             "training_finished_seconds": training_finished_seconds,
                             "selection_is_posthoc": True,
+                            "selection_wall_time_budget_seconds": selection_budget,
+                            "selection_rule": "save_completed_within_budget",
                             "fresh_process_per_panel": True,
                             "stats_valid_frames_snapshot": "immediately_before_producer_shutdown",
                             "panels": panel_manifest,
@@ -1748,7 +1780,9 @@ def run(args: argparse.Namespace) -> None:
             "parameters_updated": updated,
             "training_step": step,
             "best_checkpoint": None if best_path is None else str(best_path),
-            "best_dev_success": best_report["success_rate"],
+            "best_dev_success": (
+                None if best_path is None else best_report["success_rate"]
+            ),
             "initial_dev_success": initial_report["success_rate"],
             "final_success_rate": (
                 None if test_report is None else test_report["success_rate"]
@@ -1815,81 +1849,123 @@ def run(args: argparse.Namespace) -> None:
                 indent=2,
             )
         )
-    except BaseException:
+    except BaseException as error:
         import traceback
 
-        (args.output / "failure.json").write_text(
-            json.dumps(
-                {
-                    "elapsed_seconds": tracker.elapsed_seconds(),
-                    "error": traceback.format_exc(),
-                },
-                indent=2,
+        try:
+            (args.output / "failure.json").write_text(
+                json.dumps(
+                    {
+                        "elapsed_seconds": tracker.elapsed_seconds(),
+                        "error": traceback.format_exc(),
+                    },
+                    indent=2,
+                )
             )
-        )
+        except BaseException as report_error:
+            _add_error_note(error, f"Writing failure.json also failed: {report_error}")
         raise
     finally:
         cleanup_started = time.monotonic()
-        cleanup_error = None
-        resource_cleanup_error = None
+        primary_error = sys.exc_info()[1]
+        cleanup_errors: list[tuple[str, BaseException]] = []
+
+        def attempt_cleanup(stage: str, release: Callable[[], Any]) -> Any:
+            try:
+                return release()
+            except BaseException as error:
+                cleanup_errors.append((stage, error))
+                return None
+
         if not resources_finalized:
-            try:
-                resource_sampler.capture("before_failure_or_early_return_cleanup")
-                finish_resource_sampling()
-            except BaseException as error:
-                resource_cleanup_error = error
+            attempt_cleanup(
+                "resource_capture",
+                lambda: resource_sampler.capture(
+                    "before_failure_or_early_return_cleanup"
+                ),
+            )
+            attempt_cleanup("resource_sampler", finish_resource_sampling)
         if engine is not None:
-            try:
-                engine.stop()
-            except BaseException as error:
-                cleanup_error = error
+            attempt_cleanup("engine", engine.stop)
         if usage is not None:
-            drain_usage()
-            save_usage()
+            attempt_cleanup("usage_drain", drain_usage)
+            attempt_cleanup("usage_report", save_usage)
         if writer is not None:
-            writer.close()
-        if evaluator.pid is not None:
-            requests.put(None)
-            evaluator.join(30)
-            if evaluator.is_alive():
-                evaluator.terminate()
-                evaluator.join(10)
-            if evaluator.is_alive():
-                evaluator.kill()
-                evaluator.join()
+            attempt_cleanup("writer", writer.close)
+        evaluator_pid = evaluator.pid
+        if evaluator_pid is not None:
+            attempt_cleanup("evaluator_signal", lambda: requests.put_nowait(None))
+            attempt_cleanup("evaluator_join", lambda: evaluator.join(30))
+            for method in ("terminate", "kill"):
+                if attempt_cleanup("evaluator_health", evaluator.is_alive) is False:
+                    break
+                attempt_cleanup(f"evaluator_{method}", getattr(evaluator, method))
+                attempt_cleanup("evaluator_join", lambda: evaluator.join(10))
+            if attempt_cleanup("evaluator_health", evaluator.is_alive):
+                cleanup_errors.append(
+                    ("evaluator", RuntimeError("Evaluator survived shutdown and kill"))
+                )
+        evaluator_exitcode = evaluator.exitcode
+        attempt_cleanup("evaluator_close", evaluator.close)
         if tensorboard is not None:
-            tensorboard.terminate()
+            attempt_cleanup("tensorboard_terminate", tensorboard.terminate)
             try:
                 tensorboard.wait(10)
             except subprocess.TimeoutExpired:
-                tensorboard.kill()
-                tensorboard.wait()
-        requests.close()
-        results.close()
-        requests.join_thread()
-        results.join_thread()
-        (args.output / "cleanup.json").write_text(
-            json.dumps(
-                {
-                    "seconds": time.monotonic() - cleanup_started,
-                    "owned_worker_pids": [entry["pid"] for entry in closed_evaluators]
-                    + [evaluator.pid],
-                    "closed_evaluators": closed_evaluators,
-                    "evaluator_exitcode": evaluator.exitcode,
-                    "engine_cleanup_error": (
-                        None if cleanup_error is None else str(cleanup_error)
-                    ),
-                    "resource_sampler_cleanup_error": (
-                        None
-                        if resource_cleanup_error is None
-                        else str(resource_cleanup_error)
-                    ),
-                },
-                indent=2,
-            )
+                attempt_cleanup("tensorboard_kill", tensorboard.kill)
+                attempt_cleanup("tensorboard_wait", lambda: tensorboard.wait(10))
+            except BaseException as error:
+                cleanup_errors.append(("tensorboard_wait", error))
+        # The evaluator is gone; abandoned control messages must not block a
+        # queue feeder join when a failed consumer no longer reads its pipe.
+        for name, channel in (("requests", requests), ("results", results)):
+            attempt_cleanup(f"{name}_cancel_join", channel.cancel_join_thread)
+            attempt_cleanup(f"{name}_close", channel.close)
+        attempt_cleanup(
+            "cleanup_report",
+            lambda: (args.output / "cleanup.json").write_text(
+                json.dumps(
+                    {
+                        "seconds": time.monotonic() - cleanup_started,
+                        "owned_worker_pids": [
+                            entry["pid"] for entry in closed_evaluators
+                        ]
+                        + [evaluator_pid],
+                        "closed_evaluators": closed_evaluators,
+                        "evaluator_exitcode": evaluator_exitcode,
+                        "engine_cleanup_error": next(
+                            (
+                                str(e)
+                                for stage, e in cleanup_errors
+                                if stage == "engine"
+                            ),
+                            None,
+                        ),
+                        "resource_sampler_cleanup_error": next(
+                            (
+                                str(e)
+                                for stage, e in cleanup_errors
+                                if stage == "resource_sampler"
+                            ),
+                            None,
+                        ),
+                        "errors": [
+                            {"stage": stage, "error": f"{type(e).__name__}: {e}"}
+                            for stage, e in cleanup_errors
+                        ],
+                    },
+                    indent=2,
+                )
+            ),
         )
-        if sys.exc_info()[0] is None:
-            if cleanup_error is not None:
-                raise cleanup_error
-            if resource_cleanup_error is not None:
-                raise resource_cleanup_error
+        if primary_error is not None:
+            for stage, error in cleanup_errors:
+                _add_error_note(
+                    primary_error, f"Cleanup ({stage}) also failed: {error}"
+                )
+        elif cleanup_errors:
+            stage, error = cleanup_errors[0]
+            _add_error_note(error, f"Cleanup stage: {stage}")
+            for stage, extra in cleanup_errors[1:]:
+                _add_error_note(error, f"Cleanup ({stage}) also failed: {extra}")
+            raise error

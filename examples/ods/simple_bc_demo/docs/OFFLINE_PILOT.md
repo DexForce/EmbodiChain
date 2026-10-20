@@ -124,6 +124,9 @@ Distinguish these time origins and outcomes:
 3. Checkpoint readiness is its actual save-completion timestamp. A checkpoint
    later measured at >=80% development success has a retrospectively qualified
    readiness time, not an online time-to-80 or certified result-delivery time.
+   When a wall-time budget is configured, only checkpoints saved at or before
+   that deadline may be selected. Later panels remain diagnostic, including
+   the final save after stopping; their scores cannot supply budgeted results.
 4. Report generation, writer service/backpressure/finalization, SDK load,
    model/normalizer setup, active training, quota waiting and missing-data waiting
    separately. Do not add overlapping phase intervals to estimate total time.

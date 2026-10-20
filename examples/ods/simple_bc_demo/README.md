@@ -193,6 +193,14 @@ time-to-target. The [pilot protocol](docs/OFFLINE_PILOT.md) defines timing,
 resource and failure accounting. The retained pilot established neither a
 general ODS efficiency advantage nor a qualified full-path instrumentation cost.
 
+With `--wall-time-budget`, deferred model selection uses each checkpoint's
+save-completion time. Later saves remain diagnostic panels and cannot become
+the selected policy or supply its final test score. If no checkpoint was saved
+within the budget, the selected checkpoint and score are null and final testing
+is skipped. Comparison reports require matching development and test scene
+lists (or explicit historical seed ranges); missing or inconsistent scene
+identity makes the runs non-comparable.
+
 ## Outputs and recovery
 
 Runs retain resolved configuration and source hashes, expert qualification,
@@ -200,6 +208,10 @@ immutable checkpoints, physical panels, losses, resource samples and cleanup
 status. Usage-enabled runs also write `usage.json`, `sampling_budget.json` and
 `flow_measurements.json`. Inspect the stopping reason and `cleanup.json` after
 budget depletion. Unsupported resource peaks remain unknown.
+Full-generation waits have a 1,800-second deadline, shortened by the remaining
+wall-time budget, and continue draining publication events and checking worker
+health. Report-writing errors are surfaced after all owned-resource shutdown
+steps have been attempted; an existing training error remains primary.
 
 `--resume CHECKPOINT` restores ChunkBC, optimizer, normalization and RNG state
 in a fresh output directory. Live resume fills a new ODS cache under a new run

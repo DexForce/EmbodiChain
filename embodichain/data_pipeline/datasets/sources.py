@@ -547,7 +547,9 @@ class TensorDataSource:
                     "Segment context requires segment_id and segment_accepted metadata"
                 )
             segments = self.data["segment_id"]
-            eligible_valid &= (segments >= 0) & self.data["segment_accepted"]
+            eligible_valid = (
+                eligible_valid & (segments >= 0) & self.data["segment_accepted"]
+            )
             valid = eligible_valid
         eligible = eligible_valid.any(1).nonzero().flatten()
         if not len(eligible):
