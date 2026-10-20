@@ -2,6 +2,14 @@
 
 Read this when the request needs these details. [Topic overview](env-framework.md).
 
+Startup asset-selection events publish stable scene-UID labels. Gym resolves
+literal `{scene_uid}` tokens in task and segment instructions using those labels
+through `envs/_asset_instructions.py`. `EmbodiedEnv.compile_task_program()` binds
+a copy before compilation, and `demo.resolve_demo_instruction()` resolves the
+episode text before its recording snapshot. Task calls/targets and the source
+program template stay unchanged. Episode metadata snapshots asset identity
+alongside resolved instructions; labels are text, never format expressions.
+
 ### BaseEnv (`base_env.py`)
 
 - Owns: `SimulationManager`, `Robot`, sensors dict, action/observation spaces.

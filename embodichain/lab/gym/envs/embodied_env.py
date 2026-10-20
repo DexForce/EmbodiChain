@@ -1437,6 +1437,8 @@ class EmbodiedEnv(BaseEnv):
             "segments": [],
         }
         metadata.update(copy.deepcopy(self._recording_provenance))
+        if getattr(self, "_asset_selections", None):
+            metadata["assets"] = copy.deepcopy(self._asset_selections)
         expert_action_spec = getattr(self, "expert_action_spec", None)
         if expert_action_spec is not None:
             metadata.update(expert_action_spec.metadata(step_dt=self.step_dt))
@@ -2905,7 +2907,11 @@ class EmbodiedEnv(BaseEnv):
             Provider-free compiled program ready for runtime assembly.
 
         """
-        return self._checked_task_program_adapter().compile(program)
+        from ._asset_instructions import _bind_asset_program_instructions
+
+        return self._checked_task_program_adapter().compile(
+            _bind_asset_program_instructions(self, program)
+        )
 
     def create_task_program_bridge(
         self,

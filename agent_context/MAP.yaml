@@ -78,7 +78,7 @@ topics:
       manager, dataset manager, 管理器]
   keywords: [FunctorCfg, ObservationCfg, RewardCfg, ActionTermCfg, ObservationManager, RewardManager,
     EventManager, ActionManager, ActionDescriptor, ActionTermDescriptor, ParallelGripperAction,
-    DatasetManager, SceneEntityCfg]
+    DatasetManager, SceneEntityCfg, select_rigid_object_asset, asset selection, 资产替换, 资产选择]
   paths: [topics/manager-functor/manager-functor.md]
   source_of_truth:
   - embodichain/lab/gym/envs/managers/action_manager.py

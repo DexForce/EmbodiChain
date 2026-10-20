@@ -38,6 +38,9 @@ _SETUP_PATH = _REPOSITORY_ROOT / "setup.py"
 _CONFIG_PACKAGE = "embodichain_tasks.configs"
 _CONFIG_SOURCE = _REPOSITORY_ROOT / "extensions" / "embodichain_tasks" / "configs"
 _PROGRAMS = {
+    Path("tasks/manipulation/repeated_pick_place/task_program/program.assets.yaml"): (
+        "repeated_tabletop_cube_pick_place"
+    ),
     Path("tasks/manipulation/repeated_pick_place/task_program/program.tabletop.yaml"): (
         "repeated_tabletop_cube_pick_place"
     ),
@@ -201,6 +204,7 @@ _DUAL_ARM_RESOURCES = {
 
 _RESOURCE_PATHS = frozenset(
     {
+        Path("tasks/manipulation/repeated_pick_place/task.dual_ur5.assets.yaml"),
         *_DUAL_ARM_RESOURCES,
         *_PROGRAMS,
         *_DEPLOYMENTS,

@@ -108,6 +108,14 @@ Event RNG scopes and interval-counter reset behavior are owned by
 [randomization](../randomization/randomization.md). Renaming a functor changes its
 seed stream because the name is part of the stream identity.
 
+`events.select_rigid_object_asset` selects a named rigid-object configuration
+at startup, preserving its UID across primitive/mesh choices. Selection applies
+to the full vector environment and precedes Task Program adapter construction;
+partial-row and already-bound changes fail. Optional USD rigidization freezes
+the authored rest geometry as a centered single body in a derived data cache.
+The event publishes selected identity/labels; instruction binding is owned by
+the [Gym demonstration boundary](../env-framework/execution.md).
+
 Event and observation calls have per-functor profiling through
 `ManagerBase._call_functor()`; reward/action/dataset calls do not yet use that
 helper. See [profiling](../env-framework/profiling.md).

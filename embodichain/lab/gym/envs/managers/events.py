@@ -37,6 +37,9 @@ from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.gym.envs.managers._event_functors import (
     wait_for_dynamic_objects_to_settle,
 )
+from embodichain.lab.gym.envs.managers._event_functors.asset_selection import (
+    select_rigid_object_asset,
+)
 from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
 from embodichain.lab.gym.envs.managers import Functor, FunctorCfg
 from embodichain.utils.module_utils import find_function_from_modules
@@ -58,6 +61,7 @@ if TYPE_CHECKING:
 __all__ = [
     "apply_expansion_profile_reset",
     "replace_assets_from_group",
+    "select_rigid_object_asset",
     "prepare_extra_attr",
     "register_entity_attrs",
     "register_entity_pose",
