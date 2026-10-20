@@ -121,11 +121,14 @@ class TaskEnginePlanningCfg:
     physical_reference: str | None = None
     runtime_profile: str = "default"
     experimental_open_release: bool | None = None
+    press_extra_distance: float | None = None
 
     def __post_init__(self) -> None:
         from .experiment_policy import validate_profile
+        from ._task_program.press_binding import validate_extra_press_distance
 
         validate_profile(self.runtime_profile)
+        validate_extra_press_distance(self.press_extra_distance)
         if (
             self.experimental_open_release is not None
             and type(self.experimental_open_release) is not bool
@@ -215,6 +218,7 @@ def load_task_engine_config(
             "physical_reference",
             "runtime_profile",
             "experimental_open_release",
+            "press_extra_distance",
         }
     ):
         raise ValueError("Task Engine planning configuration fields are invalid.")

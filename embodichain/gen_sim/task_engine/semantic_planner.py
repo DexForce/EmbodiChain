@@ -350,6 +350,7 @@ class SemanticTaskPlanner:
                     or self._nearest_resource(
                         object_id,
                         objects,
+                        target_id=target_id,
                         occupied_resources=tuple(
                             value
                             for value in held_by.values()

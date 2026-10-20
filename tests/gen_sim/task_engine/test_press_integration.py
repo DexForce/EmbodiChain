@@ -128,6 +128,47 @@ def graph(scene):
     return SemanticTaskPlanner().plan(candidate, bindings, scene.planner_objects)
 
 
+def test_explicit_zero_overdrive_is_fingerprint_bound_and_default_preserved(
+    scene, tmp_path
+):
+    paths_by_name = {}
+    fingerprints = []
+    for name, extra in (("legacy", None), ("native", 0.0)):
+        selected, paths = generate_task_program_bundle(
+            graph(scene),
+            scene,
+            output_dir=tmp_path / name,
+            robot_profile="dual_franka",
+            press_extra_distance=extra,
+        )
+        paths_by_name[name] = paths
+        fingerprints.append(selected["integration_fingerprint"])
+        integration = load_config(paths.integration)
+        routes = [
+            entry["route"]
+            for entry in integration["runtime_services"]["registered_semantic_lowerers"]
+            if entry["kind"] in {"press_prepare", "press"}
+        ]
+        assert len(routes) == 2
+        assert all(
+            route["extra_press_distance"] == (0.01 if extra is None else 0.0)
+            for route in routes
+        )
+        deployment = load_deployment(
+            task_program=load_config(paths.deployment)["task_program"],
+            skill_profile=load_config(paths.embodiment)["skill_profile"],
+            base_dir=paths.root,
+        )
+        assert deployment.integration.adapter_factory.press_routes[
+            0
+        ].extra_press_distance == (0.01 if extra is None else 0.0)
+    assert fingerprints[0] != fingerprints[1]
+    for field in ("scene", "embodiment", "execution_policy", "program"):
+        assert load_config(getattr(paths_by_name["legacy"], field)) == load_config(
+            getattr(paths_by_name["native"], field)
+        )
+
+
 def test_press_complete_bundle_decodes_and_preflights(scene, tmp_path):
     result, paths = generate_task_program_bundle(
         graph(scene), scene, output_dir=tmp_path / "bundle", robot_profile="dual_franka"

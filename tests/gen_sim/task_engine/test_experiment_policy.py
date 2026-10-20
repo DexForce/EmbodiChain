@@ -176,6 +176,42 @@ def test_packaged_contact_defaults_reach_generated_bundle(support_scene, tmp_pat
 
 
 @pytest.mark.parametrize(
+    ("profile", "expected"),
+    [("default", 0.5), ("contact_experiment", 0.5), ("composition_experiment", 500.0)],
+)
+def test_composition_keeps_canonical_gripper_effort_without_changing_other_profiles(
+    support_scene, tmp_path, profile, expected
+):
+    from copy import deepcopy
+    from dataclasses import replace
+    from .test_support_bundle import _placement_graph
+    from embodichain.gen_sim.task_engine.task_program_bundle import (
+        generate_task_program_bundle,
+    )
+    from embodichain.utils.utility import load_config
+
+    rigids, objects = deepcopy(support_scene.rigid_objects), deepcopy(
+        support_scene.planner_objects
+    )
+    for item in (*rigids, *objects):
+        if item.get("runtime_uid", item.get("uid")) == "bottle":
+            item.setdefault("attrs", {}).setdefault("mass_props", {})["mass"] = 0.01
+    scene = replace(support_scene, rigid_objects=rigids, planner_objects=objects)
+    _, paths = generate_task_program_bundle(
+        _placement_graph(reference="tray"),
+        scene,
+        tmp_path / profile,
+        robot_profile="dual_franka",
+        runtime_profile=profile,
+    )
+    effort = load_config(paths.embodiment)["simulation"]["joint_drive_props"][
+        "max_effort"
+    ]
+    assert effort["left_eef"] == expected
+    assert effort["right_eef"] == 500.0
+
+
+@pytest.mark.parametrize(
     ("task_type", "selected"),
     [
         ("E1", "contact_experiment"),

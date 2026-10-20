@@ -123,6 +123,7 @@ class TaskEngineCoordinator:
         twist_mass_source: bool = False,
         runtime_profile: str = "default",
         experimental_open_release: bool | None = None,
+        press_extra_distance: float | None = None,
         planner_policy: Mapping[str, Any] | None = None,
         randomize_scene: bool = False,
         randomize_table_material: bool = False,
@@ -150,6 +151,9 @@ class TaskEngineCoordinator:
         from ..experiment_policy import validate_profile
 
         validate_profile(runtime_profile)
+        from .._task_program.press_binding import validate_extra_press_distance
+
+        validate_extra_press_distance(press_extra_distance)
         if (
             experimental_open_release is not None
             and type(experimental_open_release) is not bool
@@ -292,6 +296,8 @@ class TaskEngineCoordinator:
                             extra["experimental_open_release"] = (
                                 experimental_open_release
                             )
+                        if press_extra_distance is not None:
+                            extra["press_extra_distance"] = press_extra_distance
                         if twist_mass_source:
                             extra["twist_mass_source"] = True
                         if str(adaptation.scene_manifest["robot_profile"]) in {

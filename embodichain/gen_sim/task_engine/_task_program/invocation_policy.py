@@ -547,17 +547,23 @@ class GenSimActionEngine(AtomicActionEngine):
         )
         measured = getattr(self, "_measured_rigid_policy", None)
         owns_measured = measured is not None and request.invocation_id in measured.calls
+        owns_pour = request.skill_id == "pour" and request.invocation_id in (
+            getattr(self.actions.get("pour"), "continuations", None) or {}
+        )
         bound_slide = (
             request.skill_id == "slide"
             and getattr(self, "_articulation_calls", {}).get(request.invocation_id)
             == "slide"
         )
-        if (paired or bound_slide or owns_measured) and context is None:
+        if (paired or bound_slide or owns_measured or owns_pour) and context is None:
             context = self.initial_context()
         paired = paired and getattr(context, "batch_size", None) == 1
+        owns_pour = owns_pour and getattr(context, "batch_size", None) == 1
         parent = _COST.get()
         with search_cost_scope(
-            wall_seconds=PLANNING_WALL_SECONDS if paired or owns_measured else None
+            wall_seconds=(
+                PLANNING_WALL_SECONDS if paired or owns_measured or owns_pour else None
+            )
         ) as cost:
             try:
                 with measure_search("complete_plan_request"):

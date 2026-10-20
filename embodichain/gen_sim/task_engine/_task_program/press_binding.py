@@ -239,6 +239,28 @@ def recipe(object_id: str, arm: str, *, operation_id: str = "") -> list[dict[str
     ]
 
 
+def validate_extra_press_distance(value: float | None) -> None:
+    """Validate a request-owned override without changing legacy routes."""
+    if value is not None and (
+        type(value) not in (int, float)
+        or not math.isfinite(value)
+        or not 0.0 <= value <= 0.010
+    ):
+        raise ValueError("press_extra_distance must be between 0 and 0.010 m or None.")
+
+
+def with_extra_press_distance(
+    routes: tuple[PressRoute, ...], value: float | None
+) -> tuple[PressRoute, ...]:
+    """Bind an explicit request override to generated routes, never shared defaults."""
+    validate_extra_press_distance(value)
+    return (
+        routes
+        if value is None
+        else tuple(replace(route, extra_press_distance=value) for route in routes)
+    )
+
+
 def graph_routes(graph: dict, scene: Any) -> tuple[PressRoute, ...]:
     groups = [g for g in graph.get("task_groups", ()) if g["task_type"] == "E9"]
     if not groups:

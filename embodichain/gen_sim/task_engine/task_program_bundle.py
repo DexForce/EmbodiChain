@@ -208,6 +208,7 @@ def generate_task_program_bundle(
     idle_clearance_routes: Sequence[Mapping[str, Any]] | None = None,
     runtime_profile: str = "default",
     experimental_open_release: bool | None = None,
+    press_extra_distance: float | None = None,
 ) -> tuple[SemanticTaskGraph, TaskProgramBundlePaths]:
     """Write, compose, and provider-free preflight one semantic deployment.
 
@@ -279,6 +280,9 @@ def generate_task_program_bundle(
             Omission preserves legacy physics, sampling and route declarations.
         experimental_open_release: Explicit release-evidence policy. None retains
             legacy profile selection; False keeps the original release gate.
+        press_extra_distance: Request-owned E9 overtravel in metres, added to the
+            native button stroke. None preserves the legacy 10 mm extra travel;
+            zero requests only the native stroke without changing other tasks.
 
     Returns:
         Final fingerprint-bound graph and all generated paths.
@@ -292,6 +296,7 @@ def generate_task_program_bundle(
         resolve_profile,
         AUTO_PROFILE,
         CONTACT_PROFILE,
+        COMPOSITION_PROFILE,
         experimental_release_enabled,
     )
 
@@ -375,9 +380,12 @@ def generate_task_program_bundle(
         graph_routes,
         calibrate_scene,
         prepare_press_scene,
+        with_extra_press_distance,
     )
 
-    source_press_routes = graph_routes(selected_graph, prepared_scene)
+    source_press_routes = with_extra_press_distance(
+        graph_routes(selected_graph, prepared_scene), press_extra_distance
+    )
     from ._task_program.twist_binding import graph_routes as twist_graph_routes
 
     source_twist_routes = twist_graph_routes(selected_graph, prepared_scene)
@@ -632,7 +640,9 @@ def generate_task_program_bundle(
                 "records": mass_records,
             },
         )
-    press_routes = graph_routes(selected_graph, scene)
+    press_routes = with_extra_press_distance(
+        graph_routes(selected_graph, scene), press_extra_distance
+    )
     twist_routes = twist_graph_routes(selected_graph, scene)
     if mass_source_routes:
         for original, derived in zip(mass_source_routes, twist_routes, strict=True):
@@ -749,7 +759,8 @@ def generate_task_program_bundle(
     )
     if frozen is None:
         _bind_embodiment_to_scene(embodiment_payload, table_top_z=scene.table_top_z)
-        _calibrate_task_gripper_effort(embodiment_payload, scene, selected_graph)
+        if runtime_profile != COMPOSITION_PROFILE:
+            _calibrate_task_gripper_effort(embodiment_payload, scene, selected_graph)
     if articulation_bindings and frozen is None:
         # Calibrate this generated E6 deployment, not shared robot defaults.
         stiffness = embodiment_payload["simulation"]["joint_drive_props"]["stiffness"]
@@ -862,6 +873,7 @@ def generate_task_program_bundle(
         pour_geometry_revision=pour_geometry_revision,
         pour_proxy_position_tolerance_m=pour_proxy_position_tolerance_m,
         idle_clearance_routes=idle_clearance_routes,
+        press_extra_distance=press_extra_distance,
     )
     if runtime_profile == CONTACT_PROFILE:
         from .experiment_policy import apply_contact_options
@@ -1969,6 +1981,7 @@ def _integration_payload(
     pour_geometry_revision: int | None = None,
     pour_proxy_position_tolerance_m: float | None = None,
     idle_clearance_routes: Sequence[Mapping[str, Any]] | None = None,
+    press_extra_distance: float | None = None,
 ) -> dict[str, Any]:
     from dataclasses import asdict
     from ._task_program.idle_clearance import CALL_ID as IDLE_CALL, decode_routes
@@ -1980,9 +1993,16 @@ def _integration_payload(
     )
     scene_objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
     articulation_bindings = graph_bindings(graph, scene)
-    from ._task_program.press_binding import graph_routes, PREPARE_CALL, PRESS_CALL
+    from ._task_program.press_binding import (
+        graph_routes,
+        PREPARE_CALL,
+        PRESS_CALL,
+        with_extra_press_distance,
+    )
 
-    press_routes = graph_routes(graph, scene)
+    press_routes = with_extra_press_distance(
+        graph_routes(graph, scene), press_extra_distance
+    )
     from ._task_program.twist_binding import (
         graph_routes as twist_graph_routes,
         PREPARE_CALL as TWIST_PREPARE_CALL,

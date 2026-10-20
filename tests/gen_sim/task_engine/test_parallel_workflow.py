@@ -715,6 +715,33 @@ def test_early_binding_failure_keeps_inputs_and_uses_run_local_audit_adapter(
     assert selected_adapters[0].audit_dir.name == "binding_audit"
 
 
+@pytest.mark.parametrize("extra", [None, 0.0, 0.010])
+def test_request_press_overtravel_is_forwarded_and_recorded_without_losing_zero(
+    tmp_path, extra
+):
+    candidates = _candidate_set()
+    coordinator = _Coordinator(["bound"])
+    workflow = TaskEngineWorkflow(
+        task_agent=_TaskAgent(candidates),
+        scene_backend=_SceneBackend(_selection(candidates)),
+        coordinator=coordinator,
+        action_executor=_Executor([[True]]),
+    )
+    result = workflow.run(
+        _request(tmp_path),
+        planning_cfg=TaskEnginePlanningCfg(press_extra_distance=extra),
+        execution_cfg=TaskEngineExecutionCfg(),
+    )
+    assert result.succeeded
+    planning = json.loads(result.manifest_path.read_text())["configuration"]["planning"]
+    if extra is None:
+        assert "press_extra_distance" not in coordinator.kwargs[0]
+        assert "press_extra_distance" not in planning
+    else:
+        assert coordinator.kwargs[0]["press_extra_distance"] == extra
+        assert planning["press_extra_distance"] == extra
+
+
 def test_default_coordinator_uses_run_local_adapter_without_mutating_original(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

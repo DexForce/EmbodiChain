@@ -1067,6 +1067,11 @@ class TaskEngineWorkflow:
                             else {}
                         ),
                         candidate_set=candidate_set,
+                        **(
+                            {"press_extra_distance": planning_cfg.press_extra_distance}
+                            if planning_cfg.press_extra_distance is not None
+                            else {}
+                        ),
                         force_most_likely=False,
                         final_inspection=final_inspection,
                         unbound_action_plan=unbound_plan,
@@ -1530,6 +1535,11 @@ class TaskEngineWorkflow:
                         "max_action_attempts": workflow_cfg.max_action_attempts,
                     },
                     "planning": {
+                        **(
+                            {"press_extra_distance": planning_cfg.press_extra_distance}
+                            if planning_cfg.press_extra_distance is not None
+                            else {}
+                        ),
                         "candidate_count": planning_cfg.candidate_count,
                         "planning_mode": planning_cfg.planning_mode,
                         "max_episodes": planning_cfg.max_episodes,

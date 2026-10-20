@@ -628,6 +628,57 @@ def test_pour_target_and_primary_arm_are_not_covered_by_other_calls() -> None:
         assert _coverage(plan, graph=graph)["status"] == "uncovered"
 
 
+@pytest.mark.parametrize(
+    ("source_y", "receiver_y", "required_arm", "expected"),
+    [
+        (0.2, -0.4, "auto", "left"),
+        (-0.2, 0.4, "auto", "right"),
+        (0.2, 0.4, "auto", "right"),
+        (-0.2, -0.4, "auto", "left"),
+        (0.2, -0.4, "right_arm", "right"),
+        (-0.2, 0.4, "left_arm", "left"),
+    ],
+)
+def test_pour_auto_arm_considers_source_and_receiver_without_overriding_explicit_arm(
+    source_y, receiver_y, required_arm, expected
+) -> None:
+    source = candidate(
+        step(
+            "E3",
+            "vessel",
+            target=selector("receiver"),
+            relation="above",
+            required_arm=required_arm,
+        )
+    )
+    bindings = {
+        "schema_version": "action_engine_role_bindings_v1",
+        "task_id": "demo",
+        "candidate_id": source["candidate_id"],
+        "reference_bindings": {
+            "step_01.object": ["vessel"],
+            "step_01.target": ["receiver"],
+        },
+        "role_bindings": {},
+    }
+    plan = SemanticTaskPlanner().plan_spec(
+        source,
+        bindings,
+        [
+            {
+                "runtime_uid": uid,
+                "init_pos": [0.1, y, 0.85],
+                "init_rot": [0.0, 0.0, 0.0],
+            }
+            for uid, y in (("vessel", source_y), ("receiver", receiver_y))
+        ],
+    )
+    assert {n["call"]["resources"]["primary"] for n in plan.graph["nodes"]} == {
+        expected
+    }
+    assert _coverage(plan)["status"] == "covered"
+
+
 def test_aliased_rigid_roles_cannot_declare_conflicting_final_positions() -> None:
     source = candidate(
         step("E1", "can", target=selector("box"), relation="left_of"),

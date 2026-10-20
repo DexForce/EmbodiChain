@@ -417,10 +417,12 @@ def test_prepare_inherits_adapter_robot_profile_for_raw_scene_path(
 
 
 @pytest.mark.parametrize("selected_physical", [False, True])
+@pytest.mark.parametrize("press_extra", [None, 0.0, 0.010])
 def test_bound_prepare_publishes_semantic_task_program_bundle(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     selected_physical: bool,
+    press_extra: float | None,
 ) -> None:
     candidates = _candidate_set()
     adaptation = _adaptation(tmp_path)
@@ -526,6 +528,7 @@ def test_bound_prepare_publishes_semantic_task_program_bundle(
         tmp_path / "source" / "scene_config.json",
         tmp_path / "bundle",
         candidate_count=1,
+        press_extra_distance=press_extra,
     )
 
     assert result.bound
@@ -539,6 +542,9 @@ def test_bound_prepare_publishes_semantic_task_program_bundle(
             "max_episodes": None,
             "max_episode_steps": None,
             "fit_grasp_assets": False,
+            **(
+                {"press_extra_distance": press_extra} if press_extra is not None else {}
+            ),
             "verify_pick_phases": True,
             "task_spec": generated_calls[0]["task_spec"],
             "task_candidate": adaptation.selected_candidate,

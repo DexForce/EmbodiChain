@@ -3107,9 +3107,45 @@ class GenSimPour(Pour):
         if options.strategy == "ik_interp":
             options.preserve_cartesian_samples = True
         before_ik_rng = torch.get_rng_state().tolist() if retain else None
-        result = self.motion_generator.generate(
-            build_pose_plan_states(eef_targets), options=options
-        )
+        targets = build_pose_plan_states(eef_targets)
+        result = self.motion_generator.generate(targets, options=options)
+        recovered = False
+        if (
+            retain
+            and options.strategy == "ik_interp"
+            and getattr(context, "batch_size", None) == 1
+            and result.positions is not None
+            and result.dt is not None
+            and not result.success.all()
+        ):
+            from .motion import (
+                _joint_velocity_limits,
+                _velocity_validity,
+                resolve_continuous_ik_path,
+            )
+
+            limits = _joint_velocity_limits(self.robot, motion_target.control_part).to(
+                result.positions
+            )
+            if (
+                torch.isfinite(result.positions).all()
+                and not _velocity_validity(result.positions, result.dt, limits).all()
+            ):
+                retry = resolve_continuous_ik_path(
+                    self.motion_generator, targets, options, operation="retained Pour"
+                )
+                if retry is not None:
+                    expected = (1, object_poses.shape[1], arm_qpos.shape[1])
+                    if (
+                        retry.positions.shape != expected
+                        or not torch.equal(retry.positions[:, 0], arm_qpos)
+                        or not torch.equal(retry.dt, result.dt)
+                        or not retry.success.all()
+                    ):
+                        raise ValueError(
+                            "Continuous Pour recovery changed its start or time grid."
+                        )
+                    result, recovered = retry, True
         if result.positions is None or result.dt is None or not result.success.all():
             failed = self.failed_plan(
                 request,
@@ -3154,6 +3190,24 @@ class GenSimPour(Pour):
             env_ids=context.env_ids,
             control_dt=context.require_control_dt(),
         )
+        if recovered:
+            certificate = _inspect_pick_motion(
+                self.robot, timed.positions[0], motion_target.control_part
+            )
+            metadata = {
+                **metadata,
+                "gen_sim_pour_continuous_ik": {
+                    "unchanged_targets_and_timing": True,
+                    "robot_proxy": certificate,
+                },
+            }
+            if not certificate["valid"]:
+                return self.failed_plan(
+                    request,
+                    context,
+                    message="Continuous Pour recovery failed final robot-proxy qualification.",
+                    retryable=False,
+                )
         plan = self.build_plan(
             request,
             context,

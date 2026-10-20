@@ -309,6 +309,7 @@ def test_packaged_workflow_configuration_uses_recovery_defaults() -> None:
     assert execution.required_successes == 1
     assert execution.acceptance_mode == "experiment"
     assert planning.experimental_open_release is False
+    assert planning.press_extra_distance is None
 
 
 def test_workflow_configuration_can_be_tuned_from_yaml(tmp_path: Path) -> None:
@@ -327,6 +328,7 @@ planning:
   max_episode_steps: 5000
   fit_grasp_assets: true
   twist_mass_source: true
+  press_extra_distance: 0.0
 execution:
   num_envs: 6
   success_policy: at_least
@@ -345,8 +347,17 @@ execution:
     assert planning.max_episode_steps == 5000
     assert planning.fit_grasp_assets is True
     assert planning.twist_mass_source is True
+    assert planning.press_extra_distance == 0.0
     assert execution.num_envs == 6
     assert execution.required_successes == 2
+
+
+@pytest.mark.parametrize(
+    "value", [True, -0.001, 0.011, float("inf"), float("nan"), "0"]
+)
+def test_press_extra_distance_rejects_invalid_configuration(value) -> None:
+    with pytest.raises(ValueError, match="press_extra_distance"):
+        TaskEnginePlanningCfg(press_extra_distance=value)
 
 
 def test_execution_configuration_validates_success_policy() -> None:

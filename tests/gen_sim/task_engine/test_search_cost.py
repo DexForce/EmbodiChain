@@ -198,3 +198,54 @@ def test_nested_preview_budget_failure_returns_one_nonretryable_outer_failure(
     )
     assert costs._COST.get() is None
     assert len(captured) == int(omit_context)
+
+
+@pytest.mark.parametrize(
+    ("bound", "batch", "elapsed", "expired"),
+    [
+        (False, 1, 100.0, False),
+        (True, 2, 100.0, False),
+        (True, 1, 89.0, False),
+        (True, 1, 90.0, True),
+    ],
+)
+def test_only_owned_single_environment_pour_has_shared_90_second_budget(
+    monkeypatch, bound, batch, elapsed, expired
+):
+    from dataclasses import dataclass
+    from types import SimpleNamespace as NS
+    from unittest.mock import Mock
+    from embodichain.gen_sim.task_engine._task_program.invocation_policy import (
+        GenSimActionEngine,
+    )
+    from embodichain.lab.sim.atomic_actions import PlannerDiagnostics
+
+    @dataclass(frozen=True)
+    class Plan:
+        diagnostics: PlannerDiagnostics
+
+    now = [0.0]
+    monkeypatch.setattr(costs, "perf_counter", lambda: now[0])
+    failed = Mock(return_value=Plan(PlannerDiagnostics(backend="test")))
+    fake = NS(
+        actions={
+            "pour": NS(
+                continuations={"p": object()} if bound else {}, failed_plan=failed
+            )
+        }
+    )
+
+    def build(*args, **kwargs):
+        now[0] = elapsed
+        costs.record_search("arc_ik")
+        return Plan(PlannerDiagnostics(backend="test"))
+
+    fake._plan_request_impl = build
+    result = GenSimActionEngine._plan_request(
+        fake, NS(skill_id="pour", invocation_id="p"), NS(batch_size=batch)
+    )
+    assert bool(failed.call_count) is expired
+    snapshot = result.diagnostics.metadata["gen_sim_search_cost"]
+    assert snapshot["budget_enforced"] is (bound and batch == 1)
+    if bound and batch == 1:
+        assert snapshot["wall_budget_seconds"] == 90.0

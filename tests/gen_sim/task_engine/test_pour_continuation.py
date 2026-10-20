@@ -748,20 +748,35 @@ def test_nonfinite_pick_ik_audit_marks_unavailable_without_changing_return():
 
 
 @pytest.mark.parametrize("retain", [False, True])
-def test_failed_pour_keeps_canonical_inputs_without_more_ik_or_changing_legacy(retain):
+@pytest.mark.parametrize("branch_jump", [False, True])
+def test_failed_pour_keeps_inputs_and_legacy_when_recovery_is_unavailable(
+    monkeypatch, retain, branch_jump
+):
+    from embodichain.gen_sim.task_engine._task_program import motion
+
     @dataclass(frozen=True)
     class Failed:
         diagnostics: PlannerDiagnostics
 
     original = Failed(PlannerDiagnostics(backend="mock", messages=("IK failed",)))
+    positions = torch.zeros(1, 3, 7)
+    positions[:, 1:, 0] = 1.0
+    dt = torch.tensor([[0.0, 0.04, 0.04]])
     generate = Mock(
         return_value=SimpleNamespace(
-            positions=None, dt=None, success=torch.tensor([False])
+            positions=positions if branch_jump else None,
+            dt=dt if branch_jump else None,
+            success=torch.tensor([False]),
         )
     )
+    retry = Mock(return_value=None)
+    monkeypatch.setattr(motion, "resolve_continuous_ik_path", retry)
+    monkeypatch.setattr(motion, "_joint_velocity_limits", lambda *_: torch.ones(1, 7))
     action = actions.GenSimPour()
     action._planning_services = SimpleNamespace(
-        device=torch.device("cpu"), motion_generator=SimpleNamespace(generate=generate)
+        device=torch.device("cpu"),
+        motion_generator=SimpleNamespace(generate=generate),
+        robot=object(),
     )
     action.failed_plan = Mock(return_value=original)
     request = SimpleNamespace(
@@ -771,7 +786,7 @@ def test_failed_pour_keeps_canonical_inputs_without_more_ik_or_changing_legacy(r
             )
         )
     )
-    context = SimpleNamespace(require_control_dt=lambda: 0.04)
+    context = SimpleNamespace(require_control_dt=lambda: 0.04, batch_size=1)
     poses = torch.eye(4)[None, None].repeat(1, 3, 1, 1)
     poses[0, :, 0, 3] = torch.tensor([0.1, 0.2, 0.3])
     transform = torch.eye(4)[None]
@@ -792,6 +807,7 @@ def test_failed_pour_keeps_canonical_inputs_without_more_ik_or_changing_legacy(r
         retain=retain,
     )
     generate.assert_called_once()
+    assert retry.call_count == int(retain and branch_jump)
     action.failed_plan.assert_called_once()
     assert torch.equal(torch.get_rng_state(), before_rng)
     if not retain:
@@ -811,8 +827,19 @@ def test_failed_pour_keeps_canonical_inputs_without_more_ik_or_changing_legacy(r
         assert inputs["per_waypoint_status"] == "not_exposed_by_shared_result"
 
 
-@pytest.mark.parametrize("retain", [False, True])
-def test_existing_seed_frame_owns_pre_pour_gate_without_adding_commands(retain):
+@pytest.mark.parametrize(
+    ("retain", "branch_jump", "proxy_valid"),
+    [
+        (False, False, True),
+        (True, False, True),
+        (True, True, True),
+        (True, True, False),
+    ],
+)
+def test_existing_seed_frame_owns_pre_pour_gate_without_adding_commands(
+    monkeypatch, retain, branch_jump, proxy_valid
+):
+    from embodichain.gen_sim.task_engine._task_program import motion
     from embodichain.lab.sim.atomic_actions.execution import ExecutionSession
     from embodichain.lab.sim.atomic_actions.invocation import PhaseEffectGateRequirement
     from embodichain.lab.sim.atomic_actions.trajectory_ops import (
@@ -825,9 +852,18 @@ def test_existing_seed_frame_owns_pre_pour_gate_without_adding_commands(retain):
     arm_values[0, :, 0] = torch.arange(count) * 0.0001
     dt = torch.full((1, count), 0.04)
     dt[:, 0] = 0
+    original_values = arm_values.clone()
+    if branch_jump:
+        original_values[:, 70:, 0] += 1.0
+    recovered = PlanResult(success=torch.tensor([True]), positions=arm_values, dt=dt)
+    recovery = Mock(return_value=recovered)
+    monkeypatch.setattr(motion, "resolve_continuous_ik_path", recovery)
+    monkeypatch.setattr(motion, "_joint_velocity_limits", lambda *_: torch.ones(1, 7))
+    proxy = Mock(return_value={"valid": proxy_valid})
+    monkeypatch.setattr(actions, "_inspect_pick_motion", proxy)
     generate = Mock(
         return_value=PlanResult(
-            success=torch.tensor([True]), positions=arm_values, dt=dt
+            success=torch.tensor([not branch_jump]), positions=original_values, dt=dt
         )
     )
     action = actions.GenSimPour()
@@ -835,8 +871,10 @@ def test_existing_seed_frame_owns_pre_pour_gate_without_adding_commands(retain):
         device=torch.device("cpu"),
         motion_generator=SimpleNamespace(generate=generate),
         planner_name="mock",
+        robot=object(),
     )
     action.build_plan = Mock(return_value="plan")
+    action.failed_plan = Mock(return_value="rejected")
     request = SimpleNamespace(
         motion_policy=SimpleNamespace(
             to_motion_gen_options=lambda **kwargs: SimpleNamespace(
@@ -872,13 +910,24 @@ def test_existing_seed_frame_owns_pre_pour_gate_without_adding_commands(retain):
         {},
         retain=retain,
     )
+    if not proxy_valid:
+        assert result == "rejected"
+        action.build_plan.assert_not_called()
+        handoff.retain.assert_not_called()
+        assert action.failed_plan.call_args.kwargs["retryable"] is False
+        return
     assert result == ("retained" if retain else "plan")
     generate.assert_called_once()
+    assert recovery.call_count == int(branch_jump)
+    assert proxy.call_count == int(branch_jump)
+    if branch_jump:
+        assert recovery.call_args.args[1] is generate.call_args.args[0]
+        assert recovery.call_args.args[2] is generate.call_args.kwargs["options"]
     values = action.build_plan.call_args.kwargs
     trajectory = values["trajectory"]
     assert trajectory.waypoint_count == count
     _, expected = to_full_robot_trajectory(
-        generate.return_value,
+        recovered if branch_jump else generate.return_value,
         base_qpos=context.last_qpos,
         joint_ids=list(range(7)),
         env_ids=context.env_ids,

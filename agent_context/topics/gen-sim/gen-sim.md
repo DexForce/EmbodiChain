@@ -316,6 +316,16 @@ Only the contact profile adds a material-only Robotiq pad
 overlay (static/dynamic friction 2.85/2.70); composition retains original materials.
 Automatic selection uses the validated recipe: any E3/Pour selects composition,
 otherwise contact. It never tests task IDs, object UIDs or text-name heuristics.
+E3 auto-arm preference uses the existing source/receiver midpoint rule; explicit
+arm requests and the owner of an already-held source keep precedence. This is
+only a preference, not a reachability certificate; native continuation and
+actual held-state planning still qualify the complete route.
+Only a failed, single-environment retained E3 arc rejected by joint-velocity
+qualification may reuse the existing continuous seeded IK resolver. It retains
+every Cartesian target, the observed start, frame count and time grid, checks
+the full emitted robot proxy, and keeps native retention gates. Owned E3 planning
+shares the 90-second cooperative wall limit; successful and legacy Pour paths
+remain unchanged. This does not certify arbitrary scene collision or fluid transfer.
 The generated constraints bind the concrete profile; `runtime_profile_selection.json`
 records the request and selection. Explicit profile overrides remain unchanged.
 One bundle has one material policy, not dynamic per-call switching; mixed recipes
@@ -335,7 +345,10 @@ visible empty-arm clearance/restore pair. Its finite proximal-joint proposals
 are ranked by FK endpoint separation, screened against the current scene and
 rechecked on emitted (including transformed) MoveJoints trajectories. This is
 a bounded heuristic, not a complete bimanual planner or stability guarantee.
-Composition keeps original Pick closure and total sample counts. Contact also
+Composition keeps original Pick closure and total sample counts, and retains
+canonical gripper effort limits instead of recalibrating an earlier light-object
+grip from which arm later Pour/control recipes use. Legacy/default and contact
+profiles retain their existing effort calibration. Contact also
 retains its qualified 24-point ordinary Pick closure with 12 extra total samples,
 leaving approach/lift counts unchanged. Frozen physical inputs reject these opt-ins.
 `planning.experimental_open_release` independently selects the release observer;
@@ -1209,8 +1222,12 @@ not gripper-driven size estimation or proof of original-scene success.
 E9 physical configuration identity hashes resource contents rather than their
 absolute locations, so nested transaction publication and final-bundle copies
 preserve identity without allowing physical-parameter or asset-content drift.
-An explicit E9 route may declare 0--10 mm extra commanded press travel;
-the requested default is 10 mm. This changes only public Press's
+An explicit E9 route may declare 0--10 mm extra commanded press travel.
+`planning.press_extra_distance` exposes this as a request-owned override,
+fingerprinted in the generated E9 lowerer routes. Explicit zero keeps only the
+native button stroke; omission preserves the legacy 10 mm extra travel. The CLI
+records and forwards zero without changing other requests, source limits, drives,
+contact/release observations or withdrawal acceptance. This changes only public Press's
 command distance, not button limits, target state, physics or acceptance. The
 extra distance is included in the route fingerprint; the bound is not a
 collision-clearance or hardware-safety certificate.
