@@ -2,8 +2,9 @@
 
 Use `embodichain.data_pipeline.configuration` to plan bounded data consumption
 from two rates: accepted trajectory production and active learner demand.
-The result is a static configuration plan. A consumer must apply its cache and
-sampling settings and implement the returned pacing/refill policy.
+The result is a static configuration plan. A consumer applies its cache and
+sampling settings, then can select `ODSFlowController` for explicit owner-side
+pacing/refill or provide its own scheduler.
 
 This method applies across tasks and learners. The [Franka integration](https://github.com/DexForce/EmbodiChain/blob/main/examples/ods/simple_bc_demo/docs/CONFIGURATION.md)
 provides a worked binding; its measurements and reuse bounds are provisional
@@ -151,15 +152,16 @@ error; they do not silently remove protection.
 | --- | --- |
 | `buffer_size`, `batch_size`, `producer_envs` | Host constructs the cache/consumer at these measured settings. |
 | `episode_sample_budget`, `episode_sample_hard_limit` | Pass to `OnlineDataEngineCfg`; engine samplers enforce per-source delivery under the producer lock. Resident sources have their own optional ledger. |
-| `active_chunks_per_second_cap` | Consumer limits short-window service starts. The engine does not throttle optimizer calls. |
-| `training_chunks_per_second_target` | Consumer controls average delivery/completed-training rate and reports actual waits. |
-| `refill_remaining_chunks` | Host compares remaining usable quota and schedules manual refill. |
-| `publication_episodes_per_second_target` | Host paces production/refill requests. The engine has no finite accepted-episode production budget. |
+| `active_chunks_per_second_cap`, `training_chunks_per_second_target` | `ODSFlowController.prepare_batch()` spaces batch starts at the smaller rate. The host calls it before sampling/training; actual completed throughput still needs measurement. |
+| `refill_remaining_chunks` | With a plan, the controller compares coarse unlocked quota with this threshold and schedules manual refill. |
+| `publication_episodes_per_second_target` | Production target to compare with observed publication. The controller schedules whole-cache refills by quota, without a separate per-episode time gate. |
 
 For example, after supplying the task's validated `gym_config` and state width:
 
 ```python
-from embodichain.data_pipeline.engine import OnlineDataEngineCfg
+from embodichain.data_pipeline.datasets import OnlineDataSource, SequenceSpecCfg
+from embodichain.data_pipeline.engine import OnlineDataEngine, OnlineDataEngineCfg
+from embodichain.data_pipeline.runtime import ODSFlowController, ODSFlowControllerCfg
 
 engine_cfg = OnlineDataEngineCfg(
     gym_config={**your_gym_config, "num_envs": plan.producer_envs},
@@ -172,18 +174,98 @@ engine_cfg = OnlineDataEngineCfg(
     episode_sample_hard_limit=plan.episode_sample_hard_limit,
     include_provenance=True,
 )
+
+# The application supplies the truthful schema, feature transform and train_step.
+with OnlineDataEngine(engine_cfg) as engine:
+    source = OnlineDataSource(
+        engine, schema=your_schema, observation_transform=your_feature_transform
+    )
+    flow = ODSFlowController(
+        engine,
+        ODSFlowControllerCfg(max_generated_episodes=3 * plan.buffer_size),
+        plan=plan,
+    )
+    sequence = SequenceSpecCfg(history_length=2, prediction_horizon=64)
+    for _ in range(1000):
+        if not flow.prepare_batch(plan.batch_size):
+            break  # Final supply cannot fund another complete batch.
+        batch = flow.sample_context(source, plan.batch_size, sequence)
+        train_step(batch)
 ```
+
+The context manager starts and stops the engine. The controller requires manual
+refill and runs only in its creating process/thread; it creates no background
+scheduler or DataLoader worker. It validates the engine's cache, producer count
+and assigned/hard quotas against the plan; `prepare_batch()` validates batch
+size. With either a plan or a production limit, `engine.cfg.gym_config` must
+declare a positive integer `num_envs` that divides cache size, so each fill
+produces exactly one cache. Unplanned, unlimited legacy engines do not acquire
+this restriction. The host retains responsibility for workload and semantic
+schema compatibility. Constructing a controller does not apply engine settings.
+
+With a plan, `prepare_batch()` schedules refill, waits for enough coarse unlocked
+quota and spaces batch starts. It returns `False` when no further whole-cache
+refill fits the production limit and remaining quota cannot fund a full batch.
+Slow updates or evaluation pauses do not accumulate catch-up credits. Call it
+before each planned batch: `sample_context()` alone does not apply pacing.
+
+`max_generated_episodes` includes initial fill and must be at least cache size.
+It limits requests made through this controller to complete cache refills;
+unused partial-cache capacity remains unproduced. An already pending refill
+is adopted without another engine request or a fabricated request timestamp.
+Calls made directly to the engine bypass this controller policy.
+
+Without `plan`, `prepare_batch()` only polls health/events. Refill stays explicit
+through `flow.request_refill()`, which returns a target generation or `None`
+when no whole cache fits. This supports caller-defined round schedules without
+automatically changing their data distribution.
 
 The planner's remaining-quota threshold is **not** engine `refill_threshold`.
 The engine's default `sample_threshold` policy counts delivered samples against
 `refill_threshold * buffer_size` after successful calls. Quota exhaustion does
 not itself request refill. Use manual scheduling for the plan above.
 
-`request_refill()` returns the target generation and coalesces an outstanding
-request. `wait_for_generation()` waits for the complete requested generation,
-not first publication. Continue useful training while supply is active when
-appropriate, observe health, drain enabled lifecycle events and use bounded
-waits. Source errors remain failures, not permission to continue on stale data.
+### Bounded waits and callbacks
+
+`ODSFlowControllerCfg` defaults to 30 seconds for data/quota waits, 1800 seconds
+for a complete generation and 0.02 seconds between polling probes. A transient
+live `DataUnavailableError` or `DataBudgetExhaustedError` is retried only within
+the configured data deadline. Worker failures, invalid inputs and caller
+cancellation propagate. Callbacks run synchronously; an interval observer
+failure preserves an already active error with a diagnostic note. Resident
+sources are sampled directly; Source and Dataset APIs retain their immediate
+error semantics.
+
+`flow.wait_for_generation(generation, deadline=...)` waits for the whole fill,
+not its first publication. Its optional absolute `time.monotonic()` deadline
+can shorten the configured generation timeout. This lets a collector count time
+spent writing a previous generation against the same request deadline.
+
+All waiting/pacing loops poll caller progress, drain lifecycle events and check
+engine health. Optional callbacks let the application retain its own accounting:
+
+| Callback | Meaning |
+| --- | --- |
+| `progress()` | Check application deadlines or cancellation; raise to interrupt. |
+| `on_events(events)` | Receive drained publication/eviction records. Events are drained even without an observer; install one to retain accounting. |
+| `on_refill(generation, requested_at)` | Observe new requests made by this controller, once per generation, in absolute host monotonic seconds. Adopting an already pending generation emits no request callback. |
+| `on_interval(kind, started, ended)` | Receive `data_wait`, `quota_wait` and `usage_throttle` intervals in absolute host monotonic seconds, including zero-duration waits. |
+
+Convert callback times explicitly when an application reports seconds since
+launch; do not mix them with Unix acceptance timestamps. The application owns
+completed optimizer counts, telemetry and shutdown. `flow.drain_events()` can
+also drain final records after stop/failure. An enabled lifecycle log still
+needs capacity for initial fill before `start()` returns. The controller does
+not snapshot or restore cache, quotas or pacing state.
+
+For frequent probes, `engine.check_health()` checks readiness/liveness without
+sampling or refill. `get_flow_status()` returns compact detached generation,
+accepted-episode and optional quota counters without constructing per-row audit
+records or copying trajectory payloads. Producer and quota counters use separate
+lock snapshots. Unlocked quota requires a valid continuity-qualified anchor and
+excludes the write window; sequence/mode/generation filters may further restrict
+sampling. Use `get_sampling_budget_snapshot()` for the full retained-source
+audit rather than in every pacing poll.
 
 ## Strict budget and consumer accounting
 
@@ -201,8 +283,8 @@ the demo rejects protected offline resume without that state.
 
 The initial update count is a ceiling, not a convergence recommendation.
 After production stops, the host may consume only remaining quotas and must
-stop when a requested full batch cannot be funded. No generic background
-controller derives a new safe K or training budget automatically.
+stop when a requested full batch cannot be funded. Flow control applies the
+given profile and plan; it does not derive a new safe K or convergence budget.
 
 ## Verify the plan
 

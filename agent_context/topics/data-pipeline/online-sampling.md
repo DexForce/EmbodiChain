@@ -51,6 +51,39 @@
    so DataLoader can collate; batch mode re-samples a dynamic chunk per yield. Multi-worker
    readers sample shared memory independently.
 
+## Explicit owner-side flow control
+
+`runtime.py` owns opt-in `ODSFlowController` around a caller-managed manual
+engine. Its creating process/thread calls the controller; the application still
+starts/stops the engine and owns training, evaluation and resource accounting.
+An optional `ODSConfiguration` must match engine cache, producer count, quotas
+and batch size. A plan or production limit requires an explicit positive
+`gym_config.num_envs` dividing cache size; unplanned/unlimited legacy engines
+retain their existing layout support.
+With a plan, `prepare_batch()` schedules quota-threshold refill, bounded quota
+waits and batch-start pacing; a pause does not accumulate catch-up credits.
+Without a plan it only polls, leaving round/frozen refill decisions explicit.
+The optional accepted-episode limit covers initial fill and whole-cache refills;
+partial-cache remainder is not produced, and direct engine requests bypass it.
+Already pending generations are adopted without a new engine request or refill
+callback; only requests made through the controller receive request timestamps.
+
+Controller waits drain lifecycle events and check health/caller deadlines.
+`sample_context()` retries only live no-window/quota exceptions within a total
+bound; Source/Dataset behavior stays immediate. Generation waits can accept an
+absolute monotonic deadline that includes earlier work. Callback interval/refill
+times use absolute host monotonic seconds; the application aligns its own clock.
+The controller does not restore source or pacing state. The
+[configuration guide](../../../docs/source/features/ods/configuration.md#apply-the-plan)
+owns the integration example and callback details.
+
+`engine.check_health()` is READY-only and checks existing worker errors/liveness
+without sampling/refill. `get_flow_status()` returns compact generation and
+optional quota counters without per-row audit records or payload clones.
+Producer counters and quota totals use separate lock snapshots. Unlocked quota
+uses the same valid/continuity and write-window test as the full audit, but is a
+coarse scheduling bound; exact context/filter eligibility stays with sampling.
+
 ## Optional publication accounting
 
 `OnlineDataEngineCfg.lifecycle_event_capacity` enables a bounded shared log;
@@ -79,8 +112,9 @@ quota from no valid windows and terminal worker failure. It is immediate and
 does not partially spend a batch. `get_sampling_budget_snapshot()` returns
 retained identities, budgets, delivered/remaining counts and lifetime delivery;
 clean stopped engines remain auditable. The owner decides when to refill, wait
-with a bound, or stop. The fixed publication budget is not an adaptive replay
-retention policy and does not restore old sources after process restart.
+with a bound, or stop, directly or through the optional flow controller. The
+fixed publication budget is not an adaptive replay retention policy and does
+not restore old sources after process restart.
 
 `configuration.py` derives bounded budgets, cache/refill settings and pacing
 targets from measured accepted episodes/s and training chunks/s. It reads an

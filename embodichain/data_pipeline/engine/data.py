@@ -1602,6 +1602,19 @@ class OnlineDataEngine:
         """Whether the engine is ready to serve initialized data."""
         return self.state is OnlineDataEngineState.READY
 
+    def check_health(self) -> None:
+        """Require a ready engine and surface existing worker failures.
+
+        This check neither samples data nor requests a refill. It checks worker
+        liveness through the existing owner/consumer error channel.
+
+        Raises:
+            RuntimeError: If the engine is not READY or its worker has exited.
+            BaseException: The original reported worker or startup exception.
+        """
+        self._check_sampling_budget_health()
+        self._require_state(OnlineDataEngineState.READY, "check_health")
+
     # -----------------------------------------------------------------------
     # Sampling
     # -----------------------------------------------------------------------
@@ -2035,6 +2048,70 @@ class OnlineDataEngine:
         if self.state is OnlineDataEngineState.READY:
             self._ensure_worker_alive()
 
+    def _unlocked_sampling_chunks(
+        self, quota_rows: list[int], write_start: int, write_end: int
+    ) -> int:
+        """Sum coarse eligible quota while the caller holds the copy lock."""
+        valid = self.shared_buffer["valid"].bool()
+        continuity = self.shared_buffer.get("continuity_id", None)
+        eligible = (
+            (valid if continuity is None else valid & (continuity >= 0))
+            .any(-1)
+            .tolist()
+        )
+        return sum(
+            quota_rows[slot * 4 + 2] - quota_rows[slot * 4 + 3]
+            for slot in range(self.buffer_size)
+            if quota_rows[slot * 4] >= 0
+            and not write_start <= slot < write_end
+            and eligible[slot]
+        )
+
+    def get_flow_status(self) -> dict[str, int | None]:
+        """Return detached counters for READY-only host flow control.
+
+        Producer counters and quota totals use separate lock snapshots. The
+        quota sum includes only published, unlocked rows with a valid anchor
+        and nonnegative continuity when continuity metadata is present. It is
+        a coarse bound; sequence lengths and filters may reduce eligibility.
+        This method creates no per-row audit records or payload copies.
+
+        Returns:
+            Requested/completed generations and successful episodes, plus
+            ``unlocked_remaining_chunks`` and lifetime ``total_delivered_chunks``.
+            Quota counters are None when protection is disabled.
+
+        Raises:
+            RuntimeError: If the engine is not READY or its worker has exited.
+            BaseException: The original reported worker or startup exception.
+        """
+        self.check_health()
+        with self._progress.values.get_lock():
+            values = self._progress.values[:3]
+        status: dict[str, int | None] = {
+            name: int(value)
+            for name, value in zip(
+                ("requested_generation", "completed_generation", "successful_episodes"),
+                values,
+            )
+        }
+        quota = getattr(self, "_sampling_budget", None)
+        if quota is None:
+            return {
+                **status,
+                "unlocked_remaining_chunks": None,
+                "total_delivered_chunks": None,
+            }
+        with self._lock_index.get_lock():
+            self.check_health()
+            start, end = self._lock_index[:]
+            quota_rows = quota.rows[:]
+            status["unlocked_remaining_chunks"] = self._unlocked_sampling_chunks(
+                quota_rows, start, end
+            )
+            status["total_delivered_chunks"] = quota.meta[1]
+        return status
+
     def get_sampling_budget_snapshot(self) -> dict[str, object]:
         """Return a detached quota audit under the producer/sampling copy lock.
 
@@ -2060,17 +2137,11 @@ class OnlineDataEngine:
         with self._lock_index.get_lock():
             self._check_sampling_budget_health()
             start, end = self._lock_index[:]
-            valid = self.shared_buffer["valid"].bool()
-            continuity = self.shared_buffer.get("continuity_id", None)
-            eligible = (
-                (valid if continuity is None else valid & (continuity >= 0))
-                .any(-1)
-                .tolist()
-            )
+            quota_rows = quota.rows[:]
+            unlocked = self._unlocked_sampling_chunks(quota_rows, start, end)
             rows = []
-            unlocked = 0
             for slot in range(self.buffer_size):
-                episode_id, generation, assigned, delivered = quota.rows[
+                episode_id, generation, assigned, delivered = quota_rows[
                     slot * 4 : slot * 4 + 4
                 ]
                 if episode_id < 0:
@@ -2089,8 +2160,6 @@ class OnlineDataEngine:
                         "locked": locked,
                     }
                 )
-                if not locked and eligible[slot]:
-                    unlocked += remaining
             return {
                 "enabled": True,
                 "rows": rows,

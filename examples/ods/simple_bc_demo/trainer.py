@@ -27,7 +27,6 @@ import os
 import random
 import subprocess
 import sys
-import threading
 import time
 from collections import deque
 from collections.abc import Callable
@@ -37,25 +36,24 @@ from typing import Any
 import numpy as np
 import psutil
 import torch
-from tensordict import TensorDict
 
 from embodichain.data_pipeline.datasets import (
-    BatchSource,
     DataBudgetExhaustedError,
-    DataUnavailableError,
     OnlineDataSource,
     SequenceSpecCfg,
 )
 
+from embodichain.data_pipeline.configuration import ODSConfiguration
+from embodichain.data_pipeline.runtime import ODSFlowController, ODSFlowControllerCfg
+
 from embodichain.data_pipeline.engine.data import (
     OnlineDataEngine,
     OnlineDataEngineCfg,
-    OnlineDataEngineState,
 )
 from examples.ods.simple_bc_demo.data import (
     _content_manifest,
     EfficiencyTracker,
-    resource_snapshot,
+    _ResourceSampler,
 )
 from examples.ods.simple_bc_demo.evaluation import _evaluate_worker, _receive
 from examples.ods.simple_bc_demo.observations import (
@@ -71,112 +69,6 @@ from examples.ods.simple_bc_demo.usage import (
     UsageTracker,
     retained_deferred_checkpoints,
 )
-
-
-class _ResourceSampler:
-    """Best-effort wall-clock resource samples, never an exact peak or CPU total.
-
-    A background thread covers owner-side waits and short runs independently of
-    evaluation frequency. Collection cost is measured; this instrumentation
-    requires its own performance validation before use in a timed comparison.
-    """
-
-    def __init__(
-        self, cuda_devices: tuple[int, ...], interval_seconds: float = 5.0
-    ) -> None:
-        if not np.isfinite(interval_seconds) or interval_seconds <= 0:
-            raise ValueError("Resource sampling interval must be finite and positive")
-        self.cuda_devices = cuda_devices
-        self.interval_seconds = interval_seconds
-        self._stop = threading.Event()
-        self._lock = threading.Lock()
-        self._thread: threading.Thread | None = None
-        self._records: list[dict[str, Any]] = []
-        self._errors: list[dict[str, Any]] = []
-        self._collection_seconds = 0.0
-        self._closed = False
-
-    def start(self) -> None:
-        if self._thread is not None or self._closed:
-            raise RuntimeError("Resource sampler cannot be restarted")
-        self.capture("before_worker_startup")
-        self._thread = threading.Thread(
-            target=self._run, name="ods-resource-sampler", daemon=True
-        )
-        self._thread.start()
-
-    def _run(self) -> None:
-        while not self._stop.wait(self.interval_seconds):
-            self.capture("periodic")
-
-    def capture(self, boundary: str) -> None:
-        with self._lock:
-            if self._closed:
-                return
-        started = time.monotonic()
-        snapshot = None
-        error_record = None
-        try:
-            process = psutil.Process()
-            pids = [process.pid] + [
-                child.pid for child in process.children(recursive=True)
-            ]
-            # resource_snapshot checks is_initialized before reading CUDA
-            # allocator counters; it never creates a CUDA context itself.
-            snapshot = resource_snapshot(pids, cuda_devices=self.cuda_devices)
-            snapshot["boundary"] = boundary
-            snapshot["collection_started_monotonic_seconds"] = started
-            snapshot["process_tree_scope"] = "best_effort_current_descendants"
-        except Exception as error:
-            error_record = {
-                "boundary": boundary,
-                "monotonic_seconds": started,
-                "error": f"{type(error).__name__}: {error}",
-            }
-        elapsed = time.monotonic() - started
-        with self._lock:
-            self._collection_seconds += elapsed
-            if snapshot is not None:
-                snapshot["collection_seconds"] = elapsed
-                self._records.append(snapshot)
-            if error_record is not None:
-                error_record["collection_seconds"] = elapsed
-                self._errors.append(error_record)
-
-    def stop(self) -> list[dict[str, Any]]:
-        self._stop.set()
-        if self._thread is not None:
-            self._thread.join(timeout=10.0)
-            if self._thread.is_alive():
-                with self._lock:
-                    self._closed = True
-                raise RuntimeError("Resource sampler did not stop within 10 seconds")
-        with self._lock:
-            self._closed = True
-            return list(self._records)
-
-    def report(self) -> dict[str, Any]:
-        with self._lock:
-            return {
-                "started": self._thread is not None,
-                "stopped": self._closed
-                and (self._thread is None or not self._thread.is_alive()),
-                "interval_seconds": self.interval_seconds,
-                "samples": len(self._records),
-                "collection_wall_seconds": self._collection_seconds,
-                "errors": list(self._errors),
-                "missing_pid_observations": sum(
-                    len(row.get("missing_pids", [])) for row in self._records
-                ),
-                "scope": "sampled process-tree PSS and observed CPU counters; Torch allocator counters belong to the learner only",
-                "limitations": [
-                    "Memory values are sampled peaks, not exact peaks",
-                    "CPU counters omit work after a process's last observation and may miss short-lived descendants",
-                    "Missing processes or collection errors remain unknown, not zero",
-                    "Collection wall time sums sample service durations, including any overlapping forced/periodic captures; it is not end-to-end overhead",
-                    "End-to-end overhead and scheduling perturbation need workload-specific measurement",
-                ],
-            }
 
 
 def _write_evaluation_scalars(writer: Any, report: dict[str, Any]) -> None:
@@ -228,39 +120,6 @@ def _result(
         raise
 
 
-def _wait(
-    engine: OnlineDataEngine,
-    generation: int,
-    args: argparse.Namespace,
-    tracker: EfficiencyTracker,
-    *,
-    progress: Callable[[], Any] | None = None,
-) -> None:
-    """Bound the full generation wait while draining events and checking health."""
-    timeout = _timeout(args, tracker)
-    deadline = time.monotonic() + timeout
-    try:
-        while True:
-            if progress is not None:
-                progress()
-            remaining = min(deadline - time.monotonic(), _timeout(args, tracker))
-            if remaining <= 0:
-                raise TimeoutError(
-                    f"ODS generation {generation} was not published in {timeout}s"
-                )
-            try:
-                engine.wait_for_generation(generation, timeout=min(0.1, remaining))
-            except TimeoutError:
-                continue
-            if progress is not None:
-                progress()
-            return
-    except TimeoutError:
-        if args.wall_time_budget and tracker.elapsed_seconds() >= args.wall_time_budget:
-            raise _BudgetExpired from None
-        raise
-
-
 def _selection(report: dict[str, Any]) -> tuple[float, float, float]:
     return report["success_rate"], report["lift_rate"], -report["goal_error"]
 
@@ -276,11 +135,7 @@ def _state_digest(values: dict[str, torch.Tensor]) -> str:
 
 def _normalization_values(model: torch.nn.Module) -> dict[str, torch.Tensor]:
     """Include every input and output scale that changes policy semantics."""
-    names = (
-        ("mean", "std", "target_mean", "target_std")
-        if isinstance(model, ChunkBC)
-        else ("mean", "std")
-    )
+    names = ("mean", "std", "target_mean", "target_std")
     return {name: getattr(model, name) for name in names}
 
 
@@ -439,32 +294,6 @@ def _offline_reset_positions(corpus: Any, count: int) -> list[list[float]]:
     return corpus.data["obs"][:count, 0, 27:30].tolist()
 
 
-def _sample(
-    source: BatchSource,
-    count: int,
-    tracker: EfficiencyTracker,
-    sequence: SequenceSpecCfg,
-) -> TensorDict:
-    """Bound live-data waits while propagating offline quota/read failures."""
-    blocked = None
-    engine = getattr(source, "engine", None)
-    while True:
-        try:
-            batch = source.sample_context(count, sequence)
-            break
-        except (DataUnavailableError, DataBudgetExhaustedError) as error:
-            if engine is None or engine.state is not OnlineDataEngineState.READY:
-                raise
-            if blocked is None:
-                blocked = tracker.elapsed_seconds()
-            if tracker.elapsed_seconds() - blocked >= 30:
-                raise TimeoutError("No eligible ODS context for 30 seconds") from error
-            time.sleep(0.02)
-    ended = tracker.elapsed_seconds()
-    tracker.record_interval("data_wait", ended if blocked is None else blocked, ended)
-    return batch
-
-
 def run(args: argparse.Namespace) -> None:
     """Execute one explicitly labeled diagnostic or efficiency experiment."""
     started = time.monotonic() - (time.time() - psutil.Process().create_time())
@@ -592,6 +421,7 @@ def run(args: argparse.Namespace) -> None:
         "embodichain/data_pipeline/datasets/lerobot.py",
         "embodichain/data_pipeline/datasets/_sampling.py",
         "embodichain/data_pipeline/configuration.py",
+        "embodichain/data_pipeline/runtime.py",
         "embodichain/data_pipeline/engine/data.py",
         "embodichain/lab/gym/envs/embodied_env.py",
         "embodichain/lab/gym/envs/base_env.py",
@@ -672,6 +502,7 @@ def run(args: argparse.Namespace) -> None:
         }
 
     engine = None
+    flow = None
     corpus = None
     writer = None
     tensorboard = None
@@ -713,12 +544,8 @@ def run(args: argparse.Namespace) -> None:
             selection_budget is None or checkpoint_save_times[path] <= selection_budget
         )
 
-    def drain_usage() -> list[dict[str, Any]]:
-        if engine is None or usage is None:
-            return []
-        events = engine.drain_lifecycle_events()
-        usage.lifecycle(events)
-        return events
+    def drain_usage() -> list[dict[str, object]]:
+        return [] if flow is None else flow.drain_events()
 
     def save_usage(report: dict[str, Any] | None = None) -> None:
         if usage is None:
@@ -738,15 +565,15 @@ def run(args: argparse.Namespace) -> None:
             )
         )
 
-    recorded_refills: set[int] = set()
+    def record_refill(generation: int, started: float) -> None:
+        tracker._event(
+            "refill_requested", started - tracker.start_monotonic, generation=generation
+        )
 
-    def request_refill() -> int:
-        before = tracker.elapsed_seconds()
-        generation = engine.request_refill()
-        if generation not in recorded_refills:
-            tracker._event("refill_requested", before, generation=generation)
-            recorded_refills.add(generation)
-        return generation
+    def record_flow_interval(kind: str, started: float, ended: float) -> None:
+        tracker.record_interval(
+            kind, started - tracker.start_monotonic, ended - tracker.start_monotonic
+        )
 
     end_reason = "update_budget"
     generation_counts: dict[int, int] = {}
@@ -892,6 +719,17 @@ def run(args: argparse.Namespace) -> None:
             )["content_id"]
         else:
             engine = _engine(config, args)
+            flow = ODSFlowController(
+                engine,
+                ODSFlowControllerCfg(
+                    max_generated_episodes=args.max_generated_episodes
+                ),
+                plan=ODSConfiguration(**auto_plan) if auto_plan else None,
+                progress=lambda: _timeout(args, tracker),
+                on_events=usage.lifecycle if usage is not None else None,
+                on_refill=record_refill,
+                on_interval=record_flow_interval,
+            )
             if auto_report is not None:
                 (args.output / "auto_configuration.json").write_text(
                     json.dumps(auto_report, indent=2)
@@ -935,23 +773,14 @@ def run(args: argparse.Namespace) -> None:
                     load_lerobot_corpus,
                 )
 
-                def collection_progress() -> None:
-                    drain_usage()
-                    _timeout(args, tracker)
-                    # Also checks process liveness when a hard exit has not
-                    # yet been reflected in the shared lifecycle state.
-                    engine.wait_for_generation(1, timeout=0.1)
-
                 path = args.output / "lerobot_dataset"
                 collection_report = collect_lerobot(
-                    engine,
+                    flow,
                     initial,
                     path,
                     schema=schema,
                     episodes=offline_episodes,
                     snapshot=_snapshot,
-                    request_refill=request_refill,
-                    progress=collection_progress,
                     clock=tracker.elapsed_seconds,
                     record_interval=tracker.record_interval,
                 )
@@ -963,6 +792,7 @@ def run(args: argparse.Namespace) -> None:
                 engine.stop()
                 drain_usage()
                 engine = None
+                flow = None
                 resource_sampler.capture("after_offline_producer_shutdown")
                 before = tracker.elapsed_seconds()
                 corpus = load_lerobot_corpus(
@@ -1225,24 +1055,23 @@ def run(args: argparse.Namespace) -> None:
             ),
         )
         loop_started = tracker.elapsed_seconds()
-        next_quota_update = time.monotonic()
         for round_index in range(args.rounds):
             model.train()
             generation = 1
             barrier = None
             if (
                 round_index
-                and engine is not None
+                and flow is not None
                 and args.mode == "online"
                 and auto_plan is None
-                and (
-                    args.max_generated_episodes is None
-                    or engine.get_stats()["successful_episodes"]
-                    < args.max_generated_episodes
-                )
             ):
-                generation = request_refill()
-                barrier = args.updates_per_round // 4 if args.mode == "online" else 0
+                try:
+                    generation = flow.request_refill()
+                except _BudgetExpired:
+                    end_reason = "wall_time_budget"
+                    break
+                if generation is not None:
+                    barrier = args.updates_per_round // 4
             for update_index in range(args.updates_per_round):
                 if (
                     args.wall_time_budget
@@ -1260,7 +1089,9 @@ def run(args: argparse.Namespace) -> None:
                     )
                     == "updates_and_generations"
                 ):
-                    completed_generation = engine.get_stats()["completed_generation"]
+                    completed_generation = engine.get_flow_status()[
+                        "completed_generation"
+                    ]
                     if completed_generation > last_saved_generation:
                         if pending_ids:
                             if args.train_device.startswith("cuda:"):
@@ -1283,76 +1114,15 @@ def run(args: argparse.Namespace) -> None:
                                 f"generation_{completed_generation}_publication_dev",
                             )
                         )
-                if auto_plan is not None:
-                    quota_wait_started = None
-                    while True:
-                        drain_usage()
-                        publication = engine.get_stats()
-                        quota = engine.get_sampling_budget_snapshot()
-                        pending = (
-                            publication["requested_generation"]
-                            > publication["completed_generation"]
-                        )
-                        room = (
-                            publication["successful_episodes"]
-                            < args.max_generated_episodes
-                        )
-                        if (
-                            not pending
-                            and room
-                            and quota["unlocked_remaining_chunks"]
-                            <= auto_plan["refill_remaining_chunks"]
-                        ):
-                            request_refill()
-                            pending = True
-                        if quota["unlocked_remaining_chunks"] >= args.batch_size:
-                            break
-                        if not pending and not room:
-                            end_reason = "usage_budget"
-                            break
-                        if quota_wait_started is None:
-                            quota_wait_started = tracker.elapsed_seconds()
-                        if tracker.elapsed_seconds() - quota_wait_started >= 30:
-                            raise TimeoutError(
-                                "No unlocked trajectory quota for 30 seconds"
-                            )
-                        _timeout(args, tracker)
-                        time.sleep(0.02)
-                    quota_wait_ended = tracker.elapsed_seconds()
-                    tracker.record_interval(
-                        "quota_wait",
-                        (
-                            quota_wait_ended
-                            if quota_wait_started is None
-                            else quota_wait_started
-                        ),
-                        quota_wait_ended,
-                    )
-                    if end_reason == "usage_budget":
+                try:
+                    if flow is not None and not flow.prepare_batch(args.batch_size):
+                        end_reason = "usage_budget"
                         break
-                    before_pacing = tracker.elapsed_seconds()
-                    while time.monotonic() < next_quota_update:
-                        drain_usage()
-                        _timeout(args, tracker)
-                        engine.get_sampling_budget_snapshot()
-                        time.sleep(
-                            min(0.02, max(0.0, next_quota_update - time.monotonic()))
-                        )
-                    tracker.record_interval(
-                        "usage_throttle", before_pacing, tracker.elapsed_seconds()
-                    )
-                    next_quota_update = time.monotonic() + args.batch_size / min(
-                        auto_plan["training_chunks_per_second_target"],
-                        auto_plan["active_chunks_per_second_cap"],
-                    )
-                if barrier is not None and update_index == barrier:
-                    before = tracker.elapsed_seconds()
-                    try:
-                        _wait(engine, generation, args, tracker, progress=drain_usage)
-                    finally:
-                        tracker.record_interval(
-                            "data_wait", before, tracker.elapsed_seconds()
-                        )
+                    if barrier is not None and update_index == barrier:
+                        flow.wait_for_generation(generation)
+                except _BudgetExpired:
+                    end_reason = "wall_time_budget"
+                    break
                 if (
                     args.wall_time_budget
                     and tracker.elapsed_seconds() >= args.wall_time_budget
@@ -1362,7 +1132,17 @@ def run(args: argparse.Namespace) -> None:
                 service_started = tracker.elapsed_seconds()
                 try:
                     with sampling_rng.scope():
-                        batch = _sample(source, args.batch_size, tracker, sequence)
+                        batch = (
+                            source.sample_context(args.batch_size, sequence)
+                            if flow is None
+                            else flow.sample_context(source, args.batch_size, sequence)
+                        )
+                    if flow is None:
+                        ended = tracker.elapsed_seconds()
+                        tracker.record_interval("data_wait", ended, ended)
+                except _BudgetExpired:
+                    end_reason = "wall_time_budget"
+                    break
                 except DataBudgetExhaustedError:
                     if corpus is None:
                         raise
@@ -1399,15 +1179,11 @@ def run(args: argparse.Namespace) -> None:
                     )
                 step += 1
                 train_steps += 1
-                target_mask = batch.get("loss_mask", None)
+                target_mask = batch["loss_mask"]
                 supervised_ids = (
                     completed_target_ids
                     if usage is not None
-                    else (
-                        batch["frame_ids"]
-                        if target_mask is None
-                        else batch["frame_ids"][target_mask]
-                    )
+                    else batch["frame_ids"][target_mask]
                 )
                 if usage is None:
                     pending_ids.append(supervised_ids)
@@ -1429,11 +1205,9 @@ def run(args: argparse.Namespace) -> None:
                 tracker.record_interval(
                     "training_loop", update_started, tracker.elapsed_seconds()
                 )
-                versions, counts = (
-                    batch["generations"]
-                    if target_mask is None
-                    else batch["generations"][target_mask]
-                ).unique(return_counts=True)
+                versions, counts = batch["generations"][target_mask].unique(
+                    return_counts=True
+                )
                 for version, count in zip(versions.tolist(), counts.tolist()):
                     generation_counts[version] = (
                         generation_counts.get(version, 0) + count
@@ -1549,7 +1323,7 @@ def run(args: argparse.Namespace) -> None:
             if auto_plan is not None:
                 from examples.ods.simple_bc_demo.flow import summarize_flow
 
-                flow = summarize_flow(
+                flow_measurements = summarize_flow(
                     monotonic_origin_seconds=tracker.start_monotonic,
                     intervals=tracker.intervals,
                     refill_requests=[
@@ -1563,7 +1337,7 @@ def run(args: argparse.Namespace) -> None:
                     buffer_size=args.buffer_size,
                 )
                 (args.output / "flow_measurements.json").write_text(
-                    json.dumps(flow, indent=2)
+                    json.dumps(flow_measurements, indent=2)
                 )
             save_usage(usage_report)
         if args.defer_evaluation:

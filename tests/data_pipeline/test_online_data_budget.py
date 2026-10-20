@@ -29,7 +29,7 @@ sim dependencies.
 from __future__ import annotations
 
 import multiprocessing as mp
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
@@ -492,3 +492,147 @@ def test_shared_quota_draw_preserves_explicit_generator_and_global_rng() -> None
     )
     assert torch.equal(first.get_state(), second.get_state())
     assert torch.equal(global_before, torch.get_rng_state())
+
+
+def test_flow_status_matches_audit_across_ineligible_and_replaced_sources() -> None:
+    engine = _engine(rows=6, budget=3, hard=3)
+
+    def compare(expected_remaining: int, expected_delivered: int) -> None:
+        compact = engine.get_flow_status()
+        audit = engine.get_sampling_budget_snapshot()
+        assert compact["unlocked_remaining_chunks"] == expected_remaining
+        assert compact["total_delivered_chunks"] == expected_delivered
+        assert (
+            compact["unlocked_remaining_chunks"] == audit["unlocked_remaining_chunks"]
+        )
+        assert compact["total_delivered_chunks"] == audit["total_delivered_chunks"]
+
+    compare(18, 0)
+    with engine._lock_index.get_lock():
+        engine._sampling_budget.debit(torch.tensor([0, 0, 5]))
+        engine._lock_index[:] = [0, 1]
+        engine.shared_buffer["valid"][1].zero_()
+        engine.shared_buffer["continuity_id"][2].fill_(-1)
+        # An unpublished row with stale valid payload cannot lend credits.
+        engine._sampling_budget.rows[3 * 4] = -1
+    compare(5, 3)
+    with engine._lock_index.get_lock():
+        engine._sampling_budget.publish(5, 1, 6, 2)
+        engine.shared_buffer["ods_episode_id"][5].fill_(6)
+    # The replacement retires unused credits and resets only its own delivery.
+    compare(6, 3)
+    with engine._lock_index.get_lock():
+        engine._sampling_budget.debit(torch.tensor([5, 5, 5]))
+    compare(3, 6)
+
+
+@pytest.mark.parametrize("with_continuity", [False, True])
+def test_flow_status_requires_a_joint_valid_continuity_anchor(
+    with_continuity: bool,
+) -> None:
+    engine = _engine(rows=2, budget=3, hard=3)
+    with engine._lock_index.get_lock():
+        if with_continuity:
+            # Separate valid frames and continuity-qualified frames do not
+            # constitute one usable anchor.
+            engine.shared_buffer["valid"][0] = torch.tensor([True, False, False, False])
+            engine.shared_buffer["continuity_id"][0] = torch.tensor([-1, 0, 0, 0])
+        else:
+            engine.shared_buffer = engine.shared_buffer.exclude("continuity_id")
+            engine.shared_buffer["valid"][0].zero_()
+    assert engine.get_flow_status()["unlocked_remaining_chunks"] == 3
+    assert engine.get_sampling_budget_snapshot()["unlocked_remaining_chunks"] == 3
+
+
+@pytest.mark.parametrize("budget", [None, 3])
+def test_flow_status_is_detached_and_does_not_build_full_audits(
+    monkeypatch, budget: int | None
+) -> None:
+    engine = _engine(rows=2, budget=budget, hard=budget)
+    with engine._progress.values.get_lock():
+        engine._progress.values[:3] = [3, 2, 7]
+
+    def unexpected_audit():
+        pytest.fail("Compact flow status must not invoke full diagnostics")
+
+    monkeypatch.setattr(engine, "get_stats", unexpected_audit)
+    monkeypatch.setattr(engine, "get_sampling_budget_snapshot", unexpected_audit)
+    assert engine.check_health() is None
+    with torch.device("meta"):
+        status = engine.get_flow_status()
+    assert status == {
+        "requested_generation": 3,
+        "completed_generation": 2,
+        "successful_episodes": 7,
+        "unlocked_remaining_chunks": None if budget is None else 6,
+        "total_delivered_chunks": None if budget is None else 0,
+    }
+    assert all(value is None or type(value) is int for value in status.values())
+    status["requested_generation"] = -99
+    status["unlocked_remaining_chunks"] = -99
+    assert engine.get_flow_status()["requested_generation"] == 3
+    assert engine.get_flow_status()["unlocked_remaining_chunks"] == (
+        None if budget is None else 6
+    )
+    assert not engine._fill_signal.is_set()
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        OnlineDataEngineState.CREATED,
+        OnlineDataEngineState.STARTING,
+        OnlineDataEngineState.STOPPED,
+    ],
+)
+@pytest.mark.parametrize("method", ["check_health", "get_flow_status"])
+def test_flow_apis_require_ready_without_removing_stopped_audits(
+    state: OnlineDataEngineState, method: str
+) -> None:
+    engine = _engine()
+    engine._set_state(state)
+    with pytest.raises(RuntimeError, match=f"current state is {state.value}"):
+        getattr(engine, method)()
+    if state is OnlineDataEngineState.STOPPED:
+        assert engine.get_sampling_budget_snapshot()["unlocked_remaining_chunks"] == 6
+
+
+@pytest.mark.parametrize("method", ["check_health", "get_flow_status"])
+@pytest.mark.parametrize("shared_error", [False, True])
+def test_flow_apis_preserve_worker_and_local_failure_exceptions(
+    method: str, shared_error: bool
+) -> None:
+    engine = _engine(rows=1, budget=1, hard=1)
+    engine.sample_batch(1, 1)
+    error = TimeoutError("producer refill failed")
+    if shared_error:
+        engine._record_worker_error(error)
+    else:
+        engine._worker_error = error
+        engine._set_state(OnlineDataEngineState.FAILED)
+    with pytest.raises(TimeoutError, match="producer refill failed") as captured:
+        getattr(engine, method)()
+    assert captured.value is error
+
+
+@pytest.mark.parametrize("method", ["check_health", "get_flow_status"])
+def test_flow_apis_detect_ready_worker_exit(monkeypatch, method: str) -> None:
+    engine = _engine()
+    process = MagicMock(exitcode=17)
+    process.is_alive.return_value = False
+    engine._sim_process = process
+    monkeypatch.setattr(engine, "_is_owner_process", lambda: True)
+    with pytest.raises(RuntimeError, match="exit code 17"):
+        getattr(engine, method)()
+    assert engine.state is OnlineDataEngineState.FAILED
+    process.join.assert_called_once_with(timeout=0)
+
+
+@pytest.mark.parametrize("method", ["check_health", "get_flow_status"])
+def test_flow_apis_reject_failed_engine_without_error_envelope(method: str) -> None:
+    engine = _engine()
+    engine._set_state(OnlineDataEngineState.FAILED)
+    with pytest.raises(
+        data_module.OnlineDataWorkerError, match="without an error envelope"
+    ):
+        getattr(engine, method)()
