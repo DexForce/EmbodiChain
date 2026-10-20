@@ -30,7 +30,12 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd import (
     build_scene_usdz,
 )
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import RenderCfg, UsdSourceCfg, VisualObjectCfg
+from embodichain.lab.sim.cfg import (
+    DenoisingCfg,
+    RenderCfg,
+    UsdSourceCfg,
+    VisualObjectCfg,
+)
 from embodichain.lab.sim.sensors import CameraCfg
 from embodichain.lab.sim.shapes import MeshCfg
 
@@ -98,7 +103,12 @@ def test_exported_usd_texture_matches_native_gltf(
             device="cpu",
             num_envs=1,
             scene_node_capacity=128,
-            render_cfg=RenderCfg(renderer="hybrid"),
+            render_cfg=RenderCfg(
+                renderer="hybrid",
+                # Compare native texture sampling without DLSS availability or
+                # temporal reconstruction affecting this small offscreen target.
+                denoising=DenoisingCfg(window="off", offscreen="off"),
+            ),
         )
     )
     imported = {}
