@@ -22,6 +22,56 @@ decoding and compiling the constrained Task Program schema surface.
    compile_mllm_task_program
    decode_mllm_task_program
 
+embodichain.compute.dynamics
+----------------------------
+
+Simulation-independent NeRD coordinate, contact and history transformations.
+State derivatives retain their graphs; discrete contact and orientation decisions
+use branch-local derivatives.
+
+.. currentmodule:: embodichain.compute.dynamics
+
+.. autosummary::
+
+   reference_task_values
+   NeRDStateCodec
+   quat_multiply
+   quat_rotate
+   quat_inverse
+   plane_contact_features
+   append_history
+   reset_history
+
+embodichain.compute.dynamics.codec
+----------------------------------
+
+Convert public Newton COM velocities to NeRD spatial twists, encode relative
+targets in the current body frame, and update per-world recurrent windows.
+
+.. currentmodule:: embodichain.compute.dynamics.codec
+
+.. autosummary::
+
+   NeRDStateCodec
+   quat_multiply
+   quat_rotate
+   quat_inverse
+   plane_contact_features
+   append_history
+   reset_history
+
+embodichain.compute.dynamics.reference
+--------------------------------------
+
+Shared Cartpole and Ant observation, reward and failure calculations used by
+registered tasks and rollout comparison, with explicit quaternion validation.
+
+.. currentmodule:: embodichain.compute.dynamics.reference
+
+.. autosummary::
+
+   reference_task_values
+
 embodichain.data.assets.demo_assets
 -----------------------------------
 
@@ -87,6 +137,23 @@ embodichain.data_pipeline.depth_video
    DEPTH_METER_UNIT
    DEPTH_MILLIMETER_UNIT
    DEPTH_QMAX
+
+embodichain.data_pipeline.dynamics.shards
+-----------------------------------------
+
+Committed HDF5 trajectory shards and bounded sequence-window reads. State
+sequences have T+1 entries, controls have T; windows respect trajectory and split
+boundaries. Resume uses only manifest-committed shards.
+
+.. currentmodule:: embodichain.data_pipeline.dynamics.shards
+
+.. autosummary::
+
+   DynamicsShardWriter
+   DynamicsWindowDataset
+   trajectory_split
+   load_manifest
+   dataset_fingerprint
 
 embodichain.gen_sim.env
 -----------------------
@@ -332,6 +399,19 @@ embodichain.lab.gym.envs.demo
    execute_demo_episode
    resolve_demo_segments
 
+embodichain.lab.gym.envs.differentiable_dynamics_env
+----------------------------------------------------
+
+Graph-connected dynamics environments use explicit action/control and output
+hooks, preserve terminal reward graphs during partial reset, and expose an
+explicit detach boundary for rollout optimization.
+
+.. currentmodule:: embodichain.lab.gym.envs.differentiable_dynamics_env
+
+.. autosummary::
+
+   DifferentiableDynamicsEnv
+
 embodichain.lab.gym.envs.embodied_env
 -------------------------------------
 
@@ -341,6 +421,49 @@ embodichain.lab.gym.envs.embodied_env
 
    EmbodiedEnvCfg
    EmbodiedEnv
+
+embodichain.lab.sim.diff.dynamics
+---------------------------------
+
+Advance immutable functional state through SimulationManager public methods.
+The host owns substep scheduling, live publication and simulation time.
+
+.. currentmodule:: embodichain.lab.sim.diff.dynamics
+
+.. autosummary::
+
+   FunctionalDynamics
+   detach_dynamics_state
+
+embodichain.lab.sim.physics.solvers.collection
+----------------------------------------------
+
+Collect reference trajectories through SimulationManager and the public Scene.
+Analytical teacher and neural deployments use separate scene instances; rollout
+accuracy reports are distinct from official training qualification.
+
+.. currentmodule:: embodichain.lab.sim.physics.solvers.collection
+
+.. autosummary::
+
+   DynamicsGenerationCfg
+   DynamicsSimulation
+   generate_dataset
+   evaluate_rollouts
+
+embodichain.lab.sim.physics.solvers.nerd
+----------------------------------------
+
+The nerd entry-point provider validates its trained physical contract and shares
+one transition between native and functional execution. Cartpole is contact-free;
+Ant uses fixed plane features and exposes no contact-force report.
+
+.. currentmodule:: embodichain.lab.sim.physics.solvers.nerd
+
+.. autosummary::
+
+   NeRDProvider
+   NeuralRobotDynamicSolver
 
 embodichain.lab.task_program.integrations.simulation.handover
 -------------------------------------------------------------
@@ -979,8 +1102,9 @@ embodichain.lab.sim.atomic_actions.transports
 embodichain.lab.sim.diff
 ------------------------
 
-Public bridge from task-defined Newton kinematics and Warp tapes into PyTorch
-autograd. It does not advance the Newton dynamics solver.
+Task-defined Newton kinematics and registered solver dynamics have separate
+autograd boundaries. Functional dynamics own physical/history tensors and publish
+detached state through the Scene; the kinematics bridge never steps a solver.
 
 .. currentmodule:: embodichain.lab.sim.diff
 
@@ -988,6 +1112,12 @@ autograd. It does not advance the Newton dynamics solver.
 
    NewtonStepFunc
    tape_context
+
+
+.. autosummary::
+
+   FunctionalDynamics
+   detach_dynamics_state
 
 embodichain.lab.sim.diff.bridge
 -------------------------------
@@ -1227,6 +1357,162 @@ embodichain.lab.sim.motion.planners.trapezoidal_planner
    TrapezoidalPlanOptions
    TrapezoidalPlanner
    TrapezoidalPlannerCfg
+
+embodichain.learning.dynamics.comparison
+----------------------------------------
+
+Prepare and execute matched-data trainer comparisons with immutable source,
+initialization, statistics and sample-order identities. Completion status reflects
+which experiments actually ran.
+
+.. currentmodule:: embodichain.learning.dynamics.comparison
+
+.. autosummary::
+
+   prepare_comparison
+   run_comparison
+   run_candidate
+
+embodichain.learning.dynamics.qualification
+-------------------------------------------
+
+Compare independent forward/gradient/update snapshots and evaluate paired
+seed-level non-inferiority. Fewer than five seeds remains pending qualification.
+
+.. currentmodule:: embodichain.learning.dynamics.qualification
+
+.. autosummary::
+
+   capture_training_step
+   compare_training_steps
+   paired_noninferiority
+
+embodichain.learning.dynamics.reference
+---------------------------------------
+
+Explicit adapters for a trusted, pinned official source checkout. Reference
+execution is isolated from the production runtime; record compatibility transport
+and source identity rather than relabeling migrated code as an official baseline.
+
+.. currentmodule:: embodichain.learning.dynamics.reference
+
+.. autosummary::
+
+   OFFICIAL_COMMIT
+   reference_identity
+   run_reference
+   export_legacy_dataset
+   import_legacy_datasets
+   generate_official_dataset
+   repair_gravity_transport
+
+embodichain.learning.dynamics.reference_rollout
+-----------------------------------------------
+
+Evaluate portable weights in the pinned original Warp environment and neural
+integrator. This explicitly trusted, isolated reference process measures
+historical-domain training quality; it does not deploy historical physics into
+current Newton. Physical provenance, shared teacher traces and portable-network
+equivalence are retained with failure and policy-return evidence.
+
+.. currentmodule:: embodichain.learning.dynamics.reference_rollout
+
+.. autosummary::
+
+   evaluate_reference_rollouts
+
+embodichain.learning.dynamics.report
+------------------------------------
+
+Write machine-readable and human-readable comparison evidence with explicit
+complete, failed and pending qualification status.
+
+.. currentmodule:: embodichain.learning.dynamics.report
+
+.. autosummary::
+
+   write_comparison_report
+   annotate_rollout_evidence
+
+embodichain.learning.dynamics.trainer
+-------------------------------------
+
+Single-device causal dynamics training with frozen train-only normalization,
+committed sampling progress, optimizer/RNG resume and independent evaluation.
+
+.. currentmodule:: embodichain.learning.dynamics.trainer
+
+.. autosummary::
+
+   DynamicsTrainCfg
+   DynamicsTrainer
+   encode_batch
+   normalized_mse
+   compute_statistics
+   load_statistics
+   save_statistics
+   evaluate_model
+
+embodichain.learning.dynamics.workflow
+--------------------------------------
+
+Offline train, evaluate and export workflows validate dataset/model contracts
+without importing or initializing the simulation runtime.
+
+.. currentmodule:: embodichain.learning.dynamics.workflow
+
+.. autosummary::
+
+   run_train
+   run_eval
+   run_export
+
+embodichain.learning.models.nerd
+--------------------------------
+
+Portable causal NeRD networks, registered normalization buffers and versioned
+weights. Evaluation preserves gradients; legacy Python-object conversion requires
+explicit trust and is separate from normal runtime loading.
+
+.. currentmodule:: embodichain.learning.models.nerd
+
+.. autosummary::
+
+   NeRDModelCfg
+   NeRDModel
+   FeatureNormalizer
+   export_model
+   load_model
+   convert_legacy_checkpoint
+
+embodichain.learning.models.nerd.checkpoint
+-------------------------------------------
+
+Export tensor state and JSON metadata with checksums; load portable models or
+convert an explicitly trusted official Transformer checkpoint.
+
+.. currentmodule:: embodichain.learning.models.nerd.checkpoint
+
+.. autosummary::
+
+   export_model
+   load_model
+   convert_legacy_checkpoint
+
+embodichain.learning.models.nerd.model
+--------------------------------------
+
+Causal Transformer architecture matching official NeRD parameter names.
+Right-padded batches retain valid-prefix positional semantics and per-row output
+selection; normalizer statistics move with the network.
+
+.. currentmodule:: embodichain.learning.models.nerd.model
+
+.. autosummary::
+
+   NeRDModelCfg
+   NeRDModel
+   FeatureNormalizer
 
 embodichain.utils.warp.kinematics.trapezoidal_warp
 --------------------------------------------------
@@ -2208,6 +2494,19 @@ embodichain.toolkits.urdf_assembly.urdf_assembly_manager
 
    URDFAssemblyManager
 
+embodichain_tasks.classic_control.ant
+-------------------------------------
+
+Free-base Ant dynamics task with explicit effort controls and differentiable
+state ownership, registered with Gym and the APG learning-environment catalog.
+
+.. currentmodule:: embodichain_tasks.classic_control.ant
+
+.. autosummary::
+
+   AntDynamicsEnv
+   make_ant_dynamics_env
+
 embodichain_tasks.classic_control.cart_pole
 --------------------------------------------
 
@@ -2218,6 +2517,19 @@ Cart-pole environment registration under the task-first import path.
 .. autosummary::
 
    CartPoleEnv
+
+embodichain_tasks.classic_control.cartpole
+------------------------------------------
+
+Contact-free Cartpole dynamics task sharing the native and functional NeRD
+transition, with Gym and APG learning-environment factories.
+
+.. currentmodule:: embodichain_tasks.classic_control.cartpole
+
+.. autosummary::
+
+   CartpoleDynamicsEnv
+   make_cartpole_dynamics_env
 
 embodichain_tasks.classic_control.point_mass
 ---------------------------------------------

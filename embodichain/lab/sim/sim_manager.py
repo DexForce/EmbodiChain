@@ -238,7 +238,11 @@ class SimulationManagerCfg:
         startup_summary: Literal["compact", "full", "off"] = "compact",
         dexsim_startup_info: bool = False,
         scene_node_capacity: int | None = None,
+        enable_ground_plane: bool = True,
     ) -> None:
+        if not isinstance(enable_ground_plane, bool):
+            raise TypeError("enable_ground_plane must be boolean.")
+        self.enable_ground_plane = enable_ground_plane
         self.startup_summary = startup_summary
         self.dexsim_startup_info = dexsim_startup_info
         self.scene_node_capacity = scene_node_capacity
@@ -289,6 +293,13 @@ class SimulationManagerCfg:
 
     width: int = 1920
     """The width of the simulation window."""
+
+    enable_ground_plane: bool = True
+    """Declare the default physical ground plane during scene creation.
+
+    Set false for contact-free dynamics, where hiding the ground would leave
+    its collision geometry active. This is a creation-time setting.
+    """
 
     startup_summary: Literal["compact", "full", "off"] = "compact"
     """Startup table detail. ``off`` disables both simulation and Gym summaries."""
@@ -969,7 +980,7 @@ class SimulationManager:
         Returns:
             List[str]: list of all assets uid.
         """
-        uid_list = ["default_plane"]
+        uid_list = ["default_plane"] if self.sim_config.enable_ground_plane else []
         uid_list.extend(list(self._lights.keys()))
         uid_list.extend(list(self._sensors.keys()))
         uid_list.extend(list(self._robots.keys()))
@@ -1721,7 +1732,7 @@ class SimulationManager:
             self._env = result.get_arena("default")
             self._arenas = [result.get_arena(name) for name in scene.arena_names]
             self.__dict__.pop("arena_offsets", None)
-            if self._default_plane is None:
+            if self._default_plane is None and self.sim_config.enable_ground_plane:
                 self._bind_default_plane(scene.handles("default_plane")[0])
 
         # Runtime readiness belongs to the SimulationManager. Keep this and
@@ -1944,6 +1955,116 @@ class SimulationManager:
             if step > 0:
                 self._log_scene_summary()
 
+    def create_functional_state(self) -> Any:
+        """Snapshot independent state/history for a differentiable solver.
+
+        Returns:
+            DexSim functional state owned independently of live buffers.
+        """
+        self.prepare()
+        if not self.is_newton_backend:
+            raise ValueError("Functional dynamics requires the Newton backend.")
+        return self.spawn_result.create_functional_state()
+
+    def functional_parameters(self) -> Mapping[str, torch.Tensor]:
+        """Return named trainable parameters of the current solver extension."""
+        self.prepare()
+        if not self.is_newton_backend:
+            raise ValueError("Functional dynamics requires the Newton backend.")
+        return self.spawn_result.functional_parameters()
+
+    def functional_step(
+        self,
+        state: Any,
+        control: Mapping[str, torch.Tensor],
+        parameters: Mapping[str, torch.Tensor] | None = None,
+        dt: float | None = None,
+        *,
+        publish: bool = True,
+        render_final_step: bool = True,
+    ) -> Any:
+        """Advance one functional macro step through the owning DexSim Scene.
+
+        Args:
+            state: Independent physical and recurrent solver tensors.
+            control: Named differentiable Newton control tensors.
+            parameters: Optional named neural parameters for functional evaluation.
+            dt: Macro interval; defaults to the configured physics interval.
+            publish: Publish detached results and advance live time when true.
+                False evaluates an independent branch without touching live state.
+            render_final_step: Publish render consumers after a live step.
+
+        Returns:
+            A new functional state retaining first-order input/parameter gradients.
+        """
+        self.prepare()
+        if not self.is_newton_backend:
+            raise ValueError("Functional dynamics requires the Newton backend.")
+        resolved_dt = self.sim_config.physics_dt if dt is None else float(dt)
+        with self.profiler.section("functional_step", is_root=True):
+            result = self.spawn_result.functional_step(
+                state, control, parameters, dt=resolved_dt, publish=publish
+            )
+            if publish:
+                self._visualization_sim_step += 1
+                self._visualization_sim_time += resolved_dt
+                self._pending_record_dt += resolved_dt
+                if render_final_step:
+                    with self.render_frame():
+                        pass
+            return result
+
+    def reset_functional_state(self, state: Any, world_mask: Any | None = None) -> Any:
+        """Restore selected functional rows through the Scene reset contract.
+
+        Args:
+            state: Functional state whose unselected rows keep their graphs.
+            world_mask: Optional boolean mask of the manager's environment rows.
+                A Newton mask with a false final global row is also accepted.
+                An all-false mask leaves the supplied state and graph unchanged.
+
+        Returns:
+            Reset functional state with detached selected initial rows.
+        """
+        self.prepare()
+        if not self.is_newton_backend:
+            raise ValueError("Functional dynamics requires the Newton backend.")
+        arenas = None
+        if world_mask is not None:
+            mask = (
+                wp.to_torch(world_mask)
+                if isinstance(world_mask, wp.array)
+                else torch.as_tensor(world_mask, device=self.device)
+            )
+            if mask.dtype != torch.bool or mask.ndim != 1:
+                raise ValueError(
+                    "Functional reset requires a one-dimensional boolean mask."
+                )
+            if mask.numel() == self.num_envs + 1:
+                if bool(mask[-1]):
+                    if not bool(mask.all()):
+                        raise ValueError(
+                            "A partial manager reset cannot select global entities."
+                        )
+                    mask = None
+                else:
+                    mask = mask[:-1]
+            elif mask.numel() != self.num_envs:
+                raise ValueError("Functional reset mask must match environment count.")
+            if mask is not None:
+                arenas = [
+                    f"arena_{index}"
+                    for index in mask.nonzero(as_tuple=False).flatten().tolist()
+                ]
+                if not arenas:
+                    return state
+        # Environment reset/randomization has already written native state.
+        # Capture those values, not original model defaults, for selected rows.
+        fresh = self.spawn_result.create_functional_state()
+        return self.spawn_result.reset_functional_state(
+            state, arenas=arenas, reset_state=fresh, publish=True
+        )
+
     def get_env(self, arena_index: int = -1) -> dexsim.environment.Arena:
         """Get the arena or env by index.
 
@@ -2147,6 +2268,9 @@ class SimulationManager:
 
     def _declare_spawn_default_plane(self) -> None:
         """Declare the global ground in the World's Spawn scene."""
+
+        if not self.sim_config.enable_ground_plane:
+            return
 
         from dexsim.spawn import (
             CollisionApproximation,
@@ -3189,6 +3313,42 @@ class SimulationManager:
         if was_materialized:
             self.prepare()
         return articulation
+
+    def add_articulation_descriptor(self, descriptor: ArticulationDesc) -> Articulation:
+        """Declare a procedural articulation through the existing Spawn owner.
+
+        Args:
+            descriptor: Public DexSim descriptor with authored links and joints.
+                Geometry and physical properties retain descriptor ownership.
+
+        Returns:
+            Articulation facade bound in place by :meth:`prepare`.
+        """
+        from dexsim.spawn import ArticulationDesc
+        from embodichain.lab.sim.cfg import ArticulationRootPropertiesCfg
+
+        if not isinstance(descriptor, ArticulationDesc):
+            raise TypeError("descriptor must be a DexSim ArticulationDesc.")
+        uid = descriptor.name
+        if uid in self._articulations or uid in self._robots:
+            raise ValueError(f"Articulation {uid!r} already exists.")
+        cfg = ArticulationCfg(uid=uid, fpath=descriptor.urdf_path)
+        cfg.init_local_pose = descriptor.pose.copy()
+        cfg.asset_physics_mode = "preserve"
+        cfg.root_props = ArticulationRootPropertiesCfg(
+            fixed_base=descriptor.fixed_base,
+            self_collision_enabled=descriptor.enable_self_collision,
+        )
+        cfg.body_scale = tuple(float(v) for v in descriptor.body_scale)
+        cfg.build_pk_chain = False
+        facade = Articulation(cfg=cfg, device=self.device)
+        was_materialized = self.spawn_result is not None
+        self._spawn_scene.declare("articulation", uid, descriptor, facade=facade)
+        self._articulations[uid] = facade
+        self.notify_visualization_topology_changed()
+        if was_materialized:
+            self.prepare()
+        return facade
 
     def get_articulation(self, uid: str) -> Articulation | None:
         """Get an articulation by its unique ID.

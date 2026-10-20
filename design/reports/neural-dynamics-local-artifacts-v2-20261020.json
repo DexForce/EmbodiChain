@@ -1,0 +1,36 @@
+{
+  "scope": "unpublished paired local development wheels; physics signature v2",
+  "embodichain_source_wheel": {
+    "path": "/tmp/embodichain-nerd-v2-final-wheel/embodichain-0.3.1-py3-none-any.whl",
+    "sha256": "950be3b1f7a1929249ef09fbe3f5963fd633be329b76335c0f88055d3747823a",
+    "bytes": 3112657
+  },
+  "embodichain_paired_wheel": {
+    "path": "/tmp/embodichain-nerd-v2-final-paired-wheels/embodichain-0.3.1-py3-none-any.whl",
+    "sha256": "57a37b22f74ba272625c076f7419101061952c6087bd970480121667f55eb81f",
+    "bytes": 3112686
+  },
+  "dexsim_wheel": {
+    "path": "/home/dex/workspace/sources/dexsim/output/neural-solver-wheel/wheels/dexsim_engine-0.5.1+g4f093c4a88ff.d2bf6eb9a5b93fd36-cp311-cp311-manylinux_2_35_x86_64.whl",
+    "sha256": "2b0a37872ddb690392450b4b9764f128d27b8e53138d7973e87459e722504b3f",
+    "bytes": 374974433
+  },
+  "metadata_overlay": {
+    "from": "dexsim_engine==0.5.1rc1",
+    "to": "dexsim_engine==0.5.1+g4f093c4a88ff.d2bf6eb9a5b93fd36",
+    "only_changed_members": [
+      "embodichain-0.3.1.dist-info/METADATA",
+      "embodichain-0.3.1.dist-info/RECORD"
+    ],
+    "source_dependency_pin_modified": false,
+    "record_regenerated": true
+  },
+  "formal_accuracy_qualification": "pending",
+  "installed_pair_validation": {
+    "manifest": "/home/dex/workspace/sources/dexsim/output/neural-solver-wheel/validation-final-pair/manifest.json",
+    "sha256": "0d9fa38a2d574b33f20b463b5791eb443b9d7e82a22047c0f90a2887362f91d1",
+    "status": "final_pair_imports_dependency_and_focused_runtime_verified",
+    "exit_code": 0,
+    "scope": "No SDK changes since the previous installed 157-test suite; final EC-only refresh verified by exact dependency/import and dtype fail-fast test. Full numerical qualification is outside this packaging check."
+  }
+}

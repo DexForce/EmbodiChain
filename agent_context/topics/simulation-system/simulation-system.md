@@ -78,8 +78,9 @@ tests need non-symmetric rotations to expose component-order mistakes.
 - Configure arenas, devices, renderer and backend before manager construction.
 - Keep `prepare()` convergent and retryable; a committed scene is not ready
   until binding, render publication and camera attachment all succeed.
-- Physics advances through `update()` only. Rendering, diagnostics and marker
-  publication must not step or finalize an empty standalone scene.
+- Physics advances through `update()` or registered-solver `functional_step()`.
+  Functional evaluation with `publish=False` does not change live state/time.
+  Rendering, diagnostics and marker publication must not step or finalize an empty scene.
 - Keep physics timesteps fixed during trajectory playback; retime planner
   samples to the command grid. See [motion execution](../motion-planning/motion-planning.md).
 - Use Scene batch adapters for state selection. Preserve untouched rows/DOFs

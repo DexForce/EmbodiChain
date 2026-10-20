@@ -66,6 +66,28 @@ DEFAULT_LOOK_AT = (
     (0.0, 0.0, 1.0),
 )
 
+
+@pytest.mark.parametrize("mask_size", [2, 3])
+def test_empty_functional_reset_preserves_graph_without_native_publication(mask_size):
+    manager = SimpleNamespace(
+        prepare=MagicMock(),
+        is_newton_backend=True,
+        device=torch.device("cpu"),
+        num_envs=2,
+        spawn_result=MagicMock(),
+    )
+    initial = torch.tensor([1.0, 2.0], requires_grad=True)
+    state = SimpleNamespace(physical={"joint_q": initial * 2})
+    result = SimulationManager.reset_functional_state(
+        manager, state, torch.zeros(mask_size, dtype=torch.bool)
+    )
+    assert result is state
+    result.physical["joint_q"].sum().backward()
+    torch.testing.assert_close(initial.grad, torch.full_like(initial, 2))
+    manager.spawn_result.create_functional_state.assert_not_called()
+    manager.spawn_result.reset_functional_state.assert_not_called()
+
+
 pytestmark = pytest.mark.no_sim
 
 
@@ -2036,6 +2058,7 @@ def test_robot_mounted_camera_backend_lifecycle(tmp_path: Path, backend: str) ->
 
 def test_default_plane_authors_repeated_uv_before_spawn() -> None:
     sim = object.__new__(SimulationManager)
+    sim.sim_config = SimulationManagerCfg()
     sim._spawn_scene = MagicMock()
     sim._spawn_scene.handles.return_value = []
     sim._spawn_default_plane_material = object()

@@ -146,6 +146,8 @@ def main():
         package_dir=get_package_dir(),
         package_data={
             "embodichain": ["VERSION"],
+            "embodichain.data.nerd": ["*.urdf", "*.xml", "*.md"],
+            "embodichain.learning.models.nerd": ["THIRD_PARTY_LICENSES"],
             "embodichain.gen_sim.simready_pipeline.configs": ["*.json"],
             "embodichain.lab.scripts._atomic_action": ["README.md"],
             "embodichain_tasks.configs": [

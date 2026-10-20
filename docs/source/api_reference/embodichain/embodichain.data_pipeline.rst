@@ -22,6 +22,7 @@ storage for LeRobot datasets on Python 3.10--3.12).
       depth_video
       engine
       recording
+      dynamics
 
 Datasets
 --------

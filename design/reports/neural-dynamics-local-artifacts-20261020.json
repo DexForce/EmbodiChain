@@ -1,0 +1,29 @@
+{
+  "scope": "unpublished paired local development wheels; not a source-free release qualification",
+  "embodichain_source_wheel": {
+    "path": "/tmp/embodichain-nerd-wheel-final/embodichain-0.3.1-py3-none-any.whl",
+    "sha256": "69f39e855564b4d683d309e35c8a4ca55a182e39bee1a26afed7556fc1916c4d",
+    "bytes": 3105173
+  },
+  "embodichain_paired_wheel": {
+    "path": "/tmp/embodichain-nerd-paired-wheels/embodichain-0.3.1-py3-none-any.whl",
+    "sha256": "6a3ad03535f8b911a0d0152db0188dfe8bcdd52404a13dae55b20e5b9a457401",
+    "bytes": 3105202
+  },
+  "dexsim_wheel": {
+    "path": "/home/dex/workspace/sources/dexsim/output/neural-solver-wheel/wheels/dexsim_engine-0.5.1+g4f093c4a88ff.dd70636e2d1f028ad-cp311-cp311-manylinux_2_35_x86_64.whl",
+    "sha256": "0ab7a36b8a3f80d9f6afa1f0ff86827fba112150f053a4853aae8c9a2ca3741f",
+    "bytes": 374974063
+  },
+  "metadata_overlay": {
+    "from": "dexsim_engine==0.5.1rc1",
+    "to": "dexsim_engine==0.5.1+g4f093c4a88ff.dd70636e2d1f028ad",
+    "only_changed_members": [
+      "embodichain-0.3.1.dist-info/METADATA",
+      "embodichain-0.3.1.dist-info/RECORD"
+    ],
+    "source_pyproject_modified": false,
+    "record_regenerated": true
+  },
+  "qualification": "pending"
+}

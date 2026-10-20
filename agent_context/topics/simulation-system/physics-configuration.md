@@ -24,8 +24,11 @@ and the latter at the top level through `config_to_cfg()`.
 Newton `solver_cfg=None` preserves DexSim's scene-aware `AutoSolverCfg`.
 The concrete solver is resolved from the complete Spawn scene, then exposed
 through `NewtonPhysicsBackend.solver_type`. Do not guess a solver-specific robot
-preset while it is unresolved. Gradient mode requires an explicit
-`semi_implicit` solver. Read exact solver options/defaults in
+preset while it is unresolved. Gradient mode accepts explicit `semi_implicit`
+or a registered provider whose differentiable capability is checked at creation.
+Installed providers resolve through the DexSim entry-point registry using their
+registered `solver_type` and `options`; see
+[neural dynamics](../neural-dynamics/neural-dynamics.md). Read exact solver options/defaults in
 `cfg/simulation.py` and the installed DexSim config types; do not substitute a
 hardcoded fallback when an expected DexSim API is absent.
 

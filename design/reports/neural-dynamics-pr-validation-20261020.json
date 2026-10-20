@@ -1,0 +1,182 @@
+{
+  "date": "2026-10-20",
+  "timezone": "Asia/Shanghai",
+  "scope": "Draft submission verification; not formal accuracy qualification",
+  "tests": {
+    "counts": {
+      "tests": 479,
+      "failures": 1,
+      "errors": 0,
+      "skipped": 2,
+      "time_seconds": 191.45
+    },
+    "skips": [
+      {
+        "test": "tests.learning.models.test_nerd::test_explicit_official_checkpoint_forward_gradient_and_adam[Cartpole]",
+        "reason": "Set NERD_REFERENCE_ROOT to the pinned trusted upstream checkout"
+      },
+      {
+        "test": "tests.learning.models.test_nerd::test_explicit_official_checkpoint_forward_gradient_and_adam[Ant]",
+        "reason": "Set NERD_REFERENCE_ROOT to the pinned trusted upstream checkout"
+      }
+    ],
+    "failures": [
+      {
+        "test": "tests.sim.test_sim_manager::test_robot_mounted_camera_backend_lifecycle[newton]",
+        "message": "IndexError: list index out of range",
+        "trace": "tmp_path = PosixPath('/tmp/pytest-of-dex/pytest-752/test_robot_mounted_camera_back1')\nbackend = 'newton'\n\n    @pytest.mark.gpu\n    @pytest.mark.requires_sim\n    @pytest.mark.parametrize(\"backend\", [\"default\", \"newton\"])\n    def test_robot_mounted_camera_backend_lifecycle(tmp_path: Path, backend: str) -> None:\n        \"\"\"Mounted cameras follow state writes and survive physical topology rebuilds.\"\"\"\n        urdf_path = tmp_path / \"camera_robot.urdf\"\n        urdf_path.write_text(\"\"\"<robot name=\"camera_robot\">\n            <link name=\"base\">\n              <inertial><mass value=\"1\"/><inertia ixx=\"0.01\" iyy=\"0.01\"\n                izz=\"0.01\" ixy=\"0\" ixz=\"0\" iyz=\"0\"/></inertial>\n              <visual><geometry><box size=\"0.1 0.1 0.1\"/></geometry></visual>\n            </link>\n            <link name=\"tool\">\n              <inertial><mass value=\"0.1\"/><inertia ixx=\"0.001\" iyy=\"0.001\"\n                izz=\"0.001\" ixy=\"0\" ixz=\"0\" iyz=\"0\"/></inertial>\n              <visual><geometry><box size=\"0.05 0.05 0.05\"/></geometry></visual>\n            </link>\n            <joint name=\"joint\" type=\"revolute\">\n              <parent link=\"base\"/><child link=\"tool\"/><origin xyz=\"0 0 0.2\"/>\n              <axis xyz=\"0 0 1\"/><limit lower=\"-2\" upper=\"2\" effort=\"10\" velocity=\"2\"/>\n            </joint></robot>\"\"\")\n        physics_cfg = (\n            DefaultPhysicsCfg(device=\"cpu\")\n            if backend == \"default\"\n            else NewtonPhysicsCfg(\n                device=\"cuda:0\",\n                use_cuda_graph=False,\n                num_substeps=1,\n                solver_cfg={\"solver_type\": \"mujoco_warp\"},\n            )\n        )\n        sim = SimulationManager(\n            SimulationManagerCfg(\n                headless=True,\n                enable_entity_gizmo=False,\n                physics_cfg=physics_cfg,\n                render_cfg=RenderCfg(renderer=\"hybrid\"),\n            )\n        )\n        try:\n            camera_cfg = CameraCfg(\n                uid=\"mounted\",\n                width=32,\n                height=24,\n                extrinsics=CameraCfg.ExtrinsicsCfg(parent=\"tool\", pos=(0.1, 0.0, 0.1)),\n            )\n>           robot = sim.add_robot(\n                RobotCfg(\n                    uid=\"robot\",\n                    fpath=str(urdf_path),\n                    init_pos=(0.0, 0.0, 0.5),\n                    enable_sensor=True,\n                    sensors=[camera_cfg],\n                )\n            )\n\ntests/sim/test_sim_manager.py:2013: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \nembodichain/lab/sim/sim_manager.py:3453: in add_robot\n    self.add_sensor(sensor_cfg)\nembodichain/lab/sim/sim_manager.py:3978: in add_sensor\n    parent_nodes = self._resolve_spawn_sensor_parent_nodes(\nembodichain/lab/sim/sim_manager.py:4042: in _resolve_spawn_sensor_parent_nodes\n    return resolve_parent_nodes(parent, assets, self.num_envs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nembodichain/lab/sim/sensors/attachment.py:62: in resolve_parent_nodes\n    if link_name not in asset.link_names:\n                        ^^^^^^^^^^^^^^^^\n/home/dex/miniconda3/envs/open/lib/python3.11/functools.py:1001: in __get__\n    val = self.func(instance)\n          ^^^^^^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nself = <class 'embodichain.lab.sim.objects.robot.Robot'>: declared 1 Spawn articulations | uid: robot | device: cuda:0 | control_parts: None, solvers: {}\n\n    @cached_property\n    def link_names(self) -> List[str]:\n        \"\"\"Get the names of the links in the articulation.\n    \n        Returns:\n            List[str]: The names of the links in the articulation.\n        \"\"\"\n        if self._data is not None:\n            return self._data.link_names\n>       return self._entities[0].get_link_names()\n               ^^^^^^^^^^^^^^^^^\nE       IndexError: list index out of range\n\nembodichain/lab/sim/objects/articulation.py:1021: IndexError"
+      }
+    ],
+    "junit": {
+      "path": "/tmp/neural-dynamics-pr-tests-20261020.xml",
+      "sha256": "dbef6c757b88c57bc0bef60b17d4fe389a0e6e434c33c3a038166a561ea846dc"
+    },
+    "log": {
+      "path": "/tmp/neural-dynamics-pr-tests-20261020.log",
+      "sha256": "a47cabc8206fedefd7fd70dcd4b6fba466363caa0fa80cfec4f6899a5c6cd4b8"
+    },
+    "command": "OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 NERD_REFERENCE_SOURCE=/tmp/embodichain-nerd-main-reference NERD_REFERENCE_DEPS=/tmp/nerd-reference-deps NERD_MAIN_REFERENCE_ROOT=/tmp/embodichain-nerd-main-reference NERD_WARP18_ROOT=/tmp/nerd-reference-deps NERD_WARP151_ROOT=/tmp/nerd-reference-warp151 python -m pytest -q --import-mode=importlib --run-gpu tests/compute/dynamics tests/data_pipeline/dynamics tests/learning/models/test_nerd.py tests/learning/dynamics tests/sim/physics/solvers tests/sim/diff tests/gym/envs/test_differentiable_dynamics_env.py tests/gym/envs/tasks/test_neural_dynamics_tasks.py tests/cli/test_dynamics.py tests/sim/test_sim_manager.py tests/sim/test_sim_manager_cfg.py tests/test_agent_context_map.py tests/test_agent_context_tools.py",
+    "source_filename_scope": "Before collision-avoidance test renames; renamed code rerun separately"
+  },
+  "baseline_failure_reproduction": {
+    "counts": {
+      "tests": 1,
+      "failures": 1,
+      "errors": 0,
+      "skipped": 0,
+      "time_seconds": 8.152
+    },
+    "skips": [],
+    "failures": [
+      {
+        "test": "tests.sim.test_sim_manager::test_robot_mounted_camera_backend_lifecycle[newton]",
+        "message": "IndexError: list index out of range",
+        "trace": "tmp_path = PosixPath('/tmp/pytest-of-dex/pytest-753/test_robot_mounted_camera_back0')\nbackend = 'newton'\n\n    @pytest.mark.gpu\n    @pytest.mark.requires_sim\n    @pytest.mark.parametrize(\"backend\", [\"default\", \"newton\"])\n    def test_robot_mounted_camera_backend_lifecycle(tmp_path: Path, backend: str) -> None:\n        \"\"\"Mounted cameras follow state writes and survive physical topology rebuilds.\"\"\"\n        urdf_path = tmp_path / \"camera_robot.urdf\"\n        urdf_path.write_text(\"\"\"<robot name=\"camera_robot\">\n            <link name=\"base\">\n              <inertial><mass value=\"1\"/><inertia ixx=\"0.01\" iyy=\"0.01\"\n                izz=\"0.01\" ixy=\"0\" ixz=\"0\" iyz=\"0\"/></inertial>\n              <visual><geometry><box size=\"0.1 0.1 0.1\"/></geometry></visual>\n            </link>\n            <link name=\"tool\">\n              <inertial><mass value=\"0.1\"/><inertia ixx=\"0.001\" iyy=\"0.001\"\n                izz=\"0.001\" ixy=\"0\" ixz=\"0\" iyz=\"0\"/></inertial>\n              <visual><geometry><box size=\"0.05 0.05 0.05\"/></geometry></visual>\n            </link>\n            <joint name=\"joint\" type=\"revolute\">\n              <parent link=\"base\"/><child link=\"tool\"/><origin xyz=\"0 0 0.2\"/>\n              <axis xyz=\"0 0 1\"/><limit lower=\"-2\" upper=\"2\" effort=\"10\" velocity=\"2\"/>\n            </joint></robot>\"\"\")\n        physics_cfg = (\n            DefaultPhysicsCfg(device=\"cpu\")\n            if backend == \"default\"\n            else NewtonPhysicsCfg(\n                device=\"cuda:0\",\n                use_cuda_graph=False,\n                num_substeps=1,\n                solver_cfg={\"solver_type\": \"mujoco_warp\"},\n            )\n        )\n        sim = SimulationManager(\n            SimulationManagerCfg(\n                headless=True,\n                enable_entity_gizmo=False,\n                physics_cfg=physics_cfg,\n                render_cfg=RenderCfg(renderer=\"hybrid\"),\n            )\n        )\n        try:\n            camera_cfg = CameraCfg(\n                uid=\"mounted\",\n                width=32,\n                height=24,\n                extrinsics=CameraCfg.ExtrinsicsCfg(parent=\"tool\", pos=(0.1, 0.0, 0.1)),\n            )\n>           robot = sim.add_robot(\n                RobotCfg(\n                    uid=\"robot\",\n                    fpath=str(urdf_path),\n                    init_pos=(0.0, 0.0, 0.5),\n                    enable_sensor=True,\n                    sensors=[camera_cfg],\n                )\n            )\n\ntests/sim/test_sim_manager.py:1991: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \nembodichain/lab/sim/sim_manager.py:3293: in add_robot\n    self.add_sensor(sensor_cfg)\nembodichain/lab/sim/sim_manager.py:3818: in add_sensor\n    parent_nodes = self._resolve_spawn_sensor_parent_nodes(\nembodichain/lab/sim/sim_manager.py:3882: in _resolve_spawn_sensor_parent_nodes\n    return resolve_parent_nodes(parent, assets, self.num_envs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nembodichain/lab/sim/sensors/attachment.py:62: in resolve_parent_nodes\n    if link_name not in asset.link_names:\n                        ^^^^^^^^^^^^^^^^\n/home/dex/miniconda3/envs/open/lib/python3.11/functools.py:1001: in __get__\n    val = self.func(instance)\n          ^^^^^^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nself = <class 'embodichain.lab.sim.objects.robot.Robot'>: declared 1 Spawn articulations | uid: robot | device: cuda:0 | control_parts: None, solvers: {}\n\n    @cached_property\n    def link_names(self) -> List[str]:\n        \"\"\"Get the names of the links in the articulation.\n    \n        Returns:\n            List[str]: The names of the links in the articulation.\n        \"\"\"\n        if self._data is not None:\n            return self._data.link_names\n>       return self._entities[0].get_link_names()\n               ^^^^^^^^^^^^^^^^^\nE       IndexError: list index out of range\n\nembodichain/lab/sim/objects/articulation.py:1021: IndexError"
+      }
+    ],
+    "junit": {
+      "path": "/tmp/neural-dynamics-pr-baseline-camera-20261020.xml",
+      "sha256": "5d8fe605afd57dfa3a33bf0cb494e5e9a1d25b15b5138a1dee1f09895ef309c1"
+    },
+    "log": {
+      "path": "/tmp/neural-dynamics-pr-baseline-camera-20261020.log",
+      "sha256": "c73694613f15d20f53fd6de4b06204623cf8dd3bc4f201dfb841a96a66c36c58"
+    },
+    "source_commit": "66114674668b258c15feae43c8939a0ef1ec4ac4",
+    "source_snapshot": "/tmp/neural-dynamics-pr-baseline-20261020-um6vpq8e",
+    "same_local_sdk_environment": true,
+    "same_failure_signature": true
+  },
+  "renamed_test_regression": {
+    "counts": {
+      "tests": 17,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "time_seconds": 1.864
+    },
+    "skips": [],
+    "failures": [],
+    "junit": {
+      "path": "/tmp/neural-dynamics-pr-renamed-tests-20261020.xml",
+      "sha256": "924ce321b65f775ec7847e67519a8fe3b105d6a3eb65cb05c61cac8db56e7359"
+    },
+    "log": {
+      "path": "/tmp/neural-dynamics-pr-renamed-tests-20261020.log",
+      "sha256": "4e7b24fcf877bf8a085a5251afcc7e8c5b2ff1972ec87b6893692c6d6d2bed11"
+    },
+    "command": "python -m pytest -q --run-gpu tests/compute/dynamics/test_dynamics_task_reference.py tests/compute/dynamics/test_dynamics_metrics.py tests/learning/dynamics/test_dynamics_runtime_identity.py"
+  },
+  "default_collection": {
+    "exit_code": 0,
+    "tests_collected": 106,
+    "log": {
+      "path": "/tmp/neural-dynamics-pr-default-collection-20261020.log",
+      "sha256": "0d8f30c10f8b0b051b5d070c4868ab83681191a894abb360180e9654389fa914"
+    },
+    "command": "python -m pytest --collect-only -q tests/compute/dynamics tests/learning/dynamics tests/learning/test_runtime.py tests/learning/test_evaluation.py"
+  },
+  "initial_collection_conflict": {
+    "exit_code": 2,
+    "reason": "Default pytest prepend import mode loaded two distinct test_reference.py files as the same module; additional runtime/evaluation names were also made unique",
+    "log": {
+      "path": "/tmp/neural-dynamics-pr-tests-collection-20261020.log",
+      "sha256": "12579ae7d616708224ec2af4c36f7e601e09fde1413dfd9da4bc33e03e768d49"
+    }
+  },
+  "checks": {
+    "black": {
+      "version": "26.3.1",
+      "command": "python -m black .",
+      "unchanged_files": 1398,
+      "status": "passed"
+    },
+    "api_docs": {
+      "command": "python docs/scripts/check_api_docs.py",
+      "documented_exports": 2748,
+      "total_exports": 2748,
+      "status": "passed"
+    },
+    "context": {
+      "commands": [
+        "python .agents/skills/project-dev-context/scripts/context.py check",
+        "python .agents/skills/project-dev-context/scripts/context.py affected --base origin/main --explain"
+      ],
+      "status": "passed",
+      "review": "Changed simulation/data/environment/learning contracts revised; neural-dynamics topic added. Unchanged contracts matched by broad watch scopes need no unrelated rewrite."
+    },
+    "python_structure": {
+      "changed_or_new_files": 63,
+      "checks": [
+        "Apache header",
+        "future annotations",
+        "public module __all__"
+      ],
+      "status": "passed"
+    },
+    "diff_whitespace": {
+      "status": "passed_except_preserved_upstream_assets",
+      "inherited_whitespace_lines": 6,
+      "byte_preserved_exceptions": {
+        "embodichain/data/nerd/ant.xml": "23e9a720465a71fde3fd9fd2d5a18f8c11ec642f3dca8921c66cb4e169421fa7",
+        "embodichain/data/nerd/cartpole_single.urdf": "f31276531c03050a3ac3a3e24443899f38a4424586db17140978383433dec237"
+      }
+    }
+  },
+  "runtime_scope": {
+    "python": "3.11.14",
+    "torch": "2.7.1+cu128",
+    "newton": "1.6.0",
+    "warp": "1.17.0",
+    "gpu": "NVIDIA GeForce RTX 5090",
+    "sdk_source_package": "/home/dex/workspace/sources/dexsim/build_Release/lib/python_package",
+    "installed_metadata_version": "0.5.1",
+    "native_version_in_test_log": "0.5.1+00106a1db10e330c62cb62d8015b8474e997701b",
+    "note": "Source-backed SDK checkout, not a test of the unchanged published rc1 dependency."
+  },
+  "overall_status": "baseline_failure_recorded; formal_accuracy_pending",
+  "limitations": [
+    "Counts from overlapping test groups must not be added.",
+    "Large raw experiment artifacts and full local logs are not uploaded by this receipt.",
+    "Full training budgets, long-horizon qualification and a release-consistent source dependency remain pending."
+  ],
+  "official_checkpoint_followup": {
+    "command": "OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 NERD_REFERENCE_ROOT=/tmp/embodichain-nerd-analysis-20261019 python -m pytest -q tests/learning/models/test_nerd.py::test_explicit_official_checkpoint_forward_gradient_and_adam",
+    "counts": {
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "source_commit": "476dc67fccc6a99be293bf611f897b1c06f13e30",
+    "log": {
+      "path": "/tmp/neural-dynamics-pr-official-checkpoints-20261020.log",
+      "sha256": "c412967b03ecd435d39a6db77259bebf50685116e714f8b90dfa679ecccbb408"
+    },
+    "junit": {
+      "path": "/tmp/neural-dynamics-pr-official-checkpoints-20261020.xml",
+      "sha256": "47d56dec913c874c2d4f3b4c34f48bb3354da8d20cfbefc1d3da1c378487250d"
+    },
+    "scope": "Explicitly execute the two reference-checkpoint tests skipped by the combined command; not an independent enlarged population."
+  }
+}

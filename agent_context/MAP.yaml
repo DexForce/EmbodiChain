@@ -255,6 +255,30 @@ topics:
     tests/gym/envs/task_program/test_simulation_environment.py]
   related_topics: [scene-services, simulation-system, task-programs, robot-workspace, motion-planning, gen-sim, data-pipeline]
   status: active
+- id: neural-dynamics
+  title: Neural Dynamics and Named Physics Solvers
+  aliases: [neural dynamics, neural robot dynamics, NeRD, 神经动力学, 动力学模型训练]
+  keywords: [NeRDProvider, NeuralRobotDynamicSolver, NeRDStateCodec, NeRDModel,
+    RegisteredNewtonSolverCfg, dexsim.newton_solvers, DifferentiableDynamicsEnv,
+    FunctionalDynamics, DynamicsShardWriter, DynamicsWindowDataset, DynamicsTrainer,
+    官方训练精度对比]
+  paths: [topics/neural-dynamics/neural-dynamics.md]
+  source_of_truth:
+  - embodichain/lab/sim/physics/solvers/
+  - embodichain/lab/sim/cfg/physics.py
+  - embodichain/lab/gym/envs/differentiable_dynamics_env.py
+  - embodichain/lab/sim/diff/dynamics.py
+  - embodichain/compute/dynamics/
+  - embodichain/learning/models/nerd/
+  - embodichain/learning/dynamics/
+  - embodichain/data_pipeline/dynamics/
+  - embodichain/cli/dynamics.py
+  watch_paths: [embodichain/lab/sim/physics/solvers/, embodichain/compute/dynamics/,
+    embodichain/learning/models/nerd/, embodichain/learning/dynamics/,
+    embodichain/data_pipeline/dynamics/, tests/sim/physics/solvers/,
+    tests/compute/dynamics/, tests/learning/dynamics/, tests/data_pipeline/dynamics/]
+  related_topics: [simulation-system, differentiable-env, learning-layers, data-pipeline, rl-learning]
+  status: active
 - id: learning-layers
   title: Differentiable Learning Layers
   aliases: [learning layers, differentiable IK layer, 可微 IK, 训练层, 学习模块分层]

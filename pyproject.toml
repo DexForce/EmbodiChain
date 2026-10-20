@@ -85,6 +85,9 @@ embodichain_tasks = "embodichain_tasks"
 [project.entry-points."embodichain.robots"]
 official = "embodichain_robots._catalog:ROBOT_CONFIGS"
 
+[project.entry-points."dexsim.newton_solvers"]
+nerd = "embodichain.lab.sim.physics.solvers.nerd:NeRDProvider"
+
 [tool.uv.sources]
 bpy = { index = "blender" }
 
