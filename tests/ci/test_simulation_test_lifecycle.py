@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -165,3 +166,138 @@ def test_explicit_group(value): pass
     )
     assert result.ret == 0
     result.stdout.fnmatch_lines(["*14 tests collected*"])
+
+
+def _make_selection_project(pytester: pytest.Pytester) -> Path:
+    """Use the real collection hooks while rejecting native initialization."""
+    source = Path(__file__).parents[1] / "conftest.py"
+    pytester.makeconftest(source.read_text() + """
+def _initialize_sim_engine(renderer):
+    raise AssertionError('pure selection checks must not initialize a native world')
+""")
+    pytester.makeini("""[pytest]
+markers =
+    no_sim: pure Python test
+    gpu: resource lane classification
+    xdist_group: resource group
+""")
+    pytester.makepyfile(
+        test_selected="""
+from pathlib import Path
+import pytest
+
+@pytest.fixture(scope='class')
+def shared_fixture():
+    with Path('class-setup').open('a') as stream:
+        stream.write('setup\\n')
+
+@pytest.mark.no_sim
+@pytest.mark.gpu
+class TestSelected:
+    @pytest.mark.parametrize('value', [1, 2], ids=['one', 'two'])
+    def test_selected(self, value, shared_fixture):
+        with Path('executed').open('a') as stream:
+            stream.write(str(value) + '\\n')
+
+@pytest.mark.no_sim
+def test_unselected():
+    raise AssertionError('marker filtering must be preserved')
+""",
+        test_unrelated="""
+from pathlib import Path
+Path('unrelated-imported').touch()
+def test_plain(): pass
+""",
+    )
+    manifest = pytester.path / "selection.json"
+    result = pytester.runpytest_subprocess(
+        "--collect-only",
+        "--run-gpu",
+        "-m",
+        "gpu",
+        "--ci-collect-manifest",
+        str(manifest),
+        "-q",
+    )
+    assert result.ret == pytest.ExitCode.OK
+    assert not (pytester.path / "executed").exists()
+    (pytester.path / "unrelated-imported").unlink()
+    return manifest
+
+
+def test_resource_selection_preserves_cases_without_importing_unrelated_files(
+    pytester: pytest.Pytester,
+) -> None:
+    """Discovery selects exact cases; execution imports only their owning file."""
+    manifest = _make_selection_project(pytester)
+    selected = json.loads(manifest.read_text())
+    assert selected["files"] == ["test_selected.py"]
+    assert selected["nodeids"] == [
+        "test_selected.py::TestSelected::test_selected[one]",
+        "test_selected.py::TestSelected::test_selected[two]",
+    ]
+    result = pytester.runpytest_subprocess(
+        *selected["nodeids"],
+        "--run-gpu",
+        "-m",
+        "gpu",
+        "--ci-expected-collection",
+        str(manifest),
+        "-q",
+    )
+    result.assert_outcomes(passed=2)
+    assert (pytester.path / "executed").read_text().splitlines() == ["1", "2"]
+    assert (pytester.path / "class-setup").read_text().splitlines() == ["setup"]
+    assert not (pytester.path / "unrelated-imported").exists()
+    empty = pytester.path / "empty.json"
+    result = pytester.runpytest_subprocess(
+        "--collect-only",
+        "-m",
+        "requires_sim and not requires_sim",
+        "--ci-collect-manifest",
+        str(empty),
+        "-q",
+    )
+    assert result.ret == pytest.ExitCode.NO_TESTS_COLLECTED
+    assert json.loads(empty.read_text()) == {
+        "version": 1,
+        "files": [],
+        "nodeids": [],
+        "markers": {},
+    }
+
+
+@pytest.mark.parametrize(
+    "change", ["order", "membership", "markers", "collection-error"]
+)
+def test_resource_selection_rejects_changes_before_running_any_case(
+    pytester: pytest.Pytester,
+    change: str,
+) -> None:
+    """A stale discovery cannot silently omit, reorder or reclassify cases."""
+    manifest = _make_selection_project(pytester)
+    selected = json.loads(manifest.read_text())
+    if change == "order":
+        selected["nodeids"].reverse()
+    elif change == "membership":
+        selected["nodeids"].pop()
+    elif change == "markers":
+        selected["markers"][selected["nodeids"][0]].remove("gpu")
+    else:
+        (pytester.path / "test_selected.py").write_text(
+            "raise RuntimeError('changed')\n"
+        )
+    manifest.write_text(json.dumps(selected))
+    result = pytester.runpytest_subprocess(
+        "test_selected.py",
+        "--run-gpu",
+        "-m",
+        "gpu",
+        "--ci-expected-collection",
+        str(manifest),
+        "--continue-on-collection-errors",
+        "-q",
+    )
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    result.stderr.fnmatch_lines(["*Resource-lane collection * after discovery*"])
+    assert not (pytester.path / "executed").exists()

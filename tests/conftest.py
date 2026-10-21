@@ -20,8 +20,10 @@ from functools import lru_cache
 
 import hashlib
 import inspect
+import json
 import os
 import re
+from pathlib import Path
 import pytest
 
 os.environ.setdefault("EMBODICHAIN_SIM_EXIT_PROCESS", "0")
@@ -70,9 +72,24 @@ def pytest_addoption(parser):
         default=False,
         help="Run tests marked gpu; these are skipped by default to limit VRAM use.",
     )
+    parser.addoption(
+        "--ci-collect-manifest",
+        type=Path,
+        help="Write the ordered resource-lane selection during collect-only.",
+    )
+    parser.addoption(
+        "--ci-expected-collection",
+        type=Path,
+        help="Require the same ordered selection before executing a resource lane.",
+    )
 
 
 def pytest_configure(config):
+    if config.getoption("--ci-collect-manifest") is not None and (
+        not config.option.collectonly
+        or config.getoption("--ci-expected-collection") is not None
+    ):
+        raise pytest.UsageError("--ci-collect-manifest requires collect-only discovery")
     renderer = config.getoption("--renderer")
     if renderer:
         if renderer not in ["hybrid", "fast-rt"]:
@@ -83,6 +100,46 @@ def pytest_configure(config):
         # DexSim initialization is intentionally deferred to the first real-simulation
         # test.  Most of the suite consists of pure-Python tests and should not acquire
         # a CUDA/Vulkan context merely because pytest has started.
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_collection_finish(session: pytest.Session) -> None:
+    """Record discovery or reject a changed selection before any test setup."""
+    config = session.config
+    output = config.getoption("--ci-collect-manifest")
+    expected = config.getoption("--ci-expected-collection")
+    if output is None and expected is None:
+        return
+    if session.testsfailed:
+        if expected is not None:
+            raise pytest.UsageError(
+                "Resource-lane collection failed after discovery; refusing to execute."
+            )
+        return
+    nodes = [item.nodeid for item in session.items]
+    manifest = {
+        "version": 1,
+        "files": list(dict.fromkeys(node.split("::", 1)[0] for node in nodes)),
+        "nodeids": nodes,
+        "markers": {
+            item.nodeid: sorted({marker.name for marker in item.iter_markers()})
+            for item in session.items
+        },
+    }
+    if output is not None:
+        output.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    if expected is not None:
+        try:
+            recorded = json.loads(expected.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as error:
+            raise pytest.UsageError(
+                f"Cannot read resource-lane selection: {error}"
+            ) from error
+        if recorded != manifest:
+            raise pytest.UsageError(
+                "Resource-lane collection changed after discovery; "
+                "refusing to execute a different ordered test selection."
+            )
 
 
 _SIMULATION_MANAGER_CONSTRUCTOR = re.compile(r"\bSimulationManager\s*\(")
