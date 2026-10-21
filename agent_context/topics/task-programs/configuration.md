@@ -114,6 +114,14 @@ the closed-field decoder. Omitting `velocity_limit` preserves the Robot's
 ordered per-joint speed caps; an explicit scalar request is intersected with
 those caps rather than replacing them.
 
+`motion.plan_opts.kind: trapezoidal` selects typed backend options for
+`stop_at_waypoints`, `blend_tolerance`, and `collinearity_tolerance`. It requires
+`strategy: motion_gen` and selects the Trapezoidal planner contract; incompatible
+planner requirements fail during decoding. Policy scalar velocity/acceleration
+limits are carried into these explicit options, while omitted limits retain
+Robot speed caps and the planner's acceleration default. Sampling count remains
+owned by `motion.sample_count`.
+
 Grasp generators select toolkit-owned geometry with a string `model` ID;
 an inline mapping is a custom calibration and its `model_id` does not trigger
 catalog lookup. The catalog is owned by
