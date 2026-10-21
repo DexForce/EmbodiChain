@@ -35,6 +35,9 @@ from embodichain.lab.sim.atomic_actions import (
     OpenDoor,
     OpenDoorAffordance,
 )
+from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+    find_symmetric_nearest_xpos,
+)
 from embodichain.lab.sim.motion.planners import MoveType, ToppraPlanOptions
 from embodichain.lab.sim.motion.planners.utils import TrajectorySampleMethod
 from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
@@ -515,7 +518,7 @@ def test_axis_align_geometry_matches_the_axis_align_primitive() -> None:
     reference[:, :3, :3] = torch.diag(torch.tensor([-1.0, 1.0, -1.0]))
     assert torch.allclose(
         providers._symmetric_nearest(grasp, reference),
-        AxisAlign._find_symmetric_nearest_xpos(action, grasp, reference),
+        find_symmetric_nearest_xpos(grasp, reference),
     )
 
     upright = torch.tensor([0.0, 0.0, 1.0])

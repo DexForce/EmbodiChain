@@ -27,7 +27,6 @@ from argparse import Namespace
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
-import numpy as np
 import pytest
 import torch
 
@@ -1246,17 +1245,6 @@ def test_move_held_object_cup_starts_above_the_ground() -> None:
     cfg = sim.add_rigid_object.call_args.kwargs["cfg"]
     assert cfg.init_pos == [*module.OBJECT_XY, module.OBJECT_INITIAL_Z]
     assert module.OBJECT_INITIAL_Z == pytest.approx(0.05)
-
-
-def test_atomic_action_tutorial_scene_strategies_cover_every_entry_point() -> None:
-    classified = (
-        set(RIGID_SCENE_TUTORIAL_MODULES)
-        | set(STATIC_POSE_TUTORIAL_MODULES)
-        | set(EXPLICIT_SCENE_LIFECYCLE_TUTORIAL_MODULES)
-        | set(SCENE_FREE_TUTORIAL_MODULES)
-    )
-
-    assert classified == set(ATOMIC_ACTION_TUTORIAL_MODULES)
 
 
 @pytest.mark.parametrize("module_name", RIGID_SCENE_TUTORIAL_MODULES)

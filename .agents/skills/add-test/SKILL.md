@@ -111,6 +111,18 @@ Use the narrowest test type that proves the behavior:
   cannot reveal that requirement (for example, a hidden CUDA helper or an
   end-to-end toolkit test).
 
+Slow CPU cases that do not launch simulation can run on separate workers. Keep
+them independent of test order and shared mutable module state, or declare an
+explicit `xdist_group` when cases must stay together. Ordinary CPU modules and
+native resource groups retain their existing grouping.
+
+The CI runner discovers serial GPU/simulation selections in a separate
+collection-only process, then executes their exact ordered node IDs. Execution
+checks that node order and markers match discovery before setup. Keep imports
+and parametrization independent of unrelated test modules; discovery and
+execution startup both count toward lane time. Retain native destruction,
+cleanup-queue flushes and garbage collection in every test lifecycle.
+
 GPU tests are skipped by default to keep normal test runs within the shared VRAM budget. Run them explicitly and serially:
 
 ```bash

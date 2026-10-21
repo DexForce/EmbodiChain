@@ -26,7 +26,7 @@ from typing import ClassVar, Literal
 import torch
 
 from embodichain.utils import logger
-from embodichain.utils.math import get_relative_rotation, pose_inv
+from embodichain.utils.math import pose_inv
 
 from embodichain.lab.sim.atomic_actions.affordance import AntipodalAffordance
 from embodichain.lab.sim.atomic_actions.affordance_sampling import (
@@ -65,6 +65,7 @@ from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
     make_manipulation_slot,
 )
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+    find_symmetric_nearest_xpos,
     assemble_full_robot_trajectory,
     pad_trajectory_to_length,
     plan_named_arm_trajectory,
@@ -1161,23 +1162,6 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             "retreat": retreat,
         }
 
-    def _find_symmetric_nearest_xpos(
-        self, target_xpos: torch.Tensor, reference_xpos: torch.Tensor
-    ) -> torch.Tensor:
-        """Find the nearest symmetric pose to the reference pose."""
-        symmetric_xpos = target_xpos.clone()
-        symmetric_xpos[:, :3, 0] = -symmetric_xpos[:, :3, 0]
-        symmetric_xpos[:, :3, 1] = -symmetric_xpos[:, :3, 1]
-        angle_a = get_relative_rotation(
-            reference_xpos[:, :3, :3], target_xpos[:, :3, :3]
-        )
-        angle_b = get_relative_rotation(
-            reference_xpos[:, :3, :3], symmetric_xpos[:, :3, :3]
-        )
-        choose_target = (angle_a < angle_b)[..., None, None]
-        target_xpos = torch.where(choose_target, target_xpos, symmetric_xpos)
-        return target_xpos
-
     def _plan_direction(
         self,
         context: PlanningContext,
@@ -1263,9 +1247,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         )
         handover_grasp_success = handover_sample.success
         handover_grasp = handover_sample.poses
-        handover_grasp = self._find_symmetric_nearest_xpos(
-            handover_grasp, handover_start_eef
-        )
+        handover_grasp = find_symmetric_nearest_xpos(handover_grasp, handover_start_eef)
         handover_pre_grasp = translate_pose_world(
             handover_grasp,
             -handover_grasp[:, :3, 2] * options.pre_grasp_distance,
@@ -1316,9 +1298,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         )
         receive_grasp_success = receive_sample.success
         receive_grasp = receive_sample.poses
-        receive_grasp = self._find_symmetric_nearest_xpos(
-            receive_grasp, receive_start_eef
-        )
+        receive_grasp = find_symmetric_nearest_xpos(receive_grasp, receive_start_eef)
 
         receive_pre_grasp = translate_pose_world(
             receive_grasp,

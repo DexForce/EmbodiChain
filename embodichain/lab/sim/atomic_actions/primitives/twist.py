@@ -28,7 +28,6 @@ import torch
 from embodichain.utils.math import (
     axis_angle_to_rotation_matrix,
     pose_inv,
-    get_relative_rotation,
 )
 
 from embodichain.lab.sim.atomic_actions.affordance import TwistAffordance
@@ -59,6 +58,7 @@ from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
     make_manipulation_slot,
 )
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+    find_symmetric_nearest_xpos,
     arm_qpos_from_state,
     hold_inactive_cartesian_rows,
     resample_planned_trajectory,
@@ -149,23 +149,6 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
         self.num_envs = self.robot.get_qpos().shape[0]
         self.robot_dof = self.robot.dof
 
-    def _find_symmetric_nearest_xpos(
-        self, target_xpos: torch.Tensor, reference_xpos: torch.Tensor
-    ) -> torch.Tensor:
-        """Find the nearest symmetric pose to the reference pose."""
-        symmetric_xpos = target_xpos.clone()
-        symmetric_xpos[:, :3, 0] = -symmetric_xpos[:, :3, 0]
-        symmetric_xpos[:, :3, 1] = -symmetric_xpos[:, :3, 1]
-        angle_a = get_relative_rotation(
-            reference_xpos[:, :3, :3], target_xpos[:, :3, :3]
-        )
-        angle_b = get_relative_rotation(
-            reference_xpos[:, :3, :3], symmetric_xpos[:, :3, :3]
-        )
-        choose_target = (angle_a < angle_b)[..., None, None]
-        target_xpos = torch.where(choose_target, target_xpos, symmetric_xpos)
-        return target_xpos
-
     def _plan(
         self,
         request: ResolvedActionRequest[TwistGoal, TwistOptions],
@@ -216,7 +199,7 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
             key=(request.invocation_id or self.skill_id) + ":grasp",
         )
         grasp_xpos = grasp_sample.poses.to(device=self.device, dtype=torch.float32)
-        grasp_xpos = self._find_symmetric_nearest_xpos(
+        grasp_xpos = find_symmetric_nearest_xpos(
             grasp_xpos,
             reference_xpos=self.robot.compute_fk(
                 qpos=start_arm_qpos, name=control_part, to_matrix=True

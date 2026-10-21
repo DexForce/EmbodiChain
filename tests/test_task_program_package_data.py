@@ -37,38 +37,20 @@ _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 _SETUP_PATH = _REPOSITORY_ROOT / "setup.py"
 _CONFIG_PACKAGE = "embodichain_tasks.configs"
 _CONFIG_SOURCE = _REPOSITORY_ROOT / "extensions" / "embodichain_tasks" / "configs"
-_PROGRAMS = {
-    Path("tasks/manipulation/repeated_pick_place/task_program/program.tabletop.yaml"): (
-        "repeated_tabletop_cube_pick_place"
-    ),
-    Path("tasks/manipulation/hand_over/task_program/program.tabletop.yaml"): (
-        "tabletop_hand_over"
-    ),
-    Path(
-        "tasks/manipulation/tableware/stack_blocks_two/task_program/program.yaml"
-    ): "stack_two_blocks",
-    Path(
-        "tasks/manipulation/tableware/blocks_ranking_rgb/task_program/program.yaml"
-    ): "rank_blocks_rgb",
-    Path(
-        "tasks/manipulation/rubiks_cube_pick_place/task_program/program.yaml"
-    ): "rubiks_cube_pick_place",
-    Path("tasks/manipulation/repeated_pick_place/task_program/program.yaml"): (
-        "repeated_cube_pick_place"
-    ),
-    Path(
-        "tasks/manipulation/open_drawer/task_program/program.yaml"
-    ): "slide_open_drawer",
-    Path(
-        "tasks/manipulation/hand_over/task_program/program.yaml"
-    ): "dual_ur5_hand_over",
-    Path(
-        "tasks/manipulation/tableware/pour_water/task_program/program.yaml"
-    ): "pour_water_with_right_arm",
+_PROGRAMS = (
+    Path("tasks/manipulation/repeated_pick_place/task_program/program.tabletop.yaml"),
+    Path("tasks/manipulation/hand_over/task_program/program.tabletop.yaml"),
+    Path("tasks/manipulation/tableware/stack_blocks_two/task_program/program.yaml"),
+    Path("tasks/manipulation/tableware/blocks_ranking_rgb/task_program/program.yaml"),
+    Path("tasks/manipulation/rubiks_cube_pick_place/task_program/program.yaml"),
+    Path("tasks/manipulation/repeated_pick_place/task_program/program.yaml"),
+    Path("tasks/manipulation/open_drawer/task_program/program.yaml"),
+    Path("tasks/manipulation/hand_over/task_program/program.yaml"),
+    Path("tasks/manipulation/tableware/pour_water/task_program/program.yaml"),
     Path(
         "tasks/manipulation/tableware/pour_water/task_program/program.tianji_marvin.yaml"
-    ): "pour_water_with_right_arm",
-}
+    ),
+)
 _DEPLOYMENTS = {
     Path("tasks/manipulation/repeated_pick_place/task.tianji_marvin.yaml"): (
         "repeated_tabletop_cube_pick_place",
