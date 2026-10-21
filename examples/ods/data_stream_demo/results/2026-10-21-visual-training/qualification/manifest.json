@@ -100,6 +100,18 @@
     "shared-aux-fairness.json": {
       "source": "/tmp/ods-training-report-fairness-l2om68ht/shared-aux-pairing-validation.json",
       "sha256": "5fbdb43b3fd5b7a5063a4d4dc6ea75440ccd33c05feeb40e5a37eeb2fb6b7e21"
+    },
+    "scheduler-cpu.json": {
+      "source": "/tmp/ods-training-schedule-qualification-20261021/v2/summary.json",
+      "sha256": "e693d55317d3503b9c7261fc4c6d4ebb89ee245223850216192cab3564f2adf6"
+    },
+    "scheduler-real-attempt.json": {
+      "source": "/tmp/ods-visual-training-scheduling-validation-20261021-v1/validation.json",
+      "sha256": "2138650bfbdad57b19582da2cfc3dd975ac7c29f8de58b3c3a2e5ec426ad70db"
+    },
+    "scheduler-single-real.json": {
+      "source": "independent reconstruction of preserved actual single-camera records",
+      "sha256": "09adcff956233a615db758de0d00890309ee2c3a6ff9b6ca31c882d762387d9e"
     }
   }
 }

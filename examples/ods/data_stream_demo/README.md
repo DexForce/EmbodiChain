@@ -102,6 +102,13 @@ pipelines include fresh acquisition, failed expert attempts, encoding,
 initialization, actual optimizer work, checkpoint writing, finalization and
 normal shutdown. Last-update time is recorded separately from total time,
 so pending recording work cannot disappear from the comparison.
+All paths permit recording to overlap the next generation within the same
+bounded storage. Request the next shared-cache fill before waiting for old
+owned episodes to enter the writer queue; release those old snapshots before
+taking new ones. Offline still starts training only after its full corpus is
+finalized. Serial still starts each generation after the preceding optimizer
+updates finish, and starts its next updates only after generation completes.
+An extra recorder-submission barrier must not make either control slower.
 
 The supervisor then launches a separate CPU corpus/decoder audit and the
 independent policy evaluation. Their durations are saved and excluded from

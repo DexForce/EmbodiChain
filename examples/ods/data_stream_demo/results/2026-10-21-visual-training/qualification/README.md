@@ -40,3 +40,15 @@ LeRobot 0.4.4 and TorchCodec 0.5. The affected production/model/context selectio
 passed **400 tests**. API coverage is 2794/2794, Python 3.10 AST checks pass,
 and the repository was formatted with Black 26.3.1. The shared native runtime
 and exact experiment-source hashes are retained with each supervised suite.
+
+An additional scheduling review found that the first U128 matrix unnecessarily
+waited for recording submission before requesting a new generation in its
+offline and serial controls. That matrix was cancelled and marked superseded;
+its four completed timings are diagnostic evidence, not final efficiency
+comparisons. The corrected schedule permits recording/generation overlap in
+every arm while still excluding generation/optimizer overlap in serial.
+Nineteen CPU state/ownership cases and four old-code negative controls pass.
+Three real single-camera C8/P2/B32/U40 runs also pass, with equal overlap/serial
+final model hashes and traces. The companion dual-camera attempt failed idle
+GPU admission before launch and remains in the record; it is not a passing
+dual-camera validation. See the `scheduler-*.json` receipts.

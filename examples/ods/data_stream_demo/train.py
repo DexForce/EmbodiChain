@@ -535,11 +535,17 @@ class _Experiment:
 
         episodes, self.initial_episodes = self.initial_episodes, None
         while True:
+            # Old staging owns its snapshot, so recording can overlap the next
+            # shared-cache fill even in the collect-then-train baseline.
+            target = (
+                self.flow.request_refill()
+                if len(self.registry) < self.args.offline_episodes
+                else None
+            )
             self.flush_staging()
             del episodes
-            if len(self.registry) == self.args.offline_episodes:
+            if target is None:
                 break
-            target = self.flow.request_refill()
             episodes = self.take(target)
             self.stage(episodes)
         started = self.now()
@@ -655,9 +661,11 @@ class _Experiment:
             if target != self.generation:
                 if target != self.generation + 1:
                     raise ValueError("Serial trace skips a production generation")
+                # The previous optimizer work has synchronized. Block only
+                # generation/training overlap, not generation/recording overlap.
+                self.flow.request_refill()
                 self.flush_staging()
                 self.retire()
-                self.flow.request_refill()
                 self.install(self.take(target))
             self.flow.poll()
             requested = self.now()
@@ -666,14 +674,15 @@ class _Experiment:
             self.metrics.interval("batch_service", requested, self.now())
             self.update(batch, plan, requested_ns=requested, generation=target)
             del batch
-        self.flush_staging()
-        self.retire()
         while self.generation < self.serial_trace["generated_generations"]:
             target = self.flow.request_refill()
+            self.flush_staging()
+            self.retire()
             tail = self.take(target, drain=True)
             self.stage(tail)
-            self.flush_staging()
             del tail
+        self.flush_staging()
+        self.retire()
         expected = [
             (row["length"], row["numeric_sha256"])
             for row in self.serial_trace["episodes"]

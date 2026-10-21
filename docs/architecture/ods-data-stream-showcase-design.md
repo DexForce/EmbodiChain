@@ -423,6 +423,11 @@ uses the direct path while prohibiting generation/training overlap.
 
 The offline sizes form a time–diversity curve; the comparison does not select
 only a small offline corpus. Each primary path starts from fresh acquisition.
+All acquisition paths may overlap recording with the next shared-cache fill.
+Request the next generation before waiting for the current owned block to
+enter the bounded recording queue, then release that block before taking the
+next snapshot. The serial control excludes generation/optimizer overlap; it
+must not additionally serialize generation with recorder submission.
 Do not require equal accepted data volume, final source coverage, anchor
 order or pixel values across the primary paths. These are measured outcomes.
 The serial attribution path alone must match the corresponding overlap
