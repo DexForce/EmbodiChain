@@ -27,6 +27,7 @@ import pytest
 import torch
 
 pytestmark = [pytest.mark.gpu, pytest.mark.slow, pytest.mark.subprocess_sim]
+SMOKE_TIMEOUT_SECONDS = 180
 
 
 @pytest.mark.parametrize("robot", ["ur5", "franka"])
@@ -36,34 +37,49 @@ def test_atomic_cli_plans_and_replays_nominal_scene(
 ) -> None:
     """Each preset produces finite, timed commands and finishes native cleanup."""
     output = tmp_path / f"{skill}_{robot}"
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "embodichain",
-            "run-atomic-action",
-            "--skill",
-            skill,
-            "--physics",
-            "default",
-            "--robot",
-            robot,
-            "--planner",
-            "trapezoidal",
-            "--headless",
-            "--num-envs",
-            "1",
-            "--no-expansion",
-            "--no-save-video",
-            "--output-dir",
-            str(output),
-        ],
-        cwd=Path(__file__).resolve().parents[3],
-        capture_output=True,
-        text=True,
-        timeout=180,
-    )
-    assert result.returncode == 0, result.stdout[-20000:] + result.stderr[-20000:]
+    command = [
+        sys.executable,
+        "-u",
+        "-m",
+        "embodichain",
+        "run-example",
+        "atomic-action",
+        "--skill",
+        skill,
+        "--physics",
+        "default",
+        "--robot",
+        robot,
+        "--planner",
+        "trapezoidal",
+        "--headless",
+        "--renderer",
+        "no-render",
+        "--num-envs",
+        "1",
+        "--no-expansion",
+        "--no-save-video",
+        "--output-dir",
+        str(output),
+    ]
+    log_path = tmp_path / f"{skill}_{robot}.log"
+    with log_path.open("w") as log:
+        try:
+            result = subprocess.run(
+                command,
+                cwd=Path(__file__).resolve().parents[3],
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=SMOKE_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            pytest.fail(
+                f"CLI exceeded {SMOKE_TIMEOUT_SECONDS}s; log: {log_path}\n"
+                + log_path.read_text()[-20000:],
+                pytrace=False,
+            )
+    assert result.returncode == 0, log_path.read_text()[-20000:]
     manifest = json.loads((output / "expansion_manifest.json").read_text())
     assert manifest["status"] == "executed"
     assert manifest["variants"] == manifest["num_envs"] == 1

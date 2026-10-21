@@ -134,7 +134,8 @@ def play_joint_trajectory(
 
     Planner timing is first quantized to the configured fixed command period.
     Every command interval advances an integer number of unchanged physics
-    substeps. Velocity targets are recomputed on that executed grid.
+    substeps. Velocity targets use that executed grid and preserve each row's
+    initial/terminal rest and explicit holds.
 
     Args:
         sim: Simulation manager in explicit-update mode.
@@ -179,7 +180,7 @@ def play_joint_trajectory(
             "source-index callbacks and holds require preserve_source_grid=True"
         )
     if not cfg.preserve_source_grid:
-        positions, _, dt, _ = retime_to_control_grid(positions, dt, control_dt)
+        positions, velocities, dt, _ = retime_to_control_grid(positions, dt, control_dt)
     else:
         if dt.shape != positions.shape[:2] or not torch.isfinite(positions).all():
             raise ValueError(
@@ -234,14 +235,23 @@ def play_joint_trajectory(
     executed_dt = (
         dt.new_tensor(elapsed).unsqueeze(0).expand(positions.shape[0], -1).clone()
     )
-    # Near-equal zero-time source joins stay exact in commanded positions; use
-    # their preceding sample only for numerical differentiation.
-    derivative_positions = positions.clone()
-    for index in range(1, count):
-        if elapsed[index] == 0:
-            derivative_positions[:, index] = derivative_positions[:, index - 1]
-    velocities = differentiate_positions(derivative_positions, executed_dt)
-    velocities[:, -1] = 0
+    if cfg.preserve_source_grid:
+        # Near-equal zero-time joins stay exact in commands; use their preceding
+        # sample only for numerical differentiation.
+        derivative_positions = positions.clone()
+        for index in range(1, count):
+            if elapsed[index] == 0:
+                derivative_positions[:, index] = derivative_positions[:, index - 1]
+        velocities = differentiate_positions(derivative_positions, executed_dt)
+        indices = torch.arange(count, device=dt.device)
+        last_arrivals = torch.where(dt > 0, indices, 0).amax(dim=1)
+        terminal_holds = indices.unsqueeze(0) >= last_arrivals.unsqueeze(1)
+        velocities.masked_fill_(terminal_holds.unsqueeze(-1), 0)
+        velocities[:, 0] = 0
+    # An explicit hold must not retain a moving velocity target during physics.
+    for index, duration in holds.items():
+        if duration > 0:
+            velocities[:, index] = 0
     for waypoint in range(count):
         robot.set_qpos(positions[:, waypoint], joint_ids=resolved_joint_ids)
         if cfg.joint_command_mode == "position_velocity":

@@ -120,6 +120,66 @@ def test_position_playback_does_not_write_velocity_targets() -> None:
     assert robot.qvel_commands == []
 
 
+@pytest.mark.parametrize("preserve_source_grid", [False, True])
+def test_velocity_playback_keeps_each_rows_start_and_terminal_holds_at_rest(
+    preserve_source_grid: bool,
+) -> None:
+    robot = _FakeRobot()
+    positions = torch.tensor(
+        [[[0.0], [1.0], [2.0], [3.0]], [[4.0], [5.0], [5.0], [5.0]], [[6.0]] * 4]
+    )
+    result = play_joint_trajectory(
+        _FakeSimulation(physics_dt=0.01),
+        robot,
+        positions=positions,
+        dt=torch.tensor([[0.0, 0.01, 0.01, 0.01], [0.0, 0.01, 0.0, 0.0], [0.0] * 4]),
+        joint_ids=[1],
+        cfg=JointTrajectoryPlaybackCfg(
+            joint_command_mode="position_velocity",
+            preserve_source_grid=preserve_source_grid,
+        ),
+    )
+
+    dispatched = torch.stack(robot.qvel_commands, dim=1)
+    torch.testing.assert_close(dispatched, result.velocities)
+    assert torch.count_nonzero(dispatched[:, 0]) == 0
+    assert torch.count_nonzero(dispatched[0, -1]) == 0
+    assert torch.count_nonzero(dispatched[1, 1:]) == 0
+    assert torch.count_nonzero(dispatched[2]) == 0
+    # The longer row still moves at one joint unit per 10 ms in its interior.
+    torch.testing.assert_close(dispatched[0, 1:-1], torch.full((2, 1), 100.0))
+
+
+def test_velocity_playback_stops_at_explicit_holds_without_changing_the_clock() -> None:
+    robot = _FakeRobot()
+    sim = _FakeSimulation(physics_dt=0.01)
+    observed = []
+    positions = torch.arange(5, dtype=torch.float32).reshape(1, 5, 1)
+    result = play_joint_trajectory(
+        sim,
+        robot,
+        positions=positions,
+        dt=torch.tensor([[0.0, 0.02, 0.02, 0.02, 0.02]]),
+        joint_ids=[1],
+        cfg=JointTrajectoryPlaybackCfg(
+            joint_command_mode="position_velocity", preserve_source_grid=True
+        ),
+        hold_durations={2: 0.04, 4: 0.02},
+        on_step=lambda index, count: observed.append((index, count)),
+    )
+
+    dispatched = torch.stack(robot.qvel_commands, dim=1)
+    assert torch.count_nonzero(dispatched[:, [0, 2, 4]]) == 0
+    assert dispatched[0, 1, 0] > 0 and dispatched[0, 3, 0] > 0
+    torch.testing.assert_close(result.velocities[:, :5], dispatched)
+    assert torch.count_nonzero(result.velocities[:, -1]) == 0
+    assert torch.equal(torch.stack(robot.qpos_commands, dim=1), positions)
+    assert observed == [(index, 5) for index in range(5)]
+    assert float(result.dt.sum()) == pytest.approx(
+        sum(dt * steps for dt, steps in sim.updates)
+    )
+
+
 def test_aligned_playback_preserves_zero_time_joins_callbacks_and_records_holds() -> (
     None
 ):
