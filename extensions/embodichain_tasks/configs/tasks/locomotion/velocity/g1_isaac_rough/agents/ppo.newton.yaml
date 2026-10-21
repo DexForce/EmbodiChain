@@ -1,6 +1,6 @@
 trainer:
   exp_name: g1_rough_ppo_mujoco_warp
-  gym_config: extensions/embodichain_tasks/configs/tasks/locomotion/velocity/g1_isaac_rough/env.newton.yaml
+  gym_config: ../env.newton.yaml
   seed: 42
   device: cuda:0
   headless: true

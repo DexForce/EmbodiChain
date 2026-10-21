@@ -431,6 +431,24 @@ class IsaacVelocityEnv(EmbodiChainVelocityEnv):
         finally:
             self._reference_policy_observations_only = False
 
+    def _get_sensor_obs(self, **kwargs: Any) -> TensorDict:
+        """Read task-owned contact samples without querying an invalid reset state.
+
+        Contact rows are sampled by ``_sample_reference_contacts`` after physics
+        and cleared by the sensor reset. Other sensors retain their normal
+        observation update lifecycle.
+        """
+        self.sim.render_camera_group(self._camera_group_ids)
+        obs = TensorDict({}, batch_size=[self.num_envs], device=self.device)
+        for name, sensor in self.sensors.items():
+            if (
+                sensor is not self._reference_sensor
+                and not sensor.requires_substep_update
+            ):
+                sensor.update(fetch_only=True)
+            obs[name] = sensor.get_data()
+        return obs
+
     def get_obs(self, **kwargs: Any) -> EnvObs:
         """Defer unused training observations until commands and resets finish."""
         if getattr(self, "_reference_defer_observations", False):
