@@ -396,6 +396,11 @@ jobs:
         shell: bash -l {0}
         run: |
           source activate py311
+          set -euo pipefail
+          # Login shells may use a different Git config from actions/checkout.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git -C "$GITHUB_WORKSPACE" rev-parse \
+            --verify --end-of-options 'HEAD^{commit}'
           # The image's login profile can reset the PATH set by setup-node.
           export PATH="${CI_NODE_BIN_DIR}:${PATH}"
           node --version

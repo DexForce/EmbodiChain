@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -130,6 +131,72 @@ def test_simulator_test_job_installs_node_before_workflow_contract_tests() -> No
     assert setup_index < capture_index < tests_index
     assert "GITHUB_ENV" in steps[capture_index]["run"]
     assert 'export PATH="${CI_NODE_BIN_DIR}:${PATH}"' in steps[tests_index]["run"]
+
+
+def test_test_job_restores_git_access_before_running_selected_tests(
+    tmp_path: Path,
+) -> None:
+    """Run the workflow preparation against a checkout with untrusted ownership."""
+    steps = _load_workflow("main.yml")["jobs"]["test"]["steps"]
+    tests = next(step for step in steps if step.get("name") == "Run selected tests")
+    assert tests["shell"] == "bash -l {0}"
+    preparation = tests["run"].split("python scripts/ci/run_test_plan.py", 1)[0]
+    preparation = preparation.replace("source activate py311", ":").replace(
+        "node --version", ":"
+    )
+    repository = tmp_path / "checkout with spaces"
+    repository.mkdir()
+    config = tmp_path / "gitconfig"
+    config.write_text("")
+    environment = os.environ.copy()
+    environment.update(
+        GIT_CONFIG_GLOBAL=str(config),
+        GIT_CONFIG_NOSYSTEM="1",
+        GITHUB_WORKSPACE=str(repository),
+        CI_NODE_BIN_DIR="",
+    )
+    for args in (
+        ["init", "-q"],
+        [
+            "-c",
+            "user.name=CI Test",
+            "-c",
+            "user.email=ci@example.org",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "fixture",
+        ],
+    ):
+        subprocess.run(["git", *args], cwd=repository, env=environment, check=True)
+    revision = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=repository, env=environment, text=True
+    ).strip()
+    environment["GIT_TEST_ASSUME_DIFFERENT_OWNER"] = "1"
+    untrusted = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repository,
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+    assert untrusted.returncode != 0
+    assert "dubious ownership" in untrusted.stderr
+    prepared = subprocess.run(
+        ["bash", "-e", "-c", preparation],
+        cwd=repository,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert prepared.returncode == 0, prepared.stdout + prepared.stderr
+    assert (
+        subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=repository, env=environment, text=True
+        ).strip()
+        == revision
+    )
 
 
 @pytest.mark.parametrize(
