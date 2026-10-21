@@ -19,8 +19,8 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
-from typing import ClassVar
+from dataclasses import dataclass, field
+from typing import ClassVar, Literal
 
 import torch
 
@@ -66,6 +66,11 @@ class PourGoal:
 class PourOptions(ActionOptions):
     """Per-invocation pouring behavior."""
 
+    hand_source: Literal["observed", "grasp_command"] = field(
+        default="observed", kw_only=True
+    )
+    """Hand target retained throughout pouring, independent of measured deflection."""
+
     rotate_angle: float = math.pi / 4.0
     """Signed rotation about the held object's local internal axis, in radians."""
 
@@ -73,6 +78,8 @@ class PourOptions(ActionOptions):
     """Minimum time to remain at the poured orientation, in seconds."""
 
     def __post_init__(self) -> None:
+        if self.hand_source not in ("observed", "grasp_command"):
+            raise ValueError("hand_source must be observed or grasp_command.")
         if not math.isfinite(self.rotate_angle):
             raise ValueError("rotate_angle must be finite.")
         if not math.isfinite(self.dwell_duration) or self.dwell_duration < 0.0:
@@ -217,6 +224,13 @@ class Pour(AtomicAction[PourGoal, PourOptions]):
         # Preserve the measured contact-supported grasp instead of tightening
         # the hand to a configured nominal value on the first frame.
         full[:, :, hand_joint_ids] = context.last_qpos[:, hand_joint_ids].unsqueeze(1)
+        if options.hand_source == "grasp_command":
+            full[:, :, hand_joint_ids] = grasp_endpoint.joint_positions(
+                GRASP_COMMAND,
+                num_envs=context.batch_size,
+                device=self.device,
+                dtype=context.robot.qpos.dtype,
+            ).unsqueeze(1)
         timed = TimedTrajectory.from_uniform_step(
             full,
             env_ids=context.env_ids,

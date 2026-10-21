@@ -54,6 +54,11 @@ that commits or invalidates observed effects.
 verified grasp. Its goal optionally frees only the final world yaw; default
 goals remain exact. Heading alternatives are checked as complete motion paths,
 with accepted rows retained independently and selected offsets in diagnostics.
+MoveHeldObject, Pour and Place expose `hand_source: observed|grasp_command`.
+The default keeps measured hand posture; the explicit command mode retains the
+resolved endpoint's grasp target, including invocation overrides. Place switches
+to the unchanged open command only at its release phase. This choice does not
+change observations, attachments, failed-row holds or physical effect gates.
 
 Existing-hold `HandOver` resolves its internal exchange object pose and receiving
 grasp together through `_resolve_existing_hold_receive`. The default retains

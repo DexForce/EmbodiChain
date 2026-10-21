@@ -1872,6 +1872,7 @@ def test_pour_options_validate_rotation_and_dwell_duration() -> None:
     assert set(PourOptions.__dataclass_fields__) == {
         "rotate_angle",
         "dwell_duration",
+        "hand_source",
     }
     assert PourOptions().rotate_angle == pytest.approx(math.pi / 4.0)
     assert PourOptions().dwell_duration == pytest.approx(0.5)

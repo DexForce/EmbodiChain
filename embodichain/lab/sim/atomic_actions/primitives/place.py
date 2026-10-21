@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar, Literal
 
 import torch
@@ -130,6 +130,11 @@ class AssembleGoal:
 class PlaceOptions(ActionOptions):
     """Per-invocation placement behavior."""
 
+    hand_source: Literal["observed", "grasp_command"] = field(
+        default="observed", kw_only=True
+    )
+    """Hand target retained until release; the final open command is unchanged."""
+
     hand_interp_steps: int = 5
     """Number of waypoints for the gripper-open interpolation segment."""
 
@@ -149,6 +154,8 @@ class PlaceOptions(ActionOptions):
     """Keep the held object's observed world orientation at the place target."""
 
     def __post_init__(self) -> None:
+        if self.hand_source not in ("observed", "grasp_command"):
+            raise ValueError("hand_source must be observed or grasp_command.")
         if self.hand_interp_steps < 1:
             raise ValueError("hand_interp_steps must be at least 1.")
         if type(self.release_settle_steps) is not int or self.release_settle_steps < 0:
@@ -265,6 +272,13 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
 
         start_arm_qpos = arm_qpos_from_state(state, arm_joint_ids)
         start_hand_qpos = state.last_qpos[:, hand_joint_ids]
+        if options.hand_source == "grasp_command":
+            start_hand_qpos = grasp.joint_positions(
+                GRASP_COMMAND,
+                num_envs=context.batch_size,
+                device=self.device,
+                dtype=context.robot.qpos.dtype,
+            )
         if isinstance(target, PlaceGoal) and target.tcp_symmetry == "z_roll_180":
             place_xpos = self._select_tcp_symmetric_place_variant(
                 place_xpos, start_arm_qpos, control_part

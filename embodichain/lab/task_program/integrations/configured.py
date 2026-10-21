@@ -938,6 +938,7 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
         optional=frozenset(
             {
                 "hand_interp_steps",
+                "hand_source",
                 "hold_steps",
                 "release",
                 "release_at_target",
@@ -1121,6 +1122,7 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
             optional=frozenset(
                 {
                     "hand_interp_steps",
+                    "hand_source",
                     "release_settle_steps",
                     "lift_height",
                     "max_approach_retract_z",
@@ -1130,6 +1132,10 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
             ),
         )
         kwargs = {}
+        if "hand_source" in config:
+            kwargs["hand_source"] = _identifier(
+                config["hand_source"], path=f"{path}.hand_source"
+            )
         if "hand_interp_steps" in config:
             kwargs["hand_interp_steps"] = _integer(
                 config["hand_interp_steps"],
@@ -1166,12 +1172,23 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
             )
         return PlaceOptions(**kwargs)
     if kind == "move_held_object":
-        _mapping(
+        config = _mapping(
             value,
             path=path,
             required=frozenset({"kind"}),
+            optional=frozenset({"hand_source"}),
         )
-        return MoveHeldObjectOptions()
+        return MoveHeldObjectOptions(
+            **(
+                {
+                    "hand_source": _identifier(
+                        config["hand_source"], path=f"{path}.hand_source"
+                    )
+                }
+                if "hand_source" in config
+                else {}
+            )
+        )
     if kind == "move_joints":
         _mapping(
             value,
@@ -1256,9 +1273,13 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
             value,
             path=path,
             required=frozenset({"kind"}),
-            optional=frozenset({"rotate_angle", "dwell_duration"}),
+            optional=frozenset({"rotate_angle", "dwell_duration", "hand_source"}),
         )
         kwargs = {}
+        if "hand_source" in config:
+            kwargs["hand_source"] = _identifier(
+                config["hand_source"], path=f"{path}.hand_source"
+            )
         if "rotate_angle" in config:
             kwargs["rotate_angle"] = _real(
                 config["rotate_angle"],
