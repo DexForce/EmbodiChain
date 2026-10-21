@@ -24,6 +24,11 @@ DexSim selected-link property APIs are required. The package loader supports
 explicit G1 reference bundles for reproducible terrain and initial-state checks.
 `ReferenceRslRlEnv` retains the previously validated RSL-RL interface.
 
+The training config resolves its task config relative to the config file, so
+the installed configuration also works outside the repository directory.
+Contact observations read samples owned by the task's physics-step callback;
+reset clears selected rows without querying the invalidated solver snapshot.
+
 The native MuJoCo Warp heightfield collision path remains unsuitable for this
 terrain because the retained official-runtime reproducer produces nonfinite
 states. The default deployment therefore selects Newton contacts. DexUni's
