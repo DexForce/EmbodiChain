@@ -45,6 +45,8 @@ validity contract. Do not infer force support from sensor construction alone. In
 backend/solver/device matrix: Newton AutoSolver may change the answer during
 preparation, so the manager checks again afterwards.
 
+Particle-shape contacts do not enter this rigid ContactQuery.
+
 The sensor retains backend-emitted rows rather than reducing an actor pair to
 one contact. Force-reporting paths apply the query's positive-impulse filtering;
 geometry-only paths may provide valid rows with zero impulse. Solver settings

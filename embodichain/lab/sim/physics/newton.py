@@ -201,9 +201,9 @@ class NewtonPhysicsBackend(PhysicsBackend):
     @property
     def supports_contact_sensor(self) -> bool:
         # ContactSensor consumes the backend-neutral Scene ContactQuery API,
-        # but not every Newton solver/device pair currently publishes that
-        # query. Keep this runtime-sensitive so ``solver_type='auto'`` can be
-        # rechecked after Spawn finalization resolves the concrete solver.
+        # but CPU MuJoCo cannot publish its force report. Keep this runtime-
+        # sensitive so ``auto`` and DexUni's scene-selected solver path are
+        # rechecked after Spawn finalization.
         solver_type = self.solver_type
         if solver_type is None:
             return True
@@ -235,6 +235,5 @@ class NewtonPhysicsBackend(PhysicsBackend):
         if runtime_device is None:
             runtime_device = str(getattr(self._manager, "device", ""))
         return not (
-            solver_type.endswith("mujoco_warp")
-            and runtime_device.lower().startswith("cpu")
+            solver_type == "mujoco_warp" and runtime_device.lower().startswith("cpu")
         )

@@ -27,6 +27,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 import torch
+import trimesh
 
 from embodichain.data import get_data_path
 from embodichain.lab.sim.atomic_actions import (
@@ -43,6 +44,7 @@ from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
+    DEFAULT_GRIPPER_CLOSE_QPOS,
     add_tutorial_robot,
     broadcast_pose_batch,
     clone_local_pose_from_first_env,
@@ -74,6 +76,8 @@ PICK_SAMPLE_INTERVAL = 120
 MOVE_HELD_OBJECT_SAMPLE_INTERVAL = 120
 HAND_INTERP_STEPS = 12
 POST_TRAJECTORY_STEPS = 240
+# Candidate for this cup and UR5/DH PGI; transport orientation remains unaligned.
+DEXUNI_CUP_CLOSE_QPOS = 0.0115
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -87,11 +91,16 @@ def parse_arguments() -> argparse.Namespace:
 
 def create_pick_object(sim) -> RigidObject:
     """Create and settle the paper cup used by the tutorial."""
+    mesh = trimesh.load_mesh(get_data_path(OBJECT_MESH_PATH), process=False)
+    # Author cup proportions in the mesh; physical body scale must be uniform.
+    mesh.apply_scale((0.75, 0.75, 1.0))
     obj = sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="paper_cup",
             shape=MeshCfg(
-                fpath=get_data_path(OBJECT_MESH_PATH),
+                vertices=mesh.vertices,
+                triangles=mesh.faces,
+                normals=mesh.vertex_normals,
                 collision=MeshCollisionCfg(
                     approximation="convex_decomposition",
                     max_hulls=16,
@@ -104,7 +113,6 @@ def create_pick_object(sim) -> RigidObject:
                 newton_contact=sim.is_newton_backend,
             ),
             init_pos=[*OBJECT_XY, OBJECT_INITIAL_Z],
-            body_scale=(0.75, 0.75, 1.0),
         )
     )
     sim.prepare()
@@ -129,15 +137,35 @@ def make_object_target_pose(device: torch.device) -> torch.Tensor:
 def main() -> None:
     """Plan MoveEndEffector -> PickUp -> MoveHeldObject."""
     args = parse_arguments()
-    sim = create_tutorial_simulation(args)
-    robot = add_tutorial_robot(sim, args.robot)
+    sim = create_tutorial_simulation(
+        args,
+        newton_solver_options=(
+            {
+                "vbd_options": {"rigid_contact_history": True},
+                "collision_options": {"contact_matching": "latest"},
+            }
+            if args.physics == "newton" and args.robot == "ur5"
+            else None
+        ),
+    )
+    use_vbd_grasp = args.robot == "ur5" and sim.physics.solver_type == "dexuni"
+    robot = add_tutorial_robot(
+        sim,
+        args.robot,
+        newton_gripper_friction=4.0 if use_vbd_grasp else None,
+    )
     obj = create_pick_object(sim)
     sim.prepare()
     motion_gen = create_curobo_motion_generator(
         robot,
         planner=getattr(args, "planner", "trapezoidal"),
     )
-    hand_open, hand_close = get_hand_open_close_qpos(robot)
+    hand_open, hand_close = get_hand_open_close_qpos(
+        robot,
+        close_qpos=(
+            DEXUNI_CUP_CLOSE_QPOS if use_vbd_grasp else DEFAULT_GRIPPER_CLOSE_QPOS
+        ),
+    )
 
     engine = create_simulation_atomic_action_engine(
         motion_generator=motion_gen,

@@ -125,3 +125,15 @@ def test_get_collision_shapes_reads_new_spawned_body_descriptor():
     assert len(shapes) == 1
     assert shapes[0].shape_type == RigidBodyShape.BOX
     assert shapes[0].half_extents.tolist() == pytest.approx([0.1, 0.2, 0.3])
+
+
+def test_disabled_contact_response_keeps_planner_geometry() -> None:
+    collision = CollisionDesc.from_geometry(GeometryDesc.cube((0.2, 0.4, 0.6)))
+    collision.enable_collision = False
+    rigid_object = RigidObject.__new__(RigidObject)
+    rigid_object.uid = "disabled_contact"
+    rigid_object._entities = [_DescriptorEntity(collision)]
+    shapes = rigid_object.get_collision_shapes()
+    assert len(shapes) == 1
+    assert shapes[0].shape_type == RigidBodyShape.BOX
+    assert shapes[0].half_extents.tolist() == pytest.approx([0.1, 0.2, 0.3])

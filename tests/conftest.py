@@ -26,6 +26,24 @@ import pytest
 os.environ.setdefault("EMBODICHAIN_SIM_EXIT_PROCESS", "0")
 
 
+@pytest.fixture
+def requires_dexuni_contact_query() -> None:
+    """Require per-row contact quantities while retaining released MJWarp tests."""
+    from dexsim.scene import ContactBuffer
+
+    if not hasattr(ContactBuffer, "impulse_valid"):
+        pytest.skip("DexUni contacts require per-row quantity validity.")
+
+
+@pytest.fixture
+def requires_dexuni_two_way() -> None:
+    """Qualify dev-only contracts without excluding released-engine coverage."""
+    from dexsim.engine.newton_physics import DexUniSolverCfg
+
+    if "coupling" not in inspect.signature(DexUniSolverCfg).parameters:
+        pytest.skip("DexUni two-way coupling requires DexSim dev f32785317 or newer.")
+
+
 @pytest.fixture(scope="session")
 def _discover_task_packages():
     """Discover all installed task packages once per test session.

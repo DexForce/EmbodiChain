@@ -95,6 +95,29 @@ Author contact dimensions and material settings before `prepare()`, never by
 rewriting captured solver arrays. The current values live in
 `lab/scripts/_atomic_action/support.py` and the selected physical components.
 
+For UR5 with `dexuni`, the paper-cup `move_held_object.py` tutorial opts into
+VBD contact history with `latest` collision matching, sliding friction 4 on the
+gripper alone, and a 0.0115 m candidate close target. Transport orientation
+is not yet repeatably aligned. The native contact alpha and the cup
+and ground materials are unchanged. `create_tutorial_simulation` accepts
+`newton_solver_options`, and `add_tutorial_robot` accepts
+`newton_gripper_friction` and optional `arm_damping`; these are authored before
+model construction. This
+calibration also applies to the UR5-only `pour.py` tutorial with its 0.013 m
+cube close target. The UR5 plastic-tray `coordinated_pickment.py` tutorial uses
+the same contact settings with a 0.023 m close target; the dual-arm helper
+`add_dual_tutorial_robot` also accepts `newton_gripper_friction`.
+The current Handover fixture uses Robotiq 2F-140 and retains its fixture-owned
+angular close targets and full TCP poses in `lab/scripts/_atomic_action/handover.py`.
+The UR5 DexUni `place.py` profile uses a 0.013 m close target, gripper friction 4,
+contact history with `latest` matching, contact alpha 0.5, and arm damping 1000.
+The lower arm damping reduces tracking lag when the fingers open; finger
+drives and authored release waypoints remain unchanged. Complete cached
+replays preserve the grasp to release, but landing orientation still varies;
+this is a scoped improvement, not a claim of full solver equivalence.
+These explicit scene choices do not change world defaults
+or establish a generic object-width-to-gripper-target mapping.
+
 ## Semantic integration boundary
 
 `semantics` contains:

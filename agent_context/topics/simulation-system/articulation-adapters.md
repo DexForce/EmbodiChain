@@ -21,12 +21,21 @@ the native articulation before Direct GPU initialization and initial reset.
 Iteration counts are configured together because the native setter is atomic.
 Applying them only during facade binding is too late for captured GPU settings.
 
+`root_props.newton_gravity_compensation` is Newton creation intent applied in
+both asset physics modes; omission preserves the source/default policy. It
+compensates articulation link weight without removing payload gravity or
+contact reactions. DexSim checks the resolved solver's MuJoCo support.
+
 `joint_drive_props` is the sole joint-property entry point; sparse fields retain
 source values. `drive_type` describes the response and `target_mode` the active
 command components. Lowering masks inactive gains: none/effort clear both,
 velocity clears position gain. Newton rejects active acceleration drives;
 non-MuJoCo position mode is gain-based emulation with zero velocity target.
 Exact field options and defaults remain in `cfg/articulation.py`.
+Newton-specific `joint_drive_props.passive_damping` lowers to passive DOF
+damping, separately from the drive's velocity gain. It retains the same
+exact-name/regex/control-part matching and remains active for passive or effort
+target modes. Applied Newton-only settings are rejected on Default.
 
 ## State order and batched writes
 
@@ -122,3 +131,5 @@ FREE-joint synchronization, mesh export and no-op root writes;
 `tests/sim/objects/test_articulation.py` for topology/FK. Source configuration
 and root timing are covered by `tests/sim/spawn/test_descriptors.py` and
 `tests/sim/test_sim_manager.py`.
+`tests/sim/test_dexuni_two_way.py` compares contact-limited dynamic fingers
+against the same one-way commands, including CUDA Graph and reset.
