@@ -1,0 +1,9 @@
+{
+  "passed": true,
+  "no_gpu_work": true,
+  "source_unchanged": true,
+  "same_primary_pair_containing_aux_allowed": true,
+  "different_primary_pair_despite_shared_aux_rejected": true,
+  "existing_negative_gate_count": 32,
+  "cross_pair_reason": "paired allocation differs"
+}

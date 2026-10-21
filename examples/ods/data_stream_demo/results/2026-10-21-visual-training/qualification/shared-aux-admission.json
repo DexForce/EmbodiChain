@@ -1,0 +1,370 @@
+{
+  "passed": true,
+  "no_gpu_work": true,
+  "source_unchanged": true,
+  "source_sha256": "71fd2ffb962828b08184e9e0f05b2459cbe5f2a7bb74a9ed22cd611508da7451",
+  "explicit_idle_pairs": [
+    [
+      0,
+      2
+    ],
+    [
+      1,
+      7
+    ]
+  ],
+  "busy7_passive_only": true,
+  "all_three_idle_readings_required_for_primary": true,
+  "automatic_selection_excludes_aux": true,
+  "negative_aux_rejected": true,
+  "passive_free_memory_guarded": true,
+  "guard_cases": [
+    {
+      "name": "pair0-owned-C7-rejected",
+      "rejected": [
+        true,
+        false
+      ],
+      "guards": [
+        {
+          "samples": 1,
+          "unexpected_contexts": [
+            {
+              "pid": 1712515,
+              "gpu_uuid": "GPU-fixture7",
+              "type": "C",
+              "used_memory": "10 MiB"
+            }
+          ],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        },
+        {
+          "samples": 1,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      ]
+    },
+    {
+      "name": "pair0-owned-CplusG7-rejected",
+      "rejected": [
+        true,
+        false
+      ],
+      "guards": [
+        {
+          "samples": 1,
+          "unexpected_contexts": [
+            {
+              "pid": 1712515,
+              "gpu_uuid": "GPU-fixture7",
+              "type": "C+G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        },
+        {
+          "samples": 1,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      ]
+    },
+    {
+      "name": "pair1-owned-C7-primary-accepted",
+      "rejected": [
+        false,
+        false
+      ],
+      "guards": [
+        {
+          "samples": 1,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        },
+        {
+          "samples": 1,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": [
+            "GPU-fixture7"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "pair1-owned-CplusG7-primary-accepted",
+      "rejected": [
+        false,
+        false
+      ],
+      "guards": [
+        {
+          "samples": 1,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        },
+        {
+          "samples": 1,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": [
+            "GPU-fixture7"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "pair0-passive-small-G7-accepted",
+      "rejected": [
+        false,
+        false
+      ],
+      "guards": [
+        {
+          "samples": 1,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 1712515,
+              "gpu_uuid": "GPU-fixture7",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": []
+        },
+        {
+          "samples": 1,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      ]
+    },
+    {
+      "name": "pair0-oversized-G7-rejected",
+      "rejected": [
+        true,
+        false
+      ],
+      "guards": [
+        {
+          "samples": 1,
+          "unexpected_contexts": [
+            {
+              "pid": 1712515,
+              "gpu_uuid": "GPU-fixture7",
+              "type": "G",
+              "used_memory": "9 MiB"
+            }
+          ],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        },
+        {
+          "samples": 1,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      ]
+    },
+    {
+      "name": "pair0-unknown-memory-G7-rejected",
+      "rejected": [
+        true,
+        false
+      ],
+      "guards": [
+        {
+          "samples": 1,
+          "unexpected_contexts": [
+            {
+              "pid": 1712515,
+              "gpu_uuid": "GPU-fixture7",
+              "type": "G",
+              "used_memory": "N/A"
+            }
+          ],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        },
+        {
+          "samples": 1,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      ]
+    },
+    {
+      "name": "pair1-large-G7-primary-accepted",
+      "rejected": [
+        false,
+        false
+      ],
+      "guards": [
+        {
+          "samples": 1,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        },
+        {
+          "samples": 1,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": [
+            "GPU-fixture7"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "simultaneous-passive-and-other-primary-C7",
+      "rejected": [
+        false,
+        false
+      ],
+      "guards": [
+        {
+          "samples": 1,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 1712515,
+              "gpu_uuid": "GPU-fixture7",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": []
+        },
+        {
+          "samples": 1,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": [
+            "GPU-fixture7"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "sameboard-contexts-not-cross-attributed",
+      "rejected": [
+        true,
+        false
+      ],
+      "guards": [
+        {
+          "samples": 1,
+          "unexpected_contexts": [
+            {
+              "pid": 1712515,
+              "gpu_uuid": "GPU-fixture7",
+              "type": "C",
+              "used_memory": "1 GiB"
+            }
+          ],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        },
+        {
+          "samples": 1,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": [
+            "GPU-fixture7"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "foreign-GPU7-compute-ignored",
+      "rejected": [
+        false,
+        false
+      ],
+      "guards": [
+        {
+          "samples": 1,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        },
+        {
+          "samples": 1,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      ]
+    },
+    {
+      "name": "CPU-audit-still-forbids-primary-GPU",
+      "rejected": [
+        false,
+        true
+      ],
+      "guards": [
+        {
+          "samples": 1,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        },
+        {
+          "samples": 1,
+          "unexpected_contexts": [
+            {
+              "pid": 1712516,
+              "gpu_uuid": "GPU-fixture7",
+              "type": "C",
+              "used_memory": "10 MiB"
+            }
+          ],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      ]
+    },
+    {
+      "name": "other-unassigned-primary-still-rejected",
+      "rejected": [
+        true,
+        false
+      ],
+      "guards": [
+        {
+          "samples": 1,
+          "unexpected_contexts": [
+            {
+              "pid": 1712515,
+              "gpu_uuid": "GPU-fixture1",
+              "type": "C",
+              "used_memory": "10 MiB"
+            }
+          ],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        },
+        {
+          "samples": 1,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      ]
+    }
+  ],
+  "CPU_workers_closed": true
+}

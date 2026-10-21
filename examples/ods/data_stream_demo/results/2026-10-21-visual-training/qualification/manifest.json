@@ -92,6 +92,14 @@
     "wait-utilization-probe.json": {
       "source": "/tmp/ods-visual-training-wait-utilization-20261021-v1/summary.json",
       "sha256": "a1b05e12b344ce3b9ef6f4f0c138397e53adc39c6c12d454ef8bc16bab47219d"
+    },
+    "shared-aux-admission.json": {
+      "source": "/tmp/ods-training-shared-aux-3tm9xs76/validation.json",
+      "sha256": "f7ccfec813bdaf8e3ec99d13a2a44185d847fec706ec3449025242da68fa3c19"
+    },
+    "shared-aux-fairness.json": {
+      "source": "/tmp/ods-training-report-fairness-l2om68ht/shared-aux-pairing-validation.json",
+      "sha256": "5fbdb43b3fd5b7a5063a4d4dc6ea75440ccd33c05feeb40e5a37eeb2fb6b7e21"
     }
   }
 }

@@ -530,7 +530,10 @@ memory at most 8 MiB per owned PID and 16 GiB free. This new training policy
 records foreign auxiliary activity without using that board as compute; it
 does not require the passive board to be idle. The historical delivery
 supervisor's auxiliary admission still requires three idle readings. Keep
-the same auxiliary scope across training paths. Admit idle primary devices by
+the same auxiliary scope across training paths. The auxiliary allowance grants
+no compute capacity outside a pipeline's primary pair. An explicitly requested
+idle board may also be another pipeline's primary; all process-group guards
+still enforce the assigned two-GPU compute budget. Admit idle primary devices by
 measured utilization and sufficient free memory; never terminate unrelated jobs.
 Record primary/auxiliary device UUIDs and owned compute/graphics contexts.
 

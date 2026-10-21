@@ -114,10 +114,12 @@ requested scenes and normal evaluation closure, or an explicit zero-scene
 
 On a qualified driver, the new training supervisor can accept an explicit
 `--aux-graphics-gpu-id` for the native driver's passive graphics footprint.
-It permits only owned pure-G contexts of at most 8 MiB per PID, requires
-16 GiB free, and records any foreign activity on that auxiliary board; it
-does not admit that board as extra compute capacity. Both primary GPUs still
-need three idle readings. This exception belongs to the training supervisor.
+Outside each pipeline's primary pair it permits only owned pure-G contexts of
+at most 8 MiB per PID, requires 16 GiB free and records other board activity.
+The flag alone grants no compute capacity. If the same board is explicitly
+listed in `--gpu-ids`, it may also serve as another pipeline's primary after
+passing all three idle readings. Every process group remains limited to its
+own two primary GPUs for computation. This exception belongs to the training supervisor.
 The historical delivery supervisor below retains its stricter requirement
 that an auxiliary board also pass three idle readings.
 

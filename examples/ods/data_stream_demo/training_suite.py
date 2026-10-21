@@ -62,7 +62,7 @@ _AUX_LIMIT = 8 * 1024**2
 _LIMITS = [
     "Each primary GPU passes three zero-utilization readings and has at least 16 GiB free; admission is not an exclusive reservation.",
     "One generation/training UUID pair and eight disjoint CPUs are held for each seed/vision group; at most two groups run concurrently.",
-    "An explicit auxiliary UUID permits only owned pure-G contexts with known per-PID memory <=8 MiB. Foreign auxiliary activity is disclosed, not used as compute capacity.",
+    "Outside a pipeline's primary pair, an explicit auxiliary UUID permits only owned pure-G contexts with known per-PID memory <=8 MiB. It may also be an explicitly selected idle primary of another pipeline; per-process-group limits still apply.",
     "Periodic process-tree/process-group GPU audits can miss short-lived contexts; matching native UUID placement still needs qualification.",
     "Total pipeline time ends after normal training-worker exit; independent evaluation is outside that time.",
 ]
@@ -85,11 +85,11 @@ def _devices(args: argparse.Namespace) -> tuple[list[dict[str, Any]], dict[str, 
         raise ValueError(
             "Primary physical GPU IDs must be distinct nonnegative integers"
         )
-    if aux_id is not None and (aux_id < 0 or requested is not None and aux_id in ids):
-        raise ValueError("Auxiliary GPU must be distinct from every primary GPU")
+    if aux_id is not None and aux_id < 0:
+        raise ValueError("Auxiliary GPU must be a nonnegative physical ID")
     selected, rejected = [], []
     for gpu_id in ids:
-        if gpu_id == aux_id:
+        if gpu_id == aux_id and requested is None:
             continue
         if all(
             gpu_id in row
