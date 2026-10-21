@@ -26,8 +26,15 @@ embodichain train-rl --config extensions/embodichain_tasks/configs/tasks/manipul
 Increase `trainer.iterations` and `trainer.num_envs` for a longer experiment.
 Policy and optimizer state are saved by the standard trainer. Checkpoint
 evaluation uses the generated RUN manifest through `embodichain eval-policy`.
-The core training CLI does not currently expose an optimizer-resume option;
-programmatic continuation must restore policy, optimizer and trainer counters.
+Continue training with `embodichain train-rl --config CONFIG --resume CHECKPOINT`.
+Set `trainer.iterations` to the cumulative target, for example 15 after an initial
+10 updates. Resume restores policy normalization, optimizer, scheduler and update
+counters, then starts fresh episodes. The shared schema-v2 loader checks task,
+physics, policy and algorithm compatibility. Select a manifest checkpoint with
+`--resume latest --run RUN_DIRECTORY`; `--resume-scheduler restart` starts the
+configured schedule over the remaining updates while preserving optimizer
+momentum. Legacy checkpoints without metadata emit a compatibility warning.
+Each resumed invocation writes a new RUN directory.
 
 The fixed and continuous pen tasks share their model. Continuous spinning
 samples from 22 retained initial poses. Cube face turning retains the passive

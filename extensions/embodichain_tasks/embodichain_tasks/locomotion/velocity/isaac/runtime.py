@@ -458,6 +458,42 @@ class IsaacVelocityEnv(EmbodiChainVelocityEnv):
             return self._extend_obs(obs, **kwargs)
         return super().get_obs(**kwargs)
 
+    def get_training_state(self) -> dict[str, Any]:
+        """Return curriculum state for continuation from fresh episodes."""
+        course = self._reference_terrain_course
+        return {"terrain_course": course.state_dict() if course is not None else None}
+
+    def validate_training_state(self, state: dict[str, Any]) -> None:
+        """Validate saved terrain state before the trainer restores learning state.
+
+        Args:
+            state: Environment state returned by :meth:`get_training_state`.
+
+        Raises:
+            ValueError: The saved curriculum does not match this environment.
+        """
+        course = self._reference_terrain_course
+        saved = state["terrain_course"]
+        if (course is None) != (saved is None):
+            raise ValueError("Checkpoint terrain curriculum configuration differs")
+        if course is not None:
+            course.validate_state_dict(saved)
+
+    def load_training_state(self, state: dict[str, Any]) -> None:
+        """Restore the curriculum without advancing it on the first reset.
+
+        Args:
+            state: Environment state returned by :meth:`get_training_state`.
+        """
+        self.validate_training_state(state)
+        course = self._reference_terrain_course
+        saved = state["terrain_course"]
+        if course is not None:
+            course.load_state_dict(saved)
+            self._reference_resume_reset = torch.ones(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+
     def _initialize_episode(
         self, env_ids: Sequence[int] | None = None, **kwargs: Any
     ) -> None:
@@ -469,9 +505,16 @@ class IsaacVelocityEnv(EmbodiChainVelocityEnv):
         if ids.numel() == 0:
             return
         if self._reference_terrain_course is not None:
-            self._reference_terrain_course.update(
-                ids, self.robot.body_data.root_pose[:, :3], self.reward_command
-            )
+            resume_reset = getattr(self, "_reference_resume_reset", None)
+            update_ids = ids if resume_reset is None else ids[~resume_reset[ids]]
+            if update_ids.numel():
+                self._reference_terrain_course.update(
+                    update_ids,
+                    self.robot.body_data.root_pose[:, :3],
+                    self.reward_command,
+                )
+            if resume_reset is not None:
+                resume_reset[ids] = False
         previous_deferred = getattr(self, "_reference_events_deferred", False)
         self._reference_events_deferred = True
         try:
