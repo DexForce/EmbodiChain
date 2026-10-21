@@ -8,7 +8,7 @@ provide the inputs needed to implement and validate those interfaces.
 ## Goal and ownership
 
 All EmbodiChain benchmark families use one protocol for report-specific input
-assets from the private dataset `DexForceAI/embodichain_reports`. Benchmark
+assets from the public dataset `DexForceAI/embodichain_reports`. Benchmark
 implementations and suites remain in GitHub; reusable robot/scene assets and
 model weights retain their existing resolvers and repository ownership.
 
@@ -38,7 +38,7 @@ quality thresholds, and report/leaderboard contracts remain unchanged.
 
 Only benchmarks or suites explicitly declaring report input bundle IDs use
 this repository. A benchmark using only existing common assets or generated
-inputs must not acquire a new private-repository dependency. Report-specific
+inputs must not acquire a new report-repository dependency. Report-specific
 suite declarations will be added with their first real bundles; no speculative
 declarations are added now. Direct Python entry points and the unified CLI must
 eventually call the same preparation helper.
@@ -86,7 +86,7 @@ bundles and are retrieved separately when requested.
 
 - Dataset requests use `repo_type="dataset"`, the fixed repository ID, and the
   official endpoint `https://huggingface.co`. Existing common-asset mirror
-  settings do not select the endpoint for this private repository.
+  settings do not select the endpoint for this report repository.
 - The future benchmark integration supplies a tested full dataset commit SHA
   as its default. There is no default asset revision to advertise while the
   index is empty. The Python helper requires `revision` explicitly.
@@ -94,10 +94,12 @@ bundles and are retrieved separately when requested.
   the index. All file requests use the resolved commit; do not mix a pinned
   index with files from `main`. Changes to the code or asset pin receive review
   together when the first report integration is implemented.
-- Use standard SDK credential discovery (`HF_TOKEN` or local login), without
-  custom token storage. Do not send private credentials to mirrors or include
-  them in diagnostics/provenance. Offline mode consumes already authorized,
-  locally cached content and makes no remote permission or metadata request.
+- Public reads must work anonymously; a token is not required. If credentials
+  are used, rely on standard SDK discovery (`HF_TOKEN` or local login), without
+  custom token storage. Publishing requires write access. Do not send
+  credentials to mirrors or include them in diagnostics/provenance. Offline
+  mode consumes locally cached content and makes no remote permission or
+  metadata request.
 - Default `cache_dir` is `~/.cache/embodichain/report-assets`; a caller can
   override it. Use that root as the Hub cache directory so repository and
   commit snapshots are isolated by the SDK's normal cache layout. Returned
@@ -194,10 +196,11 @@ and historical asset migration require separate work.
 
 Initialization acceptance checks:
 
-- Repository owner is `DexForceAI`, type is dataset, and visibility is private.
+- Repository owner is `DexForceAI`, type is dataset, and visibility is public.
 - The authorized account can read all three files at the committed SHA and
   retrieve exactly the uploaded bytes.
-- Anonymous metadata and file requests cannot access the repository contents.
+- Anonymous metadata and file requests can read the repository contents;
+  publishing still requires write authorization.
 - `index.json` parses to schema version `1` with an empty `bundles` mapping;
   Markdown links and layout examples are consistent.
 
@@ -207,6 +210,7 @@ a separate real selected-bundle download check:
 | Scenario | Required outcome |
 | --- | --- |
 | Cold cache | Fetch pinned index and only the selected input files; verify all hashes. |
+| Anonymous access | Public metadata and input files download without a token. |
 | Warm cache | Reuse the same commit snapshot without re-downloading file bodies. |
 | Offline complete cache | Read index and files without any network request. |
 | Offline missing ref/index/file | Fail before benchmark initialization with a pre-download hint. |

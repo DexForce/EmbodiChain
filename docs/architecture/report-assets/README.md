@@ -12,7 +12,7 @@ tags:
 
 # EmbodiChain Technical Report Assets
 
-Private asset repository: [DexForceAI/embodichain_reports](https://huggingface.co/datasets/DexForceAI/embodichain_reports).
+Public asset repository: [DexForceAI/embodichain_reports](https://huggingface.co/datasets/DexForceAI/embodichain_reports).
 
 This repository stores report-specific benchmark inputs, published measurement
 artifacts, figures, and videos for EmbodiChain technical reports. It starts with
@@ -61,13 +61,14 @@ already exist. Hugging Face may also maintain repository metadata such as
 
 ## Access
 
-The dataset is private. Sign in with an account or token granted access to this
-repository. For the project's existing `huggingface_hub>=0.35.3,<1.0` dependency,
-use `hf auth login` or provide `HF_TOKEN` through the execution environment.
+The dataset is public and supports anonymous downloads. Publishing changes
+requires an account or token with write access to this repository. For the
+project's existing `huggingface_hub>=0.35.3,<1.0` dependency, publishers can use
+`hf auth login` or provide `HF_TOKEN` through the execution environment.
 Credentials must not be written into report files, commands recorded in reports,
-or benchmark provenance. Private downloads use `https://huggingface.co` directly.
+or benchmark provenance. Downloads use `https://huggingface.co` directly.
 
-An authorized client can retrieve the current empty index using the existing
+A client can retrieve the current empty index without logging in using the existing
 Hugging Face SDK; this is not the proposed EmbodiChain download helper:
 
 ```python
@@ -75,13 +76,14 @@ from huggingface_hub import HfApi, hf_hub_download
 
 repo_id = "DexForceAI/embodichain_reports"
 endpoint = "https://huggingface.co"
-revision = HfApi(endpoint=endpoint).dataset_info(repo_id).sha
+revision = HfApi(endpoint=endpoint, token=False).dataset_info(repo_id).sha
 index_path = hf_hub_download(
     repo_id=repo_id,
     repo_type="dataset",
     filename="index.json",
     revision=revision,
     endpoint=endpoint,
+    token=False,
 )
 ```
 
@@ -109,6 +111,6 @@ discovering the latest revision. See the [version and cache contract](DOWNLOAD_D
    the future benchmark integration's tested default. An optional release tag
    is a human-readable alias; record the resolved full SHA with results.
 
-Later corrections create a new dataset commit and a new validated pin. Public
-release, migration of historical assets, and implementation of the download
+Later corrections create a new dataset commit and a new validated pin. Report
+publication, migration of historical assets, and implementation of the download
 interfaces are separate follow-up work.
