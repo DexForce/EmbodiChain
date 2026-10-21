@@ -91,3 +91,36 @@ Use preview for the Gym scene: this task does not implement an expert trajectory
 collector. The APG configuration uses the existing learning-environment factory
 and trainer, with graph-connected state/reward hooks. Its policy checkpoint is
 separate from the NeRD dynamics-model export.
+
+## Legacy Warp parameter comparison
+
+`dynamics.generate.warp-reference.yaml` selects `physics_profile: warp_reference`
+and Featherstone with 16 substeps per 1/60-second frame. It preserves measured
+legacy asset masses/inertia, body armature, force-mode damping and contact-slot
+order. Ant also uses an explicitly authored shared ground material. The simulator
+is still current Newton; contact algorithms can differ from old Warp.
+
+Generate this bounded 512-trajectory dataset with:
+
+```bash
+embodichain dynamics generate --config extensions/embodichain_tasks/configs/tasks/classic_control/ant/dynamics.generate.warp-reference.yaml
+```
+
+Keep the same `physics_profile` in rollout evaluation. Existing exports remain
+bound to their recorded physical signature; generate new data and train or
+fine-tune a new export for this profile. The default `native` profile retains
+modern importer semantics. Both profiles need an installed DexSim with named
+solver extensions; the measured SDK branch is MR !1483 at `b61e920f`.
+
+The isolated historical/current replay tool is
+`scripts/experiments/neural_dynamics/physics_alignment.py`. Its shared input and
+trace hashes, plus finite/failure counts, are required when comparing trajectories.
+
+
+## Supported-version reference data
+
+The [original data and paired evaluation workflow](../../../../../../scripts/experiments/neural_dynamics/README.md)
+uses isolated Python3.8/Torch2.2 generation, immutable raw/canonical teacher
+traces and independently evolving model feedback. Training and evaluation
+runtimes are recorded separately; a current-Newton corpus cannot be relabeled
+as original-Warp data.

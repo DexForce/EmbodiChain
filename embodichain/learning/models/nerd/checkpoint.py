@@ -30,6 +30,29 @@ __all__ = ["export_model", "load_model", "convert_legacy_checkpoint"]
 _FORMAT_VERSION = 1
 
 
+def _execution_metadata(manifest: dict[str, Any], cfg: NeRDModelCfg) -> str:
+    """Validate execution labels without importing training into model loading."""
+    training = manifest.get("training", {})
+    training = training if isinstance(training, dict) else {}
+    profile = manifest.get(
+        "numerical_profile", training.get("numerical_profile", "default")
+    )
+    if not isinstance(profile, str) or profile not in {"default", "reference"}:
+        raise ValueError("Unknown exported numerical_profile")
+    if training.get("numerical_profile", profile) != profile:
+        raise ValueError("Export numerical_profile metadata mismatch")
+    if (
+        manifest.get("attention_backend", cfg.attention_backend)
+        != cfg.attention_backend
+        or training.get("attention_backend", cfg.attention_backend)
+        != cfg.attention_backend
+    ):
+        raise ValueError("Export attention_backend metadata mismatch")
+    if profile == "reference" and cfg.attention_backend != "math":
+        raise ValueError("Reference exports require math attention_backend")
+    return profile
+
+
 def _digest(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -50,6 +73,10 @@ def export_model(path: str | Path, model: NeRDModel, manifest: dict[str, Any]) -
     if (path / "manifest.json").exists() or (path / "weights.pt").exists():
         raise FileExistsError(f"Model export already exists: {path}")
     metadata = dict(manifest)
+    profile = _execution_metadata(metadata, model.cfg)
+    metadata.update(
+        numerical_profile=profile, attention_backend=model.cfg.attention_backend
+    )
     metadata.update(format_version=_FORMAT_VERSION, model_config=model.cfg.to_dict())
     json.dumps(metadata, allow_nan=False)
     path.mkdir(parents=True, exist_ok=True)
@@ -73,7 +100,9 @@ def load_model(
         raise ValueError("Unsupported NeRD export format_version")
     if _digest(path / "weights.pt") != manifest.get("weights_sha256"):
         raise ValueError("NeRD weights checksum mismatch")
-    model = NeRDModel(NeRDModelCfg(**manifest["model_config"]))
+    cfg = NeRDModelCfg(**manifest["model_config"])
+    _execution_metadata(manifest, cfg)
+    model = NeRDModel(cfg)
     state = torch.load(path / "weights.pt", map_location="cpu", weights_only=True)
     # Preserve exported floating dtype instead of silently downcasting to FP32.
     dtype = next(v.dtype for v in state.values() if v.is_floating_point())
@@ -153,6 +182,11 @@ def convert_legacy_checkpoint(
     dims = {
         rename(k): int(old.input_rms[k].mean.numel()) for k in old.low_dim_input_names
     }
+    training = manifest.get("training", {})
+    training = training if isinstance(training, dict) else {}
+    profile = manifest.get(
+        "numerical_profile", training.get("numerical_profile", "default")
+    )
     cfg = NeRDModelCfg(
         input_dims=dims,
         output_dim=int(old.output_rms.mean.numel()),
@@ -169,6 +203,9 @@ def convert_legacy_checkpoint(
         normalize_input=old.normalize_input,
         normalize_output=old.normalize_output,
         output_tanh=old.output_tanh,
+        attention_backend=manifest.get(
+            "attention_backend", "math" if profile == "reference" else "default"
+        ),
     )
     model = NeRDModel(cfg)
     state = old.state_dict()

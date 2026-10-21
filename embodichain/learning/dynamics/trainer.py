@@ -32,6 +32,15 @@ from torch import Tensor
 
 from embodichain.utils import configclass
 from embodichain.data_pipeline.dynamics.shards import DynamicsWindowDataset
+from ._sample_order import _CheckpointedOrder, _OfficialShuffleOrder, _open_order
+from ._numerics import (
+    _attention_context,
+    _checkpoint_numerical_profile,
+    _clip_grad_norm_,
+    _validate_numerical_profile,
+)
+
+_PREPROCESSING_EXECUTION = "nerd-shared-frame-scripted-cuda-warmup-v2"
 
 __all__ = [
     "DynamicsTrainCfg",
@@ -53,6 +62,10 @@ class DynamicsTrainCfg:
     an official epoch schedule. ``lr_offset`` is measured in schedule intervals;
     the official first trained epoch uses offset one because epoch zero evaluates.
     The durable cursor is the count of completed optimizer updates.
+
+    ``numerical_profile="reference"`` selects math attention and an ordered
+    FP64 reduction of FP32 per-parameter gradient norms. The default retains
+    Torch's gradient clipping and the model's configured attention backend.
     """
 
     total_steps: int = 10000
@@ -67,6 +80,9 @@ class DynamicsTrainCfg:
     checkpoint_interval: int = 100
     lr_update_interval: int = 1
     lr_offset: int = 0
+    log_interval: int = 1
+    resident_cache_bytes: int = 0
+    numerical_profile: str = "default"
 
 
 def encode_batch(
@@ -88,10 +104,27 @@ def encode_batch(
         key: value for key, value in transitions.items() if key.startswith("contact_")
     }
     q, qd = states["q"], states["qd"]
+    legacy_velocity = states.get("legacy_velocity")
+    current_velocity = None if legacy_velocity is None else legacy_velocity[:, :-1]
     inputs = codec.encode(
-        q[:, :-1], qd[:, :-1], effort, contacts or None, transitions.get("gravity_dir")
+        q[:, :-1],
+        qd[:, :-1],
+        effort,
+        contacts or None,
+        transitions.get("gravity_dir"),
+        legacy_velocity=current_velocity,
     )
-    target = codec.targets(q[:, :-1], qd[:, :-1], q[:, 1:], qd[:, 1:])
+    target = codec.targets(
+        q[:, :-1],
+        qd[:, :-1],
+        q[:, 1:],
+        qd[:, 1:],
+        current_embedding=inputs["states_embedding"],
+        legacy_velocity=current_velocity,
+        next_legacy_velocity=(
+            None if legacy_velocity is None else legacy_velocity[:, 1:]
+        ),
+    )
     return inputs, target, batch["valid_mask"].to(device)
 
 
@@ -103,14 +136,16 @@ def normalized_mse(
 ) -> Tensor:
     """Official MSE over normalized physical targets, excluding padded steps."""
     if variance is None:
-        error = prediction - target
+        scaled_prediction, scaled_target = prediction, target
     else:
-        weights = torch.rsqrt(variance + 1e-5)
+        weights = 1.0 / torch.sqrt(variance + 1e-5)
         # Preserve official arithmetic ordering for numerical parity.
-        error = prediction * weights - target * weights
-    squared = error.square()
+        scaled_prediction, scaled_target = prediction * weights, target * weights
     if mask is None:
-        return squared.mean()
+        return torch.nn.functional.mse_loss(scaled_prediction, scaled_target)
+    squared = torch.nn.functional.mse_loss(
+        scaled_prediction, scaled_target, reduction="none"
+    )
     valid = mask.to(squared.dtype).unsqueeze(-1)
     return (squared * valid).sum() / (valid.sum() * squared.shape[-1]).clamp_min(1)
 
@@ -207,6 +242,35 @@ def _atomic_save(path: Path, value: Any) -> None:
     os.replace(temporary, path)
 
 
+def _capture_rng_state(device: str) -> dict[str, Any]:
+    numpy_state = np.random.get_state()
+    return {
+        "torch": torch.get_rng_state(),
+        "python": random.getstate(),
+        "numpy": (
+            numpy_state[0],
+            torch.from_numpy(numpy_state[1].astype(np.int64)),
+            numpy_state[2],
+            numpy_state[3],
+            numpy_state[4],
+        ),
+        "cuda": (
+            torch.cuda.get_rng_state_all()
+            if torch.device(device).type == "cuda"
+            else []
+        ),
+    }
+
+
+def _restore_rng_state(state: dict[str, Any]) -> None:
+    torch.set_rng_state(state["torch"])
+    random.setstate(state["python"])
+    name, keys, pos, gaussian, cached = state["numpy"]
+    np.random.set_state((name, keys.numpy().astype(np.uint32), pos, gaussian, cached))
+    if state["cuda"]:
+        torch.cuda.set_rng_state_all(state["cuda"])
+
+
 def _model_variance(model: torch.nn.Module) -> Tensor | None:
     return model.output_rms.var if model.cfg.normalize_output else None
 
@@ -250,7 +314,14 @@ def evaluate_model(
                 raise FloatingPointError("Non-finite evaluation prediction")
             n = int(mask.sum())
             accumulated["normalized_mse"] += (
-                float(normalized_mse(prediction, target, _model_variance(model), mask))
+                float(
+                    normalized_mse(
+                        prediction,
+                        target,
+                        _model_variance(model),
+                        mask if dataset.include_prefix else None,
+                    )
+                )
                 * n
             )
             accumulated["target_mse"] += (
@@ -324,6 +395,7 @@ class DynamicsTrainer:
         sample_order: Tensor | str | Path | None = None,
     ) -> None:
         cfg.validate()
+        _validate_numerical_profile(cfg.numerical_profile)
         if (
             min(
                 cfg.total_steps,
@@ -331,6 +403,7 @@ class DynamicsTrainer:
                 cfg.validation_interval,
                 cfg.checkpoint_interval,
                 cfg.lr_update_interval,
+                cfg.log_interval,
             )
             < 1
         ):
@@ -339,6 +412,8 @@ class DynamicsTrainer:
             raise ValueError("validation_batches must be positive")
         if cfg.lr_offset < 0:
             raise ValueError("lr_offset must be nonnegative")
+        if type(cfg.resident_cache_bytes) is not int or cfg.resident_cache_bytes < 0:
+            raise ValueError("resident_cache_bytes must be nonnegative integer bytes")
         if (
             cfg.max_grad_norm <= 0
             or min(cfg.learning_rate, cfg.final_learning_rate) < 0
@@ -352,6 +427,8 @@ class DynamicsTrainer:
             raise ValueError("Training and validation need eligible windows")
         self.cfg, self.codec = cfg, codec
         self.model = model.to(cfg.device)
+        if cfg.numerical_profile == "reference":
+            self.model.cfg.attention_backend = "math"
         self.train_dataset, self.validation_dataset = train_dataset, validation_dataset
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -377,6 +454,26 @@ class DynamicsTrainer:
             )
         else:
             self.statistics = statistics
+        # The original trainer preprocesses one real window while constructing
+        # its integrator/model metadata. Match that JIT warmup before updates;
+        # cold and optimized CUDA coordinate graphs can round differently.
+        encode_batch(train_dataset.get_batch([0]), self.codec, cfg.device)
+        if cfg.resident_cache_bytes:
+            used = train_dataset.enable_device_cache(
+                cfg.device, cfg.resident_cache_bytes
+            )
+            validation_dataset.enable_device_cache(
+                cfg.device, cfg.resident_cache_bytes - used
+            )
+        if torch.device(cfg.device).type == "cuda":
+            # Specialize the real batch layout before committing updates. This
+            # makes the first step after resume use the same CUDA graph as an
+            # uninterrupted run, without consuming sampling/RNG or model state.
+            warm_batch = train_dataset.get_batch([0] * cfg.batch_size)
+            with torch.enable_grad():
+                for _ in range(3):
+                    encode_batch(warm_batch, self.codec, cfg.device)
+            del warm_batch
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=cfg.learning_rate)
         random.seed(cfg.seed)
         np.random.seed(cfg.seed)
@@ -386,7 +483,7 @@ class DynamicsTrainer:
 
     def _prepare_order(
         self, source: Tensor | str | Path | None
-    ) -> Tensor | np.ndarray | None:
+    ) -> Tensor | np.ndarray | _CheckpointedOrder | _OfficialShuffleOrder | None:
         if source is None:
             return None
         if isinstance(source, (str, Path)):
@@ -395,9 +492,11 @@ class DynamicsTrainer:
             with path.open("rb") as stream:
                 for block in iter(lambda: stream.read(1024 * 1024), b""):
                     digest.update(block)
-            order = np.load(path, mmap_mode="r", allow_pickle=False)
-            if order.dtype.kind not in "iu":
-                raise ValueError("Memory-mapped sample order requires integer indices")
+            order = _open_order(path)
+            if isinstance(
+                order, (_CheckpointedOrder, _OfficialShuffleOrder)
+            ) and order.dataset_size != len(self.train_dataset):
+                raise ValueError("Sample-order dataset size mismatch")
             self._sample_order_identity = {
                 "path": str(path),
                 "sha256": digest.hexdigest(),
@@ -448,33 +547,53 @@ class DynamicsTrainer:
         lr = self._lr()
         for group in self.optimizer.param_groups:
             group["lr"] = lr
-        prediction = self.model(inputs)
-        loss = normalized_mse(prediction, target, _model_variance(self.model), mask)
-        if not torch.isfinite(loss):
-            raise FloatingPointError("Non-finite dynamics training loss")
-        loss.backward()
-        norm = torch.nn.utils.clip_grad_norm_(
-            self.model.parameters(), self.cfg.max_grad_norm, error_if_nonfinite=True
-        )
+        observed = None
+        with _attention_context(self.cfg.numerical_profile):
+            prediction = self.model(inputs)
+            loss = normalized_mse(
+                prediction,
+                target,
+                _model_variance(self.model),
+                mask if self.train_dataset.include_prefix else None,
+            )
+            if self.cfg.numerical_profile == "default" and not torch.isfinite(loss):
+                raise FloatingPointError("Non-finite dynamics training loss")
+            loss.backward()
+            norm = _clip_grad_norm_(
+                self.model.parameters(),
+                self.cfg.max_grad_norm,
+                profile=self.cfg.numerical_profile,
+                error_if_nonfinite=self.cfg.numerical_profile == "default",
+            )
+            if self.cfg.numerical_profile == "reference":
+                # One device-to-host observation covers loss, total norm and
+                # finite checks; no parameter norm is read back individually.
+                observed = torch.stack((loss.detach(), norm)).cpu().tolist()
+                if not all(math.isfinite(value) for value in observed):
+                    raise FloatingPointError(
+                        "Non-finite dynamics loss or gradient norm"
+                    )
         self.optimizer.step()
         self.sampler.set_state(candidate_sampler.get_state())
         self.global_step += 1
         return {
             "step": self.global_step,
-            "loss": float(loss.detach()),
+            "loss": float(loss.detach()) if observed is None else observed[0],
             "learning_rate": lr,
-            "grad_norm": float(norm),
+            "grad_norm": float(norm) if observed is None else observed[1],
         }
 
     def save(self, path: str | Path) -> None:
         """Atomically save weights and exact committed training/RNG progress."""
-        numpy_state = np.random.get_state()
         state = {
             "format": "embodichain.nerd.training.v1",
+            "preprocessing_execution": _PREPROCESSING_EXECUTION,
             "model_cfg": self.model.cfg.to_dict(),
             "model": self.model.state_dict(),
             "manifest": self.manifest,
             "train_cfg": self.cfg.to_dict(),
+            "numerical_profile": self.cfg.numerical_profile,
+            "attention_backend": self.model.cfg.attention_backend,
             "optimizer": self.optimizer.state_dict(),
             "global_step": self.global_step,
             "scheduler": {"next_step": self.global_step},
@@ -487,22 +606,7 @@ class DynamicsTrainer:
                 "include_prefix": self.train_dataset.include_prefix,
             },
             "statistics": self.statistics,
-            "rng": {
-                "torch": torch.get_rng_state(),
-                "python": random.getstate(),
-                "numpy": (
-                    numpy_state[0],
-                    torch.from_numpy(numpy_state[1].astype(np.int64)),
-                    numpy_state[2],
-                    numpy_state[3],
-                    numpy_state[4],
-                ),
-                "cuda": (
-                    torch.cuda.get_rng_state_all()
-                    if torch.device(self.cfg.device).type == "cuda"
-                    else []
-                ),
-            },
+            "rng": _capture_rng_state(self.cfg.device),
         }
         _atomic_save(Path(path), state)
 
@@ -511,6 +615,15 @@ class DynamicsTrainer:
         state = torch.load(path, map_location="cpu", weights_only=True)
         if state.get("format") != "embodichain.nerd.training.v1":
             raise ValueError("Unsupported dynamics training checkpoint")
+        if state.get("preprocessing_execution") != _PREPROCESSING_EXECUTION:
+            raise ValueError(
+                "Resume preprocessing execution mismatch; use matching code or fine-tuning"
+            )
+        profile = _checkpoint_numerical_profile(state)
+        if profile != self.cfg.numerical_profile:
+            raise ValueError("Resume numerical_profile mismatch; use fine-tuning")
+        saved_train_cfg = {**state["train_cfg"], "numerical_profile": profile}
+        saved_model_cfg = {"attention_backend": "default", **state["model_cfg"]}
         for key, expected in (
             ("dataset_fingerprint", self.train_dataset.fingerprint),
             ("train_cfg", self.cfg.to_dict()),
@@ -524,7 +637,12 @@ class DynamicsTrainer:
                 },
             ),
         ):
-            if state[key] != expected:
+            actual = (
+                saved_train_cfg
+                if key == "train_cfg"
+                else saved_model_cfg if key == "model_cfg" else state[key]
+            )
+            if actual != expected:
                 raise ValueError(
                     f"Resume {key} mismatch; use fine-tuning for a new run"
                 )
@@ -553,14 +671,7 @@ class DynamicsTrainer:
         )
         self.statistics = state["statistics"]
         self.sampler.set_state(state["sampler_state"])
-        torch.set_rng_state(state["rng"]["torch"])
-        random.setstate(state["rng"]["python"])
-        name, keys, pos, gaussian, cached = state["rng"]["numpy"]
-        np.random.set_state(
-            (name, keys.numpy().astype(np.uint32), pos, gaussian, cached)
-        )
-        if state["rng"]["cuda"]:
-            torch.cuda.set_rng_state_all(state["rng"]["cuda"])
+        _restore_rng_state(state["rng"])
 
     def train(self, *, stop_after: int | None = None) -> dict[str, Any]:
         """Run to the configured budget or an explicit interruption checkpoint."""
@@ -605,8 +716,13 @@ class DynamicsTrainer:
                     if score < self.best_validation:
                         self.best_validation = score
                         self.save(self.output_dir / "best.pt")
-                log.write(json.dumps(last, allow_nan=False) + "\n")
-                log.flush()
+                if (
+                    self.global_step % self.cfg.log_interval == 0
+                    or self.global_step == end
+                    or "validation" in last
+                ):
+                    log.write(json.dumps(last, allow_nan=False) + "\n")
+                    log.flush()
                 if self.global_step % self.cfg.checkpoint_interval == 0:
                     self.save(self.output_dir / "last.pt")
         self.save(self.output_dir / "last.pt")

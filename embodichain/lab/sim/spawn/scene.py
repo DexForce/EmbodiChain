@@ -87,7 +87,7 @@ class SpawnScene:
         """Add a descriptor and associate it with an EmbodiChain facade."""
         if uid in self._assets:
             raise ValueError(f"Spawn asset uid is already declared: {uid!r}.")
-        self._initialize_facade_declaration(facade)
+        self._initialize_facade_declaration(facade, descriptor)
         declaration = _AssetDeclaration(
             kind=kind,
             descriptor=descriptor,
@@ -165,7 +165,7 @@ class SpawnScene:
         """Track a descriptor that was already added to ``SceneBuilder``."""
         if uid in self._assets:
             raise ValueError(f"Spawn asset uid is already declared: {uid!r}.")
-        self._initialize_facade_declaration(facade)
+        self._initialize_facade_declaration(facade, descriptor)
         declaration = _AssetDeclaration(kind, descriptor, facade)
         self._assets[uid] = declaration
         handles = self.handles(uid)
@@ -279,7 +279,9 @@ class SpawnScene:
             return ()
         return tuple(result.handles[path] for path in paths)
 
-    def _initialize_facade_declaration(self, facade: Any | None) -> None:
+    def _initialize_facade_declaration(
+        self, facade: Any | None, descriptor: Any
+    ) -> None:
         """Give a Spawn facade the instance count owned by this scene.
 
         The duck-typed fallback keeps ``SpawnScene`` usable by lightweight
@@ -290,7 +292,7 @@ class SpawnScene:
             return
         initialize = getattr(facade, "_initialize_spawn_declaration", None)
         if initialize is not None:
-            initialize(self._num_envs)
+            initialize(self._num_envs if getattr(descriptor, "per_env", True) else 1)
 
     def _resolve_articulation_source(self, descriptor: Any) -> None:
         """Resolve one descriptor through the available DexSim boundary."""

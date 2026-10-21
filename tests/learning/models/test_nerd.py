@@ -15,6 +15,7 @@
 # ----------------------------------------------------------------------------
 
 from __future__ import annotations
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -127,6 +128,109 @@ def test_legacy_pickle_requires_explicit_trust(tmp_path: Path) -> None:
         convert_legacy_checkpoint(tmp_path / "missing", tmp_path, {})
 
 
+def test_attention_backend_preserves_initial_weights_and_rng() -> None:
+    torch.manual_seed(19)
+    default = tiny()
+    expected_rng = torch.get_rng_state().clone()
+    cfg = default.cfg.copy()
+    cfg.attention_backend = "math"
+    torch.manual_seed(19)
+    math_model = NeRDModel(cfg)
+    assert torch.equal(expected_rng, torch.get_rng_state())
+    assert all(
+        torch.equal(value, math_model.state_dict()[key])
+        for key, value in default.state_dict().items()
+    )
+
+
+def test_math_attention_export_load_and_provider_prediction_restore_flags(
+    tmp_path: Path, monkeypatch
+) -> None:
+    model = tiny().eval()
+    model.cfg.attention_backend = "math"
+    export_model(
+        tmp_path,
+        model,
+        {
+            "codec": {"robot": "cartpole"},
+            "dt": 1 / 60,
+            "numerical_profile": "reference",
+        },
+    )
+    loaded, manifest = load_model(tmp_path)
+    assert loaded.cfg.attention_backend == manifest["attention_backend"] == "math"
+    assert manifest["numerical_profile"] == "reference"
+    original = torch.nn.functional.scaled_dot_product_attention
+    flags = []
+    before = (
+        torch.backends.cuda.flash_sdp_enabled(),
+        torch.backends.cuda.math_sdp_enabled(),
+        torch.backends.cuda.mem_efficient_sdp_enabled(),
+    )
+
+    def record(*args, **kwargs):
+        flags.append(
+            (
+                torch.backends.cuda.flash_sdp_enabled(),
+                torch.backends.cuda.math_sdp_enabled(),
+                torch.backends.cuda.mem_efficient_sdp_enabled(),
+            )
+        )
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(torch.nn.functional, "scaled_dot_product_attention", record)
+    inputs = {
+        key: torch.randn(2, 3, width) for key, width in loaded.cfg.input_dims.items()
+    }
+    assert torch.equal(loaded.evaluate(inputs), model.evaluate(inputs))
+    assert flags and all(row == (False, True, False) for row in flags)
+    assert before == (
+        torch.backends.cuda.flash_sdp_enabled(),
+        torch.backends.cuda.math_sdp_enabled(),
+        torch.backends.cuda.mem_efficient_sdp_enabled(),
+    )
+
+
+def test_legacy_portable_export_without_execution_fields_remains_default(
+    tmp_path: Path,
+) -> None:
+    model = tiny().eval()
+    export_model(tmp_path, model, {"codec": {"robot": "cartpole"}, "dt": 1 / 60})
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    manifest.pop("attention_backend")
+    manifest.pop("numerical_profile")
+    manifest["model_config"].pop("attention_backend")
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest))
+    loaded, _ = load_model(tmp_path)
+    assert loaded.cfg.attention_backend == "default"
+    assert all(
+        torch.equal(value, loaded.state_dict()[key])
+        for key, value in model.state_dict().items()
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation", ["attention_backend", "numerical_profile", "reference_requires_math"]
+)
+def test_export_rejects_conflicting_execution_metadata(
+    tmp_path: Path, mutation: str
+) -> None:
+    model = tiny()
+    model.cfg.attention_backend = "math"
+    export_model(tmp_path, model, {"numerical_profile": "reference"})
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    if mutation == "attention_backend":
+        manifest["attention_backend"] = "default"
+    elif mutation == "numerical_profile":
+        manifest["numerical_profile"] = "unknown"
+    else:
+        manifest["attention_backend"] = "default"
+        manifest["model_config"]["attention_backend"] = "default"
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="attention_backend|numerical_profile"):
+        load_model(tmp_path)
+
+
 @pytest.mark.parametrize("robot", ["Cartpole", "Ant"])
 def test_explicit_official_checkpoint_forward_gradient_and_adam(
     robot: str, tmp_path: Path
@@ -144,6 +248,14 @@ def test_explicit_official_checkpoint_forward_gradient_and_adam(
             **os.environ,
             "OMP_NUM_THREADS": "2",
             "MKL_NUM_THREADS": "2",
-            "PYTHONPATH": str(Path(__file__).resolve().parents[3]),
+            "PYTHONPATH": os.pathsep.join(
+                filter(
+                    None,
+                    (
+                        os.environ.get("NERD_REFERENCE_DEPS"),
+                        str(Path(__file__).resolve().parents[3]),
+                    ),
+                )
+            ),
         },
     )

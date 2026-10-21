@@ -44,6 +44,7 @@ _DEPLOYMENT_MANIFEST_FIELDS = frozenset(
         "world_rotation_xyzw",
         "gravity_transport_override",
         "source_physical_arrays",
+        "legacy_velocity",
     }
 )
 
@@ -138,7 +139,7 @@ def run_train(config: dict[str, Any]) -> dict[str, Any]:
         order_path = Path(config["sample_order"])
         order = (
             order_path
-            if order_path.suffix == ".npy"
+            if order_path.suffix in {".npy", ".json"}
             else torch.load(order_path, map_location="cpu", weights_only=True)
         )
     try:
@@ -209,6 +210,8 @@ def run_eval(config: dict[str, Any]) -> dict[str, Any]:
             ),
             "dataset_fingerprint": dataset.fingerprint,
             "qualification": "offline_only",
+            "numerical_profile": manifest.get("numerical_profile", "default"),
+            "attention_backend": model.cfg.attention_backend,
         }
         if config.get("output"):
             Path(config["output"]).write_text(
@@ -223,18 +226,24 @@ def run_export(checkpoint: str | Path, output: str | Path) -> dict[str, Any]:
     """Export a training checkpoint using the production model artifact writer."""
     import torch
     from embodichain.learning.models.nerd import NeRDModel, NeRDModelCfg, export_model
+    from ._numerics import _checkpoint_numerical_profile
 
     state = torch.load(checkpoint, map_location="cpu", weights_only=True)
     if state.get("format") != "embodichain.nerd.training.v1":
         raise ValueError("Expected a dynamics training checkpoint")
+    profile = _checkpoint_numerical_profile(state)
     model = NeRDModel(NeRDModelCfg(**state["model_cfg"]))
     model.load_state_dict(state["model"])
     manifest = {
         **state["manifest"],
+        "numerical_profile": profile,
+        "attention_backend": model.cfg.attention_backend,
         "training": {
             "global_step": state["global_step"],
             "dataset_fingerprint": state["dataset_fingerprint"],
             "qualification": "unqualified",
+            "numerical_profile": profile,
+            "attention_backend": model.cfg.attention_backend,
         },
     }
     export_model(output, model, manifest)
@@ -242,4 +251,6 @@ def run_export(checkpoint: str | Path, output: str | Path) -> dict[str, Any]:
         "output": str(output),
         "global_step": state["global_step"],
         "qualification": "unqualified",
+        "numerical_profile": profile,
+        "attention_backend": model.cfg.attention_backend,
     }

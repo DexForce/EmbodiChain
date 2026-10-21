@@ -24,6 +24,7 @@ Transformer derives from Andrej Karpathy's nanoGPT (MIT). See THIRD_PARTY_LICENS
 from __future__ import annotations
 import math
 from collections.abc import Mapping
+from contextlib import AbstractContextManager, nullcontext
 import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
@@ -38,6 +39,8 @@ class NeRDModelCfg:
 
     The default architecture matches the official Cartpole checkpoint; input_dims
     and output_dim must be supplied. Ant uses n_embd=384 and its contact schema.
+    ``attention_backend="math"`` persists an explicit SDPA choice in portable
+    exports; ``default`` preserves Torch's backend selection.
     """
 
     input_dims: dict[str, int] = {}
@@ -53,6 +56,19 @@ class NeRDModelCfg:
     normalize_input: bool = True
     normalize_output: bool = True
     output_tanh: bool = False
+    attention_backend: str = "default"
+
+
+def _attention_backend_context(backend: str) -> AbstractContextManager:
+    if backend == "default":
+        return nullcontext()
+    if backend != "math":
+        raise ValueError("attention_backend must be 'default' or 'math'")
+    if hasattr(torch.nn, "attention") and hasattr(torch.nn.attention, "sdpa_kernel"):
+        return torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH])
+    return torch.backends.cuda.sdp_kernel(
+        enable_flash=False, enable_math=True, enable_mem_efficient=False
+    )
 
 
 class FeatureNormalizer(nn.Module):
@@ -196,6 +212,11 @@ class NeRDModel(nn.Module):
 
     def __init__(self, cfg: NeRDModelCfg) -> None:
         super().__init__()
+        if not isinstance(cfg.attention_backend, str) or cfg.attention_backend not in {
+            "default",
+            "math",
+        }:
+            raise ValueError("attention_backend must be 'default' or 'math'")
         if not cfg.input_dims or any(v <= 0 for v in cfg.input_dims.values()):
             raise ValueError("input_dims must specify positive ordered feature widths")
         if any("." in k or not k for k in cfg.input_dims):
@@ -266,7 +287,8 @@ class NeRDModel(nn.Module):
             )
         if not 1 <= shape[1] <= self.cfg.block_size:
             raise ValueError("Sequence length is outside the model block_size")
-        value = self.model(self.transformer_model(torch.cat(values, -1)))
+        with _attention_backend_context(self.cfg.attention_backend):
+            value = self.model(self.transformer_model(torch.cat(values, -1)))
         if self.cfg.output_tanh:
             value = torch.tanh(value)
         return (

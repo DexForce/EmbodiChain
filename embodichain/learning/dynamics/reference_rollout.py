@@ -206,8 +206,14 @@ def _verify_historical_physics(
     )
     if manifest.get("asset_sha256") != _hash(asset):
         raise ValueError("Historical model asset checksum differs")
+    batch = manifest.get("sampling", {}).get("batch_size")
+    split_batch = (
+        manifest.get("source_split_identities", {}).get("train", {}).get("num_envs")
+    )
+    if batch is not None and split_batch is not None and batch != split_batch:
+        raise ValueError("Conflicting source sampling batch sizes")
     batch = _positive(
-        "source sampling batch_size", manifest.get("sampling", {}).get("batch_size")
+        "source sampling batch_size", batch if batch is not None else split_batch
     )
     bodies = _positive("source bodies_per_env", recorded.get("bodies_per_env"))
     if bodies != environment.bodies_per_env:
@@ -375,6 +381,8 @@ def evaluate_reference_rollouts(
             device, num_envs, trajectories, horizons, seed, motion_mode and
             initial_states(default/sample). Fixed-policy mode requires a PD policy
             mapping. verify_portable_steps bounds an extra equivalence probe.
+            teacher_dataset optionally selects immutable evaluation traces made
+            by the standalone generator in the original supported environment.
         trust_external_code: Explicit permission to execute the pinned external
             checkout. Run in a fresh subprocess with its legacy Warp on PYTHONPATH.
 
@@ -401,6 +409,7 @@ def evaluate_reference_rollouts(
         "warp_version",
         "cpu_threads",
         "verify_portable_steps",
+        "teacher_dataset",
     }
     if set(spec) - allowed:
         raise ValueError(
@@ -576,6 +585,10 @@ def evaluate_reference_rollouts(
     selected_digest = hashlib.sha256()
     parity_max = 0.0
     parity_nonfinite = False
+    teacher_dataset = None
+    teacher_feedback_max_abs_error = 0.0
+    teacher_transport_max_abs_error = 0.0
+    teacher_trace_physical = None
     names = ("q_mae", "qd_mae", "base_position_error", "base_orientation_error")
     with wp.ScopedDevice(device):
         try:
@@ -632,55 +645,132 @@ def evaluate_reference_rollouts(
                 if mode == "fixed_policy"
                 else None
             )
+            if spec.get("teacher_dataset") is not None:
+                from ._reference_traces import (
+                    _load_reference_trace,
+                    _reference_trace_batches,
+                )
+
+                teacher_directory = Path(spec["teacher_dataset"])
+                teacher_dataset, teacher_records = _load_reference_trace(
+                    teacher_directory,
+                    spec,
+                    identity,
+                    manifest,
+                    None if policy is None else policy.identity,
+                    count,
+                    horizon,
+                )
+                teacher_trace_physical = _verify_historical_physics(
+                    teacher, teacher_dataset["metadata"], identity, expected_warp
+                )
+                if not teacher_trace_physical["complete"]:
+                    raise ValueError(
+                        "Teacher trace is missing measured physical fields"
+                    )
+                batches = _reference_trace_batches(
+                    teacher_directory, teacher_records, batch, horizon, robot, device
+                )
+            else:
+                batches = (None for _ in range(0, count, batch))
             with (
                 _cpu_stream_compatibility(wp, device),
                 torch.no_grad(),
                 h5py.File(trace_path, "w") as trace,
                 rows_path.open("w") as rows_file,
             ):
-                for start in range(0, count, batch):
+                for start, recorded in zip(range(0, count, batch), batches):
                     n = min(batch, count - start)
-                    samples = []
-                    commands = []
-                    for trajectory in range(start, start + n):
-                        set_random_seed(seed + trajectory)
-                        raw = default[None].clone()
-                        if initial == "sample":
-                            sampler.sample_initial_states(1, raw)
-                        command = torch.zeros(
-                            horizon, teacher.joint_act_dim, device=device
-                        )
-                        if mode == "random_effort":
-                            sampler.sampler.sample(horizon, -limits, limits, command)
-                        samples.append(raw[0])
-                        commands.append(command)
-                    samples.extend([samples[-1]] * (batch - n))
-                    commands.extend([commands[-1]] * (batch - n))
-                    initial_raw = torch.stack(samples)
-                    command = torch.stack(commands)
-                    teacher.reset(initial_states=initial_raw.clone())
+                    cached = None if recorded is None else recorded[1]
+                    if cached is None:
+                        samples = []
+                        commands = []
+                        for trajectory in range(start, start + n):
+                            set_random_seed(seed + trajectory)
+                            raw = default[None].clone()
+                            if initial == "sample":
+                                sampler.sample_initial_states(1, raw)
+                            command = torch.zeros(
+                                horizon, teacher.joint_act_dim, device=device
+                            )
+                            if mode == "random_effort":
+                                sampler.sampler.sample(
+                                    horizon, -limits, limits, command
+                                )
+                            samples.append(raw[0])
+                            commands.append(command)
+                        samples.extend([samples[-1]] * (batch - n))
+                        commands.extend([commands[-1]] * (batch - n))
+                        initial_raw = torch.stack(samples)
+                        command = torch.stack(commands)
+                        teacher.reset(initial_states=initial_raw.clone())
+                    else:
+                        initial_raw = cached["raw"][:, 0].contiguous()
+                        command = cached["raw_joint_f"]
+                        transported = _canonical_states(cached["raw"], codec, rotation)
+                        for actual, key in zip(transported, ("q", "qd")):
+                            if not torch.allclose(
+                                actual,
+                                cached[key],
+                                atol=1e-5,
+                                rtol=1e-4,
+                                equal_nan=True,
+                            ):
+                                raise ValueError(
+                                    "Recorded raw/canonical teacher state transport differs"
+                                )
+                            error = (actual - cached[key]).abs()
+                            teacher_transport_max_abs_error = max(
+                                teacher_transport_max_abs_error,
+                                float(
+                                    torch.where(torch.isfinite(error), error, 0).max()
+                                ),
+                            )
+                        if mode == "passive" and bool((command != 0).any()):
+                            raise ValueError(
+                                "Passive teacher trace contains nonzero effort"
+                            )
                     student.reset(initial_states=initial_raw.clone())
                     if start == 0:
                         portable.reset(initial_states=initial_raw.clone())
-                    teacher_raw = [teacher.states.clone()]
+                    teacher_raw = [teacher.states.clone()] if cached is None else None
                     student_raw = [student.states.clone()]
                     teacher_controls = []
                     student_controls = []
                     for step in range(horizon):
-                        tq, tqd = _canonical_states(teacher.states, codec, rotation)
+                        tq, tqd = (
+                            _canonical_states(teacher.states, codec, rotation)
+                            if cached is None
+                            else (cached["q"][:, step], cached["qd"][:, step])
+                        )
                         nq, nqd = _canonical_states(student.states, codec, rotation)
-                        tf = command[:, step] if policy is None else policy(tq, tqd)
+                        tf = (
+                            command[:, step]
+                            if policy is None or cached is not None
+                            else policy(tq, tqd)
+                        )
                         nf = command[:, step] if policy is None else policy(nq, nqd)
+                        if cached is not None and policy is not None:
+                            expected = policy(tq, tqd)
+                            if not torch.allclose(tf, expected, atol=1e-5, rtol=1e-4):
+                                raise ValueError(
+                                    "Recorded original teacher actions differ from declared feedback"
+                                )
+                            teacher_feedback_max_abs_error = max(
+                                teacher_feedback_max_abs_error,
+                                float((tf - expected).abs().max()),
+                            )
                         # Original torque API uses view(-1), so transport a
                         # contiguous frame from batch-major command storage.
                         tf, nf = tf.contiguous(), nf.contiguous()
                         teacher_controls.append(tf.clone())
                         student_controls.append(nf.clone())
-                        teacher_raw.append(
-                            teacher.step_with_joint_act(
-                                tf, env_mode="ground-truth"
-                            ).clone()
-                        )
+                        if cached is None:
+                            teacher_raw.append(
+                                teacher.step_with_joint_act(
+                                    tf, env_mode="ground-truth"
+                                ).clone()
+                            )
                         student_raw.append(
                             student.step_with_joint_act(nf, env_mode="neural").clone()
                         )
@@ -707,9 +797,17 @@ def evaluate_reference_rollouts(
                                     ).max()
                                 ),
                             )
-                    traw = torch.stack(teacher_raw, 1)[:n]
+                    traw = (
+                        torch.stack(teacher_raw, 1)[:n]
+                        if cached is None
+                        else cached["raw"][:n]
+                    )
                     nraw = torch.stack(student_raw, 1)[:n]
-                    tq, tqd = _canonical_states(traw, codec, rotation)
+                    tq, tqd = (
+                        _canonical_states(traw, codec, rotation)
+                        if cached is None
+                        else (cached["q"][:n], cached["qd"][:n])
+                    )
                     q, qd = _canonical_states(nraw, codec, rotation)
                     tc = torch.stack(teacher_controls, 1)[:n]
                     nc = torch.stack(student_controls, 1)[:n]
@@ -919,6 +1017,29 @@ def evaluate_reference_rollouts(
         "model_manifest_sha256": manifest_sha,
         "teacher_origin": origin,
         "teacher_split": "test",
+        "teacher_dataset": (
+            None
+            if teacher_dataset is None
+            else str(Path(spec["teacher_dataset"]).resolve())
+        ),
+        "teacher_dataset_manifest_sha256": (
+            None
+            if teacher_dataset is None
+            else _hash(Path(spec["teacher_dataset"]) / "manifest.json")
+        ),
+        "teacher_generation_environment": (
+            None
+            if teacher_dataset is None
+            else teacher_dataset["metadata"]["generation_environment"]
+        ),
+        "teacher_feedback_verification": (
+            "all_selected_actions_verified_against_teacher_states"
+            if teacher_dataset is not None and policy is not None
+            else "live_feedback_execution" if policy is not None else None
+        ),
+        "teacher_feedback_max_abs_error": teacher_feedback_max_abs_error,
+        "teacher_transport_max_abs_error": teacher_transport_max_abs_error,
+        "teacher_physical_verification": teacher_trace_physical,
         "trajectories": count,
         "num_envs": batch,
         "state_dtype": "float32",

@@ -254,6 +254,43 @@ def _check_original_runtime(tmp_path: Path, robot: str, source: str) -> None:
     )
     assert old_report["qualification_status"] == "pending_missing_recorded_physics"
     assert old_report["physical_verification"]["missing_recorded_fields"] == ["gravity"]
+    # Independent official-version generation records the physical replica
+    # count in its source split receipt rather than the old sampling field.
+    split_metadata = json.loads(json.dumps(metadata))
+    batch = split_metadata["sampling"].pop("batch_size")
+    split_metadata["source_split_identities"] = {"train": {"num_envs": batch}}
+    split_export = tmp_path / "split-source-model"
+    export_model(split_export, model, split_metadata)
+    split_spec = {
+        "source": source,
+        "robot": robot,
+        "model": str(split_export),
+        "output": str(tmp_path / "split-source.json"),
+        "num_envs": 2,
+        "trajectories": 3,
+        "horizons": [1],
+        "initial_states": "default",
+        "motion_mode": "passive",
+        "cpu_threads": 2,
+    }
+    split_report = evaluate_reference_rollouts(split_spec, trust_external_code=True)
+    assert split_report["physical_verification"]["complete"]
+    assert (
+        split_report["physical_verification"]["sha256"]
+        == reports["passive"]["physical_verification"]["sha256"]
+    )
+    split_metadata["sampling"]["batch_size"] = batch + 1
+    conflicting_export = tmp_path / "conflicting-source-model"
+    export_model(conflicting_export, model, split_metadata)
+    with pytest.raises(ValueError, match="Conflicting source sampling"):
+        evaluate_reference_rollouts(
+            {
+                **split_spec,
+                "model": str(conflicting_export),
+                "output": str(tmp_path / "conflicting-source.json"),
+            },
+            trust_external_code=True,
+        )
     # A declared change to gravity must reject, not silently reuse old dynamics.
     changed = json.loads(json.dumps(metadata))
     changed["source_physical_arrays"]["gravity"] = [0.0, -1.0, 0.0]
@@ -302,5 +339,195 @@ def test_real_historical_teacher_neural_runtime_and_source_contract(
             "OMP_NUM_THREADS": "2",
             "MKL_NUM_THREADS": "2",
             "CUDA_VISIBLE_DEVICES": "",
+        },
+    )
+
+
+def _check_supported_replay(
+    tmp_path: Path, robot: str, source: str, data: Path
+) -> None:
+    import shutil
+    import h5py
+    import numpy as np
+    import torch
+    from embodichain.learning.models.nerd import NeRDModel, NeRDModelCfg, export_model
+
+    metadata = json.loads((data / f"{robot}-passive/manifest.json").read_text())[
+        "metadata"
+    ]
+    dims = (
+        {"states_embedding": 4, "joint_f": 2}
+        if robot == "cartpole"
+        else {
+            "states_embedding": 29,
+            "contact_normals": 75,
+            "contact_points_1": 75,
+            "contact_depths": 25,
+            "joint_f": 8,
+            "gravity_dir": 3,
+        }
+    )
+    torch.manual_seed(7)
+    model = NeRDModel(
+        NeRDModelCfg(
+            input_dims=dims,
+            output_dim=4 if robot == "cartpole" else 29,
+            n_embd=24,
+            n_layer=1,
+            n_head=3,
+            history_length=3,
+            block_size=4,
+        )
+    )
+    with torch.no_grad():
+        model.model.output_net.weight.mul_(0.02)
+        model.model.output_net.bias.zero_()
+        if robot == "ant":
+            model.model.output_net.bias[6] = 1.0
+    export = tmp_path / "export"
+    export_model(export, model, metadata)
+    reports = {}
+    specs = {}
+    for mode in ["passive", "random_effort", "fixed_policy"]:
+        spec = {
+            "source": source,
+            "robot": robot,
+            "model": str(export),
+            "output": str(tmp_path / (mode + ".json")),
+            "device": "cpu",
+            "num_envs": 2,
+            "trajectories": 3,
+            "horizons": [1, 4, 12],
+            "seed": 1000000,
+            "initial_states": "sample",
+            "motion_mode": mode,
+            "cpu_threads": 2,
+            "teacher_dataset": str(data / (robot + "-" + mode)),
+        }
+        if mode == "fixed_policy":
+            spec["policy"] = {"kind": "pd"}
+        result = evaluate_reference_rollouts(spec, trust_external_code=True)
+        reports[mode], specs[mode] = result, spec
+        assert result["teacher_generation_environment"]["python"] == "3.8.20"
+        assert result["teacher_generation_environment"]["torch"].startswith("2.2.2")
+        assert (
+            result["teacher_generation_environment"]["runtime_imports_embodichain"]
+            is False
+        )
+        assert result["physical_verification"]["complete"]
+        assert result["teacher_physical_verification"]["complete"]
+        assert result["teacher_transport_max_abs_error"] <= 1e-5
+        assert result["trajectories"] == 3 and set(result["horizons"]) == {
+            "1",
+            "4",
+            "12",
+        }
+        assert result["portable_runtime_equivalence"]["status"] == "passed"
+        if mode == "fixed_policy":
+            assert (
+                result["teacher_feedback_verification"]
+                == "all_selected_actions_verified_against_teacher_states"
+            )
+            assert result["teacher_feedback_max_abs_error"] <= 1e-5
+            with h5py.File(result["trace_evidence"], "r") as file:
+                assert np.any(
+                    file["0/joint_f"][:, 1:] != file["0/teacher_joint_f"][:, 1:]
+                )
+    # Different evaluation batching cannot select different teacher contents.
+    again = evaluate_reference_rollouts(
+        {**specs["passive"], "num_envs": 1, "output": str(tmp_path / "batch1.json")},
+        trust_external_code=True,
+    )
+    assert (
+        again["selected_teacher_sha256"]
+        == reports["passive"]["selected_teacher_sha256"]
+    )
+    # A rehashed but inconsistent raw/canonical frame must not become a new oracle.
+    changed = tmp_path / "changed-transport"
+    shutil.copytree(data / (robot + "-passive"), changed)
+    manifest_path = changed / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    shard = changed / manifest["shards"][0]["file"]
+    with h5py.File(shard, "a") as file:
+        file["0/states/q"][1, 0] += 1.0
+    manifest["shards"][0]["sha256"] = hashlib.sha256(shard.read_bytes()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="state transport differs"):
+        evaluate_reference_rollouts(
+            {
+                **specs["passive"],
+                "teacher_dataset": str(changed),
+                "output": str(tmp_path / "bad-transport.json"),
+            },
+            trust_external_code=True,
+        )
+    # PD action verification also rejects consistent raw/canonical effort tampering.
+    changed = tmp_path / "changed-feedback"
+    shutil.copytree(data / (robot + "-fixed_policy"), changed)
+    manifest_path = changed / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    shard = changed / manifest["shards"][0]["file"]
+    with h5py.File(shard, "a") as file:
+        file["0/transitions/raw_joint_f"][0, 0] += 1.0
+        file["0/transitions/joint_f"][0, 6 if robot == "ant" else 0] += 1.0
+    manifest["shards"][0]["sha256"] = hashlib.sha256(shard.read_bytes()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="actions differ from declared feedback"):
+        evaluate_reference_rollouts(
+            {
+                **specs["fixed_policy"],
+                "teacher_dataset": str(changed),
+                "output": str(tmp_path / "bad-feedback.json"),
+            },
+            trust_external_code=True,
+        )
+    missing = tmp_path / "missing-teacher-physics"
+    shutil.copytree(data / (robot + "-passive"), missing)
+    manifest_path = missing / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["metadata"]["source_physical_arrays"].pop("gravity")
+    manifest["metadata"]["teacher_origin"].pop("gravity", None)
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="missing measured physical fields"):
+        evaluate_reference_rollouts(
+            {
+                **specs["passive"],
+                "teacher_dataset": str(missing),
+                "output": str(tmp_path / "missing-physics.json"),
+            },
+            trust_external_code=True,
+        )
+
+
+@pytest.mark.parametrize("robot", ["cartpole", "ant"])
+def test_real_supported_environment_teacher_replay(tmp_path: Path, robot: str) -> None:
+    source = os.environ.get("NERD_MAIN_REFERENCE_ROOT")
+    dependencies = os.environ.get(
+        "NERD_WARP18_ROOT" if robot == "cartpole" else "NERD_WARP151_ROOT"
+    )
+    data = os.environ.get("NERD_SUPPORTED_EVAL_DATA")
+    if not source or not dependencies or not data:
+        pytest.skip(
+            "Set explicit trusted original source/dependencies and supported-environment evaluation corpus"
+        )
+    code = "import importlib.util,sys;from pathlib import Path;s=importlib.util.spec_from_file_location('reference_replay_test',sys.argv[1]);m=importlib.util.module_from_spec(s);s.loader.exec_module(m);m._check_supported_replay(Path(sys.argv[2]),sys.argv[3],sys.argv[4],Path(sys.argv[5]))"
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            code,
+            str(Path(__file__).resolve()),
+            str(tmp_path),
+            robot,
+            source,
+            data,
+        ],
+        check=True,
+        env={
+            **os.environ,
+            "PYTHONPATH": dependencies + os.pathsep + str(_ROOT),
+            "CUDA_VISIBLE_DEVICES": "",
+            "OMP_NUM_THREADS": "2",
+            "MKL_NUM_THREADS": "2",
         },
     )

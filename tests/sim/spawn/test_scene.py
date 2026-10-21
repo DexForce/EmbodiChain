@@ -80,6 +80,21 @@ class _RuntimeConfigFacade(_RetryableFacade):
         self.events.append("runtime_config")
 
 
+def test_global_descriptor_declares_one_facade_instance_in_replicated_scene() -> None:
+    handle = object()
+    scene = _make_scene({"reference_ground": handle})
+    scene._num_envs = 8
+    facade = _RetryableFacade()
+    scene.track(
+        "rigid_object",
+        "reference_ground",
+        SimpleNamespace(name="reference_ground", per_env=False),
+        facade=facade,
+    )
+    assert facade.declared_num_instances == 1
+    assert facade._entities == [handle]
+
+
 def test_bind_retries_only_incomplete_declarations() -> None:
     first_handle = object()
     second_handle = object()

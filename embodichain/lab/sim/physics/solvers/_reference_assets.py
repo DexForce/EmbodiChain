@@ -27,6 +27,7 @@ from dataclasses import fields
 import hashlib
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
+import xml.etree.ElementTree as ET
 
 import numpy as np
 
@@ -121,26 +122,48 @@ def reference_profile(robot: str) -> dict[str, Any]:
     }
 
 
-def _import_reference(robot: str) -> Any:
+def _import_reference(robot: str, physics_profile: str = "native") -> Any:
     """Interpret the pinned asset with upstream environment import defaults."""
     import newton
     import warp as wp
 
+    if physics_profile not in {"native", "warp_reference"}:
+        raise ValueError(f"Unsupported reference physics profile: {physics_profile}")
+    legacy = physics_profile == "warp_reference"
     builder = newton.ModelBuilder()
     if robot == "cartpole":
         builder.default_joint_cfg = newton.ModelBuilder.JointDofConfig(
             armature=0.01, limit_ke=1e4, limit_kd=10.0
         )
+        if legacy:
+            builder.default_shape_cfg = newton.ModelBuilder.ShapeConfig(
+                density=1000.0, mu=0.25
+            )
         builder.add_urdf(
             str(_asset(robot)),
             xform=wp.transform(
                 (0.0, 0.0, 0.0),
-                wp.quat_from_axis_angle(wp.vec3(0.0, 0.0, 1.0), wp.pi * 0.5),
+                (
+                    wp.quat_identity()
+                    if legacy
+                    else wp.quat_from_axis_angle(wp.vec3(0.0, 0.0, 1.0), wp.pi * 0.5)
+                ),
             ),
             floating=False,
             enable_self_collisions=False,
             collapse_fixed_joints=True,
+            ignore_inertial_definitions=legacy,
         )
+        if legacy:
+            # Warp 1.8 URDF imports ignore authored inertials by default and
+            # add armature to BOTH body inertia and generalized joint inertia.
+            for index, inertia in enumerate(builder.body_inertia):
+                builder.body_inertia[index] = wp.mat33(
+                    np.asarray(inertia).reshape(3, 3) + 0.01 * np.eye(3)
+                )
+                builder.body_inv_inertia[index] = wp.inverse(
+                    builder.body_inertia[index]
+                )
     else:
         builder.default_joint_cfg = newton.ModelBuilder.JointDofConfig(
             armature=0.05, limit_ke=1e3, limit_kd=1e2
@@ -148,12 +171,48 @@ def _import_reference(robot: str) -> Any:
         builder.default_shape_cfg = newton.ModelBuilder.ShapeConfig(
             ke=4e4, kd=1e2, kf=3e3, mu=0.75
         )
+        source = str(_asset(robot))
+        if legacy:
+            # Warp 1.5.1 honors density for spheres but uses the parser's
+            # density=1000 for capsules, ignoring MJCF geom density=5.
+            # Express those measured semantics in a temporary XML string;
+            # the pinned, packaged asset remains byte-for-byte unchanged.
+            root = ET.parse(source).getroot()
+            for geom in root.findall(".//body/geom"):
+                if geom.get("type", "sphere") == "capsule":
+                    geom.set("density", "1000")
+                    # Old Y-axis capsules emit +Y then -Y contact slots. The
+                    # modern fromto importer directs +Z toward the other end.
+                    # Reverse the equivalent capsule frame to preserve the
+                    # network's ordered contact features, not just geometry.
+                    endpoints = geom.get("fromto", "").split()
+                    if len(endpoints) == 6:
+                        geom.set("fromto", " ".join(endpoints[3:] + endpoints[:3]))
+                geom.set("friction", "0.75 0 0")
+                geom.set("margin", "0")
+            source = ET.tostring(root, encoding="unicode")
         builder.add_mjcf(
-            str(_asset(robot)),
+            source,
             enable_self_collisions=False,
             collapse_fixed_joints=True,
             ignore_names=["floor", "ground"],
+            parse_mujoco_options=not legacy,
         )
+        if legacy:
+            # The original root authors armature=0; scalar joints author .01.
+            # Old force mode ignores target_kd=.1. Newton now imports that
+            # value as passive damping, so leaving it active changes physics.
+            for index in range(1, builder.body_count):
+                builder.body_inertia[index] = wp.mat33(
+                    np.asarray(builder.body_inertia[index]).reshape(3, 3)
+                    + 0.01 * np.eye(3)
+                )
+                builder.body_inv_inertia[index] = wp.inverse(
+                    builder.body_inertia[index]
+                )
+            builder.joint_damping[:] = [0.0] * len(builder.joint_damping)
+            builder.joint_target_ke[:] = [0.0] * len(builder.joint_target_ke)
+            builder.joint_target_kd[:] = [0.0] * len(builder.joint_target_kd)
     return builder
 
 
@@ -169,9 +228,13 @@ def _pose(transform: Any) -> np.ndarray:
     return pose
 
 
-def make_reference_articulation(robot: str) -> ArticulationDesc:
+def make_reference_articulation(
+    robot: str, physics_profile: str = "native"
+) -> ArticulationDesc:
     """Build an independent public descriptor with imported physical properties.
 
+    ``warp_reference`` explicitly reproduces measured old-Warp asset parameters;
+    it does not select the old simulator or assert identical contact algorithms.
     Body/joint names retain their asset spelling, with only the importer's path
     prefix removed. The free root is represented by ``fixed_base=False`` and is
     created by Spawn. Default nonzero joint positions are in ``reference_profile``
@@ -190,7 +253,7 @@ def make_reference_articulation(robot: str) -> ArticulationDesc:
     )
     from dexsim.engine import JointType
 
-    builder = _import_reference(robot)
+    builder = _import_reference(robot, physics_profile)
     names = [str(name).rsplit("/", 1)[-1] for name in builder.body_label]
     if len(names) != len(set(names)):
         raise ValueError("Reference body names are not unique")

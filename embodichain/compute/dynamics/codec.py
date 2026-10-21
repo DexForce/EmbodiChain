@@ -43,23 +43,93 @@ def quat_inverse(q: Tensor) -> Tensor:
     return torch.cat((-q[..., :3], q[..., 3:]), -1)
 
 
+@torch.jit.script
+def _quat_product_flat(a: Tensor, b: Tensor) -> Tensor:
+    """Share the reference product between eager and scripted coordinate math."""
+    assert a.shape == b.shape
+    shape = a.shape
+    a = a.reshape(-1, 4)
+    b = b.reshape(-1, 4)
+    x1, y1, z1, w1 = a[:, 0], a[:, 1], a[:, 2], a[:, 3]
+    x2, y2, z2, w2 = b[:, 0], b[:, 1], b[:, 2], b[:, 3]
+    ww = (z1 + x1) * (x2 + y2)
+    yy = (w1 - y1) * (w2 + z2)
+    zz = (w1 + y1) * (w2 - z2)
+    xx = ww + yy + zz
+    qq = 0.5 * (xx + (z1 - x1) * (x2 - y2))
+    w = qq - ww + (z1 - y1) * (y2 - z2)
+    x = qq - xx + (x1 + w1) * (x2 + w2)
+    y = qq - yy + (w1 - x1) * (y2 + z2)
+    z = qq - zz + (z1 + y1) * (w2 - x2)
+    return torch.stack([x, y, z, w], dim=-1).view(shape)
+
+
 def quat_multiply(a: Tensor, b: Tensor) -> Tensor:
-    """Multiply broadcastable xyzw quaternions."""
-    av, bv = torch.broadcast_tensors(a[..., :3], b[..., :3])
-    return torch.cat(
-        (
-            a[..., 3:] * bv + b[..., 3:] * av + torch.linalg.cross(av, bv),
-            a[..., 3:] * b[..., 3:] - (av * bv).sum(-1, keepdim=True),
-        ),
-        -1,
+    """Multiply broadcastable xyzw quaternions in official NeRD FP32 order.
+
+    Algebraically equivalent Hamilton-product formulas round differently. The
+    identity orientation in Ant's body-frame features is sensitive to these
+    differences after normalization, so preserve the reference's operation order.
+    """
+    a, b = torch.broadcast_tensors(a, b)
+    return _quat_product_flat(a.reshape(-1, 4), b.reshape(-1, 4)).reshape(a.shape)
+
+
+@torch.jit.script
+def _inverse_rotate_flat(q: Tensor, value: Tensor) -> Tensor:
+    """Keep positive-quaternion inverse rotation inside the reference JIT graph."""
+    shape = q.shape
+    scalar, xyz = q[:, -1], q[:, :3]
+    a = value * (2.0 * scalar**2 - 1.0).unsqueeze(-1)
+    b = torch.cross(xyz, value, dim=-1) * scalar.unsqueeze(-1) * 2.0
+    c = (
+        xyz
+        * torch.bmm(xyz.view(shape[0], 1, 3), value.view(shape[0], 3, 1)).squeeze(-1)
+        * 2.0
     )
+    return a - b + c
+
+
+@torch.jit.script
+def _quat_inverse_flat(value: Tensor) -> Tensor:
+    shape = value.shape
+    value = value.reshape(-1, 4)
+    return torch.cat((-value[:, :3], value[:, -1:]), dim=-1).view(shape)
+
+
+@torch.jit.script
+def _point_inverse_flat(pos: Tensor, rotation: Tensor, point: Tensor) -> Tensor:
+    return _inverse_rotate_flat(rotation, point - pos)
+
+
+@torch.jit.script
+def _body_coordinates_flat(
+    frame_pos: Tensor,
+    frame_quat: Tensor,
+    pos: Tensor,
+    rotation: Tensor,
+    omega: Tensor,
+    nu: Tensor,
+) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+    """Match the official scripted world-to-body execution, including CUDA rounding."""
+    pos_body = _point_inverse_flat(frame_pos, frame_quat, pos)
+    rotation_body = _quat_product_flat(_quat_inverse_flat(frame_quat), rotation)
+    omega_body = _inverse_rotate_flat(frame_quat, omega)
+    nu_body = _inverse_rotate_flat(
+        frame_quat, nu - torch.cross(frame_pos, omega, dim=-1)
+    )
+    return pos_body, rotation_body, omega_body, nu_body
 
 
 def quat_rotate(q: Tensor, v: Tensor) -> Tensor:
-    """Rotate vectors by broadcastable unit xyzw quaternions."""
+    """Rotate vectors by unit xyzw quaternions in official NeRD FP32 order."""
     xyz, v = torch.broadcast_tensors(q[..., :3], v)
-    uv = torch.linalg.cross(xyz, v)
-    return v + 2 * (q[..., 3:] * uv + torch.linalg.cross(xyz, uv))
+    scalar = q[..., 3:]
+    a = v * (2.0 * scalar.square() - 1.0)
+    b = torch.linalg.cross(xyz, v) * scalar * 2.0
+    dot = torch.bmm(xyz.reshape(-1, 1, 3), v.reshape(-1, 3, 1))
+    c = xyz * dot.reshape(*v.shape[:-1], 1) * 2.0
+    return a + b + c
 
 
 def _canonical(q: Tensor) -> Tensor:
@@ -71,7 +141,7 @@ def _normalize(q: Tensor) -> Tensor:
 
 
 def _wrap(x: Tensor) -> Tensor:
-    return torch.remainder(x + torch.pi, 2 * torch.pi) - torch.pi
+    return x - torch.floor((x + torch.pi) / (2 * torch.pi)) * (2 * torch.pi)
 
 
 class NeRDStateCodec:
@@ -161,19 +231,41 @@ class NeRDStateCodec:
             -1,
         )
 
+    def _resolve_legacy_velocity(
+        self, q: Tensor, qd: Tensor, legacy_velocity: Tensor | None
+    ) -> Tensor:
+        """Keep explicit same-frame source values without a lossy COM roundtrip."""
+        if legacy_velocity is None:
+            return self.native_to_legacy(q, qd)
+        self._check(q, qd)
+        if (
+            legacy_velocity.shape != qd.shape
+            or legacy_velocity.dtype != qd.dtype
+            or legacy_velocity.device != qd.device
+        ):
+            raise ValueError(
+                "Legacy velocity override must match native qd shape, dtype and device"
+            )
+        return legacy_velocity
+
     def _body(
         self, anchor: Tensor, q: Tensor, velocity: Tensor
     ) -> tuple[Tensor, Tensor]:
-        inv = quat_inverse(anchor[..., 3:7])
-        pos = quat_rotate(inv, q[..., :3] - anchor[..., :3])
-        rot = quat_multiply(inv, q[..., 3:7])
-        omega = quat_rotate(inv, velocity[..., :3])
-        nu = quat_rotate(
-            inv,
-            velocity[..., 3:6] - torch.linalg.cross(anchor[..., :3], velocity[..., :3]),
+        shape = q.shape[:-1]
+        frame = anchor[..., :7].reshape(-1, 7).contiguous()
+        state = torch.cat((q, velocity), -1).reshape(-1, self.q_dim + self.qd_dim)
+        pos, rot, omega, nu = _body_coordinates_flat(
+            frame[:, :3],
+            frame[:, 3:7],
+            state[:, :3],
+            state[:, 3:7],
+            state[:, self.q_dim : self.q_dim + 3],
+            state[:, self.q_dim + 3 : self.q_dim + 6],
         )
-        return torch.cat((pos, rot, q[..., 7:]), -1), torch.cat(
-            (omega, nu, velocity[..., 6:]), -1
+        return torch.cat(
+            (pos.reshape(*shape, 3), rot.reshape(*shape, 4), q[..., 7:]), -1
+        ), torch.cat(
+            (omega.reshape(*shape, 3), nu.reshape(*shape, 3), velocity[..., 6:]), -1
         )
 
     def encode(
@@ -183,13 +275,27 @@ class NeRDStateCodec:
         effort: Tensor,
         contacts: Mapping[str, Tensor] | None = None,
         gravity_dir: Tensor | None = None,
+        *,
+        legacy_velocity: Tensor | None = None,
     ) -> dict[str, Tensor]:
         """Encode inputs at t; contact points/normals are world-frame flattened slots.
+
+        Args:
+            q: Current native joint positions.
+            qd: Native joint velocities, using COM velocity for the Ant free base.
+            effort: Generalized efforts, or eight actuated efforts for Ant.
+            contacts: Fixed ordered world-frame contact features for Ant.
+            gravity_dir: Optional world-frame unit gravity direction.
+            legacy_velocity: Optional original NeRD velocity in the same world
+                frame as ``q``. It must match ``qd`` shape, dtype and device.
+                This preserves imported FP32 values without a COM roundtrip;
+                omitting it retains native velocity conversion. It is an
+                independent input and is never modified or detached.
 
         Returns:
             Named unnormalized model features, retaining their input graphs.
         """
-        velocity = self.native_to_legacy(q, qd)
+        velocity = self._resolve_legacy_velocity(q, qd, legacy_velocity)
         if self.robot == "cartpole":
             if effort.shape != qd.shape:
                 raise ValueError(
@@ -233,14 +339,57 @@ class NeRDStateCodec:
             "gravity_dir": quat_rotate(inv.squeeze(-2), gravity_dir),
         }
 
-    def targets(self, q: Tensor, qd: Tensor, next_q: Tensor, next_qd: Tensor) -> Tensor:
-        """Encode relative next state in the frame at t, including quaternion delta."""
-        velocity = self.native_to_legacy(q, qd)
-        next_velocity = self.native_to_legacy(next_q, next_qd)
+    def targets(
+        self,
+        q: Tensor,
+        qd: Tensor,
+        next_q: Tensor,
+        next_qd: Tensor,
+        *,
+        current_embedding: Tensor | None = None,
+        legacy_velocity: Tensor | None = None,
+        next_legacy_velocity: Tensor | None = None,
+    ) -> Tensor:
+        """Encode relative next state in the frame at t, including quaternion delta.
+
+        Args:
+            q: Current native joint positions.
+            qd: Current native joint velocities.
+            next_q: Next native joint positions.
+            next_qd: Next native joint velocities.
+            current_embedding: Optional unnormalized ``states_embedding`` from
+                :meth:`encode` on exactly the same current state. Reusing it
+                preserves the reference trainer's single current-frame transform.
+            legacy_velocity: Optional original NeRD velocity at t, in the same
+                world frame as ``q`` and matching ``qd`` shape/dtype/device.
+                Omission retains native conversion.
+            next_legacy_velocity: Optional original NeRD velocity at t+1, in
+                the same world frame as ``next_q`` and matching ``next_qd``.
+                It is transformed into the frame at t like the native path.
+
+        Returns:
+            Relative position/orientation and velocity targets.
+        """
+        if current_embedding is not None and current_embedding.shape != (
+            *q.shape[:-1],
+            self.q_dim + self.qd_dim,
+        ):
+            raise ValueError("Current embedding shape does not match state")
+        velocity = self._resolve_legacy_velocity(q, qd, legacy_velocity)
+        next_velocity = self._resolve_legacy_velocity(
+            next_q, next_qd, next_legacy_velocity
+        )
         if self.robot == "ant":
             anchor = q
-            q, velocity = self._body(anchor, q, velocity)
+            if current_embedding is None:
+                q, velocity = self._body(anchor, q, velocity)
+            else:
+                q, velocity = (
+                    current_embedding[..., : self.q_dim],
+                    current_embedding[..., self.q_dim :],
+                )
             next_q, next_velocity = self._body(anchor, next_q, next_velocity)
+            q, next_q = self._wrap_q(q), self._wrap_q(next_q)
             delta = _canonical(
                 quat_multiply(next_q[..., 3:7], quat_inverse(q[..., 3:7]))
             )
@@ -248,18 +397,54 @@ class NeRDStateCodec:
             return torch.cat(
                 (diff[..., :3], delta, diff[..., 7:], next_velocity - velocity), -1
             )
-        return torch.cat((self._wrap_q(next_q - q), next_velocity - velocity), -1)
+        return torch.cat(
+            (
+                self._wrap_q(self._wrap_q(next_q) - self._wrap_q(q)),
+                next_velocity - velocity,
+            ),
+            -1,
+        )
 
     def decode(
-        self, q: Tensor, qd: Tensor, prediction: Tensor
+        self,
+        q: Tensor,
+        qd: Tensor,
+        prediction: Tensor,
+        *,
+        current_embedding: Tensor | None = None,
     ) -> tuple[Tensor, Tensor]:
-        """Decode a relative prediction into native Newton q/qd without detaching."""
+        """Decode a relative prediction into native Newton q/qd without detaching.
+
+        Args:
+            q: Current native joint positions.
+            qd: Current native joint velocities.
+            prediction: Relative network prediction in physical target units.
+            current_embedding: Optional unnormalized ``states_embedding`` from
+                :meth:`encode` for the same state, shared with model inputs.
+
+        Returns:
+            Next native joint positions and velocities.
+        """
         if prediction.shape != (*q.shape[:-1], self.q_dim + self.qd_dim):
             raise ValueError("Prediction shape does not match state")
+        if (
+            current_embedding is not None
+            and current_embedding.shape != prediction.shape
+        ):
+            raise ValueError("Current embedding shape does not match state")
         velocity = self.native_to_legacy(q, qd)
         if self.robot == "cartpole":
-            return self._wrap_q(q + prediction[..., :2]), qd + prediction[..., 2:]
-        bq, bv = self._body(q, q, velocity)
+            return (
+                self._wrap_q(self._wrap_q(q) + prediction[..., :2]),
+                qd + prediction[..., 2:],
+            )
+        if current_embedding is None:
+            bq, bv = self._body(q, q, velocity)
+        else:
+            bq, bv = (
+                current_embedding[..., : self.q_dim],
+                current_embedding[..., self.q_dim :],
+            )
         predicted_rot = _normalize(
             quat_multiply(_normalize(prediction[..., 3:7]), bq[..., 3:7])
         )

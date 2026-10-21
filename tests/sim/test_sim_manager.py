@@ -67,6 +67,53 @@ DEFAULT_LOOK_AT = (
 )
 
 
+def test_procedural_object_descriptor_retains_global_material_and_scene_owner(
+    monkeypatch,
+):
+    from dexsim.spawn import (
+        CollisionDesc,
+        GeometryDesc,
+        NewtonCollisionDesc,
+        ObjectDesc,
+        RigidBodyPhysicsDesc,
+    )
+
+    collision = CollisionDesc.from_geometry(GeometryDesc.plane(1000.0))
+    collision.newton = NewtonCollisionDesc(ke=1e5, kd=1e3, mu=0.5, margin=0.0)
+    descriptor = ObjectDesc(
+        name="reference_ground",
+        collisions=[collision],
+        physics=RigidBodyPhysicsDesc.static(),
+        per_env=False,
+    )
+    facade = object()
+    monkeypatch.setattr(sim_manager_module, "RigidObject", lambda **kwargs: facade)
+    manager = SimpleNamespace(
+        asset_uids=[],
+        device=torch.device("cpu"),
+        spawn_result=None,
+        _spawn_scene=MagicMock(),
+        _rigid_objects={},
+        notify_visualization_topology_changed=MagicMock(),
+        prepare=MagicMock(),
+    )
+    result = SimulationManager.add_rigid_object_descriptor(manager, descriptor)
+    assert result is facade
+    manager._spawn_scene.declare.assert_called_once_with(
+        "rigid_object", "reference_ground", descriptor, facade=facade
+    )
+    assert not descriptor.per_env and descriptor.collisions[0].newton.ke == 1e5
+    assert manager._rigid_objects["reference_ground"] is facade
+    manager.prepare.assert_not_called()
+    manager.asset_uids.append("reference_ground")
+    with pytest.raises(ValueError, match="already exists"):
+        SimulationManager.add_rigid_object_descriptor(manager, descriptor)
+    with pytest.raises(TypeError, match="physical"):
+        SimulationManager.add_rigid_object_descriptor(
+            manager, ObjectDesc(name="visual")
+        )
+
+
 @pytest.mark.parametrize("mask_size", [2, 3])
 def test_empty_functional_reset_preserves_graph_without_native_publication(mask_size):
     manager = SimpleNamespace(

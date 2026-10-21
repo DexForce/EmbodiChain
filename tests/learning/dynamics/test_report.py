@@ -25,12 +25,129 @@ from pathlib import Path
 import pytest
 
 from embodichain.learning.dynamics.report import (
+    _curve,
+    _dataset_evidence,
     _matched_rollouts,
     _numerical_evidence,
     _rollout_evidence,
     annotate_rollout_evidence,
 )
-from embodichain.learning.dynamics.reference import _hash
+from embodichain.learning.dynamics.reference import OFFICIAL_COMMIT, _hash
+
+
+def test_learning_curve_retains_sparse_full_budget_observations(tmp_path: Path) -> None:
+    path = tmp_path / "metrics.jsonl"
+    budget = 4995000
+    with path.open("w") as stream:
+        for step in range(500, budget + 1, 500):
+            stream.write(json.dumps({"step": step, "loss": 1.0 / step}) + "\n")
+    steps, losses = _curve(path, budget)
+    assert steps[0] == 500 and steps[-1] == budget
+    assert 900 <= len(steps) <= 1000
+    assert losses[0] == 1.0 / 500 and losses[-1] == 1.0 / budget
+    assert all(left < right for left, right in zip(steps, steps[1:]))
+
+
+def test_learning_curve_keeps_irregular_final_observation(tmp_path: Path) -> None:
+    path = tmp_path / "metrics.jsonl"
+    observed = [300, 650, 3000, 4500, 12000]
+    path.write_text(
+        "".join(
+            json.dumps({"step": step, "loss": float(step)}) + "\n" for step in observed
+        )
+    )
+    steps, losses = _curve(path, 12000, max_points=4)
+    assert steps[0] == 300 and steps[-1] == 12000
+    assert len(steps) <= 4 and all(step in observed for step in steps)
+    assert losses == [float(step) for step in steps]
+
+
+def test_isolated_supported_source_import_has_verified_dataset_lineage(tmp_path):
+    import h5py
+    import numpy as np
+    from embodichain.learning.dynamics.reference import import_legacy_datasets
+
+    sources = {}
+    identities = {}
+    for split in ("train", "validation", "test"):
+        raw = tmp_path / f"{split}.h5"
+        with h5py.File(raw, "w") as file:
+            data = file.create_group("data")
+            data.attrs["mode"] = "trajectory"
+            data.create_dataset("states", data=np.zeros((2, 1, 4), np.float32))
+            data.create_dataset("next_states", data=np.zeros((2, 1, 4), np.float32))
+            data.create_dataset("joint_acts", data=np.zeros((2, 1, 2), np.float32))
+        sources[split] = raw
+        identities[split] = {
+            "source_commit": OFFICIAL_COMMIT,
+            "robot": "cartpole",
+            "python": "3.8.20",
+            "numpy": "1.24.4",
+            "torch": "2.2.2+cpu",
+            "warp": "1.8.0",
+            "runtime_imports_embodichain": False,
+            "raw_sha256": _hash(raw),
+        }
+    metadata = {
+        "codec": {"robot": "cartpole"},
+        "source_split_identities": identities,
+        "source_physical_arrays": {"body_mass": [50.0, 2.5]},
+        "teacher_origin": {"kind": "official_warp", "source_commit": OFFICIAL_COMMIT},
+    }
+    output = tmp_path / "canonical"
+    result = import_legacy_datasets(sources, output, metadata)
+    declaration = {
+        "path": str(output),
+        "status": "available",
+        "fingerprint": result["fingerprint"],
+    }
+    evidence = _dataset_evidence("official_warp", declaration)
+    assert evidence["status"] == "available"
+    assert evidence["transitions"] == {"train": 2, "validation": 2, "test": 2}
+    with h5py.File(sources["test"], "r+") as file:
+        file["data/states"][0, 0, 0] = 1.0
+    assert _dataset_evidence("official_warp", declaration)["status"] == "pending"
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("source_commit", "unrelated"),
+        ("python", "3.11.14"),
+        ("torch", "2.7.0+cu128"),
+        ("warp", "1.17.0"),
+        ("raw_sha256", "0" * 64),
+        ("runtime_imports_embodichain", True),
+    ],
+)
+def test_source_split_labels_do_not_replace_supported_runtime_receipts(
+    tmp_path, field, value
+):
+    from embodichain.learning.dynamics.report import _supported_split_sources
+
+    raw = tmp_path / "source.h5"
+    raw.write_bytes(b"synthetic raw-file identity fixture")
+    identity = {
+        "source_commit": OFFICIAL_COMMIT,
+        "robot": "cartpole",
+        "python": "3.8.20",
+        "numpy": "1.24.4",
+        "torch": "2.2.2+cpu",
+        "warp": "1.8.0",
+        "runtime_imports_embodichain": False,
+        "raw_sha256": _hash(raw),
+    }
+    splits = ("train", "validation", "test")
+    metadata = {
+        "codec": {"robot": "cartpole"},
+        "legacy_sources": {
+            split: {"path": str(raw), "sha256": _hash(raw)} for split in splits
+        },
+        "source_split_identities": {split: dict(identity) for split in splits},
+    }
+    assert _supported_split_sources(metadata)
+    metadata["source_split_identities"]["test"][field] = value
+    assert not _supported_split_sources(metadata)
 
 
 def numerical_fixture() -> dict:
@@ -84,12 +201,34 @@ def test_numerical_receipt_requires_measurements_and_matching_identity(tmp_path)
 
 
 @pytest.mark.parametrize(
+    "commit,reference_kind",
+    [
+        (OFFICIAL_COMMIT, "official_warp_main"),
+        ("476dc67fccc6a99be293bf611f897b1c06f13e30", "newton_preview"),
+    ],
+)
+def test_pinned_main_and_preview_numerical_sources_remain_identifiable(
+    tmp_path, commit, reference_kind
+):
+    raw = numerical_fixture()
+    raw["reference_commit"] = commit
+    path = tmp_path / "numerical.json"
+    path.write_text(json.dumps(raw))
+    result = _numerical_evidence(path, "cartpole")
+    assert result["status"] == "passed"
+    assert result["reference_commit"] == commit
+    assert result["reference_kind"] == reference_kind
+
+
+@pytest.mark.parametrize(
     "field,value",
     [
         ("max_forward_error", float("nan")),
         ("max_codec_decode_error", -1.0),
         ("atol", 1.0),
         ("reference_commit", "unrelated"),
+        ("reference_commit", []),
+        ("reference_commit", {}),
     ],
 )
 def test_invalid_numerical_measurements_cannot_pass(tmp_path, field, value):

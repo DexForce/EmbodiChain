@@ -118,30 +118,51 @@ class DynamicsSimulation:
         solver: Mapping[str, Any] | None = None,
         num_substeps: int = 10,
         requires_grad: bool = False,
+        physics_profile: str = "native",
     ) -> None:
         for name, value in (("num_envs", num_envs), ("num_substeps", num_substeps)):
             _positive_integer(name, value)
         if type(requires_grad) is not bool:
             raise TypeError("requires_grad must be boolean")
+        if physics_profile not in {"native", "warp_reference"}:
+            raise ValueError(
+                f"Unsupported reference physics profile: {physics_profile}"
+            )
         self.profile = reference_profile(robot)
+        self.profile["physics_profile"] = physics_profile
         self.robot, self.device, self.num_envs = robot, torch.device(device), num_envs
         self.dt = float(self.profile["dt"])
         solver_cfg = dict(
             solver
-            or {
-                "solver_type": "mujoco_warp",
-                "use_mujoco_cpu": self.device.type == "cpu",
-                "separate_worlds": True,
-            }
+            or (
+                {
+                    "solver_type": "featherstone",
+                    "update_mass_matrix_interval": num_substeps,
+                }
+                if physics_profile == "warp_reference"
+                else {
+                    "solver_type": "mujoco_warp",
+                    "use_mujoco_cpu": self.device.type == "cpu",
+                    "separate_worlds": True,
+                }
+            )
         )
         neural = solver_cfg.get("solver_type") == "nerd"
+        self._featherstone_teacher = solver_cfg.get("solver_type") == "featherstone"
+        if self._featherstone_teacher:
+            interval = solver_cfg.get("update_mass_matrix_interval", 1)
+            if type(interval) is not int or interval < 1 or num_substeps % interval:
+                raise ValueError(
+                    "Featherstone teacher mass-matrix interval must divide num_substeps "
+                    "so every reset starts with a fresh mass matrix."
+                )
         if neural and num_substeps != 1:
             raise ValueError("The NeRD reference solver requires one macro substep.")
         cfg = SimulationManagerCfg(
             headless=True,
             num_envs=num_envs,
             arena_space=0.0,
-            enable_ground_plane=robot == "ant",
+            enable_ground_plane=robot == "ant" and physics_profile == "native",
             enable_entity_gizmo=False,
             render_cfg=RenderCfg(renderer="no-render"),
             startup_summary="off",
@@ -152,14 +173,52 @@ class DynamicsSimulation:
                 requires_grad=requires_grad,
                 use_cuda_graph=False,
                 solver_cfg=solver_cfg,
-                collision_cfg=None if neural else {},
+                collision_cfg=(
+                    None
+                    if neural
+                    else (
+                        {"update_interval": None}
+                        if physics_profile == "warp_reference"
+                        else {}
+                    )
+                ),
             ),
         )
         self.sim = SimulationManager(cfg, requires_native_renderer=False)
         self.articulation = None
         try:
+            if robot == "ant" and physics_profile == "warp_reference":
+                # The old ModelBuilder's shared plane has different material
+                # defaults from SimulationManager's ordinary default plane.
+                from dexsim.spawn import (
+                    CollisionDesc,
+                    GeometryDesc,
+                    NewtonCollisionDesc,
+                    ObjectDesc,
+                    RigidBodyPhysicsDesc,
+                )
+
+                collision = CollisionDesc.from_geometry(GeometryDesc.plane(1000.0))
+                collision.newton = NewtonCollisionDesc(
+                    ke=1e5,
+                    kd=1e3,
+                    kf=1e3,
+                    mu=0.5,
+                    margin=1e-5,
+                    gap=0.05,
+                    mu_torsional=0.0,
+                    mu_rolling=0.0,
+                )
+                self.sim.add_rigid_object_descriptor(
+                    ObjectDesc(
+                        name="reference_ground",
+                        collisions=[collision],
+                        physics=RigidBodyPhysicsDesc.static(),
+                        per_env=False,
+                    )
+                )
             self.articulation = self.sim.add_articulation_descriptor(
-                make_reference_articulation(robot)
+                make_reference_articulation(robot, physics_profile)
             )
             self.sim.prepare()
             self.binding = NeRDBinding.from_metadata(
@@ -173,6 +232,7 @@ class DynamicsSimulation:
             self.manifest["teacher"] = {
                 "solver": solver_cfg,
                 "num_substeps": num_substeps,
+                "physics_profile": physics_profile,
                 "versions": {
                     name: metadata.version(name)
                     for name in ("newton", "warp-lang", "torch", "dexsim-engine")
@@ -212,7 +272,12 @@ class DynamicsSimulation:
         self, q: torch.Tensor | None = None, qd: torch.Tensor | None = None
     ) -> None:
         """Set a complete reference batch through public articulation state writes."""
-        self.sim.spawn_result.reset()
+        # Featherstone has no Scene.reset capability in the named SDK. Complete
+        # articulation state writes are supported and clear both native buffers
+        # and inputs below. Calls occur at macro boundaries; the mass-matrix
+        # interval divides each macro step for the reference teacher.
+        if not self._featherstone_teacher:
+            self.sim.spawn_result.reset()
         if q is None:
             q = (
                 torch.tensor(self.profile["default_q"], device=self.device)
@@ -359,6 +424,7 @@ class DynamicsGenerationCfg:
     initial_states: str = "sample"
     max_attempts: int | None = None
     effort_scale: float = 1.0
+    physics_profile: str = "native"
 
     def __post_init__(self) -> None:
         for name in (
@@ -388,6 +454,8 @@ class DynamicsGenerationCfg:
             or self.initial_states not in {"sample", "default"}
         ):
             raise ValueError("Unsupported robot, motion_mode or initial_states")
+        if self.physics_profile not in {"native", "warp_reference"}:
+            raise ValueError("Unsupported reference physics profile")
         if self.teacher_solver is not None and not isinstance(
             self.teacher_solver, Mapping
         ):
@@ -427,6 +495,7 @@ def generate_dataset(config: Mapping[str, Any]) -> dict[str, Any]:
         num_envs=cfg.num_envs,
         solver=cfg.teacher_solver,
         num_substeps=cfg.num_substeps,
+        physics_profile=cfg.physics_profile,
     ) as host:
         manifest = dict(host.manifest)
         manifest["generation"] = {
@@ -617,6 +686,7 @@ class _FixedPolicy:
                 self.target = torch.tensor(
                     reference_profile(robot)["default_q"][7:], device=device
                 )
+                self.identity["target"] = self.target.detach().cpu().tolist()
         elif kind == "actor_only":
             if set(self.config) != {"kind", "config", "checkpoint"}:
                 raise ValueError(
@@ -736,6 +806,7 @@ def _evaluation_teacher(
         num_envs=batch,
         solver=config.get("teacher_solver"),
         num_substeps=config.get("num_substeps", 10),
+        physics_profile=config.get("physics_profile", "native"),
     ) as teacher:
         manifest["metadata"] = teacher.manifest
         manifest["evaluation"] = {
@@ -858,6 +929,33 @@ def _source_motion(manifest: Mapping[str, Any]) -> str | None:
     return None
 
 
+def _verify_feedback_trace(manifest: Mapping[str, Any], policy: _FixedPolicy) -> None:
+    """Require an actual evaluation trace bound to the declared PD feedback."""
+    if policy.identity["kind"] != "pd":
+        raise ValueError("Cached fixed-policy evaluation currently supports PD only")
+    evaluation = manifest.get("evaluation", {})
+    if (
+        manifest.get("trace_type") != "evaluation_including_failures"
+        or evaluation.get("motion_mode") != "fixed_policy"
+        or evaluation.get("policy") != policy.identity
+        or _teacher_origin(manifest["metadata"])["kind"] != "current_newton"
+    ):
+        raise ValueError("Teacher trace does not verify the declared feedback policy")
+
+
+@torch.no_grad()
+def _verify_feedback_actions(
+    policy: _FixedPolicy, q: torch.Tensor, qd: torch.Tensor, efforts: torch.Tensor
+) -> None:
+    """Check all recorded actions on device and synchronize once per batch."""
+    matched = torch.ones((), dtype=torch.bool, device=q.device)
+    for step in range(efforts.shape[1]):
+        expected = policy(q[:, step].contiguous(), qd[:, step].contiguous())
+        matched = matched & (expected == efforts[:, step]).all()
+    if not bool(matched):
+        raise ValueError("Recorded teacher actions differ from its own-state feedback")
+
+
 def _teacher_batches(
     directory: Path,
     manifest: Mapping[str, Any],
@@ -905,14 +1003,16 @@ def evaluate_rollouts(config: Mapping[str, Any]) -> dict[str, Any]:
 
     Fixed-policy actions are recomputed from each simulator's own state. Optional
     immutable teacher_dataset replays canonical test trajectories for open-loop
-    comparisons; it cannot establish closed-loop policy behavior for that teacher.
+    comparisons. Recorded live PD feedback traces support closed-loop evaluation
+    after their policy identity and all teacher actions have been verified.
     Metrics synchronize once per batch, never once per metric or simulation step.
 
     Args:
         config: Robot, model export, output path and evaluation settings. Optional
             teacher_dataset selects immutable canonical traces; split defaults to
-            test. Fixed-policy mode instead needs a live current Newton teacher
-            and a policy mapping with kind pd or actor_only. Policy artifact paths
+            test. Fixed-policy mode needs live current Newton feedback, or a
+            recorded live PD trace with verified policy/actions. A live teacher
+            supports kind pd or actor_only. Policy artifact paths
             are already resolved by the CLI. num_envs is the actual replica count
             for both teacher generation and neural replay.
 
@@ -937,6 +1037,7 @@ def evaluate_rollouts(config: Mapping[str, Any]) -> dict[str, Any]:
         "policy",
         "teacher_dataset",
         "split",
+        "physics_profile",
     }
     if set(config) - allowed:
         raise ValueError(f"Unknown rollout settings: {sorted(set(config)-allowed)}")
@@ -971,10 +1072,6 @@ def evaluate_rollouts(config: Mapping[str, Any]) -> dict[str, Any]:
     if (motion == "fixed_policy") != ("policy" in config):
         raise ValueError(
             "fixed_policy mode requires an explicit policy configuration only in that mode"
-        )
-    if motion == "fixed_policy" and config.get("teacher_dataset") is not None:
-        raise ValueError(
-            "Offline teacher_dataset cannot establish closed-loop fixed-policy behavior"
         )
     if motion == "fixed_policy" and scale != 1.0:
         raise ValueError(
@@ -1026,7 +1123,17 @@ def evaluate_rollouts(config: Mapping[str, Any]) -> dict[str, Any]:
     teacher_origin = _teacher_origin(dataset["metadata"])
     source_motion = _source_motion(dataset)
     if config.get("teacher_dataset") is not None:
-        if source_motion == "fixed_policy":
+        if motion == "fixed_policy":
+            assert policy is not None
+            _verify_feedback_trace(dataset, policy)
+            exported = json.loads((model / "manifest.json").read_text())
+            if dataset["metadata"].get("physics_signature") != exported.get(
+                "physics_signature"
+            ):
+                raise ValueError(
+                    "Feedback teacher trace/model physics signatures differ"
+                )
+        elif source_motion == "fixed_policy":
             raise ValueError(
                 "Fixed-policy traces cannot be labeled passive or random_effort replay"
             )
@@ -1059,6 +1166,7 @@ def evaluate_rollouts(config: Mapping[str, Any]) -> dict[str, Any]:
             num_envs=batch,
             solver={"solver_type": "nerd", "options": {"checkpoint": str(model)}},
             num_substeps=1,
+            physics_profile=config.get("physics_profile", "native"),
         ) as neural,
         h5py.File(evidence_path, "w") as evidence,
         rows_path.open("w") as row_stream,
@@ -1073,6 +1181,8 @@ def evaluate_rollouts(config: Mapping[str, Any]) -> dict[str, Any]:
             _teacher_batches(teacher_dir, dataset, records, batch, horizon, device)
         ):
             n = len(selected)
+            if policy is not None and config.get("teacher_dataset") is not None:
+                _verify_feedback_actions(policy, target_q, target_qd, efforts)
             if motion == "passive" and any(
                 record["has_nonzero_effort"] for record in selected
             ):
@@ -1299,6 +1409,11 @@ def evaluate_rollouts(config: Mapping[str, Any]) -> dict[str, Any]:
         "teacher_metadata": dataset["metadata"],
         "teacher_origin": teacher_origin,
         "teacher_source_motion_mode": source_motion,
+        "teacher_feedback_verification": (
+            "all_selected_actions_verified_against_teacher_states"
+            if policy is not None and config.get("teacher_dataset") is not None
+            else "live_feedback_execution" if policy is not None else None
+        ),
         "selected_teacher_sha256": selected_teacher_digest.hexdigest(),
         "selected_teacher_hash_schema": "ordered-teacher-content-v1",
         "teacher_split": split,

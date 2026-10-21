@@ -27,15 +27,29 @@ import torch
 from embodichain.learning.models.nerd import convert_legacy_checkpoint, load_model
 
 
-def compare_codec(robot: str, destination: str) -> dict[str, float]:
+def compare_codec(
+    robot: str, destination: str, *, legacy_warp: bool = False
+) -> dict[str, float]:
     """Compare the actual upstream solver's pure encoding/target/decode methods.
 
     Construct only its math metadata: no reference simulation/model is initialized.
     Native qd is independently converted to the legacy world-origin twist at the
     comparison boundary, matching the upstream solver's expected input contract.
     """
-    from newton import JointType
-    from solvers.solver_neural import NeuralSolver
+    if legacy_warp:
+        from types import SimpleNamespace
+        import warp as wp
+        import warp.sim
+        from integrators.integrator_neural import NeuralIntegrator as NeuralSolver
+
+        JointType = SimpleNamespace(
+            FREE=wp.sim.JOINT_FREE,
+            REVOLUTE=wp.sim.JOINT_REVOLUTE,
+            PRISMATIC=wp.sim.JOINT_PRISMATIC,
+        )
+    else:
+        from newton import JointType
+        from solvers.solver_neural import NeuralSolver
     from embodichain.compute.dynamics import NeRDStateCodec, quat_rotate
 
     is_ant = robot == "Ant"
@@ -48,7 +62,7 @@ def compare_codec(robot: str, destination: str) -> dict[str, float]:
     reference.state_dim = codec.q_dim + codec.qd_dim
     reference.prediction_dim = reference.state_dim
     reference.num_envs = 2
-    reference.num_contacts_per_env = 25 if is_ant else 0
+    reference.num_contacts_per_env = 25 if is_ant else (16 if legacy_warp else 0)
     reference.joint_types = (
         [JointType.FREE] + [JointType.REVOLUTE] * 8
         if is_ant
@@ -99,10 +113,18 @@ def compare_codec(robot: str, destination: str) -> dict[str, float]:
                 "contact_thicknesses_0": torch.full((2, length, 25), 0.05),
                 "contact_thicknesses_1": torch.zeros(2, length, 25),
             }
-            contacts["contact_masks"] = reference.get_contact_masks(
-                depth,
-                contacts["contact_thicknesses_0"],
-                contacts["contact_thicknesses_1"],
+            contacts["contact_masks"] = (
+                reference.get_contact_masks(
+                    depth,
+                    contacts["contact_thicknesses_0"]
+                    + contacts["contact_thicknesses_1"],
+                )
+                if legacy_warp
+                else reference.get_contact_masks(
+                    depth,
+                    contacts["contact_thicknesses_0"],
+                    contacts["contact_thicknesses_1"],
+                )
             )
 
         def legacy(q: torch.Tensor, qd: torch.Tensor) -> torch.Tensor:
@@ -129,6 +151,17 @@ def compare_codec(robot: str, destination: str) -> dict[str, float]:
         }
         if contacts:
             raw.update({k: v.clone() for k, v in contacts.items()})
+        elif legacy_warp:
+            # The original contact-free Cartpole still authors the two boxes'
+            # 16 inactive slots; its preprocessing expects their shape metadata.
+            raw.update(
+                {
+                    "contact_points_1": torch.zeros(2, length, 48),
+                    "contact_normals": torch.zeros(2, length, 48),
+                    "contact_depths": torch.full((2, length, 16), 1000.0),
+                    "contact_masks": torch.zeros(2, length, 16, dtype=torch.bool),
+                }
+            )
         processed = reference.process_neural_model_inputs(raw)
         encoded = codec.encode(q, qd, effort, contacts, gravity)
         for key, value in encoded.items():
@@ -181,6 +214,14 @@ def compare_codec(robot: str, destination: str) -> dict[str, float]:
 
 def main() -> None:
     root, robot, destination = sys.argv[1:]
+    reference_commit = subprocess.check_output(
+        ["git", "-C", root, "rev-parse", "HEAD"], text=True
+    ).strip()
+    if reference_commit not in {
+        "370e89d2b8ce68aa3578aa7812859c681b7502bc",
+        "476dc67fccc6a99be293bf611f897b1c06f13e30",
+    }:
+        raise ValueError("Use one of the explicitly pinned official references")
     sys.path.insert(0, root)
     torch.set_num_threads(2)
     path = (
@@ -277,7 +318,11 @@ def main() -> None:
             result["max_adam_parameter_error"] = max(
                 result["max_adam_parameter_error"], (p - rp).abs().max().item()
             )
-    result.update(compare_codec(robot, destination))
+    result.update(
+        compare_codec(
+            robot, destination, legacy_warp=reference_commit.startswith("370e89d")
+        )
+    )
     result["reference_commit"] = subprocess.check_output(
         ["git", "-C", root, "rev-parse", "HEAD"], text=True
     ).strip()

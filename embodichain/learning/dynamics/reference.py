@@ -87,26 +87,39 @@ def reference_identity(source: str | Path) -> dict[str, Any]:
 
 def _legacy_states(q: Any, qd: Any, codec: Any) -> Any:
     import torch
-    from embodichain.compute.dynamics import quat_rotate
 
-    if codec.robot == "cartpole":
-        return torch.cat((q, qd), -1)
-    com = q[..., :3] + quat_rotate(q[..., 3:7], q.new_tensor(codec.base_com))
-    omega = qd[..., 3:6]
-    origin_velocity = qd[..., :3] - torch.linalg.cross(omega, com)
-    return torch.cat((q, omega, origin_velocity, qd[..., 6:]), -1)
+    # Reversing cross-product operands and subtracting is algebraically equal,
+    # but its FP32 fused operations can differ. The codec owns this transport
+    # for both trainers, before the unmodified official preprocessing runs.
+    return torch.cat((q, codec.native_to_legacy(q, qd)), -1)
 
 
-def _official_batch(batch: dict[str, Any], codec: Any) -> dict[str, Any]:
-    """Transport native states to official world-frame arrays, before encoding."""
+def _official_batch(
+    batch: dict[str, Any], codec: Any, *, device: str | None = None
+) -> dict[str, Any]:
+    """Use preserved source twists when present, otherwise transport native qd."""
     import torch
 
-    q, qd = batch["states"]["q"].float(), batch["states"]["qd"].float()
-    transitions = {key: value.float() for key, value in batch["transitions"].items()}
-    states = _legacy_states(q, qd, codec)
+    q = batch["states"]["q"].to(device=device, dtype=torch.float32)
+    qd = batch["states"]["qd"].to(device=q.device, dtype=torch.float32)
+    transitions = {
+        key: value.to(device=q.device, dtype=torch.float32)
+        for key, value in batch["transitions"].items()
+    }
+    legacy_velocity = batch["states"].get("legacy_velocity")
+    if legacy_velocity is None:
+        states = _legacy_states(q, qd, codec)
+    else:
+        legacy_velocity = legacy_velocity.to(device=q.device, dtype=torch.float32)
+        codec._check(q, qd)
+        if legacy_velocity.shape != qd.shape:
+            raise ValueError("Preserved legacy velocity shape must match native qd")
+        states = torch.cat((q, legacy_velocity), -1)
     shape = q.shape[:2]
     shape = (shape[0], shape[1] - 1)
     root = batch["states"].get("root_body_q")
+    if root is not None:
+        root = root.to(device=q.device, dtype=torch.float32)
     if root is None:
         root = (
             q[..., :7]
@@ -272,7 +285,11 @@ def _restore_official_model(
 
 
 def run_reference(
-    spec: dict[str, Any], *, trust_external_code: bool = False
+    spec: dict[str, Any],
+    *,
+    trust_external_code: bool = False,
+    resume: str | Path | None = None,
+    stop_after: int | None = None,
 ) -> dict[str, Any]:
     """Run actual official trainer methods against matched immutable artifacts.
 
@@ -282,6 +299,17 @@ def run_reference(
     """
     if not trust_external_code:
         raise ValueError("Official source execution requires trust_external_code=True")
+    from ._numerics import _validate_numerical_profile
+
+    if (
+        _validate_numerical_profile(
+            spec.get("train", {}).get("numerical_profile", "default")
+        )
+        != "default"
+    ):
+        raise ValueError(
+            "Original-method reference adapter supports only default numerical_profile"
+        )
     identity = reference_identity(spec["source"])
     sys.path.insert(0, identity["root"])
     import torch
@@ -291,13 +319,25 @@ def run_reference(
     from embodichain.compute.dynamics import NeRDStateCodec
     from embodichain.data_pipeline.dynamics.shards import DynamicsWindowDataset
     from embodichain.learning.models.nerd import load_model, export_model
-    from .trainer import DynamicsTrainCfg, evaluate_model
+    from .trainer import (
+        DynamicsTrainCfg,
+        evaluate_model,
+        _atomic_save,
+        _capture_rng_state,
+        _restore_rng_state,
+        _PREPROCESSING_EXECUTION,
+    )
     from ._runtime import _training_runtime_identity
 
     cfg = DynamicsTrainCfg(**spec["train"])
+    torch.set_float32_matmul_precision("highest")
     device = cfg.device
     torch.set_num_threads(int(spec.get("cpu_threads", 1)))
     common, manifest = load_model(spec["initial_model"], device=device)
+    if common.cfg.attention_backend != "default":
+        raise ValueError(
+            "Original-method reference adapter does not support math attention initial_model"
+        )
     if (
         spec.get("initial_model_sha256")
         and _hash(Path(spec["initial_model"]) / "weights.pt")
@@ -317,11 +357,40 @@ def run_reference(
     order_path = Path(spec["sample_order"])
     if _hash(order_path) != spec["sample_order_sha256"]:
         raise ValueError("Reference sample order checksum mismatch")
-    order = np.load(order_path, mmap_mode="r", allow_pickle=False)
+    from ._sample_order import _open_order
+
+    order = _open_order(order_path)
     if order.shape != (cfg.total_steps, cfg.batch_size):
         raise ValueError("Reference sample-order shape mismatch")
+    contract = {
+        "dataset_fingerprint": training.fingerprint,
+        "sample_order_sha256": spec["sample_order_sha256"],
+        "initial_model_sha256": _hash(Path(spec["initial_model"]) / "weights.pt"),
+        "train_cfg": cfg.to_dict(),
+        "source_commit": identity["commit"],
+        "source_files": identity["files"],
+        "torch_version": str(torch.__version__),
+        "adapter_sha256": _hash(Path(__file__)),
+        "preprocessing_execution": _PREPROCESSING_EXECUTION,
+    }
+    restored = None
+    start_step = 0
+    if resume is not None:
+        restored = torch.load(resume, map_location="cpu", weights_only=True)
+        if (
+            restored.get("format") != "embodichain.nerd.reference_training.v1"
+            or restored.get("contract") != contract
+        ):
+            raise ValueError("Reference resume contract mismatch")
+        common.load_state_dict(restored["model"])
+        start_step = restored["global_step"]
+    end_step = (
+        cfg.total_steps if stop_after is None else min(stop_after, cfg.total_steps)
+    )
+    if type(end_step) is not int or not start_step <= end_step <= cfg.total_steps:
+        raise ValueError("Invalid reference training stop cursor")
     sample = training.get_batch([0])
-    raw = _official_batch(sample, codec)
+    raw = _official_batch(sample, codec, device=device)
     integrator = _reference_integrator(
         codec.robot, raw["contact_depths"].shape[-1], device
     )
@@ -343,6 +412,8 @@ def run_reference(
     original.optimizer = torch.optim.Adam(
         original.neural_model.parameters(), lr=cfg.learning_rate
     )
+    if restored is not None:
+        original.optimizer.load_state_dict(restored["optimizer"])
     original.time_report = TimeReport(cuda_synchronize=False)
     original.time_report.add_timers(["dataloader", "compute_loss", "backward", "other"])
     # Initialization and transport above may consume RNG; both runs begin their
@@ -350,23 +421,69 @@ def run_reference(
     torch.manual_seed(cfg.seed)
     if device.startswith("cuda"):
         torch.cuda.manual_seed_all(cfg.seed)
+    if cfg.resident_cache_bytes:
+        used = training.enable_device_cache(device, cfg.resident_cache_bytes)
+        validation.enable_device_cache(device, cfg.resident_cache_bytes - used)
+    if torch.device(device).type == "cuda":
+        warm_batch = training.get_batch([0] * cfg.batch_size)
+        with torch.enable_grad():
+            for _ in range(3):
+                original.preprocess_data_batch(
+                    _official_batch(warm_batch, codec, device=device)
+                )
+        del warm_batch
     destination = Path(spec["output_dir"])
     destination.mkdir(parents=True, exist_ok=True)
     best = float("inf")
     best_weights = None
+    if restored is not None:
+        best, best_weights = restored["best_validation"], restored["best_weights"]
+        _restore_rng_state(restored["rng"])
 
     def transfer() -> None:
         current = common.state_dict()
         current.update(original.neural_model.state_dict())
         common.load_state_dict(current)
 
+    def checkpoint(step: int) -> None:
+        transfer()
+        _atomic_save(
+            destination / "reference-last.pt",
+            {
+                "format": "embodichain.nerd.reference_training.v1",
+                "contract": contract,
+                "model": common.state_dict(),
+                "optimizer": original.optimizer.state_dict(),
+                "global_step": step,
+                "best_validation": best,
+                "best_weights": best_weights,
+                "rng": _capture_rng_state(device),
+            },
+        )
+
     try:
-        with (destination / "metrics.jsonl").open("w") as log:
-            for step in range(cfg.total_steps):
+        log_path = destination / "metrics.jsonl"
+        if log_path.exists():
+            if resume is None:
+                raise FileExistsError(
+                    "Reference output already has progress; use explicit resume"
+                )
+            pending_log = log_path.with_suffix(".jsonl.pending")
+            with log_path.open() as old, pending_log.open("w") as retained:
+                for line in old:
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError:
+                        break
+                    if record["step"] <= start_step:
+                        retained.write(line)
+            os.replace(pending_log, log_path)
+        with log_path.open("a") as log:
+            for step in range(start_step, end_step):
                 if np.any(order[step] < 0) or np.any(order[step] >= len(training)):
                     raise ValueError("Reference sample order index out of bounds")
                 batch = training.get_batch(order[step])
-                transported = _official_batch(batch, codec)
+                transported = _official_batch(batch, codec, device=device)
                 rate = original.get_scheduled_learning_rate(
                     step // cfg.lr_update_interval + cfg.lr_offset,
                     cfg.total_steps / cfg.lr_update_interval + cfg.lr_offset,
@@ -400,8 +517,25 @@ def run_reference(
                             key: value.detach().cpu().clone()
                             for key, value in common.state_dict().items()
                         }
-                log.write(json.dumps(record, allow_nan=False) + "\n")
-                log.flush()
+                if (
+                    (step + 1) % cfg.log_interval == 0
+                    or step + 1 == end_step
+                    or "validation" in record
+                ):
+                    log.write(json.dumps(record, allow_nan=False) + "\n")
+                    log.flush()
+                if (step + 1) % cfg.checkpoint_interval == 0:
+                    checkpoint(step + 1)
+        checkpoint(end_step)
+        if end_step != cfg.total_steps:
+            result = {
+                "status": "interrupted",
+                "completed_updates": end_step,
+                "budget": cfg.total_steps,
+                "checkpoint": str(destination / "reference-last.pt"),
+            }
+            (destination / "result.json").write_text(json.dumps(result, indent=2))
+            return result
         transfer()
         export_model(destination / "last-export", common, manifest)
         common.load_state_dict(best_weights)
@@ -448,6 +582,7 @@ def export_legacy_dataset(
 
     Variable lengths are retained via traj_lengths; padding is never sampled by
     the official TrajectoryDataset. No source dataset or split is modified.
+    Preserved source velocities bypass native conversion when available.
     """
     import h5py
     import numpy as np
@@ -514,7 +649,7 @@ def export_legacy_dataset(
         "path": str(output.resolve()),
         "sha256": _hash(output),
         "layout": "T,B,features",
-        "native_to_legacy_qd": True,
+        "native_to_legacy_qd": "legacy_velocity" not in manifest["fields"]["states"],
         "cartpole_dummy_masked_contact": codec.robot == "cartpole",
     }
     output.with_suffix(output.suffix + ".json").write_text(json.dumps(result, indent=2))
@@ -529,6 +664,7 @@ def import_legacy_datasets(
     trajectories_per_shard: int = 64,
     world_rotation_xyzw: tuple[float, float, float, float] | None = None,
     gravity_direction: tuple[float, float, float] | None = None,
+    preserve_legacy_velocity: bool = False,
 ) -> dict[str, Any]:
     """Import official world-frame HDF5 trajectories into canonical shards.
 
@@ -537,6 +673,22 @@ def import_legacy_datasets(
     time. Adjacent states must be continuous within each declared valid length.
     Legacy combined contact thickness is stored in side zero, side one zero;
     the combined feature/mask is preserved without inventing separate margins.
+
+    Args:
+        sources: Original HDF5 paths keyed by explicit dataset split.
+        output: New canonical shard directory.
+        metadata: Codec and dataset provenance, copied without modifying it.
+        trajectories_per_shard: Maximum trajectories per committed shard.
+        world_rotation_xyzw: Optional unit quaternion rotating world coordinates.
+        gravity_direction: Optional explicit unit gravity transport correction.
+        preserve_legacy_velocity: Also retain original FP32 velocities in
+            ``states/legacy_velocity`` before COM conversion. This requires
+            unrotated source-world coordinates and bitwise continuous original
+            states, including signed zero. Native ``q``/``qd`` remain available
+            to normal runtime consumers; the original input file is read only.
+
+    Returns:
+        Imported dataset identity, trajectory count and immutable fingerprint.
     """
     import h5py
     import numpy as np
@@ -551,6 +703,10 @@ def import_legacy_datasets(
     if not sources or set(sources) - {"train", "validation", "test"}:
         raise ValueError(
             "Legacy sources must explicitly name train/validation/test splits"
+        )
+    if preserve_legacy_velocity and world_rotation_xyzw is not None:
+        raise ValueError(
+            "Preserved legacy velocity requires the source world frame without rotation"
         )
     codec = NeRDStateCodec(**metadata["codec"])
     from embodichain.compute.dynamics import quat_rotate, quat_multiply
@@ -577,6 +733,25 @@ def import_legacy_datasets(
         "world_rotation_xyzw": None if rotation is None else rotation.tolist(),
         "gravity_transport_override": gravity_direction,
     }
+    if preserve_legacy_velocity:
+        manifest_metadata["legacy_velocity"] = {
+            "version": 1,
+            "field": "states/legacy_velocity",
+            "convention": "official_nerd_raw_velocity",
+            "layout": (
+                "angular_first_world_origin_spatial"
+                if codec.robot == "ant"
+                else "joint_velocity"
+            ),
+            "world_frame": "source",
+            "source_field": "data/states[..., q_dim:]",
+            "terminal_source_field": "data/next_states[valid_length-1, ..., q_dim:]",
+            "dtype": "float32",
+        }
+    else:
+        # This importer owns the field declaration. Reusing a prior preserved
+        # manifest cannot label a native-only import as lossless source data.
+        manifest_metadata.pop("legacy_velocity", None)
     total = 0
     with DynamicsShardWriter(
         output, manifest_metadata, trajectories_per_shard=trajectories_per_shard
@@ -603,12 +778,22 @@ def import_legacy_datasets(
                         raise ValueError("Invalid official trajectory valid length")
                     current = data["states"][:length, index].astype(np.float32)
                     following = data["next_states"][:length, index].astype(np.float32)
-                    if length > 1 and not np.allclose(
-                        current[1:], following[:-1], atol=1e-6, rtol=1e-5
-                    ):
-                        raise ValueError(
-                            "Legacy trajectory crosses an undeclared reset/discontinuity"
-                        )
+                    if length > 1:
+                        if preserve_legacy_velocity:
+                            if not np.array_equal(
+                                current[1:].view(np.uint32),
+                                following[:-1].view(np.uint32),
+                            ):
+                                raise ValueError(
+                                    "Preserved legacy velocity requires bitwise continuous "
+                                    "FP32 states, including signed zero"
+                                )
+                        elif not np.allclose(
+                            current[1:], following[:-1], atol=1e-6, rtol=1e-5
+                        ):
+                            raise ValueError(
+                                "Legacy trajectory crosses an undeclared reset/discontinuity"
+                            )
                     legacy = torch.from_numpy(
                         np.concatenate((current, following[-1:]), axis=0)
                     )
@@ -632,6 +817,8 @@ def import_legacy_datasets(
                             -1,
                         )
                     states = {"q": q.numpy(), "qd": qd.numpy()}
+                    if preserve_legacy_velocity:
+                        states["legacy_velocity"] = legacy[:, codec.q_dim :].numpy()
                     if "root_body_q" in data:
                         root = data["root_body_q"][:length, index].astype(np.float32)
                         if rotation is not None:
@@ -1032,6 +1219,7 @@ def generate_official_dataset(
             if spec.get("repair_uninitialized_gravity", False)
             else None
         ),
+        preserve_legacy_velocity=spec.get("preserve_legacy_velocity", False),
     )
     result.update(
         status="completed",
@@ -1055,6 +1243,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--spec", type=Path, required=True)
     parser.add_argument("--trust-external-code", action="store_true", required=True)
+    parser.add_argument("--resume", type=Path)
+    parser.add_argument("--stop-after", type=int)
     parser.add_argument(
         "--generate",
         action="store_true",
@@ -1062,8 +1252,13 @@ def main() -> None:
     )
     args = parser.parse_args()
     operation = generate_official_dataset if args.generate else run_reference
+    extra = (
+        {} if args.generate else {"resume": args.resume, "stop_after": args.stop_after}
+    )
     result = operation(
-        json.loads(args.spec.read_text()), trust_external_code=args.trust_external_code
+        json.loads(args.spec.read_text()),
+        trust_external_code=args.trust_external_code,
+        **extra,
     )
     print(json.dumps(result, indent=2))
 

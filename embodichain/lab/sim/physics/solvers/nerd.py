@@ -224,7 +224,9 @@ class NeuralRobotDynamicSolver(SolverBase):
             prediction = output.gather(
                 1, (lengths - 1)[:, None, None].expand(-1, 1, output.shape[-1])
             ).squeeze(1)
-        next_q, next_qd = self.codec.decode(q, qd, prediction)
+        next_q, next_qd = self.codec.decode(
+            q, qd, prediction, current_embedding=features["states_embedding"]
+        )
         physical = dict(state.physical)
         physical["joint_q"] = state.physical["joint_q"].scatter(
             0, self.binding.q_indices.flatten(), next_q.flatten()

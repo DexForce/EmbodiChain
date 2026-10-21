@@ -328,6 +328,27 @@ class DynamicsWindowDataset(Dataset):
                     self._ends.append(total)
         self._pid = os.getpid()
         self._handles: OrderedDict[str, h5py.File] = OrderedDict()
+        self._resident = None
+
+    def enable_device_cache(self, device: str | torch.device, max_bytes: int) -> int:
+        """Cache raw transitions within an explicit single-process byte budget.
+
+        Args:
+            device: CPU or CUDA device used by this learner.
+            max_bytes: Maximum resident raw-field allocation. Insufficient
+                budgets fail before allocating; no data are dropped or quantized.
+
+        Returns:
+            Actual resident field bytes. The original shard fingerprint and
+            statistical/window weighting remain unchanged.
+        """
+        from ._resident import _ResidentWindows
+
+        if self._resident is not None:
+            raise ValueError("A resident dynamics cache is already enabled")
+        cache = _ResidentWindows(self, device, max_bytes)
+        self._resident = cache
+        return cache.nbytes
 
     def __len__(self) -> int:
         return self._ends[-1] if self._ends else 0
@@ -434,6 +455,8 @@ class DynamicsWindowDataset(Dataset):
         requests = [operator.index(index) for index in indices]
         if not requests:
             raise ValueError("A dynamics batch must contain at least one window")
+        if self._resident is not None:
+            return self._resident.get_batch(requests)
         size = len(requests)
         grouped: dict[tuple[int, int], list[tuple[int, int, int]]] = {}
         identifiers: list[str] = []
@@ -514,7 +537,8 @@ class DynamicsWindowDataset(Dataset):
         }
 
     def close(self) -> None:
-        """Close this worker's bounded file-handle cache."""
+        """Release resident fields and file handles; returned batches stay owned."""
+        self._resident = None
         for handle in self._handles.values():
             handle.close()
         self._handles.clear()
@@ -522,6 +546,7 @@ class DynamicsWindowDataset(Dataset):
     def __getstate__(self) -> dict[str, Any]:
         state = self.__dict__.copy()
         state["_handles"] = OrderedDict()
+        state["_resident"] = None
         return state
 
     def __del__(self) -> None:

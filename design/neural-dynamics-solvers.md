@@ -11,6 +11,27 @@ contract fixes, refreshed artifacts and remaining requirements.
 The latest [bounded five-seed comparison](reports/neural-dynamics-bounded-five-seed-20261020.md)
 and [historical rollout evidence](reports/neural-dynamics-historical-rollout-20261020.md)
 cover the subsequent implementation work without claiming full qualification.
+The [trained-model and clean-environment report](reports/neural-dynamics-trained-comparison-20261020.md)
+records the Ant conversion correction, scratch-training comparison and the active
+full-budget matrix at that report's snapshot time using official-version data.
+The subsequent [CUDA training and full-v2 report](reports/neural-dynamics-cuda-alignment-20261020.md)
+records actual optimizer/resume alignment and the frozen common-teacher,
+disjoint-seed long-rollout protocol; full accuracy acceptance remains pending.
+The [supported reference-evaluation report](reports/neural-dynamics-supported-reference-evaluation-20261020.md)
+records the data provenance: both original training and held-out
+teacher data are generated in the supported old environment and replayed through
+separately recorded model runtimes.
+The latest [original-entry small-budget comparison](reports/neural-dynamics-small-budget-20261020.md)
+supersedes the full-budget execution plan for the current task. The user requested
+four 1,000-update main runs and a workflow check; the forty-cell queues and their
+evaluation waiters are stopped with artifacts preserved. That round does not
+claim project-wide accuracy qualification or public-model convergence.
+The [numerical attribution follow-up](reports/neural-dynamics-numerical-attribution-20261020.md)
+adds 1,000-update same-environment parity for Ant, identifies CPU attention and
+gradient-norm reduction differences, validates a separate common numerical policy
+through the actual migrated trainer, and isolates Ant transport effects during
+training. The official default baseline and production numerical defaults remain
+unchanged.
 
 ## Objective and decisions
 
@@ -109,7 +130,8 @@ boundary. Optimizer updates occur after backward and before a detached next roll
 
 Pin reference source: main `370e89d2b8ce68aa3578aa7812859c681b7502bc` for
 generation/training; Newton preview `476dc67fccc6a99be293bf611f897b1c06f13e30`
-for solver integration. Target integration stack is Newton 1.6 / Warp 1.17.
+for solver integration. The requested SDK MR !1483 artifact at `b61e920f` runs
+Newton 1.7.0 / Warp 1.17.0; the initial integration used Newton 1.6.
 Record the actual DexSim build, Torch, CUDA and driver identities in every report.
 
 Use upstream-matching Cartpole/Ant assets and explicit joint/shape mapping. Bind
@@ -173,7 +195,12 @@ actual generalized forces, contact data, trajectory IDs and valid lengths.
 Record schema/codec versions, units, asset/config hashes, teacher versions and
 sampling seeds. Use bounded staging/writer buffers and commit complete shards;
 resume only committed work. Dataset workers open independent HDF5 handles and
-read windows lazily. Never retain the complete dataset on GPU or in host memory.
+read windows lazily by default. Do not materialize the expanded overlapping-window
+dataset or a dense full-budget sampling index matrix. A single-process learner
+may explicitly opt into raw CPU/CUDA field residency with a strict byte limit
+and bounded host staging; it must fail before exceeding that budget. Repeated
+window gathers retain independent ownership, and serialized worker datasets drop
+resident caches. Cache placement cannot change preprocessing precision or samples.
 
 Default dataset splits are trajectory-level 80/10/10. Windows cannot cross resets,
 trajectories or splits. Normalization uses training data only and is frozen for
@@ -280,6 +307,14 @@ recomputes fixed-policy actions from its own state. Record which reference
 runtime executed the network; only current-domain tests establish the native
 Newton/functional adapter behavior.
 
+Historical comparison teacher data must also be generated in the declared
+supported original environment. Preserve raw and canonical states/controls
+without filtering failures, and reuse immutable traces across models. Verify
+generation versions, source/asset/physical arrays, coordinate transport and
+teacher feedback. Regenerating reference data under a different framework
+version requires a separate explicit scope. The model evaluation runtime is
+identified independently.
+
 ### Evaluation and acceptance
 
 For Cartpole and Ant evaluate passive motion, random effort and fixed-policy
@@ -324,12 +359,21 @@ assert equivalence to paper results from a different teacher or training budget.
 
 All items remain pending until backed by authoritative code and executed results.
 The implementation log must distinguish smoke, numerical-parity, full-budget
-quality, performance and regression evidence. The goal is not complete while any
-required capability or qualification artifact is unimplemented or unverified.
+quality, performance and regression evidence. Project-wide qualification requires
+all its artifacts. A user-selected bounded round has its own completion conditions
+and does not confer project-wide qualification.
 
-Current evidence status (2026-10-20): packages 1–4 and 6 have implementation,
-focused runtime/tests and local-artifact evidence in the linked reports. Package 5
-has executed end-to-end flows, numerical parity, 40 bounded training cells and
-both-domain short rollouts. Its full-size data, declared full training budget,
-2048-trajectory long-rollout and final acceptance gates remain pending. The
-controlled comparison is not substituted for literal paper-recipe reproduction.
+Current evidence status (2026-10-21): packages 1–4 and 6 have implementation,
+focused runtime/tests and scoped artifact evidence. Package 5 includes native
+end-to-end smoke, numerical parity, original-entry small-budget controls and
+supported-environment historical rollouts. The user stopped the 40-cell
+full-budget matrix and dependent waiters; its checkpoints, logs and configurations
+remain preserved. The subsequent one-seed-per-robot round uses original supported
+Warp data, captured original shuffle order and explicit reference/math numerics.
+Cartpole completed 4,995,000 actual updates and passed fixed offline acceptance;
+its validation-selected best is update 4,940,000. Ant final-budget acceptance is
+still pending in this source snapshot. Historical-domain success does not qualify
+current-Newton deployment. Larger multi-seed/long-rollout qualification remains
+separate from this round, and neither comparison establishes same-data public
+model convergence reproduction. The [current evidence index](reports/neural-dynamics-pr-status-20261020.md)
+links the reports and records their scopes.

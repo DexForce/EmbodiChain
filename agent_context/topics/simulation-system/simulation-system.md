@@ -25,6 +25,9 @@ and readiness for each committed topology revision. DexSim `SceneBuilder` and
 `Scene` own descriptor revisions, native materialization, replicated arenas,
 and backend handles. `add_*()` returns a declared facade; `prepare()` binds
 that same object in place. UIDs identify resources in the manager registry.
+Procedural articulation/object descriptors enter through the manager's public
+descriptor methods. Spawn owns their replication count: `per_env=False` binds
+one global facade instance even in a replicated scene.
 
 `BaseEnv` owns Gym reset/step timing; `EmbodiedEnv` translates task composition
 into manager declarations. Scene replication and collision isolation belong

@@ -19,10 +19,12 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 from pathlib import Path
 import subprocess
 import sys
+from types import ModuleType, SimpleNamespace
 
 import h5py
 import numpy as np
@@ -44,6 +46,107 @@ from embodichain.learning.dynamics.reference import (
 def test_external_execution_requires_explicit_trust():
     with pytest.raises(ValueError, match="trust_external_code"):
         run_reference({})
+
+
+@pytest.mark.parametrize("profile", ["reference", "unknown"])
+def test_original_method_adapter_rejects_unsupported_profile_before_source(profile):
+    with pytest.raises(ValueError, match="numerical_profile"):
+        run_reference(
+            {"train": {"numerical_profile": profile}}, trust_external_code=True
+        )
+
+
+def test_original_method_adapter_rejects_math_model_before_data(tmp_path, monkeypatch):
+    import embodichain.learning.dynamics.reference as reference
+    import embodichain.learning.models.nerd as models
+
+    for name in ("algorithms", "utils"):
+        package = ModuleType(name)
+        package.__path__ = []
+        monkeypatch.setitem(sys.modules, name, package)
+    vanilla = ModuleType("algorithms.vanilla_trainer")
+    vanilla.VanillaTrainer = object
+    timers = ModuleType("utils.time_report")
+    timers.TimeReport = object
+    monkeypatch.setitem(sys.modules, vanilla.__name__, vanilla)
+    monkeypatch.setitem(sys.modules, timers.__name__, timers)
+    monkeypatch.setattr(
+        reference, "reference_identity", lambda source: {"root": str(tmp_path)}
+    )
+    monkeypatch.setattr(
+        models,
+        "load_model",
+        lambda *args, **kwargs: (
+            SimpleNamespace(cfg=SimpleNamespace(attention_backend="math")),
+            {},
+        ),
+    )
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    threads, precision = torch.get_num_threads(), torch.get_float32_matmul_precision()
+    try:
+        with pytest.raises(ValueError, match="math attention initial_model"):
+            run_reference(
+                {
+                    "source": "unused",
+                    "initial_model": "unused",
+                    "train": {"device": "cpu"},
+                },
+                trust_external_code=True,
+            )
+    finally:
+        torch.set_num_threads(threads)
+        torch.set_float32_matmul_precision(precision)
+
+
+def test_official_transport_uses_the_exact_native_codec_velocity_order():
+    from embodichain.compute.dynamics import NeRDStateCodec
+    from embodichain.learning.dynamics.reference import _legacy_states
+
+    with np.load(
+        Path(__file__).parents[2] / "compute/dynamics/data/ant-official-frame.npz"
+    ) as fixture:
+        q = torch.from_numpy(fixture["q"].copy())
+        qd = torch.from_numpy(fixture["qd"].copy())
+    codec = NeRDStateCodec("ant")
+    actual = _legacy_states(q, qd, codec)
+    torch.testing.assert_close(actual[..., :15], q, atol=0, rtol=0)
+    torch.testing.assert_close(
+        actual[..., 15:], codec.native_to_legacy(q, qd), atol=0, rtol=0
+    )
+
+
+@pytest.mark.parametrize(
+    "device", ["cpu", pytest.param("cuda:0", marks=pytest.mark.gpu)]
+)
+def test_training_transport_device_is_independent_of_raw_residency(device):
+    from embodichain.compute.dynamics import NeRDStateCodec
+    from embodichain.learning.dynamics.reference import _official_batch
+
+    if device.startswith("cuda") and not torch.cuda.is_available():
+        pytest.skip("CUDA is unavailable")
+    with np.load(
+        Path(__file__).parents[2] / "compute/dynamics/data/ant-official-frame.npz"
+    ) as fixture:
+        q = torch.from_numpy(fixture["q"].copy())
+        qd = torch.from_numpy(fixture["qd"].copy())
+    shape = (q.shape[0], q.shape[1] - 1)
+    batch = {
+        "states": {"q": q, "qd": qd},
+        "transitions": {
+            "joint_f": torch.zeros(*shape, 14),
+            "contact_depths": torch.zeros(*shape, 25),
+        },
+    }
+    resident = {
+        key: {name: tensor.to(device) for name, tensor in fields.items()}
+        for key, fields in batch.items()
+    }
+    codec = NeRDStateCodec("ant")
+    lazy = _official_batch(batch, codec, device=device)
+    cached = _official_batch(resident, codec, device=device)
+    for name, actual in lazy.items():
+        assert actual.device == torch.device(device)
+        torch.testing.assert_close(actual, cached[name], atol=0, rtol=0)
 
 
 def test_legacy_export_preserves_lengths_splits_and_native_to_twist(tmp_path):
@@ -234,6 +337,254 @@ def test_legacy_roundtrip_preserves_native_qd_and_declared_split(tmp_path):
     np.testing.assert_allclose(data[0]["states"]["qd"], q[:4] * 0.5)
     assert len(DynamicsWindowDataset(tmp_path / "imported", "train", 3)) == 0
     data.close()
+
+
+def _write_source_ant_velocities(path: Path) -> np.ndarray:
+    """Make continuous source states exposing cancellation and signed-zero loss."""
+    horizon, trajectories, state_dim = 5, 2, 29
+    states = np.zeros((horizon + 1, trajectories, state_dim), np.float32)
+    states[..., :3] = [10.0, 20.0, 30.0]
+    states[..., 6] = 1.0
+    states[..., 15:18] = [5.0, 6.0, 7.0]
+    states[..., 18:21] = [0.3, 0.1, 0.2]
+    states[:, :, 18] += np.arange(horizon + 1, dtype=np.float32)[:, None] * 0.01
+    states[0, 1, 19] = -0.0
+    with h5py.File(path, "w") as file:
+        data = file.create_group("data")
+        data.attrs["mode"] = "trajectory"
+        data.create_dataset("states", data=states[:-1])
+        data.create_dataset("next_states", data=states[1:])
+        data.create_dataset("traj_lengths", data=np.array([3, 5], np.int32))
+        data.create_dataset("root_body_q", data=states[:-1, :, :7])
+        data.create_dataset(
+            "joint_acts", data=np.zeros((horizon, trajectories, 8), np.float32)
+        )
+        data.create_dataset(
+            "contact_depths",
+            data=np.broadcast_to(
+                np.array([0.01, 100.0], np.float32), (horizon, trajectories, 2)
+            ),
+        )
+        data.create_dataset(
+            "contact_thicknesses",
+            data=np.full((horizon, trajectories, 2), 0.02, np.float32),
+        )
+        data.create_dataset(
+            "contact_points_1", data=np.zeros((horizon, trajectories, 6), np.float32)
+        )
+        data.create_dataset(
+            "contact_normals", data=np.zeros((horizon, trajectories, 6), np.float32)
+        )
+        data.create_dataset(
+            "gravity_dir",
+            data=np.broadcast_to(
+                np.array([0.0, -1.0, 0.0], np.float32), (horizon, trajectories, 3)
+            ),
+        )
+    return states
+
+
+def test_original_velocity_import_roundtrip_preserves_fp32_bits_and_defaults(tmp_path):
+    from embodichain.compute.dynamics import NeRDStateCodec
+    from embodichain.data_pipeline.dynamics.shards import load_manifest
+    from embodichain.learning.dynamics.reference import (
+        import_legacy_datasets,
+        _official_batch,
+    )
+
+    path = tmp_path / "source.h5"
+    original = _write_source_ant_velocities(path)
+    source_sha = hashlib.sha256(path.read_bytes()).hexdigest()
+    metadata = {"codec": {"robot": "ant"}, "dt": 1 / 60}
+    imported = import_legacy_datasets(
+        {"validation": path},
+        tmp_path / "preserved",
+        metadata,
+        preserve_legacy_velocity=True,
+        trajectories_per_shard=1,
+    )
+    import_legacy_datasets({"validation": path}, tmp_path / "default", metadata)
+    manifest = load_manifest(tmp_path / "preserved", verify=True)
+    baseline = load_manifest(tmp_path / "default", verify=True)
+    assert imported["trajectories"] == 2
+    assert manifest["fields"]["states"]["legacy_velocity"]["shape"] == [14]
+    assert "legacy_velocity" not in baseline["fields"]["states"]
+    assert "legacy_velocity" not in baseline["metadata"]
+    without_contract = dict(manifest["metadata"])
+    contract = without_contract.pop("legacy_velocity")
+    assert without_contract == baseline["metadata"]
+    assert contract["world_frame"] == "source"
+    assert contract["field"] == "states/legacy_velocity"
+    assert manifest["metadata"]["legacy_sources"]["validation"]["sha256"] == source_sha
+    assert metadata == {"codec": {"robot": "ant"}, "dt": 1 / 60}
+    codec = NeRDStateCodec("ant")
+    for shard in manifest["shards"]:
+        with h5py.File(tmp_path / "preserved" / shard["file"], "r") as file:
+            for record in shard["trajectories"]:
+                index, length = record["metadata"]["legacy_index"], record["length"]
+                group = file[record["group"]]
+                stored = group["states/legacy_velocity"][()]
+                expected = original[: length + 1, index, 15:]
+                np.testing.assert_array_equal(
+                    stored.view(np.uint32), expected.view(np.uint32)
+                )
+                batch = {
+                    kind: {
+                        name: torch.from_numpy(field[()]).unsqueeze(0)
+                        for name, field in group[kind].items()
+                    }
+                    for kind in ("states", "transitions")
+                }
+                raw = _official_batch(batch, codec)
+                np.testing.assert_array_equal(
+                    raw["states"][0].numpy().view(np.uint32),
+                    original[:length, index].view(np.uint32),
+                )
+                np.testing.assert_array_equal(
+                    raw["next_states"][0].numpy().view(np.uint32),
+                    original[1 : length + 1, index].view(np.uint32),
+                )
+    exported = export_legacy_dataset(
+        tmp_path / "preserved", tmp_path / "export.h5", "validation"
+    )
+    assert exported["native_to_legacy_qd"] is False
+    with h5py.File(tmp_path / "export.h5", "r") as file:
+        for index, length in enumerate((3, 5)):
+            np.testing.assert_array_equal(
+                file["data/states"][:length, index].view(np.uint32),
+                original[:length, index].view(np.uint32),
+            )
+            np.testing.assert_array_equal(
+                file["data/next_states"][:length, index].view(np.uint32),
+                original[1 : length + 1, index].view(np.uint32),
+            )
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == source_sha
+
+
+def test_preserved_velocity_follows_prefix_masks_and_cpu_residency(tmp_path):
+    from torch.utils.data._utils.collate import default_collate
+    from embodichain.compute.dynamics import NeRDStateCodec
+    from embodichain.learning.dynamics.reference import (
+        import_legacy_datasets,
+        _official_batch,
+    )
+
+    source = tmp_path / "source.h5"
+    original = _write_source_ant_velocities(source)
+    import_legacy_datasets(
+        {"train": source},
+        tmp_path / "data",
+        {"codec": {"robot": "ant"}},
+        preserve_legacy_velocity=True,
+        trajectories_per_shard=1,
+    )
+    dataset = DynamicsWindowDataset(tmp_path / "data", "train", 3, include_prefix=True)
+    indices = [0, 2, 3, 7, 0]
+    individually = default_collate([dataset[index] for index in indices])
+    grouped = dataset.get_batch(indices)
+    for name, value in grouped["states"].items():
+        torch.testing.assert_close(value, individually["states"][name], atol=0, rtol=0)
+    expected = np.concatenate(
+        (original[:2, 0, 15:], np.repeat(original[1:2, 0, 15:], 2, axis=0))
+    )
+    np.testing.assert_array_equal(
+        grouped["states"]["legacy_velocity"][0].numpy().view(np.uint32),
+        expected.view(np.uint32),
+    )
+    assert grouped["valid_mask"][0].tolist() == [True, False, False]
+    codec = NeRDStateCodec("ant")
+    transported = _official_batch(grouped, codec)
+    dataset.enable_device_cache("cpu", max_bytes=1024 * 1024)
+    cached = dataset.get_batch(indices)
+    for name, value in cached["states"].items():
+        torch.testing.assert_close(value, grouped["states"][name], atol=0, rtol=0)
+    for name, value in _official_batch(cached, codec).items():
+        torch.testing.assert_close(value, transported[name], atol=0, rtol=0)
+    cached["states"]["legacy_velocity"][0, 0, 0] = 999
+    assert dataset.get_batch(indices)["states"]["legacy_velocity"][0, 0, 0] != 999
+    dataset.close()
+
+
+def test_disabling_velocity_preservation_clears_only_copied_contract(tmp_path):
+    from embodichain.data_pipeline.dynamics.shards import load_manifest
+    from embodichain.learning.dynamics.reference import import_legacy_datasets
+
+    path = tmp_path / "source.h5"
+    _write_source_ant_velocities(path)
+    import_legacy_datasets(
+        {"train": path},
+        tmp_path / "preserved",
+        {"codec": {"robot": "ant"}},
+        preserve_legacy_velocity=True,
+    )
+    metadata = load_manifest(tmp_path / "preserved")["metadata"]
+    original = json.loads(json.dumps(metadata))
+    import_legacy_datasets(
+        {"train": path},
+        tmp_path / "native",
+        metadata,
+        preserve_legacy_velocity=False,
+    )
+    native = load_manifest(tmp_path / "native")
+    assert "legacy_velocity" not in native["metadata"]
+    assert "legacy_velocity" not in native["fields"]["states"]
+    assert metadata == original
+
+
+@pytest.mark.parametrize("mismatch", ["small_delta", "signed_zero"])
+def test_lossless_import_rejects_nonidentical_adjacent_fp32_states(tmp_path, mismatch):
+    from embodichain.learning.dynamics.reference import import_legacy_datasets
+
+    path = tmp_path / "source.h5"
+    _write_source_ant_velocities(path)
+    with h5py.File(path, "a") as file:
+        if mismatch == "small_delta":
+            file["data/next_states"][0, 0, 18] += np.float32(1e-7)
+        else:
+            file["data/next_states"][0, 0, 21] = -0.0
+    # The old tolerance remains available to existing callers.
+    import_legacy_datasets(
+        {"train": path}, tmp_path / "default", {"codec": {"robot": "ant"}}
+    )
+    with pytest.raises(ValueError, match="bitwise continuous"):
+        import_legacy_datasets(
+            {"train": path},
+            tmp_path / "preserved",
+            {"codec": {"robot": "ant"}},
+            preserve_legacy_velocity=True,
+        )
+
+
+def test_lossless_import_rejects_even_explicit_identity_world_rotation(tmp_path):
+    from embodichain.learning.dynamics.reference import import_legacy_datasets
+
+    with pytest.raises(ValueError, match="source world frame"):
+        import_legacy_datasets(
+            {"train": tmp_path / "unused.h5"},
+            tmp_path / "preserved",
+            {"codec": {"robot": "ant"}},
+            preserve_legacy_velocity=True,
+            world_rotation_xyzw=(0.0, 0.0, 0.0, 1.0),
+        )
+    assert not (tmp_path / "preserved").exists()
+
+
+def test_official_transport_rejects_malformed_preserved_velocity_shape():
+    from embodichain.compute.dynamics import NeRDStateCodec
+    from embodichain.learning.dynamics.reference import _official_batch
+
+    q = torch.zeros(1, 2, 15)
+    q[..., 6] = 1
+    batch = {
+        "states": {
+            "q": q,
+            "qd": torch.zeros(1, 2, 14),
+            "legacy_velocity": torch.zeros(1, 2, 13),
+        },
+        "transitions": {"joint_f": torch.zeros(1, 1, 14)},
+    }
+    with pytest.raises(ValueError, match="Preserved legacy velocity shape"):
+        _official_batch(batch, NeRDStateCodec("ant"))
 
 
 def test_gravity_repair_is_explicit_preserves_raw_and_other_fields():
@@ -452,3 +803,133 @@ assert "dexsim" not in sys.modules
         text=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(
+    not os.getenv("NERD_REFERENCE_SOURCE"), reason="Explicit trusted reference required"
+)
+def test_actual_official_trainer_resume_preserves_optimizer_rng_and_best_model(
+    tmp_path,
+):
+    """Synthetic CPU data verify lifecycle, not learned-dynamics accuracy."""
+    from embodichain.compute.dynamics import NeRDStateCodec
+    from embodichain.learning.models.nerd import (
+        NeRDModel,
+        NeRDModelCfg,
+        export_model,
+        load_model,
+    )
+    from embodichain.learning.dynamics.trainer import compute_statistics
+    from embodichain.learning.dynamics._sample_order import _write_checkpointed_order
+    from embodichain.learning.dynamics.reference import _hash
+
+    metadata = {"codec": {"robot": "cartpole"}, "dt": 1 / 60}
+    generator = np.random.default_rng(3)
+    with DynamicsShardWriter(tmp_path / "data", metadata) as writer:
+        for split in ["train", "validation", "test"]:
+            for index in range(2):
+                q = generator.normal(size=(13, 2)).astype(np.float32)
+                qd = generator.normal(size=(13, 2)).astype(np.float32)
+                writer.add_trajectory(
+                    f"{split}:{index}",
+                    {"q": q, "qd": qd},
+                    {"joint_f": np.zeros((12, 2), np.float32)},
+                    split=split,
+                )
+    dataset = DynamicsWindowDataset(tmp_path / "data", "train", 3)
+    codec = NeRDStateCodec("cartpole")
+    stats = compute_statistics(dataset, codec)
+    torch.manual_seed(4)
+    model = NeRDModel(
+        NeRDModelCfg(
+            input_dims={"states_embedding": 4, "joint_f": 2},
+            output_dim=4,
+            n_embd=12,
+            n_head=3,
+            n_layer=1,
+            block_size=4,
+            history_length=3,
+            dropout=0.1,
+        )
+    )
+    model.set_normalization(
+        {k: (v["mean"], v["var"]) for k, v in stats["inputs"].items()},
+        stats["output"]["mean"],
+        stats["output"]["var"],
+    )
+    export_model(tmp_path / "initial", model, metadata)
+    order, _ = _write_checkpointed_order(
+        tmp_path / "order.json",
+        dataset_size=len(dataset),
+        steps=6,
+        batch_size=4,
+        seed=7,
+        block_steps=2,
+    )
+    cfg = {
+        "total_steps": 6,
+        "batch_size": 4,
+        "seed": 7,
+        "validation_interval": 2,
+        "checkpoint_interval": 2,
+        "log_interval": 2,
+        "resident_cache_bytes": 1024 * 1024,
+        "device": "cpu",
+    }
+    source = os.environ["NERD_REFERENCE_SOURCE"]
+    spec = {
+        "source": source,
+        "dataset": str(tmp_path / "data"),
+        "dataset_fingerprint": dataset.fingerprint,
+        "initial_model": str(tmp_path / "initial"),
+        "initial_model_sha256": _hash(tmp_path / "initial/weights.pt"),
+        "sample_order": str(order),
+        "sample_order_sha256": _hash(order),
+        "train": cfg,
+    }
+    environment = {
+        **os.environ,
+        "CUDA_VISIBLE_DEVICES": "",
+        "OMP_NUM_THREADS": "1",
+        "MKL_NUM_THREADS": "1",
+        "PYTHONPATH": os.pathsep.join(
+            [
+                os.environ.get("NERD_REFERENCE_DEPS", ""),
+                source,
+                str(Path(__file__).resolve().parents[3]),
+            ]
+        ),
+    }
+
+    def execute(name, extra):
+        path = tmp_path / (name + ".json")
+        path.write_text(json.dumps({**spec, "output_dir": str(tmp_path / name)}))
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "embodichain.learning.dynamics.reference",
+                "--spec",
+                str(path),
+                "--trust-external-code",
+                *extra,
+            ],
+            env=environment,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    execute("full", [])
+    execute("resumed", ["--stop-after", "3"])
+    interrupted = json.loads((tmp_path / "resumed/result.json").read_text())
+    assert (
+        interrupted["status"] == "interrupted" and interrupted["completed_updates"] == 3
+    )
+    execute("resumed", ["--resume", str(tmp_path / "resumed/reference-last.pt")])
+    for artifact in ["best-export", "last-export"]:
+        first, _ = load_model(tmp_path / "full" / artifact)
+        second, _ = load_model(tmp_path / "resumed" / artifact)
+        for key, value in first.state_dict().items():
+            torch.testing.assert_close(second.state_dict()[key], value, atol=0, rtol=0)
+    dataset.close()

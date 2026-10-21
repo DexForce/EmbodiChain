@@ -168,3 +168,23 @@ def test_rollout_attachment_preserves_measurements_and_requires_identity(tmp_pat
     assert result["errors"] == raw["horizons"]
     assert result["failure_rate"] == 0.1
     assert "policy_return" not in result
+
+
+def test_preparation_keeps_selected_virtualenv_interpreter_symlink(
+    tmp_path, monkeypatch
+):
+    import sys
+
+    chosen = tmp_path / "selected-env/bin/python"
+    chosen.parent.mkdir(parents=True)
+    chosen.symlink_to(sys.executable)
+    config = configuration(tmp_path, monkeypatch)
+    config["python"] = str(chosen)
+    path = prepare_comparison(config)
+    _, plan = _read_plan(path)
+    assert plan["python"] == str(chosen)
+    assert all(
+        cell["command"][0] == str(chosen)
+        for cell in plan["cells"]
+        if cell["status"] == "prepared"
+    )

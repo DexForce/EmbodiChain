@@ -244,8 +244,19 @@ def test_packaged_workflow_configs_decode_through_cli(tmp_path, monkeypatch):
     (tmp_path / "data").mkdir()
     (tmp_path / "export").mkdir()
     files = []
+    expected_configs = {
+        "dynamics.generate.smoke.yaml",
+        "dynamics.generate.full.yaml",
+        "dynamics.generate.warp-reference.yaml",
+        "dynamics.train.smoke.yaml",
+        "dynamics.train.full.yaml",
+        "dynamics.eval.smoke.yaml",
+        "dynamics.eval.full.yaml",
+        "dynamics.rollout.smoke.yaml",
+        "dynamics.rollout.full.yaml",
+    }
     for robot in ("cartpole", "ant"):
-        files.extend(
+        robot_configs = list(
             (
                 repo
                 / "extensions"
@@ -256,7 +267,8 @@ def test_packaged_workflow_configs_decode_through_cli(tmp_path, monkeypatch):
                 / robot
             ).glob("dynamics.*.yaml")
         )
-    assert len(files) == 16
+        assert {path.name for path in robot_configs} == expected_configs
+        files.extend(robot_configs)
     for source in files:
         config = yaml.safe_load(source.read_text())
         # Temporary destinations let path validation run without generating data.

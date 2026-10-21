@@ -21,6 +21,7 @@ from __future__ import annotations
 import pickle
 import numpy as np
 import pytest
+import torch
 from torch.utils.data import DataLoader
 
 from embodichain.data_pipeline.dynamics.shards import (
@@ -112,6 +113,74 @@ def test_stable_split_not_ingestion_order():
     backward = {str(i): trajectory_split(str(i), 7) for i in reversed(range(100))}
     assert forward == backward
     assert set(forward.values()) == {"train", "validation", "test"}
+
+
+@pytest.mark.parametrize("prefix", [False, True])
+def test_resident_windows_preserve_order_padding_ownership_and_bounded_staging(
+    tmp_path, monkeypatch, prefix
+):
+    with DynamicsShardWriter(tmp_path, {}, trajectories_per_shard=2) as writer:
+        for index, length in enumerate([3, 5, 11]):
+            writer.add_trajectory(
+                str(index), *trajectory(index * 100, length), split="train"
+            )
+    dataset = DynamicsWindowDataset(
+        tmp_path, "train", 3, include_prefix=prefix, read_page_steps=2
+    )
+    requests = [-1, 0, 3, 0, len(dataset) // 2]
+    expected = dataset.get_batch(requests)
+    original = dataset._read_block
+    spans = []
+
+    def tracked(source, name, start, end, shape, dtype):
+        spans.append(end - start)
+        return original(source, name, start, end, shape, dtype)
+
+    monkeypatch.setattr(dataset, "_read_block", tracked)
+    used = dataset.enable_device_cache("cpu", 1024 * 1024)
+    assert used > 0 and max(spans) <= 2
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Resident batches must not reopen trajectory data")
+
+    monkeypatch.setattr(dataset, "_read_block", forbidden)
+    actual = dataset.get_batch(requests)
+    _assert_same_batch(actual, expected)
+    actual["states"]["q"][0].zero_()
+    _assert_same_batch(dataset.get_batch(requests), expected)
+    monkeypatch.delattr(dataset, "_read_block")
+    copied = pickle.loads(pickle.dumps(dataset))
+    assert copied._resident is None
+    result = dataset.get_batch(requests)
+    dataset.close()
+    _assert_same_batch(result, expected)
+
+
+def test_resident_budget_failure_keeps_lazy_dataset_usable(tmp_path):
+    with DynamicsShardWriter(tmp_path, {}) as writer:
+        writer.add_trajectory("a", *trajectory(), split="train")
+    dataset = DynamicsWindowDataset(tmp_path, "train", 3)
+    with pytest.raises(ValueError, match="exceeding cache budget"):
+        dataset.enable_device_cache("cpu", 1)
+    assert dataset._resident is None
+    assert dataset[0]["length"] == 3
+
+
+@pytest.mark.gpu
+def test_resident_cuda_windows_match_cpu_and_survive_close(tmp_path):
+    with DynamicsShardWriter(tmp_path, {}) as writer:
+        writer.add_trajectory("a", *trajectory(), split="train")
+    dataset = DynamicsWindowDataset(tmp_path, "train", 3, include_prefix=True)
+    expected = dataset.get_batch([0, -1, 0])
+    dataset.enable_device_cache("cuda:0", 1024 * 1024)
+    actual = dataset.get_batch([0, -1, 0])
+    dataset.close()
+    for kind in ["states", "transitions"]:
+        for name, value in actual[kind].items():
+            assert value.device.type == "cuda"
+            torch.testing.assert_close(
+                value.cpu(), expected[kind][name], atol=0, rtol=0
+            )
 
 
 def test_finalizer_is_best_effort_but_explicit_close_surfaces_errors():

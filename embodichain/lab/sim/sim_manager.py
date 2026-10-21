@@ -137,6 +137,7 @@ from embodichain.utils.math import (
 )
 
 if TYPE_CHECKING:
+    from dexsim.spawn import ArticulationDesc, ObjectDesc
     from dexsim.engine import PhysicsScene
     from dexsim.scene import Scene
     from dexsim.interaction import EntityGizmoConfig, EntityGizmoManipulator
@@ -2693,6 +2694,44 @@ class SimulationManager:
             RigidObject: The added rigid object instance handle.
         """
         return self._declare_rigid_object(cfg, replace=False)
+
+    def add_rigid_object_descriptor(self, descriptor: ObjectDesc) -> RigidObject:
+        """Declare procedural rigid geometry through the existing Spawn owner.
+
+        Args:
+            descriptor: Public DexSim object descriptor owning geometry, physical
+                parameters and per-environment or global replication intent.
+
+        Returns:
+            Rigid object facade bound by :meth:`prepare`.
+        """
+        from dexsim.spawn import ObjectDesc
+
+        if not isinstance(descriptor, ObjectDesc) or descriptor.physics is None:
+            raise TypeError("descriptor must be a physical DexSim ObjectDesc.")
+        uid = descriptor.name
+        if uid in self.asset_uids:
+            raise ValueError(f"Asset {uid!r} already exists.")
+        body_type = {
+            ActorType.DYNAMIC: "dynamic",
+            ActorType.KINEMATIC: "kinematic",
+            ActorType.STATIC: "static",
+        }[descriptor.physics.actor_type]
+        cfg = RigidObjectCfg(
+            uid=uid,
+            init_local_pose=descriptor.pose.copy(),
+            body_type=body_type,
+            body_scale=tuple(float(value) for value in descriptor.body_scale),
+            asset_physics_mode="preserve",
+        )
+        facade = RigidObject(cfg=cfg, device=self.device)
+        was_materialized = self.spawn_result is not None
+        self._spawn_scene.declare("rigid_object", uid, descriptor, facade=facade)
+        self._rigid_objects[uid] = facade
+        self.notify_visualization_topology_changed()
+        if was_materialized:
+            self.prepare()
+        return facade
 
     def replace_rigid_object(self, cfg: RigidObjectCfg) -> RigidObject:
         """Replace a rigid object with the same UID in one preparation.

@@ -64,6 +64,7 @@ def prepare_comparison(config: dict[str, Any]) -> Path:
         save_statistics,
         load_statistics,
     )
+    from ._sample_order import _write_checkpointed_order
 
     allowed = {
         "output_dir",
@@ -100,7 +101,9 @@ def prepare_comparison(config: dict[str, Any]) -> Path:
     if any(root.iterdir()):
         raise FileExistsError("Comparison output must be a new empty directory")
     source = reference_identity(config["source"])
-    python = str(Path(config.get("python", sys.executable)).resolve())
+    # Resolving the executable symlink discards pyvenv.cfg and silently selects
+    # the base interpreter's packages instead of the requested virtualenv.
+    python = str(Path(config.get("python", sys.executable)).expanduser().absolute())
     dependencies = (
         str(Path(config["reference_dependencies"]).resolve())
         if config.get("reference_dependencies")
@@ -163,23 +166,14 @@ def prepare_comparison(config: dict[str, Any]) -> Path:
         for seed in seeds:
             seed_dir = teacher_dir / f"seed-{seed}"
             seed_dir.mkdir()
-            order_path = seed_dir / "order.npy"
-            order = np.lib.format.open_memmap(
-                order_path,
-                mode="w+",
-                dtype=np.int64,
-                shape=(cfg.total_steps, cfg.batch_size),
+            order_path, rng_path = _write_checkpointed_order(
+                seed_dir / "order.json",
+                dataset_size=len(dataset),
+                steps=cfg.total_steps,
+                batch_size=cfg.batch_size,
+                seed=seed,
             )
-            generator = torch.Generator(device="cpu").manual_seed(seed)
-            for start in range(0, cfg.total_steps, 1024):
-                end = min(cfg.total_steps, start + 1024)
-                # rand_int produces the same flattened stream as consecutive
-                # minibatches; one generator is shared by both trainers.
-                order[start:end] = torch.randint(
-                    len(dataset), (end - start, cfg.batch_size), generator=generator
-                ).numpy()
-            order.flush()
-            del order
+            artifacts[str(rng_path.relative_to(root))] = _hash(rng_path)
             order_hash = _hash(order_path)
             artifacts[str(order_path.relative_to(root))] = order_hash
             torch.manual_seed(seed)
@@ -255,6 +249,7 @@ def prepare_comparison(config: dict[str, Any]) -> Path:
             "training_order": "shared frozen torch.randint-with-replacement indices",
             "statistics": "shared provided artifact or train-window population moments",
             "checkpoint_selection": "one validation split; ordered first configured batches; partial final batch included; no epoch-zero best selection",
+            "preprocessing_execution": "shared current frame; scripted coordinate math; three real-layout CUDA preprocessing warmups without optimizer/RNG advancement",
             "paper_reproduction": "not established by this controlled protocol",
         },
         "datasets": datasets,
@@ -300,7 +295,12 @@ def _read_plan(path: str | Path) -> tuple[Path, dict[str, Any]]:
     return root, plan
 
 
-def run_candidate(spec: dict[str, Any]) -> dict[str, Any]:
+def run_candidate(
+    spec: dict[str, Any],
+    *,
+    resume: str | Path | None = None,
+    stop_after: int | None = None,
+) -> dict[str, Any]:
     """Execute the migrated trainer on the same frozen run specification."""
     import torch
     from embodichain.data_pipeline.dynamics.shards import (
@@ -310,6 +310,7 @@ def run_candidate(spec: dict[str, Any]) -> dict[str, Any]:
     from .workflow import run_train, run_export, run_eval
 
     torch.set_num_threads(int(spec.get("cpu_threads", 1)))
+    torch.set_float32_matmul_precision("highest")
     if (
         dataset_fingerprint(load_manifest(spec["dataset"], verify=True))
         != spec["dataset_fingerprint"]
@@ -323,15 +324,29 @@ def run_candidate(spec: dict[str, Any]) -> dict[str, Any]:
     ):
         raise ValueError("Common initialization changed")
     directory = Path(spec["output_dir"])
+    initial_manifest = json.loads(
+        (Path(spec["initial_model"]) / "manifest.json").read_text()
+    )
+    execution = (
+        {"resume": str(resume)}
+        if resume is not None
+        else {"fine_tune": spec["initial_model"]}
+    )
     result = run_train(
         {
             "dataset": spec["dataset"],
             "output_dir": str(directory),
-            "fine_tune": spec["initial_model"],
+            "model": initial_manifest["model_config"],
             "sample_order": spec["sample_order"],
             "train": spec["train"],
+            "stop_after": stop_after,
+            **execution,
         }
     )
+    if result["status"] != "completed":
+        result["completed_updates"] = result["global_step"]
+        _json(directory / "result.json", result)
+        return result
     for name in ("best", "last"):
         run_export(directory / f"{name}.pt", directory / f"{name}-export")
     result.update(
@@ -476,13 +491,19 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--spec", type=Path)
     parser.add_argument("--candidate", action="store_true")
+    parser.add_argument("--resume", type=Path)
+    parser.add_argument("--stop-after", type=int)
     parser.add_argument("--prepare", type=Path, help="JSON comparison configuration")
     parser.add_argument("--run", type=Path, help="Prepared experiment.json")
     parser.add_argument("--trust-external-code", action="store_true")
     parser.add_argument("--max-runs", type=int)
     args = parser.parse_args()
     if args.candidate and args.spec:
-        value = run_candidate(json.loads(args.spec.read_text()))
+        value = run_candidate(
+            json.loads(args.spec.read_text()),
+            resume=args.resume,
+            stop_after=args.stop_after,
+        )
     elif args.prepare:
         value = {
             "manifest": str(prepare_comparison(json.loads(args.prepare.read_text())))

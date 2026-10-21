@@ -19,6 +19,8 @@
 from __future__ import annotations
 
 from unittest.mock import MagicMock
+import json
+from pathlib import Path
 
 import newton
 import numpy as np
@@ -64,9 +66,10 @@ def _lower_descriptor(descriptor):
 
 
 @pytest.mark.parametrize("robot", ["cartpole", "ant"])
-def test_spawn_lowering_preserves_reference_physical_properties(robot):
-    reference = _import_reference(robot)
-    descriptor = make_reference_articulation(robot)
+@pytest.mark.parametrize("physics_profile", ["native", "warp_reference"])
+def test_spawn_lowering_preserves_reference_physical_properties(robot, physics_profile):
+    reference = _import_reference(robot, physics_profile)
+    descriptor = make_reference_articulation(robot, physics_profile)
     lowered = _lower_descriptor(descriptor)
     lower_bodies = {name: index for index, name in enumerate(lowered.body_label)}
     for source_index, label in enumerate(reference.body_label):
@@ -180,3 +183,83 @@ def test_reference_hash_and_profiles():
     assert reference_profile("ant")["effort_limits"] == [400.0] * 8
     with pytest.raises(ValueError, match="Unsupported"):
         make_reference_articulation("unknown")
+
+
+def test_warp_cartpole_import_preserves_measured_mass_and_body_armature():
+    """Check measured Warp 1.8 arrays, rather than URDF inertial declarations."""
+    builder = _import_reference("cartpole", "warp_reference")
+    np.testing.assert_allclose(builder.body_mass, [50.0, 2.5], rtol=1e-6)
+    np.testing.assert_allclose(
+        np.asarray(builder.body_inertia).reshape(-1, 3, 3),
+        [
+            np.diag([1.21833336353302, 1.21833336353302, 2.0933332443237305]),
+            np.diag([0.2188541740179062, 0.2188541740179062, 0.011041666381061077]),
+        ],
+        rtol=1e-6,
+        atol=1e-8,
+    )
+    np.testing.assert_allclose(builder.joint_armature, [0.01, 0.01])
+    # The modern interpretation stays available as its own physical domain.
+    np.testing.assert_allclose(_import_reference("cartpole").body_mass, [1.0, 10.0])
+
+
+def test_warp_ant_import_preserves_geometry_density_and_force_mode():
+    """Check measured Warp 1.5.1 masses, inertia regularization and friction."""
+    builder = _import_reference("ant", "warp_reference")
+    np.testing.assert_allclose(
+        builder.body_mass,
+        [31.653451919555664, *[7.831550598144531, 13.518441200256348] * 4],
+        rtol=1e-6,
+    )
+    np.testing.assert_allclose(
+        np.asarray(builder.body_inertia[0]).reshape(3, 3),
+        np.diag([0.5960065126419067, 0.5960065126419067, 1.0890781879425049]),
+        rtol=1e-6,
+        atol=1e-7,
+    )
+    np.testing.assert_allclose(builder.joint_damping, 0.0)
+    np.testing.assert_allclose(builder.joint_target_kd, 0.0)
+    np.testing.assert_allclose(builder.shape_material_mu, 0.75)
+    np.testing.assert_allclose(builder.shape_margin, 0.0)
+    transform = builder.shape_transform[1]
+    first_slot = wp.transform_point(
+        transform, wp.vec3(0.0, 0.0, builder.shape_scale[1][1])
+    )
+    np.testing.assert_allclose(first_slot, [0.2, 0.2, 0.0], atol=5e-8)
+    assert reference_asset_hash("ant") == (
+        "23e9a720465a71fde3fd9fd2d5a18f8c11ec642f3dca8921c66cb4e169421fa7"
+    )
+
+
+def test_unknown_reference_physics_profile_rejected():
+    with pytest.raises(ValueError, match="physics profile"):
+        _import_reference("ant", "unregistered")
+
+
+@pytest.mark.parametrize("robot", ["cartpole", "ant"])
+def test_warp_profile_matches_recorded_body_arrays_and_ordered_contacts(robot):
+    fixture = json.loads(
+        (Path(__file__).parent / "data/warp_reference_arrays.json").read_text()
+    )[robot]
+    builder = _import_reference(robot, "warp_reference")
+    for name in ("body_mass", "body_com", "body_inertia", "joint_armature"):
+        actual = np.asarray(getattr(builder, name))
+        expected = np.asarray(fixture[name]).reshape(actual.shape)
+        np.testing.assert_allclose(actual, expected, rtol=2e-6, atol=2e-7, err_msg=name)
+    inertia = np.asarray(builder.body_inertia).reshape(-1, 3, 3)
+    inverse = np.asarray(builder.body_inv_inertia).reshape(-1, 3, 3)
+    np.testing.assert_allclose(
+        inertia @ inverse, np.broadcast_to(np.eye(3), inertia.shape), atol=1e-6
+    )
+    if robot == "ant":
+        points = []
+        for scale, transform in zip(builder.shape_scale, builder.shape_transform):
+            offsets = (
+                [wp.vec3(0.0)]
+                if scale[1] == 0
+                else [wp.vec3(0.0, 0.0, scale[1]), wp.vec3(0.0, 0.0, -scale[1])]
+            )
+            points.extend(
+                list(wp.transform_point(transform, value)) for value in offsets
+            )
+        np.testing.assert_allclose(points, fixture["ordered_contact_points"], atol=2e-7)

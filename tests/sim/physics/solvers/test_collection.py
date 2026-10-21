@@ -51,6 +51,7 @@ _ROOT = Path(__file__).resolve().parents[4]
         ("num_substeps", -1),
         ("max_attempts", 1),
         ("effort_scale", float("nan")),
+        ("physics_profile", "unregistered"),
     ],
 )
 def test_generation_config_rejects_invalid_values_before_runtime(key, value) -> None:
@@ -66,6 +67,31 @@ def test_sampling_is_candidate_seed_local_and_passive_zero() -> None:
         torch.testing.assert_close(a, b, atol=0, rtol=0)
     assert not first[2][:, :6].any()
     assert not _sample("cartpole", 3, 5, "passive", "default", 1.0)[2].any()
+
+
+@pytest.mark.parametrize("robot,substeps", [("cartpole", 5), ("ant", 16)])
+def test_warp_parameter_profile_preserves_reset_replay(robot, substeps) -> None:
+    from embodichain.lab.sim.physics.solvers.collection import DynamicsSimulation
+
+    with DynamicsSimulation(
+        robot, num_envs=2, num_substeps=substeps, physics_profile="warp_reference"
+    ) as host:
+        q, qd, effort = _sample(robot, 5, 2, "random_effort", "default", 0.02)
+        q, qd = q.repeat(2, 1), qd.repeat(2, 1)
+        host.reset(q, qd)
+        host.step(effort[0].repeat(2, 1))
+        first, _ = host.snapshot()
+        host.step(effort[1].repeat(2, 1))
+        host.reset(q, qd)
+        host.step(effort[0].repeat(2, 1))
+        repeated, _ = host.snapshot()
+        for field in ("q", "qd"):
+            torch.testing.assert_close(
+                first[field], repeated[field], rtol=1e-5, atol=1e-6
+            )
+        assert host.manifest["physics_profile"] == "warp_reference"
+        assert host.manifest["teacher_origin"]["kind"] == "current_newton"
+        assert host.manifest["teacher"]["solver"]["solver_type"] == "featherstone"
 
 
 def test_fixed_policy_adapter_uses_own_state_and_records_hash() -> None:
@@ -230,6 +256,58 @@ def _check_pipeline(tmp_path: Path, robot: str) -> None:
         + fixed["horizons"]["3"]["numerically_invalid_trajectories"]
         == 3
     )
+    replay = evaluate_rollouts(
+        {
+            **common,
+            "motion_mode": "fixed_policy",
+            "policy": {"kind": "pd"},
+            "teacher_dataset": fixed["teacher_dataset"],
+            "output": str(tmp_path / "closed-replay.json"),
+        }
+    )
+    assert replay["selected_teacher_sha256"] == fixed["selected_teacher_sha256"]
+    assert replay["horizons"] == fixed["horizons"]
+    assert replay["teacher_feedback_verification"] == (
+        "all_selected_actions_verified_against_teacher_states"
+    )
+    with pytest.raises(ValueError, match="declared feedback policy"):
+        evaluate_rollouts(
+            {
+                **common,
+                "motion_mode": "fixed_policy",
+                "policy": (
+                    {"kind": "pd", "gains": [1.0, 2.0, 3.0, 4.0]}
+                    if robot == "cartpole"
+                    else {"kind": "pd", "kp": 10.0, "kd": 1.0}
+                ),
+                "teacher_dataset": fixed["teacher_dataset"],
+                "output": str(tmp_path / "wrong-policy.json"),
+            }
+        )
+    # A self-consistent file hash cannot excuse actions unrelated to the stored
+    # teacher's own observations and declared feedback configuration.
+    import shutil
+
+    changed = tmp_path / "changed-feedback"
+    shutil.copytree(fixed["teacher_dataset"], changed)
+    source_manifest = load_manifest(changed, verify=True)
+    first = source_manifest["shards"][0]
+    with h5py.File(changed / first["file"], "r+") as stream:
+        stream["0/transitions/joint_f"][0, 0] += 1.0
+    import hashlib
+
+    first["sha256"] = hashlib.sha256((changed / first["file"]).read_bytes()).hexdigest()
+    (changed / "manifest.json").write_text(json.dumps(source_manifest))
+    with pytest.raises(ValueError, match="own-state feedback"):
+        evaluate_rollouts(
+            {
+                **common,
+                "motion_mode": "fixed_policy",
+                "policy": {"kind": "pd"},
+                "teacher_dataset": str(changed),
+                "output": str(tmp_path / "changed-feedback.json"),
+            }
+        )
 
 
 def _check_actor_and_failures(tmp_path: Path) -> None:
