@@ -211,3 +211,17 @@ Use `tests/learning/` for routing, algorithms, buffers, gradients and checkpoint
 contracts; run native/distributed suites only for those resource boundaries.
 Missing names point to registries/discovery, disappearing gradients to early
 detachment, and reset/terminal issues to the selected environment protocol.
+
+## Rough terrain and dexterous task candidates
+
+`locomotion/velocity/g1_isaac_rough.py` registers the 37-action G1 task.
+Its frozen curriculum comes from `G1RoughTerrains`; the robot comes from
+`UnitreeG1Rough`, independently of the 29-joint G1 flat archive.
+
+`manipulation/dexterous/` contains five task-named learning-env factories and
+shared internal physics/MDP adapters. Matching task-first agent configurations
+select `mujoco_warp` or `dexuni` explicitly. The declared Dict observation
+spaces match returned actor/critic groups. Source MJCF audits run at creation.
+Version-specific backend adapters remain local to the task collection pending
+engine-owned public import/state interfaces. See the user-facing dexterous
+RL page for current training and checkpoint-continuation boundaries.
