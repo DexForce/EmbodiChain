@@ -1645,6 +1645,31 @@ def test_failed_publication_retries_within_the_same_frame():
     assert sim.physics.sync_render_state.call_count == 2
 
 
+def test_joint_motor_registration_preserves_manager_arena_order() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+    control = sim._register_joint_dc_motor_control("robot", {})
+    builder.add_runtime_control.assert_called_once_with(control)
+    assert control.target_paths == ("arena_0/robot", "arena_1/robot")
+
+
+@pytest.mark.parametrize(
+    "backend, uid, finalized, error",
+    [
+        ("default", "robot", False, RuntimeError),
+        ("newton", "missing", False, KeyError),
+        ("newton", "robot", True, RuntimeError),
+    ],
+)
+def test_joint_motor_registration_rejects_invalid_lifecycle(
+    backend, uid, finalized, error
+) -> None:
+    sim, builder = _make_runtime_control_sim_manager(backend=backend)
+    builder.is_finalized = finalized
+    with pytest.raises(error):
+        sim._register_joint_dc_motor_control(uid, {})
+    builder.add_runtime_control.assert_not_called()
+
+
 def test_register_kinematic_joint_trajectory_expands_each_arena() -> None:
     sim, builder = _make_runtime_control_sim_manager()
     frame_count = 3

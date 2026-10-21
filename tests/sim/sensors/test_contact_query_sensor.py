@@ -54,6 +54,32 @@ class _FakeQuery:
         return self.buffer
 
 
+def test_normal_force_snapshot_uses_valid_compact_rows_and_clears_output() -> None:
+    """Exclude friction, stale capacity rows and unavailable force quantities."""
+    wp.init()
+    query = _FakeQuery()
+    buffer = query.buffer
+    buffer.count_device[0] = 3
+    buffer.quantity_valid[:2, 0] = True
+    buffer.quantity_valid[2:, 0] = False
+    buffer.data[2:].fill_(float("nan"))
+    sensor = object.__new__(ContactSensor)
+    sensor.device = torch.device("cpu")
+    sensor._read_contacts = lambda: buffer
+    sensor._query_dropped_count = torch.zeros(1, dtype=torch.int32)
+    sensor._scatter_dropped_count = torch.ones(2, dtype=torch.int32)
+    keys = torch.tensor([4, 2**32 + 7], dtype=torch.int64)
+    rows = torch.tensor([1, 0], dtype=torch.int64)
+    out = torch.full((2, 1, 3), 999.0)
+    sensor._reduce_normal_impulses(keys, rows, out, 0.1)
+    torch.testing.assert_close(
+        out, torch.tensor([[[0.0, 7.0, 0.0]], [[0.0, 0.0, -4.0]]])
+    )
+    buffer.count_device.zero_()
+    sensor._reduce_normal_impulses(keys, rows, out, 0.1)
+    torch.testing.assert_close(out, torch.zeros_like(out))
+
+
 def test_contact_sensor_consumes_scene_query_and_explicit_env_ids() -> None:
     wp.init()
     query = _FakeQuery()

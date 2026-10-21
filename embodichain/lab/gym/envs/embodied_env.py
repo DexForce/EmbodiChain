@@ -436,7 +436,7 @@ class EmbodiedEnv(BaseEnv):
         self._record_raw_actions = self._explicit_policy_rollout
         self._last_action_manager_qpos: torch.Tensor | None = None
         self._last_action_trace: ActionTrace | None = None
-        self._expert_controller_qpos_history: list[list[torch.Tensor]] = []
+        self._expert_controller_qpos_history: list[list[torch.Tensor]] | None = None
 
         super().__init__(cfg, **kwargs)
 
@@ -508,10 +508,10 @@ class EmbodiedEnv(BaseEnv):
             self._traj_steps: torch.Tensor | None = None
             self._traj_raw_action: EnvAction | None = None
             self._trajectory_action_kind: str | None = None
-            self._raw_action_history: list[list[EnvAction]] = [
-                [] for _ in range(self.num_envs)
-            ]
-            self._expert_controller_qpos_history = [[] for _ in range(self.num_envs)]
+            # Recording methods allocate row histories on their first sample.
+            # Training resets then avoid downloading IDs to clear empty lists.
+            self._raw_action_history: list[list[EnvAction]] | None = None
+            self._expert_controller_qpos_history = None
             self._traj_save_count = 0
             self._traj_run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
             if self.cfg.record_trajectory:
@@ -556,9 +556,9 @@ class EmbodiedEnv(BaseEnv):
             self._demo_segment_participants = self._demo_active_mask.clone()
             self._demo_active_segment_start_steps = self._demo_steps.clone()
             self._demo_active_rollout_start_steps = self.rollout_steps.clone()
+            self._demo_metadata_initialized = False
             self._demo_episode_metadata: list[dict[str, Any]] = [
-                self._new_demo_episode_metadata(env_id)
-                for env_id in range(self.num_envs)
+                {} for _ in range(self.num_envs)
             ]
 
             self.episode_success_status: torch.Tensor = torch.zeros(
@@ -1280,12 +1280,12 @@ class EmbodiedEnv(BaseEnv):
         active_segment_ids = getattr(self, "_demo_active_segment_ids", None)
         if active_segment_ids is not None:
             demo_ids = env_ids_to_process.to(active_segment_ids.device)
-            active_segment_ids[demo_ids] = 0
-            self._demo_active_mask[demo_ids] = True
-            self._demo_segment_participants[demo_ids] = False
-            self._demo_active_segment_start_steps[demo_ids] = 0
-            self._demo_active_rollout_start_steps[demo_ids] = 0
-            self._demo_steps[demo_ids] = 0
+            active_segment_ids.index_fill_(0, demo_ids, 0)
+            self._demo_active_mask.index_fill_(0, demo_ids, True)
+            self._demo_segment_participants.index_fill_(0, demo_ids, False)
+            self._demo_active_segment_start_steps.index_fill_(0, demo_ids, 0)
+            self._demo_active_rollout_start_steps.index_fill_(0, demo_ids, 0)
+            self._demo_steps.index_fill_(0, demo_ids, 0)
 
         self.episode_success_status.index_fill_(0, env_ids_to_process, False)
 
@@ -1294,7 +1294,9 @@ class EmbodiedEnv(BaseEnv):
     ) -> None:
         env_ids_to_process = self.episode_context._ids(env_ids)
         episode_metadata = getattr(self, "_demo_episode_metadata", None)
-        if episode_metadata is not None:
+        if episode_metadata is not None and getattr(
+            self, "_demo_metadata_initialized", True
+        ):
             for env_id in env_ids_to_process.cpu().tolist():
                 episode_metadata[env_id] = self._new_demo_episode_metadata(env_id)
         # Stateful managers reset selected rows before reset-mode events run.
@@ -1453,6 +1455,7 @@ class EmbodiedEnv(BaseEnv):
         self._demo_segment_participants.fill_(False)
         self._demo_active_segment_start_steps = self._demo_steps.clone()
         self._demo_active_rollout_start_steps = self.rollout_steps.clone()
+        self._demo_metadata_initialized = True
         self._demo_episode_metadata = [
             self._new_demo_episode_metadata(env_id) for env_id in range(self.num_envs)
         ]
@@ -1635,6 +1638,11 @@ class EmbodiedEnv(BaseEnv):
         Returns:
             A JSON-compatible metadata dictionary.
         """
+        if "episode_uuid" not in self._demo_episode_metadata[env_id]:
+            metadata = EmbodiedEnv._new_demo_episode_metadata(self, env_id)
+            metadata.update(self._demo_episode_metadata[env_id])
+            self._demo_episode_metadata[env_id] = metadata
+        self._demo_metadata_initialized = True
         metadata = copy.deepcopy(self._demo_episode_metadata[env_id])
         metadata["episode_context"] = self.episode_context.snapshot([env_id])[0]
         metadata["segments"] = [
@@ -2454,7 +2462,10 @@ class EmbodiedEnv(BaseEnv):
                     if callable(processed_qpos)
                     else None
                 )
-            else:
+            elif self.dataset_manager is not None or (
+                getattr(self, "rollout_buffer", None) is not None
+                and getattr(self, "_rollout_buffer_mode", None) != "rl"
+            ):
                 processed_qpos = getattr(self.action_manager, "_processed_qpos", None)
                 try:
                     self._last_action_manager_qpos = (

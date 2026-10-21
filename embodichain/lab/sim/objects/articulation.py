@@ -2056,13 +2056,22 @@ class Articulation(BatchEntity):
         """
         env_index = self._resolve_env_ids(env_ids)
         env_list = env_index.detach().cpu().tolist()
-        names, _ = self._resolve_link_names(link_names)
+        names, link_index = self._resolve_link_names(link_names)
         mass = torch.as_tensor(mass, dtype=torch.float32, device=self.device)
         expected_shape = (len(env_list), len(names))
         if tuple(mass.shape) != expected_shape:
             raise ValueError(
                 f"Expected mass shape {expected_shape}, got {tuple(mass.shape)}."
             )
+
+        if (
+            self.is_spawn_bound
+            and self._data.is_newton_backend
+            and len(set(env_list)) == len(env_list)
+            and len(set(names)) == len(names)
+        ):
+            self._data.articulation_view.apply_link_mass(mass, env_index, link_index)
+            return
 
         for i, env_idx in enumerate(env_list):
             entity = self._entities[env_idx]
@@ -2113,6 +2122,17 @@ class Articulation(BatchEntity):
                 f"Expected inertia shape {expected_shape}, "
                 f"got {tuple(inertia.shape)}."
             )
+
+        if (
+            self.is_spawn_bound
+            and self._data.is_newton_backend
+            and len(set(env_list)) == len(env_list)
+            and len(set(names)) == len(names)
+        ):
+            self._data.articulation_view.apply_link_inertia(
+                inertia, env_index, link_index
+            )
+            return
 
         frames = (
             self.body_data.com_pose[env_index[:, None], link_index[None, :], 3:7]
@@ -2171,6 +2191,17 @@ class Articulation(BatchEntity):
                 f"Expected COM pose shape {expected_shape}, "
                 f"got {tuple(com_pose.shape)}."
             )
+
+        if (
+            self.is_spawn_bound
+            and self._data.is_newton_backend
+            and len(set(env_list)) == len(env_list)
+            and len(set(names)) == len(names)
+        ):
+            self._data.articulation_view.apply_link_com_pose(
+                com_pose, env_index, link_index
+            )
+            return
 
         inertia = (
             self.body_data.inertia[env_index[:, None], link_index[None, :]]

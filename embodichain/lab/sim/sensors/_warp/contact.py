@@ -162,3 +162,43 @@ def scatter_contact_rows(
             True,
             dropped,
         )
+
+
+@wp.kernel(enable_backward=False)
+def reduce_normal_impulses(
+    data: wp.array2d(dtype=wp.float32),
+    actor_ids: wp.array2d(dtype=wp.int32),
+    env_ids: wp.array(dtype=wp.int32),
+    valid: wp.array2d(dtype=wp.bool),
+    count: wp.array(dtype=wp.int32),
+    keys: wp.array(dtype=wp.int64),
+    destinations: wp.array(dtype=wp.int64),
+    inverse_dt: float,
+    forces: wp.array2d(dtype=wp.float32),
+):
+    row = wp.tid()
+    if row < count[0] and valid[row, 0]:
+        force = (
+            wp.vec3(data[row, 3], data[row, 4], data[row, 5])
+            * data[row, 9]
+            * inverse_dt
+        )
+        for side in range(2):
+            key = wp.int64(env_ids[row]) * wp.int64(4294967296) + wp.int64(
+                actor_ids[row, side]
+            )
+            lo = int(0)
+            hi = int(keys.shape[0])
+            while lo < hi:
+                middle = (lo + hi) // 2
+                if keys[middle] < key:
+                    lo = middle + 1
+                else:
+                    hi = middle
+            if lo < keys.shape[0] and keys[lo] == key:
+                destination = destinations[lo]
+                sign = float(-1.0)
+                if side == 1:
+                    sign = 1.0
+                for axis in range(3):
+                    wp.atomic_add(forces, destination, axis, sign * force[axis])
