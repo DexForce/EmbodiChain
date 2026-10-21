@@ -227,6 +227,25 @@ def test_controller_action_refreshes_executed_qpos_snapshot() -> None:
     torch.testing.assert_close(env._last_action_manager_qpos, torch.ones(2, 3))
 
 
+@pytest.mark.parametrize("expert_recording", [False, True])
+def test_action_snapshot_requires_a_recorder(expert_recording: bool) -> None:
+    """Training processes actions without reading an unused qpos snapshot."""
+    env = _controller_action_env()
+    env.dataset_manager = None
+    env.rollout_buffer = object() if expert_recording else None
+    env._rollout_buffer_mode = "expert"
+    env.action_manager._processed_qpos.return_value = torch.ones(2, 3)
+
+    env._preprocess_action(torch.ones(2, 3))
+
+    env.action_manager.process_action.assert_called_once()
+    assert env.action_manager._processed_qpos.call_count == int(expert_recording)
+    if expert_recording:
+        torch.testing.assert_close(env._last_action_manager_qpos, torch.ones(2, 3))
+    else:
+        assert env._last_action_manager_qpos is None
+
+
 def test_policy_history_snapshots_manager_owned_flat_action() -> None:
     """Dataset history captures manager state after validation and owns it."""
     env = _controller_action_env()
@@ -252,6 +271,30 @@ def test_controller_action_does_not_append_policy_history() -> None:
     env._preprocess_action(ControllerAction(torch.ones(2, 3)))
 
     assert env.get_raw_action_history(0).shape == (0, 0)
+
+
+def test_action_histories_allocate_on_first_recorded_sample() -> None:
+    """Disabled recording stays empty; first samples retain owned snapshots."""
+    env = _controller_action_env()
+    env._raw_action_history = None
+    env._expert_controller_qpos_history = None
+    env._record_raw_actions = False
+    action = torch.arange(6, dtype=torch.float32).reshape(2, 3)
+    env._record_raw_action(action)
+    env._record_expert_controller_qpos(None, torch.tensor([1]))
+    assert env._raw_action_history is None
+    assert env._expert_controller_qpos_history is None
+    assert env.get_raw_action_history(0).shape == (0, 0)
+    assert env.get_expert_controller_qpos_history(1).shape == (0, 3)
+
+    env._record_raw_actions = True
+    env._record_raw_action(action)
+    env._record_expert_controller_qpos(action, torch.tensor([1]))
+    expected = action.clone()
+    action.fill_(99)
+    torch.testing.assert_close(env.get_raw_action_history(0), expected[0:1])
+    torch.testing.assert_close(env.get_expert_controller_qpos_history(1), expected[1:2])
+    assert env.get_expert_controller_qpos_history(0).shape == (0, 3)
 
 
 def test_policy_recorder_rejects_controller_action_before_execution() -> None:

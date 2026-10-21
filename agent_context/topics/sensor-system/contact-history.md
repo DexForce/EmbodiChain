@@ -23,3 +23,8 @@ across the control interval. Query counts stay on the device until this diagnost
 is read. A standalone sensor without histories reports the latest update.
 See `tests/sim/sensors/test_contact_history.py`, `test_contact_query_sensor.py`
 and `tests/gym/envs/test_substep_sensors.py`.
+
+Normal-force-only consumers can use `ContactSensor._reduce_normal_impulses()`
+to reduce packed contact impulses directly into a task-owned snapshot. It
+retains dropped-contact accounting and does not replace the row-buffer/history
+path used by consumers requiring per-contact information.

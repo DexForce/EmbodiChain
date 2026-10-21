@@ -22,7 +22,7 @@ from abc import abstractmethod
 from dataclasses import replace
 from functools import cached_property
 import inspect
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, Sequence
 
 import gymnasium as gym
 import numpy as np
@@ -152,6 +152,9 @@ class ActionManager(ManagerBase):
             device=env.device,
         )
         self._previous_action = torch.zeros_like(self._action)
+        self._snapshot_joint_indices: dict[
+            tuple[str, str], tuple[tuple[int, ...], torch.Tensor]
+        ] = {}
 
     def __str__(self) -> str:
         """Return a table describing the ordered flat action layout."""
@@ -295,15 +298,33 @@ class ActionManager(ManagerBase):
         in active-joint order without exposing the removed pre/post protocol.
         """
         qpos = self._env.robot.get_qpos().clone()
-        for term in self._terms.values():
+        for name, term in self._terms.items():
             if term.command_type != "qpos":
                 raise ValueError(
                     "Default joint-position dataset recording requires every "
                     "action term to produce qpos commands; declare a policy "
                     "action_contract for non-qpos actions."
                 )
-            qpos[:, list(term.controlled_joint_ids)] = term.processed_actions
-        return qpos[:, self._env.active_joint_ids]
+            columns = self._snapshot_columns(("term", name), term.controlled_joint_ids)
+            qpos[:, columns] = term.processed_actions
+        columns = self._snapshot_columns(("active", ""), self._env.active_joint_ids)
+        return qpos[:, columns]
+
+    def _snapshot_columns(
+        self, key: tuple[str, str], values: Sequence[int] | torch.Tensor
+    ) -> torch.Tensor:
+        """Reuse device selectors while retaining live host selection changes."""
+        if isinstance(values, torch.Tensor):
+            return values.to(device=self._action.device, dtype=torch.long)
+        indices = tuple(int(index) for index in values)
+        cached = self._snapshot_joint_indices.get(key)
+        if cached is None or cached[0] != indices:
+            cached = (
+                indices,
+                torch.tensor(indices, device=self._action.device, dtype=torch.long),
+            )
+            self._snapshot_joint_indices[key] = cached
+        return cached[1]
 
     def mask_inactive(self, active_mask: torch.Tensor) -> None:
         """Replace inactive vector rows with resource-safe commands.
@@ -368,9 +389,15 @@ class ActionManager(ManagerBase):
         Returns:
             Empty diagnostic mapping.
         """
-        ids = slice(None) if env_ids is None else env_ids
-        self._action[ids] = 0
-        self._previous_action[ids] = 0
+        if env_ids is None:
+            self._action.zero_()
+            self._previous_action.zero_()
+        else:
+            ids = torch.as_tensor(env_ids, dtype=torch.long).to(
+                device=self._action.device, non_blocking=True
+            )
+            self._action.index_fill_(0, ids, 0)
+            self._previous_action.index_fill_(0, ids, 0)
         for term in self._terms.values():
             term.reset(env_ids=env_ids)
         return {}
