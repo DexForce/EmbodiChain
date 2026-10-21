@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 from zipfile import ZipFile
@@ -97,18 +98,51 @@ def test_release_dispatch_reports_child_without_timing_out_while_queued() -> Non
     assert "GITHUB_STEP_SUMMARY" in command
 
 
-def test_test_package_install_uses_explicit_public_index_and_private_sources() -> None:
-    steps = _load_workflow("main.yml")["jobs"]["test"]["steps"]
-    install = next(step for step in steps if step.get("name") == "Install test package")
+@pytest.mark.parametrize(
+    ("workflow_name", "job_name", "step_name"),
+    [
+        ("main.yml", "test", "Install test package"),
+        ("main.yml", "build", "Build docs"),
+        ("docs-pages.yml", "build-and-deploy", "Build docs site"),
+    ],
+)
+def test_package_install_uses_explicit_public_index_and_private_sources(
+    workflow_name: str, job_name: str, step_name: str
+) -> None:
+    steps = _load_workflow(workflow_name)["jobs"][job_name]["steps"]
+    install = next(step for step in steps if step.get("name") == step_name)
     commands = install["run"].split("pip install")[1:]
 
     # Each invocation must override any mirror inherited from the runner image.
     assert commands
     assert all("--index-url https://pypi.org/simple" in command for command in commands)
-    package_install = next(command for command in commands if "${package}" in command)
+    package_install = next(
+        command for command in commands if "--extra-index-url" in command
+    )
     assert "--extra-index-url http://pyp.open3dv.site:2345/simple/" in package_install
     assert "--trusted-host pyp.open3dv.site" in package_install
     assert "--extra-index-url https://download.blender.org/pypi/" in package_install
+
+
+@pytest.mark.parametrize(
+    ("workflow_name", "job_name", "step_name"),
+    [
+        ("main.yml", "build", "Build docs"),
+        ("main.yml", "test_docs", "Install docs test dependencies"),
+        ("docs-pages.yml", "build-and-deploy", "Build docs site"),
+    ],
+)
+def test_docs_dependencies_override_inherited_pip_index(
+    workflow_name: str, job_name: str, step_name: str
+) -> None:
+    steps = _load_workflow(workflow_name)["jobs"][job_name]["steps"]
+    install = next(step for step in steps if step.get("name") == step_name)
+    commands = install["run"].replace("\\\n", " ").splitlines()
+    arguments = shlex.split(
+        next(command for command in commands if "docs/requirements.txt" in command)
+    )
+    assert "--isolated" in arguments
+    assert arguments[arguments.index("--index-url") + 1] == "https://pypi.org/simple"
 
 
 def test_simulator_test_job_installs_node_before_workflow_contract_tests() -> None:
