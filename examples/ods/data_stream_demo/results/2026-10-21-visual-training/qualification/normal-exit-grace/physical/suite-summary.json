@@ -1,0 +1,441 @@
+{
+  "status": "complete",
+  "phase": "single",
+  "results": [
+    {
+      "output": "/tmp/ods-normal-exit-grace-physical-20261021-v1",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 112.957297387,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "process_group_shutdown": {
+        "grace_seconds": 2.0,
+        "wait_seconds": 1.4312099665403366e-05,
+        "poll_count": 1,
+        "group_disappeared": true,
+        "initial": {
+          "monotonic_ns": 1773083264162053,
+          "pgid": 2236157,
+          "exists": false,
+          "members": [],
+          "inspection_errors": []
+        },
+        "final": {
+          "monotonic_ns": 1773083264162053,
+          "pgid": 2236157,
+          "exists": false,
+          "members": [],
+          "inspection_errors": []
+        }
+      },
+      "pgid": 2236157,
+      "process_launch_monotonic_ns": 1772970306884676,
+      "device_guard": {
+        "samples": 52,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 2236183,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-normal-exit-grace-physical-20261021-v1",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 50.582283074,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "process_group_shutdown": {
+          "grace_seconds": 2.0,
+          "wait_seconds": 1.6985926777124405e-05,
+          "poll_count": 1,
+          "group_disappeared": true,
+          "initial": {
+            "monotonic_ns": 1773145383825380,
+            "pgid": 2236787,
+            "exists": false,
+            "members": [],
+            "inspection_errors": []
+          },
+          "final": {
+            "monotonic_ns": 1773145383825380,
+            "pgid": 2236787,
+            "exists": false,
+            "members": [],
+            "inspection_errors": []
+          }
+        },
+        "pgid": 2236787,
+        "process_launch_monotonic_ns": 1773094801564650,
+        "device_guard": {
+          "samples": 23,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 2236787,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-normal-exit-grace-physical-20261021-v1",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 11.531355392,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "process_group_shutdown": {
+          "grace_seconds": 2.0,
+          "wait_seconds": 1.481291837990284e-05,
+          "poll_count": 1,
+          "group_disappeared": true,
+          "initial": {
+            "monotonic_ns": 1773094798330620,
+            "pgid": 2236665,
+            "exists": false,
+            "members": [],
+            "inspection_errors": []
+          },
+          "final": {
+            "monotonic_ns": 1773094798330620,
+            "pgid": 2236665,
+            "exists": false,
+            "members": [],
+            "inspection_errors": []
+          }
+        },
+        "pgid": 2236665,
+        "process_launch_monotonic_ns": 1773083266994117,
+        "device_guard": {
+          "samples": 5,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    }
+  ],
+  "gpu_preflight": {
+    "readings": [
+      {
+        "monotonic_ns": 1772964165707064,
+        "gpus": [
+          {
+            "index": 0,
+            "uuid": "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 34499,
+            "total_mib": 73415
+          },
+          {
+            "index": 1,
+            "uuid": "GPU-3b85e500-27ff-35d9-eb8d-d54f9ff0898d",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 72831,
+            "total_mib": 73415
+          },
+          {
+            "index": 2,
+            "uuid": "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 34858,
+            "total_mib": 73415
+          },
+          {
+            "index": 3,
+            "uuid": "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 72831,
+            "total_mib": 73415
+          },
+          {
+            "index": 4,
+            "uuid": "GPU-a5477f57-58a6-4f89-6e7a-338d8fcfc6f1",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 72831,
+            "total_mib": 73415
+          },
+          {
+            "index": 5,
+            "uuid": "GPU-569c23a7-9291-45ef-c727-ba74d63708db",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 72831,
+            "total_mib": 73415
+          },
+          {
+            "index": 6,
+            "uuid": "GPU-624342e0-6d34-01ea-c202-1d15bf69f63f",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 79,
+            "free_mib": 69829,
+            "total_mib": 73415
+          },
+          {
+            "index": 7,
+            "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 72831,
+            "total_mib": 73415
+          }
+        ]
+      },
+      {
+        "monotonic_ns": 1772966423152252,
+        "gpus": [
+          {
+            "index": 0,
+            "uuid": "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 34499,
+            "total_mib": 73415
+          },
+          {
+            "index": 1,
+            "uuid": "GPU-3b85e500-27ff-35d9-eb8d-d54f9ff0898d",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 72831,
+            "total_mib": 73415
+          },
+          {
+            "index": 2,
+            "uuid": "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 34858,
+            "total_mib": 73415
+          },
+          {
+            "index": 3,
+            "uuid": "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 72831,
+            "total_mib": 73415
+          },
+          {
+            "index": 4,
+            "uuid": "GPU-a5477f57-58a6-4f89-6e7a-338d8fcfc6f1",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 72831,
+            "total_mib": 73415
+          },
+          {
+            "index": 5,
+            "uuid": "GPU-569c23a7-9291-45ef-c727-ba74d63708db",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 72831,
+            "total_mib": 73415
+          },
+          {
+            "index": 6,
+            "uuid": "GPU-624342e0-6d34-01ea-c202-1d15bf69f63f",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 90,
+            "free_mib": 69829,
+            "total_mib": 73415
+          },
+          {
+            "index": 7,
+            "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 72831,
+            "total_mib": 73415
+          }
+        ]
+      },
+      {
+        "monotonic_ns": 1772968862481366,
+        "gpus": [
+          {
+            "index": 0,
+            "uuid": "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 34499,
+            "total_mib": 73415
+          },
+          {
+            "index": 1,
+            "uuid": "GPU-3b85e500-27ff-35d9-eb8d-d54f9ff0898d",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 72831,
+            "total_mib": 73415
+          },
+          {
+            "index": 2,
+            "uuid": "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 34858,
+            "total_mib": 73415
+          },
+          {
+            "index": 3,
+            "uuid": "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 72831,
+            "total_mib": 73415
+          },
+          {
+            "index": 4,
+            "uuid": "GPU-a5477f57-58a6-4f89-6e7a-338d8fcfc6f1",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 72831,
+            "total_mib": 73415
+          },
+          {
+            "index": 5,
+            "uuid": "GPU-569c23a7-9291-45ef-c727-ba74d63708db",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 72831,
+            "total_mib": 73415
+          },
+          {
+            "index": 6,
+            "uuid": "GPU-624342e0-6d34-01ea-c202-1d15bf69f63f",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 90,
+            "free_mib": 69829,
+            "total_mib": 73415
+          },
+          {
+            "index": 7,
+            "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 72831,
+            "total_mib": 73415
+          }
+        ]
+      }
+    ],
+    "pairs": [
+      {
+        "simulation": {
+          "index": 0,
+          "uuid": "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c",
+          "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+          "utilization_percent": 0,
+          "free_mib": 34499,
+          "total_mib": 73415
+        },
+        "training": {
+          "index": 2,
+          "uuid": "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+          "utilization_percent": 0,
+          "free_mib": 34858,
+          "total_mib": 73415
+        },
+        "cpu_affinity": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ]
+      }
+    ],
+    "rejected": [],
+    "aux_graphics_gpu": {
+      "index": 7,
+      "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+      "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+      "utilization_percent": 0,
+      "free_mib": 72831,
+      "total_mib": 73415,
+      "scope": "passive pure-G driver footprint only",
+      "max_per_pid_bytes": 8388608,
+      "idle_required": false
+    },
+    "limitations": [
+      "Each primary GPU passes three zero-utilization readings and has at least 16 GiB free; admission is not an exclusive reservation.",
+      "One generation/training UUID pair and eight disjoint CPUs are held for each seed/vision group; at most two groups run concurrently.",
+      "Outside a pipeline's primary pair, an explicit auxiliary UUID permits only owned pure-G contexts with known per-PID memory <=8 MiB. It may also be an explicitly selected idle primary of another pipeline; per-process-group limits still apply.",
+      "Periodic process-tree/process-group GPU audits can miss short-lived contexts; matching native UUID placement still needs qualification.",
+      "Total pipeline time ends after normal training-worker exit; independent evaluation is outside that time."
+    ]
+  },
+  "source_sha256": {
+    "embodichain/data_pipeline/engine/data.py": "3297f1b6d036bd63b71595e08ef9fe981eb58be02db7e9fe117a91e11bcf5bb3",
+    "embodichain/data_pipeline/runtime.py": "0992cd749605df1cd79d0f64ce2b5dbac0c9e7b48124fec2a5fd3b454c263819",
+    "examples/ods/data_stream_demo/__init__.py": "c9041fac160c5ee047510a80b557bb60b3d92de74a291ed68744365508d72fe0",
+    "examples/ods/data_stream_demo/acquisition.py": "a2188f50b0fc1dba3de02b8fde2a3b20b76ea510770abf271d2caaecc122d89c",
+    "examples/ods/data_stream_demo/lerobot_io.py": "aeec5641a3e50b1fbe6ff46829a0cbe0d1a498715e0de0aa38357d554c159d5f",
+    "examples/ods/data_stream_demo/metrics.py": "c67bd79d04eb8c79361cecc18d937e1531125cbe6f4f4ad079c1133ea79ed90b",
+    "examples/ods/data_stream_demo/payload.py": "65a6e074aab6becb8a9fc46fffad0753f997bad22e10e69f25426b09af04379d",
+    "examples/ods/data_stream_demo/qualify_encoder.py": "043a94098f5672d50b58c06ec82ea84f4b9c23b9ca27fff469f309cb7f0b4647",
+    "examples/ods/data_stream_demo/report.py": "796d64a3604f692478a3023cf2242e19311d8726ccfb95e9773571ff58a66fde",
+    "examples/ods/data_stream_demo/run.py": "dd4369b5f83f728bce1feafca6ba397ba9db3a3434b8f1681bd74699106bed17",
+    "examples/ods/data_stream_demo/suite.py": "bde907ce27499f73c35686f42f4cdcf7f9d94d868e90317a6e9bc3500286a278",
+    "examples/ods/data_stream_demo/train.py": "1cbe47d228d6eba8559b74aa24fdc706949e3a700c45d8464b1b1f71f1182736",
+    "examples/ods/data_stream_demo/training_audit.py": "75e3ce65d8130972265d55b5819a70d9d4d73c91cd5adcb0ef8a2f2ae717e3ce",
+    "examples/ods/data_stream_demo/training_data.py": "dfae919f69d9e76f5e468ce3f7335f9fed130abf8673922d9757e5503c56da2b",
+    "examples/ods/data_stream_demo/training_eval.py": "e65b3def87df59531caf997577635d66beb0a2f5f695d7e0b2233817ca2003ee",
+    "examples/ods/data_stream_demo/training_metrics.py": "2bb613b2235bb8fa9f09b383beb8c27b8a4810e648adf290848063d6b34dcd72",
+    "examples/ods/data_stream_demo/training_report.py": "c9c6678446742b1f6798e7f366958781da528aaa7184c26dd43c81c00356d17d",
+    "examples/ods/data_stream_demo/training_suite.py": "e25ee63e7782d175737b5780156810231e05f03cfb622089e6e13e4db5eb9919",
+    "examples/ods/data_stream_demo/video_integrity.py": "e1286b2a60902fc7b0302e6d4decaeb024f36883d0b90066a8d4fc159a29c7d1",
+    "examples/ods/data_stream_demo/visual_policy.py": "c587fa2f9120c9163777ae9567a22cd77039fda2566b70ebf9836d5a4c50fbf4",
+    "examples/ods/simple_bc_demo/config.py": "57b27cf7f38806c8a0993990dc2767de320f8f2102d47d9a4b1fdaf7e8ffdac4",
+    "examples/ods/simple_bc_demo/configs/env.yaml": "c801ab47187fbd0e9079208149077a781ce48dda0afd4c0ccd7a5bbe8f63dfa9",
+    "examples/ods/simple_bc_demo/configs/franka.yaml": "592bf09371e3e1c74a3aff9ee951cccb853f8a41d06dba314842fd49e0cb3366",
+    "examples/ods/simple_bc_demo/configs/task.yaml": "5d33898f4b18821ee5b8dff680663258de4e231202474259cf4c38bc416a9a4e",
+    "examples/ods/simple_bc_demo/environment.py": "107e0037361ea4e7635d503be9764622f50130a253de544f5bf9eebb41362329",
+    "embodichain/learning/models/resnet_encoder.py": "32f2fb7463d80f317569084d908f3e7e741a36590d5a00ac177bc54f20ff8b90",
+    "embodichain/learning/models/mlp.py": "c607360edb8bff98f234b84400155da680129b5653c5b2e7b41b869b050e8a81",
+    "embodichain/learning/models/normalizer.py": "f9e59e8eadf568d7533aa4e91d639aaf207b0843d6c8aaaa24954c870afb4764",
+    "embodichain/learning/models/__init__.py": "62dfb80b90068ab82f28a9d312f865a6e68014eaed6655a13f6779f2b6b41a0e"
+  },
+  "limitations": [
+    "Each primary GPU passes three zero-utilization readings and has at least 16 GiB free; admission is not an exclusive reservation.",
+    "One generation/training UUID pair and eight disjoint CPUs are held for each seed/vision group; at most two groups run concurrently.",
+    "Outside a pipeline's primary pair, an explicit auxiliary UUID permits only owned pure-G contexts with known per-PID memory <=8 MiB. It may also be an explicitly selected idle primary of another pipeline; per-process-group limits still apply.",
+    "Periodic process-tree/process-group GPU audits can miss short-lived contexts; matching native UUID placement still needs qualification.",
+    "Total pipeline time ends after normal training-worker exit; independent evaluation is outside that time."
+  ]
+}

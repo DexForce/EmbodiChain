@@ -1,0 +1,55 @@
+{
+  "output": "/tmp/ods-group-grace-qualified-20261021/zombie_only",
+  "status": "failed",
+  "returncode": 0,
+  "elapsed_seconds": 2.000441353,
+  "stage": "audit",
+  "evaluation": false,
+  "timeout": false,
+  "cancelled": false,
+  "leaked_process_group": true,
+  "process_group_shutdown": {
+    "grace_seconds": 2.0,
+    "wait_seconds": 2.000435864087194,
+    "poll_count": 41,
+    "group_disappeared": false,
+    "initial": {
+      "monotonic_ns": 1772722926762023,
+      "pgid": 2235518,
+      "exists": true,
+      "members": [
+        {
+          "pid": 2235519,
+          "ppid": 2235504,
+          "create_time": 1792608681.91,
+          "name": "python",
+          "state": "zombie",
+          "cmdline_error": "psutil.ZombieProcess(pid=2235519, name='python', msg=\"PID still exists but it's a zombie\")"
+        }
+      ],
+      "inspection_errors": [],
+      "member_kind": "zombie_only"
+    },
+    "final": {
+      "monotonic_ns": 1772724926824566,
+      "pgid": 2235518,
+      "exists": true,
+      "members": [
+        {
+          "pid": 2235519,
+          "ppid": 2235504,
+          "create_time": 1792608681.91,
+          "name": "python",
+          "state": "zombie",
+          "cmdline_error": "psutil.ZombieProcess(pid=2235519, name='python', msg=\"PID still exists but it's a zombie\")"
+        }
+      ],
+      "inspection_errors": [],
+      "member_kind": "zombie_only"
+    },
+    "termination_attempted": false
+  },
+  "pgid": 2235518,
+  "process_launch_monotonic_ns": 1772722926758167,
+  "device_guard": {}
+}

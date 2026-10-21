@@ -1,0 +1,297 @@
+/root/miniconda3/envs/py311/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+2026-10-21 18:55:37.209 UTC │ JAX version 0.5.3 available.
+VERSION file not found.
+2026-10-21 18:55:38.404 UTC │ INFO    │ EmbodiChain │ [OnlineDataEngine] Simulation subprocess started (PID=2236183).
+/root/miniconda3/envs/py311/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+2026-10-21 18:55:44.925 UTC │ JAX version 0.5.3 available.
+2026-10-21 18:55:51.018 UTC │ INFO    │ EmbodiChain │ Initializing 1 environments on cuda:0.
+[1;33m[DexSim WARNING] /root/sources/dexsim/cpp/dexsim/engine/function/scene/DFSceneAssimp.cpp:933: Rejected invalid imported normals: file='/root/.cache/embodichain_data/extract/Franka/Panda/meshes/robot_arms/fr3/visual/link0.obj', mesh='_01_Base_URDF_color_255_255_255.017', invalid=6, first_vertex=420[0;m
+[1;33m[DexSim WARNING] /root/sources/dexsim/cpp/dexsim/engine/function/scene/DFSceneAssimp.cpp:933: Rejected invalid imported normals: file='/root/.cache/embodichain_data/extract/Franka/Panda/meshes/robot_arms/fr3/visual/link7.obj', mesh='_08_FLANGE_URDF_color_192_192_192.014', invalid=22, first_vertex=69[0;m
+[DexSim INFO] /root/sources/dexsim/cpp/dexsim/engine/render/optix/component/render/DFDataFrameOptiX.cpp:521: OptiX denoiser configured for FastRT offscreen target: resolution=256x256, cameras=1
+[DexSim INFO] /root/sources/dexsim/cpp/dexsim/engine/render/optix/component/render/DFDataFrameOptiX.cpp:521: OptiX denoiser configured for FastRT offscreen target: resolution=256x256, cameras=1
+2026-10-21 18:55:52.827 UTC │ INFO    │ EmbodiChain │ Initializing functor 'arm' with class 'RelativeEefPoseAction'.
+2026-10-21 18:55:52.828 UTC │ INFO    │ EmbodiChain │ Initializing functor 'eef' with class 'ParallelGripperAction'.
+╭──────────────────────────────────────────────────────────────────────────────────────────────╮
+│                     EmbodiChain · Environment initialized: PickPlaceEnv                      │
+├───────────────┬───────────────────────┬──────────────────────────────────────────────────────┤
+│ Section       │ Setting               │ Value                                                │
+├───────────────┼───────────────────────┼──────────────────────────────────────────────────────┤
+│ Runtime       │ Versions              │ EmbodiChain unknown · DexSim                         │
+│               │                       │ 0.5.1+401968ebfd112a3c11ab9deea338e2418542fe6e       │
+│               │ Compute device        │ cuda:0                                               │
+│               │ Parallel environments │ 1 · spacing 2.5 m                                    │
+├───────────────┼───────────────────────┼──────────────────────────────────────────────────────┤
+│ Rendering     │ Renderer              │ fast-rt                                              │
+│               │ Graphics API          │ Vulkan                                               │
+│               │ Render GPU            │ NVIDIA RTX PRO 5000 72GB Blackwell · GPU 0           │
+│               │ Native window         │ CLOSED                                               │
+│               │ Browser viewer        │ OFF                                                  │
+│               │ Viewer resolution     │ 1920 × 1080                                          │
+│               │ Tone mapping          │ OFF                                                  │
+├───────────────┼───────────────────────┼──────────────────────────────────────────────────────┤
+│ Physics       │ Backend               │ Default                                              │
+│               │ Solver                │ Constraint Dynamics                                  │
+│               │ Collision policy      │ isolated                                             │
+│               │ Physics timestep      │ 4.16667 ms (240 Hz)                                  │
+│               │ Gravity               │ [0, 0, -9.81] m/s²                                   │
+├───────────────┼───────────────────────┼──────────────────────────────────────────────────────┤
+│ Scene / env   │ Robots                │ 1                                                    │
+│               │ Articulations         │ 0                                                    │
+│               │ Rigid objects         │ 2                                                    │
+│               │ Visual objects        │ 0                                                    │
+│               │ Object groups         │ 0                                                    │
+│               │ Deformables           │ 0                                                    │
+│               │ Sensors               │ 2                                                    │
+├───────────────┼───────────────────────┼──────────────────────────────────────────────────────┤
+│ Scene         │ Default ground        │ GLOBAL                                               │
+│               │ Native window         │ CLOSED                                               │
+├───────────────┼───────────────────────┼──────────────────────────────────────────────────────┤
+│ Sensors / env │ cam_high              │ Camera · 256 × 256 · color                           │
+│               │ cam_wrist             │ Camera · 256 × 256 · color                           │
+├───────────────┼───────────────────────┼──────────────────────────────────────────────────────┤
+│ Scene         │ State                 │ READY                                                │
+├───────────────┼───────────────────────┼──────────────────────────────────────────────────────┤
+│ Environment   │ Config                │ EmbodiedEnvCfg                                       │
+│               │ Seed                  │ 19001                                                │
+│               │ Robot                 │ Robot (uid=FrankaPanda)                              │
+│               │ Sensors               │ 2 (cam_high, cam_wrist)                              │
+│               │ Control timestep      │ 0.0333333 s (30 Hz, 8 physics steps)                 │
+│               │ Episode limit         │ 600 control steps                                    │
+├───────────────┼───────────────────────┼──────────────────────────────────────────────────────┤
+│ Managers      │ Total                 │ 4/5 active, 6 functors                               │
+│               │ EventManager          │ 0 functors                                           │
+│               │ ObservationManager    │ 4 functors                                           │
+│               │ ActionManager         │ 2 functors                                           │
+│               │ RewardManager         │ 0 functors                                           │
+│               │ DatasetManager        │ disabled                                             │
+╰───────────────┴───────────────────────┴──────────────────────────────────────────────────────╯
+
+╭────────────────────────────────────────────────────────────────────────────────────╮
+│                      EmbodiChain · Functor Details · 6 active                      │
+├────────────────────────┬────────────────────────────┬───────┬──────────────────────┤
+│ Name                   │ Callable                   │ Mode  │ Details              │
+├────────────────────────┼────────────────────────────┼───────┼──────────────────────┤
+│ ObservationManager · 4 │                            │       │                      │
+├────────────────────────┼────────────────────────────┼───────┼──────────────────────┤
+│ tcp_pose               │ observations.get_robot_eef │ add   │ output=tcp_pose      │
+│                        │ _pose                      │       │                      │
+│ cube_velocity          │ observations.get_rigid_obj │ add   │ output=cube_velocity │
+│                        │ ect_velocity               │       │ entity=cube          │
+│ cube_pose              │ observations.get_object_po │ add   │ output=cube_pose     │
+│                        │ se                         │       │ entity=cube          │
+│ goal_position          │ observations.target_positi │ add   │ output=goal_position │
+│                        │ on                         │       │                      │
+├────────────────────────┼────────────────────────────┼───────┼──────────────────────┤
+│ ActionManager · 2      │                            │       │                      │
+├────────────────────────┼────────────────────────────┼───────┼──────────────────────┤
+│ arm                    │ RelativeEefPoseAction      │ terms │ command=qpos · dim=6 │
+│ eef                    │ ParallelGripperAction      │ terms │ command=qpos · dim=1 │
+╰────────────────────────┴────────────────────────────┴───────┴──────────────────────╯
+2026-10-21 18:55:52.895 UTC │ INFO    │ EmbodiChain │ [Simulation Process] Environment created.
+2026-10-21 18:55:52.895 UTC │ INFO    │ EmbodiChain │ [Simulation Process] Fill signal received. Starting full buffer fill.
+VERSION file not found.
+Ep 0 · Seg #1 · pick_cube: 0step [00:00, ?step/s]Ep 0 · Seg #1 · pick_cube: 1step [00:00,  7.94step/s]Ep 0 · Seg #1 · pick_cube: 2step [00:00,  8.21step/s]Ep 0 · Seg #1 · pick_cube: 6step [00:00, 20.92step/s]Ep 0 · Seg #1 · pick_cube: 11step [00:00, 28.91step/s]Ep 0 · Seg #1 · pick_cube: 15step [00:00, 32.40step/s]Ep 0 · Seg #1 · pick_cube: 19step [00:00, 34.68step/s]Ep 0 · Seg #1 · pick_cube: 23step [00:00, 36.07step/s]Ep 0 · Seg #1 · pick_cube: 27step [00:00, 37.00step/s]Ep 0 · Seg #1 · pick_cube: 31step [00:00, 37.55step/s]Ep 0 · Seg #1 · pick_cube: 35step [00:01, 37.83step/s]Ep 0 · Seg #1 · pick_cube: 39step [00:01, 38.14step/s]Ep 0 · Seg #1 · pick_cube: 43step [00:01, 36.29step/s]Ep 0 · Seg #1 · pick_cube: 47step [00:01, 36.87step/s]Ep 0 · Seg #1 · pick_cube: 51step [00:01, 37.35step/s]Ep 0 · Seg #1 · pick_cube: 55step [00:01, 37.61step/s]Ep 0 · Seg #1 · pick_cube: 59step [00:01, 37.89step/s]Ep 0 · Seg #1 · pick_cube: 63step [00:01, 38.16step/s]Ep 0 · Seg #1 · pick_cube: 67step [00:01, 38.33step/s]Ep 0 · Seg #1 · pick_cube: 71step [00:02, 38.44step/s]Ep 0 · Seg #1 · pick_cube: 75step [00:02, 38.53step/s]Ep 0 · Seg #1 · pick_cube: 79step [00:02, 38.63step/s]Ep 0 · Seg #1 · pick_cube: 83step [00:02, 38.32step/s]Ep 0 · Seg #1 · pick_cube: 87step [00:02, 38.06step/s]Ep 0 · Seg #1 · pick_cube: 91step [00:02, 38.06step/s]Ep 0 · Seg #1 · pick_cube: 95step [00:02, 37.97step/s]Ep 0 · Seg #1 · pick_cube: 99step [00:02, 38.21step/s]Ep 0 · Seg #1 · pick_cube: 103step [00:02, 38.22step/s]Ep 0 · Seg #1 · pick_cube: 107step [00:02, 38.39step/s]Ep 0 · Seg #1 · pick_cube: 111step [00:03, 38.19step/s]Ep 0 · Seg #1 · pick_cube: 115step [00:03, 38.19step/s]Ep 0 · Seg #1 · pick_cube: 119step [00:03, 38.15step/s]Ep 0 · Seg #1 · pick_cube: 123step [00:03, 37.89step/s]Ep 0 · Seg #1 · pick_cube: 127step [00:03, 37.66step/s]Ep 0 · Seg #1 · pick_cube: 131step [00:03, 37.98step/s]Ep 0 · Seg #1 · pick_cube: 135step [00:03, 37.79step/s]Ep 0 · Seg #1 · pick_cube: 139step [00:03, 37.48step/s]Ep 0 · Seg #1 · pick_cube: 143step [00:03, 37.09step/s]Ep 0 · Seg #1 · pick_cube: 147step [00:04, 36.40step/s]Ep 0 · Seg #1 · pick_cube: 151step [00:04, 36.11step/s]Ep 0 · Seg #1 · pick_cube: 155step [00:04, 35.51step/s]Ep 0 · Seg #1 · pick_cube: 159step [00:04, 35.15step/s]Ep 0 · Seg #1 · pick_cube: 163step [00:04, 34.46step/s]Ep 0 · Seg #1 · pick_cube: 167step [00:04, 34.26step/s]Ep 0 · Seg #1 · pick_cube: 171step [00:04, 34.09step/s]Ep 0 · Seg #1 · pick_cube: 175step [00:04, 34.68step/s]Ep 0 · Seg #1 · pick_cube: 179step [00:04, 35.69step/s]Ep 0 · Seg #1 · pick_cube: 183step [00:05, 36.41step/s]Ep 0 · Seg #1 · pick_cube: 187step [00:05, 36.91step/s]Ep 0 · Seg #1 · pick_cube: 191step [00:05, 36.54step/s]Ep 0 · Seg #1 · pick_cube: 195step [00:05, 36.18step/s]Ep 0 · Seg #1 · pick_cube: 199step [00:05, 35.59step/s]Ep 0 · Seg #1 · pick_cube: 203step [00:05, 35.34step/s]Ep 0 · Seg #1 · pick_cube: 207step [00:05, 35.29step/s]Ep 0 · Seg #1 · pick_cube: 211step [00:05, 35.22step/s]Ep 0 · Seg #1 · pick_cube: 215step [00:05, 35.04step/s]Ep 0 · Seg #1 · pick_cube: 219step [00:06, 35.03step/s]Ep 0 · Seg #1 · pick_cube: 223step [00:06, 35.00step/s]Ep 0 · Seg #1 · pick_cube: 227step [00:06, 34.91step/s]Ep 0 · Seg #1 · pick_cube: 231step [00:06, 34.79step/s]Ep 0 · Seg #1 · pick_cube: 235step [00:06, 34.75step/s]Ep 0 · Seg #1 · pick_cube: 239step [00:06, 34.15step/s]Ep 0 · Seg #1 · pick_cube: 243step [00:06, 34.37step/s]Ep 0 · Seg #1 · pick_cube: 247step [00:06, 35.40step/s]Ep 0 · Seg #1 · pick_cube: 251step [00:07, 36.25step/s]Ep 0 · Seg #1 · pick_cube: 255step [00:07, 36.83step/s]Ep 0 · Seg #1 · pick_cube: 259step [00:07, 37.01step/s]Ep 0 · Seg #1 · pick_cube: 263step [00:07, 37.01step/s]                                                       Ep 0 · Seg #2 · place_cube: 0step [00:00, ?step/s]Ep 0 · Seg #2 · place_cube: 4step [00:00, 35.49step/s]Ep 0 · Seg #2 · place_cube: 8step [00:00, 36.53step/s]Ep 0 · Seg #2 · place_cube: 12step [00:00, 36.50step/s]Ep 0 · Seg #2 · place_cube: 16step [00:00, 36.68step/s]Ep 0 · Seg #2 · place_cube: 20step [00:00, 36.57step/s]Ep 0 · Seg #2 · place_cube: 24step [00:00, 36.70step/s]Ep 0 · Seg #2 · place_cube: 28step [00:00, 36.39step/s]Ep 0 · Seg #2 · place_cube: 32step [00:00, 36.07step/s]Ep 0 · Seg #2 · place_cube: 36step [00:00, 35.50step/s]Ep 0 · Seg #2 · place_cube: 40step [00:01, 35.30step/s]Ep 0 · Seg #2 · place_cube: 44step [00:01, 35.22step/s]Ep 0 · Seg #2 · place_cube: 48step [00:01, 34.94step/s]Ep 0 · Seg #2 · place_cube: 52step [00:01, 34.90step/s]Ep 0 · Seg #2 · place_cube: 56step [00:01, 34.76step/s]Ep 0 · Seg #2 · place_cube: 60step [00:01, 34.85step/s]Ep 0 · Seg #2 · place_cube: 64step [00:01, 34.77step/s]Ep 0 · Seg #2 · place_cube: 68step [00:01, 34.73step/s]Ep 0 · Seg #2 · place_cube: 72step [00:02, 34.39step/s]Ep 0 · Seg #2 · place_cube: 76step [00:02, 34.56step/s]Ep 0 · Seg #2 · place_cube: 80step [00:02, 35.05step/s]Ep 0 · Seg #2 · place_cube: 84step [00:02, 35.49step/s]Ep 0 · Seg #2 · place_cube: 88step [00:02, 35.89step/s]Ep 0 · Seg #2 · place_cube: 92step [00:02, 36.23step/s]Ep 0 · Seg #2 · place_cube: 96step [00:02, 36.38step/s]Ep 0 · Seg #2 · place_cube: 100step [00:02, 36.17step/s]Ep 0 · Seg #2 · place_cube: 104step [00:02, 36.09step/s]Ep 0 · Seg #2 · place_cube: 108step [00:03, 36.06step/s]Ep 0 · Seg #2 · place_cube: 112step [00:03, 36.23step/s]Ep 0 · Seg #2 · place_cube: 116step [00:03, 35.90step/s]Ep 0 · Seg #2 · place_cube: 120step [00:03, 35.92step/s]Ep 0 · Seg #2 · place_cube: 124step [00:03, 35.94step/s]Ep 0 · Seg #2 · place_cube: 128step [00:03, 35.90step/s]Ep 0 · Seg #2 · place_cube: 132step [00:03, 35.64step/s]Ep 0 · Seg #2 · place_cube: 136step [00:03, 35.60step/s]Ep 0 · Seg #2 · place_cube: 140step [00:03, 35.34step/s]Ep 0 · Seg #2 · place_cube: 144step [00:04, 35.22step/s]Ep 0 · Seg #2 · place_cube: 148step [00:04, 35.12step/s]Ep 0 · Seg #2 · place_cube: 152step [00:04, 34.71step/s]Ep 0 · Seg #2 · place_cube: 156step [00:04, 34.36step/s]Ep 0 · Seg #2 · place_cube: 160step [00:04, 34.90step/s]Ep 0 · Seg #2 · place_cube: 164step [00:04, 35.55step/s]Ep 0 · Seg #2 · place_cube: 168step [00:04, 36.01step/s]Ep 0 · Seg #2 · place_cube: 172step [00:04, 36.19step/s]Ep 0 · Seg #2 · place_cube: 176step [00:04, 36.03step/s]Ep 0 · Seg #2 · place_cube: 180step [00:05, 36.47step/s]Ep 0 · Seg #2 · place_cube: 185step [00:05, 37.79step/s]Ep 0 · Seg #2 · place_cube: 189step [00:05, 37.99step/s]Ep 0 · Seg #2 · place_cube: 193step [00:05, 37.83step/s]Ep 0 · Seg #2 · place_cube: 197step [00:05, 37.68step/s]Ep 0 · Seg #2 · place_cube: 201step [00:05, 37.75step/s]Ep 0 · Seg #2 · place_cube: 205step [00:05, 37.50step/s]                                                        2026-10-21 18:56:08.502 UTC │ INFO    │ EmbodiChain │ [Simulation Process] Rollout 1/2 done. lock_index=[0, 1], 
+Ep 1 · Seg #1 · pick_cube: 0step [00:00, ?step/s]Ep 1 · Seg #1 · pick_cube: 4step [00:00, 35.40step/s]Ep 1 · Seg #1 · pick_cube: 8step [00:00, 36.58step/s]Ep 1 · Seg #1 · pick_cube: 13step [00:00, 38.69step/s]Ep 1 · Seg #1 · pick_cube: 18step [00:00, 39.73step/s]Ep 1 · Seg #1 · pick_cube: 23step [00:00, 40.31step/s]Ep 1 · Seg #1 · pick_cube: 28step [00:00, 39.32step/s]Ep 1 · Seg #1 · pick_cube: 32step [00:00, 38.32step/s]Ep 1 · Seg #1 · pick_cube: 36step [00:00, 37.87step/s]Ep 1 · Seg #1 · pick_cube: 40step [00:01, 37.51step/s]Ep 1 · Seg #1 · pick_cube: 44step [00:01, 37.14step/s]Ep 1 · Seg #1 · pick_cube: 48step [00:01, 37.09step/s]Ep 1 · Seg #1 · pick_cube: 52step [00:01, 37.06step/s]Ep 1 · Seg #1 · pick_cube: 56step [00:01, 36.94step/s]Ep 1 · Seg #1 · pick_cube: 60step [00:01, 37.18step/s]Ep 1 · Seg #1 · pick_cube: 64step [00:01, 37.12step/s]Ep 1 · Seg #1 · pick_cube: 68step [00:01, 37.09step/s]Ep 1 · Seg #1 · pick_cube: 72step [00:01, 36.67step/s]Ep 1 · Seg #1 · pick_cube: 76step [00:02, 36.32step/s]Ep 1 · Seg #1 · pick_cube: 80step [00:02, 35.95step/s]Ep 1 · Seg #1 · pick_cube: 84step [00:02, 36.30step/s]Ep 1 · Seg #1 · pick_cube: 88step [00:02, 37.06step/s]Ep 1 · Seg #1 · pick_cube: 92step [00:02, 37.78step/s]Ep 1 · Seg #1 · pick_cube: 96step [00:02, 38.30step/s]Ep 1 · Seg #1 · pick_cube: 100step [00:02, 38.51step/s]Ep 1 · Seg #1 · pick_cube: 104step [00:02, 38.75step/s]Ep 1 · Seg #1 · pick_cube: 108step [00:02, 38.94step/s]Ep 1 · Seg #1 · pick_cube: 112step [00:02, 38.30step/s]Ep 1 · Seg #1 · pick_cube: 116step [00:03, 37.58step/s]Ep 1 · Seg #1 · pick_cube: 120step [00:03, 37.19step/s]Ep 1 · Seg #1 · pick_cube: 124step [00:03, 36.96step/s]Ep 1 · Seg #1 · pick_cube: 128step [00:03, 36.92step/s]Ep 1 · Seg #1 · pick_cube: 132step [00:03, 36.91step/s]Ep 1 · Seg #1 · pick_cube: 136step [00:03, 36.62step/s]Ep 1 · Seg #1 · pick_cube: 140step [00:03, 36.33step/s]Ep 1 · Seg #1 · pick_cube: 144step [00:03, 35.66step/s]Ep 1 · Seg #1 · pick_cube: 148step [00:03, 35.20step/s]Ep 1 · Seg #1 · pick_cube: 152step [00:04, 34.68step/s]Ep 1 · Seg #1 · pick_cube: 156step [00:04, 34.20step/s]Ep 1 · Seg #1 · pick_cube: 160step [00:04, 33.90step/s]Ep 1 · Seg #1 · pick_cube: 164step [00:04, 33.90step/s]Ep 1 · Seg #1 · pick_cube: 168step [00:04, 34.53step/s]Ep 1 · Seg #1 · pick_cube: 172step [00:04, 35.08step/s]Ep 1 · Seg #1 · pick_cube: 176step [00:04, 35.41step/s]Ep 1 · Seg #1 · pick_cube: 180step [00:04, 35.51step/s]Ep 1 · Seg #1 · pick_cube: 184step [00:05, 35.58step/s]Ep 1 · Seg #1 · pick_cube: 188step [00:05, 35.55step/s]Ep 1 · Seg #1 · pick_cube: 192step [00:05, 35.13step/s]Ep 1 · Seg #1 · pick_cube: 196step [00:05, 34.95step/s]Ep 1 · Seg #1 · pick_cube: 200step [00:05, 34.65step/s]Ep 1 · Seg #1 · pick_cube: 204step [00:05, 34.78step/s]Ep 1 · Seg #1 · pick_cube: 208step [00:05, 35.08step/s]Ep 1 · Seg #1 · pick_cube: 212step [00:05, 34.96step/s]Ep 1 · Seg #1 · pick_cube: 216step [00:05, 35.11step/s]Ep 1 · Seg #1 · pick_cube: 220step [00:06, 34.92step/s]Ep 1 · Seg #1 · pick_cube: 224step [00:06, 35.09step/s]Ep 1 · Seg #1 · pick_cube: 228step [00:06, 34.84step/s]Ep 1 · Seg #1 · pick_cube: 232step [00:06, 34.79step/s]Ep 1 · Seg #1 · pick_cube: 236step [00:06, 35.05step/s]Ep 1 · Seg #1 · pick_cube: 240step [00:06, 35.24step/s]Ep 1 · Seg #1 · pick_cube: 244step [00:06, 35.27step/s]Ep 1 · Seg #1 · pick_cube: 248step [00:06, 35.24step/s]Ep 1 · Seg #1 · pick_cube: 252step [00:06, 35.58step/s]Ep 1 · Seg #1 · pick_cube: 256step [00:07, 36.31step/s]Ep 1 · Seg #1 · pick_cube: 260step [00:07, 36.85step/s]Ep 1 · Seg #1 · pick_cube: 264step [00:07, 37.19step/s]                                                       Ep 1 · Seg #2 · place_cube: 0step [00:00, ?step/s]Ep 1 · Seg #2 · place_cube: 4step [00:00, 34.02step/s]Ep 1 · Seg #2 · place_cube: 8step [00:00, 34.61step/s]Ep 1 · Seg #2 · place_cube: 12step [00:00, 34.44step/s]Ep 1 · Seg #2 · place_cube: 16step [00:00, 34.01step/s]Ep 1 · Seg #2 · place_cube: 20step [00:00, 34.30step/s]Ep 1 · Seg #2 · place_cube: 24step [00:00, 34.58step/s]Ep 1 · Seg #2 · place_cube: 28step [00:00, 34.69step/s]Ep 1 · Seg #2 · place_cube: 32step [00:00, 34.78step/s]Ep 1 · Seg #2 · place_cube: 36step [00:01, 35.20step/s]Ep 1 · Seg #2 · place_cube: 40step [00:01, 35.80step/s]Ep 1 · Seg #2 · place_cube: 44step [00:01, 36.25step/s]Ep 1 · Seg #2 · place_cube: 48step [00:01, 36.52step/s]Ep 1 · Seg #2 · place_cube: 52step [00:01, 36.19step/s]Ep 1 · Seg #2 · place_cube: 56step [00:01, 35.68step/s]Ep 1 · Seg #2 · place_cube: 60step [00:01, 35.42step/s]Ep 1 · Seg #2 · place_cube: 64step [00:01, 35.08step/s]Ep 1 · Seg #2 · place_cube: 68step [00:01, 34.96step/s]Ep 1 · Seg #2 · place_cube: 72step [00:02, 34.57step/s]Ep 1 · Seg #2 · place_cube: 76step [00:02, 34.50step/s]Ep 1 · Seg #2 · place_cube: 80step [00:02, 34.48step/s]Ep 1 · Seg #2 · place_cube: 84step [00:02, 34.60step/s]Ep 1 · Seg #2 · place_cube: 88step [00:02, 34.51step/s]Ep 1 · Seg #2 · place_cube: 92step [00:02, 34.75step/s]Ep 1 · Seg #2 · place_cube: 96step [00:02, 34.82step/s]Ep 1 · Seg #2 · place_cube: 100step [00:02, 35.34step/s]Ep 1 · Seg #2 · place_cube: 104step [00:02, 35.72step/s]Ep 1 · Seg #2 · place_cube: 108step [00:03, 36.11step/s]Ep 1 · Seg #2 · place_cube: 112step [00:03, 36.37step/s]Ep 1 · Seg #2 · place_cube: 116step [00:03, 36.61step/s]Ep 1 · Seg #2 · place_cube: 120step [00:03, 36.65step/s]Ep 1 · Seg #2 · place_cube: 124step [00:03, 36.72step/s]Ep 1 · Seg #2 · place_cube: 128step [00:03, 36.44step/s]Ep 1 · Seg #2 · place_cube: 132step [00:03, 35.96step/s]Ep 1 · Seg #2 · place_cube: 136step [00:03, 35.54step/s]Ep 1 · Seg #2 · place_cube: 140step [00:03, 35.26step/s]Ep 1 · Seg #2 · place_cube: 144step [00:04, 35.04step/s]Ep 1 · Seg #2 · place_cube: 148step [00:04, 34.93step/s]Ep 1 · Seg #2 · place_cube: 152step [00:04, 34.71step/s]Ep 1 · Seg #2 · place_cube: 156step [00:04, 34.71step/s]Ep 1 · Seg #2 · place_cube: 160step [00:04, 34.70step/s]Ep 1 · Seg #2 · place_cube: 164step [00:04, 34.81step/s]Ep 1 · Seg #2 · place_cube: 168step [00:04, 35.40step/s]Ep 1 · Seg #2 · place_cube: 172step [00:04, 35.99step/s]Ep 1 · Seg #2 · place_cube: 176step [00:04, 36.53step/s]Ep 1 · Seg #2 · place_cube: 180step [00:05, 37.47step/s]Ep 1 · Seg #2 · place_cube: 184step [00:05, 38.11step/s]Ep 1 · Seg #2 · place_cube: 188step [00:05, 38.49step/s]Ep 1 · Seg #2 · place_cube: 192step [00:05, 38.82step/s]Ep 1 · Seg #2 · place_cube: 196step [00:05, 38.99step/s]Ep 1 · Seg #2 · place_cube: 200step [00:05, 39.22step/s]Ep 1 · Seg #2 · place_cube: 204step [00:05, 39.42step/s]Ep 1 · Seg #2 · place_cube: 208step [00:05, 39.20step/s]                                                        2026-10-21 18:56:23.444 UTC │ INFO    │ EmbodiChain │ [Simulation Process] Rollout 2/2 done. lock_index=[1, 2], 
+2026-10-21 18:56:23.445 UTC │ INFO    │ EmbodiChain │ [Simulation Process] Initial buffer fill complete. Engine is ready.
+2026-10-21 18:56:23.712 UTC │ Using video codec: libsvtav1
+2026-10-21 18:56:24.073 UTC │ INFO    │ EmbodiChain │ [Simulation Process] Fill signal received. Starting full buffer fill.
+Ep 0 · Seg #1 · pick_cube: 0step [00:00, ?step/s]Ep 0 · Seg #1 · pick_cube: 4step [00:00, 34.05step/s]Ep 0 · Seg #1 · pick_cube: 8step [00:00, 34.62step/s]Ep 0 · Seg #1 · pick_cube: 12step [00:00, 34.79step/s]Ep 0 · Seg #1 · pick_cube: 16step [00:00, 34.77step/s]Ep 0 · Seg #1 · pick_cube: 20step [00:00, 34.77step/s]Ep 0 · Seg #1 · pick_cube: 24step [00:00, 34.82step/s]Ep 0 · Seg #1 · pick_cube: 28step [00:00, 34.87step/s]Ep 0 · Seg #1 · pick_cube: 32step [00:00, 34.92step/s]Ep 0 · Seg #1 · pick_cube: 36step [00:01, 34.94step/s]Ep 0 · Seg #1 · pick_cube: 40step [00:01, 34.95step/s]Ep 0 · Seg #1 · pick_cube: 44step [00:01, 34.90step/s]Ep 0 · Seg #1 · pick_cube: 48step [00:01, 34.93step/s]Ep 0 · Seg #1 · pick_cube: 52step [00:01, 34.96step/s]Ep 0 · Seg #1 · pick_cube: 56step [00:01, 35.58step/s]Ep 0 · Seg #1 · pick_cube: 60step [00:01, 36.12step/s]Ep 0 · Seg #1 · pick_cube: 64step [00:01, 36.50step/s]Ep 0 · Seg #1 · pick_cube: 68step [00:01, 37.20step/s]Ep 0 · Seg #1 · pick_cube: 72step [00:02, 37.46step/s]Ep 0 · Seg #1 · pick_cube: 76step [00:02, 36.43step/s]Ep 0 · Seg #1 · pick_cube: 80step [00:02, 35.80step/s]Ep 0 · Seg #1 · pick_cube: 84step [00:02, 35.16step/s]Ep 0 · Seg #1 · pick_cube: 88step [00:02, 34.98step/s]Ep 0 · Seg #1 · pick_cube: 92step [00:02, 34.94step/s]Ep 0 · Seg #1 · pick_cube: 96step [00:02, 34.75step/s]Ep 0 · Seg #1 · pick_cube: 100step [00:02, 34.58step/s]Ep 0 · Seg #1 · pick_cube: 104step [00:02, 34.54step/s]Ep 0 · Seg #1 · pick_cube: 108step [00:03, 34.50step/s]Ep 0 · Seg #1 · pick_cube: 112step [00:03, 34.57step/s]Ep 0 · Seg #1 · pick_cube: 116step [00:03, 34.61step/s]Ep 0 · Seg #1 · pick_cube: 120step [00:03, 34.34step/s]Ep 0 · Seg #1 · pick_cube: 124step [00:03, 34.42step/s]Ep 0 · Seg #1 · pick_cube: 128step [00:03, 34.49step/s]Ep 0 · Seg #1 · pick_cube: 132step [00:03, 34.36step/s]Ep 0 · Seg #1 · pick_cube: 136step [00:03, 33.72step/s]Ep 0 · Seg #1 · pick_cube: 140step [00:04, 33.81step/s]Ep 0 · Seg #1 · pick_cube: 144step [00:04, 34.01step/s]Map:   0%|          | 0/471 [00:00<?, ? examples/s]Ep 0 · Seg #1 · pick_cube: 148step [00:04, 34.29step/s]Map:  97%|█████████▋| 455/471 [00:00<00:00, 4520.83 examples/s]Map: 100%|██████████| 471/471 [00:00<00:00, 4294.31 examples/s]
+2026-10-21 18:56:29.429 UTC │ Using video codec: libsvtav1
+Svt[info]: -------------------------------------------
+Svt[info]: SVT [version]:	SVT-AV1 Encoder Lib v3.0.0
+Svt[info]: SVT [build]  :	GCC 14.2.1 20250110 (Red Hat 14.2.1-7)	 64 bit
+Svt[info]: LIB Build date: Jul  3 2025 03:14:07
+Svt[info]: -------------------------------------------
+Svt[warn]: Preset M12 is mapped to M10.
+Svt[info]: Level of Parallelism: 1
+Svt[info]: Number of PPCS 42
+Svt[info]: [asm level on system : up to avx512icl]
+Svt[info]: [asm level selected : up to avx512icl]
+Svt[info]: -------------------------------------------
+Svt[info]: SVT [config]: main profile	tier (auto)	level (auto)
+Svt[info]: SVT [config]: width / height / fps numerator / fps denominator 		: 256 / 256 / 30 / 1
+Svt[info]: SVT [config]: bit-depth / color format 					: 8 / YUV420
+Svt[info]: SVT [config]: preset / tune / pred struct 					: 10 / PSNR / random access
+Svt[info]: SVT [config]: gop size / mini-gop size / key-frame type 			: 2 / 16 / key frame
+Svt[info]: SVT [config]: BRC mode / rate factor 					: CRF / 30 
+Svt[info]: SVT [config]: AQ mode / variance boost 					: 2 / 0
+Svt[info]: SVT [config]: sharpness / luminance-based QP bias 			: 0 / 0
+Svt[info]: Svt[info]: -------------------------------------------
+Svt[warn]: Failed to set thread priority: Invalid argument
+Ep 0 · Seg #1 · pick_cube: 152step [00:04, 34.12step/s]Ep 0 · Seg #1 · pick_cube: 156step [00:04, 33.23step/s]Ep 0 · Seg #1 · pick_cube: 160step [00:04, 32.39step/s]Ep 0 · Seg #1 · pick_cube: 164step [00:04, 32.14step/s]Ep 0 · Seg #1 · pick_cube: 168step [00:04, 31.90step/s]Ep 0 · Seg #1 · pick_cube: 172step [00:04, 31.90step/s]Ep 0 · Seg #1 · pick_cube: 176step [00:05, 31.63step/s]Ep 0 · Seg #1 · pick_cube: 180step [00:05, 31.81step/s]Ep 0 · Seg #1 · pick_cube: 184step [00:05, 31.49step/s]Ep 0 · Seg #1 · pick_cube: 188step [00:05, 31.60step/s]Ep 0 · Seg #1 · pick_cube: 192step [00:05, 31.93step/s]Ep 0 · Seg #1 · pick_cube: 196step [00:05, 31.92step/s]Ep 0 · Seg #1 · pick_cube: 200step [00:05, 32.08step/s]Ep 0 · Seg #1 · pick_cube: 204step [00:06, 31.45step/s]2026-10-21 18:56:31.210 UTC │ Using video codec: libsvtav1
+Svt[info]: -------------------------------------------
+Svt[info]: SVT [version]:	SVT-AV1 Encoder Lib v3.0.0
+Svt[info]: SVT [build]  :	GCC 14.2.1 20250110 (Red Hat 14.2.1-7)	 64 bit
+Svt[info]: LIB Build date: Jul  3 2025 03:14:07
+Svt[info]: -------------------------------------------
+Svt[warn]: Preset M12 is mapped to M10.
+Svt[info]: Level of Parallelism: 1
+Svt[info]: Number of PPCS 42
+Svt[info]: [asm level on system : up to avx512icl]
+Svt[info]: [asm level selected : up to avx512icl]
+Svt[info]: -------------------------------------------
+Svt[info]: SVT [config]: main profile	tier (auto)	level (auto)
+Svt[info]: SVT [config]: width / height / fps numerator / fps denominator 		: 256 / 256 / 30 / 1
+Svt[info]: SVT [config]: bit-depth / color format 					: 8 / YUV420
+Svt[info]: SVT [config]: preset / tune / pred struct 					: 10 / PSNR / random access
+Svt[info]: SVT [config]: gop size / mini-gop size / key-frame type 			: 2 / 16 / key frame
+Svt[info]: SVT [config]: BRC mode / rate factor 					: CRF / 30 
+Svt[info]: SVT [config]: AQ mode / variance boost 					: 2 / 0
+Svt[info]: SVT [config]: sharpness / luminance-based QP bias 			: 0 / 0
+Svt[info]: Svt[info]: -------------------------------------------
+Ep 0 · Seg #1 · pick_cube: 208step [00:06, 31.88step/s]Ep 0 · Seg #1 · pick_cube: 212step [00:06, 32.04step/s]Ep 0 · Seg #1 · pick_cube: 216step [00:06, 32.23step/s]Ep 0 · Seg #1 · pick_cube: 220step [00:06, 32.11step/s]Ep 0 · Seg #1 · pick_cube: 224step [00:06, 32.28step/s]Ep 0 · Seg #1 · pick_cube: 228step [00:06, 32.48step/s]Ep 0 · Seg #1 · pick_cube: 232step [00:06, 32.48step/s]Ep 0 · Seg #1 · pick_cube: 236step [00:06, 32.04step/s]Ep 0 · Seg #1 · pick_cube: 240step [00:07, 32.27step/s]Ep 0 · Seg #1 · pick_cube: 244step [00:07, 32.61step/s]Ep 0 · Seg #1 · pick_cube: 248step [00:07, 32.91step/s]Ep 0 · Seg #1 · pick_cube: 252step [00:07, 33.08step/s]Ep 0 · Seg #1 · pick_cube: 256step [00:07, 33.23step/s]Ep 0 · Seg #1 · pick_cube: 260step [00:07, 33.35step/s]Ep 0 · Seg #1 · pick_cube: 264step [00:07, 33.33step/s]Ep 0 · Seg #1 · pick_cube: 268step [00:07, 33.09step/s]Ep 0 · Seg #1 · pick_cube: 272step [00:08, 33.16step/s]Ep 0 · Seg #1 · pick_cube: 276step [00:08, 33.20step/s]                                                       Ep 0 · Seg #2 · place_cube: 0step [00:00, ?step/s]Ep 0 · Seg #2 · place_cube: 4step [00:00, 32.37step/s]Ep 0 · Seg #2 · place_cube: 8step [00:00, 33.10step/s]Ep 0 · Seg #2 · place_cube: 12step [00:00, 33.33step/s]Ep 0 · Seg #2 · place_cube: 16step [00:00, 33.38step/s]Ep 0 · Seg #2 · place_cube: 20step [00:00, 32.96step/s]Ep 0 · Seg #2 · place_cube: 24step [00:00, 32.71step/s]Ep 0 · Seg #2 · place_cube: 28step [00:00, 32.48step/s]Ep 0 · Seg #2 · place_cube: 32step [00:00, 32.41step/s]Ep 0 · Seg #2 · place_cube: 36step [00:01, 31.78step/s]Ep 0 · Seg #2 · place_cube: 40step [00:01, 31.98step/s]Ep 0 · Seg #2 · place_cube: 44step [00:01, 32.04step/s]Ep 0 · Seg #2 · place_cube: 48step [00:01, 32.14step/s]Ep 0 · Seg #2 · place_cube: 52step [00:01, 32.35step/s]Ep 0 · Seg #2 · place_cube: 56step [00:01, 32.49step/s]Ep 0 · Seg #2 · place_cube: 60step [00:01, 32.86step/s]Ep 0 · Seg #2 · place_cube: 64step [00:01, 33.13step/s]Ep 0 · Seg #2 · place_cube: 68step [00:02, 32.89step/s]Ep 0 · Seg #2 · place_cube: 72step [00:02, 32.69step/s]Ep 0 · Seg #2 · place_cube: 76step [00:02, 32.59step/s]Ep 0 · Seg #2 · place_cube: 80step [00:02, 32.54step/s]Ep 0 · Seg #2 · place_cube: 84step [00:02, 32.47step/s]Ep 0 · Seg #2 · place_cube: 88step [00:02, 32.43step/s]Ep 0 · Seg #2 · place_cube: 92step [00:02, 32.28step/s]Ep 0 · Seg #2 · place_cube: 96step [00:02, 32.64step/s]Ep 0 · Seg #2 · place_cube: 100step [00:03, 33.01step/s]Ep 0 · Seg #2 · place_cube: 104step [00:03, 32.59step/s]Ep 0 · Seg #2 · place_cube: 108step [00:03, 32.36step/s]Ep 0 · Seg #2 · place_cube: 112step [00:03, 32.43step/s]Ep 0 · Seg #2 · place_cube: 116step [00:03, 32.56step/s]Map:   0%|          | 0/477 [00:00<?, ? examples/s]Ep 0 · Seg #2 · place_cube: 120step [00:03, 32.32step/s]Map:  61%|██████    | 292/477 [00:00<00:00, 2893.80 examples/s]Ep 0 · Seg #2 · place_cube: 124step [00:03, 31.70step/s]Map: 100%|██████████| 477/477 [00:00<00:00, 2726.74 examples/s]
+2026-10-21 18:56:38.292 UTC │ Using video codec: libsvtav1
+Svt[info]: -------------------------------------------
+Svt[info]: SVT [version]:	SVT-AV1 Encoder Lib v3.0.0
+Svt[info]: SVT [build]  :	GCC 14.2.1 20250110 (Red Hat 14.2.1-7)	 64 bit
+Svt[info]: LIB Build date: Jul  3 2025 03:14:07
+Svt[info]: -------------------------------------------
+Svt[warn]: Preset M12 is mapped to M10.
+Svt[info]: Level of Parallelism: 1
+Svt[info]: Number of PPCS 42
+Svt[info]: [asm level on system : up to avx512icl]
+Svt[info]: [asm level selected : up to avx512icl]
+Svt[info]: -------------------------------------------
+Svt[info]: SVT [config]: main profile	tier (auto)	level (auto)
+Svt[info]: SVT [config]: width / height / fps numerator / fps denominator 		: 256 / 256 / 30 / 1
+Svt[info]: SVT [config]: bit-depth / color format 					: 8 / YUV420
+Svt[info]: SVT [config]: preset / tune / pred struct 					: 10 / PSNR / random access
+Svt[info]: SVT [config]: gop size / mini-gop size / key-frame type 			: 2 / 16 / key frame
+Svt[info]: SVT [config]: BRC mode / rate factor 					: CRF / 30 
+Svt[info]: SVT [config]: AQ mode / variance boost 					: 2 / 0
+Svt[info]: SVT [config]: sharpness / luminance-based QP bias 			: 0 / 0
+Svt[info]: Svt[info]: -------------------------------------------
+Ep 0 · Seg #2 · place_cube: 128step [00:03, 31.35step/s]Ep 0 · Seg #2 · place_cube: 132step [00:04, 31.43step/s]Ep 0 · Seg #2 · place_cube: 136step [00:04, 31.67step/s]Ep 0 · Seg #2 · place_cube: 140step [00:04, 31.62step/s]Ep 0 · Seg #2 · place_cube: 144step [00:04, 31.52step/s]Ep 0 · Seg #2 · place_cube: 148step [00:04, 31.63step/s]Ep 0 · Seg #2 · place_cube: 152step [00:04, 31.90step/s]Ep 0 · Seg #2 · place_cube: 156step [00:04, 32.19step/s]Ep 0 · Seg #2 · place_cube: 160step [00:04, 32.37step/s]Ep 0 · Seg #2 · place_cube: 164step [00:05, 32.71step/s]Ep 0 · Seg #2 · place_cube: 168step [00:05, 33.13step/s]Ep 0 · Seg #2 · place_cube: 172step [00:05, 32.84step/s]Ep 0 · Seg #2 · place_cube: 176step [00:05, 32.43step/s]Ep 0 · Seg #2 · place_cube: 180step [00:05, 32.92step/s]Ep 0 · Seg #2 · place_cube: 184step [00:05, 33.52step/s][mp4 @ 0x7f08c83b8680] Starting second pass: moving the moov atom to the beginning of the file
+2026-10-21 18:56:40.192 UTC │ Using video codec: libsvtav1
+Svt[info]: -------------------------------------------
+Svt[info]: SVT [version]:	SVT-AV1 Encoder Lib v3.0.0
+Svt[info]: SVT [build]  :	GCC 14.2.1 20250110 (Red Hat 14.2.1-7)	 64 bit
+Svt[info]: LIB Build date: Jul  3 2025 03:14:07
+Svt[info]: -------------------------------------------
+Svt[warn]: Preset M12 is mapped to M10.
+Svt[info]: Level of Parallelism: 1
+Svt[info]: Number of PPCS 42
+Svt[info]: [asm level on system : up to avx512icl]
+Svt[info]: [asm level selected : up to avx512icl]
+Svt[info]: -------------------------------------------
+Svt[info]: SVT [config]: main profile	tier (auto)	level (auto)
+Svt[info]: SVT [config]: width / height / fps numerator / fps denominator 		: 256 / 256 / 30 / 1
+Svt[info]: SVT [config]: bit-depth / color format 					: 8 / YUV420
+Svt[info]: SVT [config]: preset / tune / pred struct 					: 10 / PSNR / random access
+Svt[info]: SVT [config]: gop size / mini-gop size / key-frame type 			: 2 / 16 / key frame
+Svt[info]: SVT [config]: BRC mode / rate factor 					: CRF / 30 
+Svt[info]: SVT [config]: AQ mode / variance boost 					: 2 / 0
+Svt[info]: SVT [config]: sharpness / luminance-based QP bias 			: 0 / 0
+Svt[info]: Svt[info]: -------------------------------------------
+Ep 0 · Seg #2 · place_cube: 188step [00:05, 33.95step/s]Ep 0 · Seg #2 · place_cube: 192step [00:05, 34.06step/s]Ep 0 · Seg #2 · place_cube: 196step [00:06, 33.90step/s]Ep 0 · Seg #2 · place_cube: 200step [00:06, 33.89step/s]Ep 0 · Seg #2 · place_cube: 204step [00:06, 33.72step/s]Ep 0 · Seg #2 · place_cube: 208step [00:06, 33.66step/s]Ep 0 · Seg #2 · place_cube: 212step [00:06, 33.57step/s]                                                        2026-10-21 18:56:40.974 UTC │ INFO    │ EmbodiChain │ [Simulation Process] Rollout 1/2 done. lock_index=[0, 1], 
+[mp4 @ 0x7f08c998e8c0] Starting second pass: moving the moov atom to the beginning of the file
+Ep 1 · Seg #1 · pick_cube: 0step [00:00, ?step/s]Ep 1 · Seg #1 · pick_cube: 4step [00:00, 35.56step/s]Ep 1 · Seg #1 · pick_cube: 8step [00:00, 35.36step/s]Ep 1 · Seg #1 · pick_cube: 12step [00:00, 37.29step/s]Ep 1 · Seg #1 · pick_cube: 17step [00:00, 38.96step/s]Ep 1 · Seg #1 · pick_cube: 22step [00:00, 39.80step/s]Ep 1 · Seg #1 · pick_cube: 27step [00:00, 40.29step/s]Ep 1 · Seg #1 · pick_cube: 32step [00:00, 40.64step/s]Ep 1 · Seg #1 · pick_cube: 37step [00:00, 39.70step/s]Ep 1 · Seg #1 · pick_cube: 41step [00:01, 38.75step/s]Ep 1 · Seg #1 · pick_cube: 45step [00:01, 38.15step/s]Ep 1 · Seg #1 · pick_cube: 49step [00:01, 37.64step/s]Ep 1 · Seg #1 · pick_cube: 53step [00:01, 37.23step/s]Ep 1 · Seg #1 · pick_cube: 57step [00:01, 37.14step/s]Ep 1 · Seg #1 · pick_cube: 61step [00:01, 37.05step/s]Ep 1 · Seg #1 · pick_cube: 65step [00:01, 37.05step/s]Ep 1 · Seg #1 · pick_cube: 69step [00:01, 37.20step/s]Ep 1 · Seg #1 · pick_cube: 73step [00:01, 37.09step/s]Ep 1 · Seg #1 · pick_cube: 77step [00:02, 36.88step/s]Ep 1 · Seg #1 · pick_cube: 81step [00:02, 36.45step/s]Ep 1 · Seg #1 · pick_cube: 85step [00:02, 36.98step/s]Ep 1 · Seg #1 · pick_cube: 89step [00:02, 36.78step/s]Ep 1 · Seg #1 · pick_cube: 93step [00:02, 36.41step/s]Ep 1 · Seg #1 · pick_cube: 97step [00:02, 37.22step/s]Ep 1 · Seg #1 · pick_cube: 102step [00:02, 38.38step/s]Ep 1 · Seg #1 · pick_cube: 107step [00:02, 39.16step/s]Ep 1 · Seg #1 · pick_cube: 112step [00:02, 39.44step/s]Ep 1 · Seg #1 · pick_cube: 116step [00:03, 38.56step/s]Ep 1 · Seg #1 · pick_cube: 120step [00:03, 37.94step/s]Ep 1 · Seg #1 · pick_cube: 124step [00:03, 37.45step/s]Ep 1 · Seg #1 · pick_cube: 128step [00:03, 37.04step/s]Ep 1 · Seg #1 · pick_cube: 132step [00:03, 36.88step/s]Ep 1 · Seg #1 · pick_cube: 136step [00:03, 36.68step/s]Ep 1 · Seg #1 · pick_cube: 140step [00:03, 36.49step/s]Ep 1 · Seg #1 · pick_cube: 144step [00:03, 36.48step/s]Ep 1 · Seg #1 · pick_cube: 148step [00:03, 35.85step/s]Ep 1 · Seg #1 · pick_cube: 152step [00:04, 35.57step/s]Ep 1 · Seg #1 · pick_cube: 156step [00:04, 35.39step/s]Ep 1 · Seg #1 · pick_cube: 160step [00:04, 35.39step/s]Ep 1 · Seg #1 · pick_cube: 164step [00:04, 35.24step/s]Ep 1 · Seg #1 · pick_cube: 168step [00:04, 34.39step/s]Ep 1 · Seg #1 · pick_cube: 172step [00:04, 34.13step/s]Ep 1 · Seg #1 · pick_cube: 176step [00:04, 35.13step/s]Ep 1 · Seg #1 · pick_cube: 180step [00:04, 35.90step/s]Ep 1 · Seg #1 · pick_cube: 184step [00:04, 36.03step/s]Ep 1 · Seg #1 · pick_cube: 188step [00:05, 35.56step/s]Ep 1 · Seg #1 · pick_cube: 192step [00:05, 35.38step/s]Ep 1 · Seg #1 · pick_cube: 196step [00:05, 35.20step/s]Ep 1 · Seg #1 · pick_cube: 200step [00:05, 34.84step/s]Ep 1 · Seg #1 · pick_cube: 204step [00:05, 35.15step/s]Ep 1 · Seg #1 · pick_cube: 208step [00:05, 35.14step/s]Ep 1 · Seg #1 · pick_cube: 212step [00:05, 35.18step/s]Ep 1 · Seg #1 · pick_cube: 216step [00:05, 34.99step/s]Ep 1 · Seg #1 · pick_cube: 220step [00:05, 35.25step/s]Ep 1 · Seg #1 · pick_cube: 224step [00:06, 35.06step/s]Ep 1 · Seg #1 · pick_cube: 228step [00:06, 34.95step/s]Ep 1 · Seg #1 · pick_cube: 232step [00:06, 34.84step/s]Ep 1 · Seg #1 · pick_cube: 236step [00:06, 34.53step/s]Ep 1 · Seg #1 · pick_cube: 240step [00:06, 34.44step/s]Ep 1 · Seg #1 · pick_cube: 244step [00:06, 34.05step/s]Ep 1 · Seg #1 · pick_cube: 248step [00:06, 34.00step/s]Ep 1 · Seg #1 · pick_cube: 252step [00:06, 35.01step/s]Ep 1 · Seg #1 · pick_cube: 256step [00:07, 35.80step/s]Ep 1 · Seg #1 · pick_cube: 260step [00:07, 36.19step/s]Ep 1 · Seg #1 · pick_cube: 264step [00:07, 35.37step/s]                                                       Ep 1 · Seg #2 · place_cube: 0step [00:00, ?step/s]Ep 1 · Seg #2 · place_cube: 4step [00:00, 32.70step/s]Ep 1 · Seg #2 · place_cube: 8step [00:00, 33.80step/s]Ep 1 · Seg #2 · place_cube: 12step [00:00, 35.81step/s]Ep 1 · Seg #2 · place_cube: 16step [00:00, 36.86step/s]Ep 1 · Seg #2 · place_cube: 20step [00:00, 37.44step/s]Ep 1 · Seg #2 · place_cube: 24step [00:00, 35.95step/s]Ep 1 · Seg #2 · place_cube: 28step [00:00, 35.77step/s]Ep 1 · Seg #2 · place_cube: 32step [00:00, 36.62step/s]Ep 1 · Seg #2 · place_cube: 36step [00:00, 37.27step/s]Ep 1 · Seg #2 · place_cube: 40step [00:01, 37.62step/s]Ep 1 · Seg #2 · place_cube: 44step [00:01, 36.63step/s]Ep 1 · Seg #2 · place_cube: 48step [00:01, 36.28step/s]Ep 1 · Seg #2 · place_cube: 52step [00:01, 35.89step/s]Ep 1 · Seg #2 · place_cube: 56step [00:01, 35.49step/s]Ep 1 · Seg #2 · place_cube: 60step [00:01, 35.55step/s]Ep 1 · Seg #2 · place_cube: 64step [00:01, 35.70step/s]Ep 1 · Seg #2 · place_cube: 68step [00:01, 35.23step/s]Ep 1 · Seg #2 · place_cube: 72step [00:02, 35.13step/s]Ep 1 · Seg #2 · place_cube: 76step [00:02, 34.97step/s]Ep 1 · Seg #2 · place_cube: 80step [00:02, 34.88step/s]Ep 1 · Seg #2 · place_cube: 84step [00:02, 35.01step/s]Ep 1 · Seg #2 · place_cube: 88step [00:02, 34.79step/s]Ep 1 · Seg #2 · place_cube: 92step [00:02, 35.26step/s]Ep 1 · Seg #2 · place_cube: 96step [00:02, 36.27step/s]Ep 1 · Seg #2 · place_cube: 100step [00:02, 36.41step/s]Ep 1 · Seg #2 · place_cube: 104step [00:02, 35.45step/s]Ep 1 · Seg #2 · place_cube: 108step [00:03, 36.09step/s]Ep 1 · Seg #2 · place_cube: 112step [00:03, 36.71step/s]Ep 1 · Seg #2 · place_cube: 116step [00:03, 37.23step/s]Ep 1 · Seg #2 · place_cube: 120step [00:03, 36.78step/s]Ep 1 · Seg #2 · place_cube: 124step [00:03, 36.23step/s]Ep 1 · Seg #2 · place_cube: 128step [00:03, 35.89step/s]Ep 1 · Seg #2 · place_cube: 132step [00:03, 35.58step/s]Ep 1 · Seg #2 · place_cube: 136step [00:03, 35.29step/s]Ep 1 · Seg #2 · place_cube: 140step [00:03, 35.37step/s]Ep 1 · Seg #2 · place_cube: 144step [00:04, 35.11step/s]Ep 1 · Seg #2 · place_cube: 148step [00:04, 35.11step/s]Ep 1 · Seg #2 · place_cube: 152step [00:04, 34.93step/s]Ep 1 · Seg #2 · place_cube: 156step [00:04, 34.91step/s]Ep 1 · Seg #2 · place_cube: 160step [00:04, 34.91step/s]Ep 1 · Seg #2 · place_cube: 164step [00:04, 35.46step/s]Ep 1 · Seg #2 · place_cube: 169step [00:04, 37.04step/s]Ep 1 · Seg #2 · place_cube: 174step [00:04, 38.24step/s]Ep 1 · Seg #2 · place_cube: 178step [00:04, 38.66step/s]Ep 1 · Seg #2 · place_cube: 182step [00:05, 37.59step/s]Ep 1 · Seg #2 · place_cube: 186step [00:05, 38.00step/s]Ep 1 · Seg #2 · place_cube: 191step [00:05, 38.83step/s]Ep 1 · Seg #2 · place_cube: 195step [00:05, 38.62step/s]Ep 1 · Seg #2 · place_cube: 199step [00:05, 38.51step/s]Ep 1 · Seg #2 · place_cube: 203step [00:05, 38.16step/s]                                                        2026-10-21 18:56:55.767 UTC │ INFO    │ EmbodiChain │ [Simulation Process] Rollout 2/2 done. lock_index=[1, 2], 
+Map:   0%|          | 0/492 [00:00<?, ? examples/s]Map:  95%|█████████▌| 468/492 [00:00<00:00, 4658.73 examples/s]Map: 100%|██████████| 492/492 [00:00<00:00, 4452.16 examples/s]
+2026-10-21 18:57:01.884 UTC │ Using video codec: libsvtav1
+Svt[info]: -------------------------------------------
+Svt[info]: SVT [version]:	SVT-AV1 Encoder Lib v3.0.0
+Svt[info]: SVT [build]  :	GCC 14.2.1 20250110 (Red Hat 14.2.1-7)	 64 bit
+Svt[info]: LIB Build date: Jul  3 2025 03:14:07
+Svt[info]: -------------------------------------------
+Svt[warn]: Preset M12 is mapped to M10.
+Svt[info]: Level of Parallelism: 1
+Svt[info]: Number of PPCS 42
+Svt[info]: [asm level on system : up to avx512icl]
+Svt[info]: [asm level selected : up to avx512icl]
+Svt[info]: -------------------------------------------
+Svt[info]: SVT [config]: main profile	tier (auto)	level (auto)
+Svt[info]: SVT [config]: width / height / fps numerator / fps denominator 		: 256 / 256 / 30 / 1
+Svt[info]: SVT [config]: bit-depth / color format 					: 8 / YUV420
+Svt[info]: SVT [config]: preset / tune / pred struct 					: 10 / PSNR / random access
+Svt[info]: SVT [config]: gop size / mini-gop size / key-frame type 			: 2 / 16 / key frame
+Svt[info]: SVT [config]: BRC mode / rate factor 					: CRF / 30 
+Svt[info]: SVT [config]: AQ mode / variance boost 					: 2 / 0
+Svt[info]: SVT [config]: sharpness / luminance-based QP bias 			: 0 / 0
+Svt[info]: Svt[info]: -------------------------------------------
+[mp4 @ 0x7f08c9c58540] Starting second pass: moving the moov atom to the beginning of the file
+2026-10-21 18:57:03.794 UTC │ Using video codec: libsvtav1
+Svt[info]: -------------------------------------------
+Svt[info]: SVT [version]:	SVT-AV1 Encoder Lib v3.0.0
+Svt[info]: SVT [build]  :	GCC 14.2.1 20250110 (Red Hat 14.2.1-7)	 64 bit
+Svt[info]: LIB Build date: Jul  3 2025 03:14:07
+Svt[info]: -------------------------------------------
+Svt[warn]: Preset M12 is mapped to M10.
+Svt[info]: Level of Parallelism: 1
+Svt[info]: Number of PPCS 42
+Svt[info]: [asm level on system : up to avx512icl]
+Svt[info]: [asm level selected : up to avx512icl]
+Svt[info]: -------------------------------------------
+Svt[info]: SVT [config]: main profile	tier (auto)	level (auto)
+Svt[info]: SVT [config]: width / height / fps numerator / fps denominator 		: 256 / 256 / 30 / 1
+Svt[info]: SVT [config]: bit-depth / color format 					: 8 / YUV420
+Svt[info]: SVT [config]: preset / tune / pred struct 					: 10 / PSNR / random access
+Svt[info]: SVT [config]: gop size / mini-gop size / key-frame type 			: 2 / 16 / key frame
+Svt[info]: SVT [config]: BRC mode / rate factor 					: CRF / 30 
+Svt[info]: SVT [config]: AQ mode / variance boost 					: 2 / 0
+Svt[info]: SVT [config]: sharpness / luminance-based QP bias 			: 0 / 0
+Svt[info]: Svt[info]: -------------------------------------------
+[mp4 @ 0x7f08c9c58540] Starting second pass: moving the moov atom to the beginning of the file
+Map:   0%|          | 0/471 [00:00<?, ? examples/s]Map:  83%|████████▎ | 392/471 [00:00<00:00, 3904.75 examples/s]Map: 100%|██████████| 471/471 [00:00<00:00, 3540.78 examples/s]
+2026-10-21 18:57:10.327 UTC │ Using video codec: libsvtav1
+Svt[info]: -------------------------------------------
+Svt[info]: SVT [version]:	SVT-AV1 Encoder Lib v3.0.0
+Svt[info]: SVT [build]  :	GCC 14.2.1 20250110 (Red Hat 14.2.1-7)	 64 bit
+Svt[info]: LIB Build date: Jul  3 2025 03:14:07
+Svt[info]: -------------------------------------------
+Svt[warn]: Preset M12 is mapped to M10.
+Svt[info]: Level of Parallelism: 1
+Svt[info]: Number of PPCS 42
+Svt[info]: [asm level on system : up to avx512icl]
+Svt[info]: [asm level selected : up to avx512icl]
+Svt[info]: -------------------------------------------
+Svt[info]: SVT [config]: main profile	tier (auto)	level (auto)
+Svt[info]: SVT [config]: width / height / fps numerator / fps denominator 		: 256 / 256 / 30 / 1
+Svt[info]: SVT [config]: bit-depth / color format 					: 8 / YUV420
+Svt[info]: SVT [config]: preset / tune / pred struct 					: 10 / PSNR / random access
+Svt[info]: SVT [config]: gop size / mini-gop size / key-frame type 			: 2 / 16 / key frame
+Svt[info]: SVT [config]: BRC mode / rate factor 					: CRF / 30 
+Svt[info]: SVT [config]: AQ mode / variance boost 					: 2 / 0
+Svt[info]: SVT [config]: sharpness / luminance-based QP bias 			: 0 / 0
+Svt[info]: Svt[info]: -------------------------------------------
+[mp4 @ 0x7f08c84b9540] Starting second pass: moving the moov atom to the beginning of the file
+2026-10-21 18:57:12.019 UTC │ Using video codec: libsvtav1
+Svt[info]: -------------------------------------------
+Svt[info]: SVT [version]:	SVT-AV1 Encoder Lib v3.0.0
+Svt[info]: SVT [build]  :	GCC 14.2.1 20250110 (Red Hat 14.2.1-7)	 64 bit
+Svt[info]: LIB Build date: Jul  3 2025 03:14:07
+Svt[info]: -------------------------------------------
+Svt[warn]: Preset M12 is mapped to M10.
+Svt[info]: Level of Parallelism: 1
+Svt[info]: Number of PPCS 42
+Svt[info]: [asm level on system : up to avx512icl]
+Svt[info]: [asm level selected : up to avx512icl]
+Svt[info]: -------------------------------------------
+Svt[info]: SVT [config]: main profile	tier (auto)	level (auto)
+Svt[info]: SVT [config]: width / height / fps numerator / fps denominator 		: 256 / 256 / 30 / 1
+Svt[info]: SVT [config]: bit-depth / color format 					: 8 / YUV420
+Svt[info]: SVT [config]: preset / tune / pred struct 					: 10 / PSNR / random access
+Svt[info]: SVT [config]: gop size / mini-gop size / key-frame type 			: 2 / 16 / key frame
+Svt[info]: SVT [config]: BRC mode / rate factor 					: CRF / 30 
+Svt[info]: SVT [config]: AQ mode / variance boost 					: 2 / 0
+Svt[info]: SVT [config]: sharpness / luminance-based QP bias 			: 0 / 0
+Svt[info]: Svt[info]: -------------------------------------------
+[mp4 @ 0x7f08c9dce4c0] Starting second pass: moving the moov atom to the beginning of the file
+2026-10-21 18:57:13.092 UTC │ INFO    │ EmbodiChain │ [Simulation Process] Close signal received. Shutting down.
+2026-10-21 18:57:13.875 UTC │ INFO    │ EmbodiChain │ [OnlineDataEngine] Engine stopped.
+/root/miniconda3/envs/py311/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+/root/miniconda3/envs/py311/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+/root/miniconda3/envs/py311/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+/root/miniconda3/envs/py311/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+{"update": 4, "budget": 4, "generation": 0, "generated_episodes": 4, "loss": 0.4703081250190735}
+VERSION file not found.
+VERSION file not found.
+VERSION file not found.
+VERSION file not found.
+/root/miniconda3/envs/py311/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '

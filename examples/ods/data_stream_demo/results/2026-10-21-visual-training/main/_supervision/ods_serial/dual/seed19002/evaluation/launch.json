@@ -1,0 +1,81 @@
+{
+  "command": [
+    "/root/miniconda3/envs/py311/bin/python",
+    "-m",
+    "examples.ods.data_stream_demo.training_eval",
+    "--vision",
+    "dual",
+    "--sim-device",
+    "cuda:0",
+    "--train-device",
+    "cuda:1",
+    "--checkpoint",
+    "/tmp/ods-visual-training-formal-20261021-v3/ods_serial/dual/seed19002/final.pt",
+    "--output",
+    "/tmp/ods-visual-training-formal-20261021-v3/ods_serial/dual/seed19002/evaluation.json",
+    "--scenes",
+    "20"
+  ],
+  "pair": {
+    "simulation": {
+      "index": 0,
+      "uuid": "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c",
+      "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+      "utilization_percent": 0,
+      "free_mib": 34499,
+      "total_mib": 73415
+    },
+    "training": {
+      "index": 2,
+      "uuid": "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+      "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+      "utilization_percent": 0,
+      "free_mib": 34858,
+      "total_mib": 73415
+    },
+    "cpu_affinity": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ]
+  },
+  "aux_graphics_scope": {
+    "index": 7,
+    "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+    "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+    "utilization_percent": 0,
+    "free_mib": 44527,
+    "total_mib": 73415,
+    "scope": "passive pure-G driver footprint only",
+    "max_per_pid_bytes": 8388608,
+    "idle_required": false
+  },
+  "process_launch_monotonic_ns": 1764147475698404,
+  "pgid": 2171781,
+  "cpu_affinity": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "timed_pipeline": false,
+  "environment": {
+    "CUDA_VISIBLE_DEVICES": "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c,GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+    "ODS_GPU_UUID": "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c",
+    "ODS_AUX_GRAPHICS_GPU_UUID": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+    "OMP_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "SDL_VIDEODRIVER": "dummy",
+    "ODS_PROCESS_LAUNCH_MONOTONIC_NS": "1764147475698404"
+  }
+}

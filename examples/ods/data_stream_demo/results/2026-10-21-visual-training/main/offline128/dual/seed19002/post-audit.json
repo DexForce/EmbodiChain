@@ -1,0 +1,1883 @@
+{
+  "schema": "ods-visual-training-post-audit-v2",
+  "passed": true,
+  "qualification_passed": true,
+  "scope": "post-timing numeric/checkpoint, source-window SDK and all-frame video integrity audit; no duration contributes to pipeline time",
+  "audit_source_sha256": {
+    "training_audit": "75e3ce65d8130972265d55b5819a70d9d4d73c91cd5adcb0ef8a2f2ae717e3ce",
+    "video_integrity": "e1286b2a60902fc7b0302e6d4decaeb024f36883d0b90066a8d4fc159a29c7d1"
+  },
+  "recording": {
+    "episodes": 128,
+    "frames": 63888,
+    "cameras": [
+      "cam_high",
+      "cam_wrist"
+    ],
+    "all_numeric_sha256_verified": true,
+    "sdk_metadata_verified": true
+  },
+  "training": {
+    "updates": 128,
+    "chunks": 4096,
+    "valid_targets": 131072,
+    "trained_sources": 128,
+    "untrained_saved_sources": 0,
+    "ledger_sources": 128,
+    "checkpoint_verified": true
+  },
+  "decode": {
+    "episodes": 128,
+    "stats": {
+      "delivered_batches": 128,
+      "sdk_getitem_calls": 128,
+      "returned_valid_camera_frames": 512,
+      "requested_camera_timestamps": 512,
+      "worker_fetch_seconds": 5.019456508999999,
+      "worker_pids": [
+        2168371,
+        2168372,
+        2168373,
+        2168374
+      ],
+      "reader": "official LeRobotDataset.__getitem__ + delta_timestamps",
+      "video_backend": "torchcodec CPU",
+      "decoded_corpus_preloaded": false,
+      "prefetch_batches": 4,
+      "persistent_workers": true,
+      "ordered_delivery": true,
+      "pinned_memory": false,
+      "plan_batches": 128,
+      "image_timestamps_per_chunk": 2,
+      "numeric_timestamps_per_chunk": 33,
+      "complete_contexts_required": true,
+      "restart_supported": false
+    }
+  },
+  "decode_shutdown": {
+    "unconsumed_prefetch": {
+      "episode_budget": null,
+      "delivered_chunks": 128,
+      "reserved_chunks": 0,
+      "cancelled_prefetch_chunks": 0,
+      "pending_batches": 0,
+      "remaining_chunks": null,
+      "episodes": [
+        {
+          "source_id": [
+            124241803017505743,
+            0
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            1
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            2
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            3
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            4
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            5
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            6
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            7
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            8
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            9
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            10
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            11
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            12
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            13
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            14
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            15
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            16
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            17
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            18
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            19
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            20
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            21
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            22
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            23
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            24
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            25
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            26
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            27
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            28
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            29
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            30
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            31
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            32
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            33
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            34
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            35
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            36
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            37
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            38
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            39
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            40
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            41
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            42
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            43
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            44
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            45
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            46
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            47
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            48
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            49
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            50
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            51
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            52
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            53
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            54
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            55
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            56
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            57
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            58
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            59
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            60
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            61
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            62
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            63
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            64
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            65
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            66
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            67
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            68
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            69
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            70
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            71
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            72
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            73
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            74
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            75
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            76
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            77
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            78
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            79
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            80
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            81
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            82
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            83
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            84
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            85
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            86
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            87
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            88
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            89
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            90
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            91
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            92
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            93
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            94
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            95
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            96
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            97
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            98
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            99
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            100
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            101
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            102
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            103
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            104
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            105
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            106
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            107
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            108
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            109
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            110
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            111
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            112
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            113
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            114
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            115
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            116
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            117
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            118
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            119
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            120
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            121
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            122
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            123
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            124
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            125
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            126
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            124241803017505743,
+            127
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        }
+      ]
+    },
+    "worker_pids": [
+      2168371,
+      2168372,
+      2168373,
+      2168374
+    ],
+    "worker_exitcodes": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "workers_joined": true,
+    "forced_termination": false,
+    "discarded_prefetch_chunks": 0,
+    "shutdown_seconds": 0.9630703390575945,
+    "cleanup_errors": []
+  },
+  "video_quality": {
+    "samples": [
+      {
+        "camera": "cam_high",
+        "index": 0,
+        "mae_uint8": 1.6673967489891766,
+        "psnr_db": 40.701813633230145,
+        "exact": false
+      },
+      {
+        "camera": "cam_high",
+        "index": 265,
+        "mae_uint8": 1.8669207959473322,
+        "psnr_db": 39.09385084221761,
+        "exact": false
+      },
+      {
+        "camera": "cam_high",
+        "index": 529,
+        "mae_uint8": 1.820188075839468,
+        "psnr_db": 39.294251574984834,
+        "exact": false
+      },
+      {
+        "camera": "cam_wrist",
+        "index": 0,
+        "mae_uint8": 1.6760221908258661,
+        "psnr_db": 40.83663259926113,
+        "exact": false
+      },
+      {
+        "camera": "cam_wrist",
+        "index": 265,
+        "mae_uint8": 1.800239972675513,
+        "psnr_db": 38.62577160920526,
+        "exact": false
+      },
+      {
+        "camera": "cam_wrist",
+        "index": 529,
+        "mae_uint8": 1.7450590573944282,
+        "psnr_db": 36.99090261256729,
+        "exact": false
+      }
+    ],
+    "worker_cleanup": {
+      "worker_pids": [
+        2168423
+      ],
+      "worker_exitcodes": [
+        0
+      ],
+      "workers_joined": true,
+      "forced_termination": false,
+      "discarded_prefetch_chunks": 0,
+      "shutdown_seconds": 7.814890705049038e-05,
+      "cleanup_errors": []
+    },
+    "scope": "fixed raw RGB references versus standard CPU video decoding; excluded from timed consumption"
+  },
+  "full_video_integrity": {
+    "revision": "full-video-integrity/v1",
+    "passed": true,
+    "all_saved_video_frames_decoded": true,
+    "dataset": "/tmp/ods-visual-training-formal-20261021-v3/offline128/dual/seed19002/lerobot_dataset",
+    "scope": "post-timing sequential software decode/count integrity; no lossless RGB, policy-quality or all-SDK-seek claim",
+    "decoded_pixel_format": "yuv420p",
+    "frame_hash_scope": "SHA256 of decoded rawvideo YUV420p planes; not RGB or BC-normalized tensors",
+    "files": [
+      {
+        "file": "videos/observation.images.cam_high/chunk-000/file-000.mp4",
+        "camera": "observation.images.cam_high",
+        "expected_frames": 63888,
+        "episodes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31,
+          32,
+          33,
+          34,
+          35,
+          36,
+          37,
+          38,
+          39,
+          40,
+          41,
+          42,
+          43,
+          44,
+          45,
+          46,
+          47,
+          48,
+          49,
+          50,
+          51,
+          52,
+          53,
+          54,
+          55,
+          56,
+          57,
+          58,
+          59,
+          60,
+          61,
+          62,
+          63,
+          64,
+          65,
+          66,
+          67,
+          68,
+          69,
+          70,
+          71,
+          72,
+          73,
+          74,
+          75,
+          76,
+          77,
+          78,
+          79,
+          80,
+          81,
+          82,
+          83,
+          84,
+          85,
+          86,
+          87,
+          88,
+          89,
+          90,
+          91,
+          92,
+          93,
+          94,
+          95,
+          96,
+          97,
+          98,
+          99,
+          100,
+          101,
+          102,
+          103,
+          104,
+          105,
+          106,
+          107,
+          108,
+          109,
+          110,
+          111,
+          112,
+          113,
+          114,
+          115,
+          116,
+          117,
+          118,
+          119,
+          120,
+          121,
+          122,
+          123,
+          124,
+          125,
+          126,
+          127
+        ],
+        "compressed_sha256": "77fb74eaa889c8768f9ae38fe68bc646f806b53b892276cab096e9c142d814be",
+        "decoded_pixel_format": "yuv420p",
+        "frame_hash_scope": "SHA256 of FFmpeg decoded rawvideo YUV420p planes; not RGB or BC-normalized tensors",
+        "probe_command": [
+          "/root/miniconda3/envs/py311/bin/ffprobe",
+          "-v",
+          "error",
+          "-select_streams",
+          "v",
+          "-show_entries",
+          "stream=index,codec_name,codec_type,width,height,pix_fmt,r_frame_rate,nb_frames,time_base,duration",
+          "-of",
+          "json",
+          "/tmp/ods-visual-training-formal-20261021-v3/offline128/dual/seed19002/lerobot_dataset/videos/observation.images.cam_high/chunk-000/file-000.mp4"
+        ],
+        "probe_exitcode": 0,
+        "probe": {
+          "index": 0,
+          "codec_name": "av1",
+          "codec_type": "video",
+          "width": 256,
+          "height": 256,
+          "pix_fmt": "yuv420p",
+          "r_frame_rate": "30/1",
+          "time_base": "1/15360",
+          "duration": "2129.600000",
+          "nb_frames": "63888"
+        },
+        "decode_command": [
+          "/root/miniconda3/envs/py311/bin/ffmpeg",
+          "-nostdin",
+          "-hide_banner",
+          "-loglevel",
+          "error",
+          "-xerror",
+          "-err_detect",
+          "explode",
+          "-hwaccel",
+          "none",
+          "-threads:v",
+          "1",
+          "-i",
+          "/tmp/ods-visual-training-formal-20261021-v3/offline128/dual/seed19002/lerobot_dataset/videos/observation.images.cam_high/chunk-000/file-000.mp4",
+          "-map",
+          "0:v:0",
+          "-an",
+          "-sn",
+          "-dn",
+          "-fps_mode",
+          "passthrough",
+          "-c:v",
+          "rawvideo",
+          "-pix_fmt",
+          "yuv420p",
+          "-threads:v",
+          "1",
+          "-filter_threads",
+          "1",
+          "-filter_complex_threads",
+          "1",
+          "-f",
+          "framehash",
+          "-hash",
+          "sha256",
+          "-y",
+          "/tmp/ods-visual-training-formal-20261021-v3/offline128/dual/seed19002/post-audit-video-integrity-artifacts/0000.decoded-frame-sha256.txt"
+        ],
+        "decode_exitcode": 0,
+        "decode_seconds": 16.082695870194584,
+        "decoded_frame_hashes": "/tmp/ods-visual-training-formal-20261021-v3/offline128/dual/seed19002/post-audit-video-integrity-artifacts/0000.decoded-frame-sha256.txt",
+        "decode_error_log": "/tmp/ods-visual-training-formal-20261021-v3/offline128/dual/seed19002/post-audit-video-integrity-artifacts/0000.decode.stderr",
+        "decoded_frames": 63888,
+        "decoded_frame_hash_file_sha256": "6fb5d864301f7e2ed2ae4da733cd20207c0c77eb3c2ae07dcbe9e6fb5e824351",
+        "passed": true
+      },
+      {
+        "file": "videos/observation.images.cam_wrist/chunk-000/file-000.mp4",
+        "camera": "observation.images.cam_wrist",
+        "expected_frames": 63888,
+        "episodes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31,
+          32,
+          33,
+          34,
+          35,
+          36,
+          37,
+          38,
+          39,
+          40,
+          41,
+          42,
+          43,
+          44,
+          45,
+          46,
+          47,
+          48,
+          49,
+          50,
+          51,
+          52,
+          53,
+          54,
+          55,
+          56,
+          57,
+          58,
+          59,
+          60,
+          61,
+          62,
+          63,
+          64,
+          65,
+          66,
+          67,
+          68,
+          69,
+          70,
+          71,
+          72,
+          73,
+          74,
+          75,
+          76,
+          77,
+          78,
+          79,
+          80,
+          81,
+          82,
+          83,
+          84,
+          85,
+          86,
+          87,
+          88,
+          89,
+          90,
+          91,
+          92,
+          93,
+          94,
+          95,
+          96,
+          97,
+          98,
+          99,
+          100,
+          101,
+          102,
+          103,
+          104,
+          105,
+          106,
+          107,
+          108,
+          109,
+          110,
+          111,
+          112,
+          113,
+          114,
+          115,
+          116,
+          117,
+          118,
+          119,
+          120,
+          121,
+          122,
+          123,
+          124,
+          125,
+          126,
+          127
+        ],
+        "compressed_sha256": "11110dfab2a46b8e1a3129b73743dd4994fb9d1116c72947d2413455b4c7d347",
+        "decoded_pixel_format": "yuv420p",
+        "frame_hash_scope": "SHA256 of FFmpeg decoded rawvideo YUV420p planes; not RGB or BC-normalized tensors",
+        "probe_command": [
+          "/root/miniconda3/envs/py311/bin/ffprobe",
+          "-v",
+          "error",
+          "-select_streams",
+          "v",
+          "-show_entries",
+          "stream=index,codec_name,codec_type,width,height,pix_fmt,r_frame_rate,nb_frames,time_base,duration",
+          "-of",
+          "json",
+          "/tmp/ods-visual-training-formal-20261021-v3/offline128/dual/seed19002/lerobot_dataset/videos/observation.images.cam_wrist/chunk-000/file-000.mp4"
+        ],
+        "probe_exitcode": 0,
+        "probe": {
+          "index": 0,
+          "codec_name": "av1",
+          "codec_type": "video",
+          "width": 256,
+          "height": 256,
+          "pix_fmt": "yuv420p",
+          "r_frame_rate": "30/1",
+          "time_base": "1/15360",
+          "duration": "2129.600000",
+          "nb_frames": "63888"
+        },
+        "decode_command": [
+          "/root/miniconda3/envs/py311/bin/ffmpeg",
+          "-nostdin",
+          "-hide_banner",
+          "-loglevel",
+          "error",
+          "-xerror",
+          "-err_detect",
+          "explode",
+          "-hwaccel",
+          "none",
+          "-threads:v",
+          "1",
+          "-i",
+          "/tmp/ods-visual-training-formal-20261021-v3/offline128/dual/seed19002/lerobot_dataset/videos/observation.images.cam_wrist/chunk-000/file-000.mp4",
+          "-map",
+          "0:v:0",
+          "-an",
+          "-sn",
+          "-dn",
+          "-fps_mode",
+          "passthrough",
+          "-c:v",
+          "rawvideo",
+          "-pix_fmt",
+          "yuv420p",
+          "-threads:v",
+          "1",
+          "-filter_threads",
+          "1",
+          "-filter_complex_threads",
+          "1",
+          "-f",
+          "framehash",
+          "-hash",
+          "sha256",
+          "-y",
+          "/tmp/ods-visual-training-formal-20261021-v3/offline128/dual/seed19002/post-audit-video-integrity-artifacts/0001.decoded-frame-sha256.txt"
+        ],
+        "decode_exitcode": 0,
+        "decode_seconds": 13.580220753792673,
+        "decoded_frame_hashes": "/tmp/ods-visual-training-formal-20261021-v3/offline128/dual/seed19002/post-audit-video-integrity-artifacts/0001.decoded-frame-sha256.txt",
+        "decode_error_log": "/tmp/ods-visual-training-formal-20261021-v3/offline128/dual/seed19002/post-audit-video-integrity-artifacts/0001.decode.stderr",
+        "decoded_frames": 63888,
+        "decoded_frame_hash_file_sha256": "01f24f1b1fae884c73174d303134f168767e6a3e2220d6bef3a3362d47734fc6",
+        "passed": true
+      }
+    ],
+    "cpu_affinity": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "threads_per_file": 1,
+    "files_in_parallel": 1,
+    "verifier_sha256": "e1286b2a60902fc7b0302e6d4decaeb024f36883d0b90066a8d4fc159a29c7d1",
+    "ffmpeg_version": "ffmpeg version 7.1.1 Copyright (c) 2000-2025 the FFmpeg developers",
+    "ffprobe_version": "ffprobe version 7.1.1 Copyright (c) 2007-2025 the FFmpeg developers",
+    "expected_episodes": 128,
+    "expected_frames_per_camera": 63888,
+    "metadata_sha256": {
+      "meta/info.json": "368ad62a4534f66ccdf9dcf45b525d5234cd383425ddabb5220b24cb91977550",
+      "meta/episodes/chunk-000/file-000.parquet": "0ae66a9b9c7ee45df226082967675f61c8b904d278edcf41a174b90db2740c78"
+    },
+    "decoded_frames_per_camera": {
+      "observation.images.cam_high": 63888,
+      "observation.images.cam_wrist": 63888
+    },
+    "total_decoded_camera_frames": 127776,
+    "seconds_outside_training_pipeline": 30.137892455793917
+  },
+  "seconds_outside_pipeline": 38.296541687101126
+}

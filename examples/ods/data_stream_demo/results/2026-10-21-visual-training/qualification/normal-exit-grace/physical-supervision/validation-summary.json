@@ -1,0 +1,206 @@
+{
+  "scope": "Fresh small physical diagnostic after v3; not part of formal cohort",
+  "passed": true,
+  "training": {
+    "completed_updates": 4,
+    "trained_chunks": 16,
+    "valid_target_occurrences": 512,
+    "generated_episodes": 4
+  },
+  "audit": {
+    "passed": true,
+    "decode_shutdown": {
+      "unconsumed_prefetch": {
+        "episode_budget": null,
+        "delivered_chunks": 4,
+        "reserved_chunks": 0,
+        "cancelled_prefetch_chunks": 0,
+        "pending_batches": 0,
+        "remaining_chunks": null,
+        "episodes": [
+          {
+            "source_id": [
+              290693151455105406,
+              0
+            ],
+            "assigned": null,
+            "delivered": 1,
+            "reserved": 0,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              290693151455105406,
+              1
+            ],
+            "assigned": null,
+            "delivered": 1,
+            "reserved": 0,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              290693151455105406,
+              2
+            ],
+            "assigned": null,
+            "delivered": 1,
+            "reserved": 0,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              290693151455105406,
+              3
+            ],
+            "assigned": null,
+            "delivered": 1,
+            "reserved": 0,
+            "remaining": null
+          }
+        ]
+      },
+      "worker_pids": [
+        2236679,
+        2236680,
+        2236681,
+        2236682
+      ],
+      "worker_exitcodes": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "workers_joined": true,
+      "forced_termination": false,
+      "discarded_prefetch_chunks": 0,
+      "shutdown_seconds": 0.9976773241069168,
+      "cleanup_errors": []
+    },
+    "full_video_integrity_passed": true,
+    "quality_worker_cleanup": {
+      "worker_pids": [
+        2236750
+      ],
+      "worker_exitcodes": [
+        0
+      ],
+      "workers_joined": true,
+      "forced_termination": false,
+      "discarded_prefetch_chunks": 0,
+      "shutdown_seconds": 7.50841572880745e-05,
+      "cleanup_errors": []
+    }
+  },
+  "evaluation": {
+    "passed": true,
+    "closed": true,
+    "scenes": 2,
+    "seed": 197001,
+    "scene_digest": "5c690d7b9ff7a60f90c0f0b7b46f5550aee9445c2de995cc3bb02818d5e29bcd",
+    "success_rate": 0.0,
+    "lift_rate": 0.0,
+    "goal_error": 0.390546053647995,
+    "episode_length": 600.0
+  },
+  "process_shutdown": {
+    "process.json": {
+      "returncode": 0,
+      "leaked_process_group": false,
+      "process_group_shutdown": {
+        "grace_seconds": 2.0,
+        "wait_seconds": 1.4312099665403366e-05,
+        "poll_count": 1,
+        "group_disappeared": true,
+        "initial": {
+          "monotonic_ns": 1773083264162053,
+          "pgid": 2236157,
+          "exists": false,
+          "members": [],
+          "inspection_errors": []
+        },
+        "final": {
+          "monotonic_ns": 1773083264162053,
+          "pgid": 2236157,
+          "exists": false,
+          "members": [],
+          "inspection_errors": []
+        }
+      },
+      "unexpected_contexts": []
+    },
+    "audit-process.json": {
+      "returncode": 0,
+      "leaked_process_group": false,
+      "process_group_shutdown": {
+        "grace_seconds": 2.0,
+        "wait_seconds": 1.481291837990284e-05,
+        "poll_count": 1,
+        "group_disappeared": true,
+        "initial": {
+          "monotonic_ns": 1773094798330620,
+          "pgid": 2236665,
+          "exists": false,
+          "members": [],
+          "inspection_errors": []
+        },
+        "final": {
+          "monotonic_ns": 1773094798330620,
+          "pgid": 2236665,
+          "exists": false,
+          "members": [],
+          "inspection_errors": []
+        }
+      },
+      "unexpected_contexts": []
+    },
+    "evaluation-process.json": {
+      "returncode": 0,
+      "leaked_process_group": false,
+      "process_group_shutdown": {
+        "grace_seconds": 2.0,
+        "wait_seconds": 1.6985926777124405e-05,
+        "poll_count": 1,
+        "group_disappeared": true,
+        "initial": {
+          "monotonic_ns": 1773145383825380,
+          "pgid": 2236787,
+          "exists": false,
+          "members": [],
+          "inspection_errors": []
+        },
+        "final": {
+          "monotonic_ns": 1773145383825380,
+          "pgid": 2236787,
+          "exists": false,
+          "members": [],
+          "inspection_errors": []
+        }
+      },
+      "unexpected_contexts": []
+    }
+  },
+  "gpu_guard": {
+    "samples": 75,
+    "errors": [],
+    "owned_uuid_types": [
+      [
+        "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+        "G"
+      ],
+      [
+        "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c",
+        "C"
+      ],
+      [
+        "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c",
+        "C+G"
+      ],
+      [
+        "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+        "C"
+      ]
+    ]
+  }
+}

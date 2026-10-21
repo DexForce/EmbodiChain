@@ -15,6 +15,12 @@ the achieved data coverage and independent policy evaluation.
 The complete contract is in the
 [fixed-budget visual design](../../../docs/architecture/ods-data-stream-showcase-design.md#6-fixed-training-budget-visual-comparison).
 
+The [completed visual study](results/2026-10-21-visual-training/README.md)
+retains all 30 formal attempts: 29 qualified and one audit-process shutdown
+failure. ODS starts updates earlier, but its complete pipeline is slower than
+Offline-32 at comparable observed coverage under this budget. The short
+training budget does not produce a reliable PickPlace policy.
+
 ## Primary training paths
 
 | CLI path | Data | Purpose |
@@ -114,6 +120,12 @@ The supervisor then launches a separate CPU corpus/decoder audit and the
 independent policy evaluation. Their durations are saved and excluded from
 pipeline time. A failed audit or evaluation retains the original measured
 pipeline time and disqualifies that run for comparative claims.
+After the stage leader exits, the supervisor allows up to two seconds for its
+owned process group to disappear. Remaining members, including zombies, still
+fail the stage; PID, parent, state and termination evidence are retained in
+`process_group_shutdown`. This wait belongs to the stage, including pipeline
+time for the training stage. The formal study predates this shutdown fix and
+keeps its original failure; later validation is recorded separately.
 Actual runs remain unqualified while validation is pending. The supervisor
 persists the requested evaluation scene count; formal reports require all
 requested scenes and normal evaluation closure, or an explicit zero-scene

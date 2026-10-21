@@ -1,0 +1,3250 @@
+{
+  "format": "sha256-file-manifest-v1",
+  "files": [
+    {
+      "path": ".gitattributes",
+      "bytes": 504,
+      "sha256": "b633bb47b9187cf77f97fc7b04f9ecbf72f63b11809a02a83fce4c90ed4c7a85"
+    },
+    {
+      "path": "PACKAGING.md",
+      "bytes": 2740,
+      "sha256": "26b800350dd3aaf492108a09afdb051e4241a7ae3262c036d4c5c51f392085a7"
+    },
+    {
+      "path": "README.md",
+      "bytes": 20343,
+      "sha256": "47ff36ef09870c5b0a7504b993bc92ae2f0f013cfd1b7f40cfbb52c08c7a7341"
+    },
+    {
+      "path": "comparison.csv",
+      "bytes": 2881,
+      "sha256": "59e3934d9c98e78114996e982c277fe19c86f445d9b766eec6e1a5cad8d247a3"
+    },
+    {
+      "path": "comparison.json",
+      "bytes": 226889,
+      "sha256": "086686634164cfccb9db233da8a26fc4147dbe8dd03746a56e19da5193b48bf3"
+    },
+    {
+      "path": "copy-integrity.json",
+      "bytes": 195,
+      "sha256": "fed0d6484720da99e8ef9089a4b5c44aa350e7e69be003379bf6ea10fa709ec0"
+    },
+    {
+      "path": "external-artifacts.json",
+      "bytes": 522934,
+      "sha256": "1c6f90155504f622cd0c4683bb3c29dc4bdaf4385f766854738aaa0c6c0879dc"
+    },
+    {
+      "path": "frozen-source/embodichain/data_pipeline/engine/data.py",
+      "bytes": 105228,
+      "sha256": "3297f1b6d036bd63b71595e08ef9fe981eb58be02db7e9fe117a91e11bcf5bb3"
+    },
+    {
+      "path": "frozen-source/embodichain/data_pipeline/runtime.py",
+      "bytes": 15049,
+      "sha256": "0992cd749605df1cd79d0f64ce2b5dbac0c9e7b48124fec2a5fd3b454c263819"
+    },
+    {
+      "path": "frozen-source/embodichain/learning/models/__init__.py",
+      "bytes": 1456,
+      "sha256": "62dfb80b90068ab82f28a9d312f865a6e68014eaed6655a13f6779f2b6b41a0e"
+    },
+    {
+      "path": "frozen-source/embodichain/learning/models/mlp.py",
+      "bytes": 5354,
+      "sha256": "c607360edb8bff98f234b84400155da680129b5653c5b2e7b41b869b050e8a81"
+    },
+    {
+      "path": "frozen-source/embodichain/learning/models/normalizer.py",
+      "bytes": 3174,
+      "sha256": "f9e59e8eadf568d7533aa4e91d639aaf207b0843d6c8aaaa24954c870afb4764"
+    },
+    {
+      "path": "frozen-source/embodichain/learning/models/resnet_encoder.py",
+      "bytes": 5031,
+      "sha256": "32f2fb7463d80f317569084d908f3e7e741a36590d5a00ac177bc54f20ff8b90"
+    },
+    {
+      "path": "frozen-source/examples/ods/data_stream_demo/__init__.py",
+      "bytes": 901,
+      "sha256": "c9041fac160c5ee047510a80b557bb60b3d92de74a291ed68744365508d72fe0"
+    },
+    {
+      "path": "frozen-source/examples/ods/data_stream_demo/acquisition.py",
+      "bytes": 11242,
+      "sha256": "a2188f50b0fc1dba3de02b8fde2a3b20b76ea510770abf271d2caaecc122d89c"
+    },
+    {
+      "path": "frozen-source/examples/ods/data_stream_demo/lerobot_io.py",
+      "bytes": 56691,
+      "sha256": "aeec5641a3e50b1fbe6ff46829a0cbe0d1a498715e0de0aa38357d554c159d5f"
+    },
+    {
+      "path": "frozen-source/examples/ods/data_stream_demo/metrics.py",
+      "bytes": 33000,
+      "sha256": "c67bd79d04eb8c79361cecc18d937e1531125cbe6f4f4ad079c1133ea79ed90b"
+    },
+    {
+      "path": "frozen-source/examples/ods/data_stream_demo/payload.py",
+      "bytes": 9724,
+      "sha256": "65a6e074aab6becb8a9fc46fffad0753f997bad22e10e69f25426b09af04379d"
+    },
+    {
+      "path": "frozen-source/examples/ods/data_stream_demo/qualify_encoder.py",
+      "bytes": 15892,
+      "sha256": "043a94098f5672d50b58c06ec82ea84f4b9c23b9ca27fff469f309cb7f0b4647"
+    },
+    {
+      "path": "frozen-source/examples/ods/data_stream_demo/report.py",
+      "bytes": 30798,
+      "sha256": "796d64a3604f692478a3023cf2242e19311d8726ccfb95e9773571ff58a66fde"
+    },
+    {
+      "path": "frozen-source/examples/ods/data_stream_demo/run.py",
+      "bytes": 36632,
+      "sha256": "dd4369b5f83f728bce1feafca6ba397ba9db3a3434b8f1681bd74699106bed17"
+    },
+    {
+      "path": "frozen-source/examples/ods/data_stream_demo/suite.py",
+      "bytes": 38663,
+      "sha256": "bde907ce27499f73c35686f42f4cdcf7f9d94d868e90317a6e9bc3500286a278"
+    },
+    {
+      "path": "frozen-source/examples/ods/data_stream_demo/train.py",
+      "bytes": 42950,
+      "sha256": "1cbe47d228d6eba8559b74aa24fdc706949e3a700c45d8464b1b1f71f1182736"
+    },
+    {
+      "path": "frozen-source/examples/ods/data_stream_demo/training_audit.py",
+      "bytes": 19778,
+      "sha256": "75e3ce65d8130972265d55b5819a70d9d4d73c91cd5adcb0ef8a2f2ae717e3ce"
+    },
+    {
+      "path": "frozen-source/examples/ods/data_stream_demo/training_data.py",
+      "bytes": 19719,
+      "sha256": "dfae919f69d9e76f5e468ce3f7335f9fed130abf8673922d9757e5503c56da2b"
+    },
+    {
+      "path": "frozen-source/examples/ods/data_stream_demo/training_eval.py",
+      "bytes": 16112,
+      "sha256": "e65b3def87df59531caf997577635d66beb0a2f5f695d7e0b2233817ca2003ee"
+    },
+    {
+      "path": "frozen-source/examples/ods/data_stream_demo/training_metrics.py",
+      "bytes": 24724,
+      "sha256": "2bb613b2235bb8fa9f09b383beb8c27b8a4810e648adf290848063d6b34dcd72"
+    },
+    {
+      "path": "frozen-source/examples/ods/data_stream_demo/training_report.py",
+      "bytes": 53996,
+      "sha256": "c9c6678446742b1f6798e7f366958781da528aaa7184c26dd43c81c00356d17d"
+    },
+    {
+      "path": "frozen-source/examples/ods/data_stream_demo/training_suite.py",
+      "bytes": 32561,
+      "sha256": "f33df008d427cc7f672bab0b414393f137234b097e7717cb05845a27472a4c03"
+    },
+    {
+      "path": "frozen-source/examples/ods/data_stream_demo/video_integrity.py",
+      "bytes": 19948,
+      "sha256": "e1286b2a60902fc7b0302e6d4decaeb024f36883d0b90066a8d4fc159a29c7d1"
+    },
+    {
+      "path": "frozen-source/examples/ods/data_stream_demo/visual_policy.py",
+      "bytes": 6917,
+      "sha256": "c587fa2f9120c9163777ae9567a22cd77039fda2566b70ebf9836d5a4c50fbf4"
+    },
+    {
+      "path": "frozen-source/examples/ods/simple_bc_demo/config.py",
+      "bytes": 2593,
+      "sha256": "57b27cf7f38806c8a0993990dc2767de320f8f2102d47d9a4b1fdaf7e8ffdac4"
+    },
+    {
+      "path": "frozen-source/examples/ods/simple_bc_demo/configs/env.yaml",
+      "bytes": 1878,
+      "sha256": "c801ab47187fbd0e9079208149077a781ce48dda0afd4c0ccd7a5bbe8f63dfa9"
+    },
+    {
+      "path": "frozen-source/examples/ods/simple_bc_demo/configs/franka.yaml",
+      "bytes": 1132,
+      "sha256": "592bf09371e3e1c74a3aff9ee951cccb853f8a41d06dba314842fd49e0cb3366"
+    },
+    {
+      "path": "frozen-source/examples/ods/simple_bc_demo/configs/task.yaml",
+      "bytes": 210,
+      "sha256": "5d33898f4b18821ee5b8dff680663258de4e231202474259cf4c38bc416a9a4e"
+    },
+    {
+      "path": "frozen-source/examples/ods/simple_bc_demo/environment.py",
+      "bytes": 14839,
+      "sha256": "107e0037361ea4e7635d503be9764622f50130a253de544f5bf9eebb41362329"
+    },
+    {
+      "path": "frozen-source/source-manifest.json",
+      "bytes": 5424,
+      "sha256": "fb2c534e17c21c93fd2336a0a09788736c031eb4c58808b3fa25a03b88aa68f6"
+    },
+    {
+      "path": "independent-audit.json",
+      "bytes": 478313,
+      "sha256": "23bd7479f329df8e37d412f8cf4f0dc3e4f2674580dfb0bbd941e4bd53b95779"
+    },
+    {
+      "path": "independent_audit.py",
+      "bytes": 56928,
+      "sha256": "03241310a3ba58138837609fe9271fcd2cc94f1c182666680ab43e7a24a04003"
+    },
+    {
+      "path": "main/_supervision/ods_overlap/dual/seed19001/audit/launch.json",
+      "bytes": 1901,
+      "sha256": "84f7d7f7dd3b5012bf658c2f448976cee48a5769264ed677337f936abf6e262f"
+    },
+    {
+      "path": "main/_supervision/ods_overlap/dual/seed19001/evaluation/launch.json",
+      "bytes": 2036,
+      "sha256": "e22e992266cedf6e90b46e75f810736cd5a07b11e614f9921f911f8668dafadc"
+    },
+    {
+      "path": "main/_supervision/ods_overlap/dual/seed19001/training/launch.json",
+      "bytes": 2531,
+      "sha256": "630255f4d4063aed93c9ceff7f57d824d4dc8da6db26e166bd1cdb9466ba4273"
+    },
+    {
+      "path": "main/_supervision/ods_overlap/dual/seed19002/audit/launch.json",
+      "bytes": 1901,
+      "sha256": "8e96736b27747128811e1becf78fc3d8e2e017ad3e7b061dcff2f3bbb34ab7ac"
+    },
+    {
+      "path": "main/_supervision/ods_overlap/dual/seed19002/evaluation/launch.json",
+      "bytes": 2036,
+      "sha256": "05d8e53087dcb87c5e96925fdde20f8ad4b6fa197e7d30e7fc7bb31fa5ab264a"
+    },
+    {
+      "path": "main/_supervision/ods_overlap/dual/seed19002/training/launch.json",
+      "bytes": 2531,
+      "sha256": "41d4277f0098c30c13233e2014f7e882c0711db5dd9fdedd5197aafc8c297c47"
+    },
+    {
+      "path": "main/_supervision/ods_overlap/dual/seed19003/audit/launch.json",
+      "bytes": 1901,
+      "sha256": "ba4eaa82d549be25c0c9231efaabe0509fcb3cc8b6f23ca201128925f75126d7"
+    },
+    {
+      "path": "main/_supervision/ods_overlap/dual/seed19003/evaluation/launch.json",
+      "bytes": 2036,
+      "sha256": "61314628fe24d70023e15edcbbaae744082fbafadd8ac1190eeb1ea77d78cdee"
+    },
+    {
+      "path": "main/_supervision/ods_overlap/dual/seed19003/training/launch.json",
+      "bytes": 2531,
+      "sha256": "13b64c36160c5a59da76b884de37b448907ab5e2dfaef4376538cbc21572722b"
+    },
+    {
+      "path": "main/_supervision/ods_overlap/single/seed19001/audit/launch.json",
+      "bytes": 1905,
+      "sha256": "ab7fa85826cdcae332404ecee146c22b450584fe6872605d3466acbadcb78cf4"
+    },
+    {
+      "path": "main/_supervision/ods_overlap/single/seed19001/evaluation/launch.json",
+      "bytes": 2042,
+      "sha256": "c60abc55c9dcee59788ac063bcde33299a7db6974dc9fc42bfaa4c277b60caaa"
+    },
+    {
+      "path": "main/_supervision/ods_overlap/single/seed19001/training/launch.json",
+      "bytes": 2535,
+      "sha256": "37e4bc09756bfcd8cea86e28d12a48f9ce610228191014d85fc6c085da51653e"
+    },
+    {
+      "path": "main/_supervision/ods_overlap/single/seed19002/audit/launch.json",
+      "bytes": 1905,
+      "sha256": "5e963fedaf10b31f34713ba08e3837ccc1a93d5dafaa5e7b3ef81c10430747a3"
+    },
+    {
+      "path": "main/_supervision/ods_overlap/single/seed19002/evaluation/launch.json",
+      "bytes": 2042,
+      "sha256": "945bd7df85fcb8ff5eb05d24afea27a637a4f3c7a4b52f3eeeb3447c85f31809"
+    },
+    {
+      "path": "main/_supervision/ods_overlap/single/seed19002/training/launch.json",
+      "bytes": 2535,
+      "sha256": "6004283beb6abd19129423e85582d44216eea593fc97517dc252b39577f8ea84"
+    },
+    {
+      "path": "main/_supervision/ods_overlap/single/seed19003/audit/launch.json",
+      "bytes": 1905,
+      "sha256": "0dc5a8c5452d01d3f292c5282f38fc5c2ef33732395956aa1eee26c9406f142c"
+    },
+    {
+      "path": "main/_supervision/ods_overlap/single/seed19003/evaluation/launch.json",
+      "bytes": 2042,
+      "sha256": "ab38320ca204cdd739efaff59e9b467e147a7103ee67c80cd8fd3c62b4e84aea"
+    },
+    {
+      "path": "main/_supervision/ods_overlap/single/seed19003/training/launch.json",
+      "bytes": 2535,
+      "sha256": "5cdf50bc04c08bab96d40a2b58128dec8feb645c9823d3e62ce37527e07fcf7d"
+    },
+    {
+      "path": "main/_supervision/ods_serial/dual/seed19001/audit/launch.json",
+      "bytes": 1899,
+      "sha256": "6c49584f44e49cea096d0560fcf3aa9afaf8ea84a8bc5d85537e311f6a1a656f"
+    },
+    {
+      "path": "main/_supervision/ods_serial/dual/seed19001/evaluation/launch.json",
+      "bytes": 2034,
+      "sha256": "7a2b2b30d7f80904157265ccff1b6a8c4c5cb24df0177f05d75332dbbf3e3b76"
+    },
+    {
+      "path": "main/_supervision/ods_serial/dual/seed19001/training/launch.json",
+      "bytes": 2642,
+      "sha256": "38c05886f841d4631ee3fd0189b594734581597b07b14e87ed2f5ff5b614d0d7"
+    },
+    {
+      "path": "main/_supervision/ods_serial/dual/seed19002/audit/launch.json",
+      "bytes": 1899,
+      "sha256": "f4f2c07258183fc47b19608c679cb7f750b9d0670b26d60acf0bedec27496105"
+    },
+    {
+      "path": "main/_supervision/ods_serial/dual/seed19002/evaluation/launch.json",
+      "bytes": 2034,
+      "sha256": "78b83e99e456f8f2916858963fa08f0dc84a1517648bd2aa47dda7fe47e55e61"
+    },
+    {
+      "path": "main/_supervision/ods_serial/dual/seed19002/training/launch.json",
+      "bytes": 2642,
+      "sha256": "227405f321fd4d9eee4603761601c41487bded2f016db8606ca19e48c0a4fd40"
+    },
+    {
+      "path": "main/_supervision/ods_serial/dual/seed19003/audit/launch.json",
+      "bytes": 1899,
+      "sha256": "84ac8125f6da1a4bc9f8b37d73e32c2ed62c6cbdfa7b091f9d0fb3535cd1991f"
+    },
+    {
+      "path": "main/_supervision/ods_serial/dual/seed19003/evaluation/launch.json",
+      "bytes": 2034,
+      "sha256": "4dcb6790a3e16f408346dbcdc0c3c7bd837a58f2b72dc22fb52ede91c2abcadc"
+    },
+    {
+      "path": "main/_supervision/ods_serial/dual/seed19003/training/launch.json",
+      "bytes": 2642,
+      "sha256": "ac082fdaba52b65a94395133dd3380c45ac78de6625ee7b147c079d634e7dba3"
+    },
+    {
+      "path": "main/_supervision/ods_serial/single/seed19001/audit/launch.json",
+      "bytes": 1903,
+      "sha256": "2747c23ff51e0540e86ea432ffcf7c8c8bd837dbcdddadcc176e8e87c8c7edf9"
+    },
+    {
+      "path": "main/_supervision/ods_serial/single/seed19001/evaluation/launch.json",
+      "bytes": 2040,
+      "sha256": "ef6cd4b1040292880617a6bd4080307a989d629b3ca6772bc183cbfbdafebd03"
+    },
+    {
+      "path": "main/_supervision/ods_serial/single/seed19001/training/launch.json",
+      "bytes": 2648,
+      "sha256": "2f05707b1cff4c7a9a3e6db57fd21ac51a03dd0db6eae2090b87eaa14dbbfc34"
+    },
+    {
+      "path": "main/_supervision/ods_serial/single/seed19002/audit/launch.json",
+      "bytes": 1903,
+      "sha256": "766db4bd379bf503aa49938f6b9b06b58bde8496cf6202ee275d90e385b706ea"
+    },
+    {
+      "path": "main/_supervision/ods_serial/single/seed19002/evaluation/launch.json",
+      "bytes": 2040,
+      "sha256": "d0222a5f5b9660bedce7ffc21b9aa9ee967a69b7554228a1cd5c8966d8b84bf5"
+    },
+    {
+      "path": "main/_supervision/ods_serial/single/seed19002/training/launch.json",
+      "bytes": 2648,
+      "sha256": "28d4ae2c8d7654ad8329f813bd7ca4ba52d1680d31c019e4f2f4c039b5648e97"
+    },
+    {
+      "path": "main/_supervision/ods_serial/single/seed19003/audit/launch.json",
+      "bytes": 1903,
+      "sha256": "c0a5e1ae045aa5bb25f0cebdb57ceef6ebacadf497500d27307da44e6463bdd4"
+    },
+    {
+      "path": "main/_supervision/ods_serial/single/seed19003/evaluation/launch.json",
+      "bytes": 2040,
+      "sha256": "56822345b7672be659e8655a75657ec2265749d6fac6df13bf0806a7902dec5f"
+    },
+    {
+      "path": "main/_supervision/ods_serial/single/seed19003/training/launch.json",
+      "bytes": 2648,
+      "sha256": "5d88bba913764a213b03b6327a3bc438137c5213be918c103db15d36b271c70a"
+    },
+    {
+      "path": "main/_supervision/offline128/dual/seed19001/audit/launch.json",
+      "bytes": 1899,
+      "sha256": "17442b6c653d488a869e8a74247732eb1bf2f60a9b6b4abf99e6e294052d4cb6"
+    },
+    {
+      "path": "main/_supervision/offline128/dual/seed19001/evaluation/launch.json",
+      "bytes": 2034,
+      "sha256": "8e29104adc07570aa9369eb36fb1b4c55cb11f257d466e041c5476b383a2a2d7"
+    },
+    {
+      "path": "main/_supervision/offline128/dual/seed19001/training/launch.json",
+      "bytes": 2527,
+      "sha256": "5cd1891da932b9c4261f29519fba8979c779ce63c5c1eec3bea78fef844fd283"
+    },
+    {
+      "path": "main/_supervision/offline128/dual/seed19002/audit/launch.json",
+      "bytes": 1899,
+      "sha256": "49ab5eac7dc44ff5400da881e0cfa3c08296c639d12d3931882a44f40a340469"
+    },
+    {
+      "path": "main/_supervision/offline128/dual/seed19002/evaluation/launch.json",
+      "bytes": 2034,
+      "sha256": "43d2be9170edfa50b1533fcbb76554c8a3108e7ef5bd40bb7d983bb06a2497eb"
+    },
+    {
+      "path": "main/_supervision/offline128/dual/seed19002/training/launch.json",
+      "bytes": 2527,
+      "sha256": "616c60c71ee4ae0e70b5e14d29dff20c471b10245549c369deca88c9afb08785"
+    },
+    {
+      "path": "main/_supervision/offline128/dual/seed19003/audit/launch.json",
+      "bytes": 1899,
+      "sha256": "bdf230e49627d7489587112c12a39995a2b0cb5b90bfd6c0b718a4d0312976f7"
+    },
+    {
+      "path": "main/_supervision/offline128/dual/seed19003/evaluation/launch.json",
+      "bytes": 2034,
+      "sha256": "55d16b9e7397867768029323d682b1e243beee2e3d0f6a1eb735311e135ffe95"
+    },
+    {
+      "path": "main/_supervision/offline128/dual/seed19003/training/launch.json",
+      "bytes": 2527,
+      "sha256": "18370a8bf63a4e50b2a793e784aa2e133d0dba6bc971d55ad7d3afba584d5a28"
+    },
+    {
+      "path": "main/_supervision/offline128/single/seed19001/audit/launch.json",
+      "bytes": 1903,
+      "sha256": "95a890815e9d9d470e91d0e88c575d8248854c8f5ce9c6ff33beba0fd32c54e2"
+    },
+    {
+      "path": "main/_supervision/offline128/single/seed19001/evaluation/launch.json",
+      "bytes": 2040,
+      "sha256": "7420b81314615ca71700db8943bc25a48d3996857ffa3ec2444cb74f85929475"
+    },
+    {
+      "path": "main/_supervision/offline128/single/seed19001/training/launch.json",
+      "bytes": 2531,
+      "sha256": "3a01ba72305c07ecbc31dba09004418ad0811752a1496d2ef8cfdcf38865a185"
+    },
+    {
+      "path": "main/_supervision/offline128/single/seed19002/audit/launch.json",
+      "bytes": 1903,
+      "sha256": "4aeb2deb7a140e91a709d523abead081d91e526e476b54a99364c708066ca944"
+    },
+    {
+      "path": "main/_supervision/offline128/single/seed19002/evaluation/launch.json",
+      "bytes": 2040,
+      "sha256": "de95c3d027ed4719ae240650896cd19dc1b75d02985303dd3142e43e3e876ee4"
+    },
+    {
+      "path": "main/_supervision/offline128/single/seed19002/training/launch.json",
+      "bytes": 2531,
+      "sha256": "e37f475fdeac2801883c325f7682d0f4c7b4224eb02659276337e954500e2a55"
+    },
+    {
+      "path": "main/_supervision/offline128/single/seed19003/audit/launch.json",
+      "bytes": 1903,
+      "sha256": "fc3d49865f826b34ef9d7cd00048db7f56654b45e608ae948f5ab330b10b3bf8"
+    },
+    {
+      "path": "main/_supervision/offline128/single/seed19003/evaluation/launch.json",
+      "bytes": 2040,
+      "sha256": "9b54c08092d403ae7092c3590b7559e18327caa9add0a4e8b9bcae1ed24c1048"
+    },
+    {
+      "path": "main/_supervision/offline128/single/seed19003/training/launch.json",
+      "bytes": 2531,
+      "sha256": "e0ba7b4b52f3a6be8f069df7a6df3514ead6bf9b89c764a2520c2bf691ba3796"
+    },
+    {
+      "path": "main/_supervision/offline32/dual/seed19001/audit/launch.json",
+      "bytes": 1897,
+      "sha256": "37e7f60a33acb51da0f7187a4b140afb4455751ba58fab77cecbf9df9bc32b0c"
+    },
+    {
+      "path": "main/_supervision/offline32/dual/seed19001/evaluation/launch.json",
+      "bytes": 2032,
+      "sha256": "8aa9e168a4cbd07565d6fe9a1f2b902b0d92871cceccdee5333cd97679298bee"
+    },
+    {
+      "path": "main/_supervision/offline32/dual/seed19001/training/launch.json",
+      "bytes": 2525,
+      "sha256": "6fd2d2923243b0982b977ed7c4cf38b062e8a1b697164fe61b7ec4537a221823"
+    },
+    {
+      "path": "main/_supervision/offline32/dual/seed19002/audit/launch.json",
+      "bytes": 1897,
+      "sha256": "08d8d6f01b18125ac6a1c76a40b166225666f9474d5ba5e425f5e4cd868c1878"
+    },
+    {
+      "path": "main/_supervision/offline32/dual/seed19002/evaluation/launch.json",
+      "bytes": 2032,
+      "sha256": "2f840a9452e33ff84dc0d2ba2b95741c14432f5d7796cc1e22d87748ce667343"
+    },
+    {
+      "path": "main/_supervision/offline32/dual/seed19002/training/launch.json",
+      "bytes": 2525,
+      "sha256": "53a2605742805bb7ef6f278923c67db9df4eb0ae09a8001afa20ae762a2ec28b"
+    },
+    {
+      "path": "main/_supervision/offline32/dual/seed19003/audit/launch.json",
+      "bytes": 1897,
+      "sha256": "22d0afe284b049106092ae0a87d7e09d90b808ee6f042977dc8b81d13a6251cf"
+    },
+    {
+      "path": "main/_supervision/offline32/dual/seed19003/training/launch.json",
+      "bytes": 2525,
+      "sha256": "e71233af07dc7d92884a3a4bc9cbfe32696f93fb4d2f9fb86444712052b8fa41"
+    },
+    {
+      "path": "main/_supervision/offline32/single/seed19001/audit/launch.json",
+      "bytes": 1901,
+      "sha256": "16eb8d8d00c0e7e1fef48e05da735976882bdab72492d7a589abc2987f64ff8c"
+    },
+    {
+      "path": "main/_supervision/offline32/single/seed19001/evaluation/launch.json",
+      "bytes": 2038,
+      "sha256": "8f4a06032365dec34f34cf66f37ec7caf1095526bbdc89cd07b569d0bca2ca87"
+    },
+    {
+      "path": "main/_supervision/offline32/single/seed19001/training/launch.json",
+      "bytes": 2529,
+      "sha256": "caf3b6415d11d5654c39f326bd18388eca33d74cb7993e6af18a69851142cd8f"
+    },
+    {
+      "path": "main/_supervision/offline32/single/seed19002/audit/launch.json",
+      "bytes": 1901,
+      "sha256": "4d5c94bacbefa94f9399528b524147af488d848b984e444c208531e777880ff5"
+    },
+    {
+      "path": "main/_supervision/offline32/single/seed19002/evaluation/launch.json",
+      "bytes": 2038,
+      "sha256": "c7f4ae4d4689b918dcb2d70bcbd5ea0546c468065b9ccb61b6b75046ede7802d"
+    },
+    {
+      "path": "main/_supervision/offline32/single/seed19002/training/launch.json",
+      "bytes": 2529,
+      "sha256": "9958c41e89b1ad44454f10d89432c7f9a7b9281acddfa7d2060ceb67af45a526"
+    },
+    {
+      "path": "main/_supervision/offline32/single/seed19003/audit/launch.json",
+      "bytes": 1901,
+      "sha256": "7018f9e70f0e29204bccab7c3bbb35c6f376d3894cb5730e839a88e7ea823866"
+    },
+    {
+      "path": "main/_supervision/offline32/single/seed19003/evaluation/launch.json",
+      "bytes": 2038,
+      "sha256": "7189b4fd4562323f922a4c89c91fd15ee1347daf34ceb33c8be7b55efbaa1ea0"
+    },
+    {
+      "path": "main/_supervision/offline32/single/seed19003/training/launch.json",
+      "bytes": 2529,
+      "sha256": "0453523b043daf9517d2264d4a5bf0e094c530f70a724271a66d9cf23ce7622c"
+    },
+    {
+      "path": "main/_supervision/offline8/dual/seed19001/audit/launch.json",
+      "bytes": 1895,
+      "sha256": "e75b181f7ec6e9c97e9bc80489e49cc8d28fd89c44f5da387bc06b1925a69017"
+    },
+    {
+      "path": "main/_supervision/offline8/dual/seed19001/evaluation/launch.json",
+      "bytes": 2030,
+      "sha256": "b9a879f2b8d67fb18127bd9860542795da9744b8c019fdf812f2a443ad1e5861"
+    },
+    {
+      "path": "main/_supervision/offline8/dual/seed19001/training/launch.json",
+      "bytes": 2523,
+      "sha256": "a85e672b1b1f3728afcf8d269aac47f5f449eb98e16267310229ff6f49d607f5"
+    },
+    {
+      "path": "main/_supervision/offline8/dual/seed19002/audit/launch.json",
+      "bytes": 1895,
+      "sha256": "9cfeece4a0eb5664ce5d4db8e0824bb56ac2f40f065f2f793ea6c8901aea4940"
+    },
+    {
+      "path": "main/_supervision/offline8/dual/seed19002/evaluation/launch.json",
+      "bytes": 2030,
+      "sha256": "e50c4dece3c80fd3d09e632570fdb83756e3a35cd0d82e05aee199d7555d28d4"
+    },
+    {
+      "path": "main/_supervision/offline8/dual/seed19002/training/launch.json",
+      "bytes": 2523,
+      "sha256": "5a6f3516b6565e741b01056cc0973cca6d5205c3ba926339d8cb2ab85be7fcd1"
+    },
+    {
+      "path": "main/_supervision/offline8/dual/seed19003/audit/launch.json",
+      "bytes": 1895,
+      "sha256": "50fb3ded196785f5c4e50ef28a49e7d6213b5c95ee9ffe6611018b04e076c297"
+    },
+    {
+      "path": "main/_supervision/offline8/dual/seed19003/evaluation/launch.json",
+      "bytes": 2030,
+      "sha256": "04b40db224454b2d251ac0344bcd53523af7dba7571c85711299ffa4a59bf5ab"
+    },
+    {
+      "path": "main/_supervision/offline8/dual/seed19003/training/launch.json",
+      "bytes": 2523,
+      "sha256": "8caf3eb151b23f5b5567fe2ddda2db372434e0f50609b30c9edfef5b56af41b1"
+    },
+    {
+      "path": "main/_supervision/offline8/single/seed19001/audit/launch.json",
+      "bytes": 1899,
+      "sha256": "4bf12232218ffb7605d9f28513364d3614bbf37ea8a25d9d931502eecfeac02e"
+    },
+    {
+      "path": "main/_supervision/offline8/single/seed19001/evaluation/launch.json",
+      "bytes": 2036,
+      "sha256": "e08fdec1cc5c3e4d22eabc202bf84be3c28980a5dbb5794b9ec2602d62d47e69"
+    },
+    {
+      "path": "main/_supervision/offline8/single/seed19001/training/launch.json",
+      "bytes": 2527,
+      "sha256": "b698b150fb69ef34975e88ab0bf74cb2b057d795e016ba7ee0586b7516ba3b80"
+    },
+    {
+      "path": "main/_supervision/offline8/single/seed19002/audit/launch.json",
+      "bytes": 1899,
+      "sha256": "d479564a4ca56557445e143c15a916ccab70c8d296d26336e336d3044baefd3f"
+    },
+    {
+      "path": "main/_supervision/offline8/single/seed19002/evaluation/launch.json",
+      "bytes": 2036,
+      "sha256": "5e8f18cfaf56a5d06d6ed55bce22fbf76321aa219239bf6bd6050de1adc58ba1"
+    },
+    {
+      "path": "main/_supervision/offline8/single/seed19002/training/launch.json",
+      "bytes": 2527,
+      "sha256": "bbbc77939a08791d999b9f720ff15e4bed101389c8db476dd072981c38a7ec18"
+    },
+    {
+      "path": "main/_supervision/offline8/single/seed19003/audit/launch.json",
+      "bytes": 1899,
+      "sha256": "1f76a5e37b7f3f8c342266fda138e9811b33a06f163de0d2cb2c8a97dd51a0e9"
+    },
+    {
+      "path": "main/_supervision/offline8/single/seed19003/evaluation/launch.json",
+      "bytes": 2036,
+      "sha256": "9edf71b42925a8a09af9bf1fd1f8900eac53bc2ef9b6bcbc514b689fcdc64027"
+    },
+    {
+      "path": "main/_supervision/offline8/single/seed19003/training/launch.json",
+      "bytes": 2527,
+      "sha256": "01daf9eb5a5e4a25689b2ec948ddd636abd9789223724da9b1fa06152320004a"
+    },
+    {
+      "path": "main/gpu-preflight.json",
+      "bytes": 8306,
+      "sha256": "251b176ddf31f50b60b7ac9115096fcb5fba3a5005ccbc5ba0cb7f73af24f6d1"
+    },
+    {
+      "path": "main/native-library-hashes.json",
+      "bytes": 4880,
+      "sha256": "1fcbab9ca2653cd7df8136f892442aeda9f6217aa982dc594efbd48338a1814b"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19001/audit-process.json",
+      "bytes": 491,
+      "sha256": "3d5108804256287890fcaa54cefbb647d33f2b8aefb33929d061d0d0ee61566d"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19001/config.json",
+      "bytes": 709,
+      "sha256": "906f82b63b6c4cd4585c41fdaabbd8dbe35dc63b6c850095ecf76d0fb3faf842"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19001/environment.json",
+      "bytes": 3282,
+      "sha256": "c5558de614dcd5dc659efb5bfb866ed50a9388506f7852fbee1e64fbe9a356cd"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19001/evaluation-process.json",
+      "bytes": 762,
+      "sha256": "e98aabd03f8b31e0b67c0d3774cdf4ae80059e0db9be188b38bdd5fe97147ca6"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19001/evaluation.json",
+      "bytes": 7731,
+      "sha256": "2907637c0cfb737ed59b6eea1101a1149858b9a1c25134f9b897b89eddfdb69b"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19001/initial-contract.json",
+      "bytes": 3288,
+      "sha256": "c99510e8231d0b751d6d35c7342f078a4f42d09eea25d7aadf7c5558c8ba6ad0"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19001/payload_schema.json",
+      "bytes": 2293,
+      "sha256": "37f884aa25e3297758fc3c392517e1c1690fd5036dff9af8803dec3089e91296"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19001/post-audit-video-integrity.json",
+      "bytes": 8018,
+      "sha256": "b8cd75ac65fca0e7ef47508033ac2e519f915ddb2237c2225ca3de4d020f13d9"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19001/post-audit.json",
+      "bytes": 20964,
+      "sha256": "0e1843e91164e737fdc111dcc5c31c54435a56ac60fe892571c44d83b1760b0b"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19001/process.json",
+      "bytes": 760,
+      "sha256": "8be9863db5b1de692a6a376ce8a55e91c2a4f4aca357531de66689444f2c7383"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19001/roles.json",
+      "bytes": 56,
+      "sha256": "16c5059926a735bb8379321e7ec8386fb6cffbd0751e8bfca68cc38a99143606"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19001/summary.json",
+      "bytes": 1072427,
+      "sha256": "4923ec7c7a56b544ed303c625c4c72c36b5c1995c06a057e818e5337d97a5bf5"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19001/training-trace.json",
+      "bytes": 223972,
+      "sha256": "4623073265f46fcebb11e7769e0eb29bbdb717a9ef1477556ac3e336e7290be9"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19002/audit-process.json",
+      "bytes": 491,
+      "sha256": "62289690a4565d2c6361e0d137aa10dd4e86caed0345c01145abd165efb4abf0"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19002/config.json",
+      "bytes": 709,
+      "sha256": "dbe0e895aaece095baea97bdcc86a1a81eaaa36993630eb038d25a6579c93459"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19002/environment.json",
+      "bytes": 3282,
+      "sha256": "c5558de614dcd5dc659efb5bfb866ed50a9388506f7852fbee1e64fbe9a356cd"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19002/evaluation-process.json",
+      "bytes": 762,
+      "sha256": "3eec91629378cc313bbb8bf9240e50cdd96b710008088875cc686be10381c553"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19002/evaluation.json",
+      "bytes": 7733,
+      "sha256": "eb9ba346f1d7f0a9170308d3d0d70d56b3b3058cb22d5fcc33827e6a86ea6e01"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19002/initial-contract.json",
+      "bytes": 3290,
+      "sha256": "9ed2cb1a932988816945d708980e803bd39ced858429bb5ce6a95812a600905c"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19002/payload_schema.json",
+      "bytes": 2293,
+      "sha256": "37f884aa25e3297758fc3c392517e1c1690fd5036dff9af8803dec3089e91296"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19002/post-audit-video-integrity.json",
+      "bytes": 8017,
+      "sha256": "b0f7b5640985f9a566337fcaab393a22e3f18a6d2713dd11a99af1b0cdc0196f"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19002/post-audit.json",
+      "bytes": 20966,
+      "sha256": "1d37b90e442337d86c41eeafc8bd4057a8405c3868afb8cc701aef20072389d7"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19002/process.json",
+      "bytes": 761,
+      "sha256": "ba4914737eee3782ab52645715e9737a465813b8929df58d846d989cf43c87b6"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19002/roles.json",
+      "bytes": 56,
+      "sha256": "f05c9f2d172ba755fb3e1ae7180e5f8893a084dcf2135fa1bca63010cc99ad30"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19002/summary.json",
+      "bytes": 1080811,
+      "sha256": "2e39bbd3e86bac1cff9363124d6e09c5bf8fa57bcb2fd882c510b04c52125387"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19002/training-trace.json",
+      "bytes": 224002,
+      "sha256": "271b93dd8e368934e40b89e71e9eadf0b94a2ff85c312429c09038c5c787d97a"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19003/audit-process.json",
+      "bytes": 490,
+      "sha256": "3bfd2c6ea053df1ea1da41bdb6adb322b21283a67f69e71a19650b3901f0f29a"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19003/config.json",
+      "bytes": 709,
+      "sha256": "1c255492ffeef5949c26d9a65f0378e83769e75c8c5f376821a9c64bf8093241"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19003/environment.json",
+      "bytes": 3282,
+      "sha256": "c5558de614dcd5dc659efb5bfb866ed50a9388506f7852fbee1e64fbe9a356cd"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19003/evaluation-process.json",
+      "bytes": 762,
+      "sha256": "517452c7e08fd46215fc4ede5e4631ee7f750996f706ec357eefba26579beae2"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19003/evaluation.json",
+      "bytes": 7737,
+      "sha256": "fd6d23e05aa6612742a0fae446ac9c337009d3607175f0a8d3c14c0f5e0b66b1"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19003/initial-contract.json",
+      "bytes": 3285,
+      "sha256": "6998066354cdf81040ae6c7e728dda22db74ad2c36589f9fcbbc555e5b30d498"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19003/payload_schema.json",
+      "bytes": 2293,
+      "sha256": "37f884aa25e3297758fc3c392517e1c1690fd5036dff9af8803dec3089e91296"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19003/post-audit-video-integrity.json",
+      "bytes": 8016,
+      "sha256": "c519891e1feb4030f065b69be6699c4556169a96bd80919df7dbc6256765bf43"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19003/post-audit.json",
+      "bytes": 20968,
+      "sha256": "7de80a43077602f00a066481bdd8b012fcd03ef8a0e81ecbfb52578f2d9e9c2d"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19003/process.json",
+      "bytes": 761,
+      "sha256": "8f9d7209cfbafb950de713505827c093e13862892e40458790451aa9e9a288b0"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19003/roles.json",
+      "bytes": 56,
+      "sha256": "1175f62f4f74b3bccbff848bb2d4be6613cacb655b69c5201e33c2ff870f900b"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19003/summary.json",
+      "bytes": 1069265,
+      "sha256": "736606d7b12a92c49a54b9bd0dd14a46f25e7af2e5151f19de42780d32937345"
+    },
+    {
+      "path": "main/ods_overlap/dual/seed19003/training-trace.json",
+      "bytes": 223999,
+      "sha256": "bac135070b090a7ea29044254c2da314128cdfff718adfb9b15d1cfa4ddda34e"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19001/audit-process.json",
+      "bytes": 492,
+      "sha256": "99db72a3739d9e2edc67ac91073991f5a20a8aba66e46474cf202b2cbc1720a9"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19001/config.json",
+      "bytes": 713,
+      "sha256": "d9b6fd16a79507748b32a01a474052bbde5bc530529b23e88602d5cbeb3e45b4"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19001/environment.json",
+      "bytes": 3282,
+      "sha256": "c5558de614dcd5dc659efb5bfb866ed50a9388506f7852fbee1e64fbe9a356cd"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19001/evaluation-process.json",
+      "bytes": 764,
+      "sha256": "3dc63c8a4c11021c9e6a6076fe389e96089a6bfeecd48d0b9781f9f270ba27c6"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19001/evaluation.json",
+      "bytes": 7724,
+      "sha256": "f65783703adeb487f07b55a987b856a5e6e7203a0b84a3245ba691e2fef03036"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19001/initial-contract.json",
+      "bytes": 3271,
+      "sha256": "78176b52234494156363c0eb687835ae04b75e9910d47f8c72835421dc563fdb"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19001/payload_schema.json",
+      "bytes": 2126,
+      "sha256": "9b85c5ce63a1f6a46ce322b7ce75fa79d75e7135a56cffaa0f935ec2ac52c16d"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19001/post-audit-video-integrity.json",
+      "bytes": 4679,
+      "sha256": "5db15fef2f5e554e0fd212f20f0c28e5fb6959e6353014341ac759dda4b1ad2e"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19001/post-audit.json",
+      "bytes": 16853,
+      "sha256": "0777a58cb450ccf7049b3c3bd0ee08040c523833582493e7403ce929ed912928"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19001/process.json",
+      "bytes": 763,
+      "sha256": "f7c72369b5611590c4474e68da6e06f2b025a99cfa7c6e669c1d06505d90386c"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19001/roles.json",
+      "bytes": 56,
+      "sha256": "29c85951fa15ecb05f34d1ac2fba76d4076138dedb809e9c2b9c9a1764578254"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19001/summary.json",
+      "bytes": 1068358,
+      "sha256": "95364799cd3fa9a85a18b62ff4367ceac50d3b734429baaa6285d8aef2958c06"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19001/training-trace.json",
+      "bytes": 223974,
+      "sha256": "77ae2f401ca995c31243628bd9e713b649fe64641dbe9fece20d8d4d8ae500ef"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19002/audit-process.json",
+      "bytes": 492,
+      "sha256": "c193e2e1ac39037a13ba66d0a8a649a26cd8b6f9840cf2281db045c369c9da6d"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19002/config.json",
+      "bytes": 713,
+      "sha256": "f217f882d785239cca05744db7655066844909ea117cd56d109369b92e2d20a7"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19002/environment.json",
+      "bytes": 3282,
+      "sha256": "c5558de614dcd5dc659efb5bfb866ed50a9388506f7852fbee1e64fbe9a356cd"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19002/evaluation-process.json",
+      "bytes": 764,
+      "sha256": "cded01a6296de7f05a1956bcbb7d3d5158ce857850683815a628892464500bab"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19002/evaluation.json",
+      "bytes": 7722,
+      "sha256": "d67294a423d48f2d73d12f49da066daed38f8b1dc07151aaffbe7a4ea1c0a0cc"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19002/initial-contract.json",
+      "bytes": 3273,
+      "sha256": "7d60304f7297079957b6e7d2616078f58206eca69f46035b0682a4cb8c4b90d3"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19002/payload_schema.json",
+      "bytes": 2126,
+      "sha256": "9b85c5ce63a1f6a46ce322b7ce75fa79d75e7135a56cffaa0f935ec2ac52c16d"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19002/post-audit-video-integrity.json",
+      "bytes": 4679,
+      "sha256": "4ad0f7b4340c1caa4a505e119625650f1ab8dc0ba5b69d3b93455955784b3bdb"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19002/post-audit.json",
+      "bytes": 16851,
+      "sha256": "819e1d9474299e0b0baad60846b50106d642bc04d9ffe1e2e5ca0d237d9febae"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19002/process.json",
+      "bytes": 763,
+      "sha256": "2f0de14fdd05884e94a0f819d8e15012a27734968806aabe77c542750ba3032c"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19002/roles.json",
+      "bytes": 56,
+      "sha256": "8e0ae480f8aea72615e6e1b3765f5526b9ac24ea1634bb827da4227e8531b19b"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19002/summary.json",
+      "bytes": 1076632,
+      "sha256": "cb4e0a476642ddd12a147a67a8f2af2a75d6fa5bb255561e968b52e52e0bf4ab"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19002/training-trace.json",
+      "bytes": 224004,
+      "sha256": "b250e7d1d8d5c25b5dbbd348c18485e6e955ded44cd79b5224719ff0bcfd1177"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19003/audit-process.json",
+      "bytes": 492,
+      "sha256": "b594a261f84fbc4acc8bab653f36ed355574f9a151dccfa4176f448c21bd3964"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19003/config.json",
+      "bytes": 713,
+      "sha256": "8ee7b3e30b0d677343f31907a82046b4db9e89580c77e615af2eacf6d14035c1"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19003/environment.json",
+      "bytes": 3282,
+      "sha256": "c5558de614dcd5dc659efb5bfb866ed50a9388506f7852fbee1e64fbe9a356cd"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19003/evaluation-process.json",
+      "bytes": 763,
+      "sha256": "9130e23e82b2cb4085eed00d097e0f5bd13e26afef6b24001a6c78cbc1073e76"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19003/evaluation.json",
+      "bytes": 7727,
+      "sha256": "1b35a207b35cb620d07a0649f5ee2d639f36eaa4ceacce8895dc5f357949bf1f"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19003/initial-contract.json",
+      "bytes": 3268,
+      "sha256": "98c2b2cfefb269bbb29fbca34da09fbe7a9c73968c514307d456bbec9e8d26f9"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19003/payload_schema.json",
+      "bytes": 2126,
+      "sha256": "9b85c5ce63a1f6a46ce322b7ce75fa79d75e7135a56cffaa0f935ec2ac52c16d"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19003/post-audit-video-integrity.json",
+      "bytes": 4677,
+      "sha256": "e3e9231ad771235aeaa4ce1e80baefe0039724a1cb19dd126dccbd7cbd800cfd"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19003/post-audit.json",
+      "bytes": 16849,
+      "sha256": "6077755bbd1d953f5c60cba980f7cc4b3a2918be9f6c49104712e517c4bc53f9"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19003/process.json",
+      "bytes": 763,
+      "sha256": "b662762188e1769e296f080a77e51f0ffbed04dfd6d7ff71733d9a93df3d82fc"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19003/roles.json",
+      "bytes": 56,
+      "sha256": "da731f2e4b7836e7d006b34ab835ff47f886c1255749e2220629a6e9aa8d22f7"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19003/summary.json",
+      "bytes": 1065074,
+      "sha256": "5d0e6b1d0cce46f7bb0ecb39c5a5cf029fbaae768af3cd57c66647b2a880c93f"
+    },
+    {
+      "path": "main/ods_overlap/single/seed19003/training-trace.json",
+      "bytes": 224001,
+      "sha256": "2477379fca02b7180b72b32ad9cf5d044726c7bf5db48eb9553b24888ad10ea9"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19001/audit-process.json",
+      "bytes": 489,
+      "sha256": "4cb9f60b8a0c359aa7cc2e748d664347c327dd1229790eae7ef5e087831c0501"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19001/config.json",
+      "bytes": 795,
+      "sha256": "0d5c3bfa997ec07517b983f7b108c004b956a0f6e9666ab7585a67076eea3bb2"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19001/environment.json",
+      "bytes": 3282,
+      "sha256": "c5558de614dcd5dc659efb5bfb866ed50a9388506f7852fbee1e64fbe9a356cd"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19001/evaluation-process.json",
+      "bytes": 759,
+      "sha256": "8123b6e8c2215701821e7634c1dcf3757405c52e344523c1393322eb46c43adb"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19001/evaluation.json",
+      "bytes": 7730,
+      "sha256": "775a3ee1f0997de21f8ffe2c1b17fedf7ad9cdcc5c51c72b81be6339d1429b85"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19001/initial-contract.json",
+      "bytes": 3288,
+      "sha256": "5331f3c18d33df252309508c3b53e424a1deeb6ca95199d611038fbcbaab6a95"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19001/payload_schema.json",
+      "bytes": 2293,
+      "sha256": "37f884aa25e3297758fc3c392517e1c1690fd5036dff9af8803dec3089e91296"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19001/post-audit-video-integrity.json",
+      "bytes": 8006,
+      "sha256": "e5a3bd09ecf20aef73d687922262620790762c1ed5690ca3fe9e289177513a60"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19001/post-audit.json",
+      "bytes": 20957,
+      "sha256": "8b372590c178e838cd3e60695ec96bf9d2faf9801dfd925d4e84c6214df4fbf9"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19001/process.json",
+      "bytes": 760,
+      "sha256": "be9872895a9309237d684fa5e536ceb42acc1737a292db9a866dd669095c9124"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19001/roles.json",
+      "bytes": 56,
+      "sha256": "6c85de2e423f12cacc26c335595a9ff84e77a74334e077cbe0ec05e01e6dcc80"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19001/summary.json",
+      "bytes": 1071986,
+      "sha256": "4a665508bc06181275ca3767022667d6f05837b6202312bc27587e903fe5a454"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19001/training-trace.json",
+      "bytes": 223972,
+      "sha256": "5d61597541c70e46c2ed24932fd1b5a56ef259f582a3ec205653a4bc3c3aeb54"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19002/audit-process.json",
+      "bytes": 490,
+      "sha256": "b8373bacebc7c6001e9b8b07937441a11feebf7c380f4b9d8519c9e493ade1e9"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19002/config.json",
+      "bytes": 795,
+      "sha256": "a0fe0409e7371b78aa76efcdd9ca36238be5e67f35fb4b53608ebd4206eef6cd"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19002/environment.json",
+      "bytes": 3282,
+      "sha256": "c5558de614dcd5dc659efb5bfb866ed50a9388506f7852fbee1e64fbe9a356cd"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19002/evaluation-process.json",
+      "bytes": 760,
+      "sha256": "42c9260a1a85742b178e6dfa47ec0b24537cef659c1d4db703e3058cc1c066dc"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19002/evaluation.json",
+      "bytes": 7731,
+      "sha256": "e6463df025be365a52af4fca89d97337c83b0b442f061568ec4e740ca186968d"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19002/initial-contract.json",
+      "bytes": 3290,
+      "sha256": "f8ef193a781a710848c8fb0c1936c131f6b3453e77998d33210c57e9356fd6b3"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19002/payload_schema.json",
+      "bytes": 2293,
+      "sha256": "37f884aa25e3297758fc3c392517e1c1690fd5036dff9af8803dec3089e91296"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19002/post-audit-video-integrity.json",
+      "bytes": 8006,
+      "sha256": "eb9002345a2dc1a123639e910936dc2a210ea1b37d4d9d80bec9eceaeaa6b455"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19002/post-audit.json",
+      "bytes": 20957,
+      "sha256": "f2aa9db157cb09c45cd079fad973c255b38af56d08a764df80280573966a39de"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19002/process.json",
+      "bytes": 760,
+      "sha256": "350f5d39c3ea118db3de7a05d1e43ef8f4d38c443b25183e0baad5171fc4d9d7"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19002/roles.json",
+      "bytes": 56,
+      "sha256": "a7f779bf901025c86dcdc3611a8be5ba11ddc8dbe161fb3ded49f1eca408b4cf"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19002/summary.json",
+      "bytes": 1080279,
+      "sha256": "e11b7d7aa328f143e7f2d6630b78da868d438b6af87edf9e4c6111716f62cd6e"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19002/training-trace.json",
+      "bytes": 224002,
+      "sha256": "5addb513c8548eed1537eb7b0c6fde03b713631fa5b5efbe55b1595592a94481"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19003/audit-process.json",
+      "bytes": 490,
+      "sha256": "5d9267eb5ea90d43f2ae7e020b6696d57fbf30f8e727dda37b02ec6aff39f4cb"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19003/config.json",
+      "bytes": 795,
+      "sha256": "d9f0aa8f0bdf8fe2be0a972d4bbcd203fedbba626705e7035dff33070218e1a0"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19003/environment.json",
+      "bytes": 3282,
+      "sha256": "c5558de614dcd5dc659efb5bfb866ed50a9388506f7852fbee1e64fbe9a356cd"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19003/evaluation-process.json",
+      "bytes": 761,
+      "sha256": "72e8fe123b66078cf0179269176718e7106021680014713f18042838b19975bb"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19003/evaluation.json",
+      "bytes": 7736,
+      "sha256": "0c45bc52701f74996daaff351148b8e5d620738cfa4a03367314e159ccd6c7ab"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19003/initial-contract.json",
+      "bytes": 3285,
+      "sha256": "c98d15e0cba9ef6f76fb4c279bf645bcf74d3f76112d294ee81f97cd06012418"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19003/payload_schema.json",
+      "bytes": 2293,
+      "sha256": "37f884aa25e3297758fc3c392517e1c1690fd5036dff9af8803dec3089e91296"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19003/post-audit-video-integrity.json",
+      "bytes": 8006,
+      "sha256": "e8eb70cc0a1ae4b3c998317014995b0badc1aed1f8cef82b169f66aa875b134c"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19003/post-audit.json",
+      "bytes": 20961,
+      "sha256": "8aa56183a12df3746585502644d374de68a99ffcc2dcb02038061f91c2890b3d"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19003/process.json",
+      "bytes": 760,
+      "sha256": "5b2461a23d77e824cf838787779a7e401ed47d03c224d691ce985300a357e887"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19003/roles.json",
+      "bytes": 56,
+      "sha256": "01737c57a4bb0258fe0dc6fa63dfb41f9aac34ba9cdc95d278a55d5288f64a44"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19003/summary.json",
+      "bytes": 1068722,
+      "sha256": "8c21526edb9da8bb73be1f8bf78ecd8447cd3fed876b930acb3adf3c55495458"
+    },
+    {
+      "path": "main/ods_serial/dual/seed19003/training-trace.json",
+      "bytes": 223999,
+      "sha256": "d6ebdb76a0064c4ba06741aad16a4aeb8a769ced854793b25c1b989a6010dda5"
+    },
+    {
+      "path": "main/ods_serial/single/seed19001/audit-process.json",
+      "bytes": 491,
+      "sha256": "a80f31177918f6cf0c180751c5ff327effb7b47b025edb7efe43367d858ce2f0"
+    },
+    {
+      "path": "main/ods_serial/single/seed19001/config.json",
+      "bytes": 801,
+      "sha256": "38590072b9c9afbcdb3f5ededc9e1e450f35957556c7a6d81368f528b3154982"
+    },
+    {
+      "path": "main/ods_serial/single/seed19001/environment.json",
+      "bytes": 3282,
+      "sha256": "c5558de614dcd5dc659efb5bfb866ed50a9388506f7852fbee1e64fbe9a356cd"
+    },
+    {
+      "path": "main/ods_serial/single/seed19001/evaluation-process.json",
+      "bytes": 763,
+      "sha256": "f4f127d4711d019ae6f9c36f9dc91361ecbdfd7cfa37878b5cfa0f4fadb169ee"
+    },
+    {
+      "path": "main/ods_serial/single/seed19001/evaluation.json",
+      "bytes": 7720,
+      "sha256": "37bd262b95aa14b091cbeca140b68643b3e803abbc1a5cef27d02e5eea023dd0"
+    },
+    {
+      "path": "main/ods_serial/single/seed19001/initial-contract.json",
+      "bytes": 3271,
+      "sha256": "ae29b54c7dbfddff37799bb54ee58af7f82367e4483c60b9d4b8657d93ca916b"
+    },
+    {
+      "path": "main/ods_serial/single/seed19001/payload_schema.json",
+      "bytes": 2126,
+      "sha256": "9b85c5ce63a1f6a46ce322b7ce75fa79d75e7135a56cffaa0f935ec2ac52c16d"
+    },
+    {
+      "path": "main/ods_serial/single/seed19001/post-audit-video-integrity.json",
+      "bytes": 4673,
+      "sha256": "2246ba718c80e232b92e51467c4106e64182bdb30af2c42f27ffe80782135596"
+    },
+    {
+      "path": "main/ods_serial/single/seed19001/post-audit.json",
+      "bytes": 16847,
+      "sha256": "28879a274d511456cdf487f29c758a64da23d6e70e8d9269ac0f00681b681b06"
+    },
+    {
+      "path": "main/ods_serial/single/seed19001/process.json",
+      "bytes": 762,
+      "sha256": "125765d404b3d62f4a986341268048e3b5a8d3c3ed7ad766e9c406708d40fc40"
+    },
+    {
+      "path": "main/ods_serial/single/seed19001/roles.json",
+      "bytes": 56,
+      "sha256": "785b69c708999e3a3b7ce3bdf4e3b32500f0f6962d819b11f0d40f4779f53029"
+    },
+    {
+      "path": "main/ods_serial/single/seed19001/summary.json",
+      "bytes": 1067839,
+      "sha256": "abdc6d5a45cc662956f4bd7694c02d3386f229fc95ee1405a129e8b199aac634"
+    },
+    {
+      "path": "main/ods_serial/single/seed19001/training-trace.json",
+      "bytes": 223974,
+      "sha256": "96bad6c649c152a1a842f468dd192060fa8ed5c8a26cc63a4ca5ac3968d42e73"
+    },
+    {
+      "path": "main/ods_serial/single/seed19002/audit-process.json",
+      "bytes": 491,
+      "sha256": "33555fe9b29671ba417039df7d1a94a243fb2e74c6b83124f279bd4c4e2749cf"
+    },
+    {
+      "path": "main/ods_serial/single/seed19002/config.json",
+      "bytes": 801,
+      "sha256": "149a578ed6266ae085f7cb21df81ea6b6211d1607bf0ee90ceee4e708e56eb1a"
+    },
+    {
+      "path": "main/ods_serial/single/seed19002/environment.json",
+      "bytes": 3282,
+      "sha256": "c5558de614dcd5dc659efb5bfb866ed50a9388506f7852fbee1e64fbe9a356cd"
+    },
+    {
+      "path": "main/ods_serial/single/seed19002/evaluation-process.json",
+      "bytes": 763,
+      "sha256": "488000a57784fefc25429d9727fcd2a5f914d6a44ca814b14065e139e9087049"
+    },
+    {
+      "path": "main/ods_serial/single/seed19002/evaluation.json",
+      "bytes": 7722,
+      "sha256": "5ad4f0c1e4a084e634709ff7620f559e5fb2da6f0029028792d22db0963fc60a"
+    },
+    {
+      "path": "main/ods_serial/single/seed19002/initial-contract.json",
+      "bytes": 3273,
+      "sha256": "8ea4258b5349ac5ae50b6954be3af4dc8f46207112f1122cef6d2ed943fb3d38"
+    },
+    {
+      "path": "main/ods_serial/single/seed19002/payload_schema.json",
+      "bytes": 2126,
+      "sha256": "9b85c5ce63a1f6a46ce322b7ce75fa79d75e7135a56cffaa0f935ec2ac52c16d"
+    },
+    {
+      "path": "main/ods_serial/single/seed19002/post-audit-video-integrity.json",
+      "bytes": 4674,
+      "sha256": "242b8b9a488a6badc102a579a9e3734cba90764c9d076e4633da804badd2bf05"
+    },
+    {
+      "path": "main/ods_serial/single/seed19002/post-audit.json",
+      "bytes": 16845,
+      "sha256": "3f6dba5a5c73b91117f6664314583c74b46bb062baae3b2792bb89a77b8cad06"
+    },
+    {
+      "path": "main/ods_serial/single/seed19002/process.json",
+      "bytes": 762,
+      "sha256": "cc0503a3fb2ab6ee95836add1464a88073bd526741b8d6ebae64c838f1a0de85"
+    },
+    {
+      "path": "main/ods_serial/single/seed19002/roles.json",
+      "bytes": 56,
+      "sha256": "8ec5137c1f3c0675dacfab32b573d82e2a15db8d6f16ce4f969a9309eebcdc85"
+    },
+    {
+      "path": "main/ods_serial/single/seed19002/summary.json",
+      "bytes": 1076159,
+      "sha256": "22cbb03d739775d361664acb68a7f8109febb45324a4721892bb9f34100ff191"
+    },
+    {
+      "path": "main/ods_serial/single/seed19002/training-trace.json",
+      "bytes": 224004,
+      "sha256": "e3f1aa7ee6a8145f6c5f8cacbb0835d7c34f13df07afecb5846fc4146f6f3180"
+    },
+    {
+      "path": "main/ods_serial/single/seed19003/audit-process.json",
+      "bytes": 491,
+      "sha256": "c939d7e812095b2e78e77efbb71234c1c2f0243f7d7cdc4a41e3fe7266e6b80e"
+    },
+    {
+      "path": "main/ods_serial/single/seed19003/config.json",
+      "bytes": 801,
+      "sha256": "51a9c941914a9619be2a82d5365ef67e762b09aa0ec4ba36a7333c53407b965f"
+    },
+    {
+      "path": "main/ods_serial/single/seed19003/environment.json",
+      "bytes": 3282,
+      "sha256": "c5558de614dcd5dc659efb5bfb866ed50a9388506f7852fbee1e64fbe9a356cd"
+    },
+    {
+      "path": "main/ods_serial/single/seed19003/evaluation-process.json",
+      "bytes": 761,
+      "sha256": "4a218643e77494c7320c5c4be5ae371d966e7b77fd7b75ea1f66e2c5d255cc73"
+    },
+    {
+      "path": "main/ods_serial/single/seed19003/evaluation.json",
+      "bytes": 7728,
+      "sha256": "41a82a8ae72113f7979aea3076c47a524c3e529477f84919d2749d52da43394f"
+    },
+    {
+      "path": "main/ods_serial/single/seed19003/initial-contract.json",
+      "bytes": 3260,
+      "sha256": "f141838eed131524e6839fca0b0598a7b2bb5460de24f6fe73d8743a5a2b4005"
+    },
+    {
+      "path": "main/ods_serial/single/seed19003/payload_schema.json",
+      "bytes": 2126,
+      "sha256": "9b85c5ce63a1f6a46ce322b7ce75fa79d75e7135a56cffaa0f935ec2ac52c16d"
+    },
+    {
+      "path": "main/ods_serial/single/seed19003/post-audit-video-integrity.json",
+      "bytes": 4673,
+      "sha256": "5a94aacbb9dc325e37bcd2644b53414681199e92cd5b4eb0e94067a73a670781"
+    },
+    {
+      "path": "main/ods_serial/single/seed19003/post-audit.json",
+      "bytes": 16805,
+      "sha256": "a985fa7ab60c7b7434250c74e4e6665a099db06eeb316936b056e540cfb2f4d9"
+    },
+    {
+      "path": "main/ods_serial/single/seed19003/process.json",
+      "bytes": 762,
+      "sha256": "d8df612b69261f810b9bdd56696341e134da0dee2f4b5c25a8c4cf030b4bfe0e"
+    },
+    {
+      "path": "main/ods_serial/single/seed19003/roles.json",
+      "bytes": 56,
+      "sha256": "8e7499d84b33e18d8e963d497311fe1e8b593d0fe7f1682bf050b3b0cd56127a"
+    },
+    {
+      "path": "main/ods_serial/single/seed19003/summary.json",
+      "bytes": 1064397,
+      "sha256": "6704907580b1c8fa9763b49948bce78ecc041a610313cdffb40201a97db7d38a"
+    },
+    {
+      "path": "main/ods_serial/single/seed19003/training-trace.json",
+      "bytes": 223961,
+      "sha256": "b1f588abb3e31f38006cf5977cc5a548f1c26ecfc3bb571c66affc421fe200cf"
+    },
+    {
+      "path": "main/offline128/dual/seed19001/audit-process.json",
+      "bytes": 490,
+      "sha256": "73d5c2decac9bf82de2ba0b24616f749349b5f2d1adf54eb8c00a179e2d140c3"
+    },
+    {
+      "path": "main/offline128/dual/seed19001/config.json",
+      "bytes": 705,
+      "sha256": "c3369227b71f582c8352b06e3499997906df9341c3cfdcee020c120fe27ac367"
+    },
+    {
+      "path": "main/offline128/dual/seed19001/environment.json",
+      "bytes": 3282,
+      "sha256": "c5558de614dcd5dc659efb5bfb866ed50a9388506f7852fbee1e64fbe9a356cd"
+    },
+    {
+      "path": "main/offline128/dual/seed19001/evaluation-process.json",
+      "bytes": 761,
+      "sha256": "0aaf2f4558baff91afb68a12bf7ecc6594d1beac61cf86fa18be2bdcdd126ad1"
+    },
+    {
+      "path": "main/offline128/dual/seed19001/evaluation.json",
+      "bytes": 7739,
+      "sha256": "96a2be6b0cd790a36c930195cc1a060e3f7a94eeb8b540397064e4e68dd01b27"
+    },
+    {
+      "path": "main/offline128/dual/seed19001/initial-contract.json",
+      "bytes": 3280,
+      "sha256": "39dd5c72e7df9ff6db6e12779ef2d124592c1e162c54f378ae353d7366c1603f"
+    },
+    {
+      "path": "main/offline128/dual/seed19001/payload_schema.json",
+      "bytes": 2293,
+      "sha256": "37f884aa25e3297758fc3c392517e1c1690fd5036dff9af8803dec3089e91296"
+    },
+    {
+      "path": "main/offline128/dual/seed19001/post-audit-video-integrity.json",
+      "bytes": 10180,
+      "sha256": "d56b363c9906f0d05a51726a54c0866e97139d271941faf548cf7a8e3044f9f4"
+    },
+    {
+      "path": "main/offline128/dual/seed19001/post-audit.json",
+      "bytes": 42222,
+      "sha256": "c68aaeea0dc092d63a8a46164bf33f1beb7b913054d9668513a90854c2caf2e9"
+    },
+    {
+      "path": "main/offline128/dual/seed19001/process.json",
+      "bytes": 761,
+      "sha256": "cb3a593e0b87a3174382d24aa4e2bfe3eb7f82ed7280851fab994324a4559250"
+    },
+    {
+      "path": "main/offline128/dual/seed19001/roles.json",
+      "bytes": 56,
+      "sha256": "075270a2b460d544f21f81b1c61a6ca373dac8a1ceb58a55dc9b061cad1109b9"
+    },
+    {
+      "path": "main/offline128/dual/seed19001/summary.json",
+      "bytes": 3120877,
+      "sha256": "e49c98a2926bdfbd3ab9a7e6dc4e9cd7af13e85fb8818edc64f46a64fd75b12c"
+    },
+    {
+      "path": "main/offline128/dual/seed19001/training-trace.json",
+      "bytes": 258250,
+      "sha256": "4b45268789510e33ec2e1901dafbd3cf3fabe200643b6043548896056be5a808"
+    },
+    {
+      "path": "main/offline128/dual/seed19002/audit-process.json",
+      "bytes": 490,
+      "sha256": "def8c8dae425320e1391caf836ec64225021218716940e4613bbe44fe4d4c93b"
+    },
+    {
+      "path": "main/offline128/dual/seed19002/config.json",
+      "bytes": 705,
+      "sha256": "8813717209dfb9ee03ba0f3a1fd180d726741d293238730c4f355cd8b35e83d2"
+    },
+    {
+      "path": "main/offline128/dual/seed19002/environment.json",
+      "bytes": 3282,
+      "sha256": "c5558de614dcd5dc659efb5bfb866ed50a9388506f7852fbee1e64fbe9a356cd"
+    },
+    {
+      "path": "main/offline128/dual/seed19002/evaluation-process.json",
+      "bytes": 761,
+      "sha256": "b18e2b8f53fe2ffc852ade961be8040d03aeb9dcedae769642ea3ed12e7f95c6"
+    },
+    {
+      "path": "main/offline128/dual/seed19002/evaluation.json",
+      "bytes": 7733,
+      "sha256": "c1064942b30ff411501fd1e00314ab6178c4c7b3873d55ecd295315cb0ac4d99"
+    },
+    {
+      "path": "main/offline128/dual/seed19002/initial-contract.json",
+      "bytes": 3282,
+      "sha256": "eca245eb2c9bb74058c880d2b863733c1da2e0008db378024079c7d2a4820c7c"
+    },
+    {
+      "path": "main/offline128/dual/seed19002/payload_schema.json",
+      "bytes": 2293,
+      "sha256": "37f884aa25e3297758fc3c392517e1c1690fd5036dff9af8803dec3089e91296"
+    },
+    {
+      "path": "main/offline128/dual/seed19002/post-audit-video-integrity.json",
+      "bytes": 10181,
+      "sha256": "701f36173e978c5c225fa374bddc5edece6cc487305e3080e3b67b43ccdade0e"
+    },
+    {
+      "path": "main/offline128/dual/seed19002/post-audit.json",
+      "bytes": 42224,
+      "sha256": "3d5d1acafd51c382db42fa206cbe7a17f30a9d014d4c74f16a8761d9b4226c22"
+    },
+    {
+      "path": "main/offline128/dual/seed19002/process.json",
+      "bytes": 761,
+      "sha256": "8497fd61eabe876ba32e50bfe3edc920b21516d6c6cf49a5f6d9cdffe329c0c5"
+    },
+    {
+      "path": "main/offline128/dual/seed19002/roles.json",
+      "bytes": 56,
+      "sha256": "5d0d980fa4c8db0416619637dc610ebf804e28ba61ab02ebd9fc1de2e20c1558"
+    },
+    {
+      "path": "main/offline128/dual/seed19002/summary.json",
+      "bytes": 3091347,
+      "sha256": "8370945dd85d64f4a5e982bde48112cb1579769bac30fed890ef5e4a7f145834"
+    },
+    {
+      "path": "main/offline128/dual/seed19002/training-trace.json",
+      "bytes": 258232,
+      "sha256": "6cc5ac18def80810ec81971fd205b0c3d917c49b54f453f8c2aed37f13faafe6"
+    },
+    {
+      "path": "main/offline128/dual/seed19003/audit-process.json",
+      "bytes": 490,
+      "sha256": "86a17850b57aa7ee27d2798027f253b26d4ca8ca3709887fd1fffd277bfc850e"
+    },
+    {
+      "path": "main/offline128/dual/seed19003/config.json",
+      "bytes": 705,
+      "sha256": "a116dd73822b92e64217fc22d745de9e6849b228dc763c1dc93e7d4482258279"
+    },
+    {
+      "path": "main/offline128/dual/seed19003/environment.json",
+      "bytes": 3282,
+      "sha256": "c5558de614dcd5dc659efb5bfb866ed50a9388506f7852fbee1e64fbe9a356cd"
+    },
+    {
+      "path": "main/offline128/dual/seed19003/evaluation-process.json",
+      "bytes": 759,
+      "sha256": "cc4d29a4a41bfeba363ef3984c98ad557dad8f76393694ead6205b630d6c3452"
+    },
+    {
+      "path": "main/offline128/dual/seed19003/evaluation.json",
+      "bytes": 7731,
+      "sha256": "1df69e6792f09d62442c1bbe4b0da2dad40c76f17703ae41550d5aae5efbdfd2"
+    },
+    {
+      "path": "main/offline128/dual/seed19003/initial-contract.json",
+      "bytes": 3285,
+      "sha256": "6ae4607b8351949d386fdd16a9430158089ce4b1e96d9544a66c6b2a8532429e"
+    },
+    {
+      "path": "main/offline128/dual/seed19003/payload_schema.json",
+      "bytes": 2293,
+      "sha256": "37f884aa25e3297758fc3c392517e1c1690fd5036dff9af8803dec3089e91296"
+    },
+    {
+      "path": "main/offline128/dual/seed19003/post-audit-video-integrity.json",
+      "bytes": 10181,
+      "sha256": "9ac67120f0a6dca49acd963fdf5779a830c83d1e747e6a2610acb477cdd395c6"
+    },
+    {
+      "path": "main/offline128/dual/seed19003/post-audit.json",
+      "bytes": 42353,
+      "sha256": "5a204e86b6ffee8b9991964ecbc57785f7de14a3ed78596775fbc5b5d50efb86"
+    },
+    {
+      "path": "main/offline128/dual/seed19003/process.json",
+      "bytes": 761,
+      "sha256": "82a97413e9ff905f3e733bb946e7b4793af25bae2270e14c056d60460353421e"
+    },
+    {
+      "path": "main/offline128/dual/seed19003/roles.json",
+      "bytes": 56,
+      "sha256": "657bb07d05b5bd332ef52583f4ede15ff673fdcd428f5ef7835d46fb92cd4f01"
+    },
+    {
+      "path": "main/offline128/dual/seed19003/summary.json",
+      "bytes": 3106828,
+      "sha256": "3b6ba07aeeb97656e7b6bc0b8b81695ed94a1b0fd7c101523d477ac3bef50271"
+    },
+    {
+      "path": "main/offline128/dual/seed19003/training-trace.json",
+      "bytes": 258360,
+      "sha256": "536f82ff742992ea0588ff95f7661945849672e1ab39483bbe5e0b51a74bcdb8"
+    },
+    {
+      "path": "main/offline128/single/seed19001/audit-process.json",
+      "bytes": 492,
+      "sha256": "fc3b7f634c32a35167615054fde137e441d0bc94546b14406aedb0a5a87d0a06"
+    },
+    {
+      "path": "main/offline128/single/seed19001/config.json",
+      "bytes": 709,
+      "sha256": "5fef28e06685742e346f5d4baa53517e8ed917bc7c49f3b2b96413eae23b58c3"
+    },
+    {
+      "path": "main/offline128/single/seed19001/environment.json",
+      "bytes": 3282,
+      "sha256": "c5558de614dcd5dc659efb5bfb866ed50a9388506f7852fbee1e64fbe9a356cd"
+    },
+    {
+      "path": "main/offline128/single/seed19001/evaluation-process.json",
+      "bytes": 761,
+      "sha256": "671a9e7c91f3751ad35a014267d74f3bd1783e98d4a176a6c59b221c4b158f39"
+    },
+    {
+      "path": "main/offline128/single/seed19001/evaluation.json",
+      "bytes": 7720,
+      "sha256": "1675dd80458c07c6d7e7f35651ef7effb609765b80bf97dae5ee08b58d8acad0"
+    },
+    {
+      "path": "main/offline128/single/seed19001/initial-contract.json",
+      "bytes": 3271,
+      "sha256": "2976523d561ffca3d8439195b78f7fd82d2c46fb4eb1bf024b0afd5ca763f634"
+    },
+    {
+      "path": "main/offline128/single/seed19001/payload_schema.json",
+      "bytes": 2126,
+      "sha256": "9b85c5ce63a1f6a46ce322b7ce75fa79d75e7135a56cffaa0f935ec2ac52c16d"
+    },
+    {
+      "path": "main/offline128/single/seed19001/post-audit-video-integrity.json",
+      "bytes": 5760,
+      "sha256": "f0d65d7556a57ee34199cbfa903f572961a8f69f3b1f0d1bd5341de37c6842fd"
+    },
+    {
+      "path": "main/offline128/single/seed19001/post-audit.json",
+      "bytes": 36979,
+      "sha256": "ea01aacfd43753f9836a5a39708eabfdc8cedb451619fae4aac82c0fa4b1c369"
+    },
+    {
+      "path": "main/offline128/single/seed19001/process.json",
+      "bytes": 763,
+      "sha256": "6b29c5fac23255195f3a8ba6a1eb18d029cd293f467dea1751da72080f133175"
+    },
+    {
+      "path": "main/offline128/single/seed19001/roles.json",
+      "bytes": 56,
+      "sha256": "332847094e5b4a705a85f938abaf6d26f73d9a1d9ad74b3ebdcd2ff56f6261ab"
+    },
+    {
+      "path": "main/offline128/single/seed19001/summary.json",
+      "bytes": 3115619,
+      "sha256": "0545d93320f782fcd571a50c696001ad552ce9323d0b6bd938ec6d8c97324251"
+    },
+    {
+      "path": "main/offline128/single/seed19001/training-trace.json",
+      "bytes": 258380,
+      "sha256": "c46798b99905eba3e6aed15b9843bdee23c95d0b1c2fab946f2d1842a357ef9c"
+    },
+    {
+      "path": "main/offline128/single/seed19002/audit-process.json",
+      "bytes": 492,
+      "sha256": "b325a2b6de2aa0e5443d04fbb2fc9265849cc4db9e020bb71dab2b75188b36cd"
+    },
+    {
+      "path": "main/offline128/single/seed19002/config.json",
+      "bytes": 709,
+      "sha256": "8f628250bafdb1d1c59662143a9aece42c5fda63ba0f2bd4cbd09709fc94a7e8"
+    },
+    {
+      "path": "main/offline128/single/seed19002/environment.json",
+      "bytes": 3282,
+      "sha256": "c5558de614dcd5dc659efb5bfb866ed50a9388506f7852fbee1e64fbe9a356cd"
+    },
+    {
+      "path": "main/offline128/single/seed19002/evaluation-process.json",
+      "bytes": 762,
+      "sha256": "4a058d361869ca83989576cee046ae8aeb91d3d1f61d0e22e0c3c2609bbcb495"
+    },
+    {
+      "path": "main/offline128/single/seed19002/evaluation.json",
+      "bytes": 7719,
+      "sha256": "ea7618f3d3f82cbe965cf9506a5d17c72d28fb1c4138059b961b648e77382d99"
+    },
+    {
+      "path": "main/offline128/single/seed19002/initial-contract.json",
+      "bytes": 3273,
+      "sha256": "ba49bb8afab510c80e1abe3430cace083cdb5366449f371a06fd9c66f63e0641"
+    },
+    {
+      "path": "main/offline128/single/seed19002/payload_schema.json",
+      "bytes": 2126,
+      "sha256": "9b85c5ce63a1f6a46ce322b7ce75fa79d75e7135a56cffaa0f935ec2ac52c16d"
+    },
+    {
+      "path": "main/offline128/single/seed19002/post-audit-video-integrity.json",
+      "bytes": 5760,
+      "sha256": "14da939b4dcfa8d04db4ab69366f13cdfca84f50f0cf7d37f5107a898eef5541"
+    },
+    {
+      "path": "main/offline128/single/seed19002/post-audit.json",
+      "bytes": 36978,
+      "sha256": "00615473ac8bb401787651e5bcbd1526ea39d8a11646290fc4ef2924814d6b94"
+    },
+    {
+      "path": "main/offline128/single/seed19002/process.json",
+      "bytes": 763,
+      "sha256": "9a376d9ea208e12a83f08f2b44922448dbcec72188fe6d8a5db2f5705cfbcb87"
+    },
+    {
+      "path": "main/offline128/single/seed19002/roles.json",
+      "bytes": 56,
+      "sha256": "b757a3f036219405f8c4525baa0f2133d9e02d7c298aea3c1d98282d808c5fef"
+    },
+    {
+      "path": "main/offline128/single/seed19002/summary.json",
+      "bytes": 3086258,
+      "sha256": "b0ff7997b7ca7c2ec981c8a7d7980d2f098db44df8931c11a39933ab8db480fe"
+    },
+    {
+      "path": "main/offline128/single/seed19002/training-trace.json",
+      "bytes": 258362,
+      "sha256": "ffb207aec28819d097e73218d042e7142a0928975f934043115ac0151a3d9cb9"
+    },
+    {
+      "path": "main/offline128/single/seed19003/audit-process.json",
+      "bytes": 490,
+      "sha256": "60a7fe8a95be7b2fa66c1be223ce078aec7ec5289f779eb651f64c930fdd199c"
+    },
+    {
+      "path": "main/offline128/single/seed19003/config.json",
+      "bytes": 709,
+      "sha256": "71c7f15340152d339f7fe3813089995a4034453c8c1514af291cd345f6a20b4f"
+    },
+    {
+      "path": "main/offline128/single/seed19003/environment.json",
+      "bytes": 3282,
+      "sha256": "c5558de614dcd5dc659efb5bfb866ed50a9388506f7852fbee1e64fbe9a356cd"
+    },
+    {
+      "path": "main/offline128/single/seed19003/evaluation-process.json",
+      "bytes": 763,
+      "sha256": "a9cbcfb3e461a0188ed453a11debc4e82fdaa7f8aee2866be4926a78279ffcd9"
+    },
+    {
+      "path": "main/offline128/single/seed19003/evaluation.json",
+      "bytes": 7726,
+      "sha256": "1b52e66228cee5eb2d4e7bd42baf901c3bc8627443de225748bd677eb09555ad"
+    },
+    {
+      "path": "main/offline128/single/seed19003/initial-contract.json",
+      "bytes": 3268,
+      "sha256": "35ce0d8af5e54c0add964fc42264b98a1e693b32604e80b0397d442b47e1270f"
+    },
+    {
+      "path": "main/offline128/single/seed19003/payload_schema.json",
+      "bytes": 2126,
+      "sha256": "9b85c5ce63a1f6a46ce322b7ce75fa79d75e7135a56cffaa0f935ec2ac52c16d"
+    },
+    {
+      "path": "main/offline128/single/seed19003/post-audit-video-integrity.json",
+      "bytes": 5761,
+      "sha256": "e2eaa283536d213c5c0e35bea2ca2933300442bd0e980c7496808430962df16b"
+    },
+    {
+      "path": "main/offline128/single/seed19003/post-audit.json",
+      "bytes": 36977,
+      "sha256": "23d09141c14b5078ac18a26350d852c7090f4c6532cd33d2960442ed55645140"
+    },
+    {
+      "path": "main/offline128/single/seed19003/process.json",
+      "bytes": 763,
+      "sha256": "2f0d45f3ee38a980630a7fc088a1e6a6077f325f7522e949e69d4803168dec4f"
+    },
+    {
+      "path": "main/offline128/single/seed19003/roles.json",
+      "bytes": 56,
+      "sha256": "9e4f442dbaaf04da085da1e2a22a2f87db106dc2fc18f2b5720cfb63f3e4f62e"
+    },
+    {
+      "path": "main/offline128/single/seed19003/summary.json",
+      "bytes": 3101033,
+      "sha256": "3d74966d4e2b7fc9edf1de793cec35e923ecb76b6c659272e8c9dea36146b023"
+    },
+    {
+      "path": "main/offline128/single/seed19003/training-trace.json",
+      "bytes": 258362,
+      "sha256": "9fd2f294a4d2a6ceb419917c17efc7dc0d6d5423b53289fb8e253ae565574fae"
+    },
+    {
+      "path": "main/offline32/dual/seed19001/audit-process.json",
+      "bytes": 488,
+      "sha256": "ee5e86036cb2d7a302f0b8fcd42b7345fb5ece1a971366d309b709d2025c5ee9"
+    },
+    {
+      "path": "main/offline32/dual/seed19001/config.json",
+      "bytes": 703,
+      "sha256": "3b1f215e2c85da8203539eb5659436994fa30a3eda1877b15ae0edeab5eef0e8"
+    },
+    {
+      "path": "main/offline32/dual/seed19001/environment.json",
+      "bytes": 3282,
+      "sha256": "c5558de614dcd5dc659efb5bfb866ed50a9388506f7852fbee1e64fbe9a356cd"
+    },
+    {
+      "path": "main/offline32/dual/seed19001/evaluation-process.json",
+      "bytes": 760,
+      "sha256": "90a41e38dfebb97092044843f33fab5f3552de50c7cfb640215b00be1d535ae8"
+    },
+    {
+      "path": "main/offline32/dual/seed19001/evaluation.json",
+      "bytes": 7736,
+      "sha256": "38e769740fba4aecbb6ea136227f737150571b1411cef11b8e473b74d2dda0eb"
+    },
+    {
+      "path": "main/offline32/dual/seed19001/initial-contract.json",
+      "bytes": 3288,
+      "sha256": "3d6dade92c2c650786fb24c71924601006325136f59fe76b930012a86ebfdb79"
+    },
+    {
+      "path": "main/offline32/dual/seed19001/payload_schema.json",
+      "bytes": 2293,
+      "sha256": "37f884aa25e3297758fc3c392517e1c1690fd5036dff9af8803dec3089e91296"
+    },
+    {
+      "path": "main/offline32/dual/seed19001/post-audit-video-integrity.json",
+      "bytes": 7803,
+      "sha256": "11acb88c236372de7592ffc3fd8d2a01711ea4da09ec574da9e815157350b1e2"
+    },
+    {
+      "path": "main/offline32/dual/seed19001/post-audit.json",
+      "bytes": 19004,
+      "sha256": "0234fe0612dbae2ebdcd487caa10b0af472f1cddd20eaec1590c307751408ed7"
+    },
+    {
+      "path": "main/offline32/dual/seed19001/process.json",
+      "bytes": 758,
+      "sha256": "5d850fdeed9fb34a4e0c172afa5606e3dc6f06442f9431d6b35bf08de054b1be"
+    },
+    {
+      "path": "main/offline32/dual/seed19001/roles.json",
+      "bytes": 56,
+      "sha256": "495f45bc14a55ec1e94355106d9dd68bd19a34761f6f525e10059c3c22bae687"
+    },
+    {
+      "path": "main/offline32/dual/seed19001/summary.json",
+      "bytes": 971674,
+      "sha256": "d78edabe03f01f68c7ada306250c2baeaa94e78cd57c5bff1f9679719a5cac9b"
+    },
+    {
+      "path": "main/offline32/dual/seed19001/training-trace.json",
+      "bytes": 221000,
+      "sha256": "5b602567603202336074fa6e7b0b8a706d456fa7752f07ca947c5d3abcf32872"
+    },
+    {
+      "path": "main/offline32/dual/seed19002/audit-process.json",
+      "bytes": 489,
+      "sha256": "4a468cb535b0696c04117aa11ca6731d34af9ebb15839e23a965d87f11faefd5"
+    },
+    {
+      "path": "main/offline32/dual/seed19002/config.json",
+      "bytes": 703,
+      "sha256": "57434ec9f6b00480dd70a62a119be68e636c7a0550aed0e4ee9666bf868dcc7c"
+    },
+    {
+      "path": "main/offline32/dual/seed19002/environment.json",
+      "bytes": 3282,
+      "sha256": "c5558de614dcd5dc659efb5bfb866ed50a9388506f7852fbee1e64fbe9a356cd"
+    },
+    {
+      "path": "main/offline32/dual/seed19002/evaluation-process.json",
+      "bytes": 760,
+      "sha256": "172bcbf1450627485050e6485892282555ac2c72078e87c767ae8bb5b9b2fbb6"
+    },
+    {
+      "path": "main/offline32/dual/seed19002/evaluation.json",
+      "bytes": 7731,
+      "sha256": "cdff98512f88603a68005b77a2d941cf9b6145dee12df9b62fabf627cf6b263e"
+    },
+    {
+      "path": "main/offline32/dual/seed19002/initial-contract.json",
+      "bytes": 3290,
+      "sha256": "40b520722cdaece33e97fdc5944a662b952b467c9af8695e939c8c3a96955b03"
+    },
+    {
+      "path": "main/offline32/dual/seed19002/payload_schema.json",
+      "bytes": 2293,
+      "sha256": "37f884aa25e3297758fc3c392517e1c1690fd5036dff9af8803dec3089e91296"
+    },
+    {
+      "path": "main/offline32/dual/seed19002/post-audit-video-integrity.json",
+      "bytes": 7801,
+      "sha256": "4792575e0020245ce2854042ea6149316379878098ca98fc13e87b0bc10291f7"
+    },
+    {
+      "path": "main/offline32/dual/seed19002/post-audit.json",
+      "bytes": 19009,
+      "sha256": "b4328b24db13d424b8e981ffba44edcdbec233b5c5ea42d9e13b122b8defb742"
+    },
+    {
+      "path": "main/offline32/dual/seed19002/process.json",
+      "bytes": 759,
+      "sha256": "bc6baf5cdcd89027d94c16042a5ed17be223bb9dd59e318bdd5c2317faa072b4"
+    },
+    {
+      "path": "main/offline32/dual/seed19002/roles.json",
+      "bytes": 56,
+      "sha256": "e0a9286d98ece2a090e60aaec8362b9543afd89f66971c5de4571843abd4a7c7"
+    },
+    {
+      "path": "main/offline32/dual/seed19002/summary.json",
+      "bytes": 985576,
+      "sha256": "e87059aaf29ccc25f3445290bf741ff1d0683cdbfd8a928b992287355ad41553"
+    },
+    {
+      "path": "main/offline32/dual/seed19002/training-trace.json",
+      "bytes": 220987,
+      "sha256": "91b7bf9b8a5e1563923918441092bd324668ae04f9bb7a310d5626a4e435e54b"
+    },
+    {
+      "path": "main/offline32/dual/seed19003/audit-process.json",
+      "bytes": 485,
+      "sha256": "a6b5614c31116b28ce861e2b086a64c499acb2171cbbfb31ca222c7803fff471"
+    },
+    {
+      "path": "main/offline32/dual/seed19003/config.json",
+      "bytes": 703,
+      "sha256": "8871721ada771fabe35c2ddfa70e88d0266b259ff37e229a50fe2d240949da40"
+    },
+    {
+      "path": "main/offline32/dual/seed19003/environment.json",
+      "bytes": 3282,
+      "sha256": "c5558de614dcd5dc659efb5bfb866ed50a9388506f7852fbee1e64fbe9a356cd"
+    },
+    {
+      "path": "main/offline32/dual/seed19003/initial-contract.json",
+      "bytes": 3277,
+      "sha256": "ec86e661145a0047755c75d6ebfda4184a3d2e3e485deaa99df1ebd681b0c262"
+    },
+    {
+      "path": "main/offline32/dual/seed19003/payload_schema.json",
+      "bytes": 2293,
+      "sha256": "37f884aa25e3297758fc3c392517e1c1690fd5036dff9af8803dec3089e91296"
+    },
+    {
+      "path": "main/offline32/dual/seed19003/post-audit-video-integrity.json",
+      "bytes": 7804,
+      "sha256": "c0942ddffd44294324cca533e95284e5c977d8d676e9b79ad77a2f2c72c17c8a"
+    },
+    {
+      "path": "main/offline32/dual/seed19003/post-audit.json",
+      "bytes": 18982,
+      "sha256": "897485968aeafe04d776e1b87c50ac1f36393cb82af2cc43dab6f6ddf6042a31"
+    },
+    {
+      "path": "main/offline32/dual/seed19003/process.json",
+      "bytes": 759,
+      "sha256": "fb799acc897608fa5e19d9a43a1110953c79ce7cef44cd2ca4be19aff28aeef4"
+    },
+    {
+      "path": "main/offline32/dual/seed19003/roles.json",
+      "bytes": 56,
+      "sha256": "21b6c8276702427e76e97bcfcee645177a63f9e4c4b863cea8e2348d60ac7304"
+    },
+    {
+      "path": "main/offline32/dual/seed19003/summary.json",
+      "bytes": 938187,
+      "sha256": "84d355b4794008c506778be96d13c82f8ce4e0bc96f67698cf89e6f982eccd93"
+    },
+    {
+      "path": "main/offline32/dual/seed19003/training-trace.json",
+      "bytes": 220967,
+      "sha256": "a8c86791b2ac54512904396817ad5a2d71e2638ccf42df86069995e072c73b5e"
+    },
+    {
+      "path": "main/offline32/single/seed19001/audit-process.json",
+      "bytes": 490,
+      "sha256": "62cb33c7910a22781d23e7ff584f93b202a9cd0333eff3d1ef0f08775c18db4a"
+    },
+    {
+      "path": "main/offline32/single/seed19001/config.json",
+      "bytes": 707,
+      "sha256": "0f888e39874c2b76bde8fb7a74a04094bd42d07c6caadc1207c3b77092ad0ea0"
+    },
+    {
+      "path": "main/offline32/single/seed19001/environment.json",
+      "bytes": 3282,
+      "sha256": "c5558de614dcd5dc659efb5bfb866ed50a9388506f7852fbee1e64fbe9a356cd"
+    },
+    {
+      "path": "main/offline32/single/seed19001/evaluation-process.json",
+      "bytes": 761,
+      "sha256": "dc86d8f8453750d0151c403ffee3700394615f3db0a7408128d61f9d27c1af6b"
+    },
+    {
+      "path": "main/offline32/single/seed19001/evaluation.json",
+      "bytes": 7718,
+      "sha256": "3a4066ef8df88fdcc37a5735cddeaf23bc0219e3e4db82e12b88628f9ffdf893"
+    },
+    {
+      "path": "main/offline32/single/seed19001/initial-contract.json",
+      "bytes": 3271,
+      "sha256": "3dbb242104b63d7d74d155a07f1e1ab7c85179e8ce5737cded897555301afb82"
+    },
+    {
+      "path": "main/offline32/single/seed19001/payload_schema.json",
+      "bytes": 2126,
+      "sha256": "9b85c5ce63a1f6a46ce322b7ce75fa79d75e7135a56cffaa0f935ec2ac52c16d"
+    },
+    {
+      "path": "main/offline32/single/seed19001/post-audit-video-integrity.json",
+      "bytes": 4571,
+      "sha256": "719850ce9fbd0196b1812fb63d9c3b52ad7ea3a68ae7252e9aaa63b26f7470c2"
+    },
+    {
+      "path": "main/offline32/single/seed19001/post-audit.json",
+      "bytes": 15011,
+      "sha256": "5b6205c9e21bcad7559249e6039d173311bf2163dc9c58e356242689a7257578"
+    },
+    {
+      "path": "main/offline32/single/seed19001/process.json",
+      "bytes": 761,
+      "sha256": "3af97bcd360155bec48be28b89b91fb7c7765d120672c17c3b7a1714320d4bc4"
+    },
+    {
+      "path": "main/offline32/single/seed19001/roles.json",
+      "bytes": 56,
+      "sha256": "7bf5ccf7a5dfa248332ade13de47ec3113bc41974368dc807c3061e715f1c2b6"
+    },
+    {
+      "path": "main/offline32/single/seed19001/summary.json",
+      "bytes": 967614,
+      "sha256": "1df41abb893cb398c8f34c6326d3a342d1c2695a8336fbef48fccde0e1352cc7"
+    },
+    {
+      "path": "main/offline32/single/seed19001/training-trace.json",
+      "bytes": 221002,
+      "sha256": "3ac2461cb01729a0e471392d1f59466ab6f8e0e8762e0261fc72a3027d695ed7"
+    },
+    {
+      "path": "main/offline32/single/seed19002/audit-process.json",
+      "bytes": 490,
+      "sha256": "202778c7a3c7b43269424d18a7e97867044c60a9e7144caeb5efb7fc5852da90"
+    },
+    {
+      "path": "main/offline32/single/seed19002/config.json",
+      "bytes": 707,
+      "sha256": "4832f5bc2a96024673290d996b1616ccd1fb4ecfb7bbebe7d91d56f888cee181"
+    },
+    {
+      "path": "main/offline32/single/seed19002/environment.json",
+      "bytes": 3282,
+      "sha256": "c5558de614dcd5dc659efb5bfb866ed50a9388506f7852fbee1e64fbe9a356cd"
+    },
+    {
+      "path": "main/offline32/single/seed19002/evaluation-process.json",
+      "bytes": 762,
+      "sha256": "13448f2f65e00d775f72d23fe0dfee8f5b76b6a7b86bc2c3daae46769ca2a4e0"
+    },
+    {
+      "path": "main/offline32/single/seed19002/evaluation.json",
+      "bytes": 7717,
+      "sha256": "cfc9d8740c8351cc67e79e951d7b9424993210fc098d3a6f2d9d962be165a275"
+    },
+    {
+      "path": "main/offline32/single/seed19002/initial-contract.json",
+      "bytes": 3273,
+      "sha256": "7e8708d0c9d38bb4cd3fbe320e0b76589e1ee0b45f736554989138d599bca84e"
+    },
+    {
+      "path": "main/offline32/single/seed19002/payload_schema.json",
+      "bytes": 2126,
+      "sha256": "9b85c5ce63a1f6a46ce322b7ce75fa79d75e7135a56cffaa0f935ec2ac52c16d"
+    },
+    {
+      "path": "main/offline32/single/seed19002/post-audit-video-integrity.json",
+      "bytes": 4571,
+      "sha256": "6a7d365025fef2220662a8f8eb7433b83b626f11a307d2d3cb6db9180782f4f7"
+    },
+    {
+      "path": "main/offline32/single/seed19002/post-audit.json",
+      "bytes": 15007,
+      "sha256": "7c100cce243c473ee830d0ed51d6ffbee54b60b22a5017d7251f4b66838b4738"
+    },
+    {
+      "path": "main/offline32/single/seed19002/process.json",
+      "bytes": 761,
+      "sha256": "b8e11eb6d811b13c9860540c7f35208a717c12807828d3f72caa35b1beb78ffb"
+    },
+    {
+      "path": "main/offline32/single/seed19002/roles.json",
+      "bytes": 56,
+      "sha256": "10d2aebb41f107cb376cb5bba20e37189cccf7fb16f0df42ade217de52bbe1ae"
+    },
+    {
+      "path": "main/offline32/single/seed19002/summary.json",
+      "bytes": 981468,
+      "sha256": "c9736f6a15a7977210e27f199e2d0aa0923cd124daffcf198c303f50f4fd1db5"
+    },
+    {
+      "path": "main/offline32/single/seed19002/training-trace.json",
+      "bytes": 220989,
+      "sha256": "39ffc931d4e8a2d05fffef9ce1a0e785696cdb8f310afdda0e81ce473e43d2ad"
+    },
+    {
+      "path": "main/offline32/single/seed19003/audit-process.json",
+      "bytes": 490,
+      "sha256": "b9ec5e0f1cdb49331304b790c0db3298bd33d560ef067a36df00a6e4df7703dd"
+    },
+    {
+      "path": "main/offline32/single/seed19003/config.json",
+      "bytes": 707,
+      "sha256": "424e3f8400887015d567f3572af216fa2e5038f46e9657c637539c609317cf25"
+    },
+    {
+      "path": "main/offline32/single/seed19003/environment.json",
+      "bytes": 3282,
+      "sha256": "c5558de614dcd5dc659efb5bfb866ed50a9388506f7852fbee1e64fbe9a356cd"
+    },
+    {
+      "path": "main/offline32/single/seed19003/evaluation-process.json",
+      "bytes": 762,
+      "sha256": "9833b5c1c024a1a4512773bbb8a24f06d5a501fd35b00de1879af4583cbf5496"
+    },
+    {
+      "path": "main/offline32/single/seed19003/evaluation.json",
+      "bytes": 7724,
+      "sha256": "d8b27936f821ad3e92ea11e5fc3da68cefc8b2021917dbdcec16b7d529b89e70"
+    },
+    {
+      "path": "main/offline32/single/seed19003/initial-contract.json",
+      "bytes": 3260,
+      "sha256": "0af57ed906c8d0d1c79f182265fee23da04a292ae1e0c394a549b4b136d55abf"
+    },
+    {
+      "path": "main/offline32/single/seed19003/payload_schema.json",
+      "bytes": 2126,
+      "sha256": "9b85c5ce63a1f6a46ce322b7ce75fa79d75e7135a56cffaa0f935ec2ac52c16d"
+    },
+    {
+      "path": "main/offline32/single/seed19003/post-audit-video-integrity.json",
+      "bytes": 4572,
+      "sha256": "5fa9c7ed95ae5c5f64743ef5ef2e73d147235d1c28713944753ceb200e695f5c"
+    },
+    {
+      "path": "main/offline32/single/seed19003/post-audit.json",
+      "bytes": 14982,
+      "sha256": "096bdd8b5c29a7a63b002ffa23f5abedf3dfc9574ed1236333faa87ec01f5e53"
+    },
+    {
+      "path": "main/offline32/single/seed19003/process.json",
+      "bytes": 761,
+      "sha256": "fbe8bb95f80b474d64066e665c57adee64311a342107d79d9fa7094ae1d8aca7"
+    },
+    {
+      "path": "main/offline32/single/seed19003/roles.json",
+      "bytes": 56,
+      "sha256": "00db8ef2b7cc99f545b5e748c4f7e41ddfdf5dbcf9d23f2039d86d4df7e65b6a"
+    },
+    {
+      "path": "main/offline32/single/seed19003/summary.json",
+      "bytes": 963032,
+      "sha256": "ceb68bba533dfc1749a90d5dacbfc8b427a49d8449fa1dddf42370b3111ed45c"
+    },
+    {
+      "path": "main/offline32/single/seed19003/training-trace.json",
+      "bytes": 220969,
+      "sha256": "e72d6028242221b221beab0114f3ea50574361a3ee73ebeebd3dd41c7677eba6"
+    },
+    {
+      "path": "main/offline8/dual/seed19001/audit-process.json",
+      "bytes": 486,
+      "sha256": "3db0662c1bcc80401d112c7708d00dcb729213f74045c1481bcfae97b7a6a5d3"
+    },
+    {
+      "path": "main/offline8/dual/seed19001/config.json",
+      "bytes": 701,
+      "sha256": "b0dae192a45386729603eb5ec235a0bb3cc4312abb5d8bb99a283e1892970b31"
+    },
+    {
+      "path": "main/offline8/dual/seed19001/environment.json",
+      "bytes": 3282,
+      "sha256": "c5558de614dcd5dc659efb5bfb866ed50a9388506f7852fbee1e64fbe9a356cd"
+    },
+    {
+      "path": "main/offline8/dual/seed19001/evaluation-process.json",
+      "bytes": 759,
+      "sha256": "cdab3e69aef1ed8c3107b90b9e8735bc275a39646d74df0a09df78b91d4b0465"
+    },
+    {
+      "path": "main/offline8/dual/seed19001/evaluation.json",
+      "bytes": 7729,
+      "sha256": "9478e840eab13a13827e60a52fb6d84f48007591bd01b6056f44289b65f84c6b"
+    },
+    {
+      "path": "main/offline8/dual/seed19001/initial-contract.json",
+      "bytes": 3288,
+      "sha256": "c9426767f2c784498feb9e6441bd677231441fde81744ba1179d4f49c2afde79"
+    },
+    {
+      "path": "main/offline8/dual/seed19001/payload_schema.json",
+      "bytes": 2293,
+      "sha256": "37f884aa25e3297758fc3c392517e1c1690fd5036dff9af8803dec3089e91296"
+    },
+    {
+      "path": "main/offline8/dual/seed19001/post-audit-video-integrity.json",
+      "bytes": 7212,
+      "sha256": "1ac0b856913677009d282b5c88ae1c4e1571c06f725ab0bda33b238198e50037"
+    },
+    {
+      "path": "main/offline8/dual/seed19001/post-audit.json",
+      "bytes": 13170,
+      "sha256": "62696e849d9dbbecc2d3be672fec899537e547e0a97fee3fb2ff17d9a3932c2d"
+    },
+    {
+      "path": "main/offline8/dual/seed19001/process.json",
+      "bytes": 757,
+      "sha256": "c5498d3bcff3686247577d653148ec59ada32b41ffe08bc4487ee81c931fdace"
+    },
+    {
+      "path": "main/offline8/dual/seed19001/roles.json",
+      "bytes": 56,
+      "sha256": "d8582eb80b355bf8cf5e42eac7fd652a0d30607f0b55c6cab034b98712aa408a"
+    },
+    {
+      "path": "main/offline8/dual/seed19001/summary.json",
+      "bytes": 437236,
+      "sha256": "737cb31958ee65a607690fd9d04d54da7402331c1ac7d3d05a07e01d422b3a6c"
+    },
+    {
+      "path": "main/offline8/dual/seed19001/training-trace.json",
+      "bytes": 209342,
+      "sha256": "90cbb3ebbaf2fd76c7bc02d34bdf3ff4cde1f4d684dd82404df25f1119b7ed5f"
+    },
+    {
+      "path": "main/offline8/dual/seed19002/audit-process.json",
+      "bytes": 486,
+      "sha256": "babb0a638762207d61d646cf38413b54132489e4b9974ae406170c756e3c90e2"
+    },
+    {
+      "path": "main/offline8/dual/seed19002/config.json",
+      "bytes": 701,
+      "sha256": "6f153f9453924ae50298097123f0cc6b2a969ea2d11605afed3fad37f6850fa0"
+    },
+    {
+      "path": "main/offline8/dual/seed19002/environment.json",
+      "bytes": 3282,
+      "sha256": "c5558de614dcd5dc659efb5bfb866ed50a9388506f7852fbee1e64fbe9a356cd"
+    },
+    {
+      "path": "main/offline8/dual/seed19002/evaluation-process.json",
+      "bytes": 759,
+      "sha256": "453bf186c5581ae924643be35a8142d78e9f006d64140235273db77100d76a26"
+    },
+    {
+      "path": "main/offline8/dual/seed19002/evaluation.json",
+      "bytes": 7729,
+      "sha256": "2e4c6d57c0acfad3614d47b16f11f2e60c7f2463378a4f014769a61fb3e81e05"
+    },
+    {
+      "path": "main/offline8/dual/seed19002/initial-contract.json",
+      "bytes": 3290,
+      "sha256": "d55e31d250683436e85a40b1a2631065c7b73ba2bdaae8dcc197e4c22ed91ca7"
+    },
+    {
+      "path": "main/offline8/dual/seed19002/payload_schema.json",
+      "bytes": 2293,
+      "sha256": "37f884aa25e3297758fc3c392517e1c1690fd5036dff9af8803dec3089e91296"
+    },
+    {
+      "path": "main/offline8/dual/seed19002/post-audit-video-integrity.json",
+      "bytes": 7211,
+      "sha256": "d63705c74e424373a719c5777bcd82449051905e63b045a03eaeec8707d5e540"
+    },
+    {
+      "path": "main/offline8/dual/seed19002/post-audit.json",
+      "bytes": 13170,
+      "sha256": "e401c03af46f796659062e3e590ce9768d93584ca2c8bee27eb852e92102f379"
+    },
+    {
+      "path": "main/offline8/dual/seed19002/process.json",
+      "bytes": 757,
+      "sha256": "5adc20b0133f598c1dc70bd9b7b382b804b20878b6a0f8cd13f8ddfb54b05560"
+    },
+    {
+      "path": "main/offline8/dual/seed19002/roles.json",
+      "bytes": 56,
+      "sha256": "2132f6c0aa8278b32af6c6a8249e2aad47918d81598f7159beb413de1f32dcf6"
+    },
+    {
+      "path": "main/offline8/dual/seed19002/summary.json",
+      "bytes": 438597,
+      "sha256": "03304cb4c22c193cfffd3415e67317f5de30b5c5c842d75388f4fded1b66e19f"
+    },
+    {
+      "path": "main/offline8/dual/seed19002/training-trace.json",
+      "bytes": 209364,
+      "sha256": "dfe0b001d5a2c5860706d57dbb922027ec1f111da574b135daa96522e9628f1f"
+    },
+    {
+      "path": "main/offline8/dual/seed19003/audit-process.json",
+      "bytes": 487,
+      "sha256": "e4c442dd532803719bcb59edcee69f3077b277a97ae775a87d253272abe0e6cf"
+    },
+    {
+      "path": "main/offline8/dual/seed19003/config.json",
+      "bytes": 701,
+      "sha256": "1102598ab2ad9381cbd946b52615ab0d47610c6212bcdd471412358b065afb4c"
+    },
+    {
+      "path": "main/offline8/dual/seed19003/environment.json",
+      "bytes": 3282,
+      "sha256": "c5558de614dcd5dc659efb5bfb866ed50a9388506f7852fbee1e64fbe9a356cd"
+    },
+    {
+      "path": "main/offline8/dual/seed19003/evaluation-process.json",
+      "bytes": 759,
+      "sha256": "fdd8c59aa30eed92dc46f0ef9f8b1ec9ae68f195e9ae840c245f77bf084ddc18"
+    },
+    {
+      "path": "main/offline8/dual/seed19003/evaluation.json",
+      "bytes": 7735,
+      "sha256": "28f4276acbf555ab57d73d57efd6aea8581459a28c8d1e5ed8f09598832496cf"
+    },
+    {
+      "path": "main/offline8/dual/seed19003/initial-contract.json",
+      "bytes": 3285,
+      "sha256": "c1b531e8672309e520ef130e51c37ac8494c1d5c2ea385ccfc30f1be119f2615"
+    },
+    {
+      "path": "main/offline8/dual/seed19003/payload_schema.json",
+      "bytes": 2293,
+      "sha256": "37f884aa25e3297758fc3c392517e1c1690fd5036dff9af8803dec3089e91296"
+    },
+    {
+      "path": "main/offline8/dual/seed19003/post-audit-video-integrity.json",
+      "bytes": 7211,
+      "sha256": "975666462d3d7e393455793b1bca227c05e193d15858936e684a5eca9505e3d1"
+    },
+    {
+      "path": "main/offline8/dual/seed19003/post-audit.json",
+      "bytes": 13180,
+      "sha256": "911ab9c3a23e88112ef816f10a384af255bc6e51f6e20d7ff3efd56b94112cfd"
+    },
+    {
+      "path": "main/offline8/dual/seed19003/process.json",
+      "bytes": 757,
+      "sha256": "9241830ae6f7dda7dd00a9960ec021f8ac098d8ee4c96e238c51b884b5a37377"
+    },
+    {
+      "path": "main/offline8/dual/seed19003/roles.json",
+      "bytes": 56,
+      "sha256": "c6f76baa238551a6c3245b7a3e3948d4c7cb6d0753b19cd7c8c01b458c646b98"
+    },
+    {
+      "path": "main/offline8/dual/seed19003/summary.json",
+      "bytes": 436563,
+      "sha256": "009f1578c4bfc7e276c2f08d71bbd09083bc1f12822e11a5dfba586f51150858"
+    },
+    {
+      "path": "main/offline8/dual/seed19003/training-trace.json",
+      "bytes": 209344,
+      "sha256": "4652e9b115d1d314ed0501b1ebd202ecd480b95a45a27f8e0544c2df6be20a6a"
+    },
+    {
+      "path": "main/offline8/single/seed19001/audit-process.json",
+      "bytes": 489,
+      "sha256": "362c073b40d242f9e941717c98b67e81b89661f3aa71cb169f3d9a490faea59d"
+    },
+    {
+      "path": "main/offline8/single/seed19001/config.json",
+      "bytes": 705,
+      "sha256": "55c43e4be9f8a447cd42f1f2cc60b22e1585fa887938e207d0b060a4b63fd65d"
+    },
+    {
+      "path": "main/offline8/single/seed19001/environment.json",
+      "bytes": 3282,
+      "sha256": "c5558de614dcd5dc659efb5bfb866ed50a9388506f7852fbee1e64fbe9a356cd"
+    },
+    {
+      "path": "main/offline8/single/seed19001/evaluation-process.json",
+      "bytes": 761,
+      "sha256": "b67570cb5486be489b082a8eed961ab3ab65e957f7b78f1012ad801ccb353ba8"
+    },
+    {
+      "path": "main/offline8/single/seed19001/evaluation.json",
+      "bytes": 7720,
+      "sha256": "42a97ff6e54d507d919a23deea7e4b677c3f6cabe9f97341dd9b51808e0fdcba"
+    },
+    {
+      "path": "main/offline8/single/seed19001/initial-contract.json",
+      "bytes": 3271,
+      "sha256": "de3904ac1805b667488c684cc6e3f57cb653748d7ed6cff8d326ff5e38996484"
+    },
+    {
+      "path": "main/offline8/single/seed19001/payload_schema.json",
+      "bytes": 2126,
+      "sha256": "9b85c5ce63a1f6a46ce322b7ce75fa79d75e7135a56cffaa0f935ec2ac52c16d"
+    },
+    {
+      "path": "main/offline8/single/seed19001/post-audit-video-integrity.json",
+      "bytes": 4273,
+      "sha256": "473bad787a24138181221670e65408b54fa895b841954d875fe76b98a5b767be"
+    },
+    {
+      "path": "main/offline8/single/seed19001/post-audit.json",
+      "bytes": 9521,
+      "sha256": "4d4e2635ecf4c649ccbd1cea0de1b353842fd8647edca7856c56b3671258a549"
+    },
+    {
+      "path": "main/offline8/single/seed19001/process.json",
+      "bytes": 759,
+      "sha256": "3bd40ee47970e9cb9d3011939cf88f260b8c9de9199fe1af414158d7fbbf5aac"
+    },
+    {
+      "path": "main/offline8/single/seed19001/roles.json",
+      "bytes": 56,
+      "sha256": "3a005ece8cb5bbd1fa737dbada2ea7f3c847dc01474b445b68e3e1fdfee2acf7"
+    },
+    {
+      "path": "main/offline8/single/seed19001/summary.json",
+      "bytes": 433584,
+      "sha256": "86ff5898dda9ff585ef4b05a5f2ffaecdb05b51611f0c2b2105ed45d02dadf3e"
+    },
+    {
+      "path": "main/offline8/single/seed19001/training-trace.json",
+      "bytes": 209344,
+      "sha256": "f09aad97adfa2c56e267759b252f2b153eb6e3dc34361fad7e109ad888fe4d6a"
+    },
+    {
+      "path": "main/offline8/single/seed19002/audit-process.json",
+      "bytes": 489,
+      "sha256": "0a46e3948076c88cb99ca2c491066c71f0b51098fd6169febc4e60eb7b2441d2"
+    },
+    {
+      "path": "main/offline8/single/seed19002/config.json",
+      "bytes": 705,
+      "sha256": "4f5c5e1ec3750e93c36cde6bcc8dad1e180de2d3317609ac3ba7fbafeb4e03cc"
+    },
+    {
+      "path": "main/offline8/single/seed19002/environment.json",
+      "bytes": 3282,
+      "sha256": "c5558de614dcd5dc659efb5bfb866ed50a9388506f7852fbee1e64fbe9a356cd"
+    },
+    {
+      "path": "main/offline8/single/seed19002/evaluation-process.json",
+      "bytes": 761,
+      "sha256": "4bba7faa3c08f54d6c935f5d3c7701db0877af730e4d5fe1992fc269f565facb"
+    },
+    {
+      "path": "main/offline8/single/seed19002/evaluation.json",
+      "bytes": 7716,
+      "sha256": "ddba5673b93c9ee580b0c54e1f10bd32b77d0ec47861d7bc18cdc8b903fffad0"
+    },
+    {
+      "path": "main/offline8/single/seed19002/initial-contract.json",
+      "bytes": 3273,
+      "sha256": "40b63a7471827a159d987ff5d7bbd2aa0565d0ba55c2ec7ce74154878b084460"
+    },
+    {
+      "path": "main/offline8/single/seed19002/payload_schema.json",
+      "bytes": 2126,
+      "sha256": "9b85c5ce63a1f6a46ce322b7ce75fa79d75e7135a56cffaa0f935ec2ac52c16d"
+    },
+    {
+      "path": "main/offline8/single/seed19002/post-audit-video-integrity.json",
+      "bytes": 4274,
+      "sha256": "869cec789414658bc07df3399c7ac86b9342cb8b5637731722a90b449d19856f"
+    },
+    {
+      "path": "main/offline8/single/seed19002/post-audit.json",
+      "bytes": 9518,
+      "sha256": "2ec99aebb71521f718a97af149b0d6bcfaafa8b3de2fc63b8d81e7cafd65a2ef"
+    },
+    {
+      "path": "main/offline8/single/seed19002/process.json",
+      "bytes": 759,
+      "sha256": "5f7882f609d321f62681fec7ee62e608de9c0c37803deae3e1861cad1cc1dbd6"
+    },
+    {
+      "path": "main/offline8/single/seed19002/roles.json",
+      "bytes": 56,
+      "sha256": "10d365763d4c4138ca2e2f6c3e04702a6dc6a2f5d3823c2112cc55fab03dadbf"
+    },
+    {
+      "path": "main/offline8/single/seed19002/summary.json",
+      "bytes": 434922,
+      "sha256": "3a52a3c7ac8bc4ca08adf300fe521ff2833fb66943b0ca5ee6f5f7474f5a41d7"
+    },
+    {
+      "path": "main/offline8/single/seed19002/training-trace.json",
+      "bytes": 209366,
+      "sha256": "11ac4092a941641c3d6d8315b6a23fb9599bd0ac54b4d976b0126362078f3209"
+    },
+    {
+      "path": "main/offline8/single/seed19003/audit-process.json",
+      "bytes": 489,
+      "sha256": "8cfd9d84b1ac51e212bec401a47e1c91dc928ac64ece979603f5eaf6c9c0fb7c"
+    },
+    {
+      "path": "main/offline8/single/seed19003/config.json",
+      "bytes": 705,
+      "sha256": "dc9d9194342cb24ef149618d01960a373777d7540a5718cfa651a32969e6c196"
+    },
+    {
+      "path": "main/offline8/single/seed19003/environment.json",
+      "bytes": 3282,
+      "sha256": "c5558de614dcd5dc659efb5bfb866ed50a9388506f7852fbee1e64fbe9a356cd"
+    },
+    {
+      "path": "main/offline8/single/seed19003/evaluation-process.json",
+      "bytes": 761,
+      "sha256": "663f09ace1dbc83cb062d4d7fe788e4e87a964bd58dc37c93ddd5910d8394eb8"
+    },
+    {
+      "path": "main/offline8/single/seed19003/evaluation.json",
+      "bytes": 7720,
+      "sha256": "0bab24a3ba71c439005721af69f17a6b6506c64b59e6ad2ec15753b2bfe5e083"
+    },
+    {
+      "path": "main/offline8/single/seed19003/initial-contract.json",
+      "bytes": 3268,
+      "sha256": "08104eafe2faad4f83e5e5f5c467770639fe4602c9209ca64d1701fb4672bf5b"
+    },
+    {
+      "path": "main/offline8/single/seed19003/payload_schema.json",
+      "bytes": 2126,
+      "sha256": "9b85c5ce63a1f6a46ce322b7ce75fa79d75e7135a56cffaa0f935ec2ac52c16d"
+    },
+    {
+      "path": "main/offline8/single/seed19003/post-audit-video-integrity.json",
+      "bytes": 4273,
+      "sha256": "e2eb1ac93fb0ba1db962544a561fb6c0bf8507c0544304d8dab2cafebd5075e0"
+    },
+    {
+      "path": "main/offline8/single/seed19003/post-audit.json",
+      "bytes": 9518,
+      "sha256": "02dd839f5389a1a2043f492d1475a2bcaba4d96a35661e52800cc5c50cd37ebe"
+    },
+    {
+      "path": "main/offline8/single/seed19003/process.json",
+      "bytes": 759,
+      "sha256": "11fbf4256756415500fc9df135fc8de95b602fce2d8c336a2ff7078b53d8a067"
+    },
+    {
+      "path": "main/offline8/single/seed19003/roles.json",
+      "bytes": 56,
+      "sha256": "50787ebdd457874dee7c785bb7fae63ae432d9daf5ce04da9914c6ed59d26f15"
+    },
+    {
+      "path": "main/offline8/single/seed19003/summary.json",
+      "bytes": 432883,
+      "sha256": "32446bd8441f0ab2096e3281cf98c0a8730103e7ae2f9a394ea3bc7a9c2b1cab"
+    },
+    {
+      "path": "main/offline8/single/seed19003/training-trace.json",
+      "bytes": 209346,
+      "sha256": "6eb638780469db574256fbec0b41ce6ffb8427b4293f1d54e5295976acbd45e8"
+    },
+    {
+      "path": "main/suite-overview.json",
+      "bytes": 86180,
+      "sha256": "060f7a1c6512fd24dbf711718014248b327692365f15514afae81ef6420c718d"
+    },
+    {
+      "path": "native-final-verification.json",
+      "bytes": 2650,
+      "sha256": "275fc46026d608a07e3c05733d1554fb9aba9e0abfff0651904b2bf8415fdbb8"
+    },
+    {
+      "path": "protocol.json",
+      "bytes": 6195,
+      "sha256": "41d2a462fe022eacb0a970cd3b5c8b456fc76caeacc1663e1d2b45cb38fb51b6"
+    },
+    {
+      "path": "qualification/README.md",
+      "bytes": 4551,
+      "sha256": "966942600f80b2619d480065f22d8b749644434b756219308259cd2ff73b1484"
+    },
+    {
+      "path": "qualification/audit-receipt-containment.json",
+      "bytes": 462,
+      "sha256": "74a5eee7f77717c6372e36f984bbd2c5b64405ba71a73994afa08dea0e50f7c4"
+    },
+    {
+      "path": "qualification/composite-full-audit.json",
+      "bytes": 15824,
+      "sha256": "473b1e7763063b5132fffc861681c56d198bf6fb26273da455b3e74f44f5ea56"
+    },
+    {
+      "path": "qualification/encoder-cuda-devices.json",
+      "bytes": 707,
+      "sha256": "c503803154bc3929f0de26f8cd5d2e07631259fd3720b0da4ea9b7b9784742ba"
+    },
+    {
+      "path": "qualification/encoder-cuda.json",
+      "bytes": 6899,
+      "sha256": "eb5ab2b7c931e55b37dc4af691d2a939e978c139b869671c9047fcc11338293e"
+    },
+    {
+      "path": "qualification/encoder-image-fit.json",
+      "bytes": 18880,
+      "sha256": "67ca03c0db2f35702942e76ce193e72ee419a90475fb03ccaec221937a07ffd0"
+    },
+    {
+      "path": "qualification/encoder-reference.json",
+      "bytes": 6622,
+      "sha256": "19707e583a2522ced946d065b92f98ee15ba6a5eece7d70f32eca759828443d1"
+    },
+    {
+      "path": "qualification/evaluation-no-grad.json",
+      "bytes": 131,
+      "sha256": "34ad71dc64efbf6e97e6206258a31a4a60e2309299434f1666915e1fc4637b1b"
+    },
+    {
+      "path": "qualification/evaluation-static.json",
+      "bytes": 186,
+      "sha256": "1c1c5ecc6ed697aeb5014d531eabd24c642e674ccc2c471534023611cc3c69a5"
+    },
+    {
+      "path": "qualification/final-dual-real.json",
+      "bytes": 1585,
+      "sha256": "7f13c499094628b008334094a48a71bcb6706b8b33e333f6c635926f1dbda4a5"
+    },
+    {
+      "path": "qualification/io-default-dtype.json",
+      "bytes": 535,
+      "sha256": "fbf23c16344f871cfdd4d749e322da46f0632545cd99b5223eab1130a6fca767"
+    },
+    {
+      "path": "qualification/io-exact-frame-alignment.json",
+      "bytes": 3155,
+      "sha256": "7b7354663333e02cdd4c0a2cdf0c1b891e7522f848b71bf9d07467639a924a2b"
+    },
+    {
+      "path": "qualification/io-post-audit.json",
+      "bytes": 4543,
+      "sha256": "865c58ce95a5a26f2d1152f705a7daebbf83e4164a092cb6fe52d56c72af0083"
+    },
+    {
+      "path": "qualification/io-roundtrip.json",
+      "bytes": 38761,
+      "sha256": "b4c8d0dcc537c378a4d6d8ffe458956c714eea01eaa715cea3ee17fdbb9ba5d1"
+    },
+    {
+      "path": "qualification/io-sdk-prefetch-b32.json",
+      "bytes": 4098,
+      "sha256": "c83eaa592d511a2bb695b5ec12dd71a1c9ce02ecde77315e7377dcd82c8153f7"
+    },
+    {
+      "path": "qualification/io-sdk-timeline.json",
+      "bytes": 26987,
+      "sha256": "c901d7ba2c6e83ec3cde77be60afabdda9bcddc319fa07331f7bccac19f537b7"
+    },
+    {
+      "path": "qualification/io-source-hashes.json",
+      "bytes": 301,
+      "sha256": "e483196e6f24c738c1ce8ef52a9788a512d2393c9c25a6f118d0055bcd0ef944"
+    },
+    {
+      "path": "qualification/io-training-data.json",
+      "bytes": 851,
+      "sha256": "2e8ddcb6886fa9bc21b235b9f333278e08bae40bd0d2395b9691fd1a0c37c3e5"
+    },
+    {
+      "path": "qualification/manifest.json",
+      "bytes": 7676,
+      "sha256": "f7f45d691eb5ee26c6ddaa6ef237937786212ca5c4898a9744e1ccdbfca4454d"
+    },
+    {
+      "path": "qualification/metrics-negative.json",
+      "bytes": 253,
+      "sha256": "2a8f278ab9f53b6f2cc1e60f300223d80dac4d3c5201abe183ca475ccfda13e5"
+    },
+    {
+      "path": "qualification/metrics-positive.json",
+      "bytes": 388,
+      "sha256": "a4110c82a413b47a3938eda26a1cc4737c9bc130b897d6618ec4a276d7a0fcf2"
+    },
+    {
+      "path": "qualification/normal-exit-grace/README.md",
+      "bytes": 2607,
+      "sha256": "151df6fd104a6902affbfa8da76d88020bef730ff80936670d145063a143004b"
+    },
+    {
+      "path": "qualification/normal-exit-grace/cpu/cleanup-receipt.json",
+      "bytes": 1442,
+      "sha256": "4a092c10e29619f9fa90d1bfb02129e041b3782d46d5e109ab8f1fabfffb61a7"
+    },
+    {
+      "path": "qualification/normal-exit-grace/cpu/delayed_normal_exit/audit-process.json",
+      "bytes": 1920,
+      "sha256": "e78499c2c689851f703a7821cd23b15b465ca4d998cfc34eaf7e9a6ca996d36b"
+    },
+    {
+      "path": "qualification/normal-exit-grace/cpu/delayed_normal_exit/audit.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "qualification/normal-exit-grace/cpu/delayed_normal_exit/helper.json",
+      "bytes": 23,
+      "sha256": "f90232b78f3df77b238879f57e0e92937c0b72d2d6a44fb6797a0511a6d7b812"
+    },
+    {
+      "path": "qualification/normal-exit-grace/cpu/delayed_normal_exit/post-audit.json",
+      "bytes": 16,
+      "sha256": "748eda8085f7e3c82149775d9542083427f0f8a955173c4a0ed18c85c69c5c09"
+    },
+    {
+      "path": "qualification/normal-exit-grace/cpu/delayed_normal_exit/summary.json",
+      "bytes": 190,
+      "sha256": "20ccc6440e85cfae1960693ba601682696f9702ee5707ed08c172be64033518f"
+    },
+    {
+      "path": "qualification/normal-exit-grace/cpu/persistent_live/audit-process.json",
+      "bytes": 3795,
+      "sha256": "c626ff452a01775fb6cfd2134b0c911f715dcfc04c51832de1d242bbfa780a96"
+    },
+    {
+      "path": "qualification/normal-exit-grace/cpu/persistent_live/audit.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "qualification/normal-exit-grace/cpu/persistent_live/helper.json",
+      "bytes": 23,
+      "sha256": "06396b3c482b38c541b9eb8088d4a4b0822e3d9bd8d9f5875ed99113dbbb9291"
+    },
+    {
+      "path": "qualification/normal-exit-grace/cpu/persistent_live/post-audit.json",
+      "bytes": 16,
+      "sha256": "748eda8085f7e3c82149775d9542083427f0f8a955173c4a0ed18c85c69c5c09"
+    },
+    {
+      "path": "qualification/normal-exit-grace/cpu/persistent_live/summary.json",
+      "bytes": 276,
+      "sha256": "ad199322505ecce653063ed447e683dcee75413a8c9310e4685e854a4297fef3"
+    },
+    {
+      "path": "qualification/normal-exit-grace/cpu/source-validation.json",
+      "bytes": 789,
+      "sha256": "cf4e696b6be6aeb6293e8b6c7884a31ffcfa88b88762299d16e932caea9431f7"
+    },
+    {
+      "path": "qualification/normal-exit-grace/cpu/summary.json",
+      "bytes": 7789,
+      "sha256": "c12e0846b9454add6796702ada4340eb32823ebcef03984803b9546ad06a39a6"
+    },
+    {
+      "path": "qualification/normal-exit-grace/cpu/zombie_only/audit-process.json",
+      "bytes": 1531,
+      "sha256": "9ec61e2418d823e2df793d79ed6bd51a21b808cc6f93aa24cc2e48b8b8c8fa6a"
+    },
+    {
+      "path": "qualification/normal-exit-grace/cpu/zombie_only/audit.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "qualification/normal-exit-grace/cpu/zombie_only/helper.json",
+      "bytes": 23,
+      "sha256": "76f5c8499bb15343c475856b2d6083930d76c2b799ab7f65548cfe7ec4e7b5f9"
+    },
+    {
+      "path": "qualification/normal-exit-grace/cpu/zombie_only/post-audit.json",
+      "bytes": 16,
+      "sha256": "748eda8085f7e3c82149775d9542083427f0f8a955173c4a0ed18c85c69c5c09"
+    },
+    {
+      "path": "qualification/normal-exit-grace/cpu/zombie_only/summary.json",
+      "bytes": 272,
+      "sha256": "aba5d0335a2a3c841c8046d87c1b54e5d53a400cd4b191460884cd94c5d60902"
+    },
+    {
+      "path": "qualification/normal-exit-grace/external-artifacts.json",
+      "bytes": 3786,
+      "sha256": "dc21ed84dfdc5168fa21bf1baaf72b4767af2cfb2c80ee947b40e0840fb933e4"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/_supervision/single/audit/device-contexts.jsonl",
+      "bytes": 560,
+      "sha256": "e6a8dd8a5c558af3119cdeaa6abe5896f52dd7a67db1dab910d9d9da7fed9276"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/_supervision/single/audit/launch.json",
+      "bytes": 1855,
+      "sha256": "70ed072a48c1139662ac63f561ef3c3bc4328e9713c3f67b5314497a57677f1f"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/_supervision/single/audit/process.log",
+      "bytes": 2227,
+      "sha256": "8537c0f5fc91595ab97ca2282d915aefad74a44b8e0b0a63cb4667188beb9319"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/_supervision/single/evaluation/device-contexts.jsonl",
+      "bytes": 12780,
+      "sha256": "90b46fc127cd44efda3b3105ade8178c9ad38d36ecb84bd58cd276350db03874"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/_supervision/single/evaluation/launch.json",
+      "bytes": 1989,
+      "sha256": "b7a29f32af377b15381295239de65ad42f88e3668e618bd37ac69e3e44facd76"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/_supervision/single/evaluation/process.log",
+      "bytes": 14475,
+      "sha256": "2b572f22cb7823ab29167a916adaaf58e3d2d9fae71b6a3eda08d98b2e4a2feb"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/_supervision/single/training/device-contexts.jsonl",
+      "bytes": 29034,
+      "sha256": "2e5d77e6f801c8b28c5d1bf86952941e44d12ebc5b53b033f3e37e000ab9c07d"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/_supervision/single/training/launch.json",
+      "bytes": 2498,
+      "sha256": "0863bbb69883bdea5698f6cef69a33abd505b9df32a1ac851eb5b3fc90742ac4"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/_supervision/single/training/process.log",
+      "bytes": 56297,
+      "sha256": "31cb0befd6effeb2dc3953e0e5d39f0e8f27a6b37e9eac092270ffb31ec86aeb"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/audit-process.json",
+      "bytes": 942,
+      "sha256": "0a57753761521a8a7289f9ffc123486f43b9200993bff36f1994b8e757b19e4c"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/config.json",
+      "bytes": 676,
+      "sha256": "b92c1d1558dab74ae98b48a0334be00ce2b3c5c404bfe27f4a473ac6806a6e53"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/environment.json",
+      "bytes": 3282,
+      "sha256": "6df5374e47d77edc549255c8c82c4f852e86c6058af026bd10abd47535f9f90b"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/evaluation-process.json",
+      "bytes": 1213,
+      "sha256": "84fd0f49d9c6a9a995e71a5981a9dd0c7f702aaced540a382daf987e86d95da4"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/evaluation.json",
+      "bytes": 1515,
+      "sha256": "0bf4375306198e8ae1fa017a7f8ec21c232f0bc590a1c8a8edf94103aedb7fcf"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/gpu-preflight.json",
+      "bytes": 8189,
+      "sha256": "4a6413915dace4fa52a8e64da9b7f7dd1dad44ed4981726e81cefccde45e0c5c"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/initial-contract.json",
+      "bytes": 1081,
+      "sha256": "1eddeaebeb653a27523e85cc61e89126c9994ad83feb15c300af4fb5182e0b13"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/payload_schema.json",
+      "bytes": 2293,
+      "sha256": "37f884aa25e3297758fc3c392517e1c1690fd5036dff9af8803dec3089e91296"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/post-audit-video-integrity-artifacts/0000.decode.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/post-audit-video-integrity-artifacts/0000.decoded-frame-sha256.txt",
+      "bytes": 214249,
+      "sha256": "456b0b53cd94a27fc9a084fc8ca48aa06643b4b43df834b31373c126740db59d"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/post-audit-video-integrity-artifacts/0000.probe.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/post-audit-video-integrity-artifacts/0001.decode.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/post-audit-video-integrity-artifacts/0001.decoded-frame-sha256.txt",
+      "bytes": 214249,
+      "sha256": "ba8876207ac60f17651654819e19032ec035a3cca10437ee87e5501f02e50b3c"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/post-audit-video-integrity-artifacts/0001.probe.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/post-audit-video-integrity.json",
+      "bytes": 6902,
+      "sha256": "11fb82d978949c7384605b088b3fb37070605876bed34ed9b15007713c83dea7"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/post-audit.json",
+      "bytes": 11987,
+      "sha256": "af7856f595bfec87e8b94a830ae01a0c259c99b00bb1be6cf0fb9055a2a5a8e3"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/process.json",
+      "bytes": 1213,
+      "sha256": "4d071e2aa2888344ad48036623298a6ef9b9b84318ca7f87a8a453642618bdbb"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/resources.jsonl",
+      "bytes": 61361,
+      "sha256": "8b3a828cc5b2e16abd914aed7478d63c7d3d2af480331d046ccfa9db1ee37ac9"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/roles.json",
+      "bytes": 56,
+      "sha256": "ae00cbab2103271d7c01333ed6e16400f1bee5ae6d0c2f40fd54f12a971c447b"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/suite-summary.json",
+      "bytes": 17193,
+      "sha256": "473b989f057a192b69afd2884a3c71daf4e085b7faaf58753573b08c1de4507c"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/summary.json",
+      "bytes": 118299,
+      "sha256": "11014c3c0c6adde3758f68ad1289acd55267366a22438d014df83fe47852d7fd"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/training-events.jsonl",
+      "bytes": 47762,
+      "sha256": "ba7404e988ac79f521806faa67c7d60ae9d5a1d41fb63470a7705890e09f52b6"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/training-sources.json",
+      "bytes": 66609,
+      "sha256": "6bb9f3c8a9d95ea603638e7c0734ed500efd804ae2164e28abdf844c142e8a06"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/training-trace.json",
+      "bytes": 3047,
+      "sha256": "f146483b9a377ef4e4301301d5ab2f88a26416573f36a6670fed271e368ffa1d"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical/writer-sdk-events.jsonl",
+      "bytes": 2705,
+      "sha256": "63ebba7ee8c8d9fac1a59a4e4df094ea629e7c22a897e48758906e6f26a6b86d"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical-supervision/device-contexts.jsonl",
+      "bytes": 29110,
+      "sha256": "cd3d00c4caad9874c941254e1695a419677dc6d42f5ad3bac5219d8c6acfc32f"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical-supervision/gpu-admission.json",
+      "bytes": 7320,
+      "sha256": "b33530b5d93be291d7f6fd2546b9059353cb048ffe89fcc2cf745ee18abfc6f2"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical-supervision/launch.json",
+      "bytes": 2327,
+      "sha256": "1020db8402418ae0345cdc7dac9006acf601084d97d929df53fc24efa189e612"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical-supervision/process-receipt.json",
+      "bytes": 4918,
+      "sha256": "b71b98baa8140dfead8547d3af4eac3113b96921c5d632525ae747391c0d35d2"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical-supervision/process.log",
+      "bytes": 662,
+      "sha256": "689f11b8976df377d158a9f0fe9139060624e96e65c3bcb982d7f40816b78659"
+    },
+    {
+      "path": "qualification/normal-exit-grace/physical-supervision/validation-summary.json",
+      "bytes": 5007,
+      "sha256": "b9d28c7dfc5475ef89c542616c29c791b378d15284a03ca1044566272f466c93"
+    },
+    {
+      "path": "qualification/normal-exit-grace/qualify_group_exit.py",
+      "bytes": 10266,
+      "sha256": "3394161be8ddceb8d7ea5f143944f6ebc64282b5ad6dc99c2ba1e3371cf9e0bf"
+    },
+    {
+      "path": "qualification/normal-exit-grace/retained-files.json",
+      "bytes": 16325,
+      "sha256": "c25bbfd565d7abd6582bfd346a4fad49423e1e58d2b8ab374d118e92550d577c"
+    },
+    {
+      "path": "qualification/normal-exit-grace/supplemental-evaluation/evaluation.json",
+      "bytes": 7735,
+      "sha256": "96c1ff4b68359cb705a17ee5525573734cc3067b00f421836c592a966d4711c2"
+    },
+    {
+      "path": "qualification/normal-exit-grace/supplemental-evaluation/validation-summary.json",
+      "bytes": 4819,
+      "sha256": "5da8e3f2a2fa734e048bdb6ade4da00ac13429450193b2eb1f6b64572500eda5"
+    },
+    {
+      "path": "qualification/normal-exit-grace/supplemental-evaluation-supervision/device-contexts.jsonl",
+      "bytes": 73912,
+      "sha256": "a5202232c49f1ed7cff9bdf3fe305c0429876298d9f1fc1ab26900fce9c23abe"
+    },
+    {
+      "path": "qualification/normal-exit-grace/supplemental-evaluation-supervision/gpu-admission.json",
+      "bytes": 7320,
+      "sha256": "6ed1d77da166cd640cfdbae3bbbeac33af5d2e1fae1e3b5617ab9bcd7f585d53"
+    },
+    {
+      "path": "qualification/normal-exit-grace/supplemental-evaluation-supervision/launch.json",
+      "bytes": 2273,
+      "sha256": "9cb62fe6458699cb8d804dd07cf18380878e70e0d2c1ef942b5c4fe394bc5282"
+    },
+    {
+      "path": "qualification/normal-exit-grace/supplemental-evaluation-supervision/process-receipt.json",
+      "bytes": 3173,
+      "sha256": "e5a259f3b060b027f0a0fb90fb6643b4b1025e904e4ab2b527b8b9803b9ed1c5"
+    },
+    {
+      "path": "qualification/normal-exit-grace/supplemental-evaluation-supervision/process.log",
+      "bytes": 21850,
+      "sha256": "6746998b192194c5de048033a6d031b506327c4c75995afe660da5a61c7e5d16"
+    },
+    {
+      "path": "qualification/report-fairness.json",
+      "bytes": 1157,
+      "sha256": "0574aecf0dc33a298e4d9103973c1f138fc74ed1f2f37bb1c9a9c8d30d798bf7"
+    },
+    {
+      "path": "qualification/report-smoke-audit.json",
+      "bytes": 2685,
+      "sha256": "f8731bc13481bd3feb31621d7c1ff5731697de19886bea4346a19617fbe9f7d7"
+    },
+    {
+      "path": "qualification/report-worker-contract.json",
+      "bytes": 1824,
+      "sha256": "be80fc5ed0224f0fb2e9f3234f93ef8979dd06e397fb1591027bdb5e079729b1"
+    },
+    {
+      "path": "qualification/resource-utilization.json",
+      "bytes": 5397,
+      "sha256": "1a23809b20eb9528b51d73f26b5067c5132e582a569ad6a6d8db7bcd46797f4e"
+    },
+    {
+      "path": "qualification/scheduler-cpu.json",
+      "bytes": 25834,
+      "sha256": "e693d55317d3503b9c7261fc4c6d4ebb89ee245223850216192cab3564f2adf6"
+    },
+    {
+      "path": "qualification/scheduler-current-cpu.json",
+      "bytes": 25982,
+      "sha256": "3c224895b816beb78a403dda84d03cd0128b8cf40a69405b4b29c256a553572c"
+    },
+    {
+      "path": "qualification/scheduler-real-attempt.json",
+      "bytes": 5145,
+      "sha256": "2138650bfbdad57b19582da2cfc3dd975ac7c29f8de58b3c3a2e5ec426ad70db"
+    },
+    {
+      "path": "qualification/scheduler-single-real.json",
+      "bytes": 2960,
+      "sha256": "09adcff956233a615db758de0d00890309ee2c3a6ff9b6ca31c882d762387d9e"
+    },
+    {
+      "path": "qualification/shared-aux-admission.json",
+      "bytes": 8198,
+      "sha256": "f7ccfec813bdaf8e3ec99d13a2a44185d847fec706ec3449025242da68fa3c19"
+    },
+    {
+      "path": "qualification/shared-aux-fairness.json",
+      "bytes": 275,
+      "sha256": "5fbdb43b3fd5b7a5063a4d4dc6ea75440ccd33c05feeb40e5a37eeb2fb6b7e21"
+    },
+    {
+      "path": "qualification/smoke-v2.json",
+      "bytes": 27754,
+      "sha256": "07caecbee17c87fb2306829d23d653bb2601e0116accf2f82609630782bf612d"
+    },
+    {
+      "path": "qualification/supervisor-cpu.json",
+      "bytes": 405,
+      "sha256": "af3963bea2c056ba35ef7afd5ca492e4e88bcf7c5886d9ede77cfb4b58eedaa8"
+    },
+    {
+      "path": "qualification/supervisor-guard.json",
+      "bytes": 449,
+      "sha256": "df5ae9407f2d0d818a0dcb5646282dbcf5088284e21cc3221b418a54afc2795e"
+    },
+    {
+      "path": "qualification/video-all-frames.json",
+      "bytes": 27286,
+      "sha256": "2d832828d6a7c477150534aa7eea29546c226b86acc0f428c3f8195f555f30eb"
+    },
+    {
+      "path": "qualification/video-independent-readiness.json",
+      "bytes": 1950,
+      "sha256": "36e72ed6e7cbe132fef08a3b3f10dfcc302fdba136cb66732d57f9d186bcd39d"
+    },
+    {
+      "path": "qualification/wait-utilization-probe.json",
+      "bytes": 144039,
+      "sha256": "a1b05e12b344ce3b9ef6f4f0c138397e53adc39c6c12d454ef8bc16bab47219d"
+    },
+    {
+      "path": "qualification/worker-status-baseline.json",
+      "bytes": 142,
+      "sha256": "a7a756fa5ec3d9ff6b1ad5b3ae63d2975ad9ca990c9492c499b45a59a80c6755"
+    },
+    {
+      "path": "qualification/worker-status-source-hashes.json",
+      "bytes": 230,
+      "sha256": "97570eaef3fed23cc3b3b529d9a3068fa2f72f46fa38d87c95e9ee025eea6d6e"
+    },
+    {
+      "path": "raw-log-files.json",
+      "bytes": 587315,
+      "sha256": "ff82801d20371ab1b93e2f169714cc88aedc67fcd56594653f0dc500ca7fa71d"
+    },
+    {
+      "path": "raw-logs.tar.gz",
+      "bytes": 66381430,
+      "sha256": "4e6cdb7bc69cb44d1d5dee7a0c6aacbf72943c37ed7f3aa4b4a4b83daea10fea"
+    },
+    {
+      "path": "report/01_time_diversity.pdf",
+      "bytes": 23025,
+      "sha256": "23c2be105ea55937b07630c6e01e15c405d265b289ea34b1697fd725b1366bb7"
+    },
+    {
+      "path": "report/01_time_diversity.png",
+      "bytes": 125121,
+      "sha256": "bf0e10da9a707f0cc01eb9222ddf6fbadd348116ed0f0e7536771394406d2cb1"
+    },
+    {
+      "path": "report/01_time_diversity.svg",
+      "bytes": 99216,
+      "sha256": "b459431513c3246948ea68733fc253ea207b11452bda6ee52661db3eac0eb316"
+    },
+    {
+      "path": "report/02_coverage_growth.pdf",
+      "bytes": 19373,
+      "sha256": "c24eebe8ecae2ae3678d6f842efff5ada2fd832ee3dfd1dc8e4221686d7b3315"
+    },
+    {
+      "path": "report/02_coverage_growth.png",
+      "bytes": 112695,
+      "sha256": "cd719ac004fd48eb75fe67b4102f6d1e356b4dcdc3522f4fd3ef77de4a41bedd"
+    },
+    {
+      "path": "report/02_coverage_growth.svg",
+      "bytes": 117203,
+      "sha256": "c2820bd14fb103782be4f41ddc4fbb8a2900e555d616ec2eae5644be72295a33"
+    },
+    {
+      "path": "report/03_pipeline_timeline.pdf",
+      "bytes": 117245,
+      "sha256": "bd5cdb9dc46f2d7252036f98289f6cbe9ba74ed0c81f497a78d644ec8ff11fae"
+    },
+    {
+      "path": "report/03_pipeline_timeline.png",
+      "bytes": 318044,
+      "sha256": "0881ad7093c8d39e9c0020ca8bec006f3fe0d8331ce33a18d183233300bc056a"
+    },
+    {
+      "path": "report/03_pipeline_timeline.svg",
+      "bytes": 1382978,
+      "sha256": "0b81ddc8b8447becd006a399255fc3588588ebfea26b3bcad2747a320e37d82c"
+    },
+    {
+      "path": "report/04_lifetime_reuse.pdf",
+      "bytes": 19611,
+      "sha256": "e26647c7a0ba1e12a55025efb09da82b9814c7c719f641623cca6bd61f5a003f"
+    },
+    {
+      "path": "report/04_lifetime_reuse.png",
+      "bytes": 130097,
+      "sha256": "41a4566468146d57304d6a7eda51e529dac7841a8e55922edc46405255f69217"
+    },
+    {
+      "path": "report/04_lifetime_reuse.svg",
+      "bytes": 86093,
+      "sha256": "5e14884c9837a00a687caf64ae1bda5db6c2857eac1f7c3b5caaeeaa819bb8bf"
+    },
+    {
+      "path": "report/report.md",
+      "bytes": 8733,
+      "sha256": "164bb05054984819813d40f32075b85d272736e525cdffda206e19fd6ce89a84"
+    },
+    {
+      "path": "report-input-files.json",
+      "bytes": 145606,
+      "sha256": "4d913ca43ff9f1a6f238867eff30ecc86b4ac7bb057d63335e4fbfd016759a36"
+    },
+    {
+      "path": "reproduction-check.json",
+      "bytes": 271,
+      "sha256": "e903115e283ff1f7eb355be9a59d2d816f6b21024da1e516d2c024ba71a28ca8"
+    },
+    {
+      "path": "terminal-diagnostic/ods-v3-terminal-diagnostic-summary.json",
+      "bytes": 15826,
+      "sha256": "1de1ed567c8e74e660d219fe8a39b5c20fddec87a34486836873d080ce6b5544"
+    },
+    {
+      "path": "terminal-diagnostic/ods-v3-terminal-diagnostic.json",
+      "bytes": 86906,
+      "sha256": "e3d2ba530d8323ab03889088b80560b889e8caeda055dc4f1829835b91a7592d"
+    },
+    {
+      "path": "terminal_diagnostic.py",
+      "bytes": 19979,
+      "sha256": "d4db72c1cd79f797476d684030400d4484d9056ae5acc29f201e2ab2181e2832"
+    }
+  ]
+}

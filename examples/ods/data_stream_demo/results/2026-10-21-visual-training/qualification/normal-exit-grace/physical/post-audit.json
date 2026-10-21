@@ -1,0 +1,395 @@
+{
+  "schema": "ods-visual-training-post-audit-v2",
+  "passed": true,
+  "qualification_passed": true,
+  "scope": "post-timing numeric/checkpoint, source-window SDK and all-frame video integrity audit; no duration contributes to pipeline time",
+  "audit_source_sha256": {
+    "training_audit": "75e3ce65d8130972265d55b5819a70d9d4d73c91cd5adcb0ef8a2f2ae717e3ce",
+    "video_integrity": "e1286b2a60902fc7b0302e6d4decaeb024f36883d0b90066a8d4fc159a29c7d1"
+  },
+  "recording": {
+    "episodes": 4,
+    "frames": 1911,
+    "cameras": [
+      "cam_high",
+      "cam_wrist"
+    ],
+    "all_numeric_sha256_verified": true,
+    "sdk_metadata_verified": true
+  },
+  "training": {
+    "updates": 4,
+    "chunks": 16,
+    "valid_targets": 512,
+    "trained_sources": 4,
+    "untrained_saved_sources": 0,
+    "ledger_sources": 4,
+    "checkpoint_verified": true
+  },
+  "decode": {
+    "episodes": 4,
+    "stats": {
+      "delivered_batches": 4,
+      "sdk_getitem_calls": 4,
+      "returned_valid_camera_frames": 16,
+      "requested_camera_timestamps": 16,
+      "worker_fetch_seconds": 3.6388475340000004,
+      "worker_pids": [
+        2236679,
+        2236680,
+        2236681,
+        2236682
+      ],
+      "reader": "official LeRobotDataset.__getitem__ + delta_timestamps",
+      "video_backend": "torchcodec CPU",
+      "decoded_corpus_preloaded": false,
+      "prefetch_batches": 4,
+      "persistent_workers": true,
+      "ordered_delivery": true,
+      "pinned_memory": false,
+      "plan_batches": 4,
+      "image_timestamps_per_chunk": 2,
+      "numeric_timestamps_per_chunk": 33,
+      "complete_contexts_required": true,
+      "restart_supported": false
+    }
+  },
+  "decode_shutdown": {
+    "unconsumed_prefetch": {
+      "episode_budget": null,
+      "delivered_chunks": 4,
+      "reserved_chunks": 0,
+      "cancelled_prefetch_chunks": 0,
+      "pending_batches": 0,
+      "remaining_chunks": null,
+      "episodes": [
+        {
+          "source_id": [
+            290693151455105406,
+            0
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            290693151455105406,
+            1
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            290693151455105406,
+            2
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            290693151455105406,
+            3
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        }
+      ]
+    },
+    "worker_pids": [
+      2236679,
+      2236680,
+      2236681,
+      2236682
+    ],
+    "worker_exitcodes": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "workers_joined": true,
+    "forced_termination": false,
+    "discarded_prefetch_chunks": 0,
+    "shutdown_seconds": 0.9976773241069168,
+    "cleanup_errors": []
+  },
+  "video_quality": {
+    "samples": [
+      {
+        "camera": "cam_high",
+        "index": 0,
+        "mae_uint8": 1.6319151142116652,
+        "psnr_db": 40.68747842822208,
+        "exact": false
+      },
+      {
+        "camera": "cam_high",
+        "index": 235,
+        "mae_uint8": 1.855252794469834,
+        "psnr_db": 39.237514275444724,
+        "exact": false
+      },
+      {
+        "camera": "cam_high",
+        "index": 470,
+        "mae_uint8": 1.778556822602629,
+        "psnr_db": 40.23916147284895,
+        "exact": false
+      },
+      {
+        "camera": "cam_wrist",
+        "index": 0,
+        "mae_uint8": 1.7032387202128045,
+        "psnr_db": 40.814370477580496,
+        "exact": false
+      },
+      {
+        "camera": "cam_wrist",
+        "index": 235,
+        "mae_uint8": 1.7562739001114192,
+        "psnr_db": 38.78483017550289,
+        "exact": false
+      },
+      {
+        "camera": "cam_wrist",
+        "index": 470,
+        "mae_uint8": 1.592781728925047,
+        "psnr_db": 39.60068553264272,
+        "exact": false
+      }
+    ],
+    "worker_cleanup": {
+      "worker_pids": [
+        2236750
+      ],
+      "worker_exitcodes": [
+        0
+      ],
+      "workers_joined": true,
+      "forced_termination": false,
+      "discarded_prefetch_chunks": 0,
+      "shutdown_seconds": 7.50841572880745e-05,
+      "cleanup_errors": []
+    },
+    "scope": "fixed raw RGB references versus standard CPU video decoding; excluded from timed consumption"
+  },
+  "full_video_integrity": {
+    "revision": "full-video-integrity/v1",
+    "passed": true,
+    "all_saved_video_frames_decoded": true,
+    "dataset": "/tmp/ods-normal-exit-grace-physical-20261021-v1/lerobot_dataset",
+    "scope": "post-timing sequential software decode/count integrity; no lossless RGB, policy-quality or all-SDK-seek claim",
+    "decoded_pixel_format": "yuv420p",
+    "frame_hash_scope": "SHA256 of decoded rawvideo YUV420p planes; not RGB or BC-normalized tensors",
+    "files": [
+      {
+        "file": "videos/observation.images.cam_high/chunk-000/file-000.mp4",
+        "camera": "observation.images.cam_high",
+        "expected_frames": 1911,
+        "episodes": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "compressed_sha256": "0847696ec682d9264288bbdfe066f6e2c80c16f76d5ff9c8f2122ec74de292d1",
+        "decoded_pixel_format": "yuv420p",
+        "frame_hash_scope": "SHA256 of FFmpeg decoded rawvideo YUV420p planes; not RGB or BC-normalized tensors",
+        "probe_command": [
+          "/root/miniconda3/envs/py311/bin/ffprobe",
+          "-v",
+          "error",
+          "-select_streams",
+          "v",
+          "-show_entries",
+          "stream=index,codec_name,codec_type,width,height,pix_fmt,r_frame_rate,nb_frames,time_base,duration",
+          "-of",
+          "json",
+          "/tmp/ods-normal-exit-grace-physical-20261021-v1/lerobot_dataset/videos/observation.images.cam_high/chunk-000/file-000.mp4"
+        ],
+        "probe_exitcode": 0,
+        "probe": {
+          "index": 0,
+          "codec_name": "av1",
+          "codec_type": "video",
+          "width": 256,
+          "height": 256,
+          "pix_fmt": "yuv420p",
+          "r_frame_rate": "30/1",
+          "time_base": "1/15360",
+          "duration": "63.700000",
+          "nb_frames": "1911"
+        },
+        "decode_command": [
+          "/root/miniconda3/envs/py311/bin/ffmpeg",
+          "-nostdin",
+          "-hide_banner",
+          "-loglevel",
+          "error",
+          "-xerror",
+          "-err_detect",
+          "explode",
+          "-hwaccel",
+          "none",
+          "-threads:v",
+          "1",
+          "-i",
+          "/tmp/ods-normal-exit-grace-physical-20261021-v1/lerobot_dataset/videos/observation.images.cam_high/chunk-000/file-000.mp4",
+          "-map",
+          "0:v:0",
+          "-an",
+          "-sn",
+          "-dn",
+          "-fps_mode",
+          "passthrough",
+          "-c:v",
+          "rawvideo",
+          "-pix_fmt",
+          "yuv420p",
+          "-threads:v",
+          "1",
+          "-filter_threads",
+          "1",
+          "-filter_complex_threads",
+          "1",
+          "-f",
+          "framehash",
+          "-hash",
+          "sha256",
+          "-y",
+          "/tmp/ods-normal-exit-grace-physical-20261021-v1/post-audit-video-integrity-artifacts/0000.decoded-frame-sha256.txt"
+        ],
+        "decode_exitcode": 0,
+        "decode_seconds": 0.5642978330142796,
+        "decoded_frame_hashes": "/tmp/ods-normal-exit-grace-physical-20261021-v1/post-audit-video-integrity-artifacts/0000.decoded-frame-sha256.txt",
+        "decode_error_log": "/tmp/ods-normal-exit-grace-physical-20261021-v1/post-audit-video-integrity-artifacts/0000.decode.stderr",
+        "decoded_frames": 1911,
+        "decoded_frame_hash_file_sha256": "456b0b53cd94a27fc9a084fc8ca48aa06643b4b43df834b31373c126740db59d",
+        "passed": true
+      },
+      {
+        "file": "videos/observation.images.cam_wrist/chunk-000/file-000.mp4",
+        "camera": "observation.images.cam_wrist",
+        "expected_frames": 1911,
+        "episodes": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "compressed_sha256": "e5ec06783c35262739338b3243962597fdc6ed1fdda27c85444400ce25426885",
+        "decoded_pixel_format": "yuv420p",
+        "frame_hash_scope": "SHA256 of FFmpeg decoded rawvideo YUV420p planes; not RGB or BC-normalized tensors",
+        "probe_command": [
+          "/root/miniconda3/envs/py311/bin/ffprobe",
+          "-v",
+          "error",
+          "-select_streams",
+          "v",
+          "-show_entries",
+          "stream=index,codec_name,codec_type,width,height,pix_fmt,r_frame_rate,nb_frames,time_base,duration",
+          "-of",
+          "json",
+          "/tmp/ods-normal-exit-grace-physical-20261021-v1/lerobot_dataset/videos/observation.images.cam_wrist/chunk-000/file-000.mp4"
+        ],
+        "probe_exitcode": 0,
+        "probe": {
+          "index": 0,
+          "codec_name": "av1",
+          "codec_type": "video",
+          "width": 256,
+          "height": 256,
+          "pix_fmt": "yuv420p",
+          "r_frame_rate": "30/1",
+          "time_base": "1/15360",
+          "duration": "63.700000",
+          "nb_frames": "1911"
+        },
+        "decode_command": [
+          "/root/miniconda3/envs/py311/bin/ffmpeg",
+          "-nostdin",
+          "-hide_banner",
+          "-loglevel",
+          "error",
+          "-xerror",
+          "-err_detect",
+          "explode",
+          "-hwaccel",
+          "none",
+          "-threads:v",
+          "1",
+          "-i",
+          "/tmp/ods-normal-exit-grace-physical-20261021-v1/lerobot_dataset/videos/observation.images.cam_wrist/chunk-000/file-000.mp4",
+          "-map",
+          "0:v:0",
+          "-an",
+          "-sn",
+          "-dn",
+          "-fps_mode",
+          "passthrough",
+          "-c:v",
+          "rawvideo",
+          "-pix_fmt",
+          "yuv420p",
+          "-threads:v",
+          "1",
+          "-filter_threads",
+          "1",
+          "-filter_complex_threads",
+          "1",
+          "-f",
+          "framehash",
+          "-hash",
+          "sha256",
+          "-y",
+          "/tmp/ods-normal-exit-grace-physical-20261021-v1/post-audit-video-integrity-artifacts/0001.decoded-frame-sha256.txt"
+        ],
+        "decode_exitcode": 0,
+        "decode_seconds": 0.4641403870191425,
+        "decoded_frame_hashes": "/tmp/ods-normal-exit-grace-physical-20261021-v1/post-audit-video-integrity-artifacts/0001.decoded-frame-sha256.txt",
+        "decode_error_log": "/tmp/ods-normal-exit-grace-physical-20261021-v1/post-audit-video-integrity-artifacts/0001.decode.stderr",
+        "decoded_frames": 1911,
+        "decoded_frame_hash_file_sha256": "ba8876207ac60f17651654819e19032ec035a3cca10437ee87e5501f02e50b3c",
+        "passed": true
+      }
+    ],
+    "cpu_affinity": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "threads_per_file": 1,
+    "files_in_parallel": 1,
+    "verifier_sha256": "e1286b2a60902fc7b0302e6d4decaeb024f36883d0b90066a8d4fc159a29c7d1",
+    "ffmpeg_version": "ffmpeg version 7.1.1 Copyright (c) 2000-2025 the FFmpeg developers",
+    "ffprobe_version": "ffprobe version 7.1.1 Copyright (c) 2007-2025 the FFmpeg developers",
+    "expected_episodes": 4,
+    "expected_frames_per_camera": 1911,
+    "metadata_sha256": {
+      "meta/info.json": "bf99384f94c7ceea54e14d5991c768485e5d25115b3220f2a301bc7539e45b43",
+      "meta/episodes/chunk-000/file-000.parquet": "1df98e81cb35be2d2f97f0eec1fca904ef227e38201f4153b2fd8320ae991f59"
+    },
+    "decoded_frames_per_camera": {
+      "observation.images.cam_high": 1911,
+      "observation.images.cam_wrist": 1911
+    },
+    "total_decoded_camera_frames": 3822,
+    "seconds_outside_training_pipeline": 1.1282921801321208
+  },
+  "seconds_outside_pipeline": 8.666561790043488
+}

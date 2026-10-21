@@ -1,0 +1,85 @@
+{
+  "scope": "New diagnostic data/checkpoints remain external to Git",
+  "files": [
+    {
+      "path": "/tmp/ods-normal-exit-grace-physical-20261021-v1/final.pt",
+      "bytes": 86425491,
+      "sha256": "3792500301eaea69b1c088070a90aa67d643db064c6a1850bdd7716ea1c3ef30"
+    },
+    {
+      "path": "/tmp/ods-normal-exit-grace-physical-20261021-v1/initial.pt",
+      "bytes": 28822962,
+      "sha256": "36d72afd22de9d90631829e3e1fd700334ec66921252d313c6fce380e306ce15"
+    },
+    {
+      "path": "/tmp/ods-normal-exit-grace-physical-20261021-v1/lerobot_dataset/meta/stats.json",
+      "bytes": 30526,
+      "sha256": "d1e0c3c8c3484d50eba31bc55f8f60fa22a6d6265ba0488a3fa2389ee3038f20"
+    },
+    {
+      "path": "/tmp/ods-normal-exit-grace-physical-20261021-v1/lerobot_dataset/meta/ods_data_stream.json",
+      "bytes": 5258,
+      "sha256": "f928a5aac93f8fde6b1ce13526d96c26854dc12f7843ecc518c01fbdc587bc66"
+    },
+    {
+      "path": "/tmp/ods-normal-exit-grace-physical-20261021-v1/lerobot_dataset/meta/info.json",
+      "bytes": 5237,
+      "sha256": "bf99384f94c7ceea54e14d5991c768485e5d25115b3220f2a301bc7539e45b43"
+    },
+    {
+      "path": "/tmp/ods-normal-exit-grace-physical-20261021-v1/lerobot_dataset/meta/tasks.parquet",
+      "bytes": 2351,
+      "sha256": "b645889af27929c24ed1e9d19ebb82d30f38599fcd561fe9db137f9d5ed08248"
+    },
+    {
+      "path": "/tmp/ods-normal-exit-grace-physical-20261021-v1/lerobot_dataset/meta/ods_raw_references/cam_high-235.npy",
+      "bytes": 196736,
+      "sha256": "8ae002292ed920a924cb3861706a8251978894797d20b2780bb5347a9f319005"
+    },
+    {
+      "path": "/tmp/ods-normal-exit-grace-physical-20261021-v1/lerobot_dataset/meta/ods_raw_references/cam_wrist-470.npy",
+      "bytes": 196736,
+      "sha256": "7c511a75057b490cea5ac5ce49d652d77d09a9fff92db262f2defc5cfbd181cf"
+    },
+    {
+      "path": "/tmp/ods-normal-exit-grace-physical-20261021-v1/lerobot_dataset/meta/ods_raw_references/cam_wrist-235.npy",
+      "bytes": 196736,
+      "sha256": "3954842a1b6a5661abca7b0593fc73f00a50ca56c920f8281adf7fab05432f41"
+    },
+    {
+      "path": "/tmp/ods-normal-exit-grace-physical-20261021-v1/lerobot_dataset/meta/ods_raw_references/cam_wrist-0.npy",
+      "bytes": 196736,
+      "sha256": "3794f83c65b65ca7b97941c4abd6a84426821d536963777fcd0eaf45fbac2e62"
+    },
+    {
+      "path": "/tmp/ods-normal-exit-grace-physical-20261021-v1/lerobot_dataset/meta/ods_raw_references/cam_high-470.npy",
+      "bytes": 196736,
+      "sha256": "530d5146236cefa4f1f590d5956bdeaa4d687c8bfc43c2252d15c38850b98042"
+    },
+    {
+      "path": "/tmp/ods-normal-exit-grace-physical-20261021-v1/lerobot_dataset/meta/ods_raw_references/cam_high-0.npy",
+      "bytes": 196736,
+      "sha256": "f4a3683f889be43f2b86cc0e7f519ac07feae8ff3cf5baf9ae9dac026f977b9f"
+    },
+    {
+      "path": "/tmp/ods-normal-exit-grace-physical-20261021-v1/lerobot_dataset/meta/episodes/chunk-000/file-000.parquet",
+      "bytes": 74251,
+      "sha256": "1df98e81cb35be2d2f97f0eec1fca904ef227e38201f4153b2fd8320ae991f59"
+    },
+    {
+      "path": "/tmp/ods-normal-exit-grace-physical-20261021-v1/lerobot_dataset/videos/observation.images.cam_high/chunk-000/file-000.mp4",
+      "bytes": 4265913,
+      "sha256": "0847696ec682d9264288bbdfe066f6e2c80c16f76d5ff9c8f2122ec74de292d1"
+    },
+    {
+      "path": "/tmp/ods-normal-exit-grace-physical-20261021-v1/lerobot_dataset/videos/observation.images.cam_wrist/chunk-000/file-000.mp4",
+      "bytes": 2121526,
+      "sha256": "e5ec06783c35262739338b3243962597fdc6ed1fdda27c85444400ce25426885"
+    },
+    {
+      "path": "/tmp/ods-normal-exit-grace-physical-20261021-v1/lerobot_dataset/data/chunk-000/file-000.parquet",
+      "bytes": 569253,
+      "sha256": "02d2c4539f58858fab4c68e575fbc33bd9632c51ebb104984d2674b09fd87c44"
+    }
+  ]
+}

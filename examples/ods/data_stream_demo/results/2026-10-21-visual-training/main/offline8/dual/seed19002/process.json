@@ -1,0 +1,29 @@
+{
+  "output": "/tmp/ods-visual-training-formal-20261021-v3/offline8/dual/seed19002",
+  "status": "complete",
+  "returncode": 0,
+  "elapsed_seconds": 182.788710832,
+  "stage": "training",
+  "evaluation": false,
+  "timeout": false,
+  "cancelled": false,
+  "leaked_process_group": false,
+  "pgid": 2130215,
+  "process_launch_monotonic_ns": 1760746403929196,
+  "device_guard": {
+    "samples": 88,
+    "unexpected_contexts": [],
+    "allowed_aux_contexts": [
+      {
+        "pid": 2130469,
+        "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+        "type": "G",
+        "used_memory": "6 MiB"
+      }
+    ],
+    "seen_primary_uuids": [
+      "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+      "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+    ]
+  }
+}

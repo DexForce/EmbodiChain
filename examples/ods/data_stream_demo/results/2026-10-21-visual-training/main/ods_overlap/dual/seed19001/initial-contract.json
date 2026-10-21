@@ -1,0 +1,135 @@
+{
+  "model_sha256": "d6e54ae12bc14884a439673b726cb01f3f0c5d7dfc25b2b7cfa8e97391b99664",
+  "normalization_sha256": "616e6298aa513d82cc70e11102f442f61be041c0e6a61f4bccffc0bab880db3e",
+  "initial_episodes": [
+    {
+      "ordinal": 0,
+      "source_id": [
+        2503624911073177816,
+        0
+      ],
+      "generation": 1,
+      "length": 479,
+      "initial_xy": [
+        -0.4447520971298218,
+        -0.062120214104652405
+      ],
+      "published_ns": 1754574548974333,
+      "numeric_sha256": "76931800a6f426077157662faa2f25a24449a726973eb1f7d6d7357f7bd39786"
+    },
+    {
+      "ordinal": 1,
+      "source_id": [
+        2503624911073177816,
+        1
+      ],
+      "generation": 1,
+      "length": 479,
+      "initial_xy": [
+        -0.40844130516052246,
+        -0.05386733263731003
+      ],
+      "published_ns": 1754574548974333,
+      "numeric_sha256": "f440ea336719989a2fa93ed1bde9b15f788298cfc72dbdcbfc4aed05a42edafb"
+    },
+    {
+      "ordinal": 2,
+      "source_id": [
+        2503624911073177816,
+        2
+      ],
+      "generation": 1,
+      "length": 478,
+      "initial_xy": [
+        -0.402153342962265,
+        -0.08676552027463913
+      ],
+      "published_ns": 1754592106417070,
+      "numeric_sha256": "d434c566d26d29aa256549aee3d14fd8b01eced6077ab7c254d6bab7a502d697"
+    },
+    {
+      "ordinal": 3,
+      "source_id": [
+        2503624911073177816,
+        3
+      ],
+      "generation": 1,
+      "length": 477,
+      "initial_xy": [
+        -0.4058706760406494,
+        -0.059626586735248566
+      ],
+      "published_ns": 1754592106417070,
+      "numeric_sha256": "5b7cc6950ac59cad74f719a572abe081524b23bc922d4a69d0af2b73bd6b5342"
+    },
+    {
+      "ordinal": 4,
+      "source_id": [
+        2503624911073177816,
+        4
+      ],
+      "generation": 1,
+      "length": 520,
+      "initial_xy": [
+        -0.3980139195919037,
+        -0.11762569844722748
+      ],
+      "published_ns": 1754611122520152,
+      "numeric_sha256": "300533a660310a26e82efa49f67d1c1e90da8e47241ec7c90e6ed53742bd9065"
+    },
+    {
+      "ordinal": 5,
+      "source_id": [
+        2503624911073177816,
+        5
+      ],
+      "generation": 1,
+      "length": 520,
+      "initial_xy": [
+        -0.459453821182251,
+        -0.10777673870325089
+      ],
+      "published_ns": 1754611122520152,
+      "numeric_sha256": "74cdd57e1908e3a7ef05052aca21a4a96d0c4851591f21ec70109aca1363f00c"
+    },
+    {
+      "ordinal": 6,
+      "source_id": [
+        2503624911073177816,
+        6
+      ],
+      "generation": 1,
+      "length": 485,
+      "initial_xy": [
+        -0.4577633738517761,
+        -0.059084340929985046
+      ],
+      "published_ns": 1754627261670844,
+      "numeric_sha256": "55db7a88c38de84c4e039aef9d02a23886e081da5b5eec5e402d896c92f1675d"
+    },
+    {
+      "ordinal": 7,
+      "source_id": [
+        2503624911073177816,
+        7
+      ],
+      "generation": 1,
+      "length": 484,
+      "initial_xy": [
+        -0.3975868225097656,
+        -0.05518845468759537
+      ],
+      "published_ns": 1754627261670844,
+      "numeric_sha256": "439c14f85faae6f6a68e17876aa924bc1f5891bb274a94c594dd5f41aa409252"
+    }
+  ],
+  "camera_order": [
+    "cam_high",
+    "cam_wrist"
+  ],
+  "training_budget": {
+    "updates": 128,
+    "chunks": 4096,
+    "targets": 131072
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_overlap/dual/seed19003",
+  "status": "complete",
+  "returncode": 0,
+  "elapsed_seconds": 19.407862186,
+  "stage": "audit",
+  "evaluation": false,
+  "timeout": false,
+  "cancelled": false,
+  "leaked_process_group": false,
+  "pgid": 2227747,
+  "process_launch_monotonic_ns": 1771297918584085,
+  "device_guard": {
+    "samples": 9,
+    "unexpected_contexts": [],
+    "allowed_aux_contexts": [],
+    "seen_primary_uuids": []
+  }
+}

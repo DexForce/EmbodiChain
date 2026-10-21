@@ -1,0 +1,19 @@
+{
+  "output": "/tmp/ods-visual-training-formal-20261021-v3/offline32/dual/seed19003",
+  "status": "failed",
+  "returncode": 0,
+  "elapsed_seconds": 17.202533121,
+  "stage": "audit",
+  "evaluation": false,
+  "timeout": false,
+  "cancelled": false,
+  "leaked_process_group": true,
+  "pgid": 2212846,
+  "process_launch_monotonic_ns": 1769116395770925,
+  "device_guard": {
+    "samples": 8,
+    "unexpected_contexts": [],
+    "allowed_aux_contexts": [],
+    "seen_primary_uuids": []
+  }
+}

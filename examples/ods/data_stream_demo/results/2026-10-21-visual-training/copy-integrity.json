@@ -1,0 +1,9 @@
+{
+  "passed": true,
+  "verified_frozen_bundle_files": 536,
+  "excluded_changed_git_policy": [
+    ".gitattributes"
+  ],
+  "frozen_source_files": 29,
+  "original_failed_outcome_unchanged": true
+}

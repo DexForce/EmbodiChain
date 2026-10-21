@@ -1,0 +1,177 @@
+{
+  "scope": "Supplemental independent quality evidence only; does not change formal failed qualification or timing, and must not be merged into formal evaluation aggregates",
+  "passed": true,
+  "original_formal_summary_status": "failed",
+  "original_formal_qualification_passed": false,
+  "quality": {
+    "passed": true,
+    "closed": true,
+    "checkpoint_sha256": "6223e2b24ff6e0e12b1c2ad52117cc526cb8f6523da77e5e46b0257ca46753e3",
+    "scenes": 20,
+    "seed": 197001,
+    "scene_digest": "905d0f5b2144671bed9eeec79b70d5297478c95589b5df0b214eb28e1b363a33",
+    "success_rate": 0.0,
+    "lift_rate": 0.5,
+    "goal_error": 0.19297976833186112,
+    "episode_length": 600.0,
+    "wall_seconds": 286.7361285518855
+  },
+  "quality_counts": {
+    "successes": 0,
+    "lifted": 10,
+    "retained_records": 20
+  },
+  "same_fixed_20_scene_digest_as_existing_formal_eval": true,
+  "process": {
+    "returncode": 0,
+    "process_group_shutdown": {
+      "grace_seconds": 2.0,
+      "wait_seconds": 3.4251948818564415e-05,
+      "poll_count": 1,
+      "group_disappeared": true,
+      "initial": {
+        "monotonic_ns": 1773482970418895,
+        "pgid": 2237083,
+        "exists": false,
+        "members": [],
+        "inspection_errors": []
+      },
+      "final": {
+        "monotonic_ns": 1773482970418895,
+        "pgid": 2237083,
+        "exists": false,
+        "members": [],
+        "inspection_errors": []
+      }
+    },
+    "final_group_snapshot": {
+      "monotonic_ns": 1773521907797035,
+      "pgid": 2237083,
+      "exists": false,
+      "members": [],
+      "inspection_errors": []
+    }
+  },
+  "gpu_guard": {
+    "samples": 149,
+    "errors": [],
+    "owned_uuid_types": [
+      [
+        "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+        "G"
+      ],
+      [
+        "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c",
+        "C"
+      ],
+      [
+        "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c",
+        "C+G"
+      ],
+      [
+        "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+        "C"
+      ]
+    ]
+  },
+  "original_control_records_unchanged": true,
+  "original_record_checks": [
+    {
+      "file": "summary.json",
+      "unchanged": true,
+      "before": {
+        "exists": true,
+        "sha256": "84d355b4794008c506778be96d13c82f8ce4e0bc96f67698cf89e6f982eccd93"
+      },
+      "after": {
+        "exists": true,
+        "sha256": "84d355b4794008c506778be96d13c82f8ce4e0bc96f67698cf89e6f982eccd93"
+      }
+    },
+    {
+      "file": "post-audit.json",
+      "unchanged": true,
+      "before": {
+        "exists": true,
+        "sha256": "897485968aeafe04d776e1b87c50ac1f36393cb82af2cc43dab6f6ddf6042a31"
+      },
+      "after": {
+        "exists": true,
+        "sha256": "897485968aeafe04d776e1b87c50ac1f36393cb82af2cc43dab6f6ddf6042a31"
+      }
+    },
+    {
+      "file": "audit-process.json",
+      "unchanged": true,
+      "before": {
+        "exists": true,
+        "sha256": "a6b5614c31116b28ce861e2b086a64c499acb2171cbbfb31ca222c7803fff471"
+      },
+      "after": {
+        "exists": true,
+        "sha256": "a6b5614c31116b28ce861e2b086a64c499acb2171cbbfb31ca222c7803fff471"
+      }
+    },
+    {
+      "file": "process.json",
+      "unchanged": true,
+      "before": {
+        "exists": true,
+        "sha256": "fb799acc897608fa5e19d9a43a1110953c79ce7cef44cd2ca4be19aff28aeef4"
+      },
+      "after": {
+        "exists": true,
+        "sha256": "fb799acc897608fa5e19d9a43a1110953c79ce7cef44cd2ca4be19aff28aeef4"
+      }
+    },
+    {
+      "file": "training-trace.json",
+      "unchanged": true,
+      "before": {
+        "exists": true,
+        "sha256": "a8c86791b2ac54512904396817ad5a2d71e2638ccf42df86069995e072c73b5e"
+      },
+      "after": {
+        "exists": true,
+        "sha256": "a8c86791b2ac54512904396817ad5a2d71e2638ccf42df86069995e072c73b5e"
+      }
+    },
+    {
+      "file": "initial-contract.json",
+      "unchanged": true,
+      "before": {
+        "exists": true,
+        "sha256": "ec86e661145a0047755c75d6ebfda4184a3d2e3e485deaa99df1ebd681b0c262"
+      },
+      "after": {
+        "exists": true,
+        "sha256": "ec86e661145a0047755c75d6ebfda4184a3d2e3e485deaa99df1ebd681b0c262"
+      }
+    },
+    {
+      "file": "evaluation.json",
+      "unchanged": true,
+      "before": {
+        "exists": false,
+        "sha256": null
+      },
+      "after": {
+        "exists": false,
+        "sha256": null
+      }
+    },
+    {
+      "file": "post-audit-video-integrity.json",
+      "unchanged": true,
+      "before": {
+        "exists": true,
+        "sha256": "c0942ddffd44294324cca533e95284e5c977d8d676e9b79ad77a2f2c72c17c8a"
+      },
+      "after": {
+        "exists": true,
+        "sha256": "c0942ddffd44294324cca533e95284e5c977d8d676e9b79ad77a2f2c72c17c8a"
+      }
+    }
+  ],
+  "source_sha256": "e25ee63e7782d175737b5780156810231e05f03cfb622089e6e13e4db5eb9919"
+}

@@ -1,0 +1,49 @@
+{
+  "output": "/tmp/ods-normal-exit-grace-physical-20261021-v1",
+  "status": "complete",
+  "returncode": 0,
+  "elapsed_seconds": 112.957297387,
+  "stage": "training",
+  "evaluation": false,
+  "timeout": false,
+  "cancelled": false,
+  "leaked_process_group": false,
+  "process_group_shutdown": {
+    "grace_seconds": 2.0,
+    "wait_seconds": 1.4312099665403366e-05,
+    "poll_count": 1,
+    "group_disappeared": true,
+    "initial": {
+      "monotonic_ns": 1773083264162053,
+      "pgid": 2236157,
+      "exists": false,
+      "members": [],
+      "inspection_errors": []
+    },
+    "final": {
+      "monotonic_ns": 1773083264162053,
+      "pgid": 2236157,
+      "exists": false,
+      "members": [],
+      "inspection_errors": []
+    }
+  },
+  "pgid": 2236157,
+  "process_launch_monotonic_ns": 1772970306884676,
+  "device_guard": {
+    "samples": 52,
+    "unexpected_contexts": [],
+    "allowed_aux_contexts": [
+      {
+        "pid": 2236183,
+        "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+        "type": "G",
+        "used_memory": "6 MiB"
+      }
+    ],
+    "seen_primary_uuids": [
+      "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+      "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+    ]
+  }
+}

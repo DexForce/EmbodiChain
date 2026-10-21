@@ -1,0 +1,330 @@
+{
+  "scope": "Post-formal shutdown validation; never substituted for a formal cell",
+  "files": [
+    {
+      "path": "cpu/source-validation.json",
+      "source": "/tmp/ods-group-grace-qualified-20261021/source-validation.json",
+      "sha256": "cf4e696b6be6aeb6293e8b6c7884a31ffcfa88b88762299d16e932caea9431f7"
+    },
+    {
+      "path": "cpu/cleanup-receipt.json",
+      "source": "/tmp/ods-group-grace-qualified-20261021/cleanup-receipt.json",
+      "sha256": "4a092c10e29619f9fa90d1bfb02129e041b3782d46d5e109ab8f1fabfffb61a7"
+    },
+    {
+      "path": "cpu/summary.json",
+      "source": "/tmp/ods-group-grace-qualified-20261021/summary.json",
+      "sha256": "c12e0846b9454add6796702ada4340eb32823ebcef03984803b9546ad06a39a6"
+    },
+    {
+      "path": "cpu/zombie_only/audit-process.json",
+      "source": "/tmp/ods-group-grace-qualified-20261021/zombie_only/audit-process.json",
+      "sha256": "9ec61e2418d823e2df793d79ed6bd51a21b808cc6f93aa24cc2e48b8b8c8fa6a"
+    },
+    {
+      "path": "cpu/zombie_only/helper.json",
+      "source": "/tmp/ods-group-grace-qualified-20261021/zombie_only/helper.json",
+      "sha256": "76f5c8499bb15343c475856b2d6083930d76c2b799ab7f65548cfe7ec4e7b5f9"
+    },
+    {
+      "path": "cpu/zombie_only/post-audit.json",
+      "source": "/tmp/ods-group-grace-qualified-20261021/zombie_only/post-audit.json",
+      "sha256": "748eda8085f7e3c82149775d9542083427f0f8a955173c4a0ed18c85c69c5c09"
+    },
+    {
+      "path": "cpu/zombie_only/audit.log",
+      "source": "/tmp/ods-group-grace-qualified-20261021/zombie_only/audit.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "cpu/zombie_only/summary.json",
+      "source": "/tmp/ods-group-grace-qualified-20261021/zombie_only/summary.json",
+      "sha256": "aba5d0335a2a3c841c8046d87c1b54e5d53a400cd4b191460884cd94c5d60902"
+    },
+    {
+      "path": "cpu/delayed_normal_exit/audit-process.json",
+      "source": "/tmp/ods-group-grace-qualified-20261021/delayed_normal_exit/audit-process.json",
+      "sha256": "e78499c2c689851f703a7821cd23b15b465ca4d998cfc34eaf7e9a6ca996d36b"
+    },
+    {
+      "path": "cpu/delayed_normal_exit/helper.json",
+      "source": "/tmp/ods-group-grace-qualified-20261021/delayed_normal_exit/helper.json",
+      "sha256": "f90232b78f3df77b238879f57e0e92937c0b72d2d6a44fb6797a0511a6d7b812"
+    },
+    {
+      "path": "cpu/delayed_normal_exit/post-audit.json",
+      "source": "/tmp/ods-group-grace-qualified-20261021/delayed_normal_exit/post-audit.json",
+      "sha256": "748eda8085f7e3c82149775d9542083427f0f8a955173c4a0ed18c85c69c5c09"
+    },
+    {
+      "path": "cpu/delayed_normal_exit/audit.log",
+      "source": "/tmp/ods-group-grace-qualified-20261021/delayed_normal_exit/audit.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "cpu/delayed_normal_exit/summary.json",
+      "source": "/tmp/ods-group-grace-qualified-20261021/delayed_normal_exit/summary.json",
+      "sha256": "20ccc6440e85cfae1960693ba601682696f9702ee5707ed08c172be64033518f"
+    },
+    {
+      "path": "cpu/persistent_live/audit-process.json",
+      "source": "/tmp/ods-group-grace-qualified-20261021/persistent_live/audit-process.json",
+      "sha256": "c626ff452a01775fb6cfd2134b0c911f715dcfc04c51832de1d242bbfa780a96"
+    },
+    {
+      "path": "cpu/persistent_live/helper.json",
+      "source": "/tmp/ods-group-grace-qualified-20261021/persistent_live/helper.json",
+      "sha256": "06396b3c482b38c541b9eb8088d4a4b0822e3d9bd8d9f5875ed99113dbbb9291"
+    },
+    {
+      "path": "cpu/persistent_live/post-audit.json",
+      "source": "/tmp/ods-group-grace-qualified-20261021/persistent_live/post-audit.json",
+      "sha256": "748eda8085f7e3c82149775d9542083427f0f8a955173c4a0ed18c85c69c5c09"
+    },
+    {
+      "path": "cpu/persistent_live/audit.log",
+      "source": "/tmp/ods-group-grace-qualified-20261021/persistent_live/audit.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "cpu/persistent_live/summary.json",
+      "source": "/tmp/ods-group-grace-qualified-20261021/persistent_live/summary.json",
+      "sha256": "ad199322505ecce653063ed447e683dcee75413a8c9310e4685e854a4297fef3"
+    },
+    {
+      "path": "physical/audit-process.json",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/audit-process.json",
+      "sha256": "0a57753761521a8a7289f9ffc123486f43b9200993bff36f1994b8e757b19e4c"
+    },
+    {
+      "path": "physical/initial-contract.json",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/initial-contract.json",
+      "sha256": "1eddeaebeb653a27523e85cc61e89126c9994ad83feb15c300af4fb5182e0b13"
+    },
+    {
+      "path": "physical/post-audit-video-integrity.json",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/post-audit-video-integrity.json",
+      "sha256": "11fb82d978949c7384605b088b3fb37070605876bed34ed9b15007713c83dea7"
+    },
+    {
+      "path": "physical/training-sources.json",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/training-sources.json",
+      "sha256": "6bb9f3c8a9d95ea603638e7c0734ed500efd804ae2164e28abdf844c142e8a06"
+    },
+    {
+      "path": "physical/gpu-preflight.json",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/gpu-preflight.json",
+      "sha256": "4a6413915dace4fa52a8e64da9b7f7dd1dad44ed4981726e81cefccde45e0c5c"
+    },
+    {
+      "path": "physical/evaluation-process.json",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/evaluation-process.json",
+      "sha256": "84fd0f49d9c6a9a995e71a5981a9dd0c7f702aaced540a382daf987e86d95da4"
+    },
+    {
+      "path": "physical/config.json",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/config.json",
+      "sha256": "b92c1d1558dab74ae98b48a0334be00ce2b3c5c404bfe27f4a473ac6806a6e53"
+    },
+    {
+      "path": "physical/environment.json",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/environment.json",
+      "sha256": "6df5374e47d77edc549255c8c82c4f852e86c6058af026bd10abd47535f9f90b"
+    },
+    {
+      "path": "physical/post-audit.json",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/post-audit.json",
+      "sha256": "af7856f595bfec87e8b94a830ae01a0c259c99b00bb1be6cf0fb9055a2a5a8e3"
+    },
+    {
+      "path": "physical/training-events.jsonl",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/training-events.jsonl",
+      "sha256": "ba7404e988ac79f521806faa67c7d60ae9d5a1d41fb63470a7705890e09f52b6"
+    },
+    {
+      "path": "physical/writer-sdk-events.jsonl",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/writer-sdk-events.jsonl",
+      "sha256": "63ebba7ee8c8d9fac1a59a4e4df094ea629e7c22a897e48758906e6f26a6b86d"
+    },
+    {
+      "path": "physical/training-trace.json",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/training-trace.json",
+      "sha256": "f146483b9a377ef4e4301301d5ab2f88a26416573f36a6670fed271e368ffa1d"
+    },
+    {
+      "path": "physical/roles.json",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/roles.json",
+      "sha256": "ae00cbab2103271d7c01333ed6e16400f1bee5ae6d0c2f40fd54f12a971c447b"
+    },
+    {
+      "path": "physical/payload_schema.json",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/payload_schema.json",
+      "sha256": "37f884aa25e3297758fc3c392517e1c1690fd5036dff9af8803dec3089e91296"
+    },
+    {
+      "path": "physical/evaluation.json",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/evaluation.json",
+      "sha256": "0bf4375306198e8ae1fa017a7f8ec21c232f0bc590a1c8a8edf94103aedb7fcf"
+    },
+    {
+      "path": "physical/suite-summary.json",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/suite-summary.json",
+      "sha256": "473b989f057a192b69afd2884a3c71daf4e085b7faaf58753573b08c1de4507c"
+    },
+    {
+      "path": "physical/resources.jsonl",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/resources.jsonl",
+      "sha256": "8b3a828cc5b2e16abd914aed7478d63c7d3d2af480331d046ccfa9db1ee37ac9"
+    },
+    {
+      "path": "physical/process.json",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/process.json",
+      "sha256": "4d071e2aa2888344ad48036623298a6ef9b9b84318ca7f87a8a453642618bdbb"
+    },
+    {
+      "path": "physical/summary.json",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/summary.json",
+      "sha256": "11014c3c0c6adde3758f68ad1289acd55267366a22438d014df83fe47852d7fd"
+    },
+    {
+      "path": "physical/post-audit-video-integrity-artifacts/0001.decode.stderr",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/post-audit-video-integrity-artifacts/0001.decode.stderr",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "physical/post-audit-video-integrity-artifacts/0000.decode.stderr",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/post-audit-video-integrity-artifacts/0000.decode.stderr",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "physical/post-audit-video-integrity-artifacts/0001.probe.stderr",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/post-audit-video-integrity-artifacts/0001.probe.stderr",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "physical/post-audit-video-integrity-artifacts/0000.decoded-frame-sha256.txt",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/post-audit-video-integrity-artifacts/0000.decoded-frame-sha256.txt",
+      "sha256": "456b0b53cd94a27fc9a084fc8ca48aa06643b4b43df834b31373c126740db59d"
+    },
+    {
+      "path": "physical/post-audit-video-integrity-artifacts/0001.decoded-frame-sha256.txt",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/post-audit-video-integrity-artifacts/0001.decoded-frame-sha256.txt",
+      "sha256": "ba8876207ac60f17651654819e19032ec035a3cca10437ee87e5501f02e50b3c"
+    },
+    {
+      "path": "physical/post-audit-video-integrity-artifacts/0000.probe.stderr",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/post-audit-video-integrity-artifacts/0000.probe.stderr",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "physical/_supervision/single/audit/process.log",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/_supervision/single/audit/process.log",
+      "sha256": "8537c0f5fc91595ab97ca2282d915aefad74a44b8e0b0a63cb4667188beb9319"
+    },
+    {
+      "path": "physical/_supervision/single/audit/device-contexts.jsonl",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/_supervision/single/audit/device-contexts.jsonl",
+      "sha256": "e6a8dd8a5c558af3119cdeaa6abe5896f52dd7a67db1dab910d9d9da7fed9276"
+    },
+    {
+      "path": "physical/_supervision/single/audit/launch.json",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/_supervision/single/audit/launch.json",
+      "sha256": "70ed072a48c1139662ac63f561ef3c3bc4328e9713c3f67b5314497a57677f1f"
+    },
+    {
+      "path": "physical/_supervision/single/training/process.log",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/_supervision/single/training/process.log",
+      "sha256": "31cb0befd6effeb2dc3953e0e5d39f0e8f27a6b37e9eac092270ffb31ec86aeb"
+    },
+    {
+      "path": "physical/_supervision/single/training/device-contexts.jsonl",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/_supervision/single/training/device-contexts.jsonl",
+      "sha256": "2e5d77e6f801c8b28c5d1bf86952941e44d12ebc5b53b033f3e37e000ab9c07d"
+    },
+    {
+      "path": "physical/_supervision/single/training/launch.json",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/_supervision/single/training/launch.json",
+      "sha256": "0863bbb69883bdea5698f6cef69a33abd505b9df32a1ac851eb5b3fc90742ac4"
+    },
+    {
+      "path": "physical/_supervision/single/evaluation/process.log",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/_supervision/single/evaluation/process.log",
+      "sha256": "2b572f22cb7823ab29167a916adaaf58e3d2d9fae71b6a3eda08d98b2e4a2feb"
+    },
+    {
+      "path": "physical/_supervision/single/evaluation/device-contexts.jsonl",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/_supervision/single/evaluation/device-contexts.jsonl",
+      "sha256": "90b46fc127cd44efda3b3105ade8178c9ad38d36ecb84bd58cd276350db03874"
+    },
+    {
+      "path": "physical/_supervision/single/evaluation/launch.json",
+      "source": "/tmp/ods-normal-exit-grace-physical-20261021-v1/_supervision/single/evaluation/launch.json",
+      "sha256": "b7a29f32af377b15381295239de65ad42f88e3668e618bd37ac69e3e44facd76"
+    },
+    {
+      "path": "physical-supervision/process.log",
+      "source": "/tmp/ods-normal-exit-grace-physical-supervision-20261021-v1/process.log",
+      "sha256": "689f11b8976df377d158a9f0fe9139060624e96e65c3bcb982d7f40816b78659"
+    },
+    {
+      "path": "physical-supervision/gpu-admission.json",
+      "source": "/tmp/ods-normal-exit-grace-physical-supervision-20261021-v1/gpu-admission.json",
+      "sha256": "b33530b5d93be291d7f6fd2546b9059353cb048ffe89fcc2cf745ee18abfc6f2"
+    },
+    {
+      "path": "physical-supervision/device-contexts.jsonl",
+      "source": "/tmp/ods-normal-exit-grace-physical-supervision-20261021-v1/device-contexts.jsonl",
+      "sha256": "cd3d00c4caad9874c941254e1695a419677dc6d42f5ad3bac5219d8c6acfc32f"
+    },
+    {
+      "path": "physical-supervision/process-receipt.json",
+      "source": "/tmp/ods-normal-exit-grace-physical-supervision-20261021-v1/process-receipt.json",
+      "sha256": "b71b98baa8140dfead8547d3af4eac3113b96921c5d632525ae747391c0d35d2"
+    },
+    {
+      "path": "physical-supervision/launch.json",
+      "source": "/tmp/ods-normal-exit-grace-physical-supervision-20261021-v1/launch.json",
+      "sha256": "1020db8402418ae0345cdc7dac9006acf601084d97d929df53fc24efa189e612"
+    },
+    {
+      "path": "physical-supervision/validation-summary.json",
+      "source": "/tmp/ods-normal-exit-grace-physical-supervision-20261021-v1/validation-summary.json",
+      "sha256": "b9d28c7dfc5475ef89c542616c29c791b378d15284a03ca1044566272f466c93"
+    },
+    {
+      "path": "supplemental-evaluation/evaluation.json",
+      "source": "/tmp/ods-postformal-offline32-dual-seed19003-eval-20261021-v1/evaluation.json",
+      "sha256": "96c1ff4b68359cb705a17ee5525573734cc3067b00f421836c592a966d4711c2"
+    },
+    {
+      "path": "supplemental-evaluation/validation-summary.json",
+      "source": "/tmp/ods-postformal-offline32-dual-seed19003-eval-20261021-v1/validation-summary.json",
+      "sha256": "5da8e3f2a2fa734e048bdb6ade4da00ac13429450193b2eb1f6b64572500eda5"
+    },
+    {
+      "path": "supplemental-evaluation-supervision/process.log",
+      "source": "/tmp/ods-postformal-offline32-dual-seed19003-eval-supervision-20261021-v1/process.log",
+      "sha256": "6746998b192194c5de048033a6d031b506327c4c75995afe660da5a61c7e5d16"
+    },
+    {
+      "path": "supplemental-evaluation-supervision/gpu-admission.json",
+      "source": "/tmp/ods-postformal-offline32-dual-seed19003-eval-supervision-20261021-v1/gpu-admission.json",
+      "sha256": "6ed1d77da166cd640cfdbae3bbbeac33af5d2e1fae1e3b5617ab9bcd7f585d53"
+    },
+    {
+      "path": "supplemental-evaluation-supervision/device-contexts.jsonl",
+      "source": "/tmp/ods-postformal-offline32-dual-seed19003-eval-supervision-20261021-v1/device-contexts.jsonl",
+      "sha256": "a5202232c49f1ed7cff9bdf3fe305c0429876298d9f1fc1ab26900fce9c23abe"
+    },
+    {
+      "path": "supplemental-evaluation-supervision/process-receipt.json",
+      "source": "/tmp/ods-postformal-offline32-dual-seed19003-eval-supervision-20261021-v1/process-receipt.json",
+      "sha256": "e5a259f3b060b027f0a0fb90fb6643b4b1025e904e4ab2b527b8b9803b9ed1c5"
+    },
+    {
+      "path": "supplemental-evaluation-supervision/launch.json",
+      "source": "/tmp/ods-postformal-offline32-dual-seed19003-eval-supervision-20261021-v1/launch.json",
+      "sha256": "9cb62fe6458699cb8d804dd07cf18380878e70e0d2c1ef942b5c4fe394bc5282"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "passed": true,
+  "all_runs": 30,
+  "qualified_runs": 29,
+  "qualified_paired_comparisons": 23,
+  "fairness_inputs_preserved": true,
+  "raw_archive_sha256_verified_files": 1843,
+  "rerender_output": "/tmp/ods-visual-training-v3-final-audit/archive-report-rerender"
+}

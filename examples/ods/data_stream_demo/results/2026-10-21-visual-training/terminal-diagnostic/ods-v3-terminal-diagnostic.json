@@ -1,0 +1,2627 @@
+{
+  "diagnostic_only": true,
+  "source_suite_status": "failed",
+  "source_run_status_counts": {
+    "complete": 29,
+    "failed": 1,
+    "unsupported": 0
+  },
+  "raw_RGB_equivalence": "unknown; encoded or decoded YUV is not the original model RGB input",
+  "pairs": [
+    {
+      "vision": "single",
+      "seed": 19001,
+      "source_run_statuses": {
+        "overlap": {
+          "status": "complete",
+          "qualification_passed": true,
+          "post_audit_status": "complete",
+          "evaluation_status": "complete",
+          "quality_error": null
+        },
+        "serial": {
+          "status": "complete",
+          "qualification_passed": true,
+          "post_audit_status": "complete",
+          "evaluation_status": "complete",
+          "quality_error": null
+        }
+      },
+      "contracts": {
+        "initial_model_equal": true,
+        "normalization_equal": true,
+        "initial_contracts_self_consistent": true,
+        "recipe_equal": true,
+        "numeric_episode_manifests_equal": true,
+        "ordered_updates_and_anchors_equal": true,
+        "completed_budget_matches": true,
+        "budget_overlap_serial": [
+          [
+            128,
+            4096,
+            131072
+          ],
+          [
+            128,
+            4096,
+            131072
+          ]
+        ]
+      },
+      "declared_final_model_sha_equal_diagnostic_only": false,
+      "models": {
+        "tensor_keys_equal": true,
+        "keys_only_overlap": [],
+        "keys_only_serial": [],
+        "non_tensor_state_equal": true,
+        "modules": {
+          "encoder": {
+            "tensors": 2,
+            "elements": 6,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.mlp.0": {
+            "tensors": 2,
+            "elements": 1048832,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 9.33818519115448e-05,
+            "rms": 1.3963518009943887e-06,
+            "relative_l2": 1.3398215639410995e-05,
+            "bitwise_equal": false
+          },
+          "encoder.mlp.1": {
+            "tensors": 2,
+            "elements": 512,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 5.781650543212891e-06,
+            "rms": 9.822833016049221e-07,
+            "relative_l2": 1.382796906267769e-06,
+            "bitwise_equal": false
+          },
+          "encoder.pooling_layer": {
+            "tensors": 1,
+            "elements": 262144,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 7.432699203491211e-05,
+            "rms": 1.2466565532143162e-06,
+            "relative_l2": 1.2454553534640592e-06,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.bn1": {
+            "tensors": 2,
+            "elements": 128,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 1.0522548109292984e-05,
+            "rms": 3.5153407703520073e-06,
+            "relative_l2": 4.966986102866531e-06,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.conv1": {
+            "tensors": 1,
+            "elements": 9408,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 1.6851816326379776e-05,
+            "rms": 3.4791639860751865e-06,
+            "relative_l2": 0.000135691665113464,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer1.0.bn1": {
+            "tensors": 2,
+            "elements": 128,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 1.7523765563964844e-05,
+            "rms": 4.5927704123023655e-06,
+            "relative_l2": 6.4989305972334225e-06,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer1.0.bn2": {
+            "tensors": 2,
+            "elements": 128,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 1.3232231140136719e-05,
+            "rms": 3.994617532050094e-06,
+            "relative_l2": 5.645905077728026e-06,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer1.0.conv1": {
+            "tensors": 1,
+            "elements": 36864,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 6.685219705104828e-05,
+            "rms": 5.0923833176090845e-06,
+            "relative_l2": 8.635774324567041e-05,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer1.0.conv2": {
+            "tensors": 1,
+            "elements": 36864,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.00011233240365982056,
+            "rms": 5.182398204910458e-06,
+            "relative_l2": 8.803764474058476e-05,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer2.0.bn1": {
+            "tensors": 2,
+            "elements": 256,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 2.1696090698242188e-05,
+            "rms": 4.816787779714861e-06,
+            "relative_l2": 6.8106901864463055e-06,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer2.0.bn2": {
+            "tensors": 2,
+            "elements": 256,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 4.369975067675114e-05,
+            "rms": 6.047100233156558e-06,
+            "relative_l2": 8.552841807104042e-06,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer2.0.conv1": {
+            "tensors": 1,
+            "elements": 73728,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0001138150691986084,
+            "rms": 5.415848444652398e-06,
+            "relative_l2": 0.00012952615331934594,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer2.0.conv2": {
+            "tensors": 1,
+            "elements": 147456,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.00014080479741096497,
+            "rms": 5.822376316788736e-06,
+            "relative_l2": 0.0001392217005205435,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer2.0.downsample.0": {
+            "tensors": 1,
+            "elements": 8192,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 6.83218240737915e-05,
+            "rms": 6.472396934019534e-06,
+            "relative_l2": 5.1058694699851625e-05,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer2.0.downsample.1": {
+            "tensors": 2,
+            "elements": 256,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 4.369975067675114e-05,
+            "rms": 6.477469376658485e-06,
+            "relative_l2": 9.158230783064545e-06,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer3.0.bn1": {
+            "tensors": 2,
+            "elements": 512,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 2.5134417228400707e-05,
+            "rms": 4.4147938629882075e-06,
+            "relative_l2": 6.240145017582769e-06,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer3.0.bn2": {
+            "tensors": 2,
+            "elements": 512,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 1.728534698486328e-05,
+            "rms": 4.338058663681848e-06,
+            "relative_l2": 6.1378126685681166e-06,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer3.0.conv1": {
+            "tensors": 1,
+            "elements": 294912,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0004966147243976593,
+            "rms": 6.595704012188675e-06,
+            "relative_l2": 0.00022242937515554165,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer3.0.conv2": {
+            "tensors": 1,
+            "elements": 589824,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0001871250569820404,
+            "rms": 4.186023314552831e-06,
+            "relative_l2": 0.00014117681754758892,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer3.0.downsample.0": {
+            "tensors": 1,
+            "elements": 32768,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 8.222460746765137e-05,
+            "rms": 4.461367827246644e-06,
+            "relative_l2": 5.031029928069287e-05,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer3.0.downsample.1": {
+            "tensors": 2,
+            "elements": 512,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 1.722574234008789e-05,
+            "rms": 4.265910522034855e-06,
+            "relative_l2": 6.027152064928353e-06,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer4.0.bn1": {
+            "tensors": 2,
+            "elements": 1024,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 1.942215021699667e-05,
+            "rms": 3.0178440979305562e-06,
+            "relative_l2": 4.266596664890332e-06,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer4.0.bn2": {
+            "tensors": 2,
+            "elements": 1024,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 2.1495390683412552e-05,
+            "rms": 3.3411717361749037e-06,
+            "relative_l2": 4.725429034677476e-06,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer4.0.conv1": {
+            "tensors": 1,
+            "elements": 1179648,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0004180166870355606,
+            "rms": 4.1588519146875866e-06,
+            "relative_l2": 0.00019697054065761095,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer4.0.conv2": {
+            "tensors": 1,
+            "elements": 2359296,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0006812270730733871,
+            "rms": 3.414492938450791e-06,
+            "relative_l2": 0.00016187498740215922,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer4.0.downsample.0": {
+            "tensors": 1,
+            "elements": 131072,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.00010677799582481384,
+            "rms": 3.4539610762245774e-06,
+            "relative_l2": 5.513752144753043e-05,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer4.0.downsample.1": {
+            "tensors": 2,
+            "elements": 1024,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 2.2411346435546875e-05,
+            "rms": 3.4768616608506743e-06,
+            "relative_l2": 4.915443189319169e-06,
+            "bitwise_equal": false
+          },
+          "head.0": {
+            "tensors": 2,
+            "elements": 290304,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 5.2656978368759155e-05,
+            "rms": 9.953541778279643e-07,
+            "relative_l2": 3.9490203653714765e-05,
+            "bitwise_equal": false
+          },
+          "head.2": {
+            "tensors": 2,
+            "elements": 262656,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 1.1278316378593445e-05,
+            "rms": 1.490471565164207e-07,
+            "relative_l2": 5.713352329849513e-06,
+            "bitwise_equal": false
+          },
+          "head.4": {
+            "tensors": 2,
+            "elements": 164160,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 4.323199391365051e-06,
+            "rms": 1.4580254868959292e-07,
+            "relative_l2": 5.634751230272459e-06,
+            "bitwise_equal": false
+          },
+          "normalization_buffers": {
+            "tensors": 4,
+            "elements": 74,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          }
+        },
+        "relative_l2_definition": "||serial-overlap||2 / ||overlap||2; null for nonfinite or zero reference with nonzero delta",
+        "parity_is_not_a_training_budget_requirement": true
+      },
+      "decoded_yuv": [
+        {
+          "camera": "observation.images.cam_high",
+          "file": "videos/observation.images.cam_high/chunk-000/file-000.mp4",
+          "hash_semantics": "decoded YUV checksum column only",
+          "alignment": "same camera/file and decoded row index; source attribution is conditional",
+          "same_hashes": 19974,
+          "different_or_missing_hashes": 6,
+          "frame_counts_overlap_serial": [
+            19980,
+            19980
+          ],
+          "first_difference": {
+            "file_frame_index": 7767,
+            "hashes_overlap_serial": [
+              "282f711da92e5cca6cb797a689bb17f3026d9101742ac182db9c3d3e3fc787a9",
+              "746ed555f86113d8c96c2788656b1a493855db9677b8c41838439d60f8a085e0"
+            ],
+            "overlap_source": {
+              "status": "known",
+              "source_id": [
+                2912934927212840217,
+                15
+              ],
+              "ordinal": 15,
+              "frame_index": 464,
+              "used_as_H2_training_image": false
+            },
+            "serial_source": {
+              "status": "known",
+              "source_id": [
+                2554937907949599685,
+                15
+              ],
+              "ordinal": 15,
+              "frame_index": 464,
+              "used_as_H2_training_image": false
+            }
+          },
+          "mapping_unknown_reasons": [
+            null,
+            null
+          ],
+          "pts_grid_verified": [
+            true,
+            true
+          ]
+        }
+      ]
+    },
+    {
+      "vision": "single",
+      "seed": 19002,
+      "source_run_statuses": {
+        "overlap": {
+          "status": "complete",
+          "qualification_passed": true,
+          "post_audit_status": "complete",
+          "evaluation_status": "complete",
+          "quality_error": null
+        },
+        "serial": {
+          "status": "complete",
+          "qualification_passed": true,
+          "post_audit_status": "complete",
+          "evaluation_status": "complete",
+          "quality_error": null
+        }
+      },
+      "contracts": {
+        "initial_model_equal": true,
+        "normalization_equal": true,
+        "initial_contracts_self_consistent": true,
+        "recipe_equal": true,
+        "numeric_episode_manifests_equal": true,
+        "ordered_updates_and_anchors_equal": true,
+        "completed_budget_matches": true,
+        "budget_overlap_serial": [
+          [
+            128,
+            4096,
+            131072
+          ],
+          [
+            128,
+            4096,
+            131072
+          ]
+        ]
+      },
+      "declared_final_model_sha_equal_diagnostic_only": true,
+      "models": {
+        "tensor_keys_equal": true,
+        "keys_only_overlap": [],
+        "keys_only_serial": [],
+        "non_tensor_state_equal": true,
+        "modules": {
+          "encoder": {
+            "tensors": 2,
+            "elements": 6,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.mlp.0": {
+            "tensors": 2,
+            "elements": 1048832,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.mlp.1": {
+            "tensors": 2,
+            "elements": 512,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.pooling_layer": {
+            "tensors": 1,
+            "elements": 262144,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.bn1": {
+            "tensors": 2,
+            "elements": 128,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.conv1": {
+            "tensors": 1,
+            "elements": 9408,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer1.0.bn1": {
+            "tensors": 2,
+            "elements": 128,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer1.0.bn2": {
+            "tensors": 2,
+            "elements": 128,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer1.0.conv1": {
+            "tensors": 1,
+            "elements": 36864,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer1.0.conv2": {
+            "tensors": 1,
+            "elements": 36864,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer2.0.bn1": {
+            "tensors": 2,
+            "elements": 256,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer2.0.bn2": {
+            "tensors": 2,
+            "elements": 256,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer2.0.conv1": {
+            "tensors": 1,
+            "elements": 73728,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer2.0.conv2": {
+            "tensors": 1,
+            "elements": 147456,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer2.0.downsample.0": {
+            "tensors": 1,
+            "elements": 8192,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer2.0.downsample.1": {
+            "tensors": 2,
+            "elements": 256,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer3.0.bn1": {
+            "tensors": 2,
+            "elements": 512,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer3.0.bn2": {
+            "tensors": 2,
+            "elements": 512,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer3.0.conv1": {
+            "tensors": 1,
+            "elements": 294912,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer3.0.conv2": {
+            "tensors": 1,
+            "elements": 589824,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer3.0.downsample.0": {
+            "tensors": 1,
+            "elements": 32768,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer3.0.downsample.1": {
+            "tensors": 2,
+            "elements": 512,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer4.0.bn1": {
+            "tensors": 2,
+            "elements": 1024,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer4.0.bn2": {
+            "tensors": 2,
+            "elements": 1024,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer4.0.conv1": {
+            "tensors": 1,
+            "elements": 1179648,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer4.0.conv2": {
+            "tensors": 1,
+            "elements": 2359296,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer4.0.downsample.0": {
+            "tensors": 1,
+            "elements": 131072,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer4.0.downsample.1": {
+            "tensors": 2,
+            "elements": 1024,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "head.0": {
+            "tensors": 2,
+            "elements": 290304,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "head.2": {
+            "tensors": 2,
+            "elements": 262656,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "head.4": {
+            "tensors": 2,
+            "elements": 164160,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "normalization_buffers": {
+            "tensors": 4,
+            "elements": 74,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          }
+        },
+        "relative_l2_definition": "||serial-overlap||2 / ||overlap||2; null for nonfinite or zero reference with nonzero delta",
+        "parity_is_not_a_training_budget_requirement": true
+      },
+      "decoded_yuv": [
+        {
+          "camera": "observation.images.cam_high",
+          "file": "videos/observation.images.cam_high/chunk-000/file-000.mp4",
+          "hash_semantics": "decoded YUV checksum column only",
+          "alignment": "same camera/file and decoded row index; source attribution is conditional",
+          "same_hashes": 20181,
+          "different_or_missing_hashes": 2,
+          "frame_counts_overlap_serial": [
+            20183,
+            20183
+          ],
+          "first_difference": {
+            "file_frame_index": 14441,
+            "hashes_overlap_serial": [
+              "daa31180c9c14b1d0df06c3d25a361c0ae002c1152112b0c770243cb01603ea3",
+              "ffe641f29599c6f892ee6e94996b1a8f3a72a9c6d5225c413a81fb65b441c7d8"
+            ],
+            "overlap_source": {
+              "status": "known",
+              "source_id": [
+                4117411518014293388,
+                28
+              ],
+              "ordinal": 28,
+              "frame_index": 318,
+              "used_as_H2_training_image": false
+            },
+            "serial_source": {
+              "status": "known",
+              "source_id": [
+                1037444855011870118,
+                28
+              ],
+              "ordinal": 28,
+              "frame_index": 318,
+              "used_as_H2_training_image": false
+            }
+          },
+          "mapping_unknown_reasons": [
+            null,
+            null
+          ],
+          "pts_grid_verified": [
+            true,
+            true
+          ]
+        }
+      ]
+    },
+    {
+      "vision": "single",
+      "seed": 19003,
+      "source_run_statuses": {
+        "overlap": {
+          "status": "complete",
+          "qualification_passed": true,
+          "post_audit_status": "complete",
+          "evaluation_status": "complete",
+          "quality_error": null
+        },
+        "serial": {
+          "status": "complete",
+          "qualification_passed": true,
+          "post_audit_status": "complete",
+          "evaluation_status": "complete",
+          "quality_error": null
+        }
+      },
+      "contracts": {
+        "initial_model_equal": true,
+        "normalization_equal": true,
+        "initial_contracts_self_consistent": true,
+        "recipe_equal": true,
+        "numeric_episode_manifests_equal": true,
+        "ordered_updates_and_anchors_equal": true,
+        "completed_budget_matches": true,
+        "budget_overlap_serial": [
+          [
+            128,
+            4096,
+            131072
+          ],
+          [
+            128,
+            4096,
+            131072
+          ]
+        ]
+      },
+      "declared_final_model_sha_equal_diagnostic_only": false,
+      "models": {
+        "tensor_keys_equal": true,
+        "keys_only_overlap": [],
+        "keys_only_serial": [],
+        "non_tensor_state_equal": true,
+        "modules": {
+          "encoder": {
+            "tensors": 2,
+            "elements": 6,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.mlp.0": {
+            "tensors": 2,
+            "elements": 1048832,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.014543667435646057,
+            "rms": 0.0006944864516632701,
+            "relative_l2": 0.006659607123618641,
+            "bitwise_equal": false
+          },
+          "encoder.mlp.1": {
+            "tensors": 2,
+            "elements": 512,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0016781091690063477,
+            "rms": 0.00033091274522703193,
+            "relative_l2": 0.00046612905713034627,
+            "bitwise_equal": false
+          },
+          "encoder.pooling_layer": {
+            "tensors": 1,
+            "elements": 262144,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.01266932487487793,
+            "rms": 0.0006557149654295651,
+            "relative_l2": 0.0006552696471744,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.bn1": {
+            "tensors": 2,
+            "elements": 128,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.003247559070587158,
+            "rms": 0.0006664183711066537,
+            "relative_l2": 0.0009418666689169555,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.conv1": {
+            "tensors": 1,
+            "elements": 9408,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.004094762960448861,
+            "rms": 0.000650929869432992,
+            "relative_l2": 0.025407351438045074,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer1.0.bn1": {
+            "tensors": 2,
+            "elements": 128,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0026344656944274902,
+            "rms": 0.0007560674238479225,
+            "relative_l2": 0.0010686653719292807,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer1.0.bn2": {
+            "tensors": 2,
+            "elements": 128,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0026450157165527344,
+            "rms": 0.0007853867318405617,
+            "relative_l2": 0.00110930833786456,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer1.0.conv1": {
+            "tensors": 1,
+            "elements": 36864,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0066703613847494125,
+            "rms": 0.0008928084231207419,
+            "relative_l2": 0.015073445955385152,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer1.0.conv2": {
+            "tensors": 1,
+            "elements": 36864,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.012235075235366821,
+            "rms": 0.0011933567686999132,
+            "relative_l2": 0.020183020029115595,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer2.0.bn1": {
+            "tensors": 2,
+            "elements": 256,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.003739212406799197,
+            "rms": 0.0009886750791084338,
+            "relative_l2": 0.001397881861313843,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer2.0.bn2": {
+            "tensors": 2,
+            "elements": 256,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.006181836128234863,
+            "rms": 0.001025019427978153,
+            "relative_l2": 0.001449715020014354,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer2.0.conv1": {
+            "tensors": 1,
+            "elements": 73728,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.011798888444900513,
+            "rms": 0.001081460786592704,
+            "relative_l2": 0.025919722147734053,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer2.0.conv2": {
+            "tensors": 1,
+            "elements": 147456,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.012854812666773796,
+            "rms": 0.0012683260058799677,
+            "relative_l2": 0.030331110694186012,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer2.0.downsample.0": {
+            "tensors": 1,
+            "elements": 8192,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.007707122713327408,
+            "rms": 0.0011148189571338887,
+            "relative_l2": 0.008845755513211746,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer2.0.downsample.1": {
+            "tensors": 2,
+            "elements": 256,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.005670487880706787,
+            "rms": 0.0010391995804738396,
+            "relative_l2": 0.0014691094081152462,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer3.0.bn1": {
+            "tensors": 2,
+            "elements": 512,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.005448302021250129,
+            "rms": 0.0009926231063902466,
+            "relative_l2": 0.001403916659218622,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer3.0.bn2": {
+            "tensors": 2,
+            "elements": 512,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.003870546817779541,
+            "rms": 0.0009120710221740165,
+            "relative_l2": 0.0012902886997299267,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer3.0.conv1": {
+            "tensors": 1,
+            "elements": 294912,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.013434520224109292,
+            "rms": 0.0012591913411653872,
+            "relative_l2": 0.04240504471621405,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer3.0.conv2": {
+            "tensors": 1,
+            "elements": 589824,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.015057003125548363,
+            "rms": 0.0011585082886256648,
+            "relative_l2": 0.039075935986388165,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer3.0.downsample.0": {
+            "tensors": 1,
+            "elements": 32768,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.009838305413722992,
+            "rms": 0.0011927261912880462,
+            "relative_l2": 0.013516200692578648,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer3.0.downsample.1": {
+            "tensors": 2,
+            "elements": 512,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0036244988441467285,
+            "rms": 0.0010105002425422362,
+            "relative_l2": 0.0014277169926494415,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer4.0.bn1": {
+            "tensors": 2,
+            "elements": 1024,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.005307193860062398,
+            "rms": 0.0007395848299814497,
+            "relative_l2": 0.0010455920291599628,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer4.0.bn2": {
+            "tensors": 2,
+            "elements": 1024,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.005368232727050781,
+            "rms": 0.0007922558981570674,
+            "relative_l2": 0.001120526902503049,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer4.0.conv1": {
+            "tensors": 1,
+            "elements": 1179648,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.014283417258411646,
+            "rms": 0.0009732194709845655,
+            "relative_l2": 0.04612286243530146,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer4.0.conv2": {
+            "tensors": 1,
+            "elements": 2359296,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.016169443726539612,
+            "rms": 0.0009580632368109437,
+            "relative_l2": 0.04533904674801368,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer4.0.downsample.0": {
+            "tensors": 1,
+            "elements": 131072,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.013957228511571884,
+            "rms": 0.0011218825245079948,
+            "relative_l2": 0.01786188189640277,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer4.0.downsample.1": {
+            "tensors": 2,
+            "elements": 1024,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.005724072456359863,
+            "rms": 0.000888116495711352,
+            "relative_l2": 0.0012554290030154609,
+            "bitwise_equal": false
+          },
+          "head.0": {
+            "tensors": 2,
+            "elements": 290304,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.02198023907840252,
+            "rms": 0.0005433531407366857,
+            "relative_l2": 0.021656459499084343,
+            "bitwise_equal": false
+          },
+          "head.2": {
+            "tensors": 2,
+            "elements": 262656,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.01991615630686283,
+            "rms": 0.0007505999428684736,
+            "relative_l2": 0.028768758955246044,
+            "bitwise_equal": false
+          },
+          "head.4": {
+            "tensors": 2,
+            "elements": 164160,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.029300697147846222,
+            "rms": 0.0009357216868687307,
+            "relative_l2": 0.03615377451165329,
+            "bitwise_equal": false
+          },
+          "normalization_buffers": {
+            "tensors": 4,
+            "elements": 74,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          }
+        },
+        "relative_l2_definition": "||serial-overlap||2 / ||overlap||2; null for nonfinite or zero reference with nonzero delta",
+        "parity_is_not_a_training_budget_requirement": true
+      },
+      "decoded_yuv": [
+        {
+          "camera": "observation.images.cam_high",
+          "file": "videos/observation.images.cam_high/chunk-000/file-000.mp4",
+          "hash_semantics": "decoded YUV checksum column only",
+          "alignment": "same camera/file and decoded row index; source attribution is conditional",
+          "same_hashes": 19893,
+          "different_or_missing_hashes": 2,
+          "frame_counts_overlap_serial": [
+            19895,
+            19895
+          ],
+          "first_difference": {
+            "file_frame_index": 3697,
+            "hashes_overlap_serial": [
+              "362aba39435177ebae97d5f195b194e1c61f98df2faa07ca475362bc496b3cec",
+              "c4811a144f9df99034a213d933a2c392393f7462b41c64a59c754e3404a0d478"
+            ],
+            "overlap_source": {
+              "status": "known",
+              "source_id": [
+                1381450877866638020,
+                7
+              ],
+              "ordinal": 7,
+              "frame_index": 272,
+              "used_as_H2_training_image": true
+            },
+            "serial_source": {
+              "status": "known",
+              "source_id": [
+                688395810357931013,
+                7
+              ],
+              "ordinal": 7,
+              "frame_index": 272,
+              "used_as_H2_training_image": true
+            }
+          },
+          "mapping_unknown_reasons": [
+            null,
+            null
+          ],
+          "pts_grid_verified": [
+            true,
+            true
+          ]
+        }
+      ]
+    },
+    {
+      "vision": "dual",
+      "seed": 19001,
+      "source_run_statuses": {
+        "overlap": {
+          "status": "complete",
+          "qualification_passed": true,
+          "post_audit_status": "complete",
+          "evaluation_status": "complete",
+          "quality_error": null
+        },
+        "serial": {
+          "status": "complete",
+          "qualification_passed": true,
+          "post_audit_status": "complete",
+          "evaluation_status": "complete",
+          "quality_error": null
+        }
+      },
+      "contracts": {
+        "initial_model_equal": true,
+        "normalization_equal": true,
+        "initial_contracts_self_consistent": true,
+        "recipe_equal": true,
+        "numeric_episode_manifests_equal": true,
+        "ordered_updates_and_anchors_equal": true,
+        "completed_budget_matches": true,
+        "budget_overlap_serial": [
+          [
+            128,
+            4096,
+            131072
+          ],
+          [
+            128,
+            4096,
+            131072
+          ]
+        ]
+      },
+      "declared_final_model_sha_equal_diagnostic_only": true,
+      "models": {
+        "tensor_keys_equal": true,
+        "keys_only_overlap": [],
+        "keys_only_serial": [],
+        "non_tensor_state_equal": true,
+        "modules": {
+          "encoder": {
+            "tensors": 2,
+            "elements": 6,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.mlp.0": {
+            "tensors": 2,
+            "elements": 1048832,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.mlp.1": {
+            "tensors": 2,
+            "elements": 512,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.pooling_layer": {
+            "tensors": 1,
+            "elements": 262144,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.bn1": {
+            "tensors": 2,
+            "elements": 128,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.conv1": {
+            "tensors": 1,
+            "elements": 9408,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer1.0.bn1": {
+            "tensors": 2,
+            "elements": 128,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer1.0.bn2": {
+            "tensors": 2,
+            "elements": 128,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer1.0.conv1": {
+            "tensors": 1,
+            "elements": 36864,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer1.0.conv2": {
+            "tensors": 1,
+            "elements": 36864,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer2.0.bn1": {
+            "tensors": 2,
+            "elements": 256,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer2.0.bn2": {
+            "tensors": 2,
+            "elements": 256,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer2.0.conv1": {
+            "tensors": 1,
+            "elements": 73728,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer2.0.conv2": {
+            "tensors": 1,
+            "elements": 147456,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer2.0.downsample.0": {
+            "tensors": 1,
+            "elements": 8192,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer2.0.downsample.1": {
+            "tensors": 2,
+            "elements": 256,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer3.0.bn1": {
+            "tensors": 2,
+            "elements": 512,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer3.0.bn2": {
+            "tensors": 2,
+            "elements": 512,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer3.0.conv1": {
+            "tensors": 1,
+            "elements": 294912,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer3.0.conv2": {
+            "tensors": 1,
+            "elements": 589824,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer3.0.downsample.0": {
+            "tensors": 1,
+            "elements": 32768,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer3.0.downsample.1": {
+            "tensors": 2,
+            "elements": 512,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer4.0.bn1": {
+            "tensors": 2,
+            "elements": 1024,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer4.0.bn2": {
+            "tensors": 2,
+            "elements": 1024,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer4.0.conv1": {
+            "tensors": 1,
+            "elements": 1179648,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer4.0.conv2": {
+            "tensors": 1,
+            "elements": 2359296,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer4.0.downsample.0": {
+            "tensors": 1,
+            "elements": 131072,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.resnet_backbone.layer4.0.downsample.1": {
+            "tensors": 2,
+            "elements": 1024,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "head.0": {
+            "tensors": 2,
+            "elements": 552448,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "head.2": {
+            "tensors": 2,
+            "elements": 262656,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "head.4": {
+            "tensors": 2,
+            "elements": 164160,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "normalization_buffers": {
+            "tensors": 4,
+            "elements": 74,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          }
+        },
+        "relative_l2_definition": "||serial-overlap||2 / ||overlap||2; null for nonfinite or zero reference with nonzero delta",
+        "parity_is_not_a_training_budget_requirement": true
+      },
+      "decoded_yuv": [
+        {
+          "camera": "observation.images.cam_high",
+          "file": "videos/observation.images.cam_high/chunk-000/file-000.mp4",
+          "hash_semantics": "decoded YUV checksum column only",
+          "alignment": "same camera/file and decoded row index; source attribution is conditional",
+          "same_hashes": 19968,
+          "different_or_missing_hashes": 12,
+          "frame_counts_overlap_serial": [
+            19980,
+            19980
+          ],
+          "first_difference": {
+            "file_frame_index": 3415,
+            "hashes_overlap_serial": [
+              "aa191c717e5faf953f73a1d7d6fd8ec1af12113f55d04ae6c66b20043ccfba09",
+              "fa93e837bacf477aafd854f34e9a53c2345c6ca20e15e12cfb43d9396824fead"
+            ],
+            "overlap_source": {
+              "status": "known",
+              "source_id": [
+                2503624911073177816,
+                6
+              ],
+              "ordinal": 6,
+              "frame_index": 462,
+              "used_as_H2_training_image": false
+            },
+            "serial_source": {
+              "status": "known",
+              "source_id": [
+                3940041611332753477,
+                6
+              ],
+              "ordinal": 6,
+              "frame_index": 462,
+              "used_as_H2_training_image": false
+            }
+          },
+          "mapping_unknown_reasons": [
+            null,
+            null
+          ],
+          "pts_grid_verified": [
+            true,
+            true
+          ]
+        },
+        {
+          "camera": "observation.images.cam_wrist",
+          "file": "videos/observation.images.cam_wrist/chunk-000/file-000.mp4",
+          "hash_semantics": "decoded YUV checksum column only",
+          "alignment": "same camera/file and decoded row index; source attribution is conditional",
+          "same_hashes": 19980,
+          "different_or_missing_hashes": 0,
+          "frame_counts_overlap_serial": [
+            19980,
+            19980
+          ],
+          "first_difference": null,
+          "mapping_unknown_reasons": [
+            null,
+            null
+          ],
+          "pts_grid_verified": [
+            true,
+            true
+          ]
+        }
+      ]
+    },
+    {
+      "vision": "dual",
+      "seed": 19002,
+      "source_run_statuses": {
+        "overlap": {
+          "status": "complete",
+          "qualification_passed": true,
+          "post_audit_status": "complete",
+          "evaluation_status": "complete",
+          "quality_error": null
+        },
+        "serial": {
+          "status": "complete",
+          "qualification_passed": true,
+          "post_audit_status": "complete",
+          "evaluation_status": "complete",
+          "quality_error": null
+        }
+      },
+      "contracts": {
+        "initial_model_equal": true,
+        "normalization_equal": true,
+        "initial_contracts_self_consistent": true,
+        "recipe_equal": true,
+        "numeric_episode_manifests_equal": true,
+        "ordered_updates_and_anchors_equal": true,
+        "completed_budget_matches": true,
+        "budget_overlap_serial": [
+          [
+            128,
+            4096,
+            131072
+          ],
+          [
+            128,
+            4096,
+            131072
+          ]
+        ]
+      },
+      "declared_final_model_sha_equal_diagnostic_only": false,
+      "models": {
+        "tensor_keys_equal": true,
+        "keys_only_overlap": [],
+        "keys_only_serial": [],
+        "non_tensor_state_equal": true,
+        "modules": {
+          "encoder": {
+            "tensors": 2,
+            "elements": 6,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.mlp.0": {
+            "tensors": 2,
+            "elements": 1048832,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.012609941302798688,
+            "rms": 0.0008228085977941422,
+            "relative_l2": 0.007893505328357983,
+            "bitwise_equal": false
+          },
+          "encoder.mlp.1": {
+            "tensors": 2,
+            "elements": 512,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0026210546493530273,
+            "rms": 0.0004318804495334587,
+            "relative_l2": 0.000607837892950598,
+            "bitwise_equal": false
+          },
+          "encoder.pooling_layer": {
+            "tensors": 1,
+            "elements": 262144,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.012994050979614258,
+            "rms": 0.00087852573472837,
+            "relative_l2": 0.0008815867831858909,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.bn1": {
+            "tensors": 2,
+            "elements": 128,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0025604963302612305,
+            "rms": 0.000728802137932337,
+            "relative_l2": 0.0010295562599785546,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.conv1": {
+            "tensors": 1,
+            "elements": 9408,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0030303997918963432,
+            "rms": 0.0006014377196036122,
+            "relative_l2": 0.02350428769937572,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer1.0.bn1": {
+            "tensors": 2,
+            "elements": 128,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.004490284598432481,
+            "rms": 0.0009992117407199381,
+            "relative_l2": 0.0014124762785392353,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer1.0.bn2": {
+            "tensors": 2,
+            "elements": 128,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.004329681396484375,
+            "rms": 0.0010465367124975688,
+            "relative_l2": 0.001480299819562797,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer1.0.conv1": {
+            "tensors": 1,
+            "elements": 36864,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.006286388263106346,
+            "rms": 0.0010436562710635204,
+            "relative_l2": 0.017728543357995303,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer1.0.conv2": {
+            "tensors": 1,
+            "elements": 36864,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.012243474833667278,
+            "rms": 0.001266856694658704,
+            "relative_l2": 0.021574135412071815,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer2.0.bn1": {
+            "tensors": 2,
+            "elements": 256,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.003871746826916933,
+            "rms": 0.0009631555813019565,
+            "relative_l2": 0.0013616500965242795,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer2.0.bn2": {
+            "tensors": 2,
+            "elements": 256,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.004254310391843319,
+            "rms": 0.0010531420973096841,
+            "relative_l2": 0.0014890690663297448,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer2.0.conv1": {
+            "tensors": 1,
+            "elements": 73728,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.010692013427615166,
+            "rms": 0.001265009641739494,
+            "relative_l2": 0.030472629328794916,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer2.0.conv2": {
+            "tensors": 1,
+            "elements": 147456,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.01661072112619877,
+            "rms": 0.0014545676370394324,
+            "relative_l2": 0.034817604718284316,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer2.0.downsample.0": {
+            "tensors": 1,
+            "elements": 8192,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.008246298879384995,
+            "rms": 0.001179853675989511,
+            "relative_l2": 0.009496874052963195,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer2.0.downsample.1": {
+            "tensors": 2,
+            "elements": 256,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.004254310391843319,
+            "rms": 0.001039783034049995,
+            "relative_l2": 0.0014693328807237477,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer3.0.bn1": {
+            "tensors": 2,
+            "elements": 512,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.007740437984466553,
+            "rms": 0.0010820889980369603,
+            "relative_l2": 0.0015295461550077737,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer3.0.bn2": {
+            "tensors": 2,
+            "elements": 512,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.005010880762711167,
+            "rms": 0.0010014635643565226,
+            "relative_l2": 0.0014166926113352235,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer3.0.conv1": {
+            "tensors": 1,
+            "elements": 294912,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.02063248655758798,
+            "rms": 0.0015073755141320195,
+            "relative_l2": 0.050860827358214115,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer3.0.conv2": {
+            "tensors": 1,
+            "elements": 589824,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.017291942378506064,
+            "rms": 0.0013298879985773253,
+            "relative_l2": 0.04490852645513573,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer3.0.downsample.0": {
+            "tensors": 1,
+            "elements": 32768,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.016212183982133865,
+            "rms": 0.0014371936996358968,
+            "relative_l2": 0.01624261997882275,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer3.0.downsample.1": {
+            "tensors": 2,
+            "elements": 512,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.005010880762711167,
+            "rms": 0.0010392341771694308,
+            "relative_l2": 0.0014682909385701187,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer4.0.bn1": {
+            "tensors": 2,
+            "elements": 1024,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.006283845752477646,
+            "rms": 0.0007822871430397632,
+            "relative_l2": 0.0011059281460229873,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer4.0.bn2": {
+            "tensors": 2,
+            "elements": 1024,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.006834268569946289,
+            "rms": 0.0009017467452898686,
+            "relative_l2": 0.001275366835319132,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer4.0.conv1": {
+            "tensors": 1,
+            "elements": 1179648,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.016995202749967575,
+            "rms": 0.0011315096696681353,
+            "relative_l2": 0.05378423059023875,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer4.0.conv2": {
+            "tensors": 1,
+            "elements": 2359296,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.014230111613869667,
+            "rms": 0.0009941790423747315,
+            "relative_l2": 0.04725865084528623,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer4.0.downsample.0": {
+            "tensors": 1,
+            "elements": 131072,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.014140883460640907,
+            "rms": 0.0012651145225682464,
+            "relative_l2": 0.020226849606706197,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer4.0.downsample.1": {
+            "tensors": 2,
+            "elements": 1024,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.005835890769958496,
+            "rms": 0.0010074269028865668,
+            "relative_l2": 0.0014239459669193025,
+            "bitwise_equal": false
+          },
+          "head.0": {
+            "tensors": 2,
+            "elements": 552448,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.02535710111260414,
+            "rms": 0.0009929628179895882,
+            "relative_l2": 0.05462318744027071,
+            "bitwise_equal": false
+          },
+          "head.2": {
+            "tensors": 2,
+            "elements": 262656,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.025177698582410812,
+            "rms": 0.0013228148169249193,
+            "relative_l2": 0.05117486079434349,
+            "bitwise_equal": false
+          },
+          "head.4": {
+            "tensors": 2,
+            "elements": 164160,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.02937917411327362,
+            "rms": 0.0014897780053638404,
+            "relative_l2": 0.05776681798624246,
+            "bitwise_equal": false
+          },
+          "normalization_buffers": {
+            "tensors": 4,
+            "elements": 74,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          }
+        },
+        "relative_l2_definition": "||serial-overlap||2 / ||overlap||2; null for nonfinite or zero reference with nonzero delta",
+        "parity_is_not_a_training_budget_requirement": true
+      },
+      "decoded_yuv": [
+        {
+          "camera": "observation.images.cam_high",
+          "file": "videos/observation.images.cam_high/chunk-000/file-000.mp4",
+          "hash_semantics": "decoded YUV checksum column only",
+          "alignment": "same camera/file and decoded row index; source attribution is conditional",
+          "same_hashes": 20177,
+          "different_or_missing_hashes": 6,
+          "frame_counts_overlap_serial": [
+            20183,
+            20183
+          ],
+          "first_difference": {
+            "file_frame_index": 3931,
+            "hashes_overlap_serial": [
+              "e41f61882ab58298caea89dea1ab129bd680b26f021b20d956eaf79e4c6c02be",
+              "7421ef4bb1d5aba58a59c775d7b37052d7476f00be8464e40473be109646b11a"
+            ],
+            "overlap_source": {
+              "status": "known",
+              "source_id": [
+                4288539111177254528,
+                7
+              ],
+              "ordinal": 7,
+              "frame_index": 428,
+              "used_as_H2_training_image": true
+            },
+            "serial_source": {
+              "status": "known",
+              "source_id": [
+                2242771788786130121,
+                7
+              ],
+              "ordinal": 7,
+              "frame_index": 428,
+              "used_as_H2_training_image": true
+            }
+          },
+          "mapping_unknown_reasons": [
+            null,
+            null
+          ],
+          "pts_grid_verified": [
+            true,
+            true
+          ]
+        },
+        {
+          "camera": "observation.images.cam_wrist",
+          "file": "videos/observation.images.cam_wrist/chunk-000/file-000.mp4",
+          "hash_semantics": "decoded YUV checksum column only",
+          "alignment": "same camera/file and decoded row index; source attribution is conditional",
+          "same_hashes": 20181,
+          "different_or_missing_hashes": 2,
+          "frame_counts_overlap_serial": [
+            20183,
+            20183
+          ],
+          "first_difference": {
+            "file_frame_index": 1219,
+            "hashes_overlap_serial": [
+              "1206651a875745e9435c275bd9227c6848d3fc6b978d2292e219a7359ed66007",
+              "7e9722aa1040526d093af24ad570c26518b887249c89dd0d36da56a4a7192e83"
+            ],
+            "overlap_source": {
+              "status": "known",
+              "source_id": [
+                4288539111177254528,
+                2
+              ],
+              "ordinal": 2,
+              "frame_index": 158,
+              "used_as_H2_training_image": true
+            },
+            "serial_source": {
+              "status": "known",
+              "source_id": [
+                2242771788786130121,
+                2
+              ],
+              "ordinal": 2,
+              "frame_index": 158,
+              "used_as_H2_training_image": true
+            }
+          },
+          "mapping_unknown_reasons": [
+            null,
+            null
+          ],
+          "pts_grid_verified": [
+            true,
+            true
+          ]
+        }
+      ]
+    },
+    {
+      "vision": "dual",
+      "seed": 19003,
+      "source_run_statuses": {
+        "overlap": {
+          "status": "complete",
+          "qualification_passed": true,
+          "post_audit_status": "complete",
+          "evaluation_status": "complete",
+          "quality_error": null
+        },
+        "serial": {
+          "status": "complete",
+          "qualification_passed": true,
+          "post_audit_status": "complete",
+          "evaluation_status": "complete",
+          "quality_error": null
+        }
+      },
+      "contracts": {
+        "initial_model_equal": true,
+        "normalization_equal": true,
+        "initial_contracts_self_consistent": true,
+        "recipe_equal": true,
+        "numeric_episode_manifests_equal": true,
+        "ordered_updates_and_anchors_equal": true,
+        "completed_budget_matches": true,
+        "budget_overlap_serial": [
+          [
+            128,
+            4096,
+            131072
+          ],
+          [
+            128,
+            4096,
+            131072
+          ]
+        ]
+      },
+      "declared_final_model_sha_equal_diagnostic_only": false,
+      "models": {
+        "tensor_keys_equal": true,
+        "keys_only_overlap": [],
+        "keys_only_serial": [],
+        "non_tensor_state_equal": true,
+        "modules": {
+          "encoder": {
+            "tensors": 2,
+            "elements": 6,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          },
+          "encoder.mlp.0": {
+            "tensors": 2,
+            "elements": 1048832,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.013802602887153625,
+            "rms": 0.0003897099874318854,
+            "relative_l2": 0.003737503314441562,
+            "bitwise_equal": false
+          },
+          "encoder.mlp.1": {
+            "tensors": 2,
+            "elements": 512,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0007274150848388672,
+            "rms": 0.0001612629873140378,
+            "relative_l2": 0.00022722623980549406,
+            "bitwise_equal": false
+          },
+          "encoder.pooling_layer": {
+            "tensors": 1,
+            "elements": 262144,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.013337492942810059,
+            "rms": 0.000446293550794764,
+            "relative_l2": 0.0004459888099579286,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.bn1": {
+            "tensors": 2,
+            "elements": 128,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.001904129981994629,
+            "rms": 0.00045795825070259406,
+            "relative_l2": 0.00064691889499627,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.conv1": {
+            "tensors": 1,
+            "elements": 9408,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0028978786431252956,
+            "rms": 0.00047629716207492226,
+            "relative_l2": 0.018676720068157664,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer1.0.bn1": {
+            "tensors": 2,
+            "elements": 128,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.002161383628845215,
+            "rms": 0.000537115457113532,
+            "relative_l2": 0.0007595763848217859,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer1.0.bn2": {
+            "tensors": 2,
+            "elements": 128,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0039481520652771,
+            "rms": 0.0006842227973127343,
+            "relative_l2": 0.0009674627208433721,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer1.0.conv1": {
+            "tensors": 1,
+            "elements": 36864,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.006721921265125275,
+            "rms": 0.0006939297404312853,
+            "relative_l2": 0.011722612320529468,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer1.0.conv2": {
+            "tensors": 1,
+            "elements": 36864,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.008566886186599731,
+            "rms": 0.0008047737211481577,
+            "relative_l2": 0.013626511484323487,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer2.0.bn1": {
+            "tensors": 2,
+            "elements": 256,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0030222509521991014,
+            "rms": 0.0007181217329564573,
+            "relative_l2": 0.0010154730842785063,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer2.0.bn2": {
+            "tensors": 2,
+            "elements": 256,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0034903287887573242,
+            "rms": 0.0007051876898014858,
+            "relative_l2": 0.0009972297304434098,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer2.0.conv1": {
+            "tensors": 1,
+            "elements": 73728,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.008678354322910309,
+            "rms": 0.0008443044138015582,
+            "relative_l2": 0.020248099393410584,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer2.0.conv2": {
+            "tensors": 1,
+            "elements": 147456,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.009881701087579131,
+            "rms": 0.0009245939946147452,
+            "relative_l2": 0.022131935859081305,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer2.0.downsample.0": {
+            "tensors": 1,
+            "elements": 8192,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.006087489426136017,
+            "rms": 0.000831712206265464,
+            "relative_l2": 0.006600222840731873,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer2.0.downsample.1": {
+            "tensors": 2,
+            "elements": 256,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.002778351306915283,
+            "rms": 0.000666547845214543,
+            "relative_l2": 0.0009419474085188449,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer3.0.bn1": {
+            "tensors": 2,
+            "elements": 512,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.003536522388458252,
+            "rms": 0.0006760541942428364,
+            "relative_l2": 0.0009558052858697836,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer3.0.bn2": {
+            "tensors": 2,
+            "elements": 512,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0020667314529418945,
+            "rms": 0.0005967560800860651,
+            "relative_l2": 0.0008442351132238165,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer3.0.conv1": {
+            "tensors": 1,
+            "elements": 294912,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.011002099141478539,
+            "rms": 0.0009185657075478813,
+            "relative_l2": 0.030966469353106846,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer3.0.conv2": {
+            "tensors": 1,
+            "elements": 589824,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.01145506277680397,
+            "rms": 0.0008283893098322554,
+            "relative_l2": 0.027962664576148107,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer3.0.downsample.0": {
+            "tensors": 1,
+            "elements": 32768,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.009436488151550293,
+            "rms": 0.0008691559283643555,
+            "relative_l2": 0.009844500477734032,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer3.0.downsample.1": {
+            "tensors": 2,
+            "elements": 512,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.002777576446533203,
+            "rms": 0.0006962564290236664,
+            "relative_l2": 0.0009835500173094988,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer4.0.bn1": {
+            "tensors": 2,
+            "elements": 1024,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0028574647731147707,
+            "rms": 0.0004575007003050662,
+            "relative_l2": 0.000646749220561074,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer4.0.bn2": {
+            "tensors": 2,
+            "elements": 1024,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.003209644608432427,
+            "rms": 0.0005816074496421637,
+            "relative_l2": 0.0008226658948585513,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer4.0.conv1": {
+            "tensors": 1,
+            "elements": 1179648,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.010548951104283333,
+            "rms": 0.0006262116403143313,
+            "relative_l2": 0.029745390699255417,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer4.0.conv2": {
+            "tensors": 1,
+            "elements": 2359296,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.011232416145503521,
+            "rms": 0.0005590400671691561,
+            "relative_l2": 0.02652294557021347,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer4.0.downsample.0": {
+            "tensors": 1,
+            "elements": 131072,
+            "changed_tensors": 1,
+            "nonfinite_elements": 0,
+            "max_abs": 0.010549310594797134,
+            "rms": 0.0007314343217506877,
+            "relative_l2": 0.011650093405899242,
+            "bitwise_equal": false
+          },
+          "encoder.resnet_backbone.layer4.0.downsample.1": {
+            "tensors": 2,
+            "elements": 1024,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0033968687057495117,
+            "rms": 0.0005972566972386323,
+            "relative_l2": 0.0008442117380829729,
+            "bitwise_equal": false
+          },
+          "head.0": {
+            "tensors": 2,
+            "elements": 552448,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.009614026173949242,
+            "rms": 0.00030547652104341376,
+            "relative_l2": 0.01685343776644493,
+            "bitwise_equal": false
+          },
+          "head.2": {
+            "tensors": 2,
+            "elements": 262656,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.014646828989498317,
+            "rms": 0.0004105786793157103,
+            "relative_l2": 0.015870220803746306,
+            "bitwise_equal": false
+          },
+          "head.4": {
+            "tensors": 2,
+            "elements": 164160,
+            "changed_tensors": 2,
+            "nonfinite_elements": 0,
+            "max_abs": 0.012321142479777336,
+            "rms": 0.000323943869473152,
+            "relative_l2": 0.012570909793388105,
+            "bitwise_equal": false
+          },
+          "normalization_buffers": {
+            "tensors": 4,
+            "elements": 74,
+            "changed_tensors": 0,
+            "nonfinite_elements": 0,
+            "max_abs": 0.0,
+            "rms": 0.0,
+            "relative_l2": 0.0,
+            "bitwise_equal": true
+          }
+        },
+        "relative_l2_definition": "||serial-overlap||2 / ||overlap||2; null for nonfinite or zero reference with nonzero delta",
+        "parity_is_not_a_training_budget_requirement": true
+      },
+      "decoded_yuv": [
+        {
+          "camera": "observation.images.cam_high",
+          "file": "videos/observation.images.cam_high/chunk-000/file-000.mp4",
+          "hash_semantics": "decoded YUV checksum column only",
+          "alignment": "same camera/file and decoded row index; source attribution is conditional",
+          "same_hashes": 19885,
+          "different_or_missing_hashes": 10,
+          "frame_counts_overlap_serial": [
+            19895,
+            19895
+          ],
+          "first_difference": {
+            "file_frame_index": 3410,
+            "hashes_overlap_serial": [
+              "42b0fce7bdd078c53c46c4b26b80108e76a1e56b32dd4085a89bc44397e2f257",
+              "e15b25fcd492f6007052a18eccbeebadca37f463b8ba2114e49375f25180dfb1"
+            ],
+            "overlap_source": {
+              "status": "known",
+              "source_id": [
+                3972810410259518689,
+                6
+              ],
+              "ordinal": 6,
+              "frame_index": 464,
+              "used_as_H2_training_image": false
+            },
+            "serial_source": {
+              "status": "known",
+              "source_id": [
+                2835069337026091883,
+                6
+              ],
+              "ordinal": 6,
+              "frame_index": 464,
+              "used_as_H2_training_image": false
+            }
+          },
+          "mapping_unknown_reasons": [
+            null,
+            null
+          ],
+          "pts_grid_verified": [
+            true,
+            true
+          ]
+        },
+        {
+          "camera": "observation.images.cam_wrist",
+          "file": "videos/observation.images.cam_wrist/chunk-000/file-000.mp4",
+          "hash_semantics": "decoded YUV checksum column only",
+          "alignment": "same camera/file and decoded row index; source attribution is conditional",
+          "same_hashes": 19895,
+          "different_or_missing_hashes": 0,
+          "frame_counts_overlap_serial": [
+            19895,
+            19895
+          ],
+          "first_difference": null,
+          "mapping_unknown_reasons": [
+            null,
+            null
+          ],
+          "pts_grid_verified": [
+            true,
+            true
+          ]
+        }
+      ]
+    }
+  ]
+}

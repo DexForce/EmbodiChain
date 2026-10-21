@@ -1,0 +1,552 @@
+{
+  "diagnostic_only": true,
+  "source_suite_status": "failed",
+  "source_run_status_counts": {
+    "complete": 29,
+    "failed": 1,
+    "unsupported": 0
+  },
+  "all_pairs_contracts_equal_and_budget_valid": true,
+  "raw_rgb_equivalence": "unknown",
+  "pairs": [
+    {
+      "vision": "single",
+      "seed": 19001,
+      "source_run_statuses": {
+        "overlap": {
+          "status": "complete",
+          "qualification_passed": true,
+          "post_audit_status": "complete",
+          "evaluation_status": "complete",
+          "quality_error": null
+        },
+        "serial": {
+          "status": "complete",
+          "qualification_passed": true,
+          "post_audit_status": "complete",
+          "evaluation_status": "complete",
+          "quality_error": null
+        }
+      },
+      "contracts_equal_and_budget_valid": true,
+      "completed_budget": [
+        [
+          128,
+          4096,
+          131072
+        ],
+        [
+          128,
+          4096,
+          131072
+        ]
+      ],
+      "final_model_sha_equal_diagnostic_only": false,
+      "module_count": 32,
+      "changed_tensors": 47,
+      "nonfinite_elements": 0,
+      "maximum_abs_tensor_difference": 0.0006812270730733871,
+      "overall_rms_tensor_difference": 3.515456299988279e-06,
+      "maximum_module_relative_l2": 0.00022242937515554165,
+      "yuv_same_hashes": 19974,
+      "yuv_different_or_missing_hashes": 6,
+      "yuv_files": [
+        {
+          "camera": "observation.images.cam_high",
+          "frame_counts_overlap_serial": [
+            19980,
+            19980
+          ],
+          "same_hashes": 19974,
+          "different_or_missing_hashes": 6,
+          "first_difference": {
+            "file_frame_index": 7767,
+            "hashes_overlap_serial": [
+              "282f711da92e5cca6cb797a689bb17f3026d9101742ac182db9c3d3e3fc787a9",
+              "746ed555f86113d8c96c2788656b1a493855db9677b8c41838439d60f8a085e0"
+            ],
+            "overlap_source": {
+              "status": "known",
+              "source_id": [
+                2912934927212840217,
+                15
+              ],
+              "ordinal": 15,
+              "frame_index": 464,
+              "used_as_H2_training_image": false
+            },
+            "serial_source": {
+              "status": "known",
+              "source_id": [
+                2554937907949599685,
+                15
+              ],
+              "ordinal": 15,
+              "frame_index": 464,
+              "used_as_H2_training_image": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "vision": "single",
+      "seed": 19002,
+      "source_run_statuses": {
+        "overlap": {
+          "status": "complete",
+          "qualification_passed": true,
+          "post_audit_status": "complete",
+          "evaluation_status": "complete",
+          "quality_error": null
+        },
+        "serial": {
+          "status": "complete",
+          "qualification_passed": true,
+          "post_audit_status": "complete",
+          "evaluation_status": "complete",
+          "quality_error": null
+        }
+      },
+      "contracts_equal_and_budget_valid": true,
+      "completed_budget": [
+        [
+          128,
+          4096,
+          131072
+        ],
+        [
+          128,
+          4096,
+          131072
+        ]
+      ],
+      "final_model_sha_equal_diagnostic_only": true,
+      "module_count": 32,
+      "changed_tensors": 0,
+      "nonfinite_elements": 0,
+      "maximum_abs_tensor_difference": 0.0,
+      "overall_rms_tensor_difference": 0.0,
+      "maximum_module_relative_l2": 0.0,
+      "yuv_same_hashes": 20181,
+      "yuv_different_or_missing_hashes": 2,
+      "yuv_files": [
+        {
+          "camera": "observation.images.cam_high",
+          "frame_counts_overlap_serial": [
+            20183,
+            20183
+          ],
+          "same_hashes": 20181,
+          "different_or_missing_hashes": 2,
+          "first_difference": {
+            "file_frame_index": 14441,
+            "hashes_overlap_serial": [
+              "daa31180c9c14b1d0df06c3d25a361c0ae002c1152112b0c770243cb01603ea3",
+              "ffe641f29599c6f892ee6e94996b1a8f3a72a9c6d5225c413a81fb65b441c7d8"
+            ],
+            "overlap_source": {
+              "status": "known",
+              "source_id": [
+                4117411518014293388,
+                28
+              ],
+              "ordinal": 28,
+              "frame_index": 318,
+              "used_as_H2_training_image": false
+            },
+            "serial_source": {
+              "status": "known",
+              "source_id": [
+                1037444855011870118,
+                28
+              ],
+              "ordinal": 28,
+              "frame_index": 318,
+              "used_as_H2_training_image": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "vision": "single",
+      "seed": 19003,
+      "source_run_statuses": {
+        "overlap": {
+          "status": "complete",
+          "qualification_passed": true,
+          "post_audit_status": "complete",
+          "evaluation_status": "complete",
+          "quality_error": null
+        },
+        "serial": {
+          "status": "complete",
+          "qualification_passed": true,
+          "post_audit_status": "complete",
+          "evaluation_status": "complete",
+          "quality_error": null
+        }
+      },
+      "contracts_equal_and_budget_valid": true,
+      "completed_budget": [
+        [
+          128,
+          4096,
+          131072
+        ],
+        [
+          128,
+          4096,
+          131072
+        ]
+      ],
+      "final_model_sha_equal_diagnostic_only": false,
+      "module_count": 32,
+      "changed_tensors": 47,
+      "nonfinite_elements": 0,
+      "maximum_abs_tensor_difference": 0.029300697147846222,
+      "overall_rms_tensor_difference": 0.0009435515146730407,
+      "maximum_module_relative_l2": 0.04612286243530146,
+      "yuv_same_hashes": 19893,
+      "yuv_different_or_missing_hashes": 2,
+      "yuv_files": [
+        {
+          "camera": "observation.images.cam_high",
+          "frame_counts_overlap_serial": [
+            19895,
+            19895
+          ],
+          "same_hashes": 19893,
+          "different_or_missing_hashes": 2,
+          "first_difference": {
+            "file_frame_index": 3697,
+            "hashes_overlap_serial": [
+              "362aba39435177ebae97d5f195b194e1c61f98df2faa07ca475362bc496b3cec",
+              "c4811a144f9df99034a213d933a2c392393f7462b41c64a59c754e3404a0d478"
+            ],
+            "overlap_source": {
+              "status": "known",
+              "source_id": [
+                1381450877866638020,
+                7
+              ],
+              "ordinal": 7,
+              "frame_index": 272,
+              "used_as_H2_training_image": true
+            },
+            "serial_source": {
+              "status": "known",
+              "source_id": [
+                688395810357931013,
+                7
+              ],
+              "ordinal": 7,
+              "frame_index": 272,
+              "used_as_H2_training_image": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "vision": "dual",
+      "seed": 19001,
+      "source_run_statuses": {
+        "overlap": {
+          "status": "complete",
+          "qualification_passed": true,
+          "post_audit_status": "complete",
+          "evaluation_status": "complete",
+          "quality_error": null
+        },
+        "serial": {
+          "status": "complete",
+          "qualification_passed": true,
+          "post_audit_status": "complete",
+          "evaluation_status": "complete",
+          "quality_error": null
+        }
+      },
+      "contracts_equal_and_budget_valid": true,
+      "completed_budget": [
+        [
+          128,
+          4096,
+          131072
+        ],
+        [
+          128,
+          4096,
+          131072
+        ]
+      ],
+      "final_model_sha_equal_diagnostic_only": true,
+      "module_count": 32,
+      "changed_tensors": 0,
+      "nonfinite_elements": 0,
+      "maximum_abs_tensor_difference": 0.0,
+      "overall_rms_tensor_difference": 0.0,
+      "maximum_module_relative_l2": 0.0,
+      "yuv_same_hashes": 39948,
+      "yuv_different_or_missing_hashes": 12,
+      "yuv_files": [
+        {
+          "camera": "observation.images.cam_high",
+          "frame_counts_overlap_serial": [
+            19980,
+            19980
+          ],
+          "same_hashes": 19968,
+          "different_or_missing_hashes": 12,
+          "first_difference": {
+            "file_frame_index": 3415,
+            "hashes_overlap_serial": [
+              "aa191c717e5faf953f73a1d7d6fd8ec1af12113f55d04ae6c66b20043ccfba09",
+              "fa93e837bacf477aafd854f34e9a53c2345c6ca20e15e12cfb43d9396824fead"
+            ],
+            "overlap_source": {
+              "status": "known",
+              "source_id": [
+                2503624911073177816,
+                6
+              ],
+              "ordinal": 6,
+              "frame_index": 462,
+              "used_as_H2_training_image": false
+            },
+            "serial_source": {
+              "status": "known",
+              "source_id": [
+                3940041611332753477,
+                6
+              ],
+              "ordinal": 6,
+              "frame_index": 462,
+              "used_as_H2_training_image": false
+            }
+          }
+        },
+        {
+          "camera": "observation.images.cam_wrist",
+          "frame_counts_overlap_serial": [
+            19980,
+            19980
+          ],
+          "same_hashes": 19980,
+          "different_or_missing_hashes": 0,
+          "first_difference": null
+        }
+      ]
+    },
+    {
+      "vision": "dual",
+      "seed": 19002,
+      "source_run_statuses": {
+        "overlap": {
+          "status": "complete",
+          "qualification_passed": true,
+          "post_audit_status": "complete",
+          "evaluation_status": "complete",
+          "quality_error": null
+        },
+        "serial": {
+          "status": "complete",
+          "qualification_passed": true,
+          "post_audit_status": "complete",
+          "evaluation_status": "complete",
+          "quality_error": null
+        }
+      },
+      "contracts_equal_and_budget_valid": true,
+      "completed_budget": [
+        [
+          128,
+          4096,
+          131072
+        ],
+        [
+          128,
+          4096,
+          131072
+        ]
+      ],
+      "final_model_sha_equal_diagnostic_only": false,
+      "module_count": 32,
+      "changed_tensors": 47,
+      "nonfinite_elements": 0,
+      "maximum_abs_tensor_difference": 0.02937917411327362,
+      "overall_rms_tensor_difference": 0.0010971900763321004,
+      "maximum_module_relative_l2": 0.05776681798624246,
+      "yuv_same_hashes": 40358,
+      "yuv_different_or_missing_hashes": 8,
+      "yuv_files": [
+        {
+          "camera": "observation.images.cam_high",
+          "frame_counts_overlap_serial": [
+            20183,
+            20183
+          ],
+          "same_hashes": 20177,
+          "different_or_missing_hashes": 6,
+          "first_difference": {
+            "file_frame_index": 3931,
+            "hashes_overlap_serial": [
+              "e41f61882ab58298caea89dea1ab129bd680b26f021b20d956eaf79e4c6c02be",
+              "7421ef4bb1d5aba58a59c775d7b37052d7476f00be8464e40473be109646b11a"
+            ],
+            "overlap_source": {
+              "status": "known",
+              "source_id": [
+                4288539111177254528,
+                7
+              ],
+              "ordinal": 7,
+              "frame_index": 428,
+              "used_as_H2_training_image": true
+            },
+            "serial_source": {
+              "status": "known",
+              "source_id": [
+                2242771788786130121,
+                7
+              ],
+              "ordinal": 7,
+              "frame_index": 428,
+              "used_as_H2_training_image": true
+            }
+          }
+        },
+        {
+          "camera": "observation.images.cam_wrist",
+          "frame_counts_overlap_serial": [
+            20183,
+            20183
+          ],
+          "same_hashes": 20181,
+          "different_or_missing_hashes": 2,
+          "first_difference": {
+            "file_frame_index": 1219,
+            "hashes_overlap_serial": [
+              "1206651a875745e9435c275bd9227c6848d3fc6b978d2292e219a7359ed66007",
+              "7e9722aa1040526d093af24ad570c26518b887249c89dd0d36da56a4a7192e83"
+            ],
+            "overlap_source": {
+              "status": "known",
+              "source_id": [
+                4288539111177254528,
+                2
+              ],
+              "ordinal": 2,
+              "frame_index": 158,
+              "used_as_H2_training_image": true
+            },
+            "serial_source": {
+              "status": "known",
+              "source_id": [
+                2242771788786130121,
+                2
+              ],
+              "ordinal": 2,
+              "frame_index": 158,
+              "used_as_H2_training_image": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "vision": "dual",
+      "seed": 19003,
+      "source_run_statuses": {
+        "overlap": {
+          "status": "complete",
+          "qualification_passed": true,
+          "post_audit_status": "complete",
+          "evaluation_status": "complete",
+          "quality_error": null
+        },
+        "serial": {
+          "status": "complete",
+          "qualification_passed": true,
+          "post_audit_status": "complete",
+          "evaluation_status": "complete",
+          "quality_error": null
+        }
+      },
+      "contracts_equal_and_budget_valid": true,
+      "completed_budget": [
+        [
+          128,
+          4096,
+          131072
+        ],
+        [
+          128,
+          4096,
+          131072
+        ]
+      ],
+      "final_model_sha_equal_diagnostic_only": false,
+      "module_count": 32,
+      "changed_tensors": 47,
+      "nonfinite_elements": 0,
+      "maximum_abs_tensor_difference": 0.014646828989498317,
+      "overall_rms_tensor_difference": 0.0005897589048337599,
+      "maximum_module_relative_l2": 0.030966469353106846,
+      "yuv_same_hashes": 39780,
+      "yuv_different_or_missing_hashes": 10,
+      "yuv_files": [
+        {
+          "camera": "observation.images.cam_high",
+          "frame_counts_overlap_serial": [
+            19895,
+            19895
+          ],
+          "same_hashes": 19885,
+          "different_or_missing_hashes": 10,
+          "first_difference": {
+            "file_frame_index": 3410,
+            "hashes_overlap_serial": [
+              "42b0fce7bdd078c53c46c4b26b80108e76a1e56b32dd4085a89bc44397e2f257",
+              "e15b25fcd492f6007052a18eccbeebadca37f463b8ba2114e49375f25180dfb1"
+            ],
+            "overlap_source": {
+              "status": "known",
+              "source_id": [
+                3972810410259518689,
+                6
+              ],
+              "ordinal": 6,
+              "frame_index": 464,
+              "used_as_H2_training_image": false
+            },
+            "serial_source": {
+              "status": "known",
+              "source_id": [
+                2835069337026091883,
+                6
+              ],
+              "ordinal": 6,
+              "frame_index": 464,
+              "used_as_H2_training_image": false
+            }
+          }
+        },
+        {
+          "camera": "observation.images.cam_wrist",
+          "frame_counts_overlap_serial": [
+            19895,
+            19895
+          ],
+          "same_hashes": 19895,
+          "different_or_missing_hashes": 0,
+          "first_difference": null
+        }
+      ]
+    }
+  ],
+  "all_final_model_sha_different": false,
+  "total_yuv_same_hashes": 180134,
+  "total_yuv_different_or_missing_hashes": 40
+}

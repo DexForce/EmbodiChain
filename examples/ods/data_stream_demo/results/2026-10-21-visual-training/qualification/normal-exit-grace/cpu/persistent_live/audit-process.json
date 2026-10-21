@@ -1,0 +1,99 @@
+{
+  "output": "/tmp/ods-group-grace-qualified-20261021/persistent_live",
+  "status": "failed",
+  "returncode": 0,
+  "elapsed_seconds": 2.050525518,
+  "stage": "audit",
+  "evaluation": false,
+  "timeout": false,
+  "cancelled": false,
+  "leaked_process_group": true,
+  "process_group_shutdown": {
+    "grace_seconds": 2.0,
+    "wait_seconds": 2.0002475259825587,
+    "poll_count": 41,
+    "group_disappeared": false,
+    "initial": {
+      "monotonic_ns": 1772720843663777,
+      "pgid": 2235515,
+      "exists": true,
+      "members": [
+        {
+          "pid": 2235516,
+          "ppid": 2235504,
+          "create_time": 1792608679.83,
+          "name": "python",
+          "state": "sleeping",
+          "cmdline": [
+            "/root/miniconda3/envs/py311/bin/python",
+            "-c",
+            "\nimport json, os, signal, sys, time\nfrom pathlib import Path\nready = Path(sys.argv[1]).with_suffix('.ready')\nchild = os.fork()\nif child == 0:\n    if sys.argv[3] == '1':\n        signal.signal(signal.SIGTERM, signal.SIG_IGN)\n    ready.write_text(json.dumps({'ignores_sigterm': sys.argv[3] == '1'}))\n    time.sleep(float(sys.argv[2]))\n    os._exit(0)\ndeadline = time.monotonic() + 4\nwhile not ready.exists():\n    if time.monotonic() >= deadline:\n        os.kill(child, signal.SIGKILL)\n        os._exit(2)\n    time.sleep(0.005)\nPath(sys.argv[1]).write_text(json.dumps({'helper_pid': child}))\nos._exit(0)\n",
+            "/tmp/ods-group-grace-qualified-20261021/persistent_live/helper.json",
+            "30.0",
+            "1"
+          ]
+        }
+      ],
+      "inspection_errors": [],
+      "member_kind": "live_or_unknown"
+    },
+    "final": {
+      "monotonic_ns": 1772722843722464,
+      "pgid": 2235515,
+      "exists": true,
+      "members": [
+        {
+          "pid": 2235516,
+          "ppid": 2235504,
+          "create_time": 1792608679.83,
+          "name": "python",
+          "state": "sleeping",
+          "cmdline": [
+            "/root/miniconda3/envs/py311/bin/python",
+            "-c",
+            "\nimport json, os, signal, sys, time\nfrom pathlib import Path\nready = Path(sys.argv[1]).with_suffix('.ready')\nchild = os.fork()\nif child == 0:\n    if sys.argv[3] == '1':\n        signal.signal(signal.SIGTERM, signal.SIG_IGN)\n    ready.write_text(json.dumps({'ignores_sigterm': sys.argv[3] == '1'}))\n    time.sleep(float(sys.argv[2]))\n    os._exit(0)\ndeadline = time.monotonic() + 4\nwhile not ready.exists():\n    if time.monotonic() >= deadline:\n        os.kill(child, signal.SIGKILL)\n        os._exit(2)\n    time.sleep(0.005)\nPath(sys.argv[1]).write_text(json.dumps({'helper_pid': child}))\nos._exit(0)\n",
+            "/tmp/ods-group-grace-qualified-20261021/persistent_live/helper.json",
+            "30.0",
+            "1"
+          ]
+        }
+      ],
+      "inspection_errors": [],
+      "member_kind": "live_or_unknown"
+    },
+    "termination_attempted": true,
+    "after_termination": {
+      "grace_seconds": 2.0,
+      "wait_seconds": 0.050261756870895624,
+      "poll_count": 2,
+      "group_disappeared": true,
+      "initial": {
+        "monotonic_ns": 1772722843923221,
+        "pgid": 2235515,
+        "exists": true,
+        "members": [
+          {
+            "pid": 2235516,
+            "ppid": 2235504,
+            "create_time": 1792608679.83,
+            "name": "python",
+            "state": "running",
+            "cmdline": []
+          }
+        ],
+        "inspection_errors": [],
+        "member_kind": "live_or_unknown"
+      },
+      "final": {
+        "monotonic_ns": 1772722894174763,
+        "pgid": 2235515,
+        "exists": false,
+        "members": [],
+        "inspection_errors": []
+      }
+    }
+  },
+  "pgid": 2235515,
+  "process_launch_monotonic_ns": 1772720843660382,
+  "device_guard": {}
+}

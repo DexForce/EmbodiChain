@@ -1,0 +1,7 @@
+{
+  "status": "failed",
+  "qualification_passed": false,
+  "post_audit_status": "failed",
+  "post_audit_seconds_outside_pipeline": 2.000441353,
+  "quality_error": "Owned process group remains after normal-exit grace (zombie_only; see process_group_shutdown identities)"
+}

@@ -1,0 +1,2595 @@
+{
+  "status": "failed",
+  "phase": "report",
+  "results": [
+    {
+      "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_overlap/single/seed19001",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 393.806587393,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 1993353,
+      "process_launch_monotonic_ns": 1747781931507050,
+      "device_guard": {
+        "samples": 180,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 1993446,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_overlap/single/seed19001",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 273.536739692,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2001228,
+        "process_launch_monotonic_ns": 1748190888554221,
+        "device_guard": {
+          "samples": 129,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 2001228,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_overlap/single/seed19001",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 15.108100108,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2000921,
+        "process_launch_monotonic_ns": 1748175758862688,
+        "device_guard": {
+          "samples": 7,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-formal-20261021-v3/offline8/single/seed19001",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 136.090612706,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 2011500,
+      "process_launch_monotonic_ns": 1748464698753263,
+      "device_guard": {
+        "samples": 64,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 2012003,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline8/single/seed19001",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 261.287650033,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2015245,
+        "process_launch_monotonic_ns": 1748611528171089,
+        "device_guard": {
+          "samples": 123,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 2015245,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline8/single/seed19001",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 10.720387783,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2014975,
+        "process_launch_monotonic_ns": 1748600798541081,
+        "device_guard": {
+          "samples": 5,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-formal-20261021-v3/offline32/single/seed19001",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 332.676776764,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 2017142,
+      "process_launch_monotonic_ns": 1748873076405897,
+      "device_guard": {
+        "samples": 157,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 2017183,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline32/single/seed19001",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 264.28895178,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2019410,
+        "process_launch_monotonic_ns": 1749220613515283,
+        "device_guard": {
+          "samples": 124,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 2019410,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline32/single/seed19001",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 14.821842314,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2019286,
+        "process_launch_monotonic_ns": 1749205772280550,
+        "device_guard": {
+          "samples": 7,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-formal-20261021-v3/offline128/single/seed19001",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 1131.934891947,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 2021264,
+      "process_launch_monotonic_ns": 1749485172227448,
+      "device_guard": {
+        "samples": 526,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 2021302,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline128/single/seed19001",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 281.8292903,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2040714,
+        "process_launch_monotonic_ns": 1750644851671267,
+        "device_guard": {
+          "samples": 133,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 2040714,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline128/single/seed19001",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 27.616952973,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2039943,
+        "process_launch_monotonic_ns": 1750617170565659,
+        "device_guard": {
+          "samples": 13,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_serial/single/seed19001",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 395.518147864,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 2046244,
+      "process_launch_monotonic_ns": 1750927001097460,
+      "device_guard": {
+        "samples": 186,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 2046279,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_serial/single/seed19001",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 268.197929677,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2057097,
+        "process_launch_monotonic_ns": 1751337769460440,
+        "device_guard": {
+          "samples": 128,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 2057097,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_serial/single/seed19001",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 15.207214592,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2056982,
+        "process_launch_monotonic_ns": 1751322540619824,
+        "device_guard": {
+          "samples": 7,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-formal-20261021-v3/offline8/dual/seed19001",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 179.494443105,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 2058996,
+      "process_launch_monotonic_ns": 1751606239477778,
+      "device_guard": {
+        "samples": 85,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 2059023,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline8/dual/seed19001",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 303.491023229,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2060156,
+        "process_launch_monotonic_ns": 1751798299359677,
+        "device_guard": {
+          "samples": 145,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 2060156,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline8/dual/seed19001",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 12.54659028,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2060036,
+        "process_launch_monotonic_ns": 1751785743354309,
+        "device_guard": {
+          "samples": 6,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-formal-20261021-v3/offline32/dual/seed19001",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 410.06527452,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 2060833,
+      "process_launch_monotonic_ns": 1752102050196414,
+      "device_guard": {
+        "samples": 193,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 2060862,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline32/dual/seed19001",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 288.635174686,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2066436,
+        "process_launch_monotonic_ns": 1752529594611304,
+        "device_guard": {
+          "samples": 136,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 2066436,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline32/dual/seed19001",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 17.440718791,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2066313,
+        "process_launch_monotonic_ns": 1752512134538214,
+        "device_guard": {
+          "samples": 8,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-formal-20261021-v3/offline128/dual/seed19001",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 1367.703087429,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 2070350,
+      "process_launch_monotonic_ns": 1752818499715022,
+      "device_guard": {
+        "samples": 651,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 2070392,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline128/dual/seed19001",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 309.277504015,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2082374,
+        "process_launch_monotonic_ns": 1754227098178608,
+        "device_guard": {
+          "samples": 147,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 2082374,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline128/dual/seed19001",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 40.766732353,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2082218,
+        "process_launch_monotonic_ns": 1754186266813282,
+        "device_guard": {
+          "samples": 19,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_overlap/dual/seed19001",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 481.15581454,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 2083423,
+      "process_launch_monotonic_ns": 1754536691155090,
+      "device_guard": {
+        "samples": 231,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 2083453,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_overlap/dual/seed19001",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 288.205430554,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2092938,
+        "process_launch_monotonic_ns": 1755039312423382,
+        "device_guard": {
+          "samples": 141,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 2092938,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_overlap/dual/seed19001",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 21.422363427,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2092823,
+        "process_launch_monotonic_ns": 1755017868273293,
+        "device_guard": {
+          "samples": 10,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_serial/dual/seed19001",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 491.316141582,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 2093562,
+      "process_launch_monotonic_ns": 1755327793291745,
+      "device_guard": {
+        "samples": 235,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 2093582,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_serial/dual/seed19001",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 287.8245154,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2097002,
+        "process_launch_monotonic_ns": 1755840582822220,
+        "device_guard": {
+          "samples": 140,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 2097002,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_serial/dual/seed19001",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 21.43039835,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2096895,
+        "process_launch_monotonic_ns": 1755819130919139,
+        "device_guard": {
+          "samples": 10,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-formal-20261021-v3/offline8/single/seed19002",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 139.522350433,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 2097454,
+      "process_launch_monotonic_ns": 1756128679717135,
+      "device_guard": {
+        "samples": 66,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 2097474,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline8/single/seed19002",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 269.381673022,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2098007,
+        "process_launch_monotonic_ns": 1756279957604291,
+        "device_guard": {
+          "samples": 130,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 2098007,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline8/single/seed19002",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 11.736366185,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2097918,
+        "process_launch_monotonic_ns": 1756268211400821,
+        "device_guard": {
+          "samples": 5,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-formal-20261021-v3/offline32/single/seed19002",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 350.615537572,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 2098382,
+      "process_launch_monotonic_ns": 1756549601307051,
+      "device_guard": {
+        "samples": 167,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 2098402,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline32/single/seed19002",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 297.130426353,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2099826,
+        "process_launch_monotonic_ns": 1756915214406303,
+        "device_guard": {
+          "samples": 136,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 2099826,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline32/single/seed19002",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 14.955725086,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2099732,
+        "process_launch_monotonic_ns": 1756900238019578,
+        "device_guard": {
+          "samples": 7,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-formal-20261021-v3/offline128/single/seed19002",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 1115.143527364,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 2100354,
+      "process_launch_monotonic_ns": 1757212617153694,
+      "device_guard": {
+        "samples": 529,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 2100386,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline128/single/seed19002",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 258.91074908,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2106691,
+        "process_launch_monotonic_ns": 1758354793125699,
+        "device_guard": {
+          "samples": 118,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 2106691,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline128/single/seed19002",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 26.907570798,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2106550,
+        "process_launch_monotonic_ns": 1758327823098980,
+        "device_guard": {
+          "samples": 13,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_overlap/single/seed19002",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 381.808135598,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 2107037,
+      "process_launch_monotonic_ns": 1758614018234136,
+      "device_guard": {
+        "samples": 182,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 2107060,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_overlap/single/seed19002",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 268.890501336,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2108657,
+        "process_launch_monotonic_ns": 1759010995885637,
+        "device_guard": {
+          "samples": 123,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 2108657,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_overlap/single/seed19002",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 15.125771349,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2108564,
+        "process_launch_monotonic_ns": 1758995847867834,
+        "device_guard": {
+          "samples": 7,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_serial/single/seed19002",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 397.066995341,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 2112444,
+      "process_launch_monotonic_ns": 1759280161962267,
+      "device_guard": {
+        "samples": 189,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 2112464,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_serial/single/seed19002",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 267.175223727,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2114268,
+        "process_launch_monotonic_ns": 1759692350036584,
+        "device_guard": {
+          "samples": 122,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 2114268,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_serial/single/seed19002",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 15.077193289,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2114162,
+        "process_launch_monotonic_ns": 1759677250393551,
+        "device_guard": {
+          "samples": 7,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_overlap/dual/seed19002",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 478.266133242,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 2119450,
+      "process_launch_monotonic_ns": 1759959797815314,
+      "device_guard": {
+        "samples": 225,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 2119470,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_overlap/dual/seed19002",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 287.451197893,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2126111,
+        "process_launch_monotonic_ns": 1760458680310263,
+        "device_guard": {
+          "samples": 134,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 2126111,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_overlap/dual/seed19002",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 20.569434266,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2125808,
+        "process_launch_monotonic_ns": 1760438088474787,
+        "device_guard": {
+          "samples": 10,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-formal-20261021-v3/offline8/dual/seed19002",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 182.788710832,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 2130215,
+      "process_launch_monotonic_ns": 1760746403929196,
+      "device_guard": {
+        "samples": 88,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 2130469,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline8/dual/seed19002",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 295.828449887,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2137684,
+        "process_launch_monotonic_ns": 1760941890563180,
+        "device_guard": {
+          "samples": 135,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 2137684,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline8/dual/seed19002",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 12.67871008,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2136164,
+        "process_launch_monotonic_ns": 1760929202158344,
+        "device_guard": {
+          "samples": 6,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-formal-20261021-v3/offline32/dual/seed19002",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 416.078282287,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 2143286,
+      "process_launch_monotonic_ns": 1761237978892743,
+      "device_guard": {
+        "samples": 199,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 2143306,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline32/dual/seed19002",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 287.114925642,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2151278,
+        "process_launch_monotonic_ns": 1761674482535093,
+        "device_guard": {
+          "samples": 132,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 2151278,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline32/dual/seed19002",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 20.385551923,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2150890,
+        "process_launch_monotonic_ns": 1761654076568869,
+        "device_guard": {
+          "samples": 10,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-formal-20261021-v3/offline128/dual/seed19002",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 1346.683457873,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 2153032,
+      "process_launch_monotonic_ns": 1761961867703390,
+      "device_guard": {
+        "samples": 640,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 2153053,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline128/dual/seed19002",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 284.370075487,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2168491,
+        "process_launch_monotonic_ns": 1763350115241636,
+        "device_guard": {
+          "samples": 130,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 2168491,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline128/dual/seed19002",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 41.438932092,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2168359,
+        "process_launch_monotonic_ns": 1763308613030545,
+        "device_guard": {
+          "samples": 20,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_serial/dual/seed19002",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 491.709696394,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 2168891,
+      "process_launch_monotonic_ns": 1763634805690098,
+      "device_guard": {
+        "samples": 235,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 2168917,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_serial/dual/seed19002",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 295.23497166,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2171781,
+        "process_launch_monotonic_ns": 1764147475698404,
+        "device_guard": {
+          "samples": 135,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 2171781,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_serial/dual/seed19002",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 20.915227679,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2171656,
+        "process_launch_monotonic_ns": 1764126538440652,
+        "device_guard": {
+          "samples": 10,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_overlap/single/seed19003",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 382.798261404,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 2172210,
+      "process_launch_monotonic_ns": 1764442983520919,
+      "device_guard": {
+        "samples": 181,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 2172251,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_overlap/single/seed19003",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 266.61053944,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2175772,
+        "process_launch_monotonic_ns": 1764840749012285,
+        "device_guard": {
+          "samples": 122,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 2175772,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_overlap/single/seed19003",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 14.924201193,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2175662,
+        "process_launch_monotonic_ns": 1764825802810353,
+        "device_guard": {
+          "samples": 7,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-formal-20261021-v3/offline8/single/seed19003",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 136.063400188,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 2176681,
+      "process_launch_monotonic_ns": 1765107631571963,
+      "device_guard": {
+        "samples": 65,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 2176789,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline8/single/seed19003",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 267.226173498,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2177968,
+        "process_launch_monotonic_ns": 1765254530780977,
+        "device_guard": {
+          "samples": 122,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 2177968,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline8/single/seed19003",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 10.816683317,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2177876,
+        "process_launch_monotonic_ns": 1765243704632565,
+        "device_guard": {
+          "samples": 5,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-formal-20261021-v3/offline32/single/seed19003",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 326.303986793,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 2180061,
+      "process_launch_monotonic_ns": 1765522016964404,
+      "device_guard": {
+        "samples": 156,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 2180159,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline32/single/seed19003",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 264.507198652,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2182780,
+        "process_launch_monotonic_ns": 1765862811901393,
+        "device_guard": {
+          "samples": 120,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 2182780,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline32/single/seed19003",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 14.451988802,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2182686,
+        "process_launch_monotonic_ns": 1765848339954138,
+        "device_guard": {
+          "samples": 7,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-formal-20261021-v3/offline128/single/seed19003",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 1116.624776525,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 2183226,
+      "process_launch_monotonic_ns": 1766127589113151,
+      "device_guard": {
+        "samples": 534,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 2183246,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline128/single/seed19003",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 271.824046326,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2198697,
+        "process_launch_monotonic_ns": 1767271506432588,
+        "device_guard": {
+          "samples": 124,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 2198697,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline128/single/seed19003",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 27.1650738,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2198584,
+        "process_launch_monotonic_ns": 1767244276744776,
+        "device_guard": {
+          "samples": 13,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_serial/single/seed19003",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 394.753986969,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 2200492,
+      "process_launch_monotonic_ns": 1767543649186559,
+      "device_guard": {
+        "samples": 187,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 2200514,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_serial/single/seed19003",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 272.4263866,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2202124,
+        "process_launch_monotonic_ns": 1767953636572858,
+        "device_guard": {
+          "samples": 125,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 2202124,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_serial/single/seed19003",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 15.189465585,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2202015,
+        "process_launch_monotonic_ns": 1767938425000892,
+        "device_guard": {
+          "samples": 7,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-formal-20261021-v3/offline8/dual/seed19003",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 177.713003171,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 2203857,
+      "process_launch_monotonic_ns": 1768226335237630,
+      "device_guard": {
+        "samples": 85,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 2203889,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline8/dual/seed19003",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 293.190758791,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2207068,
+        "process_launch_monotonic_ns": 1768417411979816,
+        "device_guard": {
+          "samples": 134,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 2207068,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline8/dual/seed19003",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 13.345327989,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2206817,
+        "process_launch_monotonic_ns": 1768404057418977,
+        "device_guard": {
+          "samples": 6,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-formal-20261021-v3/offline32/dual/seed19003",
+      "status": "failed",
+      "returncode": 0,
+      "elapsed_seconds": 405.513730397,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 2209818,
+      "process_launch_monotonic_ns": 1768710863061974,
+      "device_guard": {
+        "samples": 193,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 2209841,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline32/dual/seed19003",
+        "status": "failed",
+        "returncode": 0,
+        "elapsed_seconds": 17.202533121,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": true,
+        "pgid": 2212846,
+        "process_launch_monotonic_ns": 1769116395770925,
+        "device_guard": {
+          "samples": 8,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-formal-20261021-v3/offline128/dual/seed19003",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 1361.431530723,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 2212952,
+      "process_launch_monotonic_ns": 1769133867988418,
+      "device_guard": {
+        "samples": 647,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 2212986,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline128/dual/seed19003",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 291.0740638,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2222591,
+        "process_launch_monotonic_ns": 1770537441042734,
+        "device_guard": {
+          "samples": 133,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 2222591,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/offline128/dual/seed19003",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 42.015461554,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2222445,
+        "process_launch_monotonic_ns": 1770495361856178,
+        "device_guard": {
+          "samples": 20,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_overlap/dual/seed19003",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 469.066602975,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 2224612,
+      "process_launch_monotonic_ns": 1770828830079092,
+      "device_guard": {
+        "samples": 223,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 2224633,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_overlap/dual/seed19003",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 293.079971575,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2228013,
+        "process_launch_monotonic_ns": 1771317348433860,
+        "device_guard": {
+          "samples": 134,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 2228013,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_overlap/dual/seed19003",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 19.407862186,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2227747,
+        "process_launch_monotonic_ns": 1771297918584085,
+        "device_guard": {
+          "samples": 9,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_serial/dual/seed19003",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 486.536050144,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 2228712,
+      "process_launch_monotonic_ns": 1771610704424221,
+      "device_guard": {
+        "samples": 230,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 2228733,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_serial/dual/seed19003",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 284.407813747,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2234005,
+        "process_launch_monotonic_ns": 1772117699824693,
+        "device_guard": {
+          "samples": 130,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 2234005,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-formal-20261021-v3/ods_serial/dual/seed19003",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 20.416113551,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 2233872,
+        "process_launch_monotonic_ns": 1772097261680708,
+        "device_guard": {
+          "samples": 10,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    }
+  ],
+  "gpu_preflight": {
+    "readings": [
+      {
+        "monotonic_ns": 1747775494722473,
+        "gpus": [
+          {
+            "index": 0,
+            "uuid": "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 34499,
+            "total_mib": 73415
+          },
+          {
+            "index": 1,
+            "uuid": "GPU-3b85e500-27ff-35d9-eb8d-d54f9ff0898d",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 72828,
+            "total_mib": 73415
+          },
+          {
+            "index": 2,
+            "uuid": "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 34858,
+            "total_mib": 73415
+          },
+          {
+            "index": 3,
+            "uuid": "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 72831,
+            "total_mib": 73415
+          },
+          {
+            "index": 4,
+            "uuid": "GPU-a5477f57-58a6-4f89-6e7a-338d8fcfc6f1",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 72831,
+            "total_mib": 73415
+          },
+          {
+            "index": 5,
+            "uuid": "GPU-569c23a7-9291-45ef-c727-ba74d63708db",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 2,
+            "free_mib": 68569,
+            "total_mib": 73415
+          },
+          {
+            "index": 6,
+            "uuid": "GPU-624342e0-6d34-01ea-c202-1d15bf69f63f",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 90,
+            "free_mib": 69829,
+            "total_mib": 73415
+          },
+          {
+            "index": 7,
+            "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 44527,
+            "total_mib": 73415
+          }
+        ]
+      },
+      {
+        "monotonic_ns": 1747777798708957,
+        "gpus": [
+          {
+            "index": 0,
+            "uuid": "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 34499,
+            "total_mib": 73415
+          },
+          {
+            "index": 1,
+            "uuid": "GPU-3b85e500-27ff-35d9-eb8d-d54f9ff0898d",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 72828,
+            "total_mib": 73415
+          },
+          {
+            "index": 2,
+            "uuid": "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 34858,
+            "total_mib": 73415
+          },
+          {
+            "index": 3,
+            "uuid": "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 72831,
+            "total_mib": 73415
+          },
+          {
+            "index": 4,
+            "uuid": "GPU-a5477f57-58a6-4f89-6e7a-338d8fcfc6f1",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 72831,
+            "total_mib": 73415
+          },
+          {
+            "index": 5,
+            "uuid": "GPU-569c23a7-9291-45ef-c727-ba74d63708db",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 68554,
+            "total_mib": 73415
+          },
+          {
+            "index": 6,
+            "uuid": "GPU-624342e0-6d34-01ea-c202-1d15bf69f63f",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 90,
+            "free_mib": 69829,
+            "total_mib": 73415
+          },
+          {
+            "index": 7,
+            "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 44527,
+            "total_mib": 73415
+          }
+        ]
+      },
+      {
+        "monotonic_ns": 1747780479664264,
+        "gpus": [
+          {
+            "index": 0,
+            "uuid": "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 34499,
+            "total_mib": 73415
+          },
+          {
+            "index": 1,
+            "uuid": "GPU-3b85e500-27ff-35d9-eb8d-d54f9ff0898d",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 72828,
+            "total_mib": 73415
+          },
+          {
+            "index": 2,
+            "uuid": "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 34858,
+            "total_mib": 73415
+          },
+          {
+            "index": 3,
+            "uuid": "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 72831,
+            "total_mib": 73415
+          },
+          {
+            "index": 4,
+            "uuid": "GPU-a5477f57-58a6-4f89-6e7a-338d8fcfc6f1",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 72831,
+            "total_mib": 73415
+          },
+          {
+            "index": 5,
+            "uuid": "GPU-569c23a7-9291-45ef-c727-ba74d63708db",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 1,
+            "free_mib": 69531,
+            "total_mib": 73415
+          },
+          {
+            "index": 6,
+            "uuid": "GPU-624342e0-6d34-01ea-c202-1d15bf69f63f",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 89,
+            "free_mib": 69829,
+            "total_mib": 73415
+          },
+          {
+            "index": 7,
+            "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 44527,
+            "total_mib": 73415
+          }
+        ]
+      }
+    ],
+    "pairs": [
+      {
+        "simulation": {
+          "index": 0,
+          "uuid": "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c",
+          "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+          "utilization_percent": 0,
+          "free_mib": 34499,
+          "total_mib": 73415
+        },
+        "training": {
+          "index": 2,
+          "uuid": "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+          "utilization_percent": 0,
+          "free_mib": 34858,
+          "total_mib": 73415
+        },
+        "cpu_affinity": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ]
+      }
+    ],
+    "rejected": [
+      {
+        "index": 5,
+        "reason": "not present, not idle in all three readings, or below 16 GiB free"
+      }
+    ],
+    "aux_graphics_gpu": {
+      "index": 7,
+      "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+      "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+      "utilization_percent": 0,
+      "free_mib": 44527,
+      "total_mib": 73415,
+      "scope": "passive pure-G driver footprint only",
+      "max_per_pid_bytes": 8388608,
+      "idle_required": false
+    },
+    "limitations": [
+      "Each primary GPU passes three zero-utilization readings and has at least 16 GiB free; admission is not an exclusive reservation.",
+      "One generation/training UUID pair and eight disjoint CPUs are held for each seed/vision group; at most two groups run concurrently.",
+      "Outside a pipeline's primary pair, an explicit auxiliary UUID permits only owned pure-G contexts with known per-PID memory <=8 MiB. It may also be an explicitly selected idle primary of another pipeline; per-process-group limits still apply.",
+      "Periodic process-tree/process-group GPU audits can miss short-lived contexts; matching native UUID placement still needs qualification.",
+      "Total pipeline time ends after normal training-worker exit; independent evaluation is outside that time."
+    ]
+  },
+  "source_sha256": {
+    "embodichain/data_pipeline/engine/data.py": "3297f1b6d036bd63b71595e08ef9fe981eb58be02db7e9fe117a91e11bcf5bb3",
+    "embodichain/data_pipeline/runtime.py": "0992cd749605df1cd79d0f64ce2b5dbac0c9e7b48124fec2a5fd3b454c263819",
+    "examples/ods/data_stream_demo/__init__.py": "c9041fac160c5ee047510a80b557bb60b3d92de74a291ed68744365508d72fe0",
+    "examples/ods/data_stream_demo/acquisition.py": "a2188f50b0fc1dba3de02b8fde2a3b20b76ea510770abf271d2caaecc122d89c",
+    "examples/ods/data_stream_demo/lerobot_io.py": "aeec5641a3e50b1fbe6ff46829a0cbe0d1a498715e0de0aa38357d554c159d5f",
+    "examples/ods/data_stream_demo/metrics.py": "c67bd79d04eb8c79361cecc18d937e1531125cbe6f4f4ad079c1133ea79ed90b",
+    "examples/ods/data_stream_demo/payload.py": "65a6e074aab6becb8a9fc46fffad0753f997bad22e10e69f25426b09af04379d",
+    "examples/ods/data_stream_demo/qualify_encoder.py": "043a94098f5672d50b58c06ec82ea84f4b9c23b9ca27fff469f309cb7f0b4647",
+    "examples/ods/data_stream_demo/report.py": "796d64a3604f692478a3023cf2242e19311d8726ccfb95e9773571ff58a66fde",
+    "examples/ods/data_stream_demo/run.py": "dd4369b5f83f728bce1feafca6ba397ba9db3a3434b8f1681bd74699106bed17",
+    "examples/ods/data_stream_demo/suite.py": "bde907ce27499f73c35686f42f4cdcf7f9d94d868e90317a6e9bc3500286a278",
+    "examples/ods/data_stream_demo/train.py": "1cbe47d228d6eba8559b74aa24fdc706949e3a700c45d8464b1b1f71f1182736",
+    "examples/ods/data_stream_demo/training_audit.py": "75e3ce65d8130972265d55b5819a70d9d4d73c91cd5adcb0ef8a2f2ae717e3ce",
+    "examples/ods/data_stream_demo/training_data.py": "dfae919f69d9e76f5e468ce3f7335f9fed130abf8673922d9757e5503c56da2b",
+    "examples/ods/data_stream_demo/training_eval.py": "e65b3def87df59531caf997577635d66beb0a2f5f695d7e0b2233817ca2003ee",
+    "examples/ods/data_stream_demo/training_metrics.py": "2bb613b2235bb8fa9f09b383beb8c27b8a4810e648adf290848063d6b34dcd72",
+    "examples/ods/data_stream_demo/training_report.py": "c9c6678446742b1f6798e7f366958781da528aaa7184c26dd43c81c00356d17d",
+    "examples/ods/data_stream_demo/training_suite.py": "f33df008d427cc7f672bab0b414393f137234b097e7717cb05845a27472a4c03",
+    "examples/ods/data_stream_demo/video_integrity.py": "e1286b2a60902fc7b0302e6d4decaeb024f36883d0b90066a8d4fc159a29c7d1",
+    "examples/ods/data_stream_demo/visual_policy.py": "c587fa2f9120c9163777ae9567a22cd77039fda2566b70ebf9836d5a4c50fbf4",
+    "examples/ods/simple_bc_demo/config.py": "57b27cf7f38806c8a0993990dc2767de320f8f2102d47d9a4b1fdaf7e8ffdac4",
+    "examples/ods/simple_bc_demo/configs/env.yaml": "c801ab47187fbd0e9079208149077a781ce48dda0afd4c0ccd7a5bbe8f63dfa9",
+    "examples/ods/simple_bc_demo/configs/franka.yaml": "592bf09371e3e1c74a3aff9ee951cccb853f8a41d06dba314842fd49e0cb3366",
+    "examples/ods/simple_bc_demo/configs/task.yaml": "5d33898f4b18821ee5b8dff680663258de4e231202474259cf4c38bc416a9a4e",
+    "examples/ods/simple_bc_demo/environment.py": "107e0037361ea4e7635d503be9764622f50130a253de544f5bf9eebb41362329",
+    "embodichain/learning/models/resnet_encoder.py": "32f2fb7463d80f317569084d908f3e7e741a36590d5a00ac177bc54f20ff8b90",
+    "embodichain/learning/models/mlp.py": "c607360edb8bff98f234b84400155da680129b5653c5b2e7b41b869b050e8a81",
+    "embodichain/learning/models/normalizer.py": "f9e59e8eadf568d7533aa4e91d639aaf207b0843d6c8aaaa24954c870afb4764",
+    "embodichain/learning/models/__init__.py": "62dfb80b90068ab82f28a9d312f865a6e68014eaed6655a13f6779f2b6b41a0e"
+  },
+  "limitations": [
+    "Each primary GPU passes three zero-utilization readings and has at least 16 GiB free; admission is not an exclusive reservation.",
+    "One generation/training UUID pair and eight disjoint CPUs are held for each seed/vision group; at most two groups run concurrently.",
+    "Outside a pipeline's primary pair, an explicit auxiliary UUID permits only owned pure-G contexts with known per-PID memory <=8 MiB. It may also be an explicitly selected idle primary of another pipeline; per-process-group limits still apply.",
+    "Periodic process-tree/process-group GPU audits can miss short-lived contexts; matching native UUID placement still needs qualification.",
+    "Total pipeline time ends after normal training-worker exit; independent evaluation is outside that time."
+  ],
+  "original_suite_summary": {
+    "path": "/tmp/ods-visual-training-formal-20261021-v3/suite-summary.json",
+    "sha256": "6b483c173899fa76f53deedd130754ad9bd403dde4b5563cc16d591674a87cf8",
+    "retained_in_raw_archive": true
+  }
+}

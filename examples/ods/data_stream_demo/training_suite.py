@@ -482,6 +482,86 @@ def _audit(slots: list[dict[str, Any]], auxiliary: dict[str, Any] | None) -> Non
             )
 
 
+def _group_snapshot(pgid: int) -> dict[str, Any]:
+    """Capture identities only for members of this owned process group."""
+    result: dict[str, Any] = {
+        "monotonic_ns": time.monotonic_ns(),
+        "pgid": pgid,
+        "exists": False,
+        "members": [],
+        "inspection_errors": [],
+    }
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return result
+    except PermissionError as error:
+        result["inspection_errors"].append(repr(error))
+    result["exists"] = True
+    for member in psutil.process_iter():
+        try:
+            if os.getpgid(member.pid) != pgid:
+                continue
+        except ProcessLookupError:
+            continue
+        except PermissionError as error:
+            result["inspection_errors"].append(
+                {"pid": member.pid, "error": repr(error)}
+            )
+            continue
+        row: dict[str, Any] = {"pid": member.pid}
+        try:
+            with member.oneshot():
+                row.update(
+                    ppid=member.ppid(),
+                    create_time=member.create_time(),
+                    name=member.name(),
+                    state=member.status(),
+                )
+                try:
+                    row["cmdline"] = member.cmdline()
+                except (psutil.NoSuchProcess, psutil.AccessDenied) as error:
+                    row["cmdline_error"] = repr(error)
+        except psutil.NoSuchProcess:
+            continue
+        except psutil.AccessDenied as error:
+            row["inspection_error"] = repr(error)
+        result["members"].append(row)
+    result["members"].sort(key=lambda row: row["pid"])
+    states = [row.get("state") for row in result["members"]]
+    result["member_kind"] = (
+        "unresolved"
+        if result["inspection_errors"]
+        or any("inspection_error" in row for row in result["members"])
+        else (
+            "zombie_only"
+            if states and all(state == psutil.STATUS_ZOMBIE for state in states)
+            else "live_or_unknown" if states else "unresolved"
+        )
+    )
+    return result
+
+
+def _await_group_exit(pgid: int, *, timeout: float) -> dict[str, Any]:
+    """Allow brief normal helper cleanup; any group at the deadline fails."""
+    started = time.monotonic()
+    initial = _group_snapshot(pgid)
+    latest = initial
+    polls = 1
+    while latest["exists"] and time.monotonic() < started + timeout:
+        time.sleep(min(0.05, max(0.0, started + timeout - time.monotonic())))
+        latest = _group_snapshot(pgid)
+        polls += 1
+    return {
+        "grace_seconds": timeout,
+        "wait_seconds": time.monotonic() - started,
+        "poll_count": polls,
+        "group_disappeared": not latest["exists"],
+        "initial": initial,
+        "final": latest,
+    }
+
+
 def _finish(
     item: dict[str, Any], *, cancelled: bool
 ) -> tuple[dict[str, Any], dict[str, Any]] | None:
@@ -497,15 +577,22 @@ def _finish(
     if reason is not None:
         _terminate(process)
     process.wait()
-    leaked = False
-    try:
-        os.killpg(process.pid, 0)
-    except ProcessLookupError:
-        pass
-    else:
-        leaked = True
-        _terminate(process)
-        reason = reason or "Child left an owned process group alive"
+    shutdown = _await_group_exit(process.pid, timeout=2.0)
+    leaked = not shutdown["group_disappeared"]
+    if leaked:
+        kind = shutdown["final"].get("member_kind", "unresolved")
+        reason = reason or (
+            "Owned process group remains after normal-exit grace "
+            f"({kind}; see process_group_shutdown identities)"
+        )
+        # A zombie cannot execute work or respond to signals. Its presence still
+        # fails the group-empty boundary; classification grants no exemption.
+        if kind != "zombie_only":
+            _terminate(process)
+            shutdown["termination_attempted"] = True
+            shutdown["after_termination"] = _await_group_exit(process.pid, timeout=2.0)
+        else:
+            shutdown["termination_attempted"] = False
     ended_ns = time.monotonic_ns()
     item["stream"].close()
     elapsed = (ended_ns - item["started_ns"]) / 1e9
@@ -584,6 +671,7 @@ def _finish(
         "timeout": timeout,
         "cancelled": cancelled,
         "leaked_process_group": leaked,
+        "process_group_shutdown": shutdown,
         "pgid": process.pid,
         "process_launch_monotonic_ns": item["started_ns"],
         "device_guard": item["guard"],

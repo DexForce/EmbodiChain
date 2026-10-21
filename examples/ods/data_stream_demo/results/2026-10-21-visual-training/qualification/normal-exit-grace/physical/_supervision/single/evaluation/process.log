@@ -1,0 +1,150 @@
+/root/miniconda3/envs/py311/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+2026-10-21 18:57:42.709 UTC │ JAX version 0.5.3 available.
+2026-10-21 18:57:47.765 UTC │ INFO    │ EmbodiChain │ Initializing 1 environments on cuda:0.
+[1;33m[DexSim WARNING] /root/sources/dexsim/cpp/dexsim/engine/function/scene/DFSceneAssimp.cpp:933: Rejected invalid imported normals: file='/root/.cache/embodichain_data/extract/Franka/Panda/meshes/robot_arms/fr3/visual/link0.obj', mesh='_01_Base_URDF_color_255_255_255.017', invalid=6, first_vertex=420[0;m
+[1;33m[DexSim WARNING] /root/sources/dexsim/cpp/dexsim/engine/function/scene/DFSceneAssimp.cpp:933: Rejected invalid imported normals: file='/root/.cache/embodichain_data/extract/Franka/Panda/meshes/robot_arms/fr3/visual/link7.obj', mesh='_08_FLANGE_URDF_color_192_192_192.014', invalid=22, first_vertex=69[0;m
+[DexSim INFO] /root/sources/dexsim/cpp/dexsim/engine/render/optix/component/render/DFDataFrameOptiX.cpp:521: OptiX denoiser configured for FastRT offscreen target: resolution=256x256, cameras=1
+[DexSim INFO] /root/sources/dexsim/cpp/dexsim/engine/render/optix/component/render/DFDataFrameOptiX.cpp:521: OptiX denoiser configured for FastRT offscreen target: resolution=256x256, cameras=1
+2026-10-21 18:57:49.555 UTC │ INFO    │ EmbodiChain │ Initializing functor 'arm' with class 'RelativeEefPoseAction'.
+2026-10-21 18:57:49.557 UTC │ INFO    │ EmbodiChain │ Initializing functor 'eef' with class 'ParallelGripperAction'.
+╭──────────────────────────────────────────────────────────────────────────────────────────────╮
+│                     EmbodiChain · Environment initialized: PickPlaceEnv                      │
+├───────────────┬───────────────────────┬──────────────────────────────────────────────────────┤
+│ Section       │ Setting               │ Value                                                │
+├───────────────┼───────────────────────┼──────────────────────────────────────────────────────┤
+│ Runtime       │ Versions              │ EmbodiChain unknown · DexSim                         │
+│               │                       │ 0.5.1+401968ebfd112a3c11ab9deea338e2418542fe6e       │
+│               │ Compute device        │ cuda:0                                               │
+│               │ Parallel environments │ 1 · spacing 2.5 m                                    │
+├───────────────┼───────────────────────┼──────────────────────────────────────────────────────┤
+│ Rendering     │ Renderer              │ fast-rt                                              │
+│               │ Graphics API          │ Vulkan                                               │
+│               │ Render GPU            │ NVIDIA RTX PRO 5000 72GB Blackwell · GPU 0           │
+│               │ Native window         │ CLOSED                                               │
+│               │ Browser viewer        │ OFF                                                  │
+│               │ Viewer resolution     │ 1920 × 1080                                          │
+│               │ Tone mapping          │ OFF                                                  │
+├───────────────┼───────────────────────┼──────────────────────────────────────────────────────┤
+│ Physics       │ Backend               │ Default                                              │
+│               │ Solver                │ Constraint Dynamics                                  │
+│               │ Collision policy      │ isolated                                             │
+│               │ Physics timestep      │ 4.16667 ms (240 Hz)                                  │
+│               │ Gravity               │ [0, 0, -9.81] m/s²                                   │
+├───────────────┼───────────────────────┼──────────────────────────────────────────────────────┤
+│ Scene / env   │ Robots                │ 1                                                    │
+│               │ Articulations         │ 0                                                    │
+│               │ Rigid objects         │ 2                                                    │
+│               │ Visual objects        │ 0                                                    │
+│               │ Object groups         │ 0                                                    │
+│               │ Deformables           │ 0                                                    │
+│               │ Sensors               │ 2                                                    │
+├───────────────┼───────────────────────┼──────────────────────────────────────────────────────┤
+│ Scene         │ Default ground        │ GLOBAL                                               │
+│               │ Native window         │ CLOSED                                               │
+├───────────────┼───────────────────────┼──────────────────────────────────────────────────────┤
+│ Sensors / env │ cam_high              │ Camera · 256 × 256 · color                           │
+│               │ cam_wrist             │ Camera · 256 × 256 · color                           │
+├───────────────┼───────────────────────┼──────────────────────────────────────────────────────┤
+│ Scene         │ State                 │ READY                                                │
+├───────────────┼───────────────────────┼──────────────────────────────────────────────────────┤
+│ Environment   │ Config                │ EmbodiedEnvCfg                                       │
+│               │ Seed                  │ 197001                                               │
+│               │ Robot                 │ Robot (uid=FrankaPanda)                              │
+│               │ Sensors               │ 2 (cam_high, cam_wrist)                              │
+│               │ Control timestep      │ 0.0333333 s (30 Hz, 8 physics steps)                 │
+│               │ Episode limit         │ 600 control steps                                    │
+├───────────────┼───────────────────────┼──────────────────────────────────────────────────────┤
+│ Managers      │ Total                 │ 4/5 active, 6 functors                               │
+│               │ EventManager          │ 0 functors                                           │
+│               │ ObservationManager    │ 4 functors                                           │
+│               │ ActionManager         │ 2 functors                                           │
+│               │ RewardManager         │ 0 functors                                           │
+│               │ DatasetManager        │ disabled                                             │
+╰───────────────┴───────────────────────┴──────────────────────────────────────────────────────╯
+
+╭────────────────────────────────────────────────────────────────────────────────────╮
+│                      EmbodiChain · Functor Details · 6 active                      │
+├────────────────────────┬────────────────────────────┬───────┬──────────────────────┤
+│ Name                   │ Callable                   │ Mode  │ Details              │
+├────────────────────────┼────────────────────────────┼───────┼──────────────────────┤
+│ ObservationManager · 4 │                            │       │                      │
+├────────────────────────┼────────────────────────────┼───────┼──────────────────────┤
+│ tcp_pose               │ observations.get_robot_eef │ add   │ output=tcp_pose      │
+│                        │ _pose                      │       │                      │
+│ cube_velocity          │ observations.get_rigid_obj │ add   │ output=cube_velocity │
+│                        │ ect_velocity               │       │ entity=cube          │
+│ cube_pose              │ observations.get_object_po │ add   │ output=cube_pose     │
+│                        │ se                         │       │ entity=cube          │
+│ goal_position          │ observations.target_positi │ add   │ output=goal_position │
+│                        │ on                         │       │                      │
+├────────────────────────┼────────────────────────────┼───────┼──────────────────────┤
+│ ActionManager · 2      │                            │       │                      │
+├────────────────────────┼────────────────────────────┼───────┼──────────────────────┤
+│ arm                    │ RelativeEefPoseAction      │ terms │ command=qpos · dim=6 │
+│ eef                    │ ParallelGripperAction      │ terms │ command=qpos · dim=1 │
+╰────────────────────────┴────────────────────────────┴───────┴──────────────────────╯
+VERSION file not found.
+visual evaluation 1/2: success=False lifted=False error=0.3851
+visual evaluation 2/2: success=False lifted=False error=0.3959
+{
+  "passed": true,
+  "checkpoint": "/tmp/ods-normal-exit-grace-physical-20261021-v1/final.pt",
+  "checkpoint_sha256": "3792500301eaea69b1c088070a90aa67d643db064c6a1850bdd7716ea1c3ef30",
+  "policy_step": 4,
+  "vision": "dual",
+  "cameras": [
+    "cam_high",
+    "cam_wrist"
+  ],
+  "camera_profile_version": "v3",
+  "prediction_horizon": 32,
+  "action_horizon": 16,
+  "sim_device": "cuda:0",
+  "inference_device": "cuda:1",
+  "seed": 197001,
+  "scene_digest": "5c690d7b9ff7a60f90c0f0b7b46f5550aee9445c2de995cc3bb02818d5e29bcd",
+  "scenes": 2,
+  "records": [
+    {
+      "scene": 0,
+      "seed": 197001,
+      "cube_xy": [
+        -0.43312087655067444,
+        -0.10631773620843887
+      ],
+      "success": false,
+      "failure": false,
+      "lifted": false,
+      "goal_error": 0.3851433992385864,
+      "length": 600,
+      "replans": 38,
+      "terminated": false,
+      "truncated": true
+    },
+    {
+      "scene": 1,
+      "seed": 197002,
+      "cube_xy": [
+        -0.4466746747493744,
+        -0.11614350974559784
+      ],
+      "success": false,
+      "failure": false,
+      "lifted": false,
+      "goal_error": 0.39594870805740356,
+      "length": 600,
+      "replans": 38,
+      "terminated": false,
+      "truncated": true
+    }
+  ],
+  "success_rate": 0.0,
+  "lift_rate": 0.0,
+  "goal_error": 0.390546053647995,
+  "episode_length": 600.0,
+  "wall_seconds": 37.4611050079111,
+  "timing_scope": "evaluation only; excluded from training pipeline time",
+  "closed": true,
+  "expert_initialized": false
+}

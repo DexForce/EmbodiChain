@@ -1,0 +1,139 @@
+{
+  "format": "ods-data-stream-payload-v1",
+  "state_features": [
+    {
+      "path": [
+        "cube_pose"
+      ],
+      "shape": [
+        7
+      ],
+      "width": 7
+    },
+    {
+      "path": [
+        "cube_velocity"
+      ],
+      "shape": [
+        6
+      ],
+      "width": 6
+    },
+    {
+      "path": [
+        "goal_position"
+      ],
+      "shape": [
+        3
+      ],
+      "width": 3
+    },
+    {
+      "path": [
+        "robot",
+        "qf"
+      ],
+      "shape": [
+        9
+      ],
+      "width": 9
+    },
+    {
+      "path": [
+        "robot",
+        "qpos"
+      ],
+      "shape": [
+        9
+      ],
+      "width": 9
+    },
+    {
+      "path": [
+        "robot",
+        "qvel"
+      ],
+      "shape": [
+        9
+      ],
+      "width": 9
+    },
+    {
+      "path": [
+        "tcp_pose"
+      ],
+      "shape": [
+        4,
+        4
+      ],
+      "width": 16
+    }
+  ],
+  "state_width": 59,
+  "action_width": 7,
+  "cameras": {
+    "cam_high": {
+      "path": [
+        "sensor",
+        "cam_high",
+        "color"
+      ],
+      "shape": [
+        256,
+        256,
+        4
+      ]
+    }
+  },
+  "image_output": "RGB float32 channel-first [0,1]",
+  "action_schema": {
+    "semantics": "policy_request",
+    "names": [
+      "dx",
+      "dy",
+      "dz",
+      "drx",
+      "dry",
+      "drz",
+      "gripper"
+    ],
+    "step_dt": 0.03333333333333333,
+    "terms": [
+      {
+        "term": {
+          "contract": "eef_pose.relative@1"
+        }
+      },
+      {
+        "term": {
+          "contract": "gripper.parallel@1"
+        }
+      }
+    ]
+  },
+  "step_dt": 0.03333333333333333,
+  "action_parameters": {
+    "arm": {
+      "contract": "eef_pose.relative@1",
+      "params": {
+        "part_name": "arm",
+        "translation_scale": 0.02,
+        "rotation_scale": 0.1,
+        "ik_method": "dls"
+      }
+    },
+    "eef": {
+      "contract": "gripper.parallel@1",
+      "params": {
+        "part_name": "eef",
+        "command_mode": "continuous",
+        "lower_command": {
+          ".*": 0.0
+        },
+        "upper_command": {
+          ".*": 0.04
+        }
+      }
+    }
+  }
+}

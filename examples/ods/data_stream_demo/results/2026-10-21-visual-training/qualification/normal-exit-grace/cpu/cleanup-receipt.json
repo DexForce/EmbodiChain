@@ -1,0 +1,49 @@
+{
+  "passed": true,
+  "scope": "controlled CPU lifecycle validation only; old formal failed remains failed",
+  "frozen_input_sha256": "f33df008d427cc7f672bab0b414393f137234b097e7717cb05845a27472a4c03",
+  "updated_production_source_sha256": "e25ee63e7782d175737b5780156810231e05f03cfb622089e6e13e4db5eb9919",
+  "driver_sha256": "3394161be8ddceb8d7ea5f143944f6ebc64282b5ad6dc99c2ba1e3371cf9e0bf",
+  "all_fixture_process_groups_empty": true,
+  "checks": [
+    {
+      "case": "delayed_normal_exit",
+      "pgid": 2235507,
+      "final_group_snapshot": {
+        "monotonic_ns": 1772767639539117,
+        "pgid": 2235507,
+        "exists": false,
+        "members": [],
+        "inspection_errors": []
+      },
+      "persistent_SIGTERM_ignore": false,
+      "waitpid_exitcode": 0
+    },
+    {
+      "case": "persistent_live",
+      "pgid": 2235515,
+      "final_group_snapshot": {
+        "monotonic_ns": 1772767639588492,
+        "pgid": 2235515,
+        "exists": false,
+        "members": [],
+        "inspection_errors": []
+      },
+      "persistent_SIGTERM_ignore": true,
+      "waitpid_exitcode": -9
+    },
+    {
+      "case": "zombie_only",
+      "pgid": 2235518,
+      "final_group_snapshot": {
+        "monotonic_ns": 1772767639619771,
+        "pgid": 2235518,
+        "exists": false,
+        "members": [],
+        "inspection_errors": []
+      },
+      "persistent_SIGTERM_ignore": false,
+      "waitpid_exitcode": null
+    }
+  ]
+}
