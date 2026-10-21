@@ -120,6 +120,13 @@ before relocating private paths, then rebuilds their full digests and root HTML;
 readers never reseal stale artifacts. Missing legacy companions are not generated
 implicitly. `validate-graph --bundle` is read-only, and `visualize --output *.html`
 uses the same graph data rather than a separate execution representation.
+`task_engine/semantic_graph_html.py` owns the offline report and its control-part
+lanes. Optional bounded local thumbnails come from bundle-owned scene metadata;
+source cutouts and generation-stage GLB renders are not final-geometry evidence.
+Workflow and CLI completion write scoped monotonic wall time to `run_summary.json`
+and refresh only the current run's selected viewer. This display-only sidecar
+does not alter sealed companions, execution outcomes or TaskSpec qualification;
+missing images and timing remain unavailable, without network or renderer calls.
 Runtime captures supported final geometry before reset, separately from measured
 milestone events. New-contract success requires a satisfied TaskSpec evaluation;
 raw program success remains in `runtime_result.program_success`. Unsupported

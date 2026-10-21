@@ -21,11 +21,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 import json
 from pathlib import Path
+import sys
 from typing import Any
 
 from embodichain.gen_sim.task_spec import TaskSpec, validate_task_spec
 
 from .contracts import canonical_hash
+from ._semantic_graph_presentation import _graph_presentation
 from .reporting import validate_execution_report
 from .semantic_graph import validate_semantic_task_graph
 from .semantic_graph_validation import (
@@ -43,6 +45,7 @@ def render_semantic_task_graph_html(
     *,
     task_spec: TaskSpec | Mapping[str, Any] | None = None,
     validation: Mapping[str, Any] | None = None,
+    presentation: Mapping[str, Any] | None = None,
 ) -> str:
     """Render self-contained HTML without altering graph or recorded evidence.
 
@@ -51,6 +54,7 @@ def render_semantic_task_graph_html(
         execution_report: Optional identity-matched original execution report.
         task_spec: Optional normative companion; absent stays absent.
         validation: Optional recomputable static coverage envelope.
+        presentation: Optional display metadata, never a success certificate.
 
     Returns:
         Standalone HTML with embedded data, styles, SVG and local interactions.
@@ -149,6 +153,10 @@ def render_semantic_task_graph_html(
             "graph_digest": canonical_hash(selected),
             "integration_fingerprint": selected["integration_fingerprint"],
         },
+        "presentation": {
+            **_graph_presentation(selected, execution_report=report),
+            **dict(presentation or {}),
+        },
     }
     encoded = json.dumps(
         data, ensure_ascii=False, separators=(",", ":"), allow_nan=False
@@ -176,6 +184,8 @@ def write_semantic_task_graph_html(
     *,
     task_spec: TaskSpec | Mapping[str, Any] | None = None,
     validation: Mapping[str, Any] | None = None,
+    bundle_root: str | Path | None = None,
+    run_summary: Mapping[str, Any] | None = None,
 ) -> Path:
     """Write an offline graph viewer.
 
@@ -185,14 +195,120 @@ def write_semantic_task_graph_html(
         execution_report: Optional original report for separate runtime overlays.
         task_spec: Optional normative task declaration.
         validation: Optional identity-bound static coverage.
+        bundle_root: Bundle owning optional scene metadata and asset-image sources.
+            Defaults to the output directory. Missing images stay unavailable.
+        run_summary: Optional task-matched wall-clock summary, separate from evidence.
 
     Returns:
         Absolute HTML path.
     """
-    content = render_semantic_task_graph_html(
-        graph, execution_report, task_spec=task_spec, validation=validation
-    )
     destination = Path(output).expanduser().resolve()
+    selected = validate_semantic_task_graph(graph)
+    content = render_semantic_task_graph_html(
+        selected,
+        execution_report,
+        task_spec=task_spec,
+        validation=validation,
+        presentation=_graph_presentation(
+            selected,
+            bundle_root=(
+                Path(bundle_root).expanduser().resolve()
+                if bundle_root is not None
+                else destination.parent
+            ),
+            output=destination,
+            execution_report=execution_report,
+            run_summary=run_summary,
+        ),
+    )
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(content, encoding="utf-8")
     return destination
+
+
+def _finalize_run_html(
+    output_dir: Path,
+    *,
+    bundle: Path | None,
+    summary: Mapping[str, Any],
+    html_path: str | Path | None = None,
+) -> None:
+    """Publish display-only timing and refresh only this run's selected viewer."""
+    if not output_dir.is_dir():
+        return
+    try:
+        (output_dir / "run_summary.json").write_text(
+            json.dumps(
+                {"schema_version": "task_engine_run_summary/v1", **summary},
+                ensure_ascii=False,
+                indent=2,
+                allow_nan=False,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        if bundle is None:
+            return
+        if html_path is None:
+            selection_path = output_dir / "final/selection.json"
+            if selection_path.is_file():
+                selection = json.loads(selection_path.read_text(encoding="utf-8"))
+                scene, action = selection.get("scene_attempt"), selection.get(
+                    "action_attempt"
+                )
+                if (
+                    type(scene) is not int
+                    or type(action) is not int
+                    or min(scene, action) < 1
+                ):
+                    return
+                html_path = (
+                    output_dir
+                    / "attempts"
+                    / f"scene_{scene:04d}"
+                    / "action_attempts"
+                    / f"action_{action:04d}"
+                    / "semantic_graph.html"
+                )
+            else:
+                html_path = bundle / "semantic_graph.html"
+        destination = Path(html_path).resolve()
+        if not destination.is_relative_to(output_dir.resolve()):
+            return
+        if not all(
+            (bundle / name).is_file()
+            for name in (
+                "semantic_task_graph.json",
+                "task_spec.json",
+                "semantic_graph_validation.json",
+            )
+        ):
+            return
+        from .semantic_graph_validation import verify_graph_contract
+
+        graph = json.loads(
+            (bundle / "semantic_task_graph.json").read_text(encoding="utf-8")
+        )
+        contract = verify_graph_contract(bundle, graph)
+        report_path = destination.parent / "execution_report.json"
+        report = (
+            json.loads(report_path.read_text(encoding="utf-8"))
+            if report_path.is_file()
+            else None
+        )
+        write_semantic_task_graph_html(
+            graph,
+            destination,
+            report,
+            task_spec=json.loads(
+                (bundle / "task_spec.json").read_text(encoding="utf-8")
+            ),
+            validation=contract,
+            bundle_root=bundle,
+            run_summary=summary,
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        print(
+            f"[Task Engine] Semantic graph presentation unavailable: {exc}",
+            file=sys.stderr,
+        )

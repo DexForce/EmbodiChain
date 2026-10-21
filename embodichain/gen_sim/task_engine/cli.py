@@ -234,7 +234,12 @@ def _run_visualize(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
                 else None
             )
             output = write_semantic_task_graph_html(
-                graph, args.output, report, task_spec=spec, validation=validation
+                graph,
+                args.output,
+                report,
+                task_spec=spec,
+                validation=validation,
+                bundle_root=root,
             )
         else:
             if Path(args.output).suffix.lower() != ".png":
@@ -390,6 +395,21 @@ def _run_workflow(
         ),
     }
     payload["elapsed_seconds"] = round(perf_counter() - started_at, 3)
+    from .semantic_graph_html import _finalize_run_html
+
+    _finalize_run_html(
+        result.output_dir,
+        bundle=result.final_bundle,
+        html_path=payload["semantic_graph_html"],
+        summary={
+            "task_id": args.task_id,
+            "run_id": allocation.run_id,
+            "created_at": allocation.created_at.isoformat(),
+            "status": result.status,
+            "elapsed_seconds": payload["elapsed_seconds"],
+            "elapsed_scope": "CLI 墙钟：启动至运行、发布与产物发现完成；不含报告后处理",
+        },
+    )
     _print_json(payload)
     accepted = result.succeeded if execute else result.status == "prepared"
     return 0 if accepted else 2
@@ -466,6 +486,21 @@ def _run_prepared_bundle(args: argparse.Namespace, *, started_at: float) -> int:
         ),
     }
     payload["elapsed_seconds"] = round(perf_counter() - started_at, 3)
+    from .semantic_graph_html import _finalize_run_html
+
+    _finalize_run_html(
+        allocation.path,
+        bundle=Path(args.bundle).expanduser(),
+        html_path=payload["semantic_graph_html"],
+        summary={
+            "task_id": report.get("task_id"),
+            "run_id": allocation.run_id,
+            "created_at": allocation.created_at.isoformat(),
+            "status": payload["status"],
+            "elapsed_seconds": payload["elapsed_seconds"],
+            "elapsed_scope": "CLI 墙钟：启动至运行、发布与产物发现完成；不含报告后处理",
+        },
+    )
     _print_json(payload)
     return 0 if accepted else 2
 

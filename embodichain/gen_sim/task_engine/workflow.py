@@ -29,6 +29,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from time import perf_counter
 from typing import TYPE_CHECKING, Any, Final
 
 if TYPE_CHECKING:
@@ -503,6 +504,7 @@ class TaskEngineWorkflow:
         Returns:
             Published run status, manifest, state audit, and final bundle path.
         """
+        started_at = perf_counter()
         normalized = validate_task_run_request(request)
         if not isinstance(dataset_saving, bool):
             raise TypeError("dataset_saving must be a boolean.")
@@ -530,6 +532,7 @@ class TaskEngineWorkflow:
         ):
             raise ValueError("created_at must include a timezone.")
         run_metadata = {
+            "_started_at": started_at,
             "run_id": effective_run_id,
             "created_at": effective_created_at.isoformat(),
             "dataset_saving": bool(dataset_saving),
@@ -1588,6 +1591,22 @@ class TaskEngineWorkflow:
             },
         )
         published = transaction.commit()
+        from .semantic_graph_html import _finalize_run_html
+
+        _finalize_run_html(
+            published,
+            bundle=None if final_bundle is None else published / "final" / "bundle",
+            summary={
+                "task_id": request["task_id"],
+                "run_id": run_metadata["run_id"],
+                "created_at": run_metadata["created_at"],
+                "status": status,
+                "elapsed_seconds": round(
+                    perf_counter() - run_metadata["_started_at"], 3
+                ),
+                "elapsed_scope": "工作流墙钟：进入 run 至事务发布完成；不含报告后处理",
+            },
+        )
         return TaskEngineRunResult(
             status=status,
             output_dir=published,

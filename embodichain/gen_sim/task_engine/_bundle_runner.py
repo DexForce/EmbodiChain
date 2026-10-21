@@ -619,6 +619,7 @@ def execute_bundle(
             report,
             task_spec=_read_json(root / "task_spec.json"),
             validation=task_spec_contract,
+            bundle_root=root,
         )
     # The parent CLI prints the run summary; the full report stays on disk.
     return 0 if report["status"] == "succeeded" else 2

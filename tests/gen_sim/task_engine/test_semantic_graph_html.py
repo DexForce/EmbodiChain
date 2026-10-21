@@ -17,17 +17,26 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import base64
 from dataclasses import replace
 from html.parser import HTMLParser
+from io import BytesIO
 import json
 from pathlib import Path
 import shutil
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 
 from embodichain.gen_sim.task_engine.semantic_graph_html import (
+    _finalize_run_html,
     render_semantic_task_graph_html,
+    write_semantic_task_graph_html,
+)
+from embodichain.gen_sim.task_engine._semantic_graph_presentation import (
+    _graph_presentation,
+    _thumbnail,
 )
 from embodichain.gen_sim.task_engine._bundle_runner import _build_execution_report
 from embodichain.gen_sim.task_engine import cli
@@ -250,3 +259,271 @@ def test_cli_html_and_explicit_missing_companion(tmp_path) -> None:
                 str(tmp_path / "missing.json"),
             ]
         )
+
+
+def test_writer_embeds_bounded_local_images_with_provenance(tmp_path: Path) -> None:
+    image_module = pytest.importorskip("PIL.Image")
+    plan = _plan()
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    project = tmp_path / "project"
+    cutout = project / "scene_understanding/object_images/a_rgba.png"
+    render = project / "scene_generation/debug/vlm_views/a.png"
+    for path in (cutout, render):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        image_module.new("RGBA", (900, 600), (0, 100, 200, 255)).save(path)
+    objects = [{"uid": "a", "name": "Cup", "geometry": {"shape": {"fpath": "a.glb"}}}]
+    (bundle / "scene_manifest.json").write_text(
+        json.dumps({"objects": objects, "robot_profile": "dual_franka"})
+    )
+    (bundle / "static_scene_manifest.json").write_text(
+        json.dumps(
+            {
+                "source": {
+                    "config_path": str(project / "scene_export/scene_config.json")
+                },
+                "objects": objects,
+            }
+        )
+    )
+    output = tmp_path / "run/semantic_graph.html"
+    report = _report(plan.graph)
+    before = deepcopy(report)
+    write_semantic_task_graph_html(
+        plan.graph,
+        output,
+        report,
+        bundle_root=bundle,
+        run_summary={
+            "task_id": plan.graph["task_id"],
+            "elapsed_seconds": 12.345,
+            "elapsed_scope": "test workflow",
+        },
+    )
+    data = json.loads(_Scripts(output.read_text()).scripts[0][1])
+    assert report == before
+    assert data["report"] == report
+    assert data["graph"] == plan.graph
+    assert data["presentation"]["wall_seconds"] == 12.345
+    asset = data["presentation"]["assets"][0]
+    assert asset["cutout_source"] == cutout.as_posix()
+    assert asset["render_source"] == render.as_posix()
+    for key, size in (("cutout", 192), ("render", 768)):
+        with image_module.open(
+            BytesIO(base64.b64decode(asset[key].split(",")[1]))
+        ) as image:
+            assert max(image.size) <= size
+    assert "DESIGN PREVIEW" not in output.read_text()
+
+
+@pytest.mark.parametrize("elapsed", [None, -1, float("nan"), float("inf"), True, "12"])
+def test_wall_time_is_never_inferred_from_invalid_or_missing_data(elapsed) -> None:
+    graph = _plan().graph
+    data = _graph_presentation(
+        graph, run_summary={"task_id": graph["task_id"], "elapsed_seconds": elapsed}
+    )
+    assert data["wall_seconds"] is None
+    assert (
+        _graph_presentation(
+            graph, run_summary={"task_id": "other", "elapsed_seconds": 12}
+        )["wall_seconds"]
+        is None
+    )
+
+
+def test_missing_corrupt_and_external_images_stay_unavailable(tmp_path: Path) -> None:
+    plan = _plan()
+    project = tmp_path / "project"
+    project.mkdir()
+    outside = tmp_path / "outside.png"
+    outside.write_bytes(b"not a PNG")
+    link = project / "linked.png"
+    link.symlink_to(outside)
+    assert _thumbnail(link, project, render=False) is None
+    assert _thumbnail(outside, tmp_path, render=False) is None
+    (project / "scene_manifest.json").write_text("invalid JSON")
+    (project / "static_scene_manifest.json").write_text(json.dumps({"objects": None}))
+    assert _graph_presentation(plan.graph, bundle_root=project)["assets"] == []
+    (project / "scene_manifest.json").write_text(
+        json.dumps({"objects": [{"uid": "a"}]})
+    )
+    asset = _graph_presentation(plan.graph, bundle_root=project)["assets"][0]
+    assert asset["render"] is None and asset["cutout"] is None
+
+
+def test_completed_run_finalizer_generates_selected_html_without_changing_evidence(
+    tmp_path: Path,
+) -> None:
+    run = tmp_path / "run"
+    bundle = run / "final/bundle"
+    plan = _contract(bundle)
+    (bundle / "semantic_task_graph.json").write_text(json.dumps(plan.graph))
+    selected = run / "attempts/scene_0001/action_attempts/action_0002"
+    selected.mkdir(parents=True)
+    report = _report(plan.graph)
+    (selected / "execution_report.json").write_text(json.dumps(report))
+    (run / "final/selection.json").write_text(
+        json.dumps({"scene_attempt": 1, "action_attempt": 2})
+    )
+    before = {path: path.read_bytes() for path in run.rglob("*") if path.is_file()}
+    summary = {
+        "task_id": plan.graph["task_id"],
+        "run_id": "run",
+        "elapsed_seconds": 42.25,
+        "elapsed_scope": "workflow wall clock",
+    }
+    _finalize_run_html(run, bundle=bundle, summary=summary)
+    data = json.loads(
+        _Scripts((selected / "semantic_graph.html").read_text()).scripts[0][1]
+    )
+    assert data["presentation"]["wall_seconds"] == 42.25
+    assert data["report"] == report
+    assert (
+        json.loads((run / "run_summary.json").read_text())["elapsed_seconds"] == 42.25
+    )
+    assert all(path.read_bytes() == value for path, value in before.items())
+
+
+def test_finalizer_does_not_rewrite_an_external_prepared_bundle(tmp_path: Path) -> None:
+    run = tmp_path / "run"
+    run.mkdir()
+    historical = tmp_path / "old_bundle/semantic_graph.html"
+    historical.parent.mkdir()
+    historical.write_text("historical viewer")
+    _finalize_run_html(
+        run,
+        bundle=historical.parent,
+        html_path=historical,
+        summary={"elapsed_seconds": 1},
+    )
+    assert historical.read_text() == "historical viewer"
+
+
+@pytest.mark.parametrize("damage", ["report", "contract"])
+def test_finalizer_preserves_existing_html_on_identity_failure(
+    tmp_path: Path, capsys, damage: str
+) -> None:
+    run = tmp_path / "run"
+    bundle = run / "bundle"
+    plan = _contract(bundle)
+    (bundle / "semantic_task_graph.json").write_text(json.dumps(plan.graph))
+    report = _report(plan.graph)
+    if damage == "report":
+        report["integration_fingerprint"] = "foreign"
+    else:
+        (bundle / "components/scene.yaml").write_text("stale: true\n")
+    (run / "execution_report.json").write_text(json.dumps(report))
+    html = run / "semantic_graph.html"
+    html.write_text("existing viewer")
+    _finalize_run_html(
+        run, bundle=bundle, html_path=html, summary={"elapsed_seconds": 1}
+    )
+    assert html.read_text() == "existing viewer"
+    assert "presentation unavailable" in capsys.readouterr().err
+
+
+def test_channels_and_parallel_node_layout_are_not_conflated() -> None:
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js unavailable")
+    script = _Scripts(render_semantic_task_graph_html(_plan().graph)).scripts[1][1]
+    functions = "\n".join(
+        line
+        for line in script.splitlines()
+        if line.startswith(
+            ("function lane(", "function groupLane(", "function layout(")
+        )
+    )
+    program = (
+        """
+const mode='groups',positions=new Map(),laneY={},laneHeight={};let worldBounds;
+const calls=new Map([
+['a',{call:{resources:{primary:'left'}}}],
+['b',{call:{resources:{primary:'left'}}}],
+['c',{call:{resources:{primary:'right'}}}]
+]);
+const graph={task_groups:[{id:'a',node_ids:['a'],depends_on:[]},{id:'b',node_ids:['b'],depends_on:[]},{id:'c',node_ids:['c'],depends_on:[]}]};
+const groups=new Map(graph.task_groups.map(g=>[g.id,g]));
+"""
+        + functions
+        + """
+layout();
+if(positions.get('group:b').y+103>=laneY.auto)throw Error('Parallel nodes overlap AUTO');
+const resources=[{}, {primary:'auto'}, {primary:'left'}, {primary:'right'}, {source:'left',destination:'right'}];
+process.stdout.write(JSON.stringify(resources.map(resources=>lane({call:{resources}}))));
+"""
+    )
+    result = subprocess.run(
+        [node, "-e", program], text=True, capture_output=True, check=True
+    )
+    assert json.loads(result.stdout) == ["auto", "auto", "left", "right", "coordinated"]
+
+
+@pytest.mark.parametrize("prepared", [False, True])
+def test_successful_cli_automatically_refreshes_html_and_persists_real_timer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys, prepared: bool
+) -> None:
+    plan = _plan()
+    source_bundle = tmp_path / "prepared"
+    if prepared:
+        _contract(source_bundle)
+        (source_bundle / "semantic_task_graph.json").write_text(json.dumps(plan.graph))
+    ticks = iter([100.0, 112.5])
+    monkeypatch.setattr(cli, "perf_counter", lambda: next(ticks))
+    monkeypatch.setattr(cli, "SceneAdapter", lambda **_kwargs: object())
+    monkeypatch.setattr(cli, "_environment_successes", lambda *_args, **_kwargs: [True])
+
+    def execute(bundle, output, **_kwargs):
+        output = Path(output)
+        output.mkdir(parents=True, exist_ok=True)
+        report = _report(plan.graph)
+        (output / "execution_report.json").write_text(json.dumps(report))
+        (output / "semantic_graph.html").write_text("initial viewer")
+        return report
+
+    class Workflow:
+        def __init__(self, **_kwargs):
+            pass
+
+        def run(self, request, **_kwargs):
+            output = Path(request["output_dir"])
+            bundle = output / "final/bundle"
+            _contract(bundle)
+            (bundle / "semantic_task_graph.json").write_text(json.dumps(plan.graph))
+            execute(bundle, output)
+            return SimpleNamespace(
+                status="succeeded",
+                succeeded=True,
+                failure_class=None,
+                output_dir=output,
+                manifest_path=output / "run_manifest.json",
+                final_bundle=bundle,
+            )
+
+    monkeypatch.setattr(cli, "TaskEngineWorkflow", Workflow)
+    monkeypatch.setattr(cli, "SubprocessActionExecutor", lambda: execute)
+    args = (
+        ["run", "--bundle", str(source_bundle)]
+        if prepared
+        else [
+            "run-all",
+            "--mode",
+            "image",
+            "--task-id",
+            plan.graph["task_id"],
+            "--instruction",
+            "upright object",
+            "--image",
+            str(tmp_path / "input.png"),
+        ]
+    )
+    assert cli.main([*args, "--output-root", str(tmp_path / "history")]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    summary = json.loads((Path(payload["output_dir"]) / "run_summary.json").read_text())
+    data = json.loads(
+        _Scripts(Path(payload["semantic_graph_html"]).read_text()).scripts[0][1]
+    )
+    assert payload["elapsed_seconds"] == summary["elapsed_seconds"] == 12.5
+    assert data["presentation"]["wall_seconds"] == 12.5
+    assert data["presentation"]["run_id"] == payload["run_id"]
+    assert data["report"] == _report(plan.graph)
