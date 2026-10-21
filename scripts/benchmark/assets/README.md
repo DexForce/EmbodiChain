@@ -34,12 +34,39 @@ implemented by this initialization.
   Downloading benchmark inputs will not automatically download results or media.
 
 The three initialization files are maintained together in
-`scripts/benchmark/report_assets/` in the code repository. Publish those files
+`scripts/benchmark/assets/` in the code repository. Publish those three files
 to this dataset's root together;
 asset directories are created only when real files are uploaded. The code
 repository copy of `index.json` is the empty bootstrap template; after assets
 are published, the dataset index at the selected commit is authoritative and
 must not be replaced with that empty template during documentation updates.
+
+## Benchmark source assets
+
+The code repository reserves these directories under `scripts/benchmark/assets/`
+for small authored inputs, input descriptions, and references:
+
+```text
+shared/
+loading/
+rendering/
+physics/
+expert_generation/
+demonstrations/
+```
+
+These match the L/R/P/G/D families in
+[issue #679](https://github.com/DexForce/EmbodiChain/issues/679). Put future
+experiment-specific material under the appropriate family and experiment ID;
+shared definitions belong in `shared/`. The directories initially contain only
+Git placeholders. They are source organization, separate from the dataset's
+report layout below. Publish the three named bootstrap files explicitly, not
+the entire source directory or its `.gitkeep` files.
+
+Large input binaries remain in the selected asset repository and download to
+the external cache. Generated run artifacts and reports belong in
+`outputs/benchmarks/`. The first real input publication will define the matching
+bundle IDs and hashes; this scaffold does not supply datasets or measured results.
 
 ## Layout
 

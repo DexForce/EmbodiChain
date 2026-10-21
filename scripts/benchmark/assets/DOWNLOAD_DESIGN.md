@@ -13,7 +13,7 @@ implementations and suites remain in GitHub; reusable robot/scene assets and
 model weights retain their existing resolvers and repository ownership.
 
 The common downloader will belong to the benchmark utilities under
-`scripts/benchmark/report_assets/`, with the benchmark command wired through
+`scripts/benchmark/assets/`, with the benchmark command wired through
 the existing `scripts.benchmark.__main__` dispatcher.
 It will use the project's existing `huggingface_hub>=0.35.3,<1.0` dependency.
 No dependency change, runtime implementation, benchmark adapter, or new
