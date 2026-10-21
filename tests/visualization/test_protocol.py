@@ -29,10 +29,159 @@ from embodichain.lab.visualization.protocol import (
     JointControlCommand,
     JointControlSpec,
     JointControlState,
+    MeshMarkerOverlay,
     MeshGeometry,
+    SceneFrame,
     SceneManifest,
+    SceneOverlays,
+    estimate_frame_bytes,
     pose_to_position_wxyz,
 )
+
+
+def test_mesh_marker_overlay_owns_validated_arrays_and_counts_bytes() -> None:
+    vertices = np.array(
+        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+        dtype=np.float64,
+    )
+    faces = np.array([[0, 1, 2]], dtype=np.int64)
+    position = np.array([1.0, 2.0, 3.0], dtype=np.float64)
+    overlay = MeshMarkerOverlay(
+        "goal",
+        vertices,
+        faces,
+        position,
+        np.array([2.0, 0.0, 0.0, 0.0]),
+        scale=np.array([2.0, 3.0, 4.0]),
+        color=(0.2, 0.4, 0.6, 0.5),
+        env_id=1,
+    )
+    vertices[0, 0] = 99.0
+    faces[0, 0] = 2
+    position[0] = 99.0
+
+    assert overlay.vertices.dtype == np.float32
+    assert overlay.faces.dtype == np.uint32
+    np.testing.assert_allclose(overlay.vertices[0], [0.0, 0.0, 0.0])
+    np.testing.assert_array_equal(overlay.faces, [[0, 1, 2]])
+    np.testing.assert_allclose(overlay.position, [1.0, 2.0, 3.0])
+    np.testing.assert_allclose(overlay.wxyz, [1.0, 0.0, 0.0, 0.0])
+    frame = SceneFrame(
+        "run",
+        1,
+        1,
+        1,
+        0.01,
+        (),
+        np.empty((0, 3), dtype=np.float32),
+        np.empty((0, 4), dtype=np.float32),
+        np.empty((0,), dtype=np.bool_),
+        overlays=SceneOverlays(meshes=(overlay,)),
+    )
+    assert estimate_frame_bytes(frame) == sum(
+        array.nbytes
+        for array in (
+            overlay.vertices,
+            overlay.faces,
+            overlay.position,
+            overlay.wxyz,
+            overlay.scale,
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"vertices": [[0.0, np.nan, 0.0]]}, "finite"),
+        ({"faces": [[0, 1, 3]]}, "vertex indices"),
+        ({"faces": [[0, 1, -1]]}, "non-negative integers"),
+        ({"faces": [[0, 1, 1.5]]}, "non-negative integers"),
+        ({"faces": [[0, 1, 2**32]]}, "non-negative integers"),
+        ({"faces": []}, "at least one triangle"),
+        ({"overlay_id": ""}, "non-empty string"),
+        ({"env_id": True}, "non-negative integer"),
+        ({"scale": [1.0, 0.0, 1.0]}, "positive"),
+        ({"color": (1.1, 0.0, 0.0, 1.0)}, "RGBA"),
+        ({"uv_coords": [[0, 0]]}, "uv_coords"),
+        ({"uv_coords": [[float("nan"), 0]] * 3}, "uv_coords"),
+        ({"texture": np.zeros((2, 2, 4), np.uint8)}, "requires UVs"),
+        ({"uv_coords": np.zeros((3, 2)), "texture": np.zeros((2, 2, 4))}, "uint8"),
+        (
+            {"uv_coords": np.zeros((3, 2)), "texture": np.zeros((0, 2, 4), np.uint8)},
+            "nonempty",
+        ),
+    ],
+)
+def test_mesh_marker_overlay_rejects_invalid_geometry_and_style(
+    overrides: dict[str, object], message: str
+) -> None:
+    values: dict[str, object] = {
+        "overlay_id": "goal",
+        "vertices": [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+        "faces": [[0, 1, 2]],
+        "position": [0.0, 0.0, 0.0],
+        "wxyz": [1.0, 0.0, 0.0, 0.0],
+    }
+    values.update(overrides)
+
+    with pytest.raises(ValueError, match=message):
+        MeshMarkerOverlay(**values)  # type: ignore[arg-type]
+
+
+def test_textured_geometry_is_detached_shared_and_counted_once():
+    from embodichain.lab.visualization.markers import (
+        MarkerGroup,
+        MarkerGroupCfg,
+        MarkerPrototypeCfg,
+    )
+
+    image = np.full((2, 2, 4), 255, np.uint8)
+    uv = np.array([[0, 0], [1, 0], [0, 1]], np.float32)
+    group = MarkerGroup(
+        MarkerGroupCfg(
+            name="texture",
+            prototypes={
+                "mesh": MarkerPrototypeCfg(
+                    shape="mesh",
+                    vertices=[[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+                    faces=[[0, 1, 2]],
+                    uv_coords=uv,
+                    texture=image,
+                )
+            },
+        )
+    )
+    group.update(translations=[[0, 0, 0], [1, 0, 0]])
+    first, second = group.snapshot()
+    image[:] = 0
+    uv[:] = 3
+    assert first.texture is second.texture and first.vertices is second.vertices
+    assert first.texture.min() == 255
+    np.testing.assert_array_equal(first.uv_coords, [[0, 0], [1, 0], [0, 1]])
+    for array in (first.vertices, first.faces, first.texture, first.uv_coords):
+        assert not array.flags.writeable
+    frame = SceneFrame(
+        "run",
+        1,
+        1,
+        1,
+        0.01,
+        (),
+        np.empty((0, 3), np.float32),
+        np.empty((0, 4), np.float32),
+        np.empty(0, bool),
+        overlays=SceneOverlays(meshes=(first, second)),
+    )
+    assert estimate_frame_bytes(frame) == (
+        sum(
+            array.nbytes
+            for array in (first.vertices, first.faces, first.uv_coords, first.texture)
+        )
+        + 2 * (first.position.nbytes + first.wxyz.nbytes + first.scale.nbytes)
+    )
+    group.update(translations=[[5, 0, 0], [6, 0, 0]])
+    np.testing.assert_array_equal(first.position, [0, 0, 0])
 
 
 def test_pose_conversion_converts_embodichain_xyzw_to_protocol_wxyz() -> None:
