@@ -1152,6 +1152,7 @@ def test_bridge_reuses_real_workflow_across_pick_and_place(
     original_analyze, original_ground = compiler.analyze, compiler.ground
     analyses = []
     grounded_indices = []
+    execution_ids = []
 
     def analyze(calls, **kwargs):
         workflow = original_analyze(calls, **kwargs)
@@ -1161,6 +1162,10 @@ def test_bridge_reuses_real_workflow_across_pick_and_place(
     def ground(workflow, index, context, **kwargs):
         value = original_ground(workflow, index, context, **kwargs)
         grounded_indices.append(index)
+        execution_ids.append(value.invocation.invocation_id)
+        assert value.effect_spec.invocation_id == value.invocation.invocation_id
+        for boundary in (*value.effect_guards, *value.effect_gates):
+            assert boundary.effect_spec.invocation_id == value.invocation.invocation_id
         return value
 
     monkeypatch.setattr(compiler, "analyze", analyze)
@@ -1186,6 +1191,11 @@ def test_bridge_reuses_real_workflow_across_pick_and_place(
     assert len(analyses) == 1
     assert grounded_indices == [0, 1]
     assert local_indices == [[0], [0]]
+    assert execution_ids == [
+        f"{compiled.program_id}/{segment.segment_id}:{call.segment_call_index}"
+        for segment in compiled.iter_segments()
+        for call in segment.calls
+    ]
     assert len(analyses[0].calls[0].downstream_object_targets) == 1
 
 

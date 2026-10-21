@@ -570,6 +570,7 @@ class _Compiler(SemanticCallCompiler):
         context: PlanningContext,
         *,
         eligible_mask: torch.Tensor | None = None,
+        invocation_id: str | None = None,
         revision: int = 0,
         path: tuple[object, ...] = ("workflow",),
     ) -> _Grounded:
@@ -599,7 +600,7 @@ class _Compiler(SemanticCallCompiler):
                 max_action_retries=0,
                 action_timeout=100.0,
             ),
-            invocation_id=f"{workflow.workflow_id}:{call_index}",
+            invocation_id=invocation_id or f"{workflow.workflow_id}:{call_index}",
             revision=revision,
         )
         target = torch.full((BATCH_SIZE, 1), float(call_index + 1))
@@ -711,6 +712,7 @@ class _WorkflowRecoveryCompiler(SemanticCallCompiler):
         context: PlanningContext,
         *,
         eligible_mask: torch.Tensor | None = None,
+        invocation_id: str | None = None,
         revision: int = 0,
         path: tuple[object, ...] = ("workflow",),
     ) -> _Grounded:
@@ -780,7 +782,7 @@ class _WorkflowRecoveryCompiler(SemanticCallCompiler):
             motion_policy=motion_policy,
             tracking_policy=tracking_policy,
             recovery_policy=recovery_policy,
-            invocation_id=f"{workflow.workflow_id}:{decision_index}",
+            invocation_id=invocation_id or f"{workflow.workflow_id}:{decision_index}",
             revision=revision,
         )
         expectation = HeldObjectStateExpectation(
@@ -1462,7 +1464,9 @@ def test_runtime_retries_directly_when_verified_source_relation_remains() -> Non
     assert result.task_state.get_held_object("left_gripper") is None
 
 
-def test_runtime_partitions_retained_and_lost_source_rows_in_one_barrier() -> None:
+def test_runtime_partitions_retained_and_lost_source_rows_in_one_barrier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     poses = torch.eye(4).unsqueeze(0).repeat(BATCH_SIZE, 1, 1)
     initial_state = TaskState(
         batch_size=BATCH_SIZE,
@@ -1495,6 +1499,22 @@ def test_runtime_partitions_retained_and_lost_source_rows_in_one_barrier() -> No
         task_state=initial_state,
     )
 
+    ground = system.compiler.ground
+    identities = []
+
+    def record_ground(workflow, *args, **kwargs):
+        grounded = ground(workflow, *args, **kwargs)
+        identities.append(
+            (
+                workflow.workflow_id,
+                kwargs.get("invocation_id"),
+                grounded.invocation.invocation_id,
+            )
+        )
+        return grounded
+
+    monkeypatch.setattr(system.compiler, "ground", record_ground)
+
     result = system.runtime.run(
         HandOver(
             object=SceneObjectRef("cube"),
@@ -1522,6 +1542,15 @@ def test_runtime_partitions_retained_and_lost_source_rows_in_one_barrier() -> No
         SkillWorkflowRecoveryRole.RETRY_REACQUIRED,
     ]
     assert [trace.attempt_index for trace in result.workflow_recoveries] == [1, 1, 1]
+    assert identities[0] == (
+        "semantic_workflow",
+        "semantic_workflow:0",
+        "semantic_workflow:0",
+    )
+    for i, (workflow_id, override, identity) in enumerate(identities[1:]):
+        assert override is None
+        assert workflow_id == f"semantic_workflow:workflow_recovery:{i}"
+        assert identity.startswith(workflow_id + ":")
     assert result.task_state.get_held_object("left_gripper") is None
 
 

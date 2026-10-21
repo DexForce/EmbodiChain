@@ -1029,6 +1029,11 @@ class SemanticCallExecutor:
             analysis_call_index,
             context,
             eligible_mask=active_mask,
+            invocation_id=(
+                f"{self._workflow_id}:{workflow_call_index}"
+                if recovery_item is None
+                else None
+            ),
         )
         invocation = grounded.invocation
         grounded_eligible = grounded.eligible_mask

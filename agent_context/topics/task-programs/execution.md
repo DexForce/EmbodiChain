@@ -40,7 +40,10 @@ segment lifecycle completes normally.
 Sequential segments reuse one static workflow analysis per uninterrupted
 sequential stretch; parallel barriers stop this reuse across branches. Each
 executed call still grounds from a fresh observation and checks compiler/catalog
-ownership. Runtime results capture an append-only history prefix and materialize
+ownership. Cached analysis indices are separate from execution occurrence IDs:
+grounding receives the segment workflow and local call identity before creating
+effect specs, guards and gates. Recovery calls keep an independent namespace.
+Runtime results capture an append-only history prefix and materialize
 independent history tuples when read or serialized, keeping history copying out
 of status-only control steps. Synchronous observer or clock failures abort through
 the runner's cancel-then-hold boundary and retain any safe-stop failure details.
