@@ -80,12 +80,12 @@ COMMANDS = (
     Command(
         name="run-example",
         target="embodichain.cli.run_example:main",
-        help="List and run installed examples by name.",
+        help="List and run Python scripts from the examples directory.",
     ),
     Command(
         name="run-atomic-action",
         target="embodichain.cli.run_example:atomic_action_cli",
-        help="Alias for run-example atomic-action.",
+        help="Alias for run-example sim/atomic_action.",
     ),
     Command(
         name="list-task",

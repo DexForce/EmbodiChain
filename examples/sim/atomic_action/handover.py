@@ -36,12 +36,12 @@ from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
 from embodichain.utils import logger
-from embodichain_examples.atomic_action.scenario import (
+from examples.sim.atomic_action.scenario import (
     add_dual_tutorial_robot,
     add_support_surface,
     settle_object,
 )
-from embodichain_examples.atomic_action.support import (
+from examples.sim.atomic_action.support import (
     TutorialRobot,
     clone_local_pose_from_first_env,
     create_affordance_sampling_context,

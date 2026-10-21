@@ -93,7 +93,7 @@ Sample Newton contact overlays are local to the selected scene and gripper;
 they are not world defaults or a guarantee of open-loop physical success.
 Author contact dimensions and material settings before `prepare()`, never by
 rewriting captured solver arrays. The current values live in
-`examples/embodichain_examples/atomic_action/support.py` and the selected physical components.
+`examples/sim/atomic_action/support.py` and the selected physical components.
 
 ## Semantic integration boundary
 
@@ -122,17 +122,17 @@ Keep planning side-effect-free; actions do not own task sequencing or simulator 
 
 ## Direct-simulation example
 
-`embodichain run-example atomic-action --skill` selects a fixed sample scene;
+`embodichain run-example sim/atomic_action --skill` selects a fixed sample scene;
 `run-atomic-action` remains a compatibility alias. The generic launcher in
-`embodichain/cli/run_example.py` reads lightweight `embodichain.examples`
-entry-point catalogs and forwards arguments to the selected example.
+`embodichain/cli/run_example.py` resolves scripts directly from the ordinary
+`examples/` tree and forwards arguments through `_example_runner.py`.
 
-The example lives in `examples/embodichain_examples/atomic_action/` and ships
-under the separate `embodichain_examples` import namespace. Its `run.py` owns
+The example lives in `examples/sim/atomic_action/` and is shipped as ordinary
+distribution data with the rest of that tree. Its `__main__.py` owns
 typed configuration and validated selection; `host.py` owns compilation,
 expansion and output. Scene modules own physical setup and local defaults.
 Tutorial files forwarding there are compatibility entries. Read the
-[example README](../../../examples/embodichain_examples/atomic_action/README.md)
+[example README](../../../examples/sim/atomic_action/README.md)
 for supported combinations, fixture calibration, playback and output artifacts.
 
 `--variants N` requests N executions including the reference and creates N
@@ -145,7 +145,7 @@ The engine's optional `plan_transform` runs before concatenation and projected
 state propagation. The example and Task Program share
 `atomic_actions/_plan_expansion.py`, using `ActionPlanTemplateAdapter` and
 `motion.expansion` to rebuild commands, velocities and phase metadata together.
-Core simulation and Task Program code do not depend on the example package.
+Core simulation and Task Program code do not depend on example modules.
 Built-in phase permissions may only narrow; editable joints come from explicit
 motion bindings. Contact/hand samples, endpoints, required targets, stationary
 participants, zero-time joins and callback indices remain exact.

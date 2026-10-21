@@ -14,15 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Official example names and lazy launch targets."""
+"""Runnable project examples, also distributed as an ordinary data tree."""
 
 from __future__ import annotations
 
 __all__: list[str] = []
-
-EXAMPLES: dict[str, dict[str, str]] = {
-    "atomic-action": {
-        "target": "embodichain_examples.atomic_action.run:cli",
-        "description": "Twelve fixed-scene Atomic Skills with affordance and trajectory expansion.",
-    },
-}

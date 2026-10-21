@@ -55,7 +55,8 @@ topics:
   - embodichain/cli/_task_catalog.py
   - embodichain/cli/show_task.py
   - embodichain/cli/run_example.py
-  - examples/embodichain_examples/_catalog.py
+  - embodichain/cli/_example_runner.py
+  - examples/README.md
   - embodichain/lab/gym/envs/objectives/
   - embodichain/lab/scripts/evaluate_task_objective.py
   - embodichain/lab/scripts/run_task.py
@@ -363,9 +364,9 @@ topics:
   - embodichain/lab/sim/atomic_actions/affordance_sampling.py
   - embodichain/lab/sim/atomic_actions/primitives/
   - embodichain/cli/run_example.py
-  - examples/embodichain_examples/atomic_action/
+  - examples/sim/atomic_action/
   watch_paths: [embodichain/lab/sim/atomic_actions/, tests/sim/atomic_actions/, scripts/tutorials/atomic_action/,
-    embodichain/cli/run_example.py, examples/embodichain_examples/atomic_action/, tests/examples/atomic_action/]
+    embodichain/cli/run_example.py, examples/sim/atomic_action/, tests/examples/atomic_action/]
   related_topics: [simulation-system, motion-planning, robot-system, ik-solvers, task-programs]
   status: active
 - id: task-programs

@@ -348,7 +348,8 @@ risk = "medium"
 id = "runnable-examples"
 paths = [
   "embodichain/cli/run_example.py",
-  "examples/embodichain_examples/**",
+  "embodichain/cli/_example_runner.py",
+  "examples/**",
 ]
 tests = [
   "tests/cli/test_run_example.py",

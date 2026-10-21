@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from embodichain.cli.sim import add_sim_args_to_parser
-from embodichain_examples.atomic_action.defaults import (
+from examples.sim.atomic_action.defaults import (
     PLANNERS,
     ROBOTS,
     SCENES,
@@ -39,7 +39,7 @@ from embodichain_examples.atomic_action.defaults import (
 
 def _create_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="embodichain run-example atomic-action", description=__doc__
+        prog="embodichain run-example sim/atomic_action", description=__doc__
     )
     add_sim_args_to_parser(parser)
     parser.set_defaults(
@@ -170,14 +170,14 @@ def _resolve_sample(args: argparse.Namespace) -> AtomicSkillRunCfg:
 def _run_sample(cfg: AtomicSkillRunCfg, cli_args: argparse.Namespace, run: Any) -> None:
     from embodichain.lab.sim import SimulationManager
     from embodichain.utils import set_seed
-    from embodichain_examples.atomic_action.support import run_tutorial
+    from examples.sim.atomic_action.support import run_tutorial
 
     scene_args = _scene_args(cfg)
     scene_args.run = run
     for key, value in vars(cli_args).items():
         if key == "viser" or key.startswith("viser_"):
             setattr(scene_args, key, value)
-    scene = importlib.import_module(f"embodichain_examples.atomic_action.{cfg.skill}")
+    scene = importlib.import_module(f"examples.sim.atomic_action.{cfg.skill}")
     error = None
 
     def run_scene() -> None:
@@ -216,7 +216,7 @@ def cli(argv: Sequence[str] | None = None) -> None:
         cfg = _resolve_sample(args)
     except ValueError as exc:
         parser.error(str(exc))
-    from embodichain_examples.atomic_action.host import AtomicSkillRun
+    from examples.sim.atomic_action.host import AtomicSkillRun
 
     directory = Path(cfg.output_dir)
     directory.mkdir(parents=True, exist_ok=True)

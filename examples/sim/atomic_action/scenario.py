@@ -39,7 +39,7 @@ from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.sim.robots import build_dual_arm_cfg
 from embodichain.lab.sim.motion.solvers import PytorchSolverCfg
 from embodichain.utils import logger
-from embodichain_examples.atomic_action.support import (
+from examples.sim.atomic_action.support import (
     ROBOTIQ_2F_140_URDF_PATH,
     ROBOTIQ_HAND_JOINT_PATTERN,
     TutorialRobot,

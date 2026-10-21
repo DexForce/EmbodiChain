@@ -17,63 +17,63 @@
 from __future__ import annotations
 
 from pathlib import Path
-import subprocess
-import sys
 
+import pytest
 from setuptools import Distribution
-from setuptools.command.build_py import build_py
 
-from setup import get_package_dir, get_packages
+import setup as package_setup
+from setup import get_example_data_files, get_package_dir, get_packages
+
+pytestmark = pytest.mark.no_sim
 
 
-def test_distribution_stages_examples_in_their_own_namespace(tmp_path: Path) -> None:
-    packages = [
-        name for name in get_packages() if name.startswith("embodichain_examples")
-    ]
+def test_distribution_preserves_the_ordinary_examples_tree(tmp_path: Path) -> None:
     distribution = Distribution(
-        {
-            "packages": packages,
-            "package_dir": get_package_dir(),
-            "package_data": {
-                "embodichain_examples": ["README.md"],
-                "embodichain_examples.atomic_action": ["README.md"],
-            },
-            "script_name": "setup.py",
-        }
+        {"data_files": get_example_data_files(), "script_name": "setup.py"}
     )
-    command = build_py(distribution)
-    command.build_lib = str(tmp_path / "lib")
+    command = distribution.get_command_obj("install_data")
+    command.install_dir = str(tmp_path)
     command.ensure_finalized()
     command.run()
-    output = Path(command.build_lib)
+    output = tmp_path / "share/embodichain/examples"
     for relative in (
-        "embodichain_examples/__init__.py",
-        "embodichain_examples/_catalog.py",
-        "embodichain_examples/atomic_action/run.py",
-        "embodichain_examples/atomic_action/host.py",
-        "embodichain_examples/atomic_action/pickup.py",
-        "embodichain_examples/atomic_action/README.md",
+        "__init__.py",
+        "README.md",
+        "sim/atomic_action/__main__.py",
+        "sim/atomic_action/host.py",
+        "sim/motion/planners/curobo_planner.py",
+        "ods/simple_bc_demo/train.py",
+        "ods/simple_bc_demo/configs/task.yaml",
+        "learning/differentiable_ik/learn_grasp_yaw.py",
+        "expansion/asset_generalization/configs/pour_water/task.cobotmagic.yaml",
     ):
         assert (output / relative).is_file(), relative
-    assert not any(
-        name.startswith("embodichain.lab.scripts._atomic_action")
+    assert all(
+        name.partition(".")[0]
+        in {"embodichain", "embodichain_tasks", "embodichain_robots"}
         for name in get_packages()
     )
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-S",
-            "-c",
-            (
-                "import sys; "
-                "from embodichain_examples._catalog import EXAMPLES; "
-                "assert 'atomic-action' in EXAMPLES; "
-                "assert not {'torch', 'dexsim', 'gymnasium'} & sys.modules.keys()"
-            ),
+    assert "examples" not in get_package_dir()
+    assert not (output / "embodichain_examples").exists()
+
+
+def test_new_example_and_resources_are_packaged_without_registration(
+    tmp_path: Path, monkeypatch
+) -> None:
+    root = tmp_path / "examples"
+    (root / "new_family/configs").mkdir(parents=True)
+    (root / "new_family/demo.py").write_text("print('demo')\n")
+    (root / "new_family/configs/default.yaml").write_text("enabled: true\n")
+    (root / "new_family/__pycache__").mkdir()
+    (root / "new_family/__pycache__/demo.pyc").write_bytes(b"cache")
+    (root / ".hidden").mkdir()
+    (root / ".hidden/secret.py").write_text("hidden")
+    monkeypatch.setattr(package_setup, "THIS_DIR", tmp_path)
+    monkeypatch.setattr(package_setup, "EXAMPLES_DIR", root)
+    files = {destination: sources for destination, sources in get_example_data_files()}
+    assert files == {
+        "share/embodichain/examples/new_family": ["examples/new_family/demo.py"],
+        "share/embodichain/examples/new_family/configs": [
+            "examples/new_family/configs/default.yaml"
         ],
-        cwd=output,
-        capture_output=True,
-        text=True,
-        timeout=15,
-    )
-    assert result.returncode == 0, result.stderr
+    }

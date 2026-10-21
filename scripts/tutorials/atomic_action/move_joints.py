@@ -25,9 +25,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-sys.path.insert(0, str(_REPO_ROOT / "examples"))
-
-from embodichain_examples.atomic_action import move_joint as _implementation
+from examples.sim.atomic_action import move_joint as _implementation
 
 if __name__ == "__main__":
     _implementation.run_tutorial(_implementation.main)

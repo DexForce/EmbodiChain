@@ -23,16 +23,16 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from embodichain_examples.atomic_action.defaults import (
+from examples.sim.atomic_action.defaults import (
     _sample_defaults,
     _scene_args,
 )
-from embodichain_examples.atomic_action.host import (
+from examples.sim.atomic_action.host import (
     AtomicSkillRun,
     _sample_geometry,
     _same_geometry,
 )
-from embodichain_examples.atomic_action.support import (
+from examples.sim.atomic_action.support import (
     create_parallel_jaw_grasp_pose_generator,
 )
 from embodichain.lab.sim.atomic_actions import (
@@ -179,7 +179,7 @@ def test_cli_candidate_pool_has_no_hidden_approach_direction_draws() -> None:
 
 
 def test_recording_cadence_retains_the_complete_long_replay_within_its_budget() -> None:
-    from embodichain_examples.atomic_action.support import (
+    from examples.sim.atomic_action.support import (
         _recording_fps,
         AUTO_PLAY_RECORD_FPS,
         AUTO_PLAY_RECORD_MAX_MEMORY,
@@ -199,7 +199,7 @@ def test_long_standalone_playback_does_not_validate_an_unused_recording_budget()
     None
 ):
     from argparse import Namespace
-    from embodichain_examples.atomic_action.support import replay_trajectory
+    from examples.sim.atomic_action.support import replay_trajectory
 
     simulation = SimpleNamespace(
         sim_config=SimpleNamespace(physics_dt=1.0),

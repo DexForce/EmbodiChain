@@ -550,7 +550,7 @@ def test_ur5_and_franka_configs_share_place_binding_contract() -> None:
     assert all(set(cfg.control_parts) == {"arm", "eef"} for cfg in configs)
     assert all(set(cfg.solver_cfg) == {"arm"} for cfg in configs)
     assert configs[0].control_parts["eef"] == configs[1].control_parts["eef"]
-    from embodichain_examples.atomic_action.tcp_presets import sample_tool_tcp
+    from examples.sim.atomic_action.tcp_presets import sample_tool_tcp
 
     for robot_type, cfg in zip(("ur5", "franka"), configs, strict=True):
         assert torch.allclose(

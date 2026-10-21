@@ -1,1 +1,4 @@
 include VERSION
+recursive-include examples *
+global-exclude *.py[cod]
+prune examples/**/__pycache__

@@ -35,7 +35,7 @@ from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
-from embodichain_examples.atomic_action.support import (
+from examples.sim.atomic_action.support import (
     create_affordance_sampling_context,
     add_tutorial_robot,
     broadcast_pose_batch,
@@ -62,7 +62,7 @@ from embodichain_examples.atomic_action.support import (
     save_variant_joint_plot,
     trajectory_variant_rows,
 )
-from embodichain_examples.atomic_action.support import (
+from examples.sim.atomic_action.support import (
     compute_pick_close_end_step,
     initialize_benchmark_simulation,
 )

@@ -29,7 +29,7 @@ from embodichain.lab.sim.atomic_actions import (
     MotionPolicy,
 )
 from embodichain.utils import logger
-from embodichain_examples.atomic_action.support import (
+from examples.sim.atomic_action.support import (
     create_affordance_sampling_context,
     add_tutorial_robot,
     create_curobo_motion_generator,
@@ -41,7 +41,7 @@ from embodichain_examples.atomic_action.support import (
     _compile_demo,
     run_tutorial,
 )
-from embodichain_examples.atomic_action.support import (
+from examples.sim.atomic_action.support import (
     initialize_benchmark_simulation,
 )
 

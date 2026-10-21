@@ -41,14 +41,24 @@ def test_atomic_cli_plans_and_replays_nominal_scene(
 ) -> None:
     """Each preset produces finite, timed commands and finishes native cleanup."""
     output = tmp_path / f"{skill}_{robot}"
-    # Preserve a Python stack before the deadline if a CI-only stall recurs.
-    entrypoint = (
-        "import faulthandler, runpy\n"
+    # exec replaces the CLI interpreter. Arm the watchdog in the interpreter
+    # that actually owns playback, while still exercising the real launcher.
+    watchdog = (
+        "import faulthandler, runpy, sys\n"
         f"faulthandler.dump_traceback_later({SMOKE_TRACEBACK_INTERVAL_SECONDS}, repeat=True)\n"
+        "sys.argv = sys.argv[1:]\n"
         "try:\n"
-        "    runpy.run_module('embodichain', run_name='__main__')\n"
+        "    runpy.run_path(sys.argv[0], run_name='__main__')\n"
         "finally:\n"
         "    faulthandler.cancel_dump_traceback_later()\n"
+    )
+    entrypoint = (
+        "import os, runpy\n"
+        "original_execv = os.execv\n"
+        "def exec_with_watchdog(executable, arguments):\n"
+        f"    original_execv(executable, [executable, '-u', '-c', {watchdog!r}, *arguments[1:]])\n"
+        "os.execv = exec_with_watchdog\n"
+        "runpy.run_module('embodichain', run_name='__main__')\n"
     )
     command = [
         sys.executable,
@@ -56,7 +66,7 @@ def test_atomic_cli_plans_and_replays_nominal_scene(
         "-c",
         entrypoint,
         "run-example",
-        "atomic-action",
+        "sim/atomic_action",
         "--skill",
         skill,
         "--physics",

@@ -121,9 +121,11 @@ def test_repository_manifest_maps_supported_scripts(
 @pytest.mark.parametrize(
     "source_path",
     [
-        "examples/embodichain_examples/atomic_action/defaults.py",
-        "examples/embodichain_examples/atomic_action/host.py",
+        "examples/sim/atomic_action/defaults.py",
+        "examples/sim/atomic_action/host.py",
         "embodichain/cli/run_example.py",
+        "embodichain/cli/_example_runner.py",
+        "examples/sim/motion/planners/curobo_planner.py",
     ],
 )
 def test_example_changes_keep_launch_package_and_physical_smoke_coverage(
