@@ -3,7 +3,7 @@
   "kind": "static-architecture",
   "coverage": "curated-sample",
   "repository": "DexForce/EmbodiChain",
-  "revision": "c0a8c5b91f56c3286ebc226a963809c86f8d300e",
+  "revision": "bf9afaff63d99e022e767a35a65aaeb1e60b599e",
   "source_ref": "HEAD",
   "package_version": "0.3.1",
   "topic_index": "agent_context/MAP.yaml",
@@ -4502,8 +4502,8 @@
         {
           "path": "embodichain/lab/task_program/runtime/executor.py",
           "symbol": "SemanticCallExecutor._prepare_grounded_call",
-          "start_line": 1120,
-          "end_line": 1125,
+          "start_line": 1125,
+          "end_line": 1130,
           "excerpt": "        session = self._engine.start(\n            (invocation,),\n            context,\n            eligible_mask=active_mask,\n            plan_transform=plan_transform,\n        )"
         }
       ]
@@ -4520,8 +4520,8 @@
         {
           "path": "embodichain/lab/task_program/runtime/executor.py",
           "symbol": "SemanticCallExecutor._prepare_grounded_call",
-          "start_line": 1127,
-          "end_line": 1133,
+          "start_line": 1132,
+          "end_line": 1138,
           "excerpt": "        runner = ExecutionRunner(\n            session,\n            primed,\n            self._command_sink,\n            clock=self._clock,\n            cfg=runner_cfg,\n        )"
         }
       ]
