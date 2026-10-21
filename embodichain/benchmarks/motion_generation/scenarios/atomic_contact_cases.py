@@ -187,7 +187,7 @@ class PressCases(AtomicSkillCaseProvider):
             skill_id=self.skill_id,
             object_id=articulation_id,
             task_difficulty=difficulty(config),
-            primary_success="task_success",
+            primary_success="physical_skill_success",
             full_start_qpos=full_start_qpos,
             case_parameters={
                 "sample_count": int(config.get("sample_count", 80)),
@@ -429,7 +429,7 @@ class SlideCases(AtomicSkillCaseProvider):
             skill_id=self.skill_id,
             object_id=articulation_id,
             task_difficulty=difficulty(config),
-            primary_success="task_success",
+            primary_success="physical_skill_success",
             full_start_qpos=full_start_qpos,
             case_parameters={
                 "sample_count": int(config.get("sample_count", 140)),
@@ -692,7 +692,7 @@ class TwistCases(AtomicSkillCaseProvider):
             skill_id=self.skill_id,
             object_id=articulation_id,
             task_difficulty=difficulty(config),
-            primary_success="task_success",
+            primary_success="physical_skill_success",
             full_start_qpos=full_start_qpos,
             case_parameters={
                 "sample_count": int(config.get("sample_count", 140)),

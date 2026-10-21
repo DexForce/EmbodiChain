@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_franka_pgi_door_pour_align_push
-suite_version: atomic_franka_pgi_door_pour_align_push_v2
+suite_version: atomic_franka_pgi_door_pour_align_push_v3
 profile: smoke
 
 # OpenDoor, Pour, AxisAlign and PushObject on the Franka + PGI embodiment.
@@ -70,6 +70,7 @@ tracks:
       batch_sizes: [1]
       seeds: [11]
       physics:
+        clock: compiled
         steps_per_waypoint: 16
         hold_steps: 80
         hold_sim_steps: 2

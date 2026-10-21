@@ -132,6 +132,8 @@ class ProtocolCfg:
     position_threshold_m: float = 0.01
     rotation_threshold_rad: float = 0.1
     joint_limit_tolerance_rad: float = 1.0e-5
+    start_state_tolerance_rad: float = 1.0e-3
+    """Maximum absolute per-joint error at the first trajectory sample."""
     confidence_level: float = 0.95
     report_schema_version: str = "3"
     seeds: list[int] = []
@@ -192,6 +194,17 @@ class FreeSpaceTrackCfg:
     """Target modalities; omission preserves the legacy Cartesian population."""
     joint_threshold_rad: float = 0.02
     """Maximum per-joint error when matching ordered joint targets."""
+    sampling_method: str = "joint_templates"
+    """Legacy joint templates or independently screened Cartesian requests."""
+    batch_modes: list[str] = ["heterogeneous"]
+    population_design: str = "full"
+    """Full factorial geometry or a balanced rotation of shapes and waypoint counts."""
+    distance_bins: list[str] = ["near", "mid", "far"]
+    motion_components: list[str] = ["translation", "rotation", "combined"]
+    max_generation_attempts: int = 24
+    singularity_candidates: int = 8
+    jacobian_position_scale_m: float = 0.3
+    """Characteristic length used to make Jacobian conditioning dimensionless."""
 
 
 @configclass
@@ -460,6 +473,13 @@ class SuiteCfg:
             raise ValueError("rotation_threshold_rad must be > 0.")
         if self.protocol.joint_limit_tolerance_rad < 0.0:
             raise ValueError("joint_limit_tolerance_rad must be >= 0.")
+        if (
+            isinstance(self.protocol.start_state_tolerance_rad, bool)
+            or not isinstance(self.protocol.start_state_tolerance_rad, (int, float))
+            or not math.isfinite(self.protocol.start_state_tolerance_rad)
+            or self.protocol.start_state_tolerance_rad < 0.0
+        ):
+            raise ValueError("start_state_tolerance_rad must be finite and >= 0.")
         if not 0.0 < self.protocol.confidence_level < 1.0:
             raise ValueError("confidence_level must be between 0 and 1.")
         if self.protocol.report_schema_version != "3":
@@ -590,6 +610,38 @@ def _merge_mappings(
 
 def _validate_free_space(free_space: FreeSpaceTrackCfg) -> None:
     """Validate free-space case-matrix fields."""
+    if free_space.sampling_method not in {"joint_templates", "cartesian"}:
+        raise ValueError("sampling_method must be joint_templates or cartesian.")
+    if free_space.population_design not in {"full", "balanced"}:
+        raise ValueError("population_design must be full or balanced.")
+    for name, allowed in (
+        ("batch_modes", {"homogeneous", "heterogeneous"}),
+        ("distance_bins", {"near", "mid", "far"}),
+        ("motion_components", {"translation", "rotation", "combined"}),
+    ):
+        values = getattr(free_space, name)
+        if (
+            not isinstance(values, (list, tuple))
+            or not values
+            or any(
+                not isinstance(value, str) or value not in allowed for value in values
+            )
+            or len(set(values)) != len(values)
+        ):
+            raise ValueError(
+                f"{name} must contain distinct values from {sorted(allowed)}."
+            )
+    for name in ("max_generation_attempts", "singularity_candidates"):
+        if type(getattr(free_space, name)) is not int or getattr(free_space, name) < 1:
+            raise ValueError(f"{name} must be a positive integer.")
+    scale = free_space.jacobian_position_scale_m
+    if (
+        isinstance(scale, bool)
+        or not isinstance(scale, (int, float))
+        or not math.isfinite(scale)
+        or scale <= 0
+    ):
+        raise ValueError("jacobian_position_scale_m must be finite and positive.")
     if not isinstance(free_space.target_types, (list, tuple)) or not all(
         isinstance(value, str) for value in free_space.target_types
     ):
@@ -620,6 +672,18 @@ def _validate_free_space(free_space: FreeSpaceTrackCfg) -> None:
     unknown_shapes = set(free_space.path_shapes) - _SUPPORTED_PATH_SHAPES
     if unknown_shapes:
         raise ValueError(f"Unsupported path_shapes: {sorted(unknown_shapes)}.")
+    if free_space.sampling_method == "cartesian":
+        if set(free_space.path_shapes) - {"direct", "l_turn", "s_curve"}:
+            raise ValueError(
+                "Cartesian path_shapes must be direct, l_turn, or s_curve; select rotation through motion_components."
+            )
+        if "direct" not in free_space.path_shapes and (
+            "rotation" in free_space.motion_components
+            or not any(count >= 3 for count in free_space.waypoint_counts)
+        ):
+            raise ValueError(
+                "Cartesian rotation and single-target requests require the direct path shape."
+            )
     if not free_space.start_state_bins:
         raise ValueError("start_state_bins must not be empty.")
     unknown_bins = set(free_space.start_state_bins) - _SUPPORTED_START_STATE_BINS

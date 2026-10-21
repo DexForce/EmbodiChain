@@ -67,7 +67,11 @@ def _format_value(column: str, value: object) -> str:
     if isinstance(value, float):
         if not math.isfinite(value):
             return "N/A"
-        if column.endswith("_rate") or column in {"path_efficiency"}:
+        if column.endswith("_rate") or column in {
+            "path_efficiency",
+            "success_ci_lower",
+            "success_ci_upper",
+        }:
             return f"{value:.2%}"
         return f"{value:.6f}"
     if isinstance(value, (dict, list, tuple)):
@@ -95,12 +99,25 @@ _MOTION_METRIC_COLUMNS = (
     "scenario",
     "algorithm",
     "algorithm_role",
+    "target_type",
+    "batch_mode",
+    "distance_bin",
+    "motion_component",
     "robot",
     "batch_size",
     "waypoint_count",
     "path_shape",
     "start_state_bin",
     "cases",
+    "unique_input_rows",
+    "seed_clusters",
+    "success_ci_lower",
+    "success_ci_upper",
+    "tcp_translation_m_mean",
+    "tcp_rotation_rad_mean",
+    "joint_margin_fraction_min",
+    "jacobian_condition_ratio_min",
+    "conditioning_counts",
     "n_valid",
     "coverage_rate",
     "success_rate",
@@ -136,6 +153,9 @@ _ATOMIC_METRIC_COLUMNS = (
     "task_difficulty",
     "primary_success",
     "cases",
+    "seed_clusters",
+    "success_ci_lower",
+    "success_ci_upper",
     "coverage_rate",
     "success_rate",
     "physical_skill_success_rate",
@@ -198,12 +218,14 @@ def write_markdown_report(
         f"- external position threshold: `{suite.protocol.position_threshold_m} m` (external motion-validity gate)",
         f"- external rotation threshold: `{suite.protocol.rotation_threshold_rad} rad`",
         "",
-        "Geometry validity checks finite positions, ordered targets, and joint-position limits independently of timing. "
+        "Geometry validity checks the requested initial joint state, finite positions, ordered targets, and joint-position limits independently of timing. "
         "`timed_motion_valid_rate` additionally requires a solved, valid clock and the applicable dynamic limits. "
         "Nominal or unknown clocks are N/A in timed comparisons. Missing expected outcomes count against success and coverage.",
         "",
         "Continuous error/path columns use geometry-valid outcomes (`n_valid`) for every method. "
         "Dynamic peaks and violations are diagnostic measurements, including nominal clocks; they are not timed success scores.",
+        "Success intervals resample complete seed clusters with 1000 deterministic bootstrap draws; environment rows and repeated calls are not independent samples. "
+        "Fewer than two seed clusters produce N/A. These intervals describe the declared workload distribution and do not establish held-out training data.",
         "",
     ]
     if "report_views" not in aggregates:
@@ -261,7 +283,14 @@ def write_markdown_report(
                     "execution_time_ms",
                     "end_to_end_time_ms",
                 }
-            ) + ("timing_scope", "planning_time_ms")
+            ) + (
+                "target_type",
+                "batch_mode",
+                "distance_bin",
+                "motion_component",
+                "timing_scope",
+                "planning_time_ms",
+            )
             metric_columns = _MOTION_METRIC_COLUMNS
         lines.extend(["### Time & Memory", ""])
         lines.extend(_format_table(rows["time_and_memory"], time_columns))

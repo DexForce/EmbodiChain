@@ -32,6 +32,9 @@ from embodichain.benchmarks.motion_generation.config import (
 from embodichain.benchmarks.motion_generation.scenarios.atomic_skill import (
     AtomicSkillScenario,
 )
+from embodichain.benchmarks.motion_generation.scenarios._atomic_pose_sampling import (
+    _pose_settings,
+)
 from embodichain.benchmarks.motion_generation.scenarios.atomic_case_utils import (
     apply_target_rotation_randomization,
     randomization_parameters,
@@ -54,7 +57,7 @@ def test_pose_batch_suite_declares_translation_only_batched_trials() -> None:
     track = suite.enabled_tracks()[0]
 
     settings = resolve_atomic_pose_randomization(track)
-    assert suite.suite_version == "atomic_franka_pgi_pose_batch_v4"
+    assert suite.suite_version == "atomic_franka_pgi_pose_batch_v5"
     assert settings.enabled is True
     assert settings.mode == "translation"
     assert settings.pose_batch_size == 8
@@ -223,7 +226,7 @@ def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> N
         ),
     }
 
-    assert suite.suite_version == "atomic_franka_pgi_spatial_generalization_v9"
+    assert suite.suite_version == "atomic_franka_pgi_spatial_generalization_v10"
     assert len(suite.evaluation_tracks()) == 79
     assert set(expected) == {track.id for track in suite.tracks}
     for track in suite.tracks:
@@ -610,22 +613,22 @@ def test_planar_pose_mode_injects_all_strict_spatial_controls() -> None:
     assert settings.support_object_yaw_jitter_rad == pytest.approx(0.3)
     assert settings.task_frame_translation_jitter_m == (0.01, 0.02, 0.0)
     assert settings.task_frame_yaw_jitter_rad == pytest.approx(0.2)
-    assert prepared["_pose_batch_object_yaw_jitter_rad"] == pytest.approx(0.5)
-    assert prepared["_pose_batch_target_yaw_jitter_rad"] == pytest.approx(0.4)
-    assert prepared["_pose_batch_support_object_translation_jitter_m"] == [
+    assert _pose_settings(prepared).object_yaw_jitter_rad == pytest.approx(0.5)
+    assert _pose_settings(prepared).target_yaw_jitter_rad == pytest.approx(0.4)
+    assert list(_pose_settings(prepared).support_object_translation_jitter_m) == [
         0.03,
         0.02,
         0.0,
     ]
-    assert prepared["_pose_batch_support_object_yaw_jitter_rad"] == pytest.approx(0.3)
-    assert prepared["_pose_batch_task_frame_translation_jitter_m"] == [
+    assert _pose_settings(prepared).support_object_yaw_jitter_rad == pytest.approx(0.3)
+    assert list(_pose_settings(prepared).task_frame_translation_jitter_m) == [
         0.01,
         0.02,
         0.0,
     ]
-    assert prepared["_pose_batch_task_frame_yaw_jitter_rad"] == pytest.approx(0.2)
-    assert prepared["_pose_batch_object_translation_jitter_m"] == [0.0, 0.0, 0.0]
-    assert prepared["_pose_batch_translation_jitter_m"] == [0.0, 0.0, 0.0]
+    assert _pose_settings(prepared).task_frame_yaw_jitter_rad == pytest.approx(0.2)
+    assert list(_pose_settings(prepared).object_translation_jitter_m) == [0.0, 0.0, 0.0]
+    assert list(_pose_settings(prepared).target_translation_jitter_m) == [0.0, 0.0, 0.0]
 
 
 def test_spatial_pose_mode_injects_all_roll_pitch_controls() -> None:
@@ -652,13 +655,13 @@ def test_spatial_pose_mode_injects_all_roll_pitch_controls() -> None:
     assert settings.target_roll_pitch_jitter_rad == (0.2, 0.3)
     assert settings.support_object_roll_pitch_jitter_rad == (0.3, 0.4)
     assert settings.task_frame_roll_pitch_jitter_rad == (0.4, 0.5)
-    assert prepared["_pose_batch_object_roll_pitch_jitter_rad"] == [0.1, 0.2]
-    assert prepared["_pose_batch_target_roll_pitch_jitter_rad"] == [0.2, 0.3]
-    assert prepared["_pose_batch_support_object_roll_pitch_jitter_rad"] == [
+    assert list(_pose_settings(prepared).object_roll_pitch_jitter_rad) == [0.1, 0.2]
+    assert list(_pose_settings(prepared).target_roll_pitch_jitter_rad) == [0.2, 0.3]
+    assert list(_pose_settings(prepared).support_object_roll_pitch_jitter_rad) == [
         0.3,
         0.4,
     ]
-    assert prepared["_pose_batch_task_frame_roll_pitch_jitter_rad"] == [0.4, 0.5]
+    assert list(_pose_settings(prepared).task_frame_roll_pitch_jitter_rad) == [0.4, 0.5]
 
 
 def test_stratified_pose_sampling_is_deterministic_and_covers_bounds() -> None:
@@ -804,7 +807,7 @@ def test_pose_sampling_pattern_is_validated_and_injected() -> None:
     settings = resolve_atomic_pose_randomization(track)
     prepared = AtomicSkillScenario._prepare_pose_batch_config({}, track, batch_size=4)
     assert settings.sampling_pattern == "stratified"
-    assert prepared["_pose_batch_sampling_pattern"] == "stratified"
+    assert _pose_settings(prepared).sampling_pattern == "stratified"
 
     track.config["randomization"]["sampling_pattern"] = "grid"
     with pytest.raises(ValueError, match="sampling_pattern"):
@@ -1006,7 +1009,10 @@ def test_b1_offset_manifest_keeps_legacy_waypoint_shape() -> None:
     assert not isinstance(offsets[0][0], list)
 
 
-def test_pose_batch_moveeef_shares_translation_across_waypoints() -> None:
+@pytest.mark.parametrize("context_form", ["legacy", "typed"])
+def test_pose_batch_moveeef_shares_translation_across_waypoints(
+    context_form: str,
+) -> None:
     """One pose sample translates a whole MoveEEF waypoint path together."""
     batch_size = 4
     robot = Mock(device=torch.device("cpu"))
@@ -1026,6 +1032,27 @@ def test_pose_batch_moveeef_shares_translation_across_waypoints() -> None:
         "_pose_batch_enabled": True,
         "_pose_batch_seed_stride": 1,
     }
+
+    if context_form == "typed":
+        config.pop("_pose_batch_enabled")
+        config.pop("_pose_batch_seed_stride")
+        config = AtomicSkillScenario._prepare_pose_batch_config(
+            config,
+            TrackCfg(
+                id="typed",
+                scenario="atomic_skill",
+                config={
+                    "randomization": {
+                        "enabled": True,
+                        "pose_batch_size": batch_size,
+                        "target_translation_jitter_m": [0.02, 0.02, 0.02],
+                    },
+                },
+            ),
+            batch_size=batch_size,
+        )
+        assert "_pose_batch" in config
+        assert not any(key.startswith("_pose_batch_") for key in config)
 
     case = create_atomic_skill_provider("move_end_effector").generate_case(
         scenario,

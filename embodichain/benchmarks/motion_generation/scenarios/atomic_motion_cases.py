@@ -38,6 +38,7 @@ from .atomic_evaluation import (
     MoveEndEffectorEvaluator,
     MoveJointsEvaluator,
 )
+from ._atomic_pose_sampling import _pose_settings
 from .atomic_case_utils import (
     atomic_case_id,
     case_name,
@@ -90,7 +91,7 @@ class MoveEndEffectorCases(AtomicSkillCaseProvider):
         start_pose = scenario.robot.compute_fk(
             start_qpos, name=scenario.control_part, to_matrix=True
         )
-        if bool(config.get("_pose_batch_enabled", False)):
+        if _pose_settings(config).enabled:
             # One batch row represents one perturbed target pose.  Reuse the
             # same translation at every waypoint so the requested path shape
             # is preserved while each environment explores a different pose.
@@ -160,7 +161,7 @@ class MoveEndEffectorCases(AtomicSkillCaseProvider):
             robot_id=suite.robot.id,
             skill_id=self.skill_id,
             task_difficulty=difficulty(config),
-            primary_success="task_success",
+            primary_success="physical_skill_success",
             full_start_qpos=full_start_qpos,
             case_parameters={
                 "sample_count": int(config.get("sample_count", 80)),
@@ -293,7 +294,7 @@ class MoveJointsCases(AtomicSkillCaseProvider):
             robot_id=suite.robot.id,
             skill_id=self.skill_id,
             task_difficulty=difficulty(config),
-            primary_success="task_success",
+            primary_success="physical_skill_success",
             full_start_qpos=full_start_qpos,
             case_parameters={
                 "sample_count": int(config.get("sample_count", 80)),

@@ -865,7 +865,7 @@ def _fake_articulation_geometry(*, joint_type: str) -> dict[str, torch.Tensor]:
 def test_atomic_suite_is_franka_pgi_and_curobo_only():
     suite = load_suite("atomic_franka_pgi_smoke")
 
-    assert suite.suite_version == "atomic_franka_pgi_smoke_v4"
+    assert suite.suite_version == "atomic_franka_pgi_smoke_v5"
     assert suite.robot.id == "franka_pgi"
     assert suite.robot.provider == "franka_pgi"
     assert [spec.id for spec in suite.planners if spec.enabled] == ["curobo"]
@@ -996,7 +996,7 @@ def test_randomized_atomic_suite_covers_four_interaction_skills_with_fixed_seed_
     suite = load_suite("atomic_franka_pgi_randomized")
     track = suite.enabled_tracks()[0]
 
-    assert suite.suite_version == "atomic_franka_pgi_randomized_v2"
+    assert suite.suite_version == "atomic_franka_pgi_randomized_v3"
     assert track.id == "atomic-skill-randomized"
     assert track.config["seeds"] == list(range(101, 117))
     assert [item["id"] for item in track.config["skills"]] == [
@@ -1567,6 +1567,7 @@ def test_execute_masks_failed_plan_rows_from_execution_success() -> None:
         return_value=Mock(
             squared_tracking_error=torch.zeros(batch_size),
             tracking_value_count=7,
+            physics_steps=None,
             articulation_joint_initial=None,
             articulation_joint_final=None,
             articulation_joint_peak_signed_delta=None,
@@ -2537,3 +2538,106 @@ def test_nonfinite_press_joint_evidence_does_not_count_as_contact_failure(
     assert results[1].stages[0].status == "unavailable"
     assert results[1].stages[1].status == "not_reached"
     assert results[1].failure_code == "evidence_unavailable"
+
+
+def test_compiled_replay_clock_preserves_intervals_and_zero_time_boundaries():
+    from embodichain.benchmarks.motion_generation.scenarios.atomic_replay import (
+        _PhysicsReplaySettings,
+    )
+
+    runtime = AtomicReplayRuntime(
+        simulation=Mock(sim_config=Mock(physics_dt=0.01)),
+        robot=Mock(),
+        control_part="arm",
+        track_config={},
+        objects={},
+        articulations={},
+        gripper_states={},
+    )
+    compiled = SimpleNamespace(
+        trajectory=SimpleNamespace(
+            positions=torch.zeros(2, 5, 7),
+            dt=torch.tensor(
+                [[0.0, 0.025, 0.0, 0.025, 0.0], [0.0, 0.025, 0.0, 0.025, 0.0]]
+            ),
+        )
+    )
+    settings = _PhysicsReplaySettings(
+        steps_per_waypoint=16,
+        hold_steps=0,
+        hold_sim_steps=1,
+        joint_tracking_tolerance_rad=0.05,
+        clock="compiled",
+    )
+    assert runtime._arrival_steps(compiled, settings) == [0, 3, 0, 2, 0]
+    # The two 25 ms intervals occupy five physics ticks, independent of the
+    # historical sixteen-ticks-per-sample setting.
+    settings = replace(settings, clock="fixed_samples")
+    assert runtime._arrival_steps(compiled, settings) == [16] * 5
+
+
+def test_compiled_replay_uses_scheduled_ticks_for_completion_time():
+    scenario = AtomicSkillScenario()
+    scenario.simulation = Mock(sim_config=Mock(physics_dt=0.01))
+    scenario.robot = Mock()
+    scenario.robot.get_qpos.return_value = torch.zeros(1, 7)
+    scenario.robot.compute_fk.return_value = torch.eye(4).unsqueeze(0)
+    scenario.track = Mock(
+        config={
+            "physics": {
+                "clock": "compiled",
+                "steps_per_waypoint": 16,
+                "hold_steps": 0,
+                "hold_sim_steps": 1,
+            }
+        }
+    )
+    runtime = scenario._replay_runtime()
+    runtime.replay_physics = Mock(
+        return_value=SimpleNamespace(
+            squared_tracking_error=torch.zeros(1),
+            tracking_value_count=7,
+            physics_steps=5,
+            articulation_joint_initial=None,
+            articulation_joint_final=None,
+            articulation_joint_peak_signed_delta=None,
+            articulation_joint_effect_end=None,
+            object_rotation_peak_signed_rad=None,
+            replay_traces={},
+        )
+    )
+    observation = runtime.execute(
+        _compiled_replay_batch([True]), _atomic_case(), Mock()
+    )
+    assert observation.task_completion_time_s == pytest.approx(0.05)
+
+
+def test_compiled_clock_synchronizes_unequal_row_intervals():
+    from embodichain.benchmarks.motion_generation.scenarios.atomic_replay import (
+        _PhysicsReplaySettings,
+    )
+
+    runtime = AtomicReplayRuntime(
+        simulation=Mock(sim_config=Mock(physics_dt=0.01)),
+        robot=Mock(),
+        control_part="arm",
+        track_config={},
+        objects={},
+        articulations={},
+        gripper_states={},
+    )
+    compiled = SimpleNamespace(
+        trajectory=SimpleNamespace(
+            positions=torch.zeros(2, 3, 7),
+            dt=torch.tensor([[0.0, 0.01, 0.03], [0.0, 0.03, 0.01]]),
+        )
+    )
+    settings = _PhysicsReplaySettings(
+        steps_per_waypoint=4,
+        hold_steps=0,
+        hold_sim_steps=1,
+        joint_tracking_tolerance_rad=0.05,
+        clock="compiled",
+    )
+    # Both rows reach each indexed command before the next shared phase.
+    assert runtime._arrival_steps(compiled, settings) == [0, 3, 3]

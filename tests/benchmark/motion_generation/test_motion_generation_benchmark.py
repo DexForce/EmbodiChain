@@ -1051,7 +1051,7 @@ def test_missing_positions_and_joint_limit_violation_fail_motion_valid():
     # Reach the waypoint at x=2 while joint 0 is outside [-1, 1].
     case.target_waypoints[0, 0, 0, 3] = 2.0
     positions = torch.zeros(1, 2, 7)
-    positions[0, :, 0] = 2.0
+    positions[0, -1, 0] = 2.0
     violated = compute_case_outcomes(
         _timed_plan_result(positions, success=True),
         case,
@@ -2027,6 +2027,7 @@ def test_suite_loads_tracks_and_keeps_mutable_free_space_config():
 
 def test_free_space_domain_overrides_change_the_generated_case_matrix():
     suite = load_suite("motion_panda_free_space_smoke")
+    suite.free_space.sampling_method = "joint_templates"  # legacy template contract
     suite.free_space.target_types = ["eef"]
     suite.enabled_tracks()[0].domains = [
         DomainCfg(
@@ -2066,6 +2067,7 @@ class _Ur5LimitRobot(_MetricRobot):
 
 def test_motion_ur5_free_space_coverage_suite_generates_six_joint_cases():
     suite = load_suite("motion_ur5_free_space_coverage")
+    suite.free_space.sampling_method = "joint_templates"  # legacy template contract
     assert suite.robot.id == "ur5"
     assert suite.free_space.batch_sizes == [1, 8, 64]
     suite.free_space.seeds = [11]
@@ -2087,6 +2089,7 @@ def test_motion_ur5_free_space_coverage_suite_generates_six_joint_cases():
 
 def test_free_space_manifest_is_seed_stable_and_algorithm_independent():
     suite = load_suite("motion_panda_free_space_smoke")
+    suite.free_space.sampling_method = "joint_templates"  # legacy template contract
     robot = _FrankaLimitRobot()
     provider = create_scenario_provider("free_space")
     track = suite.enabled_tracks()[0]
@@ -2102,6 +2105,7 @@ def test_free_space_manifest_is_seed_stable_and_algorithm_independent():
 
 def test_free_space_cases_use_one_start_state_bin_each():
     suite = load_suite("motion_panda_free_space_coverage")
+    suite.free_space.sampling_method = "joint_templates"  # legacy template contract
     suite.free_space.target_types = ["eef"]
     suite.free_space.batch_sizes = [2]
     suite.free_space.waypoint_counts = [1]
@@ -2120,6 +2124,7 @@ def test_free_space_cases_use_one_start_state_bin_each():
 def test_free_space_starts_align_across_path_shape_and_waypoint_count():
     """random_reachable starts must be shared across shapes/W for fair compares."""
     suite = load_suite("motion_panda_free_space_smoke")
+    suite.free_space.sampling_method = "joint_templates"  # legacy template contract
     suite.free_space.target_types = ["eef"]
     suite.free_space.batch_sizes = [2]
     suite.free_space.waypoint_counts = [1, 5]

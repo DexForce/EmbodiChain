@@ -217,6 +217,11 @@ def write_case_manifest(
     }
     if suite is not None:
         payload["resolved_suite_version"] = suite.suite_version
+        payload["motion_evaluation_protocol"] = {
+            "version": "start_boundary_v1",
+            "start_state_tolerance_rad": suite.protocol.start_state_tolerance_rad,
+            "collision_validation": "not_evaluated",
+        }
         if embodiment_resolution is not None:
             payload["resolved_embodiment"] = embodiment_resolution.to_metadata()
         elif suite.embodiment is None:

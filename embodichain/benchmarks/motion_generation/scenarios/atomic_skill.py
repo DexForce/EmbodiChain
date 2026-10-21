@@ -71,6 +71,8 @@ from .atomic_grasps import (
     grasp_sample_count,
     parallel_jaw_sampler,
 )
+from ._atomic_pose_sampling import _pose_settings
+
 from .atomic_case_utils import (
     apply_seeded_spatial_rotation,
     apply_task_frame_randomization,
@@ -95,23 +97,6 @@ if TYPE_CHECKING:
     from ..planners.base import PlannerAdapter
 
 __all__ = ["AtomicSkillScenario"]
-
-
-_GRIPPER_SKILLS = {
-    "pick_up",
-    "move_held_object",
-    "place",
-    "press",
-    "slide",
-    "twist",
-    "open_door",
-    "pour",
-    "axis_align",
-    "push_object",
-    "hand_over",
-    "coordinated_pickment",
-    "coordinated_placement",
-}
 
 
 class AtomicSkillScenario(ScenarioProvider):
@@ -155,6 +140,13 @@ class AtomicSkillScenario(ScenarioProvider):
         """Expose planner attribution before planning or evaluation can fail."""
         attribution = benchmark_motion_attribution(case.skill_id)
         values = {"timing_scope": "atomic_action_compile", **attribution}
+        if self.track is not None:
+            physics = dict(self.track.config.get("physics", {}))
+            values["replay_clock"] = physics.get("clock", "fixed_samples")
+            if self.simulation is not None:
+                values["replay_control_period_s"] = float(
+                    self.simulation.sim_config.physics_dt
+                ) * int(physics.get("steps_per_waypoint", 4))
         if not attribution["selected_planner_backend_used"]:
             # These skills solve their own constrained IK interpolation. Their
             # clock must not inherit an unused adapter's nominal timing flag.
@@ -257,7 +249,8 @@ class AtomicSkillScenario(ScenarioProvider):
         simulation.update(step=1)
 
         if any(
-            isinstance(value, Mapping) and value.get("id") in _GRIPPER_SKILLS
+            isinstance(value, Mapping)
+            and create_atomic_skill_provider(str(value.get("id", ""))).requires_gripper
             for value in track.config.get("skills", [])
         ):
             gripper_values = track.config.get("grippers")
@@ -438,49 +431,7 @@ class AtomicSkillScenario(ScenarioProvider):
                     "Atomic pose-batch size must match the simulator batch: "
                     f"{randomization.pose_batch_size} != {batch_size}."
                 )
-            if randomization.mode in {"translation", "planar_pose", "spatial_pose"}:
-                config["_pose_batch_translation_jitter_m"] = list(
-                    randomization.target_translation_jitter_m
-                )
-                config["_pose_batch_object_translation_jitter_m"] = list(
-                    randomization.object_translation_jitter_m
-                )
-                config["_pose_batch_support_object_translation_jitter_m"] = list(
-                    randomization.support_object_translation_jitter_m
-                )
-                config["_pose_batch_task_frame_translation_jitter_m"] = list(
-                    randomization.task_frame_translation_jitter_m
-                )
-            if randomization.mode in {"planar_pose", "spatial_pose"}:
-                config["_pose_batch_object_yaw_jitter_rad"] = (
-                    randomization.object_yaw_jitter_rad
-                )
-                config["_pose_batch_target_yaw_jitter_rad"] = (
-                    randomization.target_yaw_jitter_rad
-                )
-                config["_pose_batch_support_object_yaw_jitter_rad"] = (
-                    randomization.support_object_yaw_jitter_rad
-                )
-                config["_pose_batch_task_frame_yaw_jitter_rad"] = (
-                    randomization.task_frame_yaw_jitter_rad
-                )
-            if randomization.mode == "spatial_pose":
-                config["_pose_batch_object_roll_pitch_jitter_rad"] = list(
-                    randomization.object_roll_pitch_jitter_rad
-                )
-                config["_pose_batch_target_roll_pitch_jitter_rad"] = list(
-                    randomization.target_roll_pitch_jitter_rad
-                )
-                config["_pose_batch_support_object_roll_pitch_jitter_rad"] = list(
-                    randomization.support_object_roll_pitch_jitter_rad
-                )
-                config["_pose_batch_task_frame_roll_pitch_jitter_rad"] = list(
-                    randomization.task_frame_roll_pitch_jitter_rad
-                )
-            config["_pose_batch_seed_stride"] = randomization.seed_stride
-            config["_pose_batch_sampling_pattern"] = randomization.sampling_pattern
-            config["_pose_batch_size"] = randomization.pose_batch_size
-            config["_pose_batch_enabled"] = True
+            config["_pose_batch"] = randomization
         return config
 
     def prepare_planner(
@@ -786,10 +737,16 @@ class AtomicSkillScenario(ScenarioProvider):
             invocations = tuple(
                 with_plan_options(item, plan_opts) for item in invocations
             )
+        physics = (
+            {} if self.track is None else dict(self.track.config.get("physics", {}))
+        )
+        control_dt = float(self.simulation.sim_config.physics_dt)
+        if physics.get("clock", "fixed_samples") == "compiled":
+            control_dt *= int(physics.get("steps_per_waypoint", 4))
         context = engine.initial_context(
             task=task,
             scene=provider.initial_scene(self, case),
-            control_dt=float(self.simulation.sim_config.physics_dt),
+            control_dt=control_dt,
         )
         frozen = provider.frozen_grasps(self, case)
         missing = sorted(set(frozen) - set(self._case_grasp_generators))
@@ -860,6 +817,7 @@ class AtomicSkillScenario(ScenarioProvider):
             position_threshold_m=suite.protocol.position_threshold_m,
             rotation_threshold_rad=suite.protocol.rotation_threshold_rad,
             joint_limit_tolerance_rad=suite.protocol.joint_limit_tolerance_rad,
+            start_state_tolerance_rad=suite.protocol.start_state_tolerance_rad,
             joint_velocity_limit_rad_s=suite.protocol.joint_velocity_limit_rad_s,
             joint_acceleration_limit_rad_s2=(
                 suite.protocol.joint_acceleration_limit_rad_s2
@@ -1128,6 +1086,7 @@ class AtomicSkillScenario(ScenarioProvider):
                 position_threshold_m=suite.protocol.position_threshold_m,
                 rotation_threshold_rad=suite.protocol.rotation_threshold_rad,
                 joint_limit_tolerance_rad=suite.protocol.joint_limit_tolerance_rad,
+                start_state_tolerance_rad=suite.protocol.start_state_tolerance_rad,
                 joint_velocity_limit_rad_s=suite.protocol.joint_velocity_limit_rad_s,
                 joint_acceleration_limit_rad_s2=suite.protocol.joint_acceleration_limit_rad_s2,
                 joint_jerk_limit_rad_s3=suite.protocol.joint_jerk_limit_rad_s3,
@@ -1172,6 +1131,12 @@ class AtomicSkillScenario(ScenarioProvider):
                 merged[index] = replace(
                     outcome,
                     finite=outcome.finite and other.finite,
+                    start_state_valid=outcome.start_state_valid
+                    and other.start_state_valid,
+                    start_joint_error_rad=max(
+                        outcome.start_joint_error_rad or 0.0,
+                        other.start_joint_error_rad or 0.0,
+                    ),
                     ordered_waypoints_reached=(
                         outcome.ordered_waypoints_reached
                         and other.ordered_waypoints_reached
@@ -1624,7 +1589,7 @@ class AtomicSkillScenario(ScenarioProvider):
             dtype=start.dtype,
             device=start.device,
             batch_size=start.shape[0],
-            seed_stride=int(config.get("_pose_batch_seed_stride", 1)),
+            seed_stride=int(_pose_settings(config).seed_stride),
         )
         limits = self.robot.get_qpos_limits(name=self.control_part)[0]
         margin = float(config.get("start_joint_limit_margin_rad", 0.05))
@@ -1658,7 +1623,7 @@ class AtomicSkillScenario(ScenarioProvider):
         """
         configured = config.get("articulation_position_jitter_m")
         if configured is None:
-            configured = config.get("_pose_batch_object_translation_jitter_m")
+            configured = _pose_settings(config).object_translation_jitter_m
         amplitude = float_vector(
             configured,
             name="articulation_position_jitter_m",
@@ -1678,22 +1643,18 @@ class AtomicSkillScenario(ScenarioProvider):
                 dtype=pose.dtype,
                 device=pose.device,
                 batch_size=pose.shape[0],
-                seed_stride=int(config.get("_pose_batch_seed_stride", 1)),
-                sampling_pattern=str(
-                    config.get("_pose_batch_sampling_pattern", "uniform")
-                ),
+                seed_stride=int(_pose_settings(config).seed_stride),
+                sampling_pattern=str(_pose_settings(config).sampling_pattern),
             )
             if translation.dim() == 1:
                 translation = translation.unsqueeze(0)
             pose[:, :3, 3] += translation
         yaw_jitter = config.get("articulation_yaw_jitter_rad")
         if yaw_jitter is None:
-            yaw_jitter = config.get("_pose_batch_object_yaw_jitter_rad", 0.0)
+            yaw_jitter = _pose_settings(config).object_yaw_jitter_rad
         roll_pitch_jitter = config.get("articulation_roll_pitch_jitter_rad")
         if roll_pitch_jitter is None:
-            roll_pitch_jitter = config.get(
-                "_pose_batch_object_roll_pitch_jitter_rad", (0.0, 0.0)
-            )
+            roll_pitch_jitter = _pose_settings(config).object_roll_pitch_jitter_rad
         apply_seeded_spatial_rotation(
             pose,
             roll_pitch_amplitude=roll_pitch_jitter,
@@ -1703,8 +1664,8 @@ class AtomicSkillScenario(ScenarioProvider):
             seed=seed,
             roll_pitch_stream=stream + 2,
             yaw_stream=stream + 1,
-            seed_stride=int(config.get("_pose_batch_seed_stride", 1)),
-            sampling_pattern=str(config.get("_pose_batch_sampling_pattern", "uniform")),
+            seed_stride=int(_pose_settings(config).seed_stride),
+            sampling_pattern=str(_pose_settings(config).sampling_pattern),
         )
         apply_task_frame_randomization(pose, config, seed=seed)
         handle.reset(pose=pose, qpos=handle.initial_qpos)
@@ -1744,7 +1705,7 @@ class AtomicSkillScenario(ScenarioProvider):
         pose = handle.initial_pose.clone()
         position_jitter = config.get("object_position_jitter_m")
         if position_jitter is None:
-            position_jitter = config.get("_pose_batch_object_translation_jitter_m")
+            position_jitter = _pose_settings(config).object_translation_jitter_m
         position_amplitude = float_vector(
             position_jitter,
             name="object_position_jitter_m",
@@ -1760,18 +1721,16 @@ class AtomicSkillScenario(ScenarioProvider):
             dtype=pose.dtype,
             device=pose.device,
             batch_size=pose.shape[0],
-            seed_stride=int(config.get("_pose_batch_seed_stride", 1)),
-            sampling_pattern=str(config.get("_pose_batch_sampling_pattern", "uniform")),
+            seed_stride=int(_pose_settings(config).seed_stride),
+            sampling_pattern=str(_pose_settings(config).sampling_pattern),
         )
 
         yaw_jitter = config.get("object_yaw_jitter_rad")
         if yaw_jitter is None:
-            yaw_jitter = config.get("_pose_batch_object_yaw_jitter_rad", 0.0)
+            yaw_jitter = _pose_settings(config).object_yaw_jitter_rad
         roll_pitch_jitter = config.get("object_roll_pitch_jitter_rad")
         if roll_pitch_jitter is None:
-            roll_pitch_jitter = config.get(
-                "_pose_batch_object_roll_pitch_jitter_rad", (0.0, 0.0)
-            )
+            roll_pitch_jitter = _pose_settings(config).object_roll_pitch_jitter_rad
         apply_seeded_spatial_rotation(
             pose,
             roll_pitch_amplitude=roll_pitch_jitter,
@@ -1781,8 +1740,8 @@ class AtomicSkillScenario(ScenarioProvider):
             seed=seed,
             roll_pitch_stream=stream + 2,
             yaw_stream=stream + 1,
-            seed_stride=int(config.get("_pose_batch_seed_stride", 1)),
-            sampling_pattern=str(config.get("_pose_batch_sampling_pattern", "uniform")),
+            seed_stride=int(_pose_settings(config).seed_stride),
+            sampling_pattern=str(_pose_settings(config).sampling_pattern),
         )
         apply_task_frame_randomization(pose, config, seed=seed)
 

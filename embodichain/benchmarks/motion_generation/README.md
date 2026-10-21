@@ -68,6 +68,10 @@ result = run_benchmark(
 )
 ```
 
+Planner case tensors and nested parameters are copied outside timing before
+capacity checks, preparation and calls, preserving the canonical manifest and
+external metric inputs even when an adapter mutates its input in place.
+
 Mappings are local to one run and can override a registered adapter for that
 call. Load models in `build()` or `prepare()`, return the canonical batched
 `PlanResult` from `plan(case)`, and release resources in `close()`. Declare
@@ -144,9 +148,10 @@ videos/                 # optional
 
 `report.md` contains Time & Memory, Success & Other Metrics, and Leaderboard
 for each represented family: three tables for a single family, six for a mixed
-run. Motion Planning has separate geometry and solved-timing rankings. Atomic
-Skills ranks physical success and reports motion, execution and end-to-end
-success separately. Raw NMG and fixed-clock IK interpolation have no timed rank.
+run. Motion Planning has separate geometry and solved-timing rankings. Built-in Atomic
+Skills rank physical success and report motion, execution and end-to-end
+success separately. Custom/legacy populations retain their declared primary
+metric, which is named explicitly in the ranking. Raw NMG and fixed-clock IK interpolation have no timed rank.
 
 Report schema `3` uses `report_views` and the `motion_planning_*` /
 `atomic_skills_*` aggregate tables. `motion_timing_leaderboard` exposes the
@@ -167,16 +172,67 @@ Copy the closest suite and change its `suite_version` when altering thresholds,
 populations or success semantics. Select `scenario: free_space` or
 `scenario: atomic_skill` per track; a second family selector is unnecessary.
 
-Motion Planning populations live in `tracks[].config`: `target_types`,
-`batch_sizes`, `waypoint_counts`, `path_shapes`, `start_state_bins`, and `seeds`.
-EEF and joint targets have separate case identities and validity rules. Omitting
-`target_types` selects the EEF-only population. The shipped suites use
-`[eef, joint]`, robot velocity caps, `10 rad/s²` acceleration and no jerk budget.
-Acceleration is a benchmark policy, not a hardware specification. Configure
-common budgets under `protocol`; conflicting adapter-local budgets are rejected.
+Motion Planning populations live in `tracks[].config`. The packaged v3 suites
+select `sampling_method: cartesian`, with EEF and joint goals built from the
+same independently screened requests. Configure `batch_sizes`, `waypoint_counts`,
+`path_shapes`, `start_state_bins`, `seeds`, `batch_modes`, `distance_bins` and
+`motion_components`. For example:
+
+```yaml
+sampling_method: cartesian
+population_design: balanced
+batch_sizes: [1, 8, 64]
+batch_modes: [homogeneous, heterogeneous]
+distance_bins: [near, mid, far]
+motion_components: [translation, rotation, combined]
+waypoint_counts: [1, 3, 5]
+path_shapes: [direct, l_turn, s_curve]
+start_state_bins: [nominal, random_reachable, near_limit, near_singularity]
+seeds: [11, 23, 37]
+target_types: [eef, joint]
+```
+
+Pure translation holds TCP orientation; pure rotation holds TCP position.
+L/S shapes describe Cartesian waypoint geometry; turns need at least three
+waypoints, and pure rotation uses `direct`. `balanced` rotates meaningful
+shape/count pairs across seeds instead of multiplying the full geometry matrix;
+`full` enumerates every meaningful pair. Each declared start population varies
+across seeds. Homogeneous batches repeat one request; heterogeneous batches
+sample each row. The manifest records input fingerprints and measured TCP
+motion, joint margins and scaled-Jacobian conditioning. `near_singularity`
+requests select the least-conditioned candidate in a bounded pool; the measured
+`conditioning_class` states whether it actually crosses the near-singular
+threshold. It is not assumed from the requested label.
+
+Generation uses independent sequential IK and FK, honors tighter suite
+thresholds and fails with `invalid_case` after `max_generation_attempts` rather
+than silently dropping difficult inputs. Geometry validity also checks the
+initial joint state against `protocol.start_state_tolerance_rad`. EEF reference
+joint states remain diagnostic and are not supplied as EEF goals to adapters.
+
+Omitting `sampling_method` retains the legacy `joint_templates` population.
+Its L/S/wrist templates describe joint displacements; those labels do not certify
+Cartesian geometry or measured singularity. Keep its results under their original
+suite version. Shared motion budgets remain under `protocol`; conflicting
+adapter-local budgets are rejected. Acceleration is a benchmark policy, not a
+hardware specification.
+
+Time and success tables retain target modality, batch mode, distance and motion
+component. Success rows include unique input counts, measured difficulty and
+seed-cluster bootstrap intervals at `protocol.confidence_level`. Repeated calls
+and batch rows stay within their seed cluster; fewer than two seed clusters
+produce N/A. Small seed populations limit interval precision, and declared
+`held_out` domains do not verify a model's training split.
 
 Atomic tracks own their objects, skill configurations, physics and pose
-randomization. Use `randomization.pose_batch_size: K` with `batch_sizes: [K]`
+randomization. Packaged suites select `physics.clock: compiled`: compilation
+uses `physics_dt * steps_per_waypoint` as its command period, and replay follows
+the compiled arrival intervals on unchanged physics ticks. Rows share each
+sample's maximum interval, with shorter rows holding; completion time includes
+the actual scheduled ticks and terminal settling. Segment indices remain
+unchanged. Legacy `fixed_samples` is retained when the clock is omitted and
+uses `steps_per_waypoint` physics ticks for every sample. The clock and command
+period are recorded in trial metadata. Use `randomization.pose_batch_size: K` with `batch_sizes: [K]`
 for one vectorized skill request over `K` independently perturbed environment
 rows. The supplied pose-batch suite uses fixed cube grasps; articulated Slide
 shares one target-local grasp across its translated rows. Track configs may
@@ -248,7 +304,7 @@ describes pose, primitive-geometry and composed domains.
 - Object: configure a built-in `cube` / `mesh` entry, or register an object-kind
   factory in [`atomic_objects.py`](./scenarios/atomic_objects.py).
 - Atomic Skill: implement [`AtomicSkillCaseProvider`](./atomic_skill.py),
-  register it, and supply a measured physical evaluator. Reuse the lifecycle
+  register it, declare `requires_gripper` when needed, and supply a measured physical evaluator. Reuse the lifecycle
   and evidence owners below.
 
 ### Provider and evaluator interfaces
@@ -257,7 +313,9 @@ describes pose, primitive-geometry and composed domains.
 | --- | --- |
 | [`atomic_skill.py`](./atomic_skill.py) | Provider contract and skill registry |
 | [`scenarios/atomic_skill.py`](./scenarios/atomic_skill.py) | Scene setup/reset, cases, compilation, evaluation, video and teardown |
-| [`atomic_case_utils.py`](./scenarios/atomic_case_utils.py) | Deterministic identities, pose randomization and goal helpers |
+| [`atomic_case_utils.py`](./scenarios/atomic_case_utils.py) | Case identity, typed pose-context adaptation, provenance and goal helpers |
+| [`_atomic_pose_sampling.py`](./scenarios/_atomic_pose_sampling.py) | Pure deterministic pose sampling and legacy-context decoding |
+| [`_free_space_sampling.py`](./scenarios/_free_space_sampling.py) | Reachable Cartesian workloads and measured difficulty |
 | [`atomic_policy.py`](./scenarios/atomic_policy.py) | Motion policy, source attribution and budgets |
 | [`atomic_grasps.py`](./scenarios/atomic_grasps.py) | Frozen and case-scoped grasp generators |
 | [`atomic_evaluation.py`](./scenarios/atomic_evaluation.py) | Measured evidence and shared evaluators |
@@ -287,8 +345,8 @@ defines evidence boundaries, stage progression and success semantics.
   currently reject cuRobo.
 - General per-row geometry-sampled antipodal candidate selection remains
   single-environment; the supplied single-arm pose-batch suites use Franka + PGI.
-- Collision-aware comparison, latency-budget sweeps, confidence intervals,
-  subprocess isolation and recovery benchmarks remain future work.
+- Collision-aware comparison, latency-budget sweeps, subprocess isolation and
+  recovery benchmarks remain future work; seed-cluster intervals are available.
 - Embodiment sensor acquisition and Task Program runtime services are outside
   this host. Other benchmark domains under `scripts/benchmark/` still require
   a source checkout.

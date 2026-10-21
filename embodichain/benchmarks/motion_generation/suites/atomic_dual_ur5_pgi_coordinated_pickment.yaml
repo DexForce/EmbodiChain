@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_dual_ur5_pgi_coordinated_pickment
-suite_version: atomic_dual_ur5_pgi_coordinated_pickment_v2
+suite_version: atomic_dual_ur5_pgi_coordinated_pickment_v3
 profile: smoke
 
 # CoordinatedPickment on the tutorial dual UR5 + PGI robot and scene.
@@ -45,6 +45,7 @@ tracks:
       batch_sizes: [1]
       seeds: [11]
       physics:
+        clock: compiled
         steps_per_waypoint: 16
         hold_steps: 80
         hold_sim_steps: 2

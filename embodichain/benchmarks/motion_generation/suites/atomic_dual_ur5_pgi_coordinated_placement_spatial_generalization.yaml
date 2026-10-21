@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization
-suite_version: atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization_v6
+suite_version: atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization_v7
 profile: coverage
 
 robot:
@@ -324,6 +324,7 @@ tracks:
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics:
+        clock: compiled
         steps_per_waypoint: 16
         hold_steps: 80
         hold_sim_steps: 2

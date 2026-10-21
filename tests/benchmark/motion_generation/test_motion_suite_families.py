@@ -192,7 +192,9 @@ def test_motion_suites_cover_both_targets_with_shared_baselines(suite_name):
     suite = load_suite(suite_name)
     planners = {spec.id: spec for spec in suite.planners}
 
-    assert suite.suite_version.endswith("_v2")
+    assert suite.suite_version.endswith("_v3")
+    assert suite.free_space.sampling_method == "cartesian"
+    assert suite.free_space.batch_modes == ["homogeneous", "heterogeneous"]
     assert suite.protocol.report_schema_version == "3"
     assert suite.free_space.target_types == ["eef", "joint"]
     assert suite.free_space.joint_threshold_rad == 0.02

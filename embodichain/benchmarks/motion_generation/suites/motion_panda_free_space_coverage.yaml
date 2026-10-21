@@ -1,6 +1,6 @@
 schema_version: 1
 name: motion_panda_free_space_coverage
-suite_version: motion_panda_free_space_coverage_v2
+suite_version: motion_panda_free_space_coverage_v3
 profile: coverage
 
 planners:
@@ -60,7 +60,7 @@ planners:
 protocol:
   report_schema_version: "3"
   warmup_trials: 3
-  measured_trials: 20
+  measured_trials: 5
   sample_interval: 80
   validation_samples: 256
   position_threshold_m: 0.01
@@ -77,10 +77,15 @@ tracks:
     scenario: free_space
     enabled: true
     config:
+      sampling_method: cartesian
+      population_design: balanced
+      batch_modes: [homogeneous, heterogeneous]
+      distance_bins: [near, mid, far]
+      motion_components: [translation, rotation, combined]
       target_types: [eef, joint]
       joint_threshold_rad: 0.02
       batch_sizes: [1, 8, 64]
       waypoint_counts: [1, 3, 5]
-      path_shapes: [direct, l_turn, s_curve, orientation_only, combined]
+      path_shapes: [direct, l_turn, s_curve]
       start_state_bins: [nominal, random_reachable, near_limit, near_singularity]
       seeds: [11, 23, 37, 53, 71]

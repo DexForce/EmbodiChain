@@ -24,7 +24,7 @@ from collections.abc import Iterable
 from dataclasses import replace
 
 from ._aggregation_policy import _source_unsupported, _unsupported_case_ids
-from .metrics.stats import nearest_rank_percentile
+from .metrics.stats import nearest_rank_percentile, _seed_cluster_interval
 from .generalization import aggregate_generalization
 from .models import BenchmarkCase, CaseOutcome, PlannerMetadata, TrialPhase, TrialRecord
 
@@ -709,6 +709,7 @@ def _metric_rows(
     metadata: list[PlannerMetadata],
     cases: list[BenchmarkCase],
     measured_trials: int,
+    confidence_level: float = 0.95,
 ) -> list[dict[str, object]]:
     """Aggregate external success and quality metrics by scenario condition.
 
@@ -916,6 +917,28 @@ def _metric_rows(
                 )
                 for case in group_cases
             )
+            rates = []
+            for case in rate_cases:
+                if case.case_id in excluded_case_ids:
+                    continue
+                own = [
+                    outcome
+                    for record in measured
+                    if record.case_id == case.case_id
+                    for outcome in record.outcomes
+                ]
+                attribute = (
+                    "geometry_valid"
+                    if case.primary_success == "geometry_valid"
+                    else case.primary_success
+                )
+                rate = sum(bool(getattr(outcome, attribute)) for outcome in own) / max(
+                    len(own), case.batch_size * measured_trials
+                )
+                rates.append((case.seed, rate))
+            ci_low, ci_high, seed_clusters = _seed_cluster_interval(
+                rates, confidence_level
+            )
             rows.append(
                 {
                     "track": track,
@@ -933,6 +956,64 @@ def _metric_rows(
                     "start_state_bin": start_state_bin,
                     "cases": len(group_cases),
                     "n_valid": len(valid_outcomes),
+                    "success_ci_lower": ci_low,
+                    "success_ci_upper": ci_high,
+                    "seed_clusters": seed_clusters,
+                    "confidence_level": confidence_level,
+                    "uncertainty_method": (
+                        "seed_cluster_percentile_bootstrap_1000"
+                        if seed_clusters >= 2
+                        else "insufficient_seed_clusters"
+                    ),
+                    "unique_input_rows": len(
+                        {
+                            fingerprint
+                            for case in group_cases
+                            for fingerprint in case.case_parameters.get(
+                                "input_fingerprints", []
+                            )
+                        }
+                    )
+                    or None,
+                    "tcp_translation_m_mean": _mean(
+                        value
+                        for case in group_cases
+                        for value in case.case_parameters.get("tcp_translation_m", [])
+                    ),
+                    "tcp_rotation_rad_mean": _mean(
+                        value
+                        for case in group_cases
+                        for value in case.case_parameters.get("tcp_rotation_rad", [])
+                    ),
+                    "joint_margin_fraction_min": min(
+                        (
+                            value
+                            for case in group_cases
+                            for value in case.case_parameters.get(
+                                "joint_margin_fraction", []
+                            )
+                        ),
+                        default=None,
+                    ),
+                    "jacobian_condition_ratio_min": min(
+                        (
+                            value
+                            for case in group_cases
+                            for value in case.case_parameters.get(
+                                "jacobian_condition_ratio", []
+                            )
+                        ),
+                        default=None,
+                    ),
+                    "conditioning_counts": dict(
+                        Counter(
+                            value
+                            for case in group_cases
+                            for value in case.case_parameters.get(
+                                "conditioning_class", []
+                            )
+                        )
+                    ),
                     "coverage_rate": min(1.0, len(outcomes) / max(expected, 1)),
                     "success_rate": _case_macro_primary_rate(
                         measured,
@@ -1141,6 +1222,21 @@ def _metric_rows(
     return rows
 
 
+def _primary_ranking(cases: list[BenchmarkCase]) -> str:
+    """Name the metric actually selected by the case population."""
+    attributes = {case.primary_success for case in cases}
+    if len(attributes) != 1:
+        return "mixed_primary"
+    attribute = next(iter(attributes))
+    return {
+        "physical_skill_success": "physical_skill",
+        "task_success": "end_to_end",
+        "end_to_end_success": "end_to_end",
+        "motion_valid": "motion",
+        "geometry_valid": "geometry",
+    }.get(attribute, attribute)
+
+
 def _view_leaderboard(
     records: list[TrialRecord],
     metadata: list[PlannerMetadata],
@@ -1247,7 +1343,11 @@ def _view_leaderboard(
                 "ranking": (
                     "timed_motion"
                     if timing
-                    else ("geometry" if view == "motion_planning" else "physical_skill")
+                    else (
+                        "geometry"
+                        if view == "motion_planning"
+                        else _primary_ranking(track_cases)
+                    )
                 ),
                 "track": track,
                 "algorithm": algorithm,
@@ -1459,6 +1559,27 @@ def _view_performance(
     return rows
 
 
+def _workload_groups(
+    cases: list[BenchmarkCase], records: list[TrialRecord]
+) -> list[tuple[dict[str, object], list[BenchmarkCase], list[TrialRecord]]]:
+    """Partition workloads once so batch semantics never disappear in averages."""
+    fields = ("target_type", "batch_mode", "distance_bin", "motion_component")
+    groups: dict[tuple[object, ...], list[BenchmarkCase]] = defaultdict(list)
+    key_by_case = {}
+    for case in cases:
+        key = tuple(case.case_parameters.get(field) for field in fields)
+        groups[key].append(case)
+        key_by_case[case.case_id] = key
+    grouped_records = defaultdict(list)
+    for record in records:
+        if record.case_id in key_by_case:
+            grouped_records[key_by_case[record.case_id]].append(record)
+    return [
+        (dict(zip(fields, key)), group, grouped_records[key])
+        for key, group in groups.items()
+    ]
+
+
 def aggregate_results(
     records: list[TrialRecord],
     metadata: list[PlannerMetadata],
@@ -1466,6 +1587,7 @@ def aggregate_results(
     measured_trials: int,
     *,
     track_scenarios: dict[str, str],
+    confidence_level: float = 0.95,
 ) -> dict[str, list[dict[str, object]]]:
     """Build scenario-owned report tables with separate geometry and timed ranks.
 
@@ -1505,12 +1627,20 @@ def aggregate_results(
                 "schema_version": 3,
             }
         )
-        result[f"{view}_time_and_memory"] = _view_performance(
-            view_records, metadata, view_cases, view=view
+        workloads = (
+            _workload_groups(view_cases, view_records)
+            if view == "motion_planning"
+            else [({}, view_cases, view_records)]
         )
+        result[f"{view}_time_and_memory"] = [
+            {**row, **labels}
+            for labels, population, trials in workloads
+            for row in _view_performance(trials, metadata, population, view=view)
+        ]
         result[f"{view}_success_and_metrics"] = [
             {
                 **row,
+                **labels,
                 "view": view,
                 "success_rate": (
                     row["geometry_valid_rate"]
@@ -1518,7 +1648,10 @@ def aggregate_results(
                     else row["success_rate"]
                 ),
             }
-            for row in _metric_rows(view_records, metadata, view_cases, measured_trials)
+            for labels, population, trials in workloads
+            for row in _metric_rows(
+                trials, metadata, population, measured_trials, confidence_level
+            )
         ]
         result[f"{view}_leaderboard"] = _view_leaderboard(
             view_records, metadata, view_cases, measured_trials, view=view

@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_dual_ur5_pgi_hand_over
-suite_version: atomic_dual_ur5_pgi_hand_over_v2
+suite_version: atomic_dual_ur5_pgi_hand_over_v3
 profile: smoke
 
 # HandOver on the tutorial dual UR5 + PGI robot and scene.  Coordinated
@@ -44,6 +44,7 @@ tracks:
       batch_sizes: [1]
       seeds: [11]
       physics:
+        clock: compiled
         steps_per_waypoint: 16
         hold_steps: 80
         hold_sim_steps: 2

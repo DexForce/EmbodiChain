@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 import torch
@@ -62,6 +62,8 @@ from ..contracts import PhysicalEvaluation, ReplayObservationWindow
 from ..evaluation import StageEvidence, evaluate_skill_stage_batch
 from ..models import BenchmarkCase, CaseOutcome
 from ..contracts import ExecutionObservation
+from ._atomic_pose_sampling import _pose_settings
+
 from .atomic_case_utils import (
     apply_task_frame_randomization,
     apply_target_rotation_randomization,
@@ -737,6 +739,14 @@ def _support_randomization_config(
 ) -> dict[str, object]:
     """Map support-object overrides onto the generic object jitter contract."""
     support_config = dict(config)
+    if "_pose_batch" in config:
+        settings = _pose_settings(config)
+        support_config["_pose_batch"] = replace(
+            settings,
+            object_translation_jitter_m=settings.support_object_translation_jitter_m,
+            object_yaw_jitter_rad=settings.support_object_yaw_jitter_rad,
+            object_roll_pitch_jitter_rad=settings.support_object_roll_pitch_jitter_rad,
+        )
     support_config.pop("object_position_jitter_m", None)
     support_config.pop("object_yaw_jitter_rad", None)
     support_config.pop("object_roll_pitch_jitter_rad", None)
@@ -841,7 +851,7 @@ def _case(
         skill_id=provider.skill_id,
         object_id=object_id,
         task_difficulty=difficulty(config),
-        primary_success="task_success",
+        primary_success="physical_skill_success",
         full_start_qpos=full_start_qpos,
         case_parameters={
             **parameters,

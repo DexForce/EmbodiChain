@@ -337,8 +337,11 @@ class BenchmarkRunner:
         """Time one plan, validate outside timing, and persist the record."""
         record_metadata = self._trial_metadata(provider, case, metadata)
         provider.reset_case(sim, robot, case, self.control_part)
+        # Adapters may normalize tensors in place. Keep the canonical manifest
+        # and external metric inputs independent; copying is outside timing.
+        planner_case = deepcopy(case)
         measured = timed_call(
-            lambda: _capture(lambda: provider.plan_case(adapter, case))
+            lambda: _capture(lambda: provider.plan_case(adapter, planner_case))
         )
         result, error = measured.result
         failure_code = None
@@ -556,7 +559,7 @@ class BenchmarkRunner:
                     record_metadata=self._trial_metadata(provider, case, metadata),
                 )
                 continue
-            supported, reason = adapter.supports_case(case)
+            supported, reason = adapter.supports_case(deepcopy(case))
             if supported:
                 supported_cases.append(case)
                 continue
@@ -619,12 +622,13 @@ class BenchmarkRunner:
         scenario_prepared = False
         try:
             if adapter.separate_prepare:
+                preparation_cases = deepcopy(supported_cases)
                 _, prepare_error = self._record_timed_lifecycle(
                     writer,
                     metadata,
                     first_case,
                     TrialPhase.PREPARE,
-                    lambda: adapter.prepare_cases(supported_cases),
+                    lambda: adapter.prepare_cases(preparation_cases),
                     record_metadata=lifecycle_metadata[first_case.case_id],
                 )
                 if prepare_error is not None:
@@ -829,6 +833,7 @@ class BenchmarkRunner:
             self.cases,
             self.suite.protocol.measured_trials,
             track_scenarios={track.id: track.scenario for track in enabled_tracks},
+            confidence_level=self.suite.protocol.confidence_level,
         )
         write_json(
             run_dir / "aggregates.json",

@@ -551,3 +551,27 @@ def test_suite_can_explicitly_rank_physical_success() -> None:
     assert metrics["physical_skill_success_rate"] == 1.0
     assert metrics["end_to_end_success_rate"] == 0.0
     assert aggregates["atomic_skills_leaderboard"][0]["overall_success_rate"] == 1.0
+
+
+@pytest.mark.parametrize(
+    "attribute,ranking,expected",
+    [
+        ("task_success", "end_to_end", 0.0),
+        ("physical_skill_success", "physical_skill", 1.0),
+    ],
+)
+def test_atomic_ranking_label_matches_actual_success_metric(
+    attribute, ranking, expected
+):
+    case = replace(_case(), primary_success=attribute)
+    outcome = with_physical_evaluation(
+        replace(_outcome(), motion_valid=False),
+        _primitive(0.002),
+        skill_id=case.skill_id,
+    )
+    row = _aggregates([case], [_record(case, (outcome,))])["atomic_skills_leaderboard"][
+        0
+    ]
+    assert row["ranking"] == ranking
+    assert row["overall_success_rate"] == expected
+    assert row["physical_skill_success_rate"] == 1.0

@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_franka_pgi_pose_batch
-suite_version: atomic_franka_pgi_pose_batch_v4
+suite_version: atomic_franka_pgi_pose_batch_v5
 profile: coverage
 
 robot:
@@ -86,6 +86,7 @@ tracks:
         target_translation_jitter_m: [0.03, 0.03, 0.02]
         seed_stride: 1
       physics:
+        clock: compiled
         steps_per_waypoint: 4
         hold_steps: 80
         hold_sim_steps: 2

@@ -690,6 +690,7 @@ def _protocol_suite() -> Mock:
             position_threshold_m=0.01,
             rotation_threshold_rad=0.1,
             joint_limit_tolerance_rad=1.0e-5,
+            start_state_tolerance_rad=1.0e-3,
             joint_velocity_limit_rad_s=None,
             joint_acceleration_limit_rad_s2=None,
             joint_jerk_limit_rad_s3=None,

@@ -19,9 +19,38 @@
 from __future__ import annotations
 
 import math
+import random
+from collections import defaultdict
 from collections.abc import Iterable
 
 __all__ = ["nearest_rank_percentile"]
+
+
+def _seed_cluster_interval(
+    values: list[tuple[int, float]], confidence_level: float
+) -> tuple[float | None, float | None, int]:
+    """Bootstrap case rates by seed, keeping environment/repeat rows together."""
+    if not 0 < confidence_level < 1:
+        raise ValueError("confidence_level must be between zero and one.")
+    groups: dict[int, list[float]] = defaultdict(list)
+    for seed, rate in values:
+        groups[seed].append(rate)
+    clusters = [(sum(group), len(group)) for _, group in sorted(groups.items())]
+    if len(clusters) < 2:
+        return None, None, len(clusters)
+    generator = random.Random(0)
+    estimates = []
+    for _ in range(1000):
+        sample = generator.choices(clusters, k=len(clusters))
+        estimates.append(
+            sum(total for total, _ in sample) / sum(count for _, count in sample)
+        )
+    tail = 100.0 * (1.0 - confidence_level) / 2.0
+    return (
+        nearest_rank_percentile(estimates, tail),
+        nearest_rank_percentile(estimates, 100.0 - tail),
+        len(clusters),
+    )
 
 
 def nearest_rank_percentile(

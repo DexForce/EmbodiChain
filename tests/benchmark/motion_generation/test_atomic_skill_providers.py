@@ -908,3 +908,46 @@ def test_push_succeeds_when_contact_starts_during_planar_motion() -> None:
         .evaluate(case, observation, ())[0]
     )
     assert result.task_success
+
+
+def test_custom_gripper_provider_initializes_configured_commands(monkeypatch):
+    from embodichain.benchmarks.motion_generation import atomic_skill as registry
+    from embodichain.benchmarks.motion_generation.config import SuiteCfg, TrackCfg
+    from embodichain.benchmarks.motion_generation.scenarios.atomic_skill import (
+        AtomicSkillScenario,
+    )
+
+    class Custom(registry.AtomicSkillCaseProvider):
+        skill_id = "custom_gripper_regression"
+        requires_gripper = True
+
+        def generate_case(self, *args, **kwargs):
+            raise NotImplementedError
+
+        def build_invocation(self, *args, **kwargs):
+            raise NotImplementedError
+
+    monkeypatch.setitem(registry._ATOMIC_SKILL_PROVIDERS, Custom.skill_id, Custom)
+    scenario = AtomicSkillScenario()
+    simulation = Mock()
+    robot = Mock()
+    robot.get_qpos.return_value = torch.zeros(1, 9)
+    scenario.simulation = simulation
+    scenario._runtime_entities_created = True
+    expected_open, expected_grasp = torch.zeros(1, 2), torch.ones(1, 2)
+    resolve = Mock(return_value=("custom_hand", expected_open, expected_grasp))
+    monkeypatch.setattr(scenario, "_resolve_gripper", resolve)
+    track = TrackCfg(
+        id="custom",
+        scenario="atomic_skill",
+        config={
+            "skills": [{"id": Custom.skill_id}],
+            "gripper": {"control_part": "custom_hand"},
+        },
+    )
+    scenario.configure_runtime(simulation, robot, SuiteCfg(), track, "arm")
+    resolve.assert_called_once()
+    assert scenario.end_effector_part == "custom_hand"
+    torch.testing.assert_close(
+        scenario._configured_grippers()["custom_hand"][0], expected_open
+    )

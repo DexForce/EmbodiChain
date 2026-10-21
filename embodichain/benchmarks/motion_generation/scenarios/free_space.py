@@ -272,6 +272,12 @@ class FreeSpaceScenario(ScenarioProvider):
         batch_size: int,
     ) -> list[BenchmarkCase]:
         case_matrix = self._case_matrix(suite, track)
+        if case_matrix.sampling_method == "cartesian":
+            from ._free_space_sampling import generate_cartesian_cases
+
+            return generate_cartesian_cases(
+                suite, track, case_matrix, robot, control_part, batch_size
+            )
         cases: list[BenchmarkCase] = []
         for seed in case_matrix.seeds:
             for num_waypoints in case_matrix.waypoint_counts:

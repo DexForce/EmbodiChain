@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_dual_ur5_pgi_coordinated_placement
-suite_version: atomic_dual_ur5_pgi_coordinated_placement_v2
+suite_version: atomic_dual_ur5_pgi_coordinated_placement_v3
 profile: smoke
 
 # CoordinatedPlacement on the tutorial dual UR5 + PGI robot and bread/pan
@@ -54,6 +54,7 @@ tracks:
       batch_sizes: [1]
       seeds: [11]
       physics:
+        clock: compiled
         steps_per_waypoint: 16
         hold_steps: 80
         hold_sim_steps: 2

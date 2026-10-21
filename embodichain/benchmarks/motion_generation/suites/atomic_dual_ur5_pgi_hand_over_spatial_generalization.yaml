@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_dual_ur5_pgi_hand_over_spatial_generalization
-suite_version: atomic_dual_ur5_pgi_hand_over_spatial_generalization_v4
+suite_version: atomic_dual_ur5_pgi_hand_over_spatial_generalization_v5
 profile: coverage
 
 robot:
@@ -198,6 +198,7 @@ tracks:
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics:
+        clock: compiled
         steps_per_waypoint: 16
         hold_steps: 80
         hold_sim_steps: 2

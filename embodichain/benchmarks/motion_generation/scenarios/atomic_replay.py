@@ -51,6 +51,7 @@ class _ReplayMetrics:
 
     squared_tracking_error: torch.Tensor
     tracking_value_count: int
+    physics_steps: int | None = None
     articulation_joint_initial: torch.Tensor | None = None
     articulation_joint_final: torch.Tensor | None = None
     articulation_joint_peak_signed_delta: torch.Tensor | None = None
@@ -98,6 +99,7 @@ class _PhysicsReplaySettings:
     hold_steps: int
     hold_sim_steps: int
     joint_tracking_tolerance_rad: float
+    clock: str = "fixed_samples"
 
 
 class AtomicReplayRuntime:
@@ -179,10 +181,15 @@ class AtomicReplayRuntime:
             / max(replay_metrics.tracking_value_count, 1)
         )
         trajectory = compiled.trajectory.positions
-        simulated_execution_time = (
-            trajectory.shape[1] * settings.steps_per_waypoint
-            + settings.hold_steps * settings.hold_sim_steps
-        ) * float(self.simulation.sim_config.physics_dt)
+        physics_steps = replay_metrics.physics_steps
+        if physics_steps is None:
+            physics_steps = (
+                trajectory.shape[1] * settings.steps_per_waypoint
+                + settings.hold_steps * settings.hold_sim_steps
+            )
+        simulated_execution_time = physics_steps * float(
+            self.simulation.sim_config.physics_dt
+        )
         final_tcp = self.robot.compute_fk(
             self.robot.get_qpos(name=self.control_part),
             name=self.control_part,
@@ -255,7 +262,10 @@ class AtomicReplayRuntime:
             joint_tracking_tolerance_rad=float(
                 physics.get("joint_tracking_tolerance_rad", 0.05)
             ),
+            clock=str(physics.get("clock", "fixed_samples")),
         )
+        if settings.clock not in {"fixed_samples", "compiled"}:
+            raise ValueError("physics.clock must be fixed_samples or compiled.")
         if (
             settings.steps_per_waypoint < 1
             or settings.hold_steps < 0
@@ -419,6 +429,7 @@ class AtomicReplayRuntime:
         object_handle = self._objects.get(case.object_id or "")
         articulation_handle = self._articulations.get(case.object_id or "")
         settings = self._physics_settings()
+        arrival_steps = self._arrival_steps(compiled, settings)
         lift_start = None if provider is None else provider.lift_segment_start(compiled)
         dynamics_cleared = False
         squared_tracking_error: torch.Tensor | None = None
@@ -551,7 +562,7 @@ class AtomicReplayRuntime:
                 )
             positions = trajectory[:, waypoint_index]
             self.robot.set_qpos(positions, target=True)
-            for _ in range(settings.steps_per_waypoint):
+            for _ in range(arrival_steps[waypoint_index]):
                 self.simulation.update(step=1)
                 if (
                     rotation_window is not None
@@ -666,6 +677,8 @@ class AtomicReplayRuntime:
             return _ReplayMetrics(
                 squared_tracking_error=squared_tracking_error,
                 tracking_value_count=tracking_value_count,
+                physics_steps=sum(arrival_steps)
+                + settings.hold_steps * settings.hold_sim_steps,
                 articulation_joint_initial=articulation_initial,
                 articulation_joint_final=articulation_final,
                 articulation_joint_peak_signed_delta=articulation_peak,
@@ -686,6 +699,48 @@ class AtomicReplayRuntime:
                 },
             )
         return None
+
+    def _arrival_steps(
+        self, compiled: CompiledTrajectory, settings: _PhysicsReplaySettings
+    ) -> list[int]:
+        """Quantize the shared compiled clock once, preserving segment indices."""
+        count = compiled.trajectory.positions.shape[1]
+        if settings.clock == "fixed_samples":
+            return [settings.steps_per_waypoint] * count
+        dt = compiled.trajectory.dt
+        if dt is None or dt.shape != compiled.trajectory.positions.shape[:2]:
+            raise ValueError(
+                "Compiled-clock replay requires aligned arrival intervals."
+            )
+        if (
+            not bool(torch.isfinite(dt).all())
+            or bool((dt < 0).any())
+            or bool((dt[:, 0] != 0).any())
+        ):
+            raise ValueError(
+                "Compiled-clock replay requires finite nonnegative intervals and a zero first arrival."
+            )
+        # Rows padded with zero-time terminal holds wait on the common clock.
+        # Cumulative quantization bounds rounding error to one physics tick.
+        physics_dt = float(self.simulation.sim_config.physics_dt)
+        if not math.isfinite(physics_dt) or physics_dt <= 0:
+            raise ValueError("physics_dt must be finite and positive.")
+        arrivals = dt.to(torch.float64).amax(dim=0).cumsum(dim=0).cpu().tolist()
+        result = []
+        previous = 0
+        for arrival in arrivals:
+            ratio = arrival / physics_dt
+            nearest = round(ratio)
+            tick = (
+                nearest
+                if math.isclose(
+                    ratio, nearest, abs_tol=max(1.0e-7, abs(ratio) * 1.0e-7)
+                )
+                else math.ceil(ratio)
+            )
+            result.append(tick - previous)
+            previous = tick
+        return result
 
     def hold_static(self) -> None:
         """Hold the current scene so a failed-case debug video has frames."""

@@ -162,6 +162,7 @@ class ScenarioProvider(ABC):
             position_threshold_m=suite.protocol.position_threshold_m,
             rotation_threshold_rad=suite.protocol.rotation_threshold_rad,
             joint_limit_tolerance_rad=suite.protocol.joint_limit_tolerance_rad,
+            start_state_tolerance_rad=suite.protocol.start_state_tolerance_rad,
             joint_velocity_limit_rad_s=suite.protocol.joint_velocity_limit_rad_s,
             joint_acceleration_limit_rad_s2=(
                 suite.protocol.joint_acceleration_limit_rad_s2

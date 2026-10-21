@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_ur5_embodiment
-suite_version: atomic_ur5_embodiment_v2
+suite_version: atomic_ur5_embodiment_v3
 profile: smoke
 
 embodiment:
@@ -48,6 +48,7 @@ tracks:
             object_translation_jitter_m: [0.02, 0.02, 0.0]
     config:
       physics:
+        clock: compiled
         steps_per_waypoint: 4
         hold_steps: 80
         hold_sim_steps: 2

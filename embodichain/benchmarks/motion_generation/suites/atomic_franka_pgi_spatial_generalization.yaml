@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_franka_pgi_spatial_generalization
-suite_version: atomic_franka_pgi_spatial_generalization_v9
+suite_version: atomic_franka_pgi_spatial_generalization_v10
 profile: coverage
 
 # Reusable strict-spatial domain definitions. Every track below selects only
@@ -386,6 +386,7 @@ x-domain-articulation-workspace-shell: &domain_articulation_workspace_shell
       seed_stride: 1
 
 x-physics: &physics
+  clock: compiled
   steps_per_waypoint: 16
   hold_steps: 80
   hold_sim_steps: 2

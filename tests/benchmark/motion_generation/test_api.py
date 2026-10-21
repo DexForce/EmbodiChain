@@ -301,3 +301,56 @@ def test_partial_scene_creation_failure_releases_scenario_and_simulation(
     close.assert_called_once()
     factory.return_value.destroy.assert_called_once_with(exit_process=False)
     factory.flush_cleanup_queue.assert_called_once()
+
+
+def test_in_place_adapter_changes_cannot_modify_canonical_cases(fake_runtime, tmp_path):
+    class MutatingAdapter(ExternalAdapter):
+        separate_prepare = True
+
+        def supports_case(self, case):
+            case.start_qpos.add_(17)
+            case.case_parameters["mutated"] = True
+            return True, None
+
+        def prepare_cases(self, cases):
+            for case in cases:
+                assert not case.start_qpos.any()
+                case.target_waypoints.zero_()
+                case.case_parameters["mutated"] = True
+            return None
+
+        def plan(self, case):
+            assert not case.start_qpos.any()
+            assert "mutated" not in case.case_parameters
+            result = super().plan(case)
+            case.start_qpos.add_(42)
+            case.target_waypoints.zero_()
+            case.case_parameters["mutated"] = True
+            return result
+
+    class ObservingAdapter(ExternalAdapter):
+        def plan(self, case):
+            assert not case.start_qpos.any()
+            assert "mutated" not in case.case_parameters
+            torch.testing.assert_close(case.target_waypoints[0, 0], torch.eye(4))
+            return super().plan(case)
+
+    suite = load_suite()
+    suite.protocol.warmup_trials = 0
+    suite.protocol.measured_trials = 2
+    result = run_benchmark(
+        suite,
+        planners=[
+            PlannerSpecCfg(id="mutator", adapter="mutator"),
+            PlannerSpecCfg(id="observer", adapter="observer"),
+        ],
+        adapters={"mutator": MutatingAdapter, "observer": ObservingAdapter},
+        device="cpu",
+        output_root=tmp_path,
+    )
+    assert all(record.status == "ok" for record in result.records)
+    manifest = json.loads((result.run_dir / "case_manifest.json").read_text())
+    case = manifest["cases"][0]
+    assert case["start_qpos"] == [[0.0, 0.0]]
+    assert "mutated" not in case["case_parameters"]
+    assert case["target_waypoints"][0][0] == torch.eye(4).tolist()

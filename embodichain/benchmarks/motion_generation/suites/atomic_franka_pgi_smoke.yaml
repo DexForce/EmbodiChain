@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_franka_pgi_smoke
-suite_version: atomic_franka_pgi_smoke_v4
+suite_version: atomic_franka_pgi_smoke_v5
 profile: smoke
 
 robot:
@@ -87,6 +87,7 @@ tracks:
       batch_sizes: [1]
       seeds: [11]
       physics:
+        clock: compiled
         steps_per_waypoint: 4
         hold_steps: 80
         hold_sim_steps: 2

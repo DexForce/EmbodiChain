@@ -25,6 +25,8 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from embodichain.compute.kinematics import pose_error
+
 from ..models import BenchmarkCase, CaseOutcome
 from ..limits import (
     resolve_dynamic_limit,
@@ -63,21 +65,13 @@ def _pose_error_matrices(
     pos_error = torch.linalg.norm(
         waypoints[:, None, :3, 3] - trajectory_poses[None, :, :3, 3], dim=-1
     )
-    waypoint_rot = waypoints[:, None, :3, :3]
-    trajectory_rot = trajectory_poses[None, :, :3, :3]
-    relative = waypoint_rot.transpose(-1, -2) @ trajectory_rot
-    trace = torch.diagonal(relative, dim1=-2, dim2=-1).sum(dim=-1)
-    rotation_error = torch.arccos(torch.clamp((trace - 1.0) * 0.5, -1.0, 1.0))
+    _, residual = pose_error(trajectory_poses[None], waypoints[:, None])
+    rotation_error = residual.norm(dim=-1)
     if rotation_symmetry == "half_turn_about_z":
-        symmetric_rot = waypoint_rot.clone()
-        symmetric_rot[..., :2] = -symmetric_rot[..., :2]
-        symmetric_relative = symmetric_rot.transpose(-1, -2) @ trajectory_rot
-        symmetric_trace = torch.diagonal(symmetric_relative, dim1=-2, dim2=-1).sum(
-            dim=-1
-        )
-        symmetric_error = torch.arccos(
-            torch.clamp((symmetric_trace - 1.0) * 0.5, -1.0, 1.0)
-        )
+        symmetric_poses = waypoints.clone()
+        symmetric_poses[:, :3, :2] *= -1
+        _, residual = pose_error(trajectory_poses[None], symmetric_poses[:, None])
+        symmetric_error = residual.norm(dim=-1)
         rotation_error = torch.minimum(rotation_error, symmetric_error)
     elif rotation_symmetry is not None:
         raise ValueError(
@@ -101,21 +95,13 @@ def get_pose_err(
     if tensor_b.ndim == 2:
         tensor_b = tensor_b.unsqueeze(0)
     translation = torch.linalg.norm(tensor_a[:, :3, 3] - tensor_b[:, :3, 3], dim=-1)
-    relative = tensor_a[:, :3, :3].transpose(-1, -2) @ tensor_b[:, :3, :3]
-    trace = torch.diagonal(relative, dim1=-2, dim2=-1).sum(dim=-1)
-    rotation = torch.arccos(torch.clamp((trace - 1.0) * 0.5, -1.0, 1.0))
+    _, residual = pose_error(tensor_a, tensor_b)
+    rotation = residual.norm(dim=-1)
     if rotation_symmetry == "half_turn_about_z":
         symmetric_b = tensor_b.clone()
         symmetric_b[:, :3, :2] = -symmetric_b[:, :3, :2]
-        symmetric_relative = (
-            tensor_a[:, :3, :3].transpose(-1, -2) @ symmetric_b[:, :3, :3]
-        )
-        symmetric_trace = torch.diagonal(symmetric_relative, dim1=-2, dim2=-1).sum(
-            dim=-1
-        )
-        symmetric_rotation = torch.arccos(
-            torch.clamp((symmetric_trace - 1.0) * 0.5, -1.0, 1.0)
-        )
+        _, residual = pose_error(tensor_a, symmetric_b)
+        symmetric_rotation = residual.norm(dim=-1)
         rotation = torch.minimum(rotation, symmetric_rotation)
     elif rotation_symmetry is not None:
         raise ValueError(
@@ -649,6 +635,7 @@ def compute_case_outcomes(
     position_threshold_m: float,
     rotation_threshold_rad: float,
     joint_limit_tolerance_rad: float,
+    start_state_tolerance_rad: float = 1.0e-3,
     joint_velocity_limit_rad_s: float | Sequence[float] | None = None,
     joint_acceleration_limit_rad_s2: float | Sequence[float] | None = None,
     joint_jerk_limit_rad_s3: float | Sequence[float] | None = None,
@@ -656,6 +643,8 @@ def compute_case_outcomes(
     timing_is_solved: bool = True,
 ) -> tuple[CaseOutcome, ...]:
     """Recompute free-space success and quality from a planner trajectory."""
+    if not math.isfinite(start_state_tolerance_rad) or start_state_tolerance_rad < 0:
+        raise ValueError("start_state_tolerance_rad must be finite and non-negative.")
     planning_success = _success_tensor(result.success, case.batch_size)
     if result.positions is None or result.positions.ndim != 3:
         return tuple(
@@ -682,7 +671,15 @@ def compute_case_outcomes(
             f"PlanResult.positions batch={positions.shape[0]} does not match "
             f"case batch={case.batch_size}."
         )
+    if case.start_qpos.shape != (case.batch_size, positions.shape[-1]):
+        raise ValueError("case.start_qpos must match the trajectory batch and joints.")
     limits = robot.get_qpos_limits(name=control_part)
+    if limits.ndim == 2:
+        limits = limits.unsqueeze(0)
+    if limits.shape[0] == 1:
+        limits = limits.expand(case.batch_size, -1, -1)
+    if limits.shape != (case.batch_size, positions.shape[-1], 2):
+        raise ValueError("Joint limits must match trajectory environments and joints.")
     dof = positions.shape[-1]
     qvel_limits = resolve_robot_velocity_limits(
         robot, control_part, joint_velocity_limit_rad_s, positions, dof=dof
@@ -799,13 +796,25 @@ def compute_case_outcomes(
         else:
             raise ValueError(f"Unknown motion_validity mode {validity_space!r}.")
         ordered = bool(semantic_matching["ordered_waypoints_reached"])
+        start_error = (
+            float(
+                (native_qpos[0] - case.start_qpos[env_index].to(native_qpos))
+                .abs()
+                .max()
+            )
+            if finite and bool(torch.isfinite(case.start_qpos[env_index]).all())
+            else None
+        )
+        start_valid = (
+            start_error is not None and start_error <= start_state_tolerance_rad
+        )
         planner_ok = bool(planning_success[env_index].item())
         # ``PlanResult.success`` is retained as a planner-stage outcome, but it
         # is not external ground truth.  A trajectory can therefore be motion
         # valid even when a backend conservatively reports planning failure.
         # ``dynamic_limits_satisfied`` is ``None`` when no limit applies, which
         # leaves ``motion_valid`` unchanged rather than failing the trajectory.
-        geometry_valid = finite and ordered and not joint_violation
+        geometry_valid = finite and ordered and not joint_violation and start_valid
         motion_valid = (
             geometry_valid and dynamic["dynamic_limits_satisfied"] is not False
         )
@@ -853,6 +862,8 @@ def compute_case_outcomes(
 
         if not finite:
             failure_code = "non_finite_trajectory"
+        elif not start_valid:
+            failure_code = "start_state_mismatch"
         elif not ordered:
             failure_code = "waypoint_miss"
         elif joint_violation:
@@ -867,6 +878,8 @@ def compute_case_outcomes(
             CaseOutcome(
                 env_index=env_index,
                 planning_success=planner_ok,
+                start_state_valid=start_valid,
+                start_joint_error_rad=start_error,
                 finite=finite,
                 ordered_waypoints_reached=ordered,
                 motion_valid=motion_valid,

@@ -44,7 +44,9 @@ motion; `aggregation.py`, `generalization.py` and `reporting.py` consume records
 without invoking planners or simulators. Atomic provider/replay owners are
 listed in the [extension guide](./README.md#provider-and-evaluator-interfaces).
 
-Every planner receives the same case's robot start state, ordered targets,
+Capacity checks, preparation and planning receive untimed copies of canonical
+case tensors and nested parameters. External metrics and manifests use the
+canonical inputs. Every planner receives the same case's robot start state, ordered targets,
 objects, grasps, seed and physics parameters. Cases record independent
 reachability evidence before measured calls. A planner being evaluated cannot
 select the cases that enter its own success denominator. EEF and joint goals
@@ -69,7 +71,8 @@ inputs so their comparison isolates the effect of timing the policy path.
 External evaluation recomputes errors and constraints from the output:
 
 ```text
-geometry_valid = finite_positions
+geometry_valid = requested_start_state_matched
+                 and finite_positions
                  and ordered_waypoints_reached
                  and joint_position_limits_satisfied
 
@@ -141,8 +144,15 @@ Validation, case generation, reporting and optional video capture are outside
 the timed operation. CUDA wall timing synchronizes around the operation.
 
 Native generation preserves planner samples where configured. Derived path
-metrics may resample copies; common Atomic execution uses the shared controller
-cadence while preserving segment timing. Motion limits may extend the requested
+metrics may resample copies. Packaged Atomic suites select `physics.clock:
+compiled`, compile on the declared command period (`physics_dt` times
+`steps_per_waypoint`) and replay compiled arrival intervals on unchanged
+physics ticks. Every sample uses the maximum interval across rows; shorter
+rows hold while other rows advance. Cumulative quantization adds at most one
+physics tick to the shared duration and preserves compiled segment indices.
+Completion time counts scheduled ticks plus terminal settling. Legacy
+`fixed_samples` replay retains its explicit per-sample stepping, and trial
+metadata identifies both its clock and command period. Motion limits may extend the requested
 sample count. Native timing and replay timing must remain identifiable.
 Multi-waypoint latency measures the complete request, including
 cuRobo's sequential segments; a per-segment diagnostic is not a replacement
@@ -225,6 +235,25 @@ remain visible with `eligible=false`; omitting difficult cases cannot improve
 eligibility.
 
 ## 6. Domain populations and generalization
+
+Packaged free-space v3 suites use Cartesian translation, rotation and combined
+requests, near/mid/far motion ranges, and explicit homogeneous/heterogeneous
+batches. Seeded start populations include measured joint margins and scaled
+finite-difference Jacobian conditioning. A requested near-singular start is
+screened from a bounded candidate pool and carries its measured classification.
+The bounded independent IK/FK screen must satisfy stricter suite thresholds;
+failed generation raises instead of reducing a candidate's denominator.
+Single-target requests cannot claim a turn; pure rotation has no translation
+path shape. Coverage profiles balance shape/count pairs across seeds. The
+README owns configuration and the sampler owns exact ranges.
+
+Success summaries bootstrap complete seed clusters at the configured confidence
+level using 1000 deterministic draws, preserving case weights and supported
+missing-outcome penalties. Environment rows and repeated calls are dependent
+within a cluster. Fewer than two clusters have unavailable intervals. Unique
+input fingerprints distinguish independent tasks from repeated throughput
+requests. These intervals characterize the declared populations; they do not
+verify training-data exclusion or justify strong claims from tiny seed counts.
 
 Domains have versioned identities and declared `nominal`, `robustness` or
 `held_out` kinds. Expansion preserves a shared `track_group`, applies overrides
@@ -333,7 +362,7 @@ These are not current benchmark capabilities:
   comparison must expose information asymmetry when cuRobo receives obstacles
   and an NMG policy does not; equal-input obstacle comparison requires a policy
   that accepts the same constraints.
-- Latency-budget/Pareto sweeps, confidence intervals, per-process isolation and
+- Latency-budget/Pareto sweeps, per-process isolation and
   broader memory accounting. `max_planning_time` checked after a plan is not a
   preemptive deadline.
 - Multimodal top-k feasibility, diversity and sampling cost; paired physics/APG

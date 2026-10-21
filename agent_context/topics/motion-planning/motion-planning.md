@@ -183,6 +183,19 @@ configuration; explicit planners replace the suite list and are enabled.
 `PlannerAdapter` owns build/prepare/plan/close and returns `PlanResult` for
 free-space evaluation; Atomic Skills also require an exposed `MotionGenerator`.
 The host owns simulation lifetime, seeded cases, evaluation, and artifacts.
+Canonical case tensors and nested parameters stay independent of adapter
+mutations through untimed copies at capacity, preparation and plan boundaries.
+Free-space Cartesian populations, bounded independent reachability screening,
+measured difficulty and batch semantics live in
+`scenarios/_free_space_sampling.py`; configuration retains explicit legacy joint
+templates. Reports preserve workload strata and seed-cluster uncertainty.
+Geometry validation includes the requested initial joint state. Atomic providers
+declare gripper requirements; typed pose settings flow through generation rather
+than being expanded into private configuration keys. Built-in Atomic suites
+compile and replay on their declared command clock; compiled replay consumes
+arrival intervals on physics ticks and preserves observation segment indices.
+Legacy fixed-sample replay remains explicit in trial metadata. The benchmark
+README and design contract own population and protocol details.
 Run calls serially within a process. Suite resources ship in the wheel; the
 installed CLI dispatches through `embodichain/cli/benchmark.py`. Source launchers
 under `scripts/benchmark/` only forward motion-generation evaluation.

@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_ur5_pgi_randomized
-suite_version: atomic_ur5_pgi_randomized_v2
+suite_version: atomic_ur5_pgi_randomized_v3
 profile: coverage
 
 robot:
@@ -53,6 +53,7 @@ tracks:
       batch_sizes: [1]
       seeds: [101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116]
       physics:
+        clock: compiled
         steps_per_waypoint: 4
         hold_steps: 80
         hold_sim_steps: 2

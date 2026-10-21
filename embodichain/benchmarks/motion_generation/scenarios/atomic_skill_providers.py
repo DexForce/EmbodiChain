@@ -780,7 +780,7 @@ class _OpenDoorCases(AtomicSkillCaseProvider):
             skill_id=self.skill_id,
             object_id=articulation_id,
             task_difficulty=difficulty(config),
-            primary_success="task_success",
+            primary_success="physical_skill_success",
             full_start_qpos=full_start_qpos,
             case_parameters={
                 "sample_count": int(config.get("sample_count", 240)),
@@ -1066,7 +1066,7 @@ class _PourCases(AtomicSkillCaseProvider):
             skill_id=self.skill_id,
             object_id=handle.object_id,
             task_difficulty=difficulty(config),
-            primary_success="task_success",
+            primary_success="physical_skill_success",
             full_start_qpos=full_start_qpos,
             case_parameters={
                 "sample_count": int(config.get("sample_count", 80)),
@@ -1416,7 +1416,7 @@ class _AxisAlignCases(AtomicSkillCaseProvider):
             skill_id=self.skill_id,
             object_id=handle.object_id,
             task_difficulty=difficulty(config),
-            primary_success="task_success",
+            primary_success="physical_skill_success",
             full_start_qpos=full_start_qpos,
             case_parameters={
                 "sample_count": int(config.get("sample_count", 180)),
@@ -1767,7 +1767,7 @@ class _PushObjectCases(AtomicSkillCaseProvider):
             skill_id=self.skill_id,
             object_id=handle.object_id,
             task_difficulty=difficulty(config),
-            primary_success="task_success",
+            primary_success="physical_skill_success",
             full_start_qpos=full_start_qpos,
             case_parameters={
                 "sample_count": int(config.get("sample_count", 160)),

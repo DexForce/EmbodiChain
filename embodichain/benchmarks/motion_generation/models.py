@@ -205,6 +205,10 @@ class CaseOutcome:
     geometry_valid: bool = False
     """Derived path validity, also accepted when reading serialized outcomes."""
 
+    start_state_valid: bool = True
+    """Whether the first native sample matches the requested joint state."""
+    start_joint_error_rad: float | None = None
+
     def __post_init__(self) -> None:
         """Recompute geometry validity from its authoritative component checks."""
         object.__setattr__(
@@ -212,7 +216,8 @@ class CaseOutcome:
             "geometry_valid",
             self.finite
             and self.ordered_waypoints_reached
-            and not self.joint_limit_violation,
+            and not self.joint_limit_violation
+            and self.start_state_valid,
         )
 
     @property

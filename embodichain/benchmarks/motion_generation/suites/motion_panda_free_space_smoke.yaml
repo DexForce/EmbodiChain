@@ -1,6 +1,6 @@
 schema_version: 1
 name: motion_panda_free_space_smoke
-suite_version: motion_panda_free_space_smoke_v2
+suite_version: motion_panda_free_space_smoke_v3
 profile: smoke
 
 planners:
@@ -77,6 +77,10 @@ tracks:
     scenario: free_space
     enabled: true
     config:
+      sampling_method: cartesian
+      batch_modes: [homogeneous, heterogeneous]
+      distance_bins: [near]
+      motion_components: [translation, rotation, combined]
       target_types: [eef, joint]
       joint_threshold_rad: 0.02
       batch_sizes: [1]
