@@ -83,6 +83,31 @@ def test_environment_identity_is_unique_per_episode_and_shared_per_run() -> None
     assert first["config_hash"] == second["config_hash"]
 
 
+def test_metadata_request_materializes_only_requested_row() -> None:
+    env = make_env()
+    env.num_envs = 2
+    env.episode_context = EpisodeContext(2)
+    env.rollout_buffer = None
+    env.rollout_steps = torch.zeros(2, dtype=torch.long)
+    env._demo_steps = torch.zeros(2, dtype=torch.long)
+    env.episode_success_status = torch.zeros(2, dtype=torch.bool)
+    env._demo_metadata_initialized = False
+    env._demo_episode_metadata = [{}, {"instruction": "Execute the selected program"}]
+    env._new_demo_episode_metadata = lambda row: EmbodiedEnv._new_demo_episode_metadata(
+        env, row
+    )
+
+    first = EmbodiedEnv.get_demo_episode_metadata(env, 1)
+    second = EmbodiedEnv.get_demo_episode_metadata(env, 1)
+
+    assert first["episode_uuid"] == second["episode_uuid"]
+    assert UUID(first["episode_uuid"])
+    assert first["env_id"] == 1
+    assert first["instruction"] == "Execute the selected program"
+    assert env._demo_episode_metadata[0] == {}
+    assert env._demo_metadata_initialized
+
+
 def test_episode_override_program_hash_uses_executed_program() -> None:
     env = make_env()
     env.cfg.task_program = {"program_id": "configured_default"}

@@ -1295,3 +1295,54 @@ def test_root_velocity_view_rejects_shape_before_writing(
     assert batch.selections == []
     torch.testing.assert_close(batch.root_linear_velocity, linear_before)
     torch.testing.assert_close(batch.root_angular_velocity, angular_before)
+
+
+@pytest.mark.parametrize(
+    ("method", "batch_method", "width"),
+    [
+        ("apply_link_mass", "apply_link_mass", None),
+        ("apply_link_inertia", "apply_link_inertia_diagonal", 3),
+        ("apply_link_com_pose", "apply_link_com_local_pose", 7),
+    ],
+)
+def test_selected_link_property_writes_preserve_layout_and_errors(
+    method: str,
+    batch_method: str,
+    width: int | None,
+) -> None:
+    batch = _ArticulationBatch()
+    view = SceneArticulationView(_Scene("newton"), batch, torch.device("cpu"))
+    selected = Mock()
+    call = getattr(selected, batch_method)
+    call.return_value = 1
+    batch.select = Mock(return_value=selected)
+    values = torch.arange(width or 1, dtype=torch.float32).reshape(
+        (1, 1) if width is None else (1, 1, width)
+    )
+    getattr(view, method)(values, [1], [0])
+    torch.testing.assert_close(batch.select.call_args.args[0], torch.tensor([1]))
+    expected = _batch_pose(values) if width == 7 else values
+    torch.testing.assert_close(call.call_args.args[0], expected)
+    assert call.call_args.kwargs["link_ids"] == [0]
+    call.return_value = -1
+    with pytest.raises(RuntimeError, match=batch_method):
+        getattr(view, method)(values, [1], [0])
+    batch.select.reset_mock()
+    getattr(view, method)(values[:0], [], [0])
+    batch.select.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "method", ["apply_link_mass", "apply_link_inertia", "apply_link_com_pose"]
+)
+def test_empty_link_property_selection_is_noop(method: str) -> None:
+    batch = _ArticulationBatch()
+    view = SceneArticulationView(_Scene("newton"), batch, torch.device("cpu"))
+    batch.select = Mock()
+    width = {
+        "apply_link_mass": (),
+        "apply_link_inertia": (3,),
+        "apply_link_com_pose": (7,),
+    }[method]
+    getattr(view, method)(torch.empty((1, 0) + width), [1], [])
+    batch.select.assert_not_called()

@@ -26,7 +26,10 @@ import warp as wp
 from tensordict import TensorDict
 
 from embodichain.lab.sim.sensors import BaseSensor, SensorCfg
-from embodichain.lab.sim.sensors._warp.contact import scatter_contact_rows
+from embodichain.lab.sim.sensors._warp.contact import (
+    reduce_normal_impulses,
+    scatter_contact_rows,
+)
 from embodichain.lab.sim.sensors.contact_history import ContactHistory
 from embodichain.utils import configclass, logger
 from embodichain.utils.device_utils import current_warp_stream
@@ -353,6 +356,41 @@ class ContactSensor(BaseSensor):
             buffer.device_counts[1] = buffer.dropped_count
         self._sync_filter_actor_metadata()
         return buffer
+
+    def _reduce_normal_impulses(
+        self,
+        actor_keys: torch.Tensor,
+        actor_rows: torch.Tensor,
+        out: torch.Tensor,
+        dt: float,
+    ) -> None:
+        """Reduce a task-owned force snapshot without materializing contact rows.
+
+        This internal path is for consumers that need only normal forces and
+        have no row-buffer or substep-history consumers in the current step.
+        Sorted keys encode environment and actor identities; rows index out.
+        """
+        buffer = self._read_contacts()
+        out.zero_()
+        wp.launch(
+            reduce_normal_impulses,
+            dim=buffer.capacity,
+            inputs=[
+                wp.from_torch(buffer.data),
+                wp.from_torch(buffer.actor_ids),
+                wp.from_torch(buffer.env_ids),
+                wp.from_torch(buffer.quantity_valid),
+                wp.from_torch(buffer.count_device),
+                wp.from_torch(actor_keys),
+                wp.from_torch(actor_rows),
+                1.0 / dt,
+                wp.from_torch(out.view(-1, 3)),
+            ],
+            device=str(self.device),
+            stream=current_warp_stream(self.device),
+        )
+        self._query_dropped_count.copy_(buffer.dropped_count_device)
+        self._scatter_dropped_count.zero_()
 
     def _scatter_contacts(self, buffer: ContactBuffer) -> None:
         assert self._num_contacts_per_env is not None
