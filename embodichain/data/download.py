@@ -88,6 +88,10 @@ def get_registry() -> dict[str, list[tuple[str, type]]]:
     registry["robot"].extend(
         _get_asset_classes("embodichain.data.assets.locomotion_assets")
     )
+    for name, cls in _get_asset_classes("embodichain.data.assets.rl_assets"):
+        category = "scene" if cls.category == "scene_assets" else "robot"
+        registry[category].append((name, cls))
+    registry["scene"].sort(key=lambda asset: asset[0])
     registry["robot"].sort(key=lambda asset: asset[0])
     return registry
 

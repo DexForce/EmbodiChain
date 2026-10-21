@@ -22,6 +22,37 @@ decoding and compiling the constrained Task Program schema surface.
    compile_mllm_task_program
    decode_mllm_task_program
 
+embodichain.data.assets.rl_assets
+---------------------------------
+
+Robot, reset-state and frozen-terrain archives use the standard asset cache.
+
+.. currentmodule:: embodichain.data.assets.rl_assets
+
+.. autosummary::
+
+   UnitreeG1Rough
+   G1RoughTerrains
+   ShadowHandPen
+   LeapHandCubeFaceTurn
+   LeapHandCube
+
+.. autoclass:: UnitreeG1Rough
+   :members:
+
+.. autoclass:: G1RoughTerrains
+   :members:
+
+.. autoclass:: ShadowHandPen
+   :members:
+
+.. autoclass:: LeapHandCubeFaceTurn
+   :members:
+
+.. autoclass:: LeapHandCube
+   :members:
+
+
 embodichain.data.assets.demo_assets
 -----------------------------------
 
@@ -2556,6 +2587,241 @@ embodichain_tasks.configs
 .. autosummary::
 
    get_config_path
+
+embodichain_tasks.locomotion.velocity.g1_isaac_rough
+----------------------------------------------------
+
+The G1 Rough environment registers the 37-action reference task with terrain height observations.
+
+.. currentmodule:: embodichain_tasks.locomotion.velocity.g1_isaac_rough
+
+.. autosummary::
+
+   UnitreeG1IsaacRoughEnv
+
+.. autoclass:: UnitreeG1IsaacRoughEnv
+   :members:
+
+
+embodichain_tasks.locomotion.velocity.isaac
+-------------------------------------------
+
+Load reference task configurations from a supplied scene bundle. The loader validates robot joint order, shared initial states and terrain inputs.
+
+.. currentmodule:: embodichain_tasks.locomotion.velocity.isaac
+
+.. autosummary::
+
+   load_reference_env_cfg
+
+.. autofunction:: load_reference_env_cfg
+
+
+embodichain_tasks.locomotion.velocity.isaac.config
+--------------------------------------------------
+
+Packaged task definitions retain policy joint order, observation dimensions and fixed physics/control periods.
+
+.. currentmodule:: embodichain_tasks.locomotion.velocity.isaac.config
+
+.. autosummary::
+
+   IsaacVelocityConfig
+   load_config
+
+.. autoclass:: IsaacVelocityConfig
+   :members:
+
+.. autofunction:: load_config
+
+
+embodichain_tasks.locomotion.velocity.isaac.curriculum
+------------------------------------------------------
+
+Terrain assignment and selected-row curriculum updates use terminal positions and commands before resetting each episode.
+
+.. currentmodule:: embodichain_tasks.locomotion.velocity.isaac.curriculum
+
+.. autosummary::
+
+   ReferenceTerrainCurriculum
+
+.. autoclass:: ReferenceTerrainCurriculum
+   :members:
+
+
+embodichain_tasks.locomotion.velocity.isaac.environment
+-------------------------------------------------------
+
+Resolve the reference deployment against exported robot and terrain assets, with optional training randomization and contact generation selection.
+
+.. currentmodule:: embodichain_tasks.locomotion.velocity.isaac.environment
+
+.. autosummary::
+
+   load_reference_env_cfg
+
+.. autofunction:: load_reference_env_cfg
+
+
+embodichain_tasks.locomotion.velocity.isaac.mdp
+-----------------------------------------------
+
+Pure Torch state, action, observation, reward and termination functions share the reference task definitions. Device constants cache fixed values and reward joint selectors.
+
+.. currentmodule:: embodichain_tasks.locomotion.velocity.isaac.mdp
+
+.. autosummary::
+
+   IsaacVelocityState
+   IsaacVelocityReward
+   IsaacVelocityConstants
+   action_target
+   observation_terms
+   build_observation
+   compute_rewards
+   compute_termination
+   dc_motor_effort
+   update_contact_times
+
+.. autoclass:: IsaacVelocityState
+   :members:
+
+.. autoclass:: IsaacVelocityReward
+   :members:
+
+.. autoclass:: IsaacVelocityConstants
+   :members:
+
+.. autofunction:: action_target
+
+.. autofunction:: observation_terms
+
+.. autofunction:: build_observation
+
+.. autofunction:: compute_rewards
+
+.. autofunction:: compute_termination
+
+.. autofunction:: dc_motor_effort
+
+.. autofunction:: update_contact_times
+
+
+embodichain_tasks.locomotion.velocity.isaac.rsl_rl
+--------------------------------------------------
+
+The RSL-RL adapter preserves unbounded policy actions, automatic selected-row resets and timeout bootstrapping. CUDA calls share the existing simulation stream with ordered entry and exit dependencies.
+
+.. currentmodule:: embodichain_tasks.locomotion.velocity.isaac.rsl_rl
+
+.. autosummary::
+
+   ReferenceRslRlEnv
+
+.. autoclass:: ReferenceRslRlEnv
+   :members:
+
+
+embodichain_tasks.locomotion.velocity.isaac.runtime
+---------------------------------------------------
+
+The runtime adapts the shared task definitions to EmbodiChain managers, state and sensors. Explicit motors retain the configured outer physics cadence; implicit torque telemetry is sampled before the final physical step.
+
+.. currentmodule:: embodichain_tasks.locomotion.velocity.isaac.runtime
+
+.. autosummary::
+
+   IsaacVelocityEnv
+
+.. autoclass:: IsaacVelocityEnv
+   :members:
+
+
+embodichain_tasks.locomotion.velocity.isaac.terrain
+---------------------------------------------------
+
+The scanner evaluates 187 torso-relative terrain rays and replays a fixed-buffer CUDA graph when the geometry and buffers remain unchanged.
+
+.. currentmodule:: embodichain_tasks.locomotion.velocity.isaac.terrain
+
+.. autosummary::
+
+   ReferenceHeightScanner
+
+.. autoclass:: ReferenceHeightScanner
+   :members:
+
+
+embodichain_tasks.manipulation.dexterous.leap_cube_face_turn
+------------------------------------------------------------
+
+Create the leap cube face turn vector environment with an explicit DexSim solver and packaged model inputs.
+
+.. currentmodule:: embodichain_tasks.manipulation.dexterous.leap_cube_face_turn
+
+.. autosummary::
+
+   make_env
+
+.. autofunction:: make_env
+
+
+embodichain_tasks.manipulation.dexterous.leap_cube_reorient
+-----------------------------------------------------------
+
+Create the leap cube reorient vector environment with an explicit DexSim solver and packaged model inputs.
+
+.. currentmodule:: embodichain_tasks.manipulation.dexterous.leap_cube_reorient
+
+.. autosummary::
+
+   make_env
+
+.. autofunction:: make_env
+
+
+embodichain_tasks.manipulation.dexterous.leap_cube_rotate_z
+-----------------------------------------------------------
+
+Create the leap cube rotate z vector environment with an explicit DexSim solver and packaged model inputs.
+
+.. currentmodule:: embodichain_tasks.manipulation.dexterous.leap_cube_rotate_z
+
+.. autosummary::
+
+   make_env
+
+.. autofunction:: make_env
+
+
+embodichain_tasks.manipulation.dexterous.shadow_pen_continuous
+--------------------------------------------------------------
+
+Create the shadow pen continuous vector environment with an explicit DexSim solver and packaged model inputs.
+
+.. currentmodule:: embodichain_tasks.manipulation.dexterous.shadow_pen_continuous
+
+.. autosummary::
+
+   make_env
+
+.. autofunction:: make_env
+
+
+embodichain_tasks.manipulation.dexterous.shadow_pen_fixed
+---------------------------------------------------------
+
+Create the shadow pen fixed vector environment with an explicit DexSim solver and packaged model inputs.
+
+.. currentmodule:: embodichain_tasks.manipulation.dexterous.shadow_pen_fixed
+
+.. autosummary::
+
+   make_env
+
+.. autofunction:: make_env
+
 
 embodichain_tasks.manipulation.push_cube
 ----------------------------------------

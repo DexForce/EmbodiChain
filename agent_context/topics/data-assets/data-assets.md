@@ -101,3 +101,9 @@ changes, exercise absolute, existing-relative and class-prefixed paths plus
 missing/bare prefixes and a custom data root. For CLI changes, cover category
 visibility and failure exit behavior. Use fake download backends for these
 contracts; separately validate actual network downloads when asset content changes.
+
+The five classes in `assets/rl_assets.py` use the same archive cache. The CLI
+adds four robot entries and the `G1RoughTerrains` scene entry, based on each
+class's archive category. The G1 Rough asset does not replace
+`UnitreeG1Locomotion`; their joint counts and provenance differ. Publication
+status is external to code registration and must be verified before release.

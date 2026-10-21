@@ -259,3 +259,17 @@ lightweight APG component must not eagerly load the simulator-backed Trainer.
 | GRPO reshape or grouping fails | `num_envs` is not divisible by `group_size` |
 | Evaluation never completes | The environment does not emit completed asynchronous episodes or terminal metrics correctly |
 | Output/checkpoint directories diverge across ranks | Distributed run metadata was not coordinated through rank zero |
+
+## Rough terrain and dexterous task candidates
+
+`locomotion/velocity/g1_isaac_rough.py` registers the 37-action G1 task.
+Its frozen curriculum comes from `G1RoughTerrains`; the robot comes from
+`UnitreeG1Rough`, independently of the 29-joint G1 flat archive.
+
+`manipulation/dexterous/` contains five task-named learning-env factories and
+shared internal physics/MDP adapters. Matching task-first agent configurations
+select `mujoco_warp` or `dexuni` explicitly. The declared Dict observation
+spaces match returned actor/critic groups. Source MJCF audits run at creation.
+Version-specific backend adapters remain local to the task collection pending
+engine-owned public import/state interfaces. See the user-facing dexterous
+RL page for current training and checkpoint-continuation boundaries.

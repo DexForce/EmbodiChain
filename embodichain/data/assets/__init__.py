@@ -29,3 +29,5 @@ from .solver_assets import *
 from .planner_assets import *
 
 from .locomotion_assets import *
+
+from .rl_assets import *
