@@ -31,9 +31,11 @@ import torch
 from embodichain.utils import logger
 
 from embodichain.lab.sim.motion.motion_generator import (
+    MotionGenCfg,
     MotionGenOptions,
     MotionGenerator,
 )
+from embodichain.compute.trajectory import interpolate_with_distance
 from embodichain.lab.sim.motion.planners.utils import (
     MoveType,
     PlanResult,
@@ -43,7 +45,20 @@ from embodichain.lab.sim.motion.planners.utils import (
 
 __all__: list[str] = []
 
-MOTION_VALIDATION_REVISION = 13
+MOTION_VALIDATION_REVISION = 14
+SAMPLED_MOTION_CONTRACT = "gen_sim.sampled_velocity/v1"
+SHARED_MOTION_CONTRACT = "lab.motion_limits/v1"
+
+
+def validate_motion_contract(value: object) -> str:
+    if type(value) is not str or value not in {
+        SAMPLED_MOTION_CONTRACT,
+        SHARED_MOTION_CONTRACT,
+    }:
+        raise ValueError("Unsupported GenSim motion_contract; regenerate the bundle.")
+    return value
+
+
 VELOCITY_RETIME_SAMPLES = (260, 320)
 
 _CPU_BATCH_THREADS: ContextVar[int | None] = ContextVar(
@@ -295,6 +310,62 @@ def _joint_velocity_limits(robot: Any, control_part: str | None) -> torch.Tensor
 class CheckedMotionGenerator(MotionGenerator):
     """Validate ordinary paths and honor the current Place's Cartesian policy."""
 
+    def __init__(
+        self, cfg: MotionGenCfg, *, motion_contract: str = SHARED_MOTION_CONTRACT
+    ) -> None:
+        self._motion_contract = validate_motion_contract(motion_contract)
+        super().__init__(cfg)
+
+    def _sampled_contract(self) -> bool:
+        return (
+            getattr(self, "_motion_contract", SHARED_MOTION_CONTRACT)
+            == SAMPLED_MOTION_CONTRACT
+        )
+
+    def _generate_ik_interpolation(
+        self, target_states: list[PlanState], options: MotionGenOptions
+    ) -> PlanResult:
+        if self._sampled_contract():
+            if (
+                options.velocity_limit is not None
+                or options.acceleration_limit not in (None, 0.5)
+            ):
+                raise ValueError(
+                    "Sampled GenSim cannot discard explicit motion limits; select lab.motion_limits/v1."
+                )
+            options = replace(options, acceleration_limit=None)
+        return super()._generate_ik_interpolation(target_states, options)
+
+    def _interpolate_ik_keyframes(
+        self, keyframes: torch.Tensor, options: MotionGenOptions
+    ) -> torch.Tensor:
+        if self._sampled_contract():
+            return interpolate_with_distance(
+                trajectory=keyframes,
+                interp_num=options.sample_count,
+                device=keyframes.device,
+            )
+        return super()._interpolate_ik_keyframes(keyframes, options)
+
+    def _interpolate_cartesian_with_limits(
+        self,
+        target_poses: torch.Tensor,
+        solved_keyframes: torch.Tensor,
+        options: MotionGenOptions,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if self._sampled_contract():
+            # The outer checked facade rejects over-speed rows on this exact
+            # grid. It does not silently change the invocation's time budget.
+            valid = torch.ones(
+                solved_keyframes.shape[0],
+                dtype=torch.bool,
+                device=solved_keyframes.device,
+            )
+            return valid, solved_keyframes
+        return super()._interpolate_cartesian_with_limits(
+            target_poses, solved_keyframes, options
+        )
+
     def generate(
         self, target_states: list[PlanState], options: MotionGenOptions | None = None
     ) -> PlanResult:
@@ -324,12 +395,22 @@ class CheckedMotionGenerator(MotionGenerator):
         poses: torch.Tensor,
         start_qpos: torch.Tensor,
         control_part: str,
+        *,
+        known_start: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         from .place_branch import solve_waypoints
 
         result = solve_waypoints(self, poses, start_qpos, control_part)
         if result is not None:
             return result
+        if self._sampled_contract() and known_start is None:
+            return self._solve_seeded_cartesian_waypoints(
+                poses, start_qpos, control_part
+            )
+        if known_start is not None:
+            return super()._solve_cartesian_waypoints(
+                poses, start_qpos, control_part, known_start=known_start
+            )
         return super()._solve_cartesian_waypoints(poses, start_qpos, control_part)
 
     def _generate_checked(

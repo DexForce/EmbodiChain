@@ -819,6 +819,9 @@ def generate_task_program_bundle(
     stability["motion_samples"] = motion_sample_declarations(
         selected_graph, drawer_groups=drawer_groups
     )
+    from ._task_program.motion import SAMPLED_MOTION_CONTRACT
+
+    stability["motion_contract"] = SAMPLED_MOTION_CONTRACT
     if runtime_profile == CONTACT_PROFILE:
         for node in selected_graph["nodes"]:
             if node["call"]["kind"] == "pick":
@@ -2655,6 +2658,7 @@ def _integration_payload(
                 "pick": default_pick_options,
                 "place": {
                     "kind": "place",
+                    "hand_source": "grasp_command",
                     "hand_interp_steps": 12,
                     "release_settle_steps": 60,
                     "lift_height": 0.05,
@@ -2678,6 +2682,7 @@ def _integration_payload(
                     {
                         call_id: {
                             "kind": "place",
+                            "hand_source": "grasp_command",
                             "hand_interp_steps": 12,
                             "release_settle_steps": 60,
                             "lift_height": 0.10,
@@ -2700,13 +2705,19 @@ def _integration_payload(
                     {
                         _MOVE_HELD_OBJECT_CALL_ID: {
                             "kind": "move_held_object",
+                            "hand_source": "grasp_command",
                         }
                     }
                     if move_held_routes
                     else {}
                 ),
                 **(
-                    {DRAWER_TRANSPORT_CALL: {"kind": "move_held_object"}}
+                    {
+                        DRAWER_TRANSPORT_CALL: {
+                            "kind": "move_held_object",
+                            "hand_source": "grasp_command",
+                        }
+                    }
                     if drawer_transport_routes
                     else {}
                 ),
@@ -2714,6 +2725,8 @@ def _integration_payload(
                     {
                         _POUR_CALL_ID: {
                             "kind": "pour",
+                            "hand_source": "grasp_command",
+                            "dwell_duration": 0.0,
                             "rotate_angle": -1.0471975512,
                         }
                     }

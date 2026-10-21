@@ -932,6 +932,52 @@ class MotionGenerator:
         )
         return success, positions
 
+    def _solve_seeded_cartesian_waypoints(
+        self,
+        poses: torch.Tensor,
+        start_qpos: torch.Tensor,
+        control_part: str,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Solve a fixed-time path with the preceding valid posture as seed.
+
+        This bounded-memory alternative preserves the random stream and branch
+        continuity of sequential point queries. It does not perform retiming.
+        """
+        seed = start_qpos.to(self._runtime_device())
+        batch, dof = seed.shape
+        if (
+            poses.ndim != 4
+            or poses.shape[0] != batch
+            or poses.shape[2:] != (4, 4)
+            or poses.shape[1] == 0
+        ):
+            raise ValueError("Cartesian waypoints must have shape (B, N, 4, 4), N > 0.")
+        success = torch.ones(batch, dtype=torch.bool, device=seed.device)
+        points = []
+        for index in range(poses.shape[1]):
+            valid, qpos = self.robot.compute_ik(
+                pose=poses[:, index].to(seed.device),
+                name=control_part,
+                joint_seed=seed,
+            )
+            valid = normalize_success_mask(
+                valid,
+                num_envs=batch,
+                device=seed.device,
+                name=f"IK success for target state {index}",
+            )
+            qpos = torch.as_tensor(qpos, dtype=seed.dtype, device=seed.device)
+            if qpos.shape != (batch, dof):
+                raise ValueError(f"IK qpos must have shape ({batch}, {dof}).")
+            valid = valid & torch.isfinite(qpos).all(dim=1)
+            seed = torch.where(valid[:, None], qpos, seed)
+            success &= valid
+            points.append(seed)
+        positions = torch.stack(points, dim=1)
+        return success, torch.where(
+            success[:, None, None], positions, start_qpos.to(seed)[:, None]
+        )
+
     def _compute_cartesian_ik_batch(
         self,
         poses: torch.Tensor,

@@ -116,6 +116,25 @@ def execute_bundle(
     deployment = _verify_integration_fingerprint(
         root, deployment_path, graph, fingerprint
     )
+    motion_contract = getattr(
+        deployment.integration.adapter_factory,
+        "motion_contract",
+        "lab.motion_limits/v1",
+    )
+    (output / "motion_contract.json").write_text(
+        json.dumps(
+            {
+                "motion_contract": motion_contract,
+                "fixed_time_sequential_ik": motion_contract
+                == "gen_sim.sampled_velocity/v1",
+                "new_acceleration_certification_claimed": False,
+                "hand_source": "See sealed action options and issued endpoint commands",
+                "existing_velocity_collision_release_gates": "retained",
+            },
+            indent=2,
+        )
+        + "\n"
+    )
     _verify_program_projection(program_path, graph)
     from .semantic_graph_validation import verify_graph_contract
 

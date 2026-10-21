@@ -41,7 +41,11 @@ from .grasp_filter import (
     install_e6_approach_filters,
     install_grasp_filters,
 )
-from .motion import MOTION_VALIDATION_REVISION
+from .motion import (
+    MOTION_VALIDATION_REVISION,
+    SHARED_MOTION_CONTRACT,
+    validate_motion_contract,
+)
 from .state_handoff import StagingContract
 from .held_command import bind_held_command_sources
 
@@ -560,6 +564,7 @@ class TaskAdapterFactory:
     pour_return_calls: tuple[str, ...] = ()
     held_command_sources: tuple = ()
     upright_container_picks: tuple = ()
+    motion_contract: str = SHARED_MOTION_CONTRACT
 
     def create_adapter(self, environment: Any) -> TaskProgramEnvironmentAdapter:
         """Bind task-owned planning scopes without overriding Session or Bridge."""
@@ -621,7 +626,8 @@ class TaskAdapterFactory:
                             dynamic_obstacle_names=dynamic,
                         ),
                     )
-                )
+                ),
+                motion_contract=self.motion_contract,
             )
         else:
             from embodichain.lab.sim.motion.motion_generator import MotionGenCfg
@@ -634,7 +640,8 @@ class TaskAdapterFactory:
                         robot_uid=environment.robot.uid,
                         sim_instance_id=environment.sim.instance_id,
                     )
-                )
+                ),
+                motion_contract=self.motion_contract,
             )
             if self.drawer_routes:
                 from .drawer_curobo import DrawerMotionGenerator
@@ -647,6 +654,7 @@ class TaskAdapterFactory:
                         )
                     ),
                     simulation=environment.sim,
+                    motion_contract=self.motion_contract,
                 )
         grasp_generators = {name: create() for name, create in self.grasp_factories}
         if self.coordinated_grasp:
@@ -861,6 +869,7 @@ def load_deployment(
             "pick_purposes",
             "upright_container_picks",
             "motion_samples",
+            "motion_contract",
             "cartesian_calls",
             "pour_receivers",
             "pour_return_calls",
@@ -883,6 +892,21 @@ def load_deployment(
             "Unsupported GenSim task constraint format; regenerate the bundle."
         )
     presets = payload["presets"]
+    motion_contract = validate_motion_contract(
+        payload.get("motion_contract", SHARED_MOTION_CONTRACT)
+    )
+    if motion_contract == "gen_sim.sampled_velocity/v1":
+        from embodichain.lab.task_program.integrations._configured_composition import (
+            _resolve_task_program_components,
+        )
+
+        _, _, authored_policy = _resolve_task_program_components(
+            task_program, base_dir=Path(base_dir)
+        )
+        if {"velocity_limit", "acceleration_limit"} & authored_policy["motion"].keys():
+            raise ValueError(
+                "Sampled GenSim cannot discard explicit motion limits; select lab.motion_limits/v1."
+            )
     from ..experiment_policy import validate_profile, experimental_release_enabled
 
     validate_profile(payload.get("runtime_profile", "default"))
@@ -1066,6 +1090,11 @@ def load_deployment(
 
     registration = with_held_alignment(
         registration,
+        hand_source=(
+            "grasp_command"
+            if motion_contract == "gen_sim.sampled_velocity/v1"
+            else "observed"
+        ),
         program=program,
         constraints=constraints,
         verify_retention=True,
@@ -1372,6 +1401,7 @@ def load_deployment(
         coordinated_grasp=coordinated,
         handover_scene_clearance=handover_scene_clearance,
         motion_samples=motion_samples,
+        motion_contract=motion_contract,
         cartesian_calls=cartesian_calls,
         articulation_calls=articulation_calls,
         articulation_followups=articulation_followups,

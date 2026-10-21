@@ -57,6 +57,17 @@ Official components resolve through `resolve_config_path`; concrete robot
 presets import from `embodichain_robots`. Changes to endpoint names, motion
 limits or validator declarations require bundle regeneration and new identity;
 the bundle projection does not erase these differences to reuse older receipts.
+Generated bundles explicitly seal `motion_contract=gen_sim.sampled_velocity/v1`
+for fixed-time interpolation and preceding-waypoint IK seeds. The GenSim hooks
+reuse the shared generator and numerical utilities, keep the existing URDF speed,
+collision, release and stability gates, and do not claim the newer acceleration
+budget. Explicit authored motion limits require `lab.motion_limits/v1`; bundles
+without the contract keep that shared path. Native runs save `motion_contract.json`.
+Generated MoveHeldObject, Pour and Place options select
+`hand_source: grasp_command` to preserve drive authority under measured finger
+deflection. Shared defaults remain `observed`; final open commands and physical
+release gates are unchanged. These declarations participate in bundle identity
+and require new full-task qualification, not reuse of old receipts.
 UR10 ready/Park shoulder pan faces the table under the shared mount; its zero
 pan pose faces away. `_task_program/solver_tolerances.py` preserves iterative
 solver budgets and supplies explicit analytic-UR FK validation budgets without

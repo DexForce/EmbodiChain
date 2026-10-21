@@ -919,7 +919,9 @@ def test_curobo_adapter_allocates_only_declared_mesh_cache(monkeypatch) -> None:
 
     cfgs = []
     monkeypatch.setattr(
-        motion, "CheckedMotionGenerator", lambda cfg: cfgs.append(cfg) or object()
+        motion,
+        "CheckedMotionGenerator",
+        lambda cfg, *, motion_contract: cfgs.append(cfg) or object(),
     )
     captured = {}
 
