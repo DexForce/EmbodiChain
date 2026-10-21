@@ -2641,3 +2641,38 @@ def test_compiled_clock_synchronizes_unequal_row_intervals():
     )
     # Both rows reach each indexed command before the next shared phase.
     assert runtime._arrival_steps(compiled, settings) == [0, 3, 3]
+
+
+def test_atomic_reset_restores_frozen_robot_state_after_settling() -> None:
+    case = _atomic_case()
+    frozen_qpos = case.full_start_qpos.clone()
+    state = {"qpos": frozen_qpos.clone(), "target": frozen_qpos.clone()}
+    events = []
+
+    def set_qpos(qpos: torch.Tensor, *, target: bool) -> None:
+        state["target" if target else "qpos"] = qpos.clone()
+        events.append(("set_qpos", target))
+
+    def settle(*, step: int) -> None:
+        # Model the observed driven-joint drift during the reset window.
+        state["qpos"].add_(0.002)
+        events.append(("settle", step))
+
+    robot = SimpleNamespace(
+        set_qpos=set_qpos,
+        clear_dynamics=lambda: events.append(("clear_dynamics",)),
+        device=torch.device("cpu"),
+    )
+    simulation = SimpleNamespace(update=settle)
+    scenario = AtomicSkillScenario()
+    scenario.reset_case(simulation, robot, case, "arm")
+
+    torch.testing.assert_close(state["qpos"], frozen_qpos, rtol=0, atol=0)
+    torch.testing.assert_close(state["target"], frozen_qpos, rtol=0, atol=0)
+    torch.testing.assert_close(case.full_start_qpos, frozen_qpos, rtol=0, atol=0)
+    assert events[-3:] == [
+        ("set_qpos", False),
+        ("set_qpos", True),
+        ("clear_dynamics",),
+    ]
+    assert ("settle", 2) in events

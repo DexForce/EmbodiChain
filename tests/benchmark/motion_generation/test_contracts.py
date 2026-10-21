@@ -352,3 +352,26 @@ def test_replay_observation_trace_requires_synchronized_batch_axes() -> None:
             object_pose=torch.eye(4).repeat(5, 2, 1, 1),
             gripper_qpos={"hand": torch.zeros(4, 2, 2)},
         )
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+def test_default_fixed_grasp_is_a_proper_rotation(dtype: torch.dtype) -> None:
+    from embodichain.benchmarks.motion_generation.scenarios.atomic_case_utils import (
+        TOP_DOWN_ROTATION,
+    )
+
+    rotation = torch.tensor(TOP_DOWN_ROTATION, dtype=dtype)
+    # Independent IK rejects the former four-decimal fixture (8.175e-5 error).
+    tolerance = 1.0e-6
+    torch.testing.assert_close(
+        rotation.T @ rotation,
+        torch.eye(3, dtype=dtype),
+        atol=tolerance,
+        rtol=tolerance,
+    )
+    torch.testing.assert_close(
+        torch.det(rotation),
+        torch.tensor(1.0, dtype=dtype),
+        atol=tolerance,
+        rtol=tolerance,
+    )

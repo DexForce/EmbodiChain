@@ -2465,6 +2465,17 @@ class CuroboPlanner(BasePlanner):
                 positions[b, :1] = start[b]
                 positions[b, 1:] = start[b]
 
+        # cuRobo interpolation can round its first sample by a few float32
+        # ulps. Preserve the requested boundary exactly at that precision:
+        # Atomic action concatenation gives a repeated start zero arrival time,
+        # so even one ulp otherwise appears to be an instantaneous joint jump.
+        # Keep larger mismatches visible to callers and external validation.
+        roundoff = 4 * torch.finfo(positions.dtype).eps * start.abs().clamp_min(1)
+        same_start = ((positions[:, 0] - start).abs() <= roundoff).all(
+            dim=-1, keepdim=True
+        )
+        positions[:, 0] = torch.where(same_start, start, positions[:, 0])
+
         def assemble_derivative(
             parts: list[list[torch.Tensor | None]] | None,
             fallback: torch.Tensor | None = None,

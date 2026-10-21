@@ -656,6 +656,12 @@ class AtomicSkillScenario(ScenarioProvider):
             # rather than integrating it into a different Q2 state.
             handle, pose, qpos = active_articulation_state
             handle.reset(pose=pose, qpos=qpos)
+        # Physics settling also moves driven robot joints. Restore the same
+        # frozen state used by case validation before compiling any backend;
+        # otherwise a correct plan starts at a different state than its case.
+        for target in (False, True):
+            robot.set_qpos(case.full_start_qpos, target=target)
+        robot.clear_dynamics()
 
     def plan_case(self, adapter: PlannerAdapter, case: BenchmarkCase) -> object:
         """Compile one Atomic Action with an explicitly pinned motion backend."""

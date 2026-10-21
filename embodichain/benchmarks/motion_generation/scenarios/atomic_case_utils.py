@@ -75,10 +75,12 @@ __all__ = [
 ]
 
 
+# Nearest proper rotation to the original four-decimal fixture. Retain full
+# precision: rounding its entries makes independent rigid-pose IK validation fail.
 TOP_DOWN_ROTATION = (
-    (-0.0539, -0.9985, -0.0022),
-    (-0.9977, 0.0540, -0.0401),
-    (0.0401, 0.0000, -0.9992),
+    (-0.053930418806384106, -0.9985423102658203, -0.002182781795413258),
+    (-0.9977379548674098, 0.05397457111992954, -0.04007142484885853),
+    (0.04013082785547817, 0.00001677552021006612, -0.9991944337185912),
 )
 
 
