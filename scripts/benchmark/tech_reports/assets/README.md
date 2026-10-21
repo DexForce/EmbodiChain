@@ -34,7 +34,7 @@ implemented by this initialization.
   Downloading benchmark inputs will not automatically download results or media.
 
 The three initialization files are maintained together in
-`scripts/benchmark/assets/` in the code repository. Publish those three files
+`scripts/benchmark/tech_reports/assets/` in the code repository. Publish those three files
 to this dataset's root together;
 asset directories are created only when real files are uploaded. The code
 repository copy of `index.json` is the empty bootstrap template; after assets
@@ -43,7 +43,7 @@ must not be replaced with that empty template during documentation updates.
 
 ## Benchmark source assets
 
-The code repository reserves these directories under `scripts/benchmark/assets/`
+The code repository reserves these directories under `scripts/benchmark/tech_reports/assets/`
 for small authored inputs, input descriptions, and references:
 
 ```text
