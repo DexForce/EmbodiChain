@@ -1,0 +1,1445 @@
+{
+  "scope": "Cartpole and Ant, official original-entry supported environment versus current EmbodiChain; seed0; 1000 updates; 16 fixed held-out trajectories per motion scenario; no final convergence or 40-run qualification claim",
+  "robots": {
+    "cartpole": {
+      "official_supported_test": {
+        "normalized_mse": 0.006280350161122752,
+        "itemized": {
+          "state_0": 1.1641596147156024e-05,
+          "state_1": 0.026745948162707655,
+          "state_2": 0.002248380374122452,
+          "state_3": 0.004020542888850957,
+          "state_MSE": 0.008256627308143364,
+          "q_error_norm": 0.009857856310330905,
+          "qd_error_norm": 0.05216374764075646
+        },
+        "windows": 46592,
+        "valid_positions": 465920
+      },
+      "official_common_evaluator_test": {
+        "normalized_mse": 0.006280351665566911,
+        "target_mse": 0.0015781430289620064,
+        "q_error_norm": 0.00560734969164644,
+        "qd_error_norm": 0.05216374554476895,
+        "valid_positions": 465920,
+        "windows": 46592,
+        "split": "test"
+      },
+      "migrated_test": {
+        "normalized_mse": 0.010722713324927038,
+        "target_mse": 0.002540436701255513,
+        "q_error_norm": 0.010504291075599062,
+        "qd_error_norm": 0.06120473297087701,
+        "valid_positions": 465920,
+        "windows": 46592,
+        "split": "test"
+      },
+      "relative_test_normalized_mse_change": 0.7073432292523822,
+      "official_validation_curve": [
+        {
+          "step": 0,
+          "normalized_mse": 0.9530872106552124,
+          "itemized": {
+            "state_0": 0.008097185753285885,
+            "state_1": 0.8766315579414368,
+            "state_2": 0.23806163668632507,
+            "state_3": 0.2827773690223694,
+            "state_MSE": 0.3513919711112976,
+            "q_error_norm": 0.28943973779678345,
+            "qd_error_norm": 0.5101015567779541
+          },
+          "windows": 4096,
+          "valid_positions": 40960
+        },
+        {
+          "step": 250,
+          "normalized_mse": 0.0445367656648159,
+          "itemized": {
+            "state_0": 6.113350536907092e-05,
+            "state_1": 0.09407810866832733,
+            "state_2": 0.017248129472136497,
+            "state_3": 0.027410641312599182,
+            "state_MSE": 0.03469950333237648,
+            "q_error_norm": 0.0295485258102417,
+            "qd_error_norm": 0.1414671689271927
+          },
+          "windows": 4096,
+          "valid_positions": 40960
+        },
+        {
+          "step": 500,
+          "normalized_mse": 0.020203260704874992,
+          "itemized": {
+            "state_0": 3.495882629067637e-05,
+            "state_1": 0.05962773784995079,
+            "state_2": 0.007553520612418652,
+            "state_3": 0.013007620349526405,
+            "state_MSE": 0.02005595900118351,
+            "q_error_norm": 0.018112966790795326,
+            "qd_error_norm": 0.09791047871112823
+          },
+          "windows": 4096,
+          "valid_positions": 40960
+        },
+        {
+          "step": 750,
+          "normalized_mse": 0.008739027194678783,
+          "itemized": {
+            "state_0": 1.4849246326775756e-05,
+            "state_1": 0.04810943081974983,
+            "state_2": 0.002969014225527644,
+            "state_3": 0.005928980652242899,
+            "state_MSE": 0.014255567453801632,
+            "q_error_norm": 0.013420394621789455,
+            "qd_error_norm": 0.06505876034498215
+          },
+          "windows": 4096,
+          "valid_positions": 40960
+        },
+        {
+          "step": 1000,
+          "normalized_mse": 0.006152283400297165,
+          "itemized": {
+            "state_0": 1.1181759873579722e-05,
+            "state_1": 0.029857086017727852,
+            "state_2": 0.002145282691344619,
+            "state_3": 0.004019843880087137,
+            "state_MSE": 0.009008348919451237,
+            "q_error_norm": 0.010221962817013264,
+            "qd_error_norm": 0.05145695433020592
+          },
+          "windows": 4096,
+          "valid_positions": 40960
+        }
+      ],
+      "migrated_validation_curve": [
+        {
+          "step": 0,
+          "normalized_mse": 0.9530872106552124
+        },
+        {
+          "step": 250,
+          "normalized_mse": 0.04734030365943909
+        },
+        {
+          "step": 500,
+          "normalized_mse": 0.02214982733130455
+        },
+        {
+          "step": 750,
+          "normalized_mse": 0.01883654296398163
+        },
+        {
+          "step": 1000,
+          "normalized_mse": 0.00987573154270649
+        }
+      ],
+      "official_validation_selection": [
+        {
+          "step": 0,
+          "loss": 0.9343751341432005,
+          "itemized": {
+            "state_0": 0.00802457136112255,
+            "state_1": 0.8628187074766054,
+            "state_2": 0.23129603626963857,
+            "state_3": 0.27534463903406164,
+            "state_MSE": 0.3443709991790436,
+            "q_error_norm": 0.28683777693863755,
+            "qd_error_norm": 0.5053253173828125
+          }
+        },
+        {
+          "step": 1000,
+          "loss": 0.006011311824505146,
+          "itemized": {
+            "state_0": 1.1328358336218766e-05,
+            "state_1": 0.03165075543162587,
+            "state_2": 0.0021725077550489823,
+            "state_3": 0.0038252908449906567,
+            "state_MSE": 0.009414970874786377,
+            "q_error_norm": 0.01048088401228517,
+            "qd_error_norm": 0.05136696322933658
+          }
+        }
+      ],
+      "migrated_validation_selection": [
+        {
+          "step": 0,
+          "loss": 0.9343751341432005
+        },
+        {
+          "step": 1000,
+          "loss": 0.00983209924383478
+        }
+      ],
+      "official_torch22_vs_portable_torch27_prediction_max_abs_difference": 1.3709068298339844e-06,
+      "dataset_fingerprint": "da9e416490a908adc310806909c8ea0af26518ad4e92e74c579458ae8bbd6a84"
+    },
+    "ant": {
+      "official_supported_test": {
+        "normalized_mse": 0.025272413924500182,
+        "itemized": {
+          "state_0": 8.633821610371572e-07,
+          "state_1": 1.5265195743068235e-06,
+          "state_2": 1.747326338203153e-06,
+          "state_3": 1.9379276436866148e-06,
+          "state_4": 1.4829986337265307e-06,
+          "state_5": 3.9677232872326296e-06,
+          "state_6": 4.054620766120414e-09,
+          "state_7": 9.83562402345322e-05,
+          "state_8": 5.254198561657916e-05,
+          "state_9": 9.751502056043227e-05,
+          "state_10": 5.757526729951848e-05,
+          "state_11": 8.81720231948318e-05,
+          "state_12": 6.488754137695491e-05,
+          "state_13": 8.848563327894106e-05,
+          "state_14": 5.11364561024603e-05,
+          "state_15": 0.042569556079068024,
+          "state_16": 0.04383656742808583,
+          "state_17": 0.12321425008249808,
+          "state_18": 0.005111822387674353,
+          "state_19": 0.004923685238911555,
+          "state_20": 0.002273820913754977,
+          "state_21": 0.7936157394241501,
+          "state_22": 0.389921376993368,
+          "state_23": 0.7630931309291294,
+          "state_24": 0.44384405115148523,
+          "state_25": 0.731428963797433,
+          "state_26": 0.452385745205722,
+          "state_27": 0.7556971455668355,
+          "state_28": 0.45383797111092034,
+          "state_MSE": 0.1726332549210433,
+          "q_error_norm": 0.02205698568742354,
+          "qd_error_norm": 1.917664580292754
+        },
+        "windows": 46592,
+        "valid_positions": 465920
+      },
+      "official_common_evaluator_test": {
+        "normalized_mse": 0.025272411754825613,
+        "target_mse": 0.1726332383823919,
+        "q_error_norm": 0.021801808116200205,
+        "qd_error_norm": 1.9177056532639725,
+        "base_position_error": 0.0018653743992467504,
+        "base_orientation_error_rad": 0.004643241962888739,
+        "valid_positions": 465920,
+        "windows": 46592,
+        "split": "test"
+      },
+      "migrated_test": {
+        "normalized_mse": 0.025661787018179893,
+        "target_mse": 0.1785742270422506,
+        "q_error_norm": 0.021773180725810293,
+        "qd_error_norm": 1.9571649907709479,
+        "base_position_error": 0.0018844298220106533,
+        "base_orientation_error_rad": 0.00431388435619218,
+        "valid_positions": 465920,
+        "windows": 46592,
+        "split": "test"
+      },
+      "relative_test_normalized_mse_change": 0.01540704005731075,
+      "official_validation_curve": [
+        {
+          "step": 0,
+          "normalized_mse": 0.962001621723175,
+          "itemized": {
+            "state_0": 0.00015269083087332547,
+            "state_1": 0.0001516282354714349,
+            "state_2": 0.00017791285063140094,
+            "state_3": 0.0002112019865307957,
+            "state_4": 0.00019741800497286022,
+            "state_5": 0.00035877071786671877,
+            "state_6": 4.217795037675387e-07,
+            "state_7": 0.007005237974226475,
+            "state_8": 0.004774892702698708,
+            "state_9": 0.007308515720069408,
+            "state_10": 0.004801151808351278,
+            "state_11": 0.00703460443764925,
+            "state_12": 0.004766259342432022,
+            "state_13": 0.007072989828884602,
+            "state_14": 0.005004264414310455,
+            "state_15": 0.8501080870628357,
+            "state_16": 0.8303656578063965,
+            "state_17": 4.667496681213379,
+            "state_18": 0.08723977208137512,
+            "state_19": 0.08623822778463364,
+            "state_20": 0.041575171053409576,
+            "state_21": 23.05838966369629,
+            "state_22": 11.735166549682617,
+            "state_23": 24.47194480895996,
+            "state_24": 11.576713562011719,
+            "state_25": 24.37741470336914,
+            "state_26": 11.539741516113281,
+            "state_27": 24.048175811767578,
+            "state_28": 11.862109184265137,
+            "state_MSE": 5.147644996643066,
+            "q_error_norm": 0.19579903781414032,
+            "qd_error_norm": 10.901086807250977
+          },
+          "windows": 4096,
+          "valid_positions": 40960
+        },
+        {
+          "step": 250,
+          "normalized_mse": 0.09577106684446335,
+          "itemized": {
+            "state_0": 3.3049352623493178e-06,
+            "state_1": 2.99759381050535e-06,
+            "state_2": 4.874787464359542e-06,
+            "state_3": 6.2392264226218686e-06,
+            "state_4": 5.653441803588066e-06,
+            "state_5": 1.5785237337695435e-05,
+            "state_6": 2.3269874915854416e-08,
+            "state_7": 0.000344128260621801,
+            "state_8": 0.0002143966848962009,
+            "state_9": 0.0003326861187815666,
+            "state_10": 0.00019490467093419284,
+            "state_11": 0.00034167972626164556,
+            "state_12": 0.00020116675295867026,
+            "state_13": 0.0003324399294797331,
+            "state_14": 0.00026128493482246995,
+            "state_15": 0.15373525023460388,
+            "state_16": 0.15604931116104126,
+            "state_17": 0.5117089748382568,
+            "state_18": 0.018654746934771538,
+            "state_19": 0.01809912547469139,
+            "state_20": 0.008921796455979347,
+            "state_21": 2.842785596847534,
+            "state_22": 1.73273766040802,
+            "state_23": 2.965949773788452,
+            "state_24": 1.6720573902130127,
+            "state_25": 3.1317272186279297,
+            "state_26": 1.7035821676254272,
+            "state_27": 3.2015540599823,
+            "state_28": 1.7191537618637085,
+            "state_MSE": 0.6841026544570923,
+            "q_error_norm": 0.04280421882867813,
+            "qd_error_norm": 3.945206642150879
+          },
+          "windows": 4096,
+          "valid_positions": 40960
+        },
+        {
+          "step": 500,
+          "normalized_mse": 0.04870753735303879,
+          "itemized": {
+            "state_0": 1.6344970390491653e-06,
+            "state_1": 1.6254163028861512e-06,
+            "state_2": 1.507484853391361e-06,
+            "state_3": 4.7203820940922014e-06,
+            "state_4": 3.298398951301351e-06,
+            "state_5": 7.587346317450283e-06,
+            "state_6": 1.1480880246494962e-08,
+            "state_7": 0.00016289007908198982,
+            "state_8": 0.0001095104162232019,
+            "state_9": 0.00018384224676992744,
+            "state_10": 0.00012280643568374217,
+            "state_11": 0.0001639287220314145,
+            "state_12": 9.428073099115863e-05,
+            "state_13": 0.0001635643420740962,
+            "state_14": 0.0001205190783366561,
+            "state_15": 0.08375095576047897,
+            "state_16": 0.0822124257683754,
+            "state_17": 0.25200992822647095,
+            "state_18": 0.009968397207558155,
+            "state_19": 0.009570064954459667,
+            "state_20": 0.004132085479795933,
+            "state_21": 1.4259759187698364,
+            "state_22": 0.8242645859718323,
+            "state_23": 1.5098724365234375,
+            "state_24": 0.9049246907234192,
+            "state_25": 1.5075407028198242,
+            "state_26": 0.849658727645874,
+            "state_27": 1.5762038230895996,
+            "state_28": 0.8763481378555298,
+            "state_MSE": 0.341985285282135,
+            "q_error_norm": 0.030292121693491936,
+            "qd_error_norm": 2.7266478538513184
+          },
+          "windows": 4096,
+          "valid_positions": 40960
+        },
+        {
+          "step": 750,
+          "normalized_mse": 0.03336688131093979,
+          "itemized": {
+            "state_0": 1.242157395608956e-06,
+            "state_1": 1.0751889476523502e-06,
+            "state_2": 8.323835913870425e-07,
+            "state_3": 3.829022716672625e-06,
+            "state_4": 2.4788625978544587e-06,
+            "state_5": 5.893747129448457e-06,
+            "state_6": 7.90761500724102e-09,
+            "state_7": 0.00012580552720464766,
+            "state_8": 6.849483906989917e-05,
+            "state_9": 0.00011084317520726472,
+            "state_10": 5.80801788601093e-05,
+            "state_11": 0.0001101676098187454,
+            "state_12": 6.939605373190716e-05,
+            "state_13": 0.000122488199849613,
+            "state_14": 6.500131712527946e-05,
+            "state_15": 0.056230299174785614,
+            "state_16": 0.0575857050716877,
+            "state_17": 0.1787153035402298,
+            "state_18": 0.006194422021508217,
+            "state_19": 0.006447437219321728,
+            "state_20": 0.0028911286499351263,
+            "state_21": 1.0096218585968018,
+            "state_22": 0.7091044783592224,
+            "state_23": 1.2586544752120972,
+            "state_24": 0.5292105674743652,
+            "state_25": 1.1828689575195312,
+            "state_26": 0.532759964466095,
+            "state_27": 1.0169836282730103,
+            "state_28": 0.5353503227233887,
+            "state_MSE": 0.24425391852855682,
+            "q_error_norm": 0.024320881813764572,
+            "qd_error_norm": 2.306320905685425
+          },
+          "windows": 4096,
+          "valid_positions": 40960
+        },
+        {
+          "step": 1000,
+          "normalized_mse": 0.025701433420181274,
+          "itemized": {
+            "state_0": 8.909525490707892e-07,
+            "state_1": 1.563207661092747e-06,
+            "state_2": 1.779397848622466e-06,
+            "state_3": 1.937738261403865e-06,
+            "state_4": 1.4929731833035476e-06,
+            "state_5": 4.124753104406409e-06,
+            "state_6": 5.644913425584264e-09,
+            "state_7": 0.00010342521272832528,
+            "state_8": 5.348954437067732e-05,
+            "state_9": 9.496208804193884e-05,
+            "state_10": 5.635690104099922e-05,
+            "state_11": 9.50649191509001e-05,
+            "state_12": 6.606528768315911e-05,
+            "state_13": 8.994936069939286e-05,
+            "state_14": 5.304510341375135e-05,
+            "state_15": 0.04252181574702263,
+            "state_16": 0.04330464079976082,
+            "state_17": 0.1256198137998581,
+            "state_18": 0.005308893509209156,
+            "state_19": 0.0050760917365550995,
+            "state_20": 0.002246485324576497,
+            "state_21": 0.8396525382995605,
+            "state_22": 0.3993927240371704,
+            "state_23": 0.7379521727561951,
+            "state_24": 0.4262559413909912,
+            "state_25": 0.798298180103302,
+            "state_26": 0.45601704716682434,
+            "state_27": 0.7616283297538757,
+            "state_28": 0.47761648893356323,
+            "state_MSE": 0.17660397291183472,
+            "q_error_norm": 0.02224990911781788,
+            "qd_error_norm": 1.9351176023483276
+          },
+          "windows": 4096,
+          "valid_positions": 40960
+        }
+      ],
+      "migrated_validation_curve": [
+        {
+          "step": 0,
+          "normalized_mse": 0.962001621723175
+        },
+        {
+          "step": 250,
+          "normalized_mse": 0.09599173069000244
+        },
+        {
+          "step": 500,
+          "normalized_mse": 0.04858820140361786
+        },
+        {
+          "step": 750,
+          "normalized_mse": 0.035115115344524384
+        },
+        {
+          "step": 1000,
+          "normalized_mse": 0.02603572979569435
+        }
+      ],
+      "official_validation_selection": [
+        {
+          "step": 0,
+          "loss": 0.9707297021216088,
+          "itemized": {
+            "state_0": 0.0001496092140019595,
+            "state_1": 0.00015361310279631352,
+            "state_2": 0.000184541445348289,
+            "state_3": 0.00020911710357273018,
+            "state_4": 0.0002033640681714802,
+            "state_5": 0.0003632725021996341,
+            "state_6": 4.176802246877412e-07,
+            "state_7": 0.007388236103477059,
+            "state_8": 0.004969593915310534,
+            "state_9": 0.007389948918269231,
+            "state_10": 0.00473122544341035,
+            "state_11": 0.007084746937175373,
+            "state_12": 0.004743269511631557,
+            "state_13": 0.007238747654380379,
+            "state_14": 0.005082317433514438,
+            "state_15": 0.845852778508113,
+            "state_16": 0.8464574289845896,
+            "state_17": 4.701992831387362,
+            "state_18": 0.08607216195745783,
+            "state_19": 0.08653168101887126,
+            "state_20": 0.04210843358721052,
+            "state_21": 23.721784319196427,
+            "state_22": 11.688775701837224,
+            "state_23": 24.356466775412088,
+            "state_24": 11.660936963427197,
+            "state_25": 24.613976111778847,
+            "state_26": 11.583066835508241,
+            "state_27": 24.18942093063187,
+            "state_28": 11.800771859975962,
+            "state_MSE": 5.181864644144918,
+            "q_error_norm": 0.1975767324258993,
+            "qd_error_norm": 10.940409566019918
+          }
+        },
+        {
+          "step": 1000,
+          "loss": 0.025532979231614333,
+          "itemized": {
+            "state_0": 8.793339385282617e-07,
+            "state_1": 1.5457239447182023e-06,
+            "state_2": 1.754817856056104e-06,
+            "state_3": 1.9511626905423925e-06,
+            "state_4": 1.4681601577059744e-06,
+            "state_5": 4.098489995697861e-06,
+            "state_6": 4.514132345090959e-09,
+            "state_7": 0.00010236615703983622,
+            "state_8": 5.455736255089005e-05,
+            "state_9": 9.453313036279364e-05,
+            "state_10": 5.752776473105609e-05,
+            "state_11": 9.48475080204534e-05,
+            "state_12": 6.584140502817029e-05,
+            "state_13": 8.989909438641516e-05,
+            "state_14": 5.24839417046898e-05,
+            "state_15": 0.04235034198551388,
+            "state_16": 0.04226561693044809,
+            "state_17": 0.12636825016566686,
+            "state_18": 0.005182066461542151,
+            "state_19": 0.004979116576058524,
+            "state_20": 0.002217904060751527,
+            "state_21": 0.8280019236134959,
+            "state_22": 0.4089648907001202,
+            "state_23": 0.7519369439764337,
+            "state_24": 0.4316761310283954,
+            "state_25": 0.7987269307230855,
+            "state_26": 0.4570194286304516,
+            "state_27": 0.7732650421477936,
+            "state_28": 0.4576405535687457,
+            "state_MSE": 0.17693861238249056,
+            "q_error_norm": 0.022293622677142803,
+            "qd_error_norm": 1.9414417979481455
+          }
+        }
+      ],
+      "migrated_validation_selection": [
+        {
+          "step": 0,
+          "loss": 0.9707297021216088
+        },
+        {
+          "step": 1000,
+          "loss": 0.02591415551992563
+        }
+      ],
+      "official_torch22_vs_portable_torch27_prediction_max_abs_difference": 1.0967254638671875e-05,
+      "dataset_fingerprint": "b1a5e096f5af371daf5d68091f88cd01a4b16434234b2793814c2843c52b2ead"
+    }
+  },
+  "rollouts": [
+    {
+      "robot": "cartpole",
+      "motion_mode": "passive",
+      "horizon": 1,
+      "official": {
+        "endpoint": {
+          "q_mae": 0.003602763987146318,
+          "qd_mae": 0.022468983836006373,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "prefix_mean": {
+          "q_mae": 0.003602763987146318,
+          "qd_mae": 0.022468983836006373,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 1,
+        "neural_failed_trajectories": 1
+      },
+      "migrated": {
+        "endpoint": {
+          "q_mae": 0.0045166752533987164,
+          "qd_mae": 0.017431980872061104,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "prefix_mean": {
+          "q_mae": 0.0045166752533987164,
+          "qd_mae": 0.017431980872061104,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 1,
+        "neural_failed_trajectories": 1
+      }
+    },
+    {
+      "robot": "cartpole",
+      "motion_mode": "passive",
+      "horizon": 10,
+      "official": {
+        "endpoint": {
+          "q_mae": 0.03392360941506922,
+          "qd_mae": 0.1631581244582776,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "prefix_mean": {
+          "q_mae": 0.0185826843167888,
+          "qd_mae": 0.10257817458186765,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 2,
+        "neural_failed_trajectories": 3
+      },
+      "migrated": {
+        "endpoint": {
+          "q_mae": 0.052967376075685024,
+          "qd_mae": 0.17279394748038612,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "prefix_mean": {
+          "q_mae": 0.026894704191363417,
+          "qd_mae": 0.08862911371106748,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 2,
+        "neural_failed_trajectories": 2
+      }
+    },
+    {
+      "robot": "cartpole",
+      "motion_mode": "passive",
+      "horizon": 100,
+      "official": {
+        "endpoint": {
+          "q_mae": 0.9299745654368612,
+          "qd_mae": 2.497581840842031,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "prefix_mean": {
+          "q_mae": 0.34237092684076914,
+          "qd_mae": 1.0029388692107022,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 13,
+        "neural_failed_trajectories": 14
+      },
+      "migrated": {
+        "endpoint": {
+          "q_mae": 1.018314782545262,
+          "qd_mae": 5.318118917406537,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "prefix_mean": {
+          "q_mae": 0.49038796380416044,
+          "qd_mae": 2.4569047527327346,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 13,
+        "neural_failed_trajectories": 12
+      }
+    },
+    {
+      "robot": "cartpole",
+      "motion_mode": "random_effort",
+      "horizon": 1,
+      "official": {
+        "endpoint": {
+          "q_mae": 0.004139121389016509,
+          "qd_mae": 0.027877858374267817,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "prefix_mean": {
+          "q_mae": 0.004139121389016509,
+          "qd_mae": 0.027877858374267817,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 3,
+        "neural_failed_trajectories": 3
+      },
+      "migrated": {
+        "endpoint": {
+          "q_mae": 0.005738887237384915,
+          "qd_mae": 0.026728416327387094,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "prefix_mean": {
+          "q_mae": 0.005738887237384915,
+          "qd_mae": 0.026728416327387094,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 3,
+        "neural_failed_trajectories": 3
+      }
+    },
+    {
+      "robot": "cartpole",
+      "motion_mode": "random_effort",
+      "horizon": 10,
+      "official": {
+        "endpoint": {
+          "q_mae": 0.03371963498648256,
+          "qd_mae": 0.18818811420351267,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "prefix_mean": {
+          "q_mae": 0.018043760977225664,
+          "qd_mae": 0.11499902685172855,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 5,
+        "neural_failed_trajectories": 4
+      },
+      "migrated": {
+        "endpoint": {
+          "q_mae": 0.061153705581091344,
+          "qd_mae": 0.18875689851120114,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "prefix_mean": {
+          "q_mae": 0.030895228851359625,
+          "qd_mae": 0.11117767379619181,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 5,
+        "neural_failed_trajectories": 4
+      }
+    },
+    {
+      "robot": "cartpole",
+      "motion_mode": "random_effort",
+      "horizon": 100,
+      "official": {
+        "endpoint": {
+          "q_mae": 0.7373821424629134,
+          "qd_mae": 2.779321431647986,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "prefix_mean": {
+          "q_mae": 0.3141073164062599,
+          "qd_mae": 1.0735727162612603,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 14,
+        "neural_failed_trajectories": 13
+      },
+      "migrated": {
+        "endpoint": {
+          "q_mae": 0.9748335024493868,
+          "qd_mae": 6.359299529809505,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "prefix_mean": {
+          "q_mae": 0.5141442643365605,
+          "qd_mae": 2.772576483883895,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 14,
+        "neural_failed_trajectories": 13
+      }
+    },
+    {
+      "robot": "cartpole",
+      "motion_mode": "fixed_policy",
+      "horizon": 1,
+      "official": {
+        "endpoint": {
+          "q_mae": 0.003915302222594619,
+          "qd_mae": 0.02283012878615409,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "prefix_mean": {
+          "q_mae": 0.003915302222594619,
+          "qd_mae": 0.02283012878615409,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 2,
+        "neural_failed_trajectories": 2
+      },
+      "migrated": {
+        "endpoint": {
+          "q_mae": 0.00454322318546474,
+          "qd_mae": 0.018299537536222488,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "prefix_mean": {
+          "q_mae": 0.00454322318546474,
+          "qd_mae": 0.018299537536222488,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 2,
+        "neural_failed_trajectories": 2
+      }
+    },
+    {
+      "robot": "cartpole",
+      "motion_mode": "fixed_policy",
+      "horizon": 10,
+      "official": {
+        "endpoint": {
+          "q_mae": 0.03659066231921315,
+          "qd_mae": 0.1645882340380922,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "prefix_mean": {
+          "q_mae": 0.020076844961327178,
+          "qd_mae": 0.10454287680768175,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 4,
+        "neural_failed_trajectories": 3
+      },
+      "migrated": {
+        "endpoint": {
+          "q_mae": 0.05418394785374403,
+          "qd_mae": 0.17981546360533684,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "prefix_mean": {
+          "q_mae": 0.027892065814408153,
+          "qd_mae": 0.09333327080967138,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 4,
+        "neural_failed_trajectories": 3
+      }
+    },
+    {
+      "robot": "cartpole",
+      "motion_mode": "fixed_policy",
+      "horizon": 100,
+      "official": {
+        "endpoint": {
+          "q_mae": 0.7700066131225909,
+          "qd_mae": 2.7889942536130548,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "prefix_mean": {
+          "q_mae": 0.3239748633654373,
+          "qd_mae": 1.1369787277254728,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 12,
+        "neural_failed_trajectories": 13
+      },
+      "migrated": {
+        "endpoint": {
+          "q_mae": 1.18911849036714,
+          "qd_mae": 2.8580976161174476,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "prefix_mean": {
+          "q_mae": 0.4975818710306949,
+          "qd_mae": 1.6355206656270094,
+          "base_position_error": 0.0,
+          "base_orientation_error_rad": 0.0
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 12,
+        "neural_failed_trajectories": 11
+      }
+    },
+    {
+      "robot": "ant",
+      "motion_mode": "passive",
+      "horizon": 1,
+      "official": {
+        "endpoint": {
+          "q_mae": 0.005319860429153778,
+          "qd_mae": 0.26778628100198276,
+          "base_position_error": 0.001860829589409647,
+          "base_orientation_error_rad": 0.004582292870354682
+        },
+        "prefix_mean": {
+          "q_mae": 0.005319860429153778,
+          "qd_mae": 0.26778628100198276,
+          "base_position_error": 0.001860829589409647,
+          "base_orientation_error_rad": 0.004582292870354682
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 0,
+        "neural_failed_trajectories": 0
+      },
+      "migrated": {
+        "endpoint": {
+          "q_mae": 0.00474398750520777,
+          "qd_mae": 0.2458741563444034,
+          "base_position_error": 0.001569766367491007,
+          "base_orientation_error_rad": 0.003166631296829971
+        },
+        "prefix_mean": {
+          "q_mae": 0.00474398750520777,
+          "qd_mae": 0.2458741563444034,
+          "base_position_error": 0.001569766367491007,
+          "base_orientation_error_rad": 0.003166631296829971
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 0,
+        "neural_failed_trajectories": 0
+      }
+    },
+    {
+      "robot": "ant",
+      "motion_mode": "passive",
+      "horizon": 10,
+      "official": {
+        "endpoint": {
+          "q_mae": 0.12857750787043187,
+          "qd_mae": 1.0649671559450715,
+          "base_position_error": 0.03964947053163369,
+          "base_orientation_error_rad": 0.12758399457774613
+        },
+        "prefix_mean": {
+          "q_mae": 0.0667934399785736,
+          "qd_mae": 0.8274826575048273,
+          "base_position_error": 0.01755508988320242,
+          "base_orientation_error_rad": 0.06008767799240631
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 0,
+        "neural_failed_trajectories": 0
+      },
+      "migrated": {
+        "endpoint": {
+          "q_mae": 0.12755039721196226,
+          "qd_mae": 1.1085607342538424,
+          "base_position_error": 0.038761292457971656,
+          "base_orientation_error_rad": 0.12755005785324783
+        },
+        "prefix_mean": {
+          "q_mae": 0.06603073152982689,
+          "qd_mae": 0.8189388558441092,
+          "base_position_error": 0.017052160756325214,
+          "base_orientation_error_rad": 0.05853200811786373
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 0,
+        "neural_failed_trajectories": 0
+      }
+    },
+    {
+      "robot": "ant",
+      "motion_mode": "passive",
+      "horizon": 100,
+      "official": {
+        "endpoint": {
+          "q_mae": 0.47226262179901823,
+          "qd_mae": 0.458499246637343,
+          "base_position_error": 0.5758756479400944,
+          "base_orientation_error_rad": 1.0894487027377107
+        },
+        "prefix_mean": {
+          "q_mae": 0.37819225867338446,
+          "qd_mae": 0.9819303791635167,
+          "base_position_error": 0.355256956506547,
+          "base_orientation_error_rad": 0.6768722637087495
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 8,
+        "neural_failed_trajectories": 12
+      },
+      "migrated": {
+        "endpoint": {
+          "q_mae": 0.5688787088147365,
+          "qd_mae": 0.4909705882383264,
+          "base_position_error": 0.6963908831280007,
+          "base_orientation_error_rad": 1.5458201138109016
+        },
+        "prefix_mean": {
+          "q_mae": 0.41956209684088663,
+          "qd_mae": 1.0628628465051997,
+          "base_position_error": 0.39864579146383206,
+          "base_orientation_error_rad": 0.9027896640681493
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 8,
+        "neural_failed_trajectories": 15
+      }
+    },
+    {
+      "robot": "ant",
+      "motion_mode": "random_effort",
+      "horizon": 1,
+      "official": {
+        "endpoint": {
+          "q_mae": 0.006481394389993511,
+          "qd_mae": 0.42662397707525607,
+          "base_position_error": 0.0018659432671227928,
+          "base_orientation_error_rad": 0.005099715908059602
+        },
+        "prefix_mean": {
+          "q_mae": 0.006481394389993511,
+          "qd_mae": 0.42662397707525607,
+          "base_position_error": 0.0018659432671227928,
+          "base_orientation_error_rad": 0.005099715908059602
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 0,
+        "neural_failed_trajectories": 0
+      },
+      "migrated": {
+        "endpoint": {
+          "q_mae": 0.006159232783829793,
+          "qd_mae": 0.4062738242584081,
+          "base_position_error": 0.0014841981525077928,
+          "base_orientation_error_rad": 0.003578758159705596
+        },
+        "prefix_mean": {
+          "q_mae": 0.006159232783829793,
+          "qd_mae": 0.4062738242584081,
+          "base_position_error": 0.0014841981525077928,
+          "base_orientation_error_rad": 0.003578758159705596
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 0,
+        "neural_failed_trajectories": 0
+      }
+    },
+    {
+      "robot": "ant",
+      "motion_mode": "random_effort",
+      "horizon": 10,
+      "official": {
+        "endpoint": {
+          "q_mae": 0.09891457709454698,
+          "qd_mae": 1.449956315162126,
+          "base_position_error": 0.0315579202490427,
+          "base_orientation_error_rad": 0.11321888160206922
+        },
+        "prefix_mean": {
+          "q_mae": 0.05747206846208428,
+          "qd_mae": 0.9169976327137451,
+          "base_position_error": 0.014876183249059576,
+          "base_orientation_error_rad": 0.05374336103830305
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 0,
+        "neural_failed_trajectories": 0
+      },
+      "migrated": {
+        "endpoint": {
+          "q_mae": 0.1080305757568567,
+          "qd_mae": 1.4122576337207906,
+          "base_position_error": 0.03199135131904695,
+          "base_orientation_error_rad": 0.1202135262458407
+        },
+        "prefix_mean": {
+          "q_mae": 0.05944690010419436,
+          "qd_mae": 0.9571718881708096,
+          "base_position_error": 0.014769103268557182,
+          "base_orientation_error_rad": 0.05229272850985829
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 0,
+        "neural_failed_trajectories": 0
+      }
+    },
+    {
+      "robot": "ant",
+      "motion_mode": "random_effort",
+      "horizon": 100,
+      "official": {
+        "endpoint": {
+          "q_mae": 0.3342890131971217,
+          "qd_mae": 1.9295381686097244,
+          "base_position_error": 0.5915070575607586,
+          "base_orientation_error_rad": 1.2947435968169163
+        },
+        "prefix_mean": {
+          "q_mae": 0.3043545666307182,
+          "qd_mae": 1.8366111416146078,
+          "base_position_error": 0.36266761761570265,
+          "base_orientation_error_rad": 0.7593971293483395
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 9,
+        "neural_failed_trajectories": 11
+      },
+      "migrated": {
+        "endpoint": {
+          "q_mae": 0.4559083668063977,
+          "qd_mae": 2.6720290664733124,
+          "base_position_error": 0.6682852949417459,
+          "base_orientation_error_rad": 1.7804311155566146
+        },
+        "prefix_mean": {
+          "q_mae": 0.3350302883356198,
+          "qd_mae": 1.95655032466928,
+          "base_position_error": 0.3761870341861412,
+          "base_orientation_error_rad": 1.008255826750756
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 9,
+        "neural_failed_trajectories": 12
+      }
+    },
+    {
+      "robot": "ant",
+      "motion_mode": "fixed_policy",
+      "horizon": 1,
+      "official": {
+        "endpoint": {
+          "q_mae": 0.0053062050756125245,
+          "qd_mae": 0.2626456083827569,
+          "base_position_error": 0.0018396848312295252,
+          "base_orientation_error_rad": 0.0045719440871303035
+        },
+        "prefix_mean": {
+          "q_mae": 0.0053062050756125245,
+          "qd_mae": 0.2626456083827569,
+          "base_position_error": 0.0018396848312295252,
+          "base_orientation_error_rad": 0.0045719440871303035
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 0,
+        "neural_failed_trajectories": 0
+      },
+      "migrated": {
+        "endpoint": {
+          "q_mae": 0.004744569600006798,
+          "qd_mae": 0.24299892984189292,
+          "base_position_error": 0.001554736626211719,
+          "base_orientation_error_rad": 0.003166865006220342
+        },
+        "prefix_mean": {
+          "q_mae": 0.004744569600006798,
+          "qd_mae": 0.24299892984189292,
+          "base_position_error": 0.001554736626211719,
+          "base_orientation_error_rad": 0.003166865006220342
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 0,
+        "neural_failed_trajectories": 0
+      }
+    },
+    {
+      "robot": "ant",
+      "motion_mode": "fixed_policy",
+      "horizon": 10,
+      "official": {
+        "endpoint": {
+          "q_mae": 0.12198719092702959,
+          "qd_mae": 0.9713971914232908,
+          "base_position_error": 0.039061609433714506,
+          "base_orientation_error_rad": 0.1220908948827665
+        },
+        "prefix_mean": {
+          "q_mae": 0.0637050231860485,
+          "qd_mae": 0.7725331200757084,
+          "base_position_error": 0.017326071712747578,
+          "base_orientation_error_rad": 0.056660911019473015
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 0,
+        "neural_failed_trajectories": 0
+      },
+      "migrated": {
+        "endpoint": {
+          "q_mae": 0.12608897217432968,
+          "qd_mae": 1.0238051168229763,
+          "base_position_error": 0.03771493999199786,
+          "base_orientation_error_rad": 0.1252778443100724
+        },
+        "prefix_mean": {
+          "q_mae": 0.06328423784143525,
+          "qd_mae": 0.7772919466841163,
+          "base_position_error": 0.016755506095732266,
+          "base_orientation_error_rad": 0.055146147635087905
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 0,
+        "neural_failed_trajectories": 0
+      }
+    },
+    {
+      "robot": "ant",
+      "motion_mode": "fixed_policy",
+      "horizon": 100,
+      "official": {
+        "endpoint": {
+          "q_mae": 0.4596343934790639,
+          "qd_mae": 0.5388422452714232,
+          "base_position_error": 0.6072629957069082,
+          "base_orientation_error_rad": 1.0936193238042664
+        },
+        "prefix_mean": {
+          "q_mae": 0.34301805260942303,
+          "qd_mae": 1.0250043196421725,
+          "base_position_error": 0.3683772146700457,
+          "base_orientation_error_rad": 0.6751834420213825
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 6,
+        "neural_failed_trajectories": 12
+      },
+      "migrated": {
+        "endpoint": {
+          "q_mae": 0.5009392694591952,
+          "qd_mae": 0.5091114111481667,
+          "base_position_error": 0.6070302807069402,
+          "base_orientation_error_rad": 1.5389436025885685
+        },
+        "prefix_mean": {
+          "q_mae": 0.3953221045440134,
+          "qd_mae": 1.1363968631930705,
+          "base_position_error": 0.3583828558532299,
+          "base_orientation_error_rad": 0.8785606005360747
+        },
+        "valid_trajectories": 16,
+        "nonfinite_trajectories": 0,
+        "teacher_nonfinite_trajectories": 0,
+        "teacher_failed_trajectories": 6,
+        "neural_failed_trajectories": 11
+      }
+    }
+  ],
+  "cartpole_environment_attribution": {
+    "current_environment_control_completed_updates": 1000,
+    "migrated_completed_updates": 1000,
+    "model_max_abs_difference": 0.0,
+    "first_update_gradient_max_abs_difference": 2.2351741790771484e-08,
+    "first_update_gradient_largest_field": "transformer_model.transformer.wte.weight",
+    "first_update_parameter_max_abs_difference": 4.614586941897869e-06,
+    "scope": "Cartpole seed0; same source initialization, source-consumed sample order, frozen source statistics, Adam and LR. This control reuses original numerical methods in Torch2.7; it is distinct from the main original-entry Torch2.2 baseline.",
+    "optimizer_max_abs_difference": 0.0
+  },
+  "ant_environment_attribution_short": {
+    "completed_updates": 10,
+    "model_max_abs_difference": 0.0,
+    "largest_difference_field": "transformer_model.transformer.wte.weight",
+    "scope": "Ant current Torch2.7 CPU, same captured initialization/statistics/order and canonical coordinates, original numerical training methods versus migrated trainer. Short diagnostic only; no final-convergence or 1000-update equivalence claim."
+  },
+  "native_workflows": {
+    "cartpole": {
+      "robot": "cartpole",
+      "status": "passed",
+      "training_reused": true,
+      "training_steps": 1000,
+      "training_result": "/root/.cache/embodichain/pr822-accuracy/clean-ec-workflow-cartpole/train/result.json",
+      "training_result_sha256": "5e6318b3af8c8928e87fbc41357b8ec94a9785865efaea2df198449c702e19aa",
+      "training_dataset": "/root/.cache/embodichain/pr822-accuracy/clean-ec-workflow-cartpole/data",
+      "training_checkpoint_sha256": "48b674d781e448f79014a4024328bb61c06bf2db4190732e54268c84dc05add7",
+      "new_dataset_generation": "/workspace/exp_data/embodichain-pr822-accuracy-20261020/small-budget-official-v1/native-workflow/cartpole/generated-data",
+      "new_export": "/workspace/exp_data/embodichain-pr822-accuracy-20261020/small-budget-official-v1/native-workflow/cartpole/export",
+      "new_native_inference": "/workspace/exp_data/embodichain-pr822-accuracy-20261020/small-budget-official-v1/native-workflow/cartpole/rollout.json",
+      "scope": "SDK workflow contract only, independent from original-data four-run accuracy comparison. Reuse already completed native 1000-update training to avoid additional training budget."
+    },
+    "ant": {
+      "robot": "ant",
+      "status": "passed",
+      "training_reused": true,
+      "training_steps": 1000,
+      "training_result": "/root/.cache/embodichain/pr822-accuracy/clean-ec-workflow-ant/train/result.json",
+      "training_result_sha256": "9333c02206e56315b8f36d17e9b5bc7e1b84d4a002d25746c002f4a512fd8f39",
+      "training_dataset": "/root/.cache/embodichain/pr822-accuracy/clean-ec-workflow-ant/data",
+      "training_checkpoint_sha256": "e38ade4c0de8a59838a36866bc3007c9855bb38cd62596bdd282801747a15fb1",
+      "new_dataset_generation": "/workspace/exp_data/embodichain-pr822-accuracy-20261020/small-budget-official-v1/native-workflow/ant/generated-data",
+      "new_export": "/workspace/exp_data/embodichain-pr822-accuracy-20261020/small-budget-official-v1/native-workflow/ant/export",
+      "new_native_inference": "/workspace/exp_data/embodichain-pr822-accuracy-20261020/small-budget-official-v1/native-workflow/ant/rollout.json",
+      "scope": "SDK workflow contract only, independent from original-data four-run accuracy comparison. Reuse already completed native 1000-update training to avoid additional training budget."
+    }
+  },
+  "completed_utc": "2026-10-20T13:03:12.340280+00:00",
+  "completion": {
+    "four_main_runs_1000_updates_each": true,
+    "accuracy_judgment_delivered": true,
+    "native_workflow_passed": true,
+    "native_training_reused_from_prior_completed_1000_update_runs": true,
+    "cross_environment_accuracy_aligned": false,
+    "full_matrix_required_for_this_round": false,
+    "full_matrix_status": "stopped; artifacts preserved"
+  },
+  "additional_diagnostics": {
+    "cartpole_cuda_training_updates": 1000,
+    "cartpole_current_environment_original_methods_updates": 1000,
+    "ant_current_environment_original_methods_updates": 10,
+    "single_fixed_batch_gradient_probes": "Torch2.2 and Torch2.7; one update each; no extra model seed or convergence run"
+  },
+  "preservation": {
+    "stop_receipt": "/workspace/exp_data/embodichain-pr822-accuracy-20261020/small-budget-official-v1/stop-full-budget-result.json",
+    "checkpoint_inventory": "/workspace/exp_data/embodichain-pr822-accuracy-20261020/small-budget-official-v1/preserved-full-budget-checkpoints.json",
+    "allowed_physical_gpus": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ]
+  },
+  "learning_rate_scalar_validation": {
+    "cartpole-official": {
+      "logged_float64_rates": [
+        0.0009991000000000002
+      ],
+      "max_abs_scalar_difference": 0.0,
+      "effective_fp32_adam_step_size_identical_for_all_updates": true
+    },
+    "cartpole-migrated": {
+      "logged_float64_rates": [
+        0.0009991,
+        0.0009991000000000002
+      ],
+      "max_abs_scalar_difference": 2.168404344971009e-19,
+      "effective_fp32_adam_step_size_identical_for_all_updates": true
+    },
+    "ant-official": {
+      "logged_float64_rates": [
+        0.0009991000000000002
+      ],
+      "max_abs_scalar_difference": 0.0,
+      "effective_fp32_adam_step_size_identical_for_all_updates": true
+    },
+    "ant-migrated": {
+      "logged_float64_rates": [
+        0.0009991,
+        0.0009991000000000002
+      ],
+      "max_abs_scalar_difference": 2.168404344971009e-19,
+      "effective_fp32_adam_step_size_identical_for_all_updates": true
+    }
+  },
+  "final_validation": "/workspace/exp_data/embodichain-pr822-accuracy-20261020/small-budget-official-v1/final-validation.json",
+  "measurement_corrections": [
+    "/workspace/exp_data/embodichain-pr822-accuracy-20261020/small-budget-official-v1/cartpole/migrated-gpu-diagnostic/feature-comparison-correction.json"
+  ],
+  "session_exitcodes": "/workspace/exp_data/embodichain-pr822-accuracy-20261020/small-budget-official-v1/session-exitcodes.json"
+}
