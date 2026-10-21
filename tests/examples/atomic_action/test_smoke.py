@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -27,7 +28,10 @@ import pytest
 import torch
 
 pytestmark = [pytest.mark.gpu, pytest.mark.slow, pytest.mark.subprocess_sim]
-SMOKE_TIMEOUT_SECONDS = 180
+# Full scenes contain up to roughly 190 simulated seconds, plus cold planning.
+# This is a bounded correctness smoke, not a wall-time performance assertion.
+SMOKE_TIMEOUT_SECONDS = 600
+SMOKE_TRACEBACK_INTERVAL_SECONDS = 150
 
 
 @pytest.mark.parametrize("robot", ["ur5", "franka"])
@@ -37,11 +41,20 @@ def test_atomic_cli_plans_and_replays_nominal_scene(
 ) -> None:
     """Each preset produces finite, timed commands and finishes native cleanup."""
     output = tmp_path / f"{skill}_{robot}"
+    # Preserve a Python stack before the deadline if a CI-only stall recurs.
+    entrypoint = (
+        "import faulthandler, runpy\n"
+        f"faulthandler.dump_traceback_later({SMOKE_TRACEBACK_INTERVAL_SECONDS}, repeat=True)\n"
+        "try:\n"
+        "    runpy.run_module('embodichain', run_name='__main__')\n"
+        "finally:\n"
+        "    faulthandler.cancel_dump_traceback_later()\n"
+    )
     command = [
         sys.executable,
         "-u",
-        "-m",
-        "embodichain",
+        "-c",
+        entrypoint,
         "run-example",
         "atomic-action",
         "--skill",
@@ -72,6 +85,14 @@ def test_atomic_cli_plans_and_replays_nominal_scene(
                 stderr=subprocess.STDOUT,
                 text=True,
                 timeout=SMOKE_TIMEOUT_SECONDS,
+                # One environment should not inherit the runner's potentially
+                # hundreds of BLAS/OpenMP workers for small planning kernels.
+                env={
+                    **os.environ,
+                    "OMP_NUM_THREADS": "1",
+                    "MKL_NUM_THREADS": "1",
+                    "OPENBLAS_NUM_THREADS": "1",
+                },
             )
         except subprocess.TimeoutExpired:
             pytest.fail(
