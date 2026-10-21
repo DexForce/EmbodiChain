@@ -9,3 +9,5 @@ default_deployment: newton
 deployments:
   newton:
     config: env.newton.yaml
+  dexuni:
+    config: env.dexuni.yaml

@@ -821,3 +821,46 @@ def test_height_scanner_graph_replays_changed_poses() -> None:
         if previous is not None:
             assert not torch.equal(captured, previous)
         previous = captured
+
+
+@pytest.mark.no_sim
+def test_curriculum_checkpoint_restores_assignments_and_rejects_other_maps() -> None:
+    origins = torch.arange(36, dtype=torch.float32).reshape(4, 3, 3)
+
+    def make(count=6):
+        return ReferenceTerrainCurriculum(
+            origins.clone(), count, 3, 8.0, 20.0, torch.Generator().manual_seed(4)
+        )
+
+    source = make()
+    source.levels.fill_(3)
+    source.env_origins.copy_(source.origins[source.levels, source.types])
+    saved = source.state_dict()
+    target = make()
+    target.load_state_dict(saved)
+    torch.testing.assert_close(target.levels, source.levels)
+    torch.testing.assert_close(target.env_origins, source.env_origins)
+    torch.testing.assert_close(
+        target.generator.get_state(), source.generator.get_state()
+    )
+    with pytest.raises(ValueError, match="instance count"):
+        make(3).load_state_dict(saved)
+    different_map = make()
+    different_map.origins.add_(1)
+    with pytest.raises(ValueError, match="map differs"):
+        different_map.load_state_dict(saved)
+    env = SimpleNamespace(
+        _reference_terrain_course=target, num_envs=6, device=torch.device("cpu")
+    )
+    env.validate_training_state = (
+        lambda state: IsaacVelocityEnv.validate_training_state(env, state)
+    )
+    IsaacVelocityEnv.load_training_state(env, {"terrain_course": saved})
+    assert env._reference_resume_reset.all()
+
+    before = target.state_dict()
+    invalid = {**saved, "levels": torch.full_like(saved["levels"], -1)}
+    with pytest.raises(ValueError, match="out of range"):
+        env.validate_training_state({"terrain_course": invalid})
+    for key, value in before.items():
+        torch.testing.assert_close(value, target.state_dict()[key], rtol=0, atol=0)
