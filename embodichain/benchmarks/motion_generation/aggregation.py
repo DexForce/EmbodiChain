@@ -710,6 +710,8 @@ def _metric_rows(
     cases: list[BenchmarkCase],
     measured_trials: int,
     confidence_level: float = 0.95,
+    *,
+    success_attribute: str | None = None,
 ) -> list[dict[str, object]]:
     """Aggregate external success and quality metrics by scenario condition.
 
@@ -718,6 +720,8 @@ def _metric_rows(
     remain conditioned on externally geometry-valid outcomes. Cases whose
     scenario bypasses the selected planner are excluded from planner metrics
     and reported under the algorithm that actually produced their motion.
+    ``success_attribute`` selects the same metric for the displayed success
+    rate and its interval; otherwise each case uses its declared primary.
     """
     measured_by_key: dict[
         tuple[
@@ -927,11 +931,7 @@ def _metric_rows(
                     if record.case_id == case.case_id
                     for outcome in record.outcomes
                 ]
-                attribute = (
-                    "geometry_valid"
-                    if case.primary_success == "geometry_valid"
-                    else case.primary_success
-                )
+                attribute = success_attribute or case.primary_success
                 rate = sum(bool(getattr(outcome, attribute)) for outcome in own) / max(
                     len(own), case.batch_size * measured_trials
                 )
@@ -1015,12 +1015,7 @@ def _metric_rows(
                         )
                     ),
                     "coverage_rate": min(1.0, len(outcomes) / max(expected, 1)),
-                    "success_rate": _case_macro_primary_rate(
-                        measured,
-                        rate_cases,
-                        excluded_case_ids=excluded_case_ids,
-                        measured_trials=measured_trials,
-                    ),
+                    "success_rate": _mean(rate for _, rate in rates),
                     "planning_success_rate": _case_macro_rate(
                         measured,
                         rate_cases,
@@ -1642,15 +1637,17 @@ def aggregate_results(
                 **row,
                 **labels,
                 "view": view,
-                "success_rate": (
-                    row["geometry_valid_rate"]
-                    if view == "motion_planning"
-                    else row["success_rate"]
-                ),
             }
             for labels, population, trials in workloads
             for row in _metric_rows(
-                trials, metadata, population, measured_trials, confidence_level
+                trials,
+                metadata,
+                population,
+                measured_trials,
+                confidence_level,
+                success_attribute=(
+                    "geometry_valid" if view == "motion_planning" else None
+                ),
             )
         ]
         result[f"{view}_leaderboard"] = _view_leaderboard(

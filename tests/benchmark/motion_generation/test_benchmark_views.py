@@ -230,6 +230,60 @@ def test_geometry_error_population_includes_a_dynamic_failure() -> None:
     assert row["timed_motion_valid_rate"] == 0.0
 
 
+@pytest.mark.parametrize("scenario", ["free_space", "atomic_skill"])
+@pytest.mark.parametrize("measured_trials", [1, 2])
+def test_success_interval_matches_displayed_rate_for_custom_motion_primary(
+    scenario: str, measured_trials: int
+) -> None:
+    """A speed violation affects motion success while leaving geometry valid."""
+    cases = [
+        replace(
+            _case(atomic=scenario == "atomic_skill"),
+            case_id=f"custom-primary-{seed}",
+            seed=seed,
+            primary_success="motion_valid",
+        )
+        for seed in (11, 23)
+    ]
+    records = []
+    for case in cases:
+        outcome = compute_case_outcomes(
+            SimpleNamespace(
+                positions=torch.tensor([[[0.0], [0.1]]]),
+                dt=torch.tensor([[0.0, 0.1]]),
+                success=True,
+            ),
+            case,
+            _Robot(),
+            "arm",
+            validation_samples=2,
+            position_threshold_m=0.001,
+            rotation_threshold_rad=0.001,
+            joint_limit_tolerance_rad=0.001,
+        )[0]
+        assert outcome.geometry_valid is True
+        assert outcome.velocity_limit_violation is True
+        assert outcome.motion_valid is False
+        records.append(_record(case, outcome=outcome))
+
+    result = aggregate_results(
+        records,
+        [_metadata("solved")],
+        cases,
+        measured_trials,
+        track_scenarios={cases[0].track: scenario},
+    )
+    view = "motion_planning" if scenario == "free_space" else "atomic_skills"
+    row = result[f"{view}_success_and_metrics"][0]
+    expected = 1.0 / measured_trials if scenario == "free_space" else 0.0
+    assert row["seed_clusters"] == 2
+    assert row["geometry_valid_rate"] == pytest.approx(1.0 / measured_trials)
+    assert row["motion_valid_rate"] == 0.0
+    assert row["success_rate"] == pytest.approx(expected)
+    assert row["success_ci_lower"] == pytest.approx(expected)
+    assert row["success_ci_upper"] == pytest.approx(expected)
+
+
 @pytest.mark.parametrize("unsupported", [False, True])
 def test_effective_algorithm_preserves_each_source_population(
     unsupported: bool,
