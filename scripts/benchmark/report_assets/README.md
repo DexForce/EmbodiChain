@@ -34,7 +34,7 @@ implemented by this initialization.
   Downloading benchmark inputs will not automatically download results or media.
 
 The three initialization files are maintained together in
-`docs/architecture/report-assets/` in the code repository. Publish those files
+`scripts/benchmark/report_assets/` in the code repository. Publish those files
 to this dataset's root together;
 asset directories are created only when real files are uploaded. The code
 repository copy of `index.json` is the empty bootstrap template; after assets
