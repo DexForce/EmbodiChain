@@ -38,6 +38,7 @@ EmbodiChain data cache.
    MultiW1Data
    RubiksCube
    ScoopIceNewEnv
+   TabletopFourBases
 
 embodichain.data.assets.planner_assets
 --------------------------------------
@@ -71,6 +72,59 @@ embodichain.data.assets.solver_assets
 .. autosummary::
 
    download_neural_ik_checkpoint
+
+embodichain.data_pipeline
+------------------------
+
+The configuration submodule derives bounded pipeline settings without starting
+an online worker. Importing the data-pipeline package remains lazy.
+
+.. currentmodule:: embodichain.data_pipeline
+
+.. autosummary::
+
+   configuration
+
+embodichain.data_pipeline.configuration
+--------------------------------------
+
+Configure ODS from measured generation and training capacities. A versioned
+profile bounds selections per trajectory; the planner never promotes provisional
+bounds to qualified ones. Runtime metadata constrains cache storage, refill
+latency and short-window consumption. The online engine and consumer must enforce
+the returned quota and pacing targets. Measurement helpers preserve the units,
+common monotonic window and difference between active and wall-clock rates.
+
+.. currentmodule:: embodichain.data_pipeline.configuration
+
+.. autosummary::
+
+   ODSReuseProfileCfg
+   ODSRuntimeCfg
+   ODSConfiguration
+   configure_ods
+   ODSRateMeasurementCfg
+   ODSThroughputMeasurement
+   measure_ods_throughput
+
+.. autoclass:: ODSReuseProfileCfg
+   :members:
+
+.. autoclass:: ODSRuntimeCfg
+   :members:
+
+.. autoclass:: ODSConfiguration
+   :members:
+
+.. autofunction:: configure_ods
+
+.. autoclass:: ODSRateMeasurementCfg
+   :members:
+
+.. autoclass:: ODSThroughputMeasurement
+   :members:
+
+.. autofunction:: measure_ods_throughput
 
 embodichain.data_pipeline.depth_video
 -------------------------------------
@@ -478,6 +532,19 @@ Task Program deployment from a semantic task graph and prepared scene.
    TaskProgramBundlePaths
    generate_task_program_bundle
 
+embodichain.gen_sim.scene_engine.cli.randomization
+--------------------------------------------------
+
+Command-line entry point for grouped layout generation from an existing
+Scene Engine workspace. Validates the YAML policy, prepares a reusable
+baseline and saves successful candidates with a completion manifest.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.cli.randomization
+
+.. autosummary::
+
+   main
+
 embodichain.gen_sim.scene_engine.core.scene_edit_plan
 -----------------------------------------------------
 
@@ -563,6 +630,161 @@ Entity metadata and deterministic UID indexing for schema-v2 USD scene stages.
    UsdEntityDesc
    UsdSceneBinding
    UsdSceneIndex
+
+embodichain.gen_sim.scene_engine.randomization.adapter
+------------------------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.randomization.adapter
+
+.. autosummary::
+
+   scene_layout_input_from_export
+   randomize_scene_export
+   convert_layouts
+
+embodichain.gen_sim.scene_engine.randomization.baseline
+-------------------------------------------------------
+
+Extracts one table work area, group AABBs and root-relative member poses from
+rigid GLB exports. A group contains a direct table child and all descendants.
+The baseline cache is reused only when source identity, extraction version,
+structure and checksum match; preparation leaves the source export untouched.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.randomization.baseline
+
+.. autosummary::
+
+   PreparedSceneBaseline
+   prepare_scene_baseline
+
+embodichain.gen_sim.scene_engine.randomization.cfg
+--------------------------------------------------
+
+Loads a closed, versioned YAML policy and resolves the workspace's
+``scene_export/`` input and ``scene_randomization_base.yaml`` baseline path.
+The workspace is supplied separately through ``output_root``. For example:
+
+.. code-block:: yaml
+
+   schema_version: 1
+   seed: 42
+   candidate_count: 10
+   max_attempts: 1000
+   collision_margin_m: 0.02
+
+Generate and save layouts, then cycle the original scene and saved candidates:
+
+.. code-block:: bash
+
+   embodichain scene-randomization --output_root ./workspace --config policy.yaml
+   python -m embodichain.gen_sim.scene_engine.randomization.loading \
+       --layout-dir ./workspace/scene_layouts/run_001/layouts --interval 3
+
+Version 3 adds hierarchical member XY/yaw sampling on CPU or CUDA:
+
+.. code-block:: yaml
+
+   schema_version: 3
+   backend: batched
+   device: cuda:0
+   randomize_groups: true
+   intra_group:
+     targets:
+       mug_001:
+         xy_offset_bounds_m: null
+         yaw_delta_range_deg: [-180, 180]
+
+``randomize_groups: false`` holds group roots fixed. Unselected members retain
+parent-relative poses and follow moved ancestors. XY bounds, when supplied as
+``[[min_x, min_y], [max_x, max_y]]``, bound the original entity origin's offset
+in its parent support frame. A null bound uses the complete feasible region.
+Yaw increments rotate around the support normal while retaining authored tilt.
+Defaults are 2 mm boundary and sibling margins, 1 mm support gap and 1 mm grid
+resolution. ``intra_group.support_overrides`` accepts parent UID entries with
+a proper rigid ``parent_from_support`` matrix and GeoJSON ``polygon``; overrides
+must have mesh support evidence. Invalid polygons are rejected during policy
+loading before scene preparation. Ambiguous automatic layers raise an error.
+The positive height deviation of the selected near-planar layer is included in
+its conservative support height, retaining the configured minimum gap over
+shallow raised geometry.
+
+Content-addressed geometry caches leave the original baseline unchanged.
+Hierarchical layouts save v3 root XY translations and full selected member
+poses relative to their parents, using JSON or packed storage. Replay validates
+source, cache, policy, geometry and identity before exposing lazy variants and
+does not sample again. The existing v1/v2 group layouts and earlier v3
+hierarchical layouts remain readable. New hierarchical proposals use algorithm
+version 2: dynamic group centers are sampled from the remaining free rectangular
+area without nested retries. Support caches use extraction version 2 and include
+a conservative layer height ceiling; older caches retain their recorded height
+semantics on replay. Saving compares the on-disk cache against the generated
+snapshot before publishing a completed run.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.randomization.cfg
+
+.. autosummary::
+
+   MemberRandomizationCfg
+   SupportOverrideCfg
+   IntraGroupRandomizationCfg
+   SceneRandomizationCfg
+   load_randomization_config
+
+embodichain.gen_sim.scene_engine.randomization.generation
+---------------------------------------------------------
+
+Uses the shared seeded procedural generator and XY layout solver, then expands
+every group from the same baseline. Successful candidates contain a full
+``SceneFragment`` and a ``SceneVariant``. Group-only sampling preserves authored
+orientation and height. Hierarchical sampling changes selected members' support
+XY/yaw, aligns their geometric bottom to the support gap and propagates subtrees.
+Scale and exported collision hull budgets are preserved. Acceptance checks
+conservative support coverage, sibling/group AABBs and table bounds; it does not
+establish physical stability or task success.
+
+``budget_exhausted`` is a normal result that retains any successful candidates.
+The result records actual parameters, proposal attempts and solver outcomes;
+generation does not save candidates until ``save_layouts`` is called.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.randomization.generation
+
+.. autosummary::
+
+   SceneRandomizationResult
+   randomize_scene
+
+embodichain.gen_sim.scene_engine.randomization.loading
+------------------------------------------------------
+
+Validates a completed run's candidate files against its manifest, policy,
+baseline and unchanged source export, then reconstructs every group member's
+absolute pose without generating layouts or rewriting caches. Playback loads
+assets once and cycles original and candidate poses without advancing physics.
+Runs with no successful candidates cannot be previewed.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.randomization.loading
+
+.. autosummary::
+
+   LoadedLayouts
+   load_layouts
+   preview_layouts
+   main
+
+embodichain.gen_sim.scene_engine.randomization.persistence
+----------------------------------------------------------
+
+Saves each result in a distinct ``scene_layouts/run_NNN/`` directory containing
+the resolved policy and candidate group centers. Relative references identify
+the existing source export and baseline, so those files must remain available
+and unchanged. The completion manifest is published last, including for a run
+with zero candidates; interrupted writes may leave a run without that manifest.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.randomization.persistence
+
+.. autosummary::
+
+   save_layouts
 
 embodichain.gen_sim.asset_engine.cli.start
 -----------------------------------------------
@@ -688,6 +910,33 @@ embodichain.lab.gym.envs.embodied_env
    EmbodiedEnvCfg
    EmbodiedEnv
 
+embodichain.lab.sim.scene.expansion.layout
+------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.scene.expansion.layout
+
+.. autosummary::
+
+   SceneLayoutInput
+   PreparedSceneRandomization
+   SceneRandomizationBatch
+   SceneVariantApplicationResult
+   scene_layout_input_from_sim
+   prepare_scene_randomization
+   generate_scene_variants
+   apply_scene_variants
+
+embodichain.lab.sim.scene.expansion.persistence
+-----------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.scene.expansion.persistence
+
+.. autosummary::
+
+   LoadedSceneVariants
+   save_scene_variants
+   load_scene_variants
+
 embodichain.lab.task_program.integrations.simulation.handover
 -------------------------------------------------------------
 
@@ -696,6 +945,23 @@ embodichain.lab.task_program.integrations.simulation.handover
 .. autosummary::
 
    ConfiguredHandOverPoseProvider
+
+embodichain.lab.gym.envs.episode_context
+--------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.episode_context
+
+Row-local recording eligibility follows the buffered episode, independently of
+replaceable demo annotations. Synchronous checks retain pending and rejected
+state across internal resets, and snapshots own their JSON provenance.
+
+.. autosummary::
+   :nosignatures:
+
+   EpisodeContext
+
+.. autoclass:: EpisodeContext
+   :members:
 
 embodichain.lab.gym.envs.managers.action_manager
 ------------------------------------------------
@@ -721,6 +987,7 @@ embodichain.lab.gym.envs.managers.actions
    JointPositionToLimitsAction
    JointVelocityAction
    ParallelGripperAction
+   RelativeEefPoseAction
    RelativeJointPositionAction
 
 embodichain.lab.gym.envs.managers.action_types
@@ -903,10 +1170,31 @@ embodichain.lab.scripts.preview_lerobot_data
    main
    resolve_dataset_root
 
-embodichain.lab.scripts.run_env
+embodichain.lab.scripts.preview_robot
+-------------------------------------
+
+.. currentmodule:: embodichain.lab.scripts.preview_robot
+
+Load a catalog robot or a standalone configuration and run a native or Viser
+preview with managed control-part Gizmos and optional joint controls.
+
+.. autosummary::
+
+   build_robot_cfg
+   cli
+   main
+
+.. autofunction:: build_robot_cfg
+
+.. autofunction:: cli
+
+.. autofunction:: main
+
+
+embodichain.lab.scripts.run_task
 -------------------------------
 
-.. currentmodule:: embodichain.lab.scripts.run_env
+.. currentmodule:: embodichain.lab.scripts.run_task
 
 .. autosummary::
 
@@ -1324,6 +1612,35 @@ embodichain.lab.sim.diff.bridge
    NewtonStepFunc
    tape_context
 
+embodichain.lab.sim.cfg.source
+-------------------------------
+
+USD source configuration identifies a file and an optional exact prim inside
+that file. Source selection is independent of runtime identity, placement and
+parent/link attachment. Supply it through ``source`` on a visual, rigid-object
+or articulation configuration. Existing mesh and URDF file inputs remain
+available; each asset has one file owner.
+
+.. currentmodule:: embodichain.lab.sim.cfg.source
+
+.. autosummary::
+
+   UsdSourceCfg
+
+.. autoclass:: UsdSourceCfg
+   :members:
+
+embodichain.lab.sim.cfg.visual_object
+-------------------------------------
+
+Render-only geometry or a USD source, and initial visual state.
+
+.. currentmodule:: embodichain.lab.sim.cfg.visual_object
+
+.. autosummary::
+
+   VisualObjectCfg
+
 embodichain.lab.sim.diff.runtime
 --------------------------------
 
@@ -1402,6 +1719,18 @@ embodichain.lab.sim.objects.robot
    ControlGroup
    Robot
 
+
+embodichain.lab.sim.objects.visual_object
+-----------------------------------------
+
+Batched render-only objects provide pose, visibility and material-assignment operations without physical buffers or collision APIs.
+
+.. currentmodule:: embodichain.lab.sim.objects.visual_object
+
+.. autosummary::
+
+   VisualObject
+   VisualObjectCfg
 
 embodichain.lab.sim.physics
 ---------------------------
@@ -1523,11 +1852,17 @@ embodichain.lab.sim.motion.planners.toppra_planner
 
 .. currentmodule:: embodichain.lab.sim.motion.planners.toppra_planner
 
+Time-optimal joint-path parameterization. The planner solves timing for
+waypoint input; :func:`retime_joint_paths` applies the same parameterization to
+paths another planner already produced, such as a closed-loop policy rollout
+whose samples carry only nominal timing.
+
 .. autosummary::
 
    ToppraPlanner
    ToppraPlannerCfg
    ToppraPlanOptions
+   retime_joint_paths
 
 embodichain.lab.sim.motion.planners.se3
 ---------------------------------------
@@ -1584,66 +1919,6 @@ embodichain.lab.sim.motion.planners.utils
    interpolate_xpos
    interpolate_xpos_batched
 
-embodichain.lab.sim.robots.cobotmagic
--------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.robots.cobotmagic
-
-.. autosummary::
-
-   CobotMagicCfg
-
-embodichain.lab.sim.robots.dexforce_w1.hand_specs
--------------------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.robots.dexforce_w1.hand_specs
-
-.. autosummary::
-
-   W1HandSideSpec
-   W1HandSpec
-   get_default_w1_hand_version
-   get_w1_hand_spec
-   normalize_w1_hand_mappings
-
-embodichain.lab.sim.robots.dexforce_w1.specs
---------------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.robots.dexforce_w1.specs
-
-.. autosummary::
-
-   W1VersionSpec
-   get_w1_version_spec
-
-embodichain.lab.sim.robots.dexforce_w1.types
---------------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.robots.dexforce_w1.types
-
-.. autosummary::
-
-   DexforceW1Version
-   DexforceW1HandVersion
-   DexforceW1ArmSide
-   DexforceW1Type
-   DexforceW1HandBrand
-
-embodichain.lab.sim.robots.dexforce_w1.utils
---------------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.robots.dexforce_w1.utils
-
-.. autosummary::
-
-   ChassisManager
-   TorsoManager
-   HeadManager
-   ArmManager
-   HandManager
-   EyesManager
-   build_dexforce_w1_assembly_urdf_cfg
-
 embodichain.lab.sim.robots.dual_arm
 -----------------------------------
 
@@ -1654,24 +1929,6 @@ embodichain.lab.sim.robots.dual_arm
    DualArmRobotCfg
    build_dual_arm_cfg
    resolve_mounts
-
-embodichain.lab.sim.robots.franka_panda
----------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.robots.franka_panda
-
-.. autosummary::
-
-   FrankaPandaCfg
-
-embodichain.lab.sim.robots.ur_robot
------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.robots.ur_robot
-
-.. autosummary::
-
-   URRobotCfg
 
 embodichain.lab.sim.sensors.camera
 ----------------------------------
@@ -1911,7 +2168,9 @@ into DexSim Spawn descriptors.
    articulation_desc_from_cfg
    articulation_desc_from_usd
    rigid_desc_from_cfg
+   visual_desc_from_cfg
    rigid_desc_from_usd
+   visual_desc_from_usd
    surface_deformable_desc_from_cfg
    volume_deformable_desc_from_cfg
 
@@ -1925,6 +2184,7 @@ embodichain.lab.sim.spawn.descriptors
    articulation_desc_from_cfg
    configure_articulation_desc
    rigid_desc_from_cfg
+   visual_desc_from_cfg
    surface_deformable_desc_from_cfg
    volume_deformable_desc_from_cfg
 
@@ -1955,6 +2215,21 @@ embodichain.lab.sim.spawn.usd
 
    articulation_desc_from_usd
    rigid_desc_from_usd
+   visual_desc_from_usd
+
+embodichain.lab.sim.utility.dynamic_pybind
+----------------------------------------
+
+Install the projective UV helper on DexSim render bodies. The helper projects
+vertices across mesh segments and adapts UV storage to the pinned DexSim
+0.5.1rc1 binding before writing each segment.
+
+.. currentmodule:: embodichain.lab.sim.utility.dynamic_pybind
+
+.. autosummary::
+
+   set_projective_uv
+   init_dynamic_pybind
 
 embodichain.lab.sim.utility.render_utils
 ----------------------------------------
@@ -2412,28 +2687,28 @@ Row-wise action-adjoint clipping and its rollout-level diagnostics.
    BatchedGradientNormStats
    clip_batched_gradient_norm
 
-embodichain.learning.rl.models.actor_critic
--------------------------------------------
+embodichain.learning.rl.policies.actor_critic
+---------------------------------------------
 
-.. currentmodule:: embodichain.learning.rl.models.actor_critic
+.. currentmodule:: embodichain.learning.rl.policies.actor_critic
 
 .. autosummary::
 
    ActorCritic
 
-embodichain.learning.rl.models.actor_only
------------------------------------------
+embodichain.learning.rl.policies.actor_only
+-------------------------------------------
 
-.. currentmodule:: embodichain.learning.rl.models.actor_only
+.. currentmodule:: embodichain.learning.rl.policies.actor_only
 
 .. autosummary::
 
    ActorOnly
 
-embodichain.learning.rl.models.policy
--------------------------------------
+embodichain.learning.rl.policies.policy
+---------------------------------------
 
-.. currentmodule:: embodichain.learning.rl.models.policy
+.. currentmodule:: embodichain.learning.rl.policies.policy
 
 .. autosummary::
 
@@ -2828,15 +3103,6 @@ joint-position action variants.
 .. autosummary::
 
 
-embodichain_tasks.manipulation.tableware.blocks_ranking_rgb
------------------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.manipulation.tableware.blocks_ranking_rgb
-
-.. autosummary::
-
-   BlocksRankingRGBEnv
-
 embodichain_tasks.manipulation.tableware.blocks_ranking_size
 ------------------------------------------------------------
 
@@ -2864,24 +3130,6 @@ embodichain_tasks.manipulation.tableware.place_object_drawer
 
    PlaceObjectDrawerEnv
 
-embodichain_tasks.manipulation.tableware.scoop_ice
---------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.manipulation.tableware.scoop_ice
-
-.. autosummary::
-
-   ScoopIce
-
-embodichain_tasks.manipulation.tableware.stack_blocks_two
----------------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.manipulation.tableware.stack_blocks_two
-
-.. autosummary::
-
-   StackBlocksTwoEnv
-
 embodichain_tasks.manipulation.tableware.stack_cups
 ---------------------------------------------------
 
@@ -2902,33 +3150,6 @@ kinematics route used by analytic policy-gradient experiments.
 .. autosummary::
 
    FrankaReachApgEnv
-
-embodichain_tasks.special.simple_task
--------------------------------------
-
-.. currentmodule:: embodichain_tasks.special.simple_task
-
-.. autosummary::
-
-   SimpleTaskEnv
-
-embodichain_tasks.special.stay_still_save
------------------------------------------
-
-.. currentmodule:: embodichain_tasks.special.stay_still_save
-
-.. autosummary::
-
-   StayStillSaveEnv
-
-embodichain_tasks.special.stay_still_save_3cam
-----------------------------------------------
-
-.. currentmodule:: embodichain_tasks.special.stay_still_save_3cam
-
-.. autosummary::
-
-   StayStillSave3CamEnv
 
 embodichain_tasks.utils.importer
 --------------------------------
@@ -2961,3 +3182,44 @@ kernel policy; callers log and apply that seed to their own generators.
 .. autofunction:: add_seed_arg_to_parser
 
 .. autofunction:: resolve_seed
+
+
+.. toctree::
+   :hidden:
+
+   object_asset_bundles
+
+
+embodichain.lab.sim.cfg.robot
+-----------------------------
+
+Robot construction and complete backend alternatives
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Robot configurations include optional mounted camera declarations.
+Standalone simulation initializes them only when ``enable_sensor`` is true;
+Gym uses its environment-wide sensor switch, which defaults to enabled.
+
+.. currentmodule:: embodichain.lab.sim.cfg.robot
+
+.. autosummary::
+   :nosignatures:
+
+   RobotCfg
+   RobotPresetCfg
+
+.. autoclass:: RobotCfg
+   :members: sensors, enable_sensor
+   :noindex:
+
+.. autoclass:: RobotPresetCfg
+   :noindex:
+
+
+Asset generalization contracts
+------------------------------
+
+.. toctree::
+   :maxdepth: 2
+
+   asset_generalization

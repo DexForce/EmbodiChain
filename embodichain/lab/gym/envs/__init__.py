@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from .episode_context import *
 from .base_env import *
 from .demo import *
 from .embodied_env import *

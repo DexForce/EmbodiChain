@@ -34,21 +34,19 @@ from embodichain.utils.utility import load_config
 from embodichain_tasks.classic_control.point_mass import PointMassEnv
 
 EXPECTED_IMPORT_REGISTERED_TASK_MODULES = {
-    "BlocksRankingRGB-v1": "embodichain_tasks.manipulation.tableware.blocks_ranking_rgb",
     "BlocksRankingSize-v1": "embodichain_tasks.manipulation.tableware.blocks_ranking_size",
     "CartPoleRL": "embodichain_tasks.classic_control.cart_pole",
     "MatchObjectContainer-v1": "embodichain_tasks.manipulation.tableware.match_object_container",
     "PlaceObjectDrawer-v1": "embodichain_tasks.manipulation.tableware.place_object_drawer",
     "PushCubeRL": "embodichain_tasks.manipulation.push_cube",
-    "ScoopIce-v1": "embodichain_tasks.manipulation.tableware.scoop_ice",
-    "SimpleTask-v1": "embodichain_tasks.special.simple_task",
-    "StackBlocksTwo-v1": "embodichain_tasks.manipulation.tableware.stack_blocks_two",
     "StackCups-v1": "embodichain_tasks.manipulation.tableware.stack_cups",
-    "StayStillSave-v1": "embodichain_tasks.special.stay_still_save",
-    "StayStillSave3Cam-v1": "embodichain_tasks.special.stay_still_save_3cam",
 }
 REMOVED_AGENT_ENV_IDS = {"PourWaterAgent-v3", "RearrangementAgent-v3"}
-CONFIG_DEFINED_TASK_PROGRAM_TASKS = {"pour_water"}
+CONFIG_DEFINED_TASK_PROGRAM_TASKS = {
+    "pour_water",
+    "stack_blocks_two",
+    "blocks_ranking_rgb",
+}
 RL_SIMULATOR_ENV_IDS = {
     "CartPoleRL",
     "PushCubeRL",
@@ -59,12 +57,11 @@ TABLEWARE_CONFIG_TASKS = {
     "match_object_container",
     "place_object_drawer",
     "pour_water",
-    "scoop_ice",
     "stack_blocks_two",
     "stack_cups",
 }
 TASK_CONFIG_ROOT = (
-    Path(__file__).resolve().parents[3] / "embodichain_tasks/configs/tasks"
+    Path(__file__).resolve().parents[3] / "extensions/embodichain_tasks/configs/tasks"
 )
 
 
@@ -233,3 +230,27 @@ def test_config_defined_task_programs_do_not_need_python_task_modules() -> None:
         assert integration_path.is_file()
         assert "scene_binding" in load_config(integration_path)
         assert not (config_root / "task_program/scene_binding.yaml").exists()
+
+
+@pytest.mark.parametrize("task_name", sorted(CONFIG_DEFINED_TASK_PROGRAM_TASKS))
+def test_task_program_deployments_configure_overall_instructions(
+    task_name: str,
+) -> None:
+    """Task Program goals remain available independently of recording."""
+    path = (
+        TASK_CONFIG_ROOT / "manipulation/tableware" / task_name / "task.cobotmagic.yaml"
+    )
+    cfg = config_to_cfg(load_config(path), source_path=path)
+    assert "instruction" not in cfg.dataset.lerobot.params
+    instruction = cfg.task_instruction or cfg.task_program.instruction
+    assert isinstance(instruction, str) and instruction.strip()
+    assert instruction != "unknown_task"
+
+
+@pytest.mark.parametrize("instruction", ["", "  ", " padded ", True, 7])
+def test_task_instruction_rejects_invalid_configuration(instruction) -> None:
+    path = TASK_CONFIG_ROOT / "manipulation/tableware/stack_cups/env.json"
+    payload = load_config(path)
+    payload["env"]["task_instruction"] = instruction
+    with pytest.raises(ValueError, match="env.task_instruction"):
+        config_to_cfg(payload, source_path=path)

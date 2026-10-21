@@ -37,7 +37,7 @@ import time
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager, nullcontext
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -56,7 +56,10 @@ from embodichain.lab.sim.motion.planners.base_planner import (
     PlanOptions,
     validate_plan_options,
 )
-from embodichain.lab.sim.motion.planners.curobo.curobo_yaml import _named_rigid_objects
+from embodichain.lab.sim.motion.planners.curobo.curobo_yaml import (
+    _curobo_joint_limits,
+    _named_rigid_objects,
+)
 from embodichain.lab.sim.motion.planners.utils import MoveType, PlanResult, PlanState
 
 if TYPE_CHECKING:
@@ -354,6 +357,19 @@ class CuroboPlannerCfg(BasePlannerCfg):
 
     planner_type: str = "curobo"
 
+    max_velocity: float | list[float] | None = field(default=None, kw_only=True)
+    """Optional speed request intersected with effective Robot velocity caps.
+
+    Lists follow ``robot.active_joint_ids`` order; ``None`` uses Robot caps.
+    """
+
+    max_acceleration: float | list[float] | None = field(default=None, kw_only=True)
+    """Planning acceleration budget [rad/s^2 or m/s^2].
+
+    Lists follow ``robot.active_joint_ids`` order. ``None`` preserves cuRobo's
+    default budget of 15.0.
+    """
+
     log_level: str = "error"
     """Log level for cuRobo's Python logger.
 
@@ -488,6 +504,12 @@ class CuroboPlanOptions(PlanOptions):
 
     max_attempts: int | None = None
     """Per-plan override of ``CuroboPlannerCfg.max_attempts``."""
+
+    max_velocity: float | list[float] | None = None
+    """Per-plan joint velocity budget, intersected by the motion facade."""
+
+    max_acceleration: float | list[float] | None = None
+    """Per-plan joint acceleration budget, intersected by the motion facade."""
 
 
 # =============================================================================
@@ -898,11 +920,21 @@ class CuroboPlanner(BasePlanner):
 
         The samples are not replanned or replaced. They are mapped from the
         simulator's control-part order into the exact cuRobo model, then checked
-        against joint bounds, self-collision, and the live world collision
-        checker. Each horizon sample uses the configured SDK bound, self and
+        against joint bounds, any configured self-collision cost, and the live
+        world collision checker. Each horizon sample uses SDK bound, self and
         scene costs directly: scene collision consumes a ``KinematicsState``,
         while self collision consumes its sphere tensor. Cost feature axes are
         reduced only after checking their complete batch/horizon/feature schema.
+        Standard checker construction disables self-collision consistently with
+        motion planning; an already configured checker retains its own costs.
+
+        Args:
+            trajectory: Joint positions with shape ``(B, T, D)``.
+            control_part: Configured part whose joint order the samples use.
+            obstacle_poses: Current world poses for configured dynamic obstacles.
+
+        Returns:
+            A boolean ``(B, T)`` mask on the trajectory device.
         """
         if (
             not isinstance(trajectory, torch.Tensor)
@@ -913,11 +945,18 @@ class CuroboPlanner(BasePlanner):
         ):
             raise ValueError("trajectory must be finite floating shape (B, T, D).")
         batch_size, horizon, dof = trajectory.shape
-        backend = self._get_backend(
-            control_part,
-            batch_size,
-            MoveType.JOINT_MOVE,
+        backend = next(
+            (
+                cached
+                for (part, batch, _graph, _mode), cached in getattr(
+                    self, "_backend_cache", {}
+                ).items()
+                if part == control_part and batch == batch_size
+            ),
+            None,
         )
+        if backend is None:
+            backend = self._get_backend(control_part, batch_size, MoveType.JOINT_MOVE)
         if dof != len(backend.sim_joint_names):
             raise ValueError(
                 f"Trajectory for {control_part!r} has {dof} joints, expected "
@@ -958,6 +997,7 @@ class CuroboPlanner(BasePlanner):
                 num_envs=batch_size,
                 collision_activation_distance=self.cfg.collision_activation_distance,
             )
+            checker_cfg.self_collision_cost = None
             backend.collision_checker = self._bindings.RobotCollisionChecker(
                 checker_cfg
             )
@@ -994,7 +1034,9 @@ class CuroboPlanner(BasePlanner):
         )
         with device_context:
             for sample_index in range(horizon):
-                sample = curobo_trajectory[:, sample_index : sample_index + 1]
+                sample = curobo_trajectory[
+                    :, sample_index : sample_index + 1
+                ].contiguous()
                 checker = backend.collision_checker
                 checker.setup_batch_tensors(batch_size, 1)
                 state = checker.get_kinematics(sample)
@@ -1027,6 +1069,8 @@ class CuroboPlanner(BasePlanner):
     def __init__(self, cfg: CuroboPlannerCfg) -> None:
         super().__init__(cfg)
         self.cfg: CuroboPlannerCfg = cfg
+        self._configured_max_velocity = cfg.max_velocity
+        self._configured_max_acceleration = cfg.max_acceleration
         self.device = torch.device(self.robot.device)
         self._curobo_device = _resolve_curobo_device(
             cfg.cuda_device,
@@ -1205,6 +1249,21 @@ class CuroboPlanner(BasePlanner):
                 success=torch.zeros(0, dtype=torch.bool, device=self.device),
                 positions=None,
             )
+        # MotionGenOptions carries backend-neutral per-invocation limits. Keep
+        # the planner-owned baseline so a later call without overrides does not
+        # inherit a previous invocation's stricter budget. The backend cache key
+        # includes these values and therefore rebuilds the CUDA planner/YAML when
+        # the effective limits change.
+        self.cfg.max_velocity = (
+            self._configured_max_velocity
+            if options.max_velocity is None
+            else options.max_velocity
+        )
+        self.cfg.max_acceleration = (
+            self._configured_max_acceleration
+            if options.max_acceleration is None
+            else options.max_acceleration
+        )
         control_part = self._resolve_control_part(options)
         start = self._resolve_start_qpos(options.start_qpos, control_part)
         move_types = {target.move_type for target in target_states}
@@ -1314,8 +1373,15 @@ class CuroboPlanner(BasePlanner):
         """Return a cached in-process backend for one goal-buffer shape."""
         multi_env = bool(self.cfg.world.multi_env)
         key = (control_part, int(batch_size), multi_env, planning_mode)
-        if key in self._backend_cache:
-            return self._backend_cache[key]
+        limits_key = self._robot_yaml_cache_key(
+            self.robot.cfg.fpath, control_part, None, self.cfg.auto_gen
+        )
+        cached = self._backend_cache.get(key)
+        if cached is not None:
+            if cached.motion_limits_key == limits_key:
+                return cached
+            self._close_planner(cached.planner)
+            del self._backend_cache[key]
 
         profile = self._materialize_profile(control_part)
         sim_joint_names = self._resolve_sim_joint_names(control_part)
@@ -1404,6 +1470,7 @@ class CuroboPlanner(BasePlanner):
                         f"cuRobo capture coordinator release failed: {exc}"
                     )
 
+        backend.motion_limits_key = limits_key
         self._backend_cache[key] = backend
         logger.log_info(
             f"cuRobo in-process backend ready for '{control_part}' "
@@ -1804,7 +1871,12 @@ class CuroboPlanner(BasePlanner):
             urdf_path, control_part, tool_frame, auto
         )
         cache_path = os.path.join(cache_dir, f"{cache_key}.yml")
-        if not auto.force and os.path.exists(cache_path):
+        motion_urdf_path = os.path.splitext(cache_path)[0] + ".motion.urdf"
+        if (
+            not auto.force
+            and os.path.exists(cache_path)
+            and os.path.exists(motion_urdf_path)
+        ):
             logger.log_info(f"cuRobo robot YAML cache hit: {cache_path}")
             return cache_path
         logger.log_info(
@@ -1821,6 +1893,8 @@ class CuroboPlanner(BasePlanner):
             surface_radius=auto.surface_radius,
             iterations=auto.iterations,
             collision_sphere_buffer=auto.collision_sphere_buffer,
+            max_velocity=self.cfg.max_velocity,
+            max_acceleration=self.cfg.max_acceleration,
             device=str(self._curobo_device),
         )
 
@@ -1833,6 +1907,7 @@ class CuroboPlanner(BasePlanner):
     ) -> str:
         """Hash the URDF path/content and fit parameters into a stable cache key."""
         hasher = hashlib.md5()
+        hasher.update(b"absolute-motion-limits-v2")
         hasher.update(urdf_path.encode("utf-8"))
         try:
             with open(urdf_path, "rb") as urdf_file:
@@ -1846,6 +1921,15 @@ class CuroboPlanner(BasePlanner):
         hasher.update(str(auto.surface_radius).encode("utf-8"))
         hasher.update(str(auto.iterations).encode("utf-8"))
         hasher.update(str(auto.collision_sphere_buffer).encode("utf-8"))
+        hasher.update(
+            repr(
+                _curobo_joint_limits(
+                    self.robot,
+                    max_velocity=self.cfg.max_velocity,
+                    max_acceleration=self.cfg.max_acceleration,
+                )
+            ).encode("utf-8")
+        )
         return hasher.hexdigest()
 
     def _auto_generate_world_scene(self, world_cfg: CuroboWorldCfg) -> "Any":
@@ -2823,6 +2907,7 @@ class _CuroboBackend:
     batch_size: int
     use_cuda_graph: bool
     planning_mode: MoveType
+    motion_limits_key: str | None = None
     collision_checker: "Any | None" = None
     # Lazily-built device-tensor caches for the shared post-processing. The
     # cuRobo joint order and the profile's fixed transforms are stable for a

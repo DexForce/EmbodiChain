@@ -14,10 +14,10 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Dispatch benchmarks for all atomic actions.
+"""Profile individual atomic actions over preset scenes.
 
-Run a single action benchmark or all action benchmarks in sequence.
-Run: embodichain benchmark atomic-action --action move_end_effector
+Run one action or several actions in sequence, with optional replay videos.
+Run: embodichain benchmark atomic-action-profile --action move_end_effector
 """
 
 from __future__ import annotations
@@ -120,7 +120,7 @@ def add_benchmark_args(parser: argparse.ArgumentParser) -> None:
 def _parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="Run one or more atomic-action benchmarks."
+        description="Profile individual atomic actions over object and position presets."
     )
     add_benchmark_args(parser)
     return parser.parse_args()

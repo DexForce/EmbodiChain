@@ -1,0 +1,96 @@
+schema_version: 1
+name: atomic_dual_ur5_pgi_hand_over
+suite_version: atomic_dual_ur5_pgi_hand_over_v2
+profile: smoke
+
+# HandOver on the tutorial dual UR5 + PGI robot and scene.  Coordinated
+# dual-arm skills reject cuRobo, so TOPPRA plans every case.
+robot:
+  id: dual_ur5_pgi_hand_over
+  provider: dual_arm
+  config:
+    robot_type: ur5
+    uid: benchmark_dual_ur5_hand_over
+    urdf_name: benchmark_dual_ur5_hand_over
+    tcp_z: 0.15
+    solver: ur
+    ur_ik_nearest_weight: [1.0, 4.0, 1.0, 1.0, 1.0, 1.0]
+
+planners:
+  - id: toppra
+    adapter: toppra
+    role: primary_baseline
+    enabled: true
+    config: {}
+
+protocol:
+  report_schema_version: "3"
+  # Preserve the existing Atomic motion budget for every timed planner.
+  joint_velocity_limit_rad_s: 0.2
+  joint_acceleration_limit_rad_s2: 0.5
+  warmup_trials: 1
+  measured_trials: 1
+  sample_interval: 80
+  validation_samples: 512
+  position_threshold_m: 0.01
+  rotation_threshold_rad: 0.1
+  joint_limit_tolerance_rad: 0.00001
+
+tracks:
+  - id: atomic-skill
+    scenario: atomic_skill
+    enabled: true
+    config:
+      batch_sizes: [1]
+      seeds: [11]
+      physics:
+        steps_per_waypoint: 16
+        hold_steps: 80
+        hold_sim_steps: 2
+        joint_tracking_tolerance_rad: 0.05
+      grippers:
+        - control_part: left_eef
+          open_qpos: [0.0]
+          grasp_qpos: [0.04]
+        - control_part: right_eef
+          open_qpos: [0.0]
+          grasp_qpos: [0.04]
+      fixtures:
+        - id: support_surface
+          kind: cube
+          size: [0.8, 1.2, 0.02]
+          position: [0.0, 0.0, 0.49]
+          mass: 10.0
+          dynamic_friction: 0.9
+          static_friction: 0.95
+          restitution: 0.01
+      objects:
+        - id: soda_can
+          kind: mesh
+          asset_path: SodaCan/simple_cola_can.obj
+          scale: [0.56, 0.56, 0.56]
+          rotation_deg: [90.0, 0.0, 0.0]
+          position: [0.0, 0.02, 0.62]
+          max_convex_hull_num: 16
+          mass: 0.01
+          dynamic_friction: 0.97
+          static_friction: 0.99
+          restitution: 0.01
+          linear_damping: 0.5
+          angular_damping: 1.0
+          contact_offset: 0.001
+          rest_offset: 0.0
+          settle_steps: 500
+      skills:
+        - id: hand_over
+          sample_count: 220
+          pre_grasp_distance_m: 0.08
+          lift_height_m: 0.15
+          hand_interp_steps: 10
+          grasp_sample_count: 10000
+          pre_action_settle_steps: 500
+          cases:
+            - name: soda_can_left_to_right
+              object: soda_can
+              task_difficulty: medium
+              target_object_offset_m: [0.0, -0.22, 0.06]

@@ -305,3 +305,20 @@ def test_download_version_wget_uses_repo_prefixed_output_after_wget_error(
         "copy"
     )
     assert not (build_dir / "EmbodiChain").exists()
+
+
+def test_required_download_rejects_partial_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def failed_download(
+        *args: object, **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        (tmp_path / "v0.3.1").mkdir()
+        (tmp_path / "v0.3.1" / "index.html").write_text("partial")
+        return subprocess.CompletedProcess(args=[], returncode=8)
+
+    monkeypatch.setattr(subprocess, "run", failed_download)
+    with pytest.raises(RuntimeError, match="Incomplete download"):
+        download_version_wget(
+            "https://example.org", "v0.3.1", tmp_path / "v0.3.1", required=True
+        )

@@ -54,6 +54,9 @@ from ..language.schema import (
     InvokeCfg,
     ObjectNearRelativeTargetValidatorCfg,
     ObjectNearTargetValidatorCfg,
+    ObjectLiftedValidatorCfg,
+    ObjectRelativePositionValidatorCfg,
+    ObjectUprightValidatorCfg,
     ParallelCfg,
     PickCfg,
     PlaceCfg,
@@ -209,29 +212,83 @@ class CompiledTaskProgramCall:
 
 
 @dataclass(frozen=True, slots=True)
+class _WaitStableValues:
+    """Immutable execution values, independent of mutable authoring config."""
+
+    entity: str
+    preset: str
+    kind: str
+
+
+@dataclass(frozen=True, slots=True)
+class _ObjectNearTargetValues:
+    """Immutable object-position acceptance parameters."""
+
+    object: str
+    target: str
+    position_tolerance: float
+    kind: str
+
+
+@dataclass(frozen=True, slots=True)
+class _ObjectNearRelativeTargetValues:
+    """Immutable live-relative object-position acceptance parameters."""
+
+    object: str
+    reference: str
+    displacement: tuple[float, float, float]
+    position_tolerance: float
+    kind: str
+
+
+@dataclass(frozen=True, slots=True)
+class _ArticulationJointPositionValues:
+    """Immutable articulation-position acceptance parameters."""
+
+    articulation: str
+    joint: str
+    minimum_position: float | None
+    maximum_position: float | None
+    kind: str
+
+
+@dataclass(frozen=True, slots=True)
+class _ObjectStateValues:
+    """Immutable measured-object acceptance parameters."""
+
+    object: str
+    kind: str
+    minimum_lift: float | None = None
+    reference: str | None = None
+    position_offset: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    position_tolerance: tuple[float | None, float | None, float | None] = (
+        0.03,
+        0.03,
+        0.03,
+    )
+    maximum_tilt_degrees: float | None = None
+    reference_frame: str = "world_axes"
+
+
+@dataclass(frozen=True, slots=True)
 class CompiledPostPolicy:
     """Owned post-policy config plus its canonical scene entity and source path."""
 
-    cfg: WaitStablePostCfg
+    cfg: WaitStablePostCfg | _WaitStableValues
     entity: SceneEntityRef
     source_path: ConfigPath
 
     def __post_init__(self) -> None:
-        if type(self.cfg) is not WaitStablePostCfg:
+        if type(self.cfg) not in (WaitStablePostCfg, _WaitStableValues):
             raise TypeError("cfg must be exactly WaitStablePostCfg.")
         if type(self.entity) not in _SCENE_REF_TYPES:
             raise TypeError("entity must be an exact SceneEntityRef value.")
         if type(self.source_path) is not tuple:
             raise TypeError("source_path must be a ConfigPath tuple.")
-        object.__setattr__(
-            self,
-            "cfg",
-            WaitStablePostCfg(
-                entity=self.cfg.entity,
-                preset=self.cfg.preset,
-                kind=self.cfg.kind,
-            ),
+        validated = WaitStablePostCfg(
+            entity=self.cfg.entity, preset=self.cfg.preset, kind=self.cfg.kind
         )
+        object.__setattr__(self, "cfg", _WaitStableValues(**validated.to_dict()))
         object.__setattr__(self, "entity", _copy_scene_ref(self.entity))
 
 
@@ -239,14 +296,17 @@ class CompiledPostPolicy:
 class CompiledObjectNearTargetValidator:
     """Owned validator config with canonical object and resolved target pose."""
 
-    cfg: ObjectNearTargetValidatorCfg
+    cfg: ObjectNearTargetValidatorCfg | _ObjectNearTargetValues
     object: SceneObjectRef
     target_pose: SemanticPose
     target_selection: CompiledTargetSelection
     source_path: ConfigPath
 
     def __post_init__(self) -> None:
-        if type(self.cfg) is not ObjectNearTargetValidatorCfg:
+        if type(self.cfg) not in (
+            ObjectNearTargetValidatorCfg,
+            _ObjectNearTargetValues,
+        ):
             raise TypeError("cfg must be exactly ObjectNearTargetValidatorCfg.")
         if type(self.object) is not SceneObjectRef:
             raise TypeError("object must be exactly SceneObjectRef.")
@@ -256,16 +316,13 @@ class CompiledObjectNearTargetValidator:
             raise TypeError("target_selection must be exactly CompiledTargetSelection.")
         if type(self.source_path) is not tuple:
             raise TypeError("source_path must be a ConfigPath tuple.")
-        object.__setattr__(
-            self,
-            "cfg",
-            ObjectNearTargetValidatorCfg(
-                object=self.cfg.object,
-                target=self.cfg.target,
-                position_tolerance=self.cfg.position_tolerance,
-                kind=self.cfg.kind,
-            ),
+        validated = ObjectNearTargetValidatorCfg(
+            object=self.cfg.object,
+            target=self.cfg.target,
+            position_tolerance=self.cfg.position_tolerance,
+            kind=self.cfg.kind,
         )
+        object.__setattr__(self, "cfg", _ObjectNearTargetValues(**validated.to_dict()))
         object.__setattr__(self, "object", _copy_scene_ref(self.object))
         object.__setattr__(self, "target_pose", self.target_pose.snapshot())
 
@@ -274,13 +331,16 @@ class CompiledObjectNearTargetValidator:
 class CompiledObjectNearRelativeTargetValidator:
     """Owned validator with canonical object and live reference identities."""
 
-    cfg: ObjectNearRelativeTargetValidatorCfg
+    cfg: ObjectNearRelativeTargetValidatorCfg | _ObjectNearRelativeTargetValues
     object: SceneObjectRef
     reference: SceneObjectRef
     source_path: ConfigPath
 
     def __post_init__(self) -> None:
-        if type(self.cfg) is not ObjectNearRelativeTargetValidatorCfg:
+        if type(self.cfg) not in (
+            ObjectNearRelativeTargetValidatorCfg,
+            _ObjectNearRelativeTargetValues,
+        ):
             raise TypeError("cfg must be exactly ObjectNearRelativeTargetValidatorCfg.")
         if type(self.object) is not SceneObjectRef:
             raise TypeError("object must be exactly SceneObjectRef.")
@@ -288,16 +348,15 @@ class CompiledObjectNearRelativeTargetValidator:
             raise TypeError("reference must be exactly SceneObjectRef.")
         if type(self.source_path) is not tuple:
             raise TypeError("source_path must be a ConfigPath tuple.")
+        validated = ObjectNearRelativeTargetValidatorCfg(
+            object=self.cfg.object,
+            reference=self.cfg.reference,
+            displacement=self.cfg.displacement,
+            position_tolerance=self.cfg.position_tolerance,
+            kind=self.cfg.kind,
+        )
         object.__setattr__(
-            self,
-            "cfg",
-            ObjectNearRelativeTargetValidatorCfg(
-                object=self.cfg.object,
-                reference=self.cfg.reference,
-                displacement=self.cfg.displacement,
-                position_tolerance=self.cfg.position_tolerance,
-                kind=self.cfg.kind,
-            ),
+            self, "cfg", _ObjectNearRelativeTargetValues(**validated.to_dict())
         )
         object.__setattr__(self, "object", _copy_scene_ref(self.object))
         object.__setattr__(self, "reference", _copy_scene_ref(self.reference))
@@ -307,12 +366,15 @@ class CompiledObjectNearRelativeTargetValidator:
 class CompiledArticulationJointPositionValidator:
     """Owned joint-position validator with its canonical articulation."""
 
-    cfg: ArticulationJointPositionValidatorCfg
+    cfg: ArticulationJointPositionValidatorCfg | _ArticulationJointPositionValues
     articulation: SceneArticulationRef
     source_path: ConfigPath
 
     def __post_init__(self) -> None:
-        if type(self.cfg) is not ArticulationJointPositionValidatorCfg:
+        if type(self.cfg) not in (
+            ArticulationJointPositionValidatorCfg,
+            _ArticulationJointPositionValues,
+        ):
             raise TypeError(
                 "cfg must be exactly ArticulationJointPositionValidatorCfg."
             )
@@ -320,16 +382,15 @@ class CompiledArticulationJointPositionValidator:
             raise TypeError("articulation must be exactly SceneArticulationRef.")
         if type(self.source_path) is not tuple:
             raise TypeError("source_path must be a ConfigPath tuple.")
+        validated = ArticulationJointPositionValidatorCfg(
+            articulation=self.cfg.articulation,
+            joint=self.cfg.joint,
+            minimum_position=self.cfg.minimum_position,
+            maximum_position=self.cfg.maximum_position,
+            kind=self.cfg.kind,
+        )
         object.__setattr__(
-            self,
-            "cfg",
-            ArticulationJointPositionValidatorCfg(
-                articulation=self.cfg.articulation,
-                joint=self.cfg.joint,
-                minimum_position=self.cfg.minimum_position,
-                maximum_position=self.cfg.maximum_position,
-                kind=self.cfg.kind,
-            ),
+            self, "cfg", _ArticulationJointPositionValues(**validated.to_dict())
         )
         object.__setattr__(
             self,
@@ -338,12 +399,82 @@ class CompiledArticulationJointPositionValidator:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class CompiledObjectStateValidator:
+    """Owned measured lift, relative position, or upright object contract.
+
+    Args:
+        cfg: Typed measured-object validator configuration to snapshot.
+        object: Canonical object reference resolved during static compilation.
+        source_path: Validator location in the original program configuration.
+        reference: Canonical reference object, required only for relative
+            position validation.
+    """
+
+    cfg: (
+        ObjectLiftedValidatorCfg
+        | ObjectRelativePositionValidatorCfg
+        | ObjectUprightValidatorCfg
+        | _ObjectStateValues
+    )
+    object: SceneObjectRef
+    source_path: ConfigPath
+    reference: SceneObjectRef | None = None
+
+    def __post_init__(self) -> None:
+        """Snapshot the exact configuration and canonical object references."""
+        if type(self.cfg) not in (
+            ObjectLiftedValidatorCfg,
+            ObjectRelativePositionValidatorCfg,
+            ObjectUprightValidatorCfg,
+            _ObjectStateValues,
+        ):
+            raise TypeError("cfg must be an exact object-state validator config.")
+        if type(self.object) is not SceneObjectRef:
+            raise TypeError("object must be exactly SceneObjectRef.")
+        if type(self.source_path) is not tuple:
+            raise TypeError("source_path must be a ConfigPath tuple.")
+        kinds = {
+            "object_lifted": (ObjectLiftedValidatorCfg, ("minimum_lift",)),
+            "object_relative_position": (
+                ObjectRelativePositionValidatorCfg,
+                (
+                    "reference",
+                    "position_offset",
+                    "position_tolerance",
+                    "reference_frame",
+                ),
+            ),
+            "object_upright": (ObjectUprightValidatorCfg, ("maximum_tilt_degrees",)),
+        }
+        if self.cfg.kind not in kinds:
+            raise ValueError("Unsupported object-state validator kind.")
+        cfg_type, fields = kinds[self.cfg.kind]
+        if type(self.cfg) not in (cfg_type, _ObjectStateValues):
+            raise TypeError("cfg type must match its object-state validator kind.")
+        cfg = cfg_type(
+            object=self.cfg.object,
+            kind=self.cfg.kind,
+            **{name: getattr(self.cfg, name) for name in fields},
+        )
+        if type(cfg) is ObjectRelativePositionValidatorCfg:
+            if type(self.reference) is not SceneObjectRef:
+                raise TypeError("reference must be exactly SceneObjectRef.")
+            object.__setattr__(self, "reference", _copy_scene_ref(self.reference))
+        elif self.reference is not None:
+            raise ValueError("Only relative-position validators accept reference.")
+        object.__setattr__(self, "cfg", _ObjectStateValues(**cfg.to_dict()))
+        object.__setattr__(self, "object", _copy_scene_ref(self.object))
+
+
 CompiledTaskProgramValidator: TypeAlias = (
     CompiledObjectNearTargetValidator
     | CompiledObjectNearRelativeTargetValidator
     | CompiledArticulationJointPositionValidator
+    | CompiledObjectStateValidator
 )
 _COMPILED_VALIDATOR_TYPES = (
+    CompiledObjectStateValidator,
     CompiledObjectNearTargetValidator,
     CompiledObjectNearRelativeTargetValidator,
     CompiledArticulationJointPositionValidator,
@@ -430,6 +561,7 @@ class CompiledTaskProgramSegment:
     validators: tuple[CompiledTaskProgramValidator, ...] = ()
     parallel_block: CompiledParallelBlock | None = None
     implicit: bool = False
+    instruction: str | None = None
 
     def __post_init__(self) -> None:
         if type(self.segment_index) is not int or self.segment_index < 0:
@@ -438,6 +570,14 @@ class CompiledTaskProgramSegment:
             value = getattr(self, field_name)
             if type(value) is not str or not value:
                 raise ValueError(f"{field_name} must be a non-empty string.")
+        if self.instruction is not None and (
+            type(self.instruction) is not str
+            or not self.instruction
+            or self.instruction.strip() != self.instruction
+        ):
+            raise ValueError(
+                "instruction must be a non-empty string without outer whitespace or None."
+            )
         calls = tuple(self.calls)
         if not calls or not all(
             type(call) is CompiledTaskProgramCall for call in calls
@@ -608,16 +748,30 @@ class _ArticulationJointPositionValidatorTemplate:
     source_path: ConfigPath
 
 
+@dataclass(frozen=True, slots=True)
+class _ObjectStateValidatorTemplate:
+    cfg: (
+        ObjectLiftedValidatorCfg
+        | ObjectRelativePositionValidatorCfg
+        | ObjectUprightValidatorCfg
+    )
+    object: SceneObjectRef
+    reference: SceneObjectRef | None
+    source_path: ConfigPath
+
+
 _ValidatorTemplate: TypeAlias = (
     _ObjectNearTargetValidatorTemplate
     | _ObjectNearRelativeTargetValidatorTemplate
     | _ArticulationJointPositionValidatorTemplate
+    | _ObjectStateValidatorTemplate
 )
 
 
 @dataclass(frozen=True, slots=True)
 class _SegmentTemplate:
     name: str
+    instruction: str | None
     steps: _NodeTemplate
     post: tuple[_PostTemplate, ...]
     validators: tuple[_ValidatorTemplate, ...]
@@ -989,6 +1143,15 @@ def _iter_segments(
                     source_path=validator.source_path,
                 )
             )
+        elif type(validator) is _ObjectStateValidatorTemplate:
+            validators.append(
+                CompiledObjectStateValidator(
+                    cfg=validator.cfg,
+                    object=validator.object,
+                    reference=validator.reference,
+                    source_path=validator.source_path,
+                )
+            )
         else:
             raise TypeError(
                 f"Unsupported internal validator template {type(validator).__name__}."
@@ -1002,6 +1165,7 @@ def _iter_segments(
             implicit=False,
         ),
         name=template.name,
+        instruction=template.instruction,
         calls=tuple(calls),
         source_path=template.source_path,
         repeat_frames=repeat_frames,
@@ -1016,9 +1180,10 @@ def _iter_segments(
 
 @dataclass(frozen=True, slots=True, init=False)
 class CompiledTaskProgram:
-    """Bounded provider-free segment snapshot used by preflight and execution."""
+    """Immutable overall instruction and bounded segments for task execution."""
 
     program_id: str
+    instruction: str | None
     _integration: TaskProgramIntegrationCfg = field(repr=False, compare=False)
     _segments: tuple[CompiledTaskProgramSegment, ...] = field(
         repr=False,
@@ -1037,12 +1202,21 @@ class CompiledTaskProgram:
         cls,
         *,
         program_id: str,
+        instruction: str | None,
         integration: TaskProgramIntegrationCfg,
         segments: tuple[CompiledTaskProgramSegment, ...],
     ) -> CompiledTaskProgram:
         """Create one compiler-owned materialized program."""
         if type(program_id) is not str or not program_id:
             raise ValueError("program_id must be a non-empty string.")
+        if instruction is not None and (
+            type(instruction) is not str
+            or not instruction
+            or instruction.strip() != instruction
+        ):
+            raise ValueError(
+                "instruction must be a non-empty string without outer whitespace or None."
+            )
         if type(integration) is not TaskProgramIntegrationCfg:
             raise TypeError("integration must be TaskProgramIntegrationCfg.")
         values = tuple(segments)
@@ -1068,6 +1242,7 @@ class CompiledTaskProgram:
 
         instance = object.__new__(cls)
         object.__setattr__(instance, "program_id", program_id)
+        object.__setattr__(instance, "instruction", instruction)
         object.__setattr__(
             instance,
             "_integration",
@@ -1202,6 +1377,7 @@ class CompiledTaskProgram:
 def _materialize_program(
     *,
     program_id: str,
+    instruction: str | None,
     integration: TaskProgramIntegrationCfg,
     targets: Mapping[str, tuple[SemanticPose, ...]],
     root: _NodeTemplate,
@@ -1227,6 +1403,7 @@ def _materialize_program(
         segments.append(segment)
     return CompiledTaskProgram._create(
         program_id=program_id,
+        instruction=instruction,
         integration=integration,
         segments=tuple(segments),
     )
@@ -1619,6 +1796,32 @@ class TaskProgramCompiler:
                         )
                     )
                     continue
+                if type(cfg) in (
+                    ObjectLiftedValidatorCfg,
+                    ObjectRelativePositionValidatorCfg,
+                    ObjectUprightValidatorCfg,
+                ):
+                    object_ref = self._resolve_scene(
+                        cfg.object,
+                        expected_types=(SceneObjectRef,),
+                        path=(*validator_path, "object"),
+                    )
+                    reference_ref = None
+                    if type(cfg) is ObjectRelativePositionValidatorCfg:
+                        reference_ref = self._resolve_scene(
+                            cfg.reference,
+                            expected_types=(SceneObjectRef,),
+                            path=(*validator_path, "reference"),
+                        )
+                    validators.append(
+                        _ObjectStateValidatorTemplate(
+                            cfg=type(cfg)(**cfg.to_dict()),
+                            object=object_ref,
+                            reference=reference_ref,
+                            source_path=validator_path,
+                        )
+                    )
+                    continue
                 if type(cfg) is ArticulationJointPositionValidatorCfg:
                     if cfg.kind != "articulation_joint_position":
                         raise TaskProgramCompileError(
@@ -1667,6 +1870,7 @@ class TaskProgramCompiler:
                 )
             return _SegmentTemplate(
                 name=node.name,
+                instruction=node.instruction,
                 steps=steps,
                 post=tuple(post),
                 validators=tuple(validators),
@@ -1789,6 +1993,16 @@ class TaskProgramCompiler:
         """
         if type(config) is not TaskProgramCfg:
             raise TypeError("config must be exactly TaskProgramCfg.")
+        if config.instruction is not None and (
+            type(config.instruction) is not str
+            or not config.instruction
+            or config.instruction.strip() != config.instruction
+        ):
+            raise TaskProgramCompileError(
+                "invalid_instruction",
+                ("instruction",),
+                "instruction must be a non-empty string without outer whitespace or None.",
+            )
         targets = self._compile_targets(config.targets)
         root = self._compile_node(
             config.program,
@@ -1804,6 +2018,7 @@ class TaskProgramCompiler:
         )
         return _materialize_program(
             program_id=config.program_id,
+            instruction=config.instruction,
             integration=integration,
             targets=targets,
             root=root,

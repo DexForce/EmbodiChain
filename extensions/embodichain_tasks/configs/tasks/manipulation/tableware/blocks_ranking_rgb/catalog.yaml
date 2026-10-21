@@ -1,0 +1,13 @@
+task_key: blocks_ranking_rgb
+title: Blocks Ranking RGB
+summary: Use both arms in sequence to arrange known red and blue blocks around the
+  green block.
+tags:
+- tableware
+- rearrangement
+- task_program
+- expert_trajectory
+default_deployment: default
+deployments:
+  default:
+    config: task.cobotmagic.yaml

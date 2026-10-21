@@ -21,9 +21,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Literal
 
+from ._usd_assets import _UsdTextureFiles
+
 __all__ = ["SpawnScene"]
 
 _AssetKind = Literal[
+    "visual_object",
     "rigid_object",
     "rigid_object_group",
     "articulation",
@@ -66,6 +69,11 @@ class SpawnScene:
             collision_policy="isolated",
         )
         self._assets: dict[str, _AssetDeclaration] = {}
+        self._usd_texture_files = _UsdTextureFiles()
+
+    def _resolve_materials(self, materials: dict[str, Any]) -> dict[str, Any]:
+        """Resolve package images before DexSim creates native materials."""
+        return self._usd_texture_files.resolve(materials)
 
     @property
     def arena_names(self) -> tuple[str, ...]:
@@ -110,6 +118,7 @@ class SpawnScene:
                 configure_source(descriptor)
                 declaration.source_configurator = None
             add_name = {
+                "visual_object": "add_object",
                 "rigid_object": "add_object",
                 "articulation": "add_articulation",
                 "soft_object": "add_soft_object",
@@ -185,6 +194,7 @@ class SpawnScene:
                 self.builder.remove_object(member.name)
         else:
             remove_name = {
+                "visual_object": "remove_object",
                 "rigid_object": "remove_object",
                 "articulation": "remove_articulation",
             }[declaration.kind]
@@ -252,10 +262,13 @@ class SpawnScene:
     def close(self) -> None:
         """Release Spawn resources and facade references."""
         result = self.builder.result
-        if result is not None:
-            result.close()
-        self.builder.result = None
-        self._assets.clear()
+        try:
+            if result is not None:
+                result.close()
+        finally:
+            self.builder.result = None
+            self._assets.clear()
+            self._usd_texture_files.close()
 
     def handles(self, uid: str) -> tuple[Any, ...]:
         """Return currently materialized handles for one logical asset."""

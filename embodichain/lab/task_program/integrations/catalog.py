@@ -130,6 +130,9 @@ _VALIDATOR_KINDS = frozenset(
         "articulation_joint_position",
         "object_near_relative_target",
         "object_near_target",
+        "object_lifted",
+        "object_relative_position",
+        "object_upright",
     }
 )
 

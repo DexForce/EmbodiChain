@@ -39,6 +39,7 @@ from .articulation import (
     link_attrs_from_dict,
 )
 from .asset import AssetPhysicsMode, ObjectBaseCfg, _resolve_asset_physics_mode
+from .source import UsdSourceCfg
 from .deformable import (
     SurfaceElementPropertiesCfg,
     VolumeDeformableMeshingCfg,
@@ -63,6 +64,7 @@ from .rigid import (
     RigidBodyPhysicsCfg,
 )
 from .rigid_object import RigidObjectCfg, RigidObjectGroupCfg
+from .visual_object import VisualObjectCfg
 from .scene import LightCfg, RigidConstraintCfg
 from .physics import (
     DefaultPhysicsCfg,
@@ -79,7 +81,7 @@ from .urdf import URDFCfg
 from .viewer import MarkerCfg, WindowCameraPoseCfg, WindowRecordCfg
 
 # The renderer selection code intentionally mutates this package-level value.
-DEFAULT_RENDERER: Literal["auto", "hybrid", "fast-rt", "rt"] = "auto"
+DEFAULT_RENDERER: Literal["auto", "no-render", "hybrid", "fast-rt", "rt"] = "auto"
 
 # Robot imports are kept last because SolverCfg discovery imports simulation
 # modules that themselves rely on the public facade above.
@@ -117,8 +119,10 @@ __all__ = [
     "NewtonRigidBodyMaterialCfg",
     "RigidBodyPhysicsCfg",
     "ObjectBaseCfg",
+    "UsdSourceCfg",
     "LightCfg",
     "RigidObjectCfg",
+    "VisualObjectCfg",
     "DeformableObjectCfg",
     "VolumeDeformableObjectCfg",
     "SurfaceDeformableObjectCfg",

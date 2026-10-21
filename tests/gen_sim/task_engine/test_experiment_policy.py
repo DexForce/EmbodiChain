@@ -138,6 +138,64 @@ def test_packaged_defaults_enable_automatic_qualified_policy():
     assert execution.acceptance_mode == "experiment"
 
 
+def test_motion_contract_and_hand_source_are_explicit_sealed_declarations(
+    support_scene, tmp_path
+):
+    from .test_support_bundle import _placement_graph, _load_bundle
+    from embodichain.gen_sim.task_engine.task_program_bundle import (
+        generate_task_program_bundle,
+    )
+    from embodichain.utils.utility import load_config, save_config
+
+    _, paths = generate_task_program_bundle(
+        _placement_graph(reference="tray"),
+        support_scene,
+        tmp_path / "contracts",
+        robot_profile="dual_franka",
+    )
+    path = paths.root / "task_program/constraints.json"
+    constraints = load_config(path)
+    assert constraints["motion_contract"] == "gen_sim.sampled_velocity/v1"
+    legacy = _load_bundle(paths)
+    assert (
+        legacy.integration.adapter_factory.motion_contract
+        == constraints["motion_contract"]
+    )
+    first = legacy.integration.integration_fingerprint
+    constraints.pop("motion_contract")
+    save_config(path, constraints)
+    shared = _load_bundle(paths)
+    assert shared.integration.adapter_factory.motion_contract == "lab.motion_limits/v1"
+    assert shared.integration.integration_fingerprint != first
+    for bad in (None, True, "legacy"):
+        constraints["motion_contract"] = bad
+        save_config(path, constraints)
+        with pytest.raises(ValueError, match="motion_contract"):
+            _load_bundle(paths)
+
+
+def test_sampled_contract_rejects_explicit_authored_limits(support_scene, tmp_path):
+    from .test_support_bundle import _placement_graph, _load_bundle
+    from embodichain.gen_sim.task_engine.task_program_bundle import (
+        generate_task_program_bundle,
+    )
+    from embodichain.utils.utility import load_config, save_config
+
+    _, paths = generate_task_program_bundle(
+        _placement_graph(reference="tray"),
+        support_scene,
+        tmp_path / "limits",
+        robot_profile="dual_franka",
+    )
+    deployment = load_config(paths.deployment)
+    policy_path = paths.root / deployment["task_program"]["execution_policy"]
+    policy = load_config(policy_path)
+    policy["motion"]["acceleration_limit"] = 0.5
+    save_config(policy_path, policy)
+    with pytest.raises(ValueError, match="explicit motion limits"):
+        _load_bundle(paths)
+
+
 def test_explicit_contact_profile_reaches_generated_bundle(support_scene, tmp_path):
     from .test_support_bundle import _placement_graph, _load_bundle
     from embodichain.gen_sim.task_engine.task_program_bundle import (

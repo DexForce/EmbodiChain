@@ -26,6 +26,7 @@ Run: embodichain benchmark robotics-kinematic-solver
 from __future__ import annotations
 
 import argparse
+from importlib.metadata import version
 import os
 import time
 from datetime import datetime
@@ -66,7 +67,7 @@ UR_TCP = [
 ]
 
 SAMPLE_SIZES = [100, 1000, 10000]
-SUPPORTED_SOLVERS = ("opw", "pytorch", "ur", "fep")
+SUPPORTED_SOLVERS = ("opw", "pytorch", "ur", "fep", "differentiable")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -81,7 +82,7 @@ def _parse_args() -> argparse.Namespace:
         choices=(*SUPPORTED_SOLVERS, "franka", "all"),
         default=["all"],
         help=(
-            "Solvers to benchmark. Use one or more of: opw, pytorch, ur, fep, "
+            "Solvers to benchmark. Use one or more of: opw, pytorch, ur, fep, differentiable, "
             "franka, all. The franka comparison runs only when selected explicitly. "
             "Default: all."
         ),
@@ -1026,7 +1027,7 @@ def benchmark_franka_solver_comparison() -> (
     """Compare Franka's default FEP and former Pytorch solver on shared inputs."""
     from scipy.spatial.transform import Rotation
 
-    from embodichain.lab.sim.robots.franka_panda import FrankaPandaCfg
+    from embodichain_robots.franka_panda import FrankaPandaCfg
 
     perf_rows: list[dict[str, object]] = []
     metric_rows: list[dict[str, object]] = []
@@ -1149,6 +1150,249 @@ def benchmark_franka_solver_comparison() -> (
     return perf_rows, metric_rows
 
 
+def benchmark_differentiable_solver() -> (
+    tuple[list[dict[str, object]], list[dict[str, object]]]
+):
+    """Measure complete training graphs and forward baselines on shared Franka data.
+
+    DLS settings use the public defaults except for the iteration count. The
+    comparison Pytorch solver uses two seeds and 64 iterations; FEP enables
+    redundancy search. Each mode receives identical targets and initial joints.
+    Component measurements are diagnostic and excluded from the leaderboard.
+    """
+    from embodichain.compute.kinematics import (
+        DifferentiableIKCfg,
+        SerialChainKinematics,
+        damped_least_squares_step,
+        pose_error,
+    )
+    from embodichain.learning.layers import DifferentiableIKLayer, KinematicsLayer
+
+    perf_rows: list[dict[str, object]] = []
+    metric_rows: list[dict[str, object]] = []
+    path = get_data_path("Franka/Panda/PandaWithHand.urdf")
+    devices = [torch.device("cpu")]
+    if torch.cuda.is_available():
+        devices.append(torch.device("cuda", torch.cuda.current_device()))
+    # Generate once on CPU so different devices get the same workloads.
+    cpu_model = SerialChainKinematics.from_urdf(
+        Path(path).read_text(), "fr3_hand_tcp", "base"
+    )
+    lower, upper = cpu_model.chain.low, cpu_model.chain.high
+    generator = torch.Generator().manual_seed(2026)
+    workloads = []
+    for count in (1, 64, 256, 1024):
+        seed = lower + (0.25 + 0.5 * torch.rand(count, 7, generator=generator)) * (
+            upper - lower
+        )
+        nearby = (seed + 0.04 * torch.randn(count, 7, generator=generator)).clamp(
+            min=lower, max=upper
+        )
+        distant = lower + (0.1 + 0.8 * torch.rand(count, 7, generator=generator)) * (
+            upper - lower
+        )
+        for scenario, joints in (("nearby", nearby), ("distant", distant)):
+            target = cpu_model.evaluate(joints, torch.eye(4))[0]
+            workloads.append((scenario, count, target, seed))
+
+    def measure(call, device):
+        # No retained graph survives across repetitions; input leaves are
+        # created outside the timing closure by the caller and never mutated.
+        for _ in range(2):
+            torch.manual_seed(2026)
+            output = call()
+            del output
+        times, peaks, ram, vram = [], [], [], []
+        for _ in range(3):
+            torch.manual_seed(2026)
+            if device.type == "cuda":
+                torch.cuda.synchronize(device)
+                torch.cuda.reset_peak_memory_stats(device)
+            before = _memory_snapshot()
+            start = time.perf_counter()
+            output = call()
+            if device.type == "cuda":
+                torch.cuda.synchronize(device)
+            times.append((time.perf_counter() - start) * 1000)
+            after = _memory_snapshot()
+            peaks.append(
+                torch.cuda.max_memory_allocated(device) / 1024**2
+                if device.type == "cuda"
+                else 0.0
+            )
+            ram.append(after["cpu_mb"] - before["cpu_mb"])
+            vram.append(
+                after["gpu_mb"] - before["gpu_mb"] if device.type == "cuda" else 0.0
+            )
+            del output
+        return {
+            "cost_time_ms": float(np.median(times)),
+            "cpu_delta_mb": max(ram),
+            "gpu_delta_mb": max(vram),
+            "peak_gpu_mb": max(peaks),
+        }
+
+    for device in devices:
+        model = cpu_model.to(device, torch.float32)
+        kinematics = KinematicsLayer(model)
+        common_cfg = dict(
+            urdf_path=path,
+            root_link_name="base",
+            end_link_name="fr3_hand_tcp",
+            joint_names=list(model.joint_names),
+        )
+        _ensure_warp_initialized()
+        fep = FEPSolverCfg(**common_cfg, redundancy_search=True).init_solver(
+            device=device
+        )
+        pytorch = PytorchSolverCfg(
+            **common_cfg, num_samples=2, max_iterations=64, dt=0.5
+        ).init_solver(device=device)
+        for scenario, count, cpu_target, cpu_seed in workloads:
+            target, seed = cpu_target.to(device), cpu_seed.to(device)
+            for iterations in (4, 8, 16):
+                layer = DifferentiableIKLayer(
+                    kinematics, DifferentiableIKCfg(max_iterations=iterations)
+                )
+                with torch.no_grad():
+                    quality = layer.solve(target, seed)
+                impl = f"differentiable_{iterations}_{device.type}"
+                common = {
+                    "sample_size": count,
+                    "scenario": scenario,
+                    "impl": impl,
+                    "component": "franka_ik",
+                }
+                metric_rows.append(
+                    {
+                        **common,
+                        "success_rate": quality.success.float().mean().item(),
+                        "translation_err_mm": quality.position_error.norm(dim=-1)
+                        .mean()
+                        .item()
+                        * 1000,
+                        "rotation_err_deg": quality.rotation_error.norm(dim=-1)
+                        .mean()
+                        .item()
+                        * 180
+                        / np.pi,
+                    }
+                )
+                del quality
+                goal = target.detach().requires_grad_()
+                initial = seed.detach().requires_grad_()
+                for mode in ("no_grad", "forward", "forward_backward"):
+
+                    def call():
+                        with torch.set_grad_enabled(mode != "no_grad"):
+                            result = layer.solve(goal, initial)
+                            if mode == "forward_backward":
+                                # autograd.grad avoids accumulating input leaf grads.
+                                return torch.autograd.grad(
+                                    result.qpos.square().mean(), (goal, initial)
+                                )
+                            return result.qpos
+
+                    measured = measure(call, device)
+                    perf_rows.append(
+                        {
+                            **common,
+                            "mode": mode,
+                            "iterations": iterations,
+                            **measured,
+                            "queries_per_second": count
+                            * 1000
+                            / measured["cost_time_ms"],
+                        }
+                    )
+                print(
+                    f"  differentiable {device.type} {scenario} n={count} steps={iterations}: {measured['cost_time_ms']:.2f} ms forward+backward",
+                    flush=True,
+                )
+
+            # Decompose work at the same seed without timing input preparation.
+            with torch.no_grad():
+                pose, jacobian = kinematics.evaluate(seed)
+                position, rotation = pose_error(pose, target)
+                error = torch.cat((position, rotation), -1)
+            for component in ("fk_jacobian", "dls_step"):
+                for backward in (False, True):
+                    q = seed.detach().requires_grad_()
+                    e = error.detach().requires_grad_()
+                    j = jacobian.detach().requires_grad_()
+
+                    def call_component():
+                        if component == "fk_jacobian":
+                            p, matrix = kinematics.evaluate(q)
+                            return (
+                                torch.autograd.grad(
+                                    p.square().mean() + matrix.square().mean(), q
+                                )
+                                if backward
+                                else (p, matrix)
+                            )
+                        delta = damped_least_squares_step(e, j, 0.05)
+                        return (
+                            torch.autograd.grad(delta.square().mean(), (e, j))
+                            if backward
+                            else delta
+                        )
+
+                    measured = measure(call_component, device)
+                    perf_rows.append(
+                        {
+                            "sample_size": count,
+                            "scenario": scenario,
+                            "impl": f"differentiable_{device.type}",
+                            "component": component,
+                            "mode": "forward_backward" if backward else "forward",
+                            **measured,
+                        }
+                    )
+
+            for name, solver in (
+                ("fep_search", fep),
+                ("pytorch_two_seeds_64", pytorch),
+            ):
+
+                def call_baseline():
+                    with torch.no_grad():
+                        return solver.get_ik(target, qpos_seed=seed)
+
+                measured = measure(call_baseline, device)
+                torch.manual_seed(2026)
+                with torch.no_grad():
+                    success, joints = call_baseline()
+                    joints = joints.reshape(count, 7)
+                    position, rotation = pose_error(kinematics(joints), target)
+                common = {
+                    "sample_size": count,
+                    "scenario": scenario,
+                    "impl": f"{name}_{device.type}",
+                    "component": "franka_ik",
+                }
+                perf_rows.append(
+                    {
+                        **common,
+                        "mode": "no_grad",
+                        **measured,
+                        "queries_per_second": count * 1000 / measured["cost_time_ms"],
+                    }
+                )
+                metric_rows.append(
+                    {
+                        **common,
+                        "success_rate": success.float().mean().item(),
+                        "translation_err_mm": position.norm(dim=-1).mean().item()
+                        * 1000,
+                        "rotation_err_deg": rotation.norm(dim=-1).mean().item()
+                        * 180
+                        / np.pi,
+                    }
+                )
+    return perf_rows, metric_rows
+
+
 def run_all_benchmarks(selected_solvers: list[str] | None = None) -> None:
     """Run unified OPW + UR + FEP + Pytorch kinematic solver benchmarks."""
     solvers_to_run = _normalize_selected_solvers(selected_solvers)
@@ -1204,6 +1448,11 @@ def run_all_benchmarks(selected_solvers: list[str] | None = None) -> None:
         perf_rows.extend(franka_perf_rows)
         metric_rows.extend(franka_metric_rows)
 
+    if "differentiable" in solvers_to_run:
+        diff_perf, diff_metrics = benchmark_differentiable_solver()
+        perf_rows.extend(diff_perf)
+        metric_rows.extend(diff_metrics)
+
     leaderboard_rows = _build_leaderboard_rows(metric_rows)
 
     benchmark_name = "kinematic_solver"
@@ -1219,7 +1468,15 @@ def run_all_benchmarks(selected_solvers: list[str] | None = None) -> None:
         leaderboard_rows=leaderboard_rows,
         notes=[
             "CPU/GPU memory fields are deltas measured around timed calls.",
+            f"Runtime: Torch {torch.__version__}, pytorch_kinematics {version('pytorch_kinematics')}, CPU threads {torch.get_num_threads()}, GPU {torch.cuda.get_device_name() if torch.cuda.is_available() else 'unavailable'}. Numeric benchmark inputs use float32.",
             "This report contains exactly three tables: Time & Memory, Success & Other Metrics, and Leaderboard.",
+            *(
+                [
+                    "Differentiable mode uses shared CPU-generated Franka targets/seeds on CPU and CUDA. DLS: 4/8/16 steps, damping .05, step size .5, hard limits. FEP: redundancy search. Pytorch: two seeds, 64 iterations, lr .5. Timings are medians of three synchronized calls after two warmups, excluding data preparation and RNG reset to seed 2026; each backward call rebuilds its graph. Pose errors include all rows, including failures. Component rows are excluded from the success leaderboard. Peak GPU memory is absolute allocated Torch memory; Warp allocations in FEP are not captured by that counter."
+                ]
+                if "differentiable" in solvers_to_run
+                else []
+            ),
         ]
         + (
             [

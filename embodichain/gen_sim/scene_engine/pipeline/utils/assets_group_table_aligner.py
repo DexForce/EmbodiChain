@@ -16,20 +16,23 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 
+from embodichain.lab.sim.scene._placement_cpu import group_height_offset
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_generation_utils import (
     layout_object_to_transform_matrix,
     load_glb_mesh,
     transform_matrix_to_layout_object,
 )
+from embodichain.utils import configclass
 from embodichain.utils.logger import log_info
 
+__all__ = ["AssetsGroupTableAlignerConfig", "AssetsGroupTableAligner"]
 
-@dataclass(frozen=True)
+
+@configclass
 class AssetsGroupTableAlignerConfig:
     """Controls for the initial vertical gap above the table."""
 
@@ -95,18 +98,21 @@ class AssetsGroupTableAligner:
         table_mesh = load_glb_mesh(self.geometry_root / f"{table_id}.glb")
         table_mesh.apply_transform(y_up_to_z_up_matrix)
         table_mesh.apply_transform(layout_object_to_transform_matrix(z_up_table_layout))
-        target_group_bottom_z = table_mesh.bounds[1, 2] + self.config.clearance_m
 
-        group_bottom_z = np.inf
+        asset_bounds = []
         for asset_layout in z_up_assets_layout:
             asset_id = self._require_layout_id(asset_layout, name="Asset")
             asset_mesh = load_glb_mesh(self.geometry_root / f"{asset_id}.glb")
             asset_mesh.apply_transform(y_up_to_z_up_matrix)
             asset_mesh.apply_transform(layout_object_to_transform_matrix(asset_layout))
             # Find the lowest z among all the assets.
-            group_bottom_z = min(group_bottom_z, float(asset_mesh.bounds[0, 2]))
+            asset_bounds.append(asset_mesh.bounds.copy())
 
-        group_vertical_translation_z = target_group_bottom_z - group_bottom_z
+        group_vertical_translation_z = group_height_offset(
+            float(table_mesh.bounds[1, 2]),
+            np.asarray(asset_bounds),
+            clearance_m=self.config.clearance_m,
+        )
         for asset_layout in z_up_assets_layout:
             asset_layout["pos"][2] += group_vertical_translation_z
 

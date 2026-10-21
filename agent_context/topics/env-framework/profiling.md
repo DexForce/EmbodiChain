@@ -24,7 +24,7 @@ disabled, so the instrumentation stays in place unconditionally.
 | `nvtx` | `False` | Also push NVTX ranges (named in `nsys` timelines) |
 | `output_path` | `None` | Dump JSON report to this path on `report()` |
 
-CLI: `run-env --profile [--profile_output prof.json]`. In code:
+CLI: `run-task --profile [--profile_output prof.json]`. In code:
 `cfg.profiler = EnvProfilerCfg(enable_time=True, ...)`.
 
 ### Instrumented sections

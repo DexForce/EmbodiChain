@@ -23,9 +23,121 @@ import torch
 import warp as wp
 
 from embodichain.compute.trajectory import (
+    interpolate_minimum_jerk,
     interpolate_with_distance,
     resample_with_distance,
 )
+
+
+def test_minimum_jerk_expands_sample_count_and_preserves_limits() -> None:
+    keyframes = torch.tensor([[[0.0], [1.0], [0.5]]])
+    step_dt = 0.05
+
+    result = interpolate_minimum_jerk(
+        keyframes,
+        minimum_sample_count=5,
+        step_dt=step_dt,
+        velocity_limit=0.5,
+        acceleration_limit=1.0,
+    )
+
+    assert result.shape[1] > 5
+    assert torch.equal(result[:, :1], keyframes[:, :1])
+    assert torch.equal(result[:, -1:], keyframes[:, -1:])
+    assert any(
+        torch.equal(result[:, index], keyframes[:, 1])
+        for index in range(1, result.shape[1] - 1)
+    )
+    interval_velocity = result.diff(dim=1) / step_dt
+    interval_acceleration = interval_velocity.diff(dim=1) / step_dt
+    assert interval_velocity.abs().max() <= 0.5 + 1.0e-5
+    assert interval_acceleration.abs().max() <= 1.0 + 1.0e-4
+
+
+def test_minimum_jerk_uses_sample_count_as_a_lower_bound() -> None:
+    result = interpolate_minimum_jerk(
+        torch.tensor([[[0.0], [0.01]]]),
+        minimum_sample_count=20,
+        step_dt=0.1,
+        velocity_limit=1.0,
+        acceleration_limit=2.0,
+    )
+
+    assert result.shape == (1, 20, 1)
+
+
+def test_minimum_jerk_validates_dense_float32_output_derivatives() -> None:
+    step_dt = 0.001
+    velocity_limit = 0.2
+    acceleration_limit = 0.5
+
+    result = interpolate_minimum_jerk(
+        torch.tensor([[[0.0], [1.0]]], dtype=torch.float32),
+        minimum_sample_count=3,
+        step_dt=step_dt,
+        velocity_limit=velocity_limit,
+        acceleration_limit=acceleration_limit,
+    )
+
+    interval_velocity = result.diff(dim=1) / step_dt
+    boundary_acceleration = (
+        torch.cat(
+            [
+                interval_velocity[:, :1],
+                interval_velocity.diff(dim=1),
+                -interval_velocity[:, -1:],
+            ],
+            dim=1,
+        )
+        / step_dt
+    )
+    assert torch.all(result.diff(dim=1) >= 0.0)
+    assert interval_velocity.abs().max() <= velocity_limit * (1.0 + 1.0e-5)
+    assert boundary_acceleration.abs().max() <= acceleration_limit * (1.0 + 1.0e-5)
+
+
+def test_minimum_jerk_allows_only_stationary_zero_speed_joints() -> None:
+    keyframes = torch.tensor([[[0.0, 0.0], [0.0, 1.0]]])
+
+    result = interpolate_minimum_jerk(
+        keyframes,
+        minimum_sample_count=3,
+        step_dt=0.05,
+        velocity_limit=torch.tensor([0.0, 0.2]),
+        acceleration_limit=0.5,
+    )
+
+    assert torch.equal(result[..., 0], torch.zeros_like(result[..., 0]))
+    with pytest.raises(ValueError, match="zero-velocity joint"):
+        interpolate_minimum_jerk(
+            torch.tensor([[[0.0, 0.0], [0.1, 1.0]]]),
+            minimum_sample_count=3,
+            step_dt=0.05,
+            velocity_limit=torch.tensor([0.0, 0.2]),
+            acceleration_limit=0.5,
+        )
+
+
+def test_minimum_jerk_rejects_unbounded_interval_requests() -> None:
+    with pytest.raises(ValueError, match="exceeding the safety limit"):
+        interpolate_minimum_jerk(
+            torch.tensor([[[0.0], [1.0]]]),
+            minimum_sample_count=3,
+            step_dt=0.01,
+            velocity_limit=1.0e-12,
+            acceleration_limit=1.0,
+        )
+
+
+def test_minimum_jerk_rejects_oversized_requested_sample_count() -> None:
+    with pytest.raises(ValueError, match="exceeding the safety limit"):
+        interpolate_minimum_jerk(
+            torch.tensor([[[0.0], [0.0]]]),
+            minimum_sample_count=10_002,
+            step_dt=0.01,
+            velocity_limit=1.0,
+            acceleration_limit=1.0,
+        )
 
 
 def test_interpolate_with_distance_preserves_intermediate_keyframe() -> None:

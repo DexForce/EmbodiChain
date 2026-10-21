@@ -73,6 +73,80 @@ def test_ik_removes_tcp_before_solving(monkeypatch, tcp_kind):
         torch.testing.assert_close(target, original_target, atol=0, rtol=0)
         np.testing.assert_array_equal(solver.get_tcp(), tcp)
 
+    valid, candidates = solver.get_ik(
+        target,
+        qpos_seed=torch.zeros((2, 1)),
+        return_all_solutions=True,
+    )
+    assert valid.shape == (2, 1)
+    assert candidates.shape == (2, 1, 1)
+
+
+@pytest.mark.no_sim
+def test_continuous_path_selection_tracks_previous_solution() -> None:
+    """Manipulability ordering cannot make a continuous path jump branches."""
+    solver = object.__new__(PytorchSolver)
+    solver.device = torch.device("cpu")
+    solver.dof = 1
+    solver.ik_nearest_weight = torch.ones(1)
+    candidates = torch.tensor(
+        [[[[0.1], [2.8]], [[2.9], [0.2]], [[0.3], [3.0]]]],
+        dtype=torch.float32,
+    )
+    valid = torch.ones(1, 3, 2, dtype=torch.bool)
+
+    path_valid, path = solver._select_continuous_ik_path(
+        candidates, valid, torch.zeros(1, 1)
+    )
+
+    assert path_valid.all()
+    torch.testing.assert_close(path, torch.tensor([[[0.1], [0.2], [0.3]]]))
+
+
+@pytest.mark.no_sim
+def test_return_all_solutions_preserves_candidate_validity(monkeypatch) -> None:
+    solver = object.__new__(PytorchSolver)
+    solver.device = torch.device("cpu")
+    solver.dof = 1
+    solver._num_samples = 2
+    solver._seed_sampler = None
+    solver.lower_qpos_limits = torch.tensor([-2.0])
+    solver.upper_qpos_limits = torch.tensor([2.0])
+    solver.set_tcp(np.eye(4))
+    convergence = torch.tensor([True, False, False, True])
+    solutions = torch.tensor([[0.1], [0.2], [0.3], [0.4]])
+    monkeypatch.setattr(
+        solver,
+        "_compute_inverse_kinematics",
+        lambda target_pose, joint_seed: (convergence, solutions),
+    )
+
+    valid, candidates = solver.get_ik(
+        torch.eye(4).repeat(2, 1, 1),
+        qpos_seed=torch.zeros(2, 1),
+        return_all_solutions=True,
+    )
+
+    assert valid.tolist() == [[True, False], [False, True]]
+    torch.testing.assert_close(candidates, solutions.reshape(2, 2, 1))
+
+
+@pytest.mark.no_sim
+def test_continuous_path_selection_holds_last_solution_on_failure() -> None:
+    solver = object.__new__(PytorchSolver)
+    solver.device = torch.device("cpu")
+    solver.dof = 1
+    solver.ik_nearest_weight = torch.ones(1)
+    candidates = torch.tensor([[[[0.1]], [[float("nan")]], [[0.3]]]])
+    valid = torch.ones(1, 3, 1, dtype=torch.bool)
+
+    path_valid, path = solver._select_continuous_ik_path(
+        candidates, valid, torch.zeros(1, 1)
+    )
+
+    assert path_valid.tolist() == [[True, False, True]]
+    torch.testing.assert_close(path, torch.tensor([[[0.1], [0.1], [0.3]]]))
+
 
 def grid_sample_qpos_from_limits(
     qpos_limits: torch.Tensor,

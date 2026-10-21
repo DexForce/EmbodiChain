@@ -44,12 +44,21 @@ ActionInvocation                       semantic program
 ```
 
 Planning never steps simulation and never treats command completion as proof of
-a physical effect.
+a physical effect. Runtime hosts may collect versioned physical evidence after
+each fresh observation and pass it to an evidence-aware effect verifier, phase
+gate, or held-object guard. Evidence acquisition stays outside planning and
+does not mutate symbolic task state; verification results are the only path
+that commits or invalidates observed effects.
 
 `MoveHeldObject` accepts ordered object-pose waypoints without rebasing the
 verified grasp. Its goal optionally frees only the final world yaw; default
 goals remain exact. Heading alternatives are checked as complete motion paths,
 with accepted rows retained independently and selected offsets in diagnostics.
+MoveHeldObject, Pour and Place expose `hand_source: observed|grasp_command`.
+The default keeps measured hand posture; the explicit command mode retains the
+resolved endpoint's grasp target, including invocation overrides. Place switches
+to the unchanged open command only at its release phase. This choice does not
+change observations, attachments, failed-row holds or physical effect gates.
 
 Existing-hold `HandOver` resolves its internal exchange object pose and receiving
 grasp together through `_resolve_existing_hold_receive`. The default retains
@@ -88,6 +97,7 @@ contact or physical goal satisfaction.
 | Articulation affordance geometry adapter | `atomic_actions/articulation_geometry.py` |
 | Invocation, binding, and policies | `invocation.py`, `bindings.py`, `policies.py`, `control.py` |
 | Robot/task/scene state | `state.py`, `scene.py` |
+| Runtime physical evidence | `evidence.py`, `scene.py`, `runner.py` |
 | Plans and runtime commands | `plans.py`, `runtime_commands.py` |
 | Session state machine | `execution.py` |
 | Verification request/result values | `verification.py` |
@@ -104,26 +114,11 @@ contact or physical goal satisfaction.
 - [Affordance sampling](affordance-sampling.md): legal geometric variation, reproducible branch identity, action feasibility, and the sim-only host boundary.
 - [Articulation geometry](articulation-geometry.md): topology/mesh ownership and directional affordance contracts.
 
-The `scripts/tutorials/atomic_action/place.py` tutorial configures a
-task-scoped Newton contact candidate on the cube and gripper collision links
-before `SimulationManager.prepare()`. Shared tutorial helpers also author
-`condim=4` on gripper/contact links and grasped objects before preparation.
-Newton manipulation overlays use `ke=4e4`, `kd=4e2`,
-`torsional_friction=0.1`, and `rolling_friction=0.01` on the gripper and
-directly manipulated object contact surfaces. `condim=4` activates the
-torsional term in MuJoCo-Warp; the rolling coefficient is retained for
-solvers/`condim=6` that support it.
-The profile was selected from Newton's native-contact examples and a fixed-
-seed Default comparison; it improves contact force-closure in the replay but
-does not promise identical open-loop Place behavior, whose attachment,
-mimic-joint, and release timing semantics remain backend-sensitive.
-The values are intentionally scoped and are not world defaults. Other surfaces
-keep their source contact dimension. Replay does not rewrite MuJoCo model
-arrays after CUDA Graph capture; contact storage is allocated for the authored
-dimensions. The packaged PGI/Franka embodiment and
-repeated-pick/open-drawer environment components carry the same Newton-only
-overlays, while their declared Default backend continues to consume only the
-portable fields.
+Sample Newton contact overlays are local to the selected scene and gripper;
+they are not world defaults or a guarantee of open-loop physical success.
+Author contact dimensions and material settings before `prepare()`, never by
+rewriting captured solver arrays. The current values live in
+`lab/scripts/_atomic_action/support.py` and the selected physical components.
 
 ## Semantic integration boundary
 
@@ -149,6 +144,27 @@ Projected assurance is not physical task success.
 
 Use `/add-atomic-action` to extend goals, planners, registration and focused tests.
 Keep planning side-effect-free; actions do not own task sequencing or simulator stepping.
+
+## Direct-simulation sample host
+
+`embodichain run-atomic-action --skill` selects a sample scene.
+`lab/scripts/run_atomic_action.py` owns selection, batching and cleanup;
+`lab/scripts/_atomic_action/` owns scenes, robot compatibility, solver choices,
+and local defaults. Tutorial files forwarding there are compatibility entries.
+Read the [host README](../../../embodichain/lab/scripts/_atomic_action/README.md)
+for supported combinations, fixture calibration, expansion and output artifacts.
+
+Mounted-gripper TCPs belong to `lab/scripts/_atomic_action/tcp_presets.py`.
+They are independent full poses per fixture, forwarded to single/dual-arm
+solvers; changing a TCP changes the kinematic tool frame, not physical geometry.
+
+Affordance branch identity stays separate from physical slots. The host adapts
+compiled references to `motion.expansion` while preserving contact/hand samples,
+action boundaries and callback timing. Measured state remains row-local,
+including Slide's replanned push after pull. Completion reports planning and
+playback only; it does not establish measured success or Gym dataset collection.
+See [motion expansion](../motion-planning/motion-planning.md) for the shared
+operators and host ownership boundary.
 
 ## Recommended change sites
 

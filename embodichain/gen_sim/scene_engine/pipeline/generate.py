@@ -17,6 +17,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from embodichain.lab.sim.scene.expansion import SceneRandomizationJobCfg
 
 from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
@@ -55,6 +59,7 @@ def generate_scene_from_image(
     output_root: str | Path,
     *,
     scene_z_rotation_degrees: float = 0.0,
+    scene_randomization: SceneRandomizationJobCfg | dict | str | Path | None = None,
 ) -> Scene:
     """Generate the initial core scene state from an input image.
 
@@ -63,6 +68,8 @@ def generate_scene_from_image(
         output_root: Directory receiving intermediate and exported artifacts.
         scene_z_rotation_degrees: Final counterclockwise world-z rotation applied
             rigidly to the complete scene before export.
+        scene_randomization: Optional grouped layout policy applied to the final
+            exported workspace without changing the generated source scene.
 
     Returns:
         The final scene in the rotated export frame.
@@ -138,4 +145,10 @@ def generate_scene_from_image(
         log_warning(f"Skipped whole-scene USD export: {exc}")
     log_info("Completed Scene Export")
 
+    if scene_randomization is not None:
+        from embodichain.gen_sim.scene_engine.randomization.adapter import (
+            randomize_scene_export,
+        )
+
+        randomize_scene_export(resolved_output_root, scene_randomization)
     return scene

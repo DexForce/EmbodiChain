@@ -31,6 +31,7 @@ import numpy as np
 
 from embodichain.lab.task_program.language import load_task_program
 from embodichain.utils.utility import load_config, save_config
+from embodichain.utils.config_paths import resolve_config_path
 
 from .config import TaskEnginePlanningCfg
 from .robot_profiles import _canonical_robot_profile
@@ -434,7 +435,6 @@ def generate_task_program_bundle(
         normalize_scene_assets,
     )
 
-    project_root = Path(__file__).resolve().parents[3]
     from .robot_profiles import _load_robotiq_embodiment
 
     embodiment_payload = (
@@ -745,10 +745,8 @@ def generate_task_program_bundle(
         semantic_task_graph=root / "semantic_task_graph.json",
         integration_fingerprint=root / "integration_fingerprint.json",
     )
-    policy_source = (
-        project_root
-        / "embodichain_tasks/configs/components/execution_policies"
-        / "dual_arm_trajectory_verified.yaml"
+    policy_source = resolve_config_path(
+        "extensions/embodichain_tasks/configs/components/execution_policies/dual_arm_trajectory_verified.yaml"
     )
     if frozen is None:
         table_bounds = None
@@ -821,6 +819,9 @@ def generate_task_program_bundle(
     stability["motion_samples"] = motion_sample_declarations(
         selected_graph, drawer_groups=drawer_groups
     )
+    from ._task_program.motion import SAMPLED_MOTION_CONTRACT
+
+    stability["motion_contract"] = SAMPLED_MOTION_CONTRACT
     if runtime_profile == CONTACT_PROFILE:
         for node in selected_graph["nodes"]:
             if node["call"]["kind"] == "pick":
@@ -2657,6 +2658,7 @@ def _integration_payload(
                 "pick": default_pick_options,
                 "place": {
                     "kind": "place",
+                    "hand_source": "grasp_command",
                     "hand_interp_steps": 12,
                     "release_settle_steps": 60,
                     "lift_height": 0.05,
@@ -2680,6 +2682,7 @@ def _integration_payload(
                     {
                         call_id: {
                             "kind": "place",
+                            "hand_source": "grasp_command",
                             "hand_interp_steps": 12,
                             "release_settle_steps": 60,
                             "lift_height": 0.10,
@@ -2702,13 +2705,19 @@ def _integration_payload(
                     {
                         _MOVE_HELD_OBJECT_CALL_ID: {
                             "kind": "move_held_object",
+                            "hand_source": "grasp_command",
                         }
                     }
                     if move_held_routes
                     else {}
                 ),
                 **(
-                    {DRAWER_TRANSPORT_CALL: {"kind": "move_held_object"}}
+                    {
+                        DRAWER_TRANSPORT_CALL: {
+                            "kind": "move_held_object",
+                            "hand_source": "grasp_command",
+                        }
+                    }
                     if drawer_transport_routes
                     else {}
                 ),
@@ -2716,6 +2725,8 @@ def _integration_payload(
                     {
                         _POUR_CALL_ID: {
                             "kind": "pour",
+                            "hand_source": "grasp_command",
+                            "dwell_duration": 0.0,
                             "rotate_angle": -1.0471975512,
                         }
                     }

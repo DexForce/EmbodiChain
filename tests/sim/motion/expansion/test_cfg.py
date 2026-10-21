@@ -372,6 +372,35 @@ def test_semantic_revalidation_rejects_mutated_configuration() -> None:
         TrajectoryAugmentationCfg(factors={})
 
 
+def test_enabled_spatial_offset_must_exceed_the_dedup_tolerance() -> None:
+    # At or below the tolerance every proposal measures as a duplicate of the
+    # reference, so the enabled factor would silently keep the nominal variant
+    # alone. The contract default pair (0.05 / 0.01) stays valid.
+    with pytest.raises(ValueError, match="joint_dedup_normalized_tol"):
+        TrajectoryAugmentationCfg.from_mapping(
+            {
+                "factors": {"spatial": {"enabled": True, "joint_offset_scale": 0.01}},
+                "coverage": {"joint_dedup_normalized_tol": 0.01},
+            }
+        )
+    accepted = TrajectoryAugmentationCfg.from_mapping(
+        {
+            "factors": {"spatial": {"enabled": True, "joint_offset_scale": 0.005}},
+            "coverage": {"joint_dedup_normalized_tol": 0.002},
+        }
+    )
+    assert accepted.factors.spatial.joint_offset_scale == 0.005
+
+
+def test_disabled_spatial_factor_keeps_a_zero_offset_scale_valid() -> None:
+    # Packaged expansion policies disable the factor and keep a zero scale, so
+    # the guard has to read the enabled flag rather than the numbers alone.
+    cfg = TrajectoryAugmentationCfg.from_mapping(
+        {"factors": {"spatial": {"enabled": False, "joint_offset_scale": 0.0}}}
+    )
+    assert cfg.factors.spatial.joint_offset_scale == 0.0
+
+
 def test_variant_factors_decode_and_declare_their_operator_capabilities() -> None:
     cfg = TrajectoryExpansionJobCfg.from_mapping(
         {

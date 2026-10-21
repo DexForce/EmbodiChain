@@ -19,6 +19,8 @@
 from __future__ import annotations
 
 from itertools import islice
+from dataclasses import FrozenInstanceError, replace
+from pathlib import Path
 
 import pytest
 import torch
@@ -35,6 +37,9 @@ from embodichain.lab.task_program import (
     InvokeCfg,
     ObjectNearRelativeTargetValidatorCfg,
     ObjectNearTargetValidatorCfg,
+    ObjectLiftedValidatorCfg,
+    ObjectRelativePositionValidatorCfg,
+    ObjectUprightValidatorCfg,
     PickCfg,
     PlaceCfg,
     PoseCfg,
@@ -44,6 +49,7 @@ from embodichain.lab.task_program import (
     SequenceCfg,
     TargetRefCfg,
     WaitStablePostCfg,
+    load_task_program,
 )
 from embodichain.lab.sim.atomic_actions import Affordance, EntityState
 from embodichain.lab.task_program.semantics.calls import (
@@ -160,6 +166,50 @@ def _assert_pose_equal(actual: SemanticPose, expected: SemanticPose) -> None:
     assert torch.allclose(actual.quaternion_xyzw, expected.quaternion_xyzw)
 
 
+@pytest.mark.parametrize("instruction", [None, "Pick up the cube."])
+def test_compiled_program_owns_immutable_overall_instruction(
+    instruction: str | None,
+) -> None:
+    registry, _ = _scene_registry()
+    config = _program(InvokeCfg(call=PickCfg(object="cube")))
+    config.instruction = instruction
+    compiled = TaskProgramCompiler.from_scene_registry(registry).compile(config)
+    config.instruction = "Changed after compilation."
+    assert compiled.instruction == instruction
+    with pytest.raises(FrozenInstanceError):
+        compiled.instruction = "Change the compiled snapshot."
+
+
+@pytest.mark.parametrize("instruction", ["", "   ", " padded ", 7, True, ["pick"]])
+def test_compiler_rejects_mutated_invalid_overall_instruction(
+    instruction: object,
+) -> None:
+    registry, _ = _scene_registry()
+    config = _program(InvokeCfg(call=PickCfg(object="cube")))
+    config.instruction = instruction
+    with pytest.raises(TaskProgramCompileError) as error:
+        TaskProgramCompiler.from_scene_registry(registry).compile(config)
+    assert error.value.path == ("instruction",)
+
+
+def test_loaded_program_compilation_snapshots_overall_instruction(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "program.yaml"
+    path.write_text(
+        "program_id: pick_cube\n"
+        "instruction: Pick up the cube.\n"
+        "targets: {}\n"
+        "program: {kind: invoke, call: {kind: pick, object: cube}}\n"
+    )
+    config = load_task_program(path, integration=_integration())
+    registry, _ = _scene_registry()
+    compiled = TaskProgramCompiler.from_scene_registry(registry).compile(config)
+    config.instruction = "Changed after compilation."
+    path.write_text("invalid replacement after compilation")
+    assert compiled.instruction == "Pick up the cube."
+
+
 def _assert_semantic_call_equal(
     actual: SemanticCallSpec,
     expected: SemanticCallSpec,
@@ -268,6 +318,7 @@ def test_repeat_expands_independent_segments_with_cyclic_targets() -> None:
     poses = (_pose(0.45, -0.2), _pose(0.45, 0.0), _pose(0.45, 0.2))
     body = SegmentCfg(
         name="move_cube",
+        instruction="Pick up the cube and move it to the next target.",
         steps=SequenceCfg(
             items=(
                 InvokeCfg(call=PickCfg(object="cube")),
@@ -289,7 +340,11 @@ def test_repeat_expands_independent_segments_with_cyclic_targets() -> None:
     )
 
     compiled = TaskProgramCompiler.from_scene_registry(registry).compile(config)
+    body.instruction = "Changed after compilation."
     segments = list(compiled)
+    assert {segment.instruction for segment in segments} == {
+        "Pick up the cube and move it to the next target."
+    }
     second_pass = list(compiled)
 
     assert [segment.segment_id for segment in segments] == [
@@ -386,6 +441,11 @@ def test_compiler_resolves_relative_validator_provider_free() -> None:
     assert validator.cfg.displacement == pytest.approx((0.0, -0.1, 0.04))
     assert validator.cfg.position_tolerance == pytest.approx(0.05)
     assert provider.calls == 0
+    assert replace(validator).cfg == validator.cfg
+    config.program.validators[0].position_tolerance = float("inf")
+    config.program.validators[0].displacement = (99.0, 0.0, 0.0)
+    assert validator.cfg.position_tolerance == pytest.approx(0.05)
+    assert validator.cfg.displacement == pytest.approx((0.0, -0.1, 0.04))
 
 
 def test_repeat_expansion_is_bounded_and_never_observes_scene_providers() -> None:
@@ -547,6 +607,40 @@ def test_compiled_program_owns_source_and_each_emitted_mutable_config() -> None:
     assert second_pass[0].validators[0].cfg.position_tolerance == pytest.approx(0.03)
 
 
+def test_compiled_acceptance_and_post_policy_values_are_frozen() -> None:
+    registry, _ = _scene_registry()
+    config = _program(
+        SegmentCfg(
+            name="checked",
+            steps=InvokeCfg(call=PickCfg(object="cube")),
+            post=(WaitStablePostCfg(entity="cube"),),
+            validators=(
+                ObjectNearTargetValidatorCfg(object="cube", target="drop"),
+                ArticulationJointPositionValidatorCfg(
+                    articulation="arm", joint="joint", minimum_position=0.0
+                ),
+                ObjectNearRelativeTargetValidatorCfg(
+                    object="cube", reference="tray", displacement=(0.1, 0.0, 0.0)
+                ),
+            ),
+        ),
+        targets={"drop": CyclicPoseTargetCfg(values=(_pose(0.4),))},
+    )
+    compiled = TaskProgramCompiler.from_scene_registry(registry).compile(config)
+    segment = next(iter(compiled))
+    for values, field_name, replacement in (
+        (segment.post_policies[0].cfg, "preset", "changed"),
+        (segment.validators[0].cfg, "position_tolerance", float("inf")),
+        (segment.validators[1].cfg, "minimum_position", None),
+        (segment.validators[2].cfg, "position_tolerance", float("inf")),
+        (segment.validators[2].cfg, "displacement", (99.0, 0.0, 0.0)),
+    ):
+        with pytest.raises(FrozenInstanceError):
+            setattr(values, field_name, replacement)
+    assert next(iter(compiled)).validators[0].cfg.position_tolerance == 0.03
+    assert next(iter(compiled)).validators[2].cfg.displacement == (0.1, 0.0, 0.0)
+
+
 def test_compiler_rejects_nested_segment_at_exact_path() -> None:
     registry, _ = _scene_registry()
     config = _program(
@@ -598,3 +692,58 @@ def test_compiler_rechecks_mutated_repeat_and_target_bounds() -> None:
         TaskProgramCompiler.from_scene_registry(registry).compile(config)
     assert target_error.value.code == "empty_target_values"
     assert target_error.value.path == ("targets", "drop_pose", "values")
+
+
+@pytest.mark.parametrize("frame", ["world_axes", "parent"])
+def test_measured_object_validators_compile_without_observation_and_own_values(
+    frame: str,
+) -> None:
+    registry, provider = _scene_registry()
+    relative = ObjectRelativePositionValidatorCfg(
+        object="sim_cube",
+        reference="tray",
+        position_offset=[-0.08, 0.0, 0.0],
+        position_tolerance=[0.035, 0.03, None],
+        reference_frame=frame,
+    )
+    config = _program(
+        SegmentCfg(
+            name="checked",
+            steps=InvokeCfg(call=PickCfg(object="cube")),
+            validators=(
+                ObjectLiftedValidatorCfg(object="cube"),
+                relative,
+                ObjectUprightValidatorCfg(object="tray"),
+            ),
+        )
+    )
+    compiled = TaskProgramCompiler.from_scene_registry(registry).compile(config)
+    relative.position_offset = (9.0, 9.0, 9.0)
+    relative.position_tolerance = (9.0, 9.0, 9.0)
+    relative.reference_frame = "parent" if frame == "world_axes" else "world_axes"
+    for _ in range(2):
+        segment = next(iter(compiled))
+        assert provider.calls == 0
+        assert segment.validators[1].object == SceneObjectRef("cube")
+        assert segment.validators[1].reference == SceneObjectRef("tray")
+        assert segment.validators[1].cfg.position_offset == (-0.08, 0.0, 0.0)
+        assert segment.validators[1].cfg.position_tolerance == (0.035, 0.03, None)
+        assert segment.validators[1].cfg.reference_frame == frame
+        with pytest.raises(FrozenInstanceError):
+            segment.validators[0].cfg.minimum_lift = 99.0
+
+
+def test_relative_position_validator_rejects_unresolved_reference_at_compile() -> None:
+    registry, provider = _scene_registry()
+    config = _program(
+        SegmentCfg(
+            name="checked",
+            steps=InvokeCfg(call=PickCfg(object="cube")),
+            validators=(
+                ObjectRelativePositionValidatorCfg(object="cube", reference="missing"),
+            ),
+        )
+    )
+    with pytest.raises(TaskProgramCompileError, match="reference"):
+        TaskProgramCompiler.from_scene_registry(registry).compile(config)
+    assert provider.calls == 0

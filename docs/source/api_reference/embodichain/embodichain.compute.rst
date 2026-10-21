@@ -47,6 +47,7 @@ means trajectory deformation.
    differentiate_positions
    resample_in_time
    interpolate_with_distance
+   interpolate_minimum_jerk
    interpolate_with_nums
    resample_with_distance
    sort_and_padding_key_frame
@@ -127,3 +128,42 @@ Pure trajectory functions formerly defined in
 compatibility. New consumers should import from ``compute.trajectory``.
 ``get_trajectory_object_offset_qpos`` remains in the simulation utility module
 because it calls a stateful solver's FK and IK interfaces.
+
+Geometry tensor kernels
+-----------------------
+
+.. toctree::
+   :maxdepth: 1
+
+   embodichain.compute.scene_geometry
+
+Differentiable inverse kinematics
+--------------------------------
+
+The fixed-step DLS implementation preserves target and seed gradients through
+both FK and the geometric Jacobian. ``SerialChainKinematics`` adapts a copied
+PK chain without loading simulation. ``DifferentiableIKCfg`` configures the
+compute function and Torch layer; failed solves retain their last iterate.
+
+.. currentmodule:: embodichain.compute.kinematics
+
+.. autosummary::
+
+   damped_least_squares_step
+   solve_dls_ik
+   pose_error
+   SerialChainKinematics
+   DifferentiableIKCfg
+   DifferentiableIKResult
+
+.. automodule:: embodichain.compute.kinematics.dls
+   :members:
+
+.. automodule:: embodichain.compute.kinematics.pose_error
+   :members:
+
+.. automodule:: embodichain.compute.kinematics.serial_chain
+   :members:
+
+.. automodule:: embodichain.compute.kinematics.types
+   :members:

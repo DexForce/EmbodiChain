@@ -19,6 +19,7 @@ from __future__ import annotations
 from typing import Any
 
 import os
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -39,7 +40,9 @@ from embodichain.lab.sim.cfg import (
     MassPropertiesCfg,
     physics_cfg_for_backend,
     RigidBodyPhysicsCfg,
+    RigidObjectCfg,
 )
+from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.data import get_data_path
 from embodichain.utils.math import matrix_from_quat
 from dexsim.types import ActorType, DriveType
@@ -56,6 +59,114 @@ def _inertia_tensor(inertia: torch.Tensor, com_pose: torch.Tensor) -> torch.Tens
     """Compare physical inertia independently of the chosen principal axes."""
     rotation = matrix_from_quat(com_pose[..., 3:])
     return rotation @ torch.diag_embed(inertia) @ rotation.transpose(-1, -2)
+
+
+@pytest.mark.parametrize("device", ["cpu", "cuda:0"])
+@pytest.mark.parametrize("env_ids", [None, [0]], ids=["all", "selected"])
+@pytest.mark.parametrize("operation", ["reset", "root_pose"])
+def test_reset_and_root_pose_write_preserve_physics_state(
+    tmp_path: Path, device: str, env_ids: list[int] | None, operation: str
+) -> None:
+    """State restoration publishes link poses without advancing any body."""
+    # An off-axis COM makes even a hidden 1 ms step generate joint velocity.
+    urdf_path = tmp_path / "pendulum.urdf"
+    urdf_path.write_text(
+        """<robot name="reset_pendulum">
+  <link name="base">
+    <inertial><mass value="1"/>
+      <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/>
+    </inertial>
+  </link>
+  <link name="arm">
+    <inertial><origin xyz="0.1 0 0"/><mass value="1"/>
+      <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/>
+    </inertial>
+    <visual><origin xyz="0.1 0 0"/>
+      <geometry><box size="0.2 0.02 0.02"/></geometry>
+    </visual>
+    <collision><origin xyz="0.1 0 0"/>
+      <geometry><box size="0.2 0.02 0.02"/></geometry>
+    </collision>
+  </link>
+  <joint name="hinge" type="revolute">
+    <parent link="base"/><child link="arm"/><axis xyz="0 1 0"/>
+    <limit lower="-2" upper="2" effort="100" velocity="10"/>
+  </joint>
+</robot>""",
+        encoding="utf-8",
+    )
+    initial_angle = 0.5
+    sim = SimulationManager(
+        SimulationManagerCfg(headless=True, device=device, num_envs=2)
+    )
+    art = cube = None
+    try:
+        art = sim.add_articulation(
+            ArticulationCfg(
+                uid="pendulum",
+                fpath=str(urdf_path),
+                init_pos=(0.0, 0.0, 1.0),
+                init_qpos=[initial_angle],
+                asset_physics_mode="overlay",
+                joint_drive_props=JointDrivePropertiesCfg(drive_type="none"),
+            )
+        )
+        cube = sim.add_rigid_object(
+            RigidObjectCfg(
+                uid="falling_cube",
+                shape=CubeCfg(size=(0.05, 0.05, 0.05)),
+                init_pos=(1.0, 0.0, 2.0),
+            )
+        )
+        sim.prepare()
+        changed_qpos = torch.tensor([[0.8], [1.0]], device=sim.device)
+        changed_qvel = torch.tensor([[0.2], [0.3]], device=sim.device)
+        art.set_qpos(changed_qpos, target=False)
+        art.set_qpos(changed_qpos, target=True)
+        art.set_qvel(changed_qvel, target=False)
+        root_pose = art.get_local_pose().clone()
+        cube_pose = cube.get_local_pose().clone()
+        cube_velocity = cube.body_data.vel.clone()
+
+        expected_qpos = changed_qpos.clone()
+        expected_qvel = changed_qvel.clone()
+        selected_rows = [0, 1] if env_ids is None else env_ids
+        if operation == "reset":
+            art.reset(env_ids=env_ids)
+            expected_qpos[selected_rows] = initial_angle
+            expected_qvel[selected_rows] = 0.0
+        else:
+            # Binary fractions stay exact when arena offsets are added/subtracted.
+            root_pose[selected_rows, :3] = torch.tensor(
+                [0.25, -0.125, 1.5], device=sim.device
+            )
+            art.set_local_pose(root_pose[selected_rows], env_ids=env_ids)
+
+        torch.testing.assert_close(art.get_local_pose(), root_pose, rtol=0, atol=1e-7)
+        torch.testing.assert_close(art.get_qpos(), expected_qpos, rtol=0, atol=1e-7)
+        torch.testing.assert_close(art.get_qvel(), expected_qvel, rtol=0, atol=1e-7)
+        torch.testing.assert_close(cube.get_local_pose(), cube_pose, rtol=0, atol=0)
+        torch.testing.assert_close(cube.body_data.vel, cube_velocity, rtol=0, atol=0)
+
+        # Link orientation must be current immediately, without a physics step.
+        angle = expected_qpos[:, 0]
+        quaternion = torch.zeros((2, 4), device=sim.device)
+        quaternion[:, 1] = torch.sin(angle / 2)
+        quaternion[:, 3] = torch.cos(angle / 2)
+        expected_link_pose = torch.eye(4, device=sim.device).repeat(2, 1, 1)
+        expected_link_pose[:, :3, :3] = matrix_from_quat(quaternion)
+        # The hinge has no origin offset, so arm and root frame origins coincide.
+        expected_link_pose[:, :3, 3] = root_pose[:, :3]
+        torch.testing.assert_close(
+            art.get_link_pose("arm", to_matrix=True),
+            expected_link_pose,
+            rtol=0,
+            atol=1e-6,
+        )
+    finally:
+        sim.destroy(exit_process=False)
+        del art, cube
+        SimulationManager.flush_cleanup_queue()
 
 
 @pytest.mark.parametrize("physics", ["default", "newton"])

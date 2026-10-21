@@ -27,7 +27,7 @@ import torch
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Articulation, Robot
 from embodichain.lab.sim.objects.backends.newton import _default_mujoco_mimic_solref
-from embodichain.lab.sim.robots.dexforce_w1 import DexforceW1Cfg
+from embodichain_robots.dexforce_w1 import DexforceW1Cfg
 from embodichain.lab.sim.cfg import physics_cfg_for_backend
 from embodichain.lab.sim.motion.solvers.base_solver import BaseSolver
 from embodichain.data import get_data_path
@@ -108,6 +108,10 @@ def test_compute_batch_ik_continuous_reuses_all_solver_candidates() -> None:
     assert torch.equal(qpos, selected_qpos)
     solver.get_ik.assert_called_once()
     assert solver.get_ik.call_args.kwargs["return_all_solutions"] is True
+    torch.testing.assert_close(
+        solver.get_ik.call_args.kwargs["qpos_seed"],
+        seed[:, None].expand(2, 3, 2).reshape(6, 2),
+    )
     solver._select_continuous_ik_path.assert_called_once()
 
 

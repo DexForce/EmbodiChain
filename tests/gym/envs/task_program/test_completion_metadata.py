@@ -290,6 +290,7 @@ class _TraceCompiler(SemanticCallCompiler):
         context: PlanningContext,
         *,
         eligible_mask: torch.Tensor | None = None,
+        invocation_id: str | None = None,
         revision: int = 0,
         path: tuple[object, ...] = ("workflow",),
     ) -> _TraceGroundedCall:
@@ -312,7 +313,7 @@ class _TraceCompiler(SemanticCallCompiler):
                 max_action_retries=1,
                 action_timeout=1.0,
             ),
-            invocation_id=f"{workflow.workflow_id}:{call_index}",
+            invocation_id=invocation_id or f"{workflow.workflow_id}:{call_index}",
             revision=revision,
         )
         analyzed = SimpleNamespace(
@@ -357,6 +358,7 @@ class _CompiledSegment:
     validators: tuple[object, ...] = ()
     parallel_block: None = None
     implicit: bool = False
+    instruction: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

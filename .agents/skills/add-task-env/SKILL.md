@@ -62,8 +62,8 @@ Resolve from the prompt or nearby conventions:
 Organize by task identity, never by solution method. Use:
 
 ```text
-embodichain_tasks/embodichain_tasks/<category_path>/<task_name>.py
-embodichain_tasks/configs/tasks/<category_path>/<task_name>/
+extensions/embodichain_tasks/embodichain_tasks/<category_path>/<task_name>.py
+extensions/embodichain_tasks/configs/tasks/<category_path>/<task_name>/
 ```
 
 Keep a single task Python entry point flat at `<task_name>.py`. Do not create a
@@ -127,7 +127,7 @@ deployment. Use separate environment files for backend-specific settings.
 ### Optional Python entry point
 
 Create
-`embodichain_tasks/embodichain_tasks/<category_path>/<task_name>.py` when the
+`extensions/embodichain_tasks/embodichain_tasks/<category_path>/<task_name>.py` when the
 route requires import-owned behavior or registration:
 
 - an environment-only registered Gym task;

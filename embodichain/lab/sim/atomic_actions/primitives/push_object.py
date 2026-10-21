@@ -314,6 +314,11 @@ class PushObject(AtomicAction[PushObjectGoal, PushObjectOptions]):
         context: PlanningContext,
     ) -> ActionPlan:
         """Plan close, approach, contact, planar push, and retract segments."""
+        if request.motion_policy.strategy != "ik_interp":
+            raise ValueError(
+                "PushObject requires strategy='ik_interp' because its contact "
+                "and push phases must preserve every Cartesian path sample."
+            )
         goal = self.require_goal(request)
         options = request.skill_options
         interpolation_dt = context.require_control_dt()
@@ -491,11 +496,17 @@ class PushObject(AtomicAction[PushObjectGoal, PushObjectOptions]):
             n_approach,
             interpolation_dt=interpolation_dt,
         )
-        contact_keyframes = axis_translation_keyframes(
-            approach_xpos,
-            contact_xpos,
-            support_normal,
-            n_waypoints=n_contact - 1,
+        # Contact, push, and retract remain explicit Cartesian samples.
+        linear_contact = True
+        contact_keyframes = (
+            axis_translation_keyframes(
+                approach_xpos,
+                contact_xpos,
+                support_normal,
+                n_waypoints=n_contact - 1,
+            )
+            if linear_contact
+            else contact_xpos
         )
         contact_success, contact_arm = self._plan_pose_segment(
             contact_keyframes,
@@ -504,13 +515,17 @@ class PushObject(AtomicAction[PushObjectGoal, PushObjectOptions]):
             request,
             n_contact,
             interpolation_dt=interpolation_dt,
-            cartesian_linear=True,
+            cartesian_linear=linear_contact,
         )
-        push_keyframes = axis_translation_keyframes(
-            contact_xpos,
-            pushed_xpos,
-            push_direction,
-            n_waypoints=n_push - 1,
+        push_keyframes = (
+            axis_translation_keyframes(
+                contact_xpos,
+                pushed_xpos,
+                push_direction,
+                n_waypoints=n_push - 1,
+            )
+            if linear_contact
+            else pushed_xpos
         )
         push_success, push_arm = self._plan_pose_segment(
             push_keyframes,
@@ -519,17 +534,21 @@ class PushObject(AtomicAction[PushObjectGoal, PushObjectOptions]):
             request,
             n_push,
             interpolation_dt=interpolation_dt,
-            cartesian_linear=True,
+            cartesian_linear=linear_contact,
         )
         if options.retract_height <= 1.0e-6:
             retract_success = push_success.clone()
             retract_arm = push_arm[:, -1:].expand(-1, n_retract, -1).clone()
         else:
-            retract_keyframes = axis_translation_keyframes(
-                pushed_xpos,
-                retract_xpos,
-                support_normal,
-                n_waypoints=n_retract - 1,
+            retract_keyframes = (
+                axis_translation_keyframes(
+                    pushed_xpos,
+                    retract_xpos,
+                    support_normal,
+                    n_waypoints=n_retract - 1,
+                )
+                if linear_contact
+                else retract_xpos
             )
             retract_success, retract_arm = self._plan_pose_segment(
                 retract_keyframes,
@@ -538,7 +557,7 @@ class PushObject(AtomicAction[PushObjectGoal, PushObjectOptions]):
                 request,
                 n_retract,
                 interpolation_dt=interpolation_dt,
-                cartesian_linear=True,
+                cartesian_linear=linear_contact,
             )
         success = completed | (
             valid_direction
@@ -629,8 +648,12 @@ class PushObject(AtomicAction[PushObjectGoal, PushObjectOptions]):
         )
         assert isinstance(result.success, torch.Tensor)
         assert result.positions is not None
+        assert result.dt is not None
         return result.success, resample_planned_trajectory(
-            result.positions, sample_count
+            result.positions,
+            sample_count,
+            dt=result.dt,
+            control_dt=interpolation_dt,
         )
 
 

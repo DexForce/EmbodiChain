@@ -29,13 +29,31 @@ Read this when the request needs these details. [Topic overview](env-framework.m
 - Overrides `_extend_obs()` to run `ObservationManager.compute()`.
 - Overrides `_extend_reward()` to run `RewardManager.compute()` and add to
   base reward.
-- Overrides `_initialize_episode()` to run event-manager `reset` mode,
-  dataset save, and manager resets.
+- Uses `_before_episode_reset()` to save/discard old records before physical reset,
+  `_initialize_episode()` for reset events and managers, and `_after_episode_reset()`
+  to seed the authoritative first recording frame.
 - Overrides `_update_sim_state()` to run event-manager `interval` mode.
 - Manages rollout buffer (expert or RL mode) via `_hook_after_sim_step()`.
 - Owns per-row demonstration metadata and dense segment acceptance, attempt,
   and causal-continuity annotations.
 - `extensions` dict entries are set as attributes on both cfg and env instance.
+
+### Task language (`demo.py`, `embodied_env.py`)
+
+`EmbodiedEnvCfg.task_instruction` owns handwritten and direct-control goals;
+Task Programs own the root `instruction` in their program. The common executor
+resolves explicit episode language first, then the selected program, task
+configuration, and legacy recorder configuration. Resolution reads legacy config
+without constructing DatasetManager, so online generation retains compatibility.
+Conflicting legacy recorders need an authoritative task-level description.
+
+The executor freezes `DemoEpisodeResult.instruction` and its source before
+planning and restores outer snapshot state even on hook/planning exceptions.
+Recorded metadata preserves an unknown dynamic-program snapshot rather than
+borrowing the static program's goal. Segment fallback labels use the resolved
+episode goal and record their fallback source; they are not fine-grained labels.
+The [data pipeline](../data-pipeline/data-pipeline.md) owns disk mappings and
+stable online language IDs. Language intent does not establish physical success.
 
 ### Action boundary (`types.py`, `embodied_env.py`)
 
@@ -90,7 +108,7 @@ Read this when the request needs these details. [Topic overview](env-framework.m
 - Environments without a Task Program keep the ordinary `BaseEnv.is_task_success()`
   behavior and task-specific overrides.
 
-### Segment terminal progress (`demo.py`, `run_env.py`)
+### Segment terminal progress (`demo.py`, `run_task.py`)
 
 Every demo path reaches the same terminal `tqdm` wrapper through
 `execute_demo_episode()`. A `DemoSegment` can declare an exact
@@ -115,15 +133,16 @@ EmbodiedEnv.__init__(cfg)
   ├── init manager slots to None
   ├── super().__init__(cfg)  →  BaseEnv.__init__
   │     ├── set seed, compute frequencies
-  │     ├── _setup_scene()
-  │     │     ├── create SimulationManager
-  │     │     ├── _setup_robot()  → Robot + single_action_space
-  │     │     ├── _prepare_scene()  → lights, background, objects
-  │     │     └── _setup_sensors() → sensors dict
+  │     ├── EmbodiedEnv._setup_scene()
+  │     │     ├── filter functors and resolve ground visibility
+  │     │     └── BaseEnv._setup_scene()
+  │     │           ├── resolve render demand → create SimulationManager
+  │     │           ├── _setup_robot() → Robot + single_action_space
+  │     │           ├── _prepare_scene() → lights, background, objects
+  │     │           └── _setup_sensors() → sensors dict
   │     ├── SimulationManager.prepare() (backend-neutral readiness boundary)
   │     ├── open window (if not headless)
   │     └── _init_sim_state()
-  │           ├── _apply_functor_filter() (strip visual rand if configured)
   │           ├── create EventManager   (if cfg.events)
   │           │     └── apply "startup" mode
   │           ├── create ObservationManager (if cfg.observations)
@@ -138,18 +157,16 @@ EmbodiedEnv.__init__(cfg)
 
 ```
 reset(options)
-  ├── is_task_success() → save status before resetting
+  ├── validate selections and episode_prepare callback
+  ├── is_task_success() → capture old task outcome
+  ├── _before_episode_reset() → existing save policy × EpisodeContext eligibility
+  ├── begin selected context episodes only after old buffers are consumed
   ├── sim.reset_objects_state(env_ids, excluded_uids)
-  ├── _initialize_episode(env_ids)
-  │     ├── dataset_manager.apply("save") for successful episodes, eligible
-  │     │   segment-fragment rows, or an explicit dataset-only
-  │     │   ``commit_env_ids`` subset during a final vector batch
-  │     ├── event_manager.apply("reset", env_ids)
-  │     ├── observation_manager.reset(env_ids)
-  │     └── reward_manager.reset(env_ids)
-  ├── _reset_physical_objective(env_ids) # after persistence and reset events
-  ├── _elapsed_steps[env_ids] = 0
-  └── return get_obs(), get_info()
+  ├── _initialize_episode() → event/manager reset
+  ├── episode_prepare() → optional trusted host preparation
+  ├── physical objective reset → final observation → _after_episode_reset()
+  └── complete initialization → return observations and context info
+
 ```
 
 ### `step(action)`
@@ -192,7 +209,7 @@ wire one in. Each manager follows the Functor/FunctorCfg pattern (see
 | `ObservationManager` | `cfg.observations` | `_init_sim_state()` | `_extend_obs()` on every `get_obs()` |
 | `RewardManager` | `cfg.rewards` | `_init_sim_state()` | `_extend_reward()` on every step |
 | `ActionManager` | `cfg.actions` | `_init_sim_state()` | overrides `single_action_space` |
-| `DatasetManager` | `cfg.dataset` | `__init__` (after super) | `_initialize_episode()` save mode |
+| `DatasetManager` | `cfg.dataset` | `__init__` (after super) | `_before_episode_reset()`; see the reset lifecycle above |
 
 ### Event manager modes
 
@@ -266,6 +283,24 @@ not orchestrate multiple experiments or qualify kinematic playback.
 - **Fixed action layout**: an ActionManager-backed trajectory uses the batched
   policy action space; a controller/expert trajectory uses the private
   `ExpertActionSpec` layout. One trajectory cannot mix these schemas.
-- **CLI**: `run-env --replay --replay_trajectory <path> --replay_mode {kinematic,dynamic,control}`.
+- **CLI**: `run-task --replay --replay_trajectory <path> --replay_mode {kinematic,dynamic,control}`.
 
 ---
+
+### Generic recording eligibility
+
+`EpisodeContext` has three component interfaces: `check`, `filter_recordable`
+and `snapshot`. Construction is uninitialized. Checks are synchronous owner-thread
+scopes; pending checks survive internal resets and exceptions latch rejection in
+current buffers. Only the host's successful buffer-consumption boundary opens a
+new episode; demo annotation replacement and reseeding do not. Context snapshots
+are strict JSON copies for async writers. Neither eligibility nor geometry evidence
+changes task success. Save/discard failure leaves the old episode and scene intact;
+initialization/first-frame failure blocks the selected new rows.
+
+`commit_env_ids` retains dataset-only selection, including with `save_data=False`.
+All normal output selections also intersect context eligibility. Explicit
+`purpose="diagnostic"` trajectory/camera exports retain failure evidence separately
+and are never dataset commits. Closing only drains committed writes and discards
+live buffers. Camera recordings use independent row buffers and files, with owned
+context sidecars; asynchronous jobs do not wait for another row or a mosaic.

@@ -1,7 +1,7 @@
 :orphan:
 
 Aloha Mini robot configuration
-=============================
+==============================
 
 The preset configures the complete Aloha Mini 2 Pro asset, its five control
 parts, arm and torso solvers, and local serial chains for all five parts.
@@ -9,23 +9,23 @@ parts, arm and torso solvers, and local serial chains for all five parts.
 Public import
 -------------
 
-.. currentmodule:: embodichain.lab.sim.robots
+.. currentmodule:: embodichain_robots
 
-.. autosummary::
+.. py:class:: AlohaMiniCfg
 
-   AlohaMiniCfg
+   Preset for the complete Aloha Mini 2 Pro asset. Shared configuration fields
+   follow :class:`~embodichain.lab.sim.cfg.RobotCfg`.
 
-.. autoclass:: AlohaMiniCfg
-   :members: from_dict, build_pk_serial_chain
+.. automethod:: AlohaMiniCfg.from_dict
+
+.. automethod:: AlohaMiniCfg.build_pk_serial_chain
 
 Implementation module
 ---------------------
 
-.. currentmodule:: embodichain.lab.sim.robots.aloha_mini
+.. currentmodule:: embodichain_robots.aloha_mini
 
-.. autosummary::
-
-   AlohaMiniCfg
-
-.. autoclass:: AlohaMiniCfg
+.. py:class:: AlohaMiniCfg
    :no-index:
+
+   Implementation of :class:`embodichain_robots.AlohaMiniCfg`.

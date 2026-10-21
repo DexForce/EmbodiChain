@@ -22,7 +22,7 @@ import numpy as np
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot
-from embodichain.lab.sim.robots import CobotMagicCfg
+from embodichain_robots import CobotMagicCfg
 from embodichain.lab.sim.cfg import RenderCfg
 
 

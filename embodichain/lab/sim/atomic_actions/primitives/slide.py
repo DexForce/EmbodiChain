@@ -55,6 +55,7 @@ from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
 )
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     arm_qpos_from_state,
+    pad_trajectory_to_length,
     resample_planned_trajectory,
 )
 from embodichain.lab.sim.atomic_actions.requirements import (
@@ -224,6 +225,11 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
         context: PlanningContext,
     ) -> ActionPlan:
         """Plan the complete pull/push sequence without stepping simulation."""
+        if request.motion_policy.strategy != "ik_interp":
+            raise ValueError(
+                "Slide requires strategy='ik_interp' because its contact path "
+                "must preserve every Cartesian sample."
+            )
         target = self.require_goal(request)
         affordance = self._require_slide_affordance(target.semantics)
         options = request.skill_options
@@ -483,6 +489,16 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
             hand_open_qpos,
             n_waypoints=options.hand_interp_steps,
         )
+        release_length = max(
+            hand_open.shape[1],
+            0 if release_arm is None else release_arm.shape[1],
+        )
+        hand_open = pad_trajectory_to_length(hand_open, release_length)
+        release_arm_phase = (
+            translate_arm[:, -1:].expand(-1, release_length, -1)
+            if release_arm is None
+            else pad_trajectory_to_length(release_arm, release_length)
+        )
         named_parts: list[tuple[str, torch.Tensor]] = [
             ("approach", approach_arm),
             ("reach", reach_arm),
@@ -508,13 +524,11 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
             full[:, offset:stop, hand_joint_ids] = hand_preshape_qpos.unsqueeze(1)
             offset = stop
 
-        if options.preshape_fraction > 0.0:
-            count = min(approach_arm.shape[1], options.hand_interp_steps)
-            full[:, :count, hand_joint_ids] = interpolate_hand_qpos(
-                context.robot.qpos[:, hand_joint_ids],
-                hand_preshape_qpos,
-                n_waypoints=count,
-            )
+        full[:, : approach_arm.shape[1], hand_joint_ids] = interpolate_hand_qpos(
+            context.last_qpos[:, hand_joint_ids],
+            hand_preshape_qpos,
+            n_waypoints=approach_arm.shape[1],
+        )
 
         stop = offset + hand_close.shape[1]
         full[:, offset:stop, arm_joint_ids] = reach_arm[:, -1].unsqueeze(1)
@@ -527,9 +541,7 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
         offset = stop
 
         stop = offset + hand_open.shape[1]
-        full[:, offset:stop, arm_joint_ids] = (
-            translate_arm[:, -1].unsqueeze(1) if release_arm is None else release_arm
-        )
+        full[:, offset:stop, arm_joint_ids] = release_arm_phase
         full[:, offset:stop, hand_joint_ids] = hand_open
         offset = stop
 
@@ -670,8 +682,12 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
         )
         assert isinstance(result.success, torch.Tensor)
         assert result.positions is not None
+        assert result.dt is not None
         return result.success, resample_planned_trajectory(
-            result.positions, sample_count
+            result.positions,
+            sample_count,
+            dt=result.dt,
+            control_dt=interpolation_dt,
         )
 
 

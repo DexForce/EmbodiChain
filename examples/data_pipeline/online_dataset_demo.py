@@ -34,7 +34,6 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import json
 import time
 from pathlib import Path
 
@@ -67,25 +66,47 @@ def _parse_args() -> argparse.Namespace:
 
 def _build_engine(args: argparse.Namespace) -> OnlineDataEngine:
     """Construct and start an OnlineDataEngine from the given CLI args."""
-    config_path = Path(
-        "embodichain_tasks/configs/tasks/special/simple_task/env_ur10.json"
+    config_path = (
+        Path(__file__).resolve().parents[2]
+        / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml"
     )
     if not config_path.exists():
         raise FileNotFoundError(
             f"Gym config not found: {config_path}. "
-            "Provide a valid path via --config."
+            "Run this example from a checkout containing the official task configs."
         )
 
     from embodichain.utils.utility import load_config
 
     gym_config = load_config(config_path)
 
+    # The engine passes a dictionary to a fresh worker, without a source path.
+    # Resolve this deployment's component references before crossing that boundary.
+    gym_config["environment"] = {
+        "component": str(config_path.parent / gym_config["environment"]["default"])
+    }
+    embodiment = gym_config["embodiment"]
+    embodiment["component"] = str(
+        (config_path.parent / embodiment["component"]).resolve()
+    )
+    gym_config["task_program"] = {
+        key: str((config_path.parent / value).resolve())
+        for key, value in gym_config["task_program"].items()
+    }
+
     gym_config["headless"] = True
     gym_config.setdefault("renderer", "hybrid")
     gym_config["gpu_id"] = 0
     gym_config["device"] = args.device
+    # This sampling example uses proprioception only; avoid allocating image rows.
+    gym_config["enable_sensor"] = False
     cfg = OnlineDataEngineCfg(
-        buffer_size=2, state_dim=6, gym_config=gym_config, buffer_device=args.device
+        buffer_size=2,
+        # Franka has seven arm joints and two finger joints in this deployment.
+        state_dim=9,
+        max_episode_steps=1200,
+        gym_config=gym_config,
+        buffer_device=args.device,
     )
     engine = OnlineDataEngine(cfg)
     engine.start()

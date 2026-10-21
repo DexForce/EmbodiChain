@@ -14,25 +14,36 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Robot-specific configuration presets (``RobotCfg`` subclasses) ready to drop into a simulation scene, plus the ``build_dual_arm_cfg`` dual-arm assembly helper."""
+"""Generic dual-arm composition; concrete presets live in embodichain_robots."""
 
 from __future__ import annotations
 
-from .aloha_mini import AlohaMiniCfg
-from .tianji_marvin import TianjiMarvinCfg
-from .dexforce_w1 import *
-from .cobotmagic import CobotMagicCfg
-from .franka_panda import FrankaPandaCfg
-from .ur_robot import URRobotCfg
-from .dual_arm import DualArmRobotCfg, build_dual_arm_cfg
+from importlib import import_module
+from typing import Any
 
 __all__ = [
-    "AlohaMiniCfg",
-    "TianjiMarvinCfg",
-    "DexforceW1Cfg",
-    "CobotMagicCfg",
-    "FrankaPandaCfg",
-    "URRobotCfg",
     "DualArmRobotCfg",
     "build_dual_arm_cfg",
 ]
+
+_EXPORTS = {
+    "DualArmRobotCfg": ".dual_arm",
+    "build_dual_arm_cfg": ".dual_arm",
+}
+_MODULES = ("dual_arm",)
+
+
+def __getattr__(name: str) -> Any:
+    if name in _MODULES:
+        value = import_module(f".{name}", __name__)
+        globals()[name] = value
+        return value
+    if name not in _EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(_EXPORTS[name], __name__), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__) | set(_MODULES))

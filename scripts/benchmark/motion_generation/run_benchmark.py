@@ -14,14 +14,14 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Run the extensible planner motion-generation benchmark.
+"""Run Motion Planning and Atomic Skills suites through the shared benchmark.
 
 cuRobo is the default primary baseline. IK interpolation and TOPPRA are
 optional diagnostic baselines. NMG is loaded from a standalone ONNX policy.
 
-Run: ``python -m scripts.benchmark.motion_generation.run_benchmark --suite
-smoke`` or select the Franka + PGI Atomic Task slice with
-``--suite atomic_franka_pgi_curobo``.
+Run: ``embodichain benchmark motion-generation --suite
+motion_panda_free_space_smoke`` or select the Franka + PGI Atomic Skills suite
+with ``--suite atomic_franka_pgi_smoke``.
 """
 
 from __future__ import annotations
@@ -48,12 +48,14 @@ def add_parser_arguments(parser: argparse.ArgumentParser) -> None:
     """Add planner benchmark options to an existing argument parser."""
     parser.add_argument(
         "--suite",
-        default="smoke",
+        default="motion_panda_free_space_smoke",
         help=(
-            "Suite short name (smoke/coverage/atomic_franka_pgi_curobo, "
-            "atomic_franka_pgi_curobo_randomized, "
-            "atomic_franka_pgi_curobo_pose_batch) "
-            "or an explicit YAML path."
+            "Suite file stem or explicit YAML path. Motion Planning examples: "
+            "motion_panda_free_space_smoke, motion_panda_free_space_coverage, "
+            "motion_ur5_free_space_coverage. Atomic Skills examples: "
+            "atomic_franka_pgi_smoke, atomic_franka_pgi_randomized, "
+            "atomic_franka_pgi_pose_batch, atomic_ur5_pgi_randomized. "
+            "Default: motion_panda_free_space_smoke."
         ),
     )
     parser.add_argument(
@@ -115,7 +117,7 @@ def add_parser_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--record-video",
         action="store_true",
-        help="Record Atomic Task measured physics-replay videos after evaluation.",
+        help="Record Atomic Skills measured physics-replay videos after evaluation.",
     )
     parser.add_argument(
         "--record-failed-video",
@@ -204,8 +206,23 @@ def _apply_overrides(
         suite.free_space.start_state_bins = start_state_bins
     if seeds is not None:
         suite.free_space.seeds = seeds
+    free_space_overrides = {
+        key: value
+        for key, value in {
+            "batch_sizes": batch_sizes,
+            "waypoint_counts": num_waypoints,
+            "path_shapes": path_shapes,
+            "start_state_bins": start_state_bins,
+            "seeds": seeds,
+        }.items()
+        if value is not None
+    }
+    if free_space_overrides:
         for track in suite.tracks:
-            if track.scenario == "atomic_task":
+            if track.scenario == "free_space":
+                for key, value in free_space_overrides.items():
+                    track.config[key] = list(value)
+            elif track.scenario == "atomic_skill" and seeds is not None:
                 track.config["seeds"] = list(seeds)
     if num_trials is not None:
         suite.protocol.measured_trials = num_trials
@@ -220,8 +237,12 @@ def _apply_overrides(
     if rotation_threshold_rad is not None:
         suite.protocol.rotation_threshold_rad = rotation_threshold_rad
 
-    nmg = next((spec for spec in suite.planners if spec.id == "nmg"), None)
-    if nmg is not None:
+    # Every NMG row, not just the one named "nmg": a suite can pair a nominal
+    # and a retimed arm, and leaving the paired row without a checkpoint would
+    # silently drop it from availability and run no comparison at all. The
+    # paired rows must also keep identical tolerances, or the comparison would
+    # measure a tolerance difference alongside the timing one.
+    for nmg in (spec for spec in suite.planners if spec.adapter == "nmg_onnx"):
         if nmg_pos_eps is not None:
             nmg.config["pos_eps"] = nmg_pos_eps
         if nmg_rot_eps is not None:
@@ -237,7 +258,7 @@ def run_all_benchmarks(
     headless: bool = True,
     nmg_onnx_path: str | None = None,
     *,
-    suite_name: str = "smoke",
+    suite_name: str = "motion_panda_free_space_smoke",
     algorithms: list[str] | None = None,
     extra_baselines: list[str] | None = None,
     batch_sizes: list[int] | None = None,
@@ -317,7 +338,7 @@ def run_from_args(args: argparse.Namespace) -> BenchmarkRunResult:
 def _parse_args() -> argparse.Namespace:
     """Parse standalone module arguments using the unified option schema."""
     parser = argparse.ArgumentParser(
-        description="Benchmark planners on fixed motion and Atomic Task cases."
+        description="Compare planners with Motion Planning or Atomic Skills suites."
     )
     add_parser_arguments(parser)
     return parser.parse_args()

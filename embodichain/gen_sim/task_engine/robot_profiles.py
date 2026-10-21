@@ -26,14 +26,14 @@ import xml.etree.ElementTree as ET
 import numpy as np
 from scipy.spatial.transform import Rotation
 
+from embodichain.utils.config_paths import resolve_config_path
 from embodichain.utils.utility import load_config
 from .contracts import canonical_hash
 
 __all__: list[str] = []
 
-_FRANKA_COMPONENT = (
-    Path(__file__).resolve().parents[3]
-    / "embodichain_tasks/configs/components/embodiments/dual_franka_robotiq_arg2f_140.yaml"
+_FRANKA_COMPONENT = resolve_config_path(
+    "extensions/embodichain_tasks/configs/components/embodiments/dual_franka_robotiq_arg2f_140.yaml"
 )
 _MARVIN_PROFILES = frozenset({"dual_tianji", "tianji_marvin"})
 # Simulation calibration for the low-inertia Marvin links with the heavier
@@ -104,7 +104,7 @@ def _load_robotiq_embodiment(profile: str, output_dir: Path) -> dict[str, Any]:
         return payload
     simulation = payload["simulation"]
     if profile == "dual_ur10":
-        from embodichain.lab.sim.robots import URRobotCfg
+        from embodichain_robots import URRobotCfg
 
         arm = URRobotCfg.from_dict({"robot_type": "ur10"})
         simulation["urdf_cfg"]["fname"] = "dual_ur10_robotiq_arg2f_140"
@@ -137,7 +137,7 @@ def _load_robotiq_embodiment(profile: str, output_dir: Path) -> dict[str, Any]:
         simulation["init_qpos"] = [q for q in home for _ in range(2)] + [0.0] * 12
     else:
         from embodichain.data import get_data_path
-        from embodichain.lab.sim.robots import TianjiMarvinCfg
+        from embodichain_robots import TianjiMarvinCfg
 
         source = Path(get_data_path("TianjiMarvin/robot_acd.urdf"))
         arm = TianjiMarvinCfg.from_dict({"with_gripper": False, "fpath": str(source)})
@@ -380,7 +380,7 @@ def _profile_lateral_positions(
     if profile not in _MARVIN_PROFILES:
         return None
     from embodichain.data import get_data_path
-    from embodichain.lab.sim.robots import TianjiMarvinCfg
+    from embodichain_robots import TianjiMarvinCfg
 
     source = Path(get_data_path("TianjiMarvin/robot_acd.urdf"))
     native = TianjiMarvinCfg.from_dict({"with_gripper": False, "fpath": str(source)})

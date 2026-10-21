@@ -19,9 +19,9 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from embodichain.utils.config_paths import resolve_config_path
 from dataclasses import FrozenInstanceError
 import math
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -919,7 +919,9 @@ def test_curobo_adapter_allocates_only_declared_mesh_cache(monkeypatch) -> None:
 
     cfgs = []
     monkeypatch.setattr(
-        motion, "CheckedMotionGenerator", lambda cfg: cfgs.append(cfg) or object()
+        motion,
+        "CheckedMotionGenerator",
+        lambda cfg, *, motion_contract: cfgs.append(cfg) or object(),
     )
     captured = {}
 
@@ -1428,10 +1430,8 @@ def test_coordinated_hold_lowerer_retains_both_verified_attachments() -> None:
 def test_configured_handover_uses_baseline_timing_and_rejects_removed_wait_field() -> (
     None
 ):
-    path = (
-        Path(__file__).parents[3]
-        / "embodichain_tasks/configs/tasks/manipulation/hand_over"
-        / "task.dual_ur5_dh_pgi_140_80.yaml"
+    path = resolve_config_path(
+        "extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/task.dual_ur5_dh_pgi_140_80.yaml"
     )
     physical = _resolve_gym_components(load_config(path), base_dir=path.parent)
     _, task, policy = _resolve_task_program_components(
@@ -1470,10 +1470,8 @@ def test_gensim_composition_preserves_v38_handover_default_without_mutation(
 ) -> None:
     from embodichain.gen_sim.task_engine._task_program import configured
 
-    path = (
-        Path(__file__).parents[3]
-        / "embodichain_tasks/configs/tasks/manipulation/hand_over"
-        / "task.dual_ur5_dh_pgi_140_80.yaml"
+    path = resolve_config_path(
+        "extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/task.dual_ur5_dh_pgi_140_80.yaml"
     )
     physical = _resolve_gym_components(load_config(path), base_dir=path.parent)
     program_path, task, policy = _resolve_task_program_components(

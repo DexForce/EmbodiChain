@@ -18,7 +18,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
 
@@ -38,7 +39,12 @@ from .artifacts import (
     write_json,
     write_resolved_suite,
 )
-from .config import PlannerSpecCfg, SuiteCfg
+from .config import PlannerSpecCfg, SuiteCfg, stable_hash
+from .embodiments import (
+    EmbodimentResolution,
+    check_embodiment_capabilities,
+    resolve_embodiment,
+)
 from .metrics import timed_call
 from .models import (
     BenchmarkCase,
@@ -116,13 +122,29 @@ class BenchmarkRunner:
         output_root: str | Path = "outputs/benchmarks",
         video: VideoRecordCfg | None = None,
     ) -> None:
-        self.suite = suite
+        self.suite = deepcopy(suite)
+        suite = self.suite
         self.planner_specs = planner_specs
         self.device = resolve_device(device)
         self.headless = headless
         self.output_root = Path(output_root)
         self.video = VideoRecordCfg() if video is None else video
-        self.robot_provider = create_robot_provider(suite.robot)
+        self.embodiment_resolution: EmbodimentResolution = resolve_embodiment(
+            suite.embodiment,
+            suite.robot,
+            base_dir=Path.cwd(),
+        )
+        if suite.embodiment is None:
+            self.robot_provider = create_robot_provider(suite.robot)
+        else:
+            from .robots.base import EmbodimentRobotProvider
+
+            self.robot_provider = EmbodimentRobotProvider(
+                self.embodiment_resolution, suite.embodiment.resource_id
+            )
+            suite.robot = deepcopy(self.robot_provider.spec)
+            for track in suite.tracks:
+                self.robot_provider.configure_track(track)
         self.control_part = self.robot_provider.control_part
         self.records: list[TrialRecord] = []
         self.cases: list[BenchmarkCase] = []
@@ -179,6 +201,9 @@ class BenchmarkRunner:
             "task_difficulty": case.task_difficulty,
             "primary_success": case.primary_success,
             "phase": phase,
+            "domain": case.domain,
+            "track_group": case.track_group,
+            "embodiment_id": case.embodiment_id,
         }
 
     def _record_unavailable(
@@ -189,6 +214,7 @@ class BenchmarkRunner:
         reason: str,
         *,
         failure_code: str,
+        record_metadata: dict[str, object] | None = None,
     ) -> None:
         """Record an unsupported/unavailable planner without counting a failure."""
         self._append(
@@ -198,11 +224,26 @@ class BenchmarkRunner:
                 status="unsupported",
                 failure_code=failure_code,
                 failure_message=reason,
+                metadata={} if record_metadata is None else dict(record_metadata),
             ),
         )
         note = f"{metadata.algorithm_id} skipped for B={case.batch_size}: {reason}"
         self.notes.append(note)
         print(f"SKIPPED: {note}")
+
+    @staticmethod
+    def _trial_metadata(
+        provider: ScenarioProvider,
+        case: BenchmarkCase,
+        metadata: PlannerMetadata,
+    ) -> dict[str, object]:
+        """Record timing provenance for the path that actually owns motion."""
+        values = dict(provider.trial_metadata(case))
+        values.setdefault("timing_is_solved", metadata.timing_is_solved)
+        limits = metadata.parameters.get("resolved_motion_limits")
+        if limits is not None:
+            values["resolved_motion_limits"] = deepcopy(limits)
+        return values
 
     def _record_timed_lifecycle(
         self,
@@ -211,12 +252,16 @@ class BenchmarkRunner:
         case: BenchmarkCase,
         phase: TrialPhase,
         callable_fn: "Callable[[], object]",
+        *,
+        record_metadata: dict[str, object] | None = None,
     ) -> tuple[object | None, Exception | None]:
         """Measure a construct/prepare operation and persist its outcome."""
         measured = timed_call(lambda: _capture(callable_fn))
         result, error = measured.result
         status = "error" if error is not None else "ok"
-        phase_metadata = result if isinstance(result, dict) else {}
+        phase_metadata = dict(result) if isinstance(result, dict) else {}
+        if error is not None and record_metadata is not None:
+            phase_metadata.update(record_metadata)
         self._append(
             writer,
             TrialRecord(
@@ -238,6 +283,30 @@ class BenchmarkRunner:
             )
         return result, error
 
+    def _record_lifecycle_failures(
+        self,
+        writer: TrialJsonlWriter,
+        metadata: PlannerMetadata,
+        cases: list[BenchmarkCase],
+        phase: TrialPhase,
+        *,
+        failure_code: str,
+        failure_message: str,
+        record_metadata: dict[str, dict[str, object]],
+    ) -> None:
+        """Replicate a shared lifecycle failure across every affected case."""
+        for case in cases:
+            self._append(
+                writer,
+                TrialRecord(
+                    **self._base_record(metadata, case, phase),
+                    status="error",
+                    failure_code=failure_code,
+                    failure_message=failure_message,
+                    metadata=dict(record_metadata[case.case_id]),
+                ),
+            )
+
     def _run_plan_call(
         self,
         writer: TrialJsonlWriter,
@@ -251,6 +320,7 @@ class BenchmarkRunner:
         repeat: int,
     ) -> None:
         """Time one plan, validate outside timing, and persist the record."""
+        record_metadata = self._trial_metadata(provider, case, metadata)
         provider.reset_case(sim, robot, case, self.control_part)
         measured = timed_call(
             lambda: _capture(lambda: provider.plan_case(adapter, case))
@@ -276,14 +346,27 @@ class BenchmarkRunner:
             outcomes = ()
         else:
             try:
-                evaluation = provider.evaluate_case(
+                candidate_evaluation = provider.evaluate_case(
                     result,
                     case,
                     robot,
                     self.control_part,
                     self.suite,
                     planning_time_ms=measured.cost_time_ms,
+                    timing_is_solved=bool(record_metadata["timing_is_solved"]),
                 )
+                conflicts = {
+                    key: (record_metadata[key], value)
+                    for key, value in candidate_evaluation.metadata.items()
+                    if key in record_metadata and record_metadata[key] != value
+                }
+                if conflicts:
+                    raise ValueError(
+                        "Scenario evaluation changed pre-plan trial metadata: "
+                        f"{conflicts}."
+                    )
+                record_metadata.update(candidate_evaluation.metadata)
+                evaluation = candidate_evaluation
                 outcomes = evaluation.outcomes
             except Exception as exc:  # noqa: BLE001 - metric failure is recorded
                 status = "error"
@@ -291,7 +374,17 @@ class BenchmarkRunner:
                 failure_message = str(exc)
                 outcomes = provider.failure_outcomes(case, failure_code)
 
-        record_metadata = {} if evaluation is None else dict(evaluation.metadata)
+        if status == "error":
+            outcomes = tuple(
+                replace(
+                    outcome,
+                    timed_motion_valid=(
+                        False if record_metadata["timing_is_solved"] else None
+                    ),
+                )
+                for outcome in outcomes
+            )
+
         video_path = self._maybe_record_replay(
             provider, result, case, evaluation, metadata.algorithm_id, phase
         )
@@ -342,7 +435,7 @@ class BenchmarkRunner:
         algorithm_id: str,
         phase: TrialPhase,
     ) -> Path | None:
-        """Record one measured Atomic Task replay outside planner timing."""
+        """Record one measured Atomic Skill replay outside planner timing."""
         if phase is not TrialPhase.MEASURED or not self.video.enabled:
             return None
         success = bool(
@@ -389,12 +482,46 @@ class BenchmarkRunner:
             device=self.device,
             sample_interval=self.suite.protocol.sample_interval,
             robot_id=self.suite.robot.id,
+            joint_velocity_limit_rad_s=self.suite.protocol.joint_velocity_limit_rad_s,
+            joint_acceleration_limit_rad_s2=(
+                self.suite.protocol.joint_acceleration_limit_rad_s2
+            ),
+            joint_jerk_limit_rad_s3=self.suite.protocol.joint_jerk_limit_rad_s3,
         )
         adapter = create_planner_adapter(spec, context)
         metadata = adapter.metadata
         self.metadata.setdefault(metadata.algorithm_id, metadata)
         supported_cases = []
         for case in cases:
+            embodiment_decision = check_embodiment_capabilities(
+                self.embodiment_resolution,
+                case.required_capabilities,
+            )
+            if embodiment_decision.status != "supported":
+                self._record_unavailable(
+                    writer,
+                    metadata,
+                    case,
+                    embodiment_decision.reason or "unsupported embodiment capability",
+                    failure_code="unsupported_capability",
+                    record_metadata=self._trial_metadata(provider, case, metadata),
+                )
+                continue
+            planner_required_capabilities = set(required_capabilities)
+            missing_planner_capabilities = sorted(
+                planner_required_capabilities - set(adapter.capabilities)
+            )
+            if missing_planner_capabilities:
+                self._record_unavailable(
+                    writer,
+                    metadata,
+                    case,
+                    "missing required capabilities on planner adapter: "
+                    + ", ".join(missing_planner_capabilities),
+                    failure_code="unsupported_capability",
+                    record_metadata=self._trial_metadata(provider, case, metadata),
+                )
+                continue
             motion_capability, modality_reason = _case_motion_capability(case)
             if (
                 motion_capability is None
@@ -407,6 +534,7 @@ class BenchmarkRunner:
                     modality_reason
                     or f"case requires planner capability {motion_capability!r}",
                     failure_code="unsupported_capability",
+                    record_metadata=self._trial_metadata(provider, case, metadata),
                 )
                 continue
             supported, reason = adapter.supports_case(case)
@@ -419,29 +547,26 @@ class BenchmarkRunner:
                 case,
                 reason or "case is outside planner capacity",
                 failure_code="unsupported_capacity",
+                record_metadata=self._trial_metadata(provider, case, metadata),
             )
         if not supported_cases:
             return
         first_case = supported_cases[0]
-        missing = sorted(required_capabilities - adapter.capabilities)
-        if missing:
-            self._record_unavailable(
-                writer,
-                metadata,
-                first_case,
-                f"missing required capabilities: {', '.join(missing)}",
-                failure_code="unsupported_capability",
-            )
-            return
+        lifecycle_metadata = {
+            case.case_id: self._trial_metadata(provider, case, metadata)
+            for case in supported_cases
+        }
         available, reason = adapter.availability()
         if not available:
-            self._record_unavailable(
-                writer,
-                metadata,
-                first_case,
-                reason or "runtime unavailable",
-                failure_code="runtime_unavailable",
-            )
+            for case in supported_cases:
+                self._record_unavailable(
+                    writer,
+                    metadata,
+                    case,
+                    reason or "runtime unavailable",
+                    failure_code="runtime_unavailable",
+                    record_metadata=lifecycle_metadata[case.case_id],
+                )
             return
 
         _, build_error = self._record_timed_lifecycle(
@@ -450,10 +575,28 @@ class BenchmarkRunner:
             first_case,
             TrialPhase.CONSTRUCT,
             adapter.build,
+            record_metadata=lifecycle_metadata[first_case.case_id],
         )
         if build_error is not None:
+            self._record_lifecycle_failures(
+                writer,
+                metadata,
+                supported_cases[1:],
+                TrialPhase.CONSTRUCT,
+                failure_code="planner_exception",
+                failure_message=str(build_error),
+                record_metadata=lifecycle_metadata,
+            )
             adapter.close()
             return
+        # Adapters resolve robot-owned limits during construction. Persist the
+        # actual per-batch budgets rather than only the unresolved suite request.
+        metadata = adapter.metadata
+        self.metadata[metadata.algorithm_id] = metadata
+        lifecycle_metadata = {
+            case.case_id: self._trial_metadata(provider, case, metadata)
+            for case in supported_cases
+        }
         scenario_prepared = False
         try:
             if adapter.separate_prepare:
@@ -463,22 +606,32 @@ class BenchmarkRunner:
                     first_case,
                     TrialPhase.PREPARE,
                     lambda: adapter.prepare_cases(supported_cases),
+                    record_metadata=lifecycle_metadata[first_case.case_id],
                 )
                 if prepare_error is not None:
+                    self._record_lifecycle_failures(
+                        writer,
+                        metadata,
+                        supported_cases[1:],
+                        TrialPhase.PREPARE,
+                        failure_code="planner_exception",
+                        failure_message=str(prepare_error),
+                        record_metadata=lifecycle_metadata,
+                    )
                     return
 
             try:
                 provider.prepare_planner(adapter, first_case)
                 scenario_prepared = True
             except Exception as exc:  # noqa: BLE001 - recorded benchmark failure
-                self._append(
+                self._record_lifecycle_failures(
                     writer,
-                    TrialRecord(
-                        **self._base_record(metadata, first_case, TrialPhase.PREPARE),
-                        status="error",
-                        failure_code="scenario_prepare_error",
-                        failure_message=str(exc),
-                    ),
+                    metadata,
+                    supported_cases,
+                    TrialPhase.PREPARE,
+                    failure_code="scenario_prepare_error",
+                    failure_message=str(exc),
+                    record_metadata=lifecycle_metadata,
                 )
                 self.notes.append(
                     f"{metadata.algorithm_id} scenario prepare failed for "
@@ -534,11 +687,17 @@ class BenchmarkRunner:
         write_resolved_suite(run_dir / "resolved_suite.yaml", self.suite)
         write_json(run_dir / "environment.json", environment_metadata())
         writer = TrialJsonlWriter(run_dir / "trials.jsonl")
+        planner_config_hashes = {
+            spec.id: stable_hash(spec.config) for spec in self.planner_specs
+        }
 
         print("=" * 60)
         print("Motion Generation Benchmark")
         print("=" * 60)
-        enabled_tracks = self.suite.enabled_tracks()
+        enabled_tracks = self.suite.evaluation_tracks()
+        if self.suite.embodiment is not None:
+            for track in enabled_tracks:
+                self.robot_provider.configure_track(track)
         print(
             f"suite={self.suite.suite_version} device={self.device} "
             f"tracks={','.join(track.id for track in enabled_tracks)} "
@@ -567,7 +726,48 @@ class BenchmarkRunner:
                     cases = provider.generate_cases(
                         self.suite, track, robot, self.control_part, batch_size
                     )
+                    domain = (
+                        track.domain.to_identity() if track.domain is not None else None
+                    )
+                    if domain is not None and any(
+                        case.domain not in (None, domain) for case in cases
+                    ):
+                        raise ValueError("Provider domain conflicts with track.domain.")
+                    track_group = track.group_id or track.id
+                    resolved_cases = []
+                    for case in cases:
+                        if (
+                            case.robot_id != self.suite.robot.id
+                            or case.embodiment_id
+                            not in (None, self.embodiment_resolution.embodiment_id)
+                        ):
+                            raise ValueError(
+                                "Provider case conflicts with suite embodiment."
+                            )
+                        case_domain = case.domain or domain
+                        required = set(case.required_capabilities)
+                        if case_domain is not None:
+                            required.update(case_domain.required_capabilities)
+                        resolved_cases.append(
+                            replace(
+                                case,
+                                domain=case_domain,
+                                track_group=track_group,
+                                embodiment_id=case.embodiment_id
+                                or self.embodiment_resolution.embodiment_id,
+                                required_capabilities=frozenset(required),
+                            )
+                        )
+                    cases = resolved_cases
                     self.cases.extend(cases)
+                    # Persist each frozen population before evaluating candidates.
+                    write_case_manifest(
+                        run_dir / "case_manifest.json",
+                        self.cases,
+                        suite=self.suite,
+                        planner_config_hashes=planner_config_hashes,
+                        embodiment_resolution=self.embodiment_resolution,
+                    )
                     for spec in self.planner_specs:
                         self._run_adapter(
                             writer,
@@ -588,7 +788,13 @@ class BenchmarkRunner:
                         sim.destroy(exit_process=False)
                         SimulationManager.flush_cleanup_queue()
 
-        write_case_manifest(run_dir / "case_manifest.json", self.cases)
+        write_case_manifest(
+            run_dir / "case_manifest.json",
+            self.cases,
+            suite=self.suite,
+            planner_config_hashes=planner_config_hashes,
+            embodiment_resolution=self.embodiment_resolution,
+        )
         metadata = [
             self.metadata[spec.id]
             for spec in self.planner_specs
@@ -599,22 +805,30 @@ class BenchmarkRunner:
             metadata,
             self.cases,
             self.suite.protocol.measured_trials,
+            track_scenarios={track.id: track.scenario for track in enabled_tracks},
         )
-        write_json(run_dir / "aggregates.json", aggregates)
+        write_json(
+            run_dir / "aggregates.json",
+            {
+                "report_schema_version": self.suite.protocol.report_schema_version,
+                **aggregates,
+            },
+        )
         enabled_scenarios = {track.scenario for track in enabled_tracks}
         track_notes: list[str] = []
         if "free_space" in enabled_scenarios:
             track_notes.append(
-                "Collision, dynamic, execution, and task metrics are N/A in "
-                "free-space-common v1."
+                "Motion Planning validates geometry and reports sampled dynamics "
+                "separately for solved timing. Collision, physical execution, and "
+                "task completion are not evaluated by free_space."
             )
-        if "atomic_task" in enabled_scenarios:
+        if "atomic_skill" in enabled_scenarios:
             track_notes.extend(
                 [
-                    "Atomic Task cost_time_ms measures AtomicActionEngine.compile only; "
+                    "Atomic Skill cost_time_ms measures AtomicActionEngine.compile only; "
                     "execution_time_ms is common physics-replay wall time and "
                     "end_to_end_time_ms is their sum.",
-                    "trajectory_duration_s is planner-native nominal duration; "
+                    "trajectory_duration_s is available only for solved trajectory timing; "
                     "task_completion_time_s is simulated replay time through the "
                     "stability hold for successful tasks.",
                 ]
@@ -626,32 +840,23 @@ class BenchmarkRunner:
             aggregates,
             notes=[
                 "CPU/GPU memory values are process/PyTorch allocator deltas around timed calls.",
-                "External position/rotation thresholds (default 0.01 m / 0.1 rad) are "
-                "feasibility gates for ordered_waypoints_reached / motion_valid. "
-                "Read final_*_err and waypoint_*_p95 for finer precision on the "
-                "motion-valid subset.",
-                "Continuous error and path metrics (final_*_err, waypoint_*_p95, "
-                "path lengths, path_efficiency) average only motion_valid outcomes "
-                "(success-conditioned / survivor-biased). Always read them with n_valid; "
-                "a high path_efficiency on n_valid=2 is not comparable to n_valid=200.",
+                "Ordered Cartesian matching uses position/rotation thresholds of "
+                f"{self.suite.protocol.position_threshold_m:g} m / "
+                f"{self.suite.protocol.rotation_threshold_rad:g} rad. Joint tasks "
+                "use ordered joint-waypoint error and keep Cartesian errors as diagnostics.",
+                "Continuous error and path metrics average only geometry_valid outcomes; "
+                "read these success-conditioned values alongside n_valid and success rates.",
                 *track_notes,
-                "Leaderboard and Success-table boolean rates "
-                "(overall_success_rate / success_rate / motion_valid_rate / "
-                "planning_success_rate / ordered_waypoint_success_rate) are macro averages "
-                "over mandatory cases (equal case weight after within-case env/repeat "
-                "micro-average). Missing cases contribute 0.0. coverage_rate remains "
-                "outcome-count completeness.",
-                "Leaderboard latency_p95_ms is a case-macro tiebreaker: mean warm "
-                "cost_time_ms within each case, then nearest-rank p95 across cases "
-                "(equal case weight; missing cases omitted). Stratified absolute latency "
-                "stays in Time & Memory (warm_plan_ms_p50/p95 by batch_size/waypoint_count).",
-                "cold_plan_ms is reported only on the Time & Memory row whose waypoint_count "
-                "matches the first real case measured for that batch; other waypoint rows "
-                "show N/A. planner_construct_ms / backend_prepare_ms are one-time batch costs.",
-                "Cartesian tasks use the same threshold-greedy pose matching for "
-                "continuous errors and motion validity. Joint tasks use ordered joint "
-                "waypoint error for motion validity and retain Cartesian errors as "
-                "auxiliary diagnostics.",
+                "Success rates give each mandatory case equal weight after averaging its "
+                "environment/repeat outcomes. Unsupported cases are N/A; missing supported "
+                "results count as failures. coverage_rate measures outcome completeness.",
+                "Ranking latency uses nearest-rank p95 of per-case mean warm cost_time_ms, "
+                "omitting missing cases: latency_p95_ms for Motion Planning and "
+                "compile_latency_p95_ms for Atomic Skills. Time & Memory retains trial-level "
+                "latency by batch_size/waypoint_count.",
+                "planner_construct_ms / backend_prepare_ms are one-time batch costs. "
+                "cold_plan_ms appears only on the row matching that batch's first measured "
+                "case; other waypoint rows show N/A.",
                 *self.notes,
             ],
         )

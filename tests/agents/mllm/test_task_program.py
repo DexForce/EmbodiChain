@@ -180,6 +180,20 @@ def test_decoder_injects_exact_host_integration() -> None:
     assert config.integration.runtime_preset == "safe"
 
 
+def test_mllm_frontend_preserves_overall_instruction_through_compilation() -> None:
+    data = _model_data()
+    data["instruction"] = "Pick up the cube."
+    response = json.dumps(data)
+    config = decode_mllm_task_program(response, integration=_integration())
+    compiled = compile_mllm_task_program(
+        response,
+        adapter=_adapter(_CompileOnlyFactory()),
+        integration=_integration(),
+    )
+    assert config.instruction == "Pick up the cube."
+    assert compiled.instruction == config.instruction
+
+
 def test_decoder_rejects_model_controlled_integration() -> None:
     response = _model_data()
     response["integration"] = {

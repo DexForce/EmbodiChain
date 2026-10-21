@@ -101,6 +101,11 @@ class ScenarioProvider(ABC):
     def close_planner(self, adapter: "PlannerAdapter") -> None:
         """Release scenario resources that retain a planner adapter."""
 
+    def trial_metadata(self, case: "BenchmarkCase") -> dict[str, object]:
+        """Return scenario attribution known before a planning call."""
+        del case
+        return {"timing_scope": "planner_call"}
+
     def reset_case(
         self,
         simulation: "SimulationManager",
@@ -116,7 +121,7 @@ class ScenarioProvider(ABC):
             for target in (False, True):
                 robot.set_qpos(case.start_qpos, name=control_part, target=target)
         robot.clear_dynamics()
-        simulation.update(step=1)
+        simulation.sync_render_state()
 
     def plan_case(self, adapter: "PlannerAdapter", case: "BenchmarkCase") -> object:
         """Plan one case through the selected adapter."""
@@ -143,6 +148,7 @@ class ScenarioProvider(ABC):
         suite: "SuiteCfg",
         *,
         planning_time_ms: float,
+        timing_is_solved: bool = True,
     ) -> ScenarioEvaluation:
         """Externally validate a planner-only trajectory."""
         if not isinstance(result, PlanResult):
@@ -156,8 +162,22 @@ class ScenarioProvider(ABC):
             position_threshold_m=suite.protocol.position_threshold_m,
             rotation_threshold_rad=suite.protocol.rotation_threshold_rad,
             joint_limit_tolerance_rad=suite.protocol.joint_limit_tolerance_rad,
+            joint_velocity_limit_rad_s=suite.protocol.joint_velocity_limit_rad_s,
+            joint_acceleration_limit_rad_s2=(
+                suite.protocol.joint_acceleration_limit_rad_s2
+            ),
+            joint_jerk_limit_rad_s3=suite.protocol.joint_jerk_limit_rad_s3,
+            dynamic_limit_tolerance=suite.protocol.dynamic_limit_tolerance,
+            timing_is_solved=timing_is_solved,
         )
-        return ScenarioEvaluation(outcomes=outcomes)
+        # Only a solved parameterization has a duration worth publishing; a
+        # nominal clock is filtered out downstream by `timing_is_solved`.
+        duration = (
+            float(result.dt.sum(dim=-1).mean().item())
+            if result.dt is not None and result.dt.numel()
+            else None
+        )
+        return ScenarioEvaluation(outcomes=outcomes, trajectory_duration_s=duration)
 
     def record_replay(
         self,

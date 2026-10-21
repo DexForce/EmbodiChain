@@ -762,6 +762,8 @@ class RigidObject(BatchEntity):
     ) -> None:
         """Set local pose of the rigid object.
 
+        Pose writes do not advance physics or move other scene objects.
+
         Args:
             pose (torch.Tensor): The local pose of the rigid object with shape (N, 7) or (N, 4, 4).
             env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
@@ -2026,6 +2028,11 @@ class RigidObject(BatchEntity):
         apply_rigid_initial_state(self)
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
+        """Restore selected instances' initial state without advancing physics.
+
+        Args:
+            env_ids: Environment indices to reset. None resets all instances.
+        """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
         self.restore_visual_material(env_ids=local_env_ids)

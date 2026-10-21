@@ -103,7 +103,7 @@ def test_new_mount_uses_arm_anchor_not_franka_root_offset(tmp_path: Path) -> Non
 def test_ur10_initial_and_park_tcp_face_the_table(tmp_path: Path) -> None:
     import torch
     from scipy.spatial.transform import Rotation
-    from embodichain.lab.sim.robots import URRobotCfg
+    from embodichain_robots import URRobotCfg
     from embodichain.gen_sim.task_engine.task_program_bundle import (
         _bind_embodiment_to_scene,
     )
@@ -176,7 +176,7 @@ def test_ur10_fk_chain_matches_solver_and_gripper(tmp_path: Path) -> None:
 def marvin_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Synthetic fourteen-joint body tests assembly, not real Marvin geometry."""
     from embodichain import data
-    from embodichain.lab.sim.robots import tianji_marvin
+    from embodichain_robots import tianji_marvin
 
     root = ET.Element("robot", name="marvin_fixture")
     body = ET.SubElement(root, "link", name="base_link")
@@ -385,7 +385,7 @@ def test_marvin_robotiq_armature_does_not_change_hands_or_lab_defaults(
     tmp_path: Path, marvin_source: Path
 ) -> None:
     from embodichain.lab.sim.cfg import RobotCfg
-    from embodichain.lab.sim.robots import TianjiMarvinCfg
+    from embodichain_robots import TianjiMarvinCfg
 
     native = TianjiMarvinCfg.from_dict(
         {"with_gripper": False, "fpath": str(marvin_source)}

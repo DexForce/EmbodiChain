@@ -320,8 +320,14 @@ class _PayloadPlanner(CuroboPlanner):
 class DrawerMotionGenerator(CheckedMotionGenerator):
     """Use cuRobo only inside the explicit held-transport planning scope."""
 
-    def __init__(self, cfg: MotionGenCfg, *, simulation: Any) -> None:
-        super().__init__(cfg)
+    def __init__(
+        self,
+        cfg: MotionGenCfg,
+        *,
+        simulation: Any,
+        motion_contract: str = "lab.motion_limits/v1",
+    ) -> None:
+        super().__init__(cfg, motion_contract=motion_contract)
         self._simulation = simulation
         self._transport = None
         self._placement_path = None

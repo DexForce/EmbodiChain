@@ -218,6 +218,7 @@ def with_held_alignment(
     program: dict[str, Any],
     constraints: Any,
     verify_retention: bool = False,
+    hand_source: str = "observed",
 ) -> Any:
     axes = {
         cfg.entity: cfg.local_axis
@@ -265,7 +266,7 @@ def with_held_alignment(
     presets = []
     for preset in registration.robot_profile_binding.presets:
         options = dict(preset.action_option_templates)
-        options[ALIGN_HELD_CALL] = MoveHeldObjectOptions()
+        options[ALIGN_HELD_CALL] = MoveHeldObjectOptions(hand_source=hand_source)
         monitors = dict(preset.effect_monitors)
         if verify_retention and preset.effect_assurance is EffectAssurance.VERIFIED:
             # Match the ordinary GenSim transport's measured retention contract.

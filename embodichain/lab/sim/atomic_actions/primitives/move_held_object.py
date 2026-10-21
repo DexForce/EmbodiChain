@@ -19,9 +19,9 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 import torch
 
@@ -108,6 +108,15 @@ class HeldObjectPoseGoal:
 class MoveHeldObjectOptions(ActionOptions):
     """Per-invocation held-object transport behavior."""
 
+    hand_source: Literal["observed", "grasp_command"] = field(
+        default="observed", kw_only=True
+    )
+    """Keep the measured hand posture or actively retain its bound grasp command."""
+
+    def __post_init__(self) -> None:
+        if self.hand_source not in ("observed", "grasp_command"):
+            raise ValueError("hand_source must be observed or grasp_command.")
+
 
 class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
     """Move the held object through exact target poses with a closed hand.
@@ -157,12 +166,6 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
         control_part = motion_target.control_part
         arm_joint_ids = list(motion_target.joint_ids)
         hand_joint_ids = list(grasp_target.joint_ids)
-        hand_grasp_qpos = grasp.joint_positions(
-            GRASP_COMMAND,
-            num_envs=context.batch_size,
-            device=self.device,
-            dtype=context.robot.qpos.dtype,
-        )
         state = context
         held_object = state.get_held_object(task_state_key)
         if held_object is None:
@@ -227,7 +230,13 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
         success = result.success & eligible
 
         base_qpos = state.last_qpos.clone()
-        base_qpos[:, hand_joint_ids] = hand_grasp_qpos
+        if options.hand_source == "grasp_command":
+            base_qpos[:, hand_joint_ids] = grasp.joint_positions(
+                GRASP_COMMAND,
+                num_envs=context.batch_size,
+                device=self.device,
+                dtype=context.robot.qpos.dtype,
+            )
         _, timed = to_full_robot_trajectory(
             result,
             base_qpos=base_qpos,

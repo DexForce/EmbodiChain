@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Protocol, runtime_checkable
 
@@ -95,6 +95,7 @@ from .results import (
     SkillPlanAttemptTrace,
     SkillWorkflowRecoveryRole,
     SkillWorkflowRecoveryTrace,
+    _HistoryJournal,
     _snapshot_event,
     _snapshot_task_state,
 )
@@ -106,6 +107,30 @@ from ..compiler.lowering import (
     HeldObjectGuardBaseline,
     SemanticCallCompiler,
 )
+
+
+class _WorkflowCalls(Sequence[SemanticCallSpec]):
+    """Constant-size view of an analyzed workflow's remaining calls."""
+
+    def __init__(self, workflow: object, offset: int) -> None:
+        self._analyzed = workflow.calls
+        self._offset = offset
+
+    def __len__(self) -> int:
+        return len(self._analyzed) - self._offset
+
+    def __getitem__(
+        self, index: int | slice
+    ) -> SemanticCallSpec | tuple[SemanticCallSpec, ...]:
+        if isinstance(index, slice):
+            return tuple(
+                self[position] for position in range(*index.indices(len(self)))
+            )
+        if index < 0:
+            index += len(self)
+        if not 0 <= index < len(self):
+            raise IndexError(index)
+        return self._analyzed[self._offset + index].call
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -298,7 +323,8 @@ class SemanticCallExecutor:
         self._status = SemanticExecutionStatus.IDLE
         self._workflow: object | None = None
         self._workflow_id: str | None = None
-        self._calls: tuple[SemanticCallSpec, ...] = ()
+        self._calls: Sequence[SemanticCallSpec] = ()
+        self._analysis_call_offset = 0
         self._execution_prefix_length = 0
         self._current_call_index: int | None = None
         self._runner: ExecutionRunner | None = None
@@ -315,11 +341,13 @@ class SemanticCallExecutor:
         self._success = torch.zeros_like(self._eligible)
         self._failed = torch.zeros_like(self._eligible)
         self._cancelled = torch.zeros_like(self._eligible)
-        self._events: list[ExecutionEvent] = []
-        self._call_traces: list[SkillCallTrace] = []
-        self._effect_traces: list[SkillEffectTrace] = []
-        self._workflow_recovery_traces: list[SkillWorkflowRecoveryTrace] = []
-        self._failures: list[SkillFailure] = []
+        self._events: _HistoryJournal[ExecutionEvent] = _HistoryJournal()
+        self._call_traces: _HistoryJournal[SkillCallTrace] = _HistoryJournal()
+        self._effect_traces: _HistoryJournal[SkillEffectTrace] = _HistoryJournal()
+        self._workflow_recovery_traces: _HistoryJournal[SkillWorkflowRecoveryTrace] = (
+            _HistoryJournal()
+        )
+        self._failures: _HistoryJournal[SkillFailure] = _HistoryJournal()
         self._call_event_offset = 0
         self._call_effect_offset = 0
         self._observation_revision = 0
@@ -442,11 +470,13 @@ class SemanticCallExecutor:
             cancelled_mask=self._cancelled,
             eligible_mask=self._eligible,
             task_state=self._task_state,
-            events=tuple(self._events),
-            calls=tuple(self._call_traces),
-            effects=tuple(self._effect_traces),
-            workflow_recoveries=tuple(self._workflow_recovery_traces),
-            failures=tuple(self._failures),
+            events=self._events.snapshot(_snapshot_event),
+            calls=self._call_traces.snapshot(SkillCallTrace.snapshot),
+            effects=self._effect_traces.snapshot(SkillEffectTrace.snapshot),
+            workflow_recoveries=self._workflow_recovery_traces.snapshot(
+                SkillWorkflowRecoveryTrace.snapshot
+            ),
+            failures=self._failures.snapshot(SkillFailure.snapshot),
             wait_duration=self._wait_duration,
             message=self._message,
         )
@@ -492,6 +522,42 @@ class SemanticCallExecutor:
         try:
             self._prepare_call(0)
         except Exception as exc:  # noqa: BLE001 - return one uniform result
+            self._fail_preparation(0, exc)
+        return self.result
+
+    def _start_analyzed(
+        self,
+        workflow: object,
+        *,
+        call_offset: int,
+        execution_prefix_length: int,
+        workflow_id: str,
+        eligible_mask: torch.Tensor | None,
+    ) -> SemanticExecutionResult:
+        """Execute a segment using a previously analyzed sequential stretch.
+
+        The bridge owns the cache; compiler ownership/revision checks and live
+        grounding still run before execution. Runtime indices remain local to
+        this segment, while grounding addresses the complete analyzed workflow.
+        """
+        if self._status is SemanticExecutionStatus.RUNNING:
+            raise RuntimeError("A semantic workflow is already running.")
+        self._compiler._assert_workflow_current(workflow, path=("workflow",))
+        calls = _WorkflowCalls(workflow, call_offset)
+        prefix_length = self._normalize_execution_prefix_length(
+            execution_prefix_length, call_count=len(calls)
+        )
+        self._reset_workflow(
+            calls,
+            workflow,
+            workflow_id=workflow_id,
+            eligible_mask=eligible_mask,
+            execution_prefix_length=prefix_length,
+        )
+        self._analysis_call_offset = call_offset
+        try:
+            self._prepare_call(0)
+        except Exception as exc:
             self._fail_preparation(0, exc)
         return self.result
 
@@ -549,7 +615,12 @@ class SemanticCallExecutor:
             held_object_guard_verifier=guard_verifier,
         )
         if self._step_observer is not None:
-            self._step_observer(runner_step)
+            try:
+                self._step_observer(runner_step)
+            except Exception as exc:
+                self._consume_runner_step(runner_step)
+                self._abort(f"Step observer failed: {type(exc).__name__}: {exc}")
+                return self.result
         self._consume_runner_step(runner_step)
         if (
             runner_step.status is RunnerStatus.RUNNING
@@ -591,6 +662,8 @@ class SemanticCallExecutor:
             raise ValueError("max_steps must be a positive integer.")
         if on_step is not None and not callable(on_step):
             raise TypeError("on_step must be callable or None.")
+        if self._status is SemanticExecutionStatus.RUNNING:
+            raise RuntimeError("A semantic workflow is already running.")
         previous_observer = self._step_observer
         self._step_observer = on_step
         try:
@@ -607,6 +680,11 @@ class SemanticCallExecutor:
                     self._clock.sleep(result.wait_duration)
                 result = self.step()
             self._abort(f"Semantic runtime exceeded max_steps={max_steps}.")
+            return self.result
+        except Exception as exc:
+            if self._status is not SemanticExecutionStatus.RUNNING:
+                raise
+            self._abort(f"Semantic runtime failed: {type(exc).__name__}: {exc}")
             return self.result
         finally:
             self._step_observer = previous_observer
@@ -803,7 +881,7 @@ class SemanticCallExecutor:
 
     def _reset_workflow(
         self,
-        calls: tuple[SemanticCallSpec, ...],
+        calls: Sequence[SemanticCallSpec],
         workflow: object,
         *,
         workflow_id: str,
@@ -833,6 +911,7 @@ class SemanticCallExecutor:
         self._workflow = workflow
         self._workflow_id = workflow_id
         self._calls = calls
+        self._analysis_call_offset = 0
         self._execution_prefix_length = execution_prefix_length
         self._current_call_index = 0
         self._runner = None
@@ -844,11 +923,11 @@ class SemanticCallExecutor:
         self._success = torch.zeros_like(eligible)
         self._failed = torch.zeros_like(eligible)
         self._cancelled = torch.zeros_like(eligible)
-        self._events = []
-        self._call_traces = []
-        self._effect_traces = []
-        self._workflow_recovery_traces = []
-        self._failures = []
+        self._events = _HistoryJournal()
+        self._call_traces = _HistoryJournal()
+        self._effect_traces = _HistoryJournal()
+        self._workflow_recovery_traces = _HistoryJournal()
+        self._failures = _HistoryJournal()
         self._call_event_offset = 0
         self._call_effect_offset = 0
         self._observation_revision = 0
@@ -898,7 +977,7 @@ class SemanticCallExecutor:
         assert self._workflow is not None
         self._prepare_grounded_call(
             self._workflow,
-            analysis_call_index=call_index,
+            analysis_call_index=self._analysis_call_offset + call_index,
             workflow_call_index=call_index,
             call=self._calls[call_index],
             active_mask=self._eligible,
@@ -950,6 +1029,11 @@ class SemanticCallExecutor:
             analysis_call_index,
             context,
             eligible_mask=active_mask,
+            invocation_id=(
+                f"{self._workflow_id}:{workflow_call_index}"
+                if recovery_item is None
+                else None
+            ),
         )
         invocation = grounded.invocation
         grounded_eligible = grounded.eligible_mask
@@ -2110,7 +2194,7 @@ class SemanticCallExecutor:
         if analyzed is None:
             workflow_calls = getattr(self._workflow, "calls", ())
             if call_index < len(workflow_calls):
-                analyzed = workflow_calls[call_index]
+                analyzed = workflow_calls[self._analysis_call_offset + call_index]
         bound = getattr(analyzed, "bound", None)
         if bound is None:
             return
@@ -2170,6 +2254,8 @@ class SemanticCallExecutor:
         if self._runner is not None:
             recovery_item = self._active_recovery_item
             safe_stop_step = self._runner.cancel(reason)
+            if safe_stop_step.status is RunnerStatus.FAILED and safe_stop_step.message:
+                reason = f"{reason}; safe stop failed: {safe_stop_step.message}"
             runner_step = replace(
                 safe_stop_step,
                 status=RunnerStatus.FAILED,

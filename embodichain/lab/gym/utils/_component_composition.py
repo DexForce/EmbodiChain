@@ -23,6 +23,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 
+from embodichain.utils.config_paths import resolve_config_path
 from embodichain.utils.utility import load_config
 
 __all__: list[str] = []
@@ -54,6 +55,7 @@ _ENVIRONMENT_DEPLOYMENT_OVERRIDE_FIELDS = frozenset(
 _SCENE_SIMULATION_FIELDS = frozenset(
     {
         "light",
+        "visual_object",
         "background",
         "rigid_object",
         "rigid_object_group",
@@ -107,12 +109,9 @@ def _component_path(
     base_dir: Path,
     path: str,
 ) -> Path:
-    """Resolve one YAML component path relative to its owner."""
+    """Resolve one packaged or owner-relative YAML component path."""
     selected = _identifier(value, path=path)
-    component_path = Path(selected).expanduser()
-    if not component_path.is_absolute():
-        component_path = base_dir / component_path
-    component_path = component_path.resolve()
+    component_path = resolve_config_path(selected, base_dir=base_dir).resolve()
     if component_path.suffix.lower() not in {".yaml", ".yml"}:
         raise ValueError(f"{path} must be a YAML file: {component_path}.")
     if not component_path.is_file():
@@ -139,6 +138,30 @@ def _owned_sequence(value: object, *, path: str) -> list[object]:
 def _load_yaml_component(path: Path, *, field_name: str) -> dict[str, object]:
     """Load one YAML component mapping."""
     return _owned_mapping(load_config(path), path=field_name)
+
+
+def _resolve_local_resource_paths(value: object, *, base_dir: Path) -> None:
+    """Resolve explicitly relative resource files from their declaring owner.
+
+    Bare paths remain dataset registry identifiers. The ``./`` or ``../``
+    prefix opts into owner-relative files without CWD-dependent probing.
+    """
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if (
+                key in {"fpath", "urdf_path", "xml_path"}
+                and isinstance(child, str)
+                and child.startswith(("./", "../"))
+            ):
+                selected = (base_dir / child).resolve()
+                if not selected.is_file():
+                    raise FileNotFoundError(selected)
+                value[key] = str(selected)
+            else:
+                _resolve_local_resource_paths(child, base_dir=base_dir)
+    elif isinstance(value, list):
+        for child in value:
+            _resolve_local_resource_paths(child, base_dir=base_dir)
 
 
 def _resolve_environment_component(
@@ -224,6 +247,7 @@ def _resolve_environment_component(
         if key not in {"environment_id", "simulation"}
     }
     environment_values.update(deepcopy(dict(simulation)))
+    _resolve_local_resource_paths(environment_values, base_dir=component_path.parent)
 
     deployment_physics_fields = sorted(
         {"physics", "physics_config"}.intersection(resolved)
@@ -293,6 +317,8 @@ def _resolve_embodiment_component(
         optional=_EMBODIMENT_OVERRIDE_FIELDS,
     )
     simulation.update(deepcopy(dict(overrides)))
+    _resolve_local_resource_paths(simulation, base_dir=component_path.parent)
+    _resolve_local_resource_paths(sensors, base_dir=component_path.parent)
     skill_profile = None
     if "skill_profile" in component:
         skill_profile = _owned_mapping(
@@ -330,7 +356,9 @@ def _resolve_scene_component(
         required=frozenset(),
         optional=_SCENE_SIMULATION_FIELDS,
     )
-    return deepcopy(dict(simulation))
+    resolved = deepcopy(dict(simulation))
+    _resolve_local_resource_paths(resolved, base_dir=component_path.parent)
+    return resolved
 
 
 def _physical_scene_uids(
@@ -411,6 +439,7 @@ def _resolve_gym_components(
     """Expand optional environment, embodiment, and scene selectors."""
     resolved = _owned_mapping(config, path="Gym config")
     selected_base_dir = Path(base_dir).expanduser()
+    _resolve_local_resource_paths(resolved, base_dir=selected_base_dir)
 
     if "task" in resolved:
         raise ValueError(

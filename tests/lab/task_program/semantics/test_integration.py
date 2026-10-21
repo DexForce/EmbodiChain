@@ -1056,3 +1056,62 @@ def test_bound_semantic_integration_rejects_manifest_subclass_behavior() -> None
             robot_profile=bound_profile,
             engine=engine,
         )
+
+
+def test_pose_source_revision_survives_projection_and_rejects_live_identity_drift() -> (
+    None
+):
+    """Provider pose declarations participate in static/live identity matching."""
+    provider = _NeverObservedStateProvider()
+
+    def registry(revision: str | None) -> SceneRegistry:
+        return SceneRegistry(
+            (
+                SceneEntityRegistration(
+                    ref=SceneObjectRef("cube"),
+                    state_provider=provider,
+                    pose_source_revision=revision,
+                ),
+            )
+        )
+
+    original = registry("pose-v1")
+    projected = SceneEntityMetadata.from_registration(original.registrations[0])
+    assert projected.pose_source_revision == "pose-v1"
+    manifest = SceneManifest.from_registry(original)
+    assert manifest.entries[0].pose_source_revision == "pose-v1"
+    manifest.validate_registry(registry("pose-v1"))
+    for changed_revision in ("pose-v2", None):
+        with pytest.raises(SemanticValidationError) as error:
+            manifest.validate_registry(registry(changed_revision))
+        assert error.value.diagnostic.code == "scene_manifest_mismatch"
+    assert provider.calls == 0
+
+
+@pytest.mark.parametrize("revision", ["", " padded", "padded ", 1, True])
+def test_pose_source_revision_requires_an_identifier(revision: object) -> None:
+    """Static metadata and live registration share revision validation."""
+    with pytest.raises((TypeError, ValueError), match="pose_source_revision"):
+        SceneEntityMetadata(ref=SceneObjectRef("cube"), pose_source_revision=revision)
+    with pytest.raises((TypeError, ValueError), match="pose_source_revision"):
+        SceneEntityRegistration(
+            ref=SceneObjectRef("cube"),
+            state_provider=_NeverObservedStateProvider(),
+            pose_source_revision=revision,
+        )
+
+
+def test_pose_source_revision_requires_a_provider_and_defaults_to_none() -> None:
+    """Existing parent-relative affordances remain compatible without revisions."""
+    declaration = {
+        "ref": SceneAffordanceRef("cube.grasp"),
+        "parent": SceneObjectRef("cube"),
+        "native_name": "grasp",
+        "relative_pose": torch.eye(4),
+        "affordance": Affordance(),
+    }
+    assert SceneEntityRegistration(**declaration).pose_source_revision is None
+    with pytest.raises(
+        ValueError, match="pose_source_revision requires state_provider"
+    ):
+        SceneEntityRegistration(**declaration, pose_source_revision="pose-v1")

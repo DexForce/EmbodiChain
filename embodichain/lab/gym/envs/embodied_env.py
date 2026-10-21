@@ -16,18 +16,22 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from math import log
 from functools import wraps
 from datetime import datetime
+import logging
 import os
 import threading
 import copy
+from pathlib import Path
+import tempfile
+from uuid import uuid4
 import torch
 import numpy as np
 import gymnasium as gym
 
-from dataclasses import MISSING
+from dataclasses import MISSING, fields
 from typing import (
     TYPE_CHECKING,
     Dict,
@@ -36,6 +40,7 @@ from typing import (
     Any,
     Iterable,
     List,
+    Literal,
     Optional,
 )
 from tensordict import TensorDict
@@ -44,12 +49,13 @@ from embodichain.lab.sim.cfg import (
     RobotCfg,
     RobotPresetCfg,
     RigidObjectCfg,
+    VisualObjectCfg,
     RigidObjectGroupCfg,
     ArticulationCfg,
     LightCfg,
 )
 from embodichain.lab.sim.objects import Robot
-from embodichain.lab.sim.sensors import BaseSensor, SensorCfg
+from embodichain.lab.sim.sensors import BaseSensor, Camera, SensorCfg
 from embodichain.lab.sim.types import EnvObs, EnvAction
 from embodichain.lab.gym.envs import BaseEnv, EnvCfg
 from embodichain.lab.gym.envs._startup_summary import format_functor_summary
@@ -78,14 +84,18 @@ from embodichain.lab.gym.envs.managers import (
     ActionManager,
     ActionTrace,
     DatasetManager,
+    FunctorCfg,
 )
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.lab.gym.utils.gym_utils import (
+    _collect_sensor_cfgs,
     build_trajectory_buffer,
     init_rollout_buffer_from_gym_space,
 )
 from embodichain.lab.gym.utils.trajectory_state import capture_trajectory_state
+from embodichain.data_pipeline.recording import build_recording_provenance
 from embodichain.utils import configclass, logger
+from embodichain.utils.string import string_to_callable
 from embodichain.data import get_data_path
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
 
@@ -127,8 +137,8 @@ class EmbodiedEnvCfg(EnvCfg):
         `None`, all controllable joints are used.
     - **active_joint_ids**: List[int] — explicit joint indices to use for
         control (alternative to `control_parts`).
-    - **sensor**: List[`SensorCfg`] — sensors attached to the robot or scene
-        (cameras, depth, segmentation, force sensors, ...).
+    - **sensor**: List[`SensorCfg`] — independent sensors. Mounted cameras
+        declared by `robot.sensors` are included in the effective sensor suite.
     - **light**: `EnvLightCfg` — lighting configuration (direct lights now,
         indirect/IBL planned for future releases).
     - **background**, **rigid_object**, **rigid_object_group**, **articulation**:
@@ -173,15 +183,28 @@ class EmbodiedEnvCfg(EnvCfg):
     """
 
     sensor: List[SensorCfg] = []
+    """Independent sensors, combined with the robot's mounted sensor suite."""
     enable_sensor: bool = True
     """Whether configured sensors are instantiated and sampled.
 
-    Embodiment components may declare a reusable sensor suite even when a
-    deployment only needs proprioception. Set this to ``False`` to skip
+    Independent declarations and robot-mounted defaults remain available when
+    a deployment only needs proprioception. Set this to ``False`` to skip all
     sensor creation, including camera-group allocation and image fetching.
     """
 
     light: EnvLightCfg = EnvLightCfg()
+
+    ground_plane_visible: bool | None = None
+    """Native rendering visibility of the default ground plane.
+
+    ``None`` hides the ground when an active HDR indirect-lighting randomizer
+    is configured, and shows it otherwise. Explicit booleans override that
+    default. Visibility affects native windows and cameras without changing
+    ground collisions or the Viser grid.
+    """
+
+    visual_object: list[VisualObjectCfg] = []
+    """Render-only assets with no collision or rigid-body state."""
 
     background: List[RigidObjectCfg] = []
 
@@ -226,8 +249,26 @@ class EmbodiedEnvCfg(EnvCfg):
     Please refer to the :class:`embodichain.lab.gym.envs.managers.ActionManager` class for more details.
     """
 
+    rollout_action_semantics: Literal["expert_controller_command", "policy_request"] = (
+        "expert_controller_command"
+    )
+    """Meaning of episode rollout actions, independently of the expert schema.
+
+    ``policy_request`` stores the flat ActionManager input and requires an
+    ActionManager. It also enables raw-policy recording without a DatasetManager.
+    The default preserves active-joint expert-controller recording.
+    """
+
     objective: OrderedPlacementObjectiveCfg | None = None
     """Optional measured physical objective, independent of task success and persistence."""
+
+    task_instruction: str | None = None
+    """Overall task language for handwritten/direct-control demonstrations.
+
+    Task Programs own their instruction in the program configuration. Explicit
+    episode instructions take precedence; recorder instructions are legacy
+    fallbacks and are not required to enable task language.
+    """
 
     expert_trajectory: ExpertTrajectoryCfg = ExpertTrajectoryCfg()
     """Source-neutral expert trajectory control and recording settings."""
@@ -283,7 +324,8 @@ class EmbodiedEnvCfg(EnvCfg):
 
     trajectory_auto_save: bool = True
     """If True (and record_trajectory is True), auto-save each env's trajectory to
-    ``trajectory_save_dir`` at episode end and on close()."""
+    ``trajectory_save_dir`` before an explicitly committed episode reset.
+    Closing discards trajectories that were never committed."""
 
     task_program: TaskProgramCfg | None = None
     """Optional declarative Task Program used to generate demo segments.
@@ -385,7 +427,13 @@ class EmbodiedEnv(BaseEnv):
         self.reward_manager: RewardManager | None = None
         self.action_manager: ActionManager | None = None
         self.dataset_manager: DatasetManager | None = None
-        self._record_raw_actions = False
+        if cfg.rollout_action_semantics not in {
+            "expert_controller_command",
+            "policy_request",
+        }:
+            raise ValueError("Unknown rollout_action_semantics.")
+        self._explicit_policy_rollout = cfg.rollout_action_semantics == "policy_request"
+        self._record_raw_actions = self._explicit_policy_rollout
         self._last_action_manager_qpos: torch.Tensor | None = None
         self._last_action_trace: ActionTrace | None = None
         self._expert_controller_qpos_history: list[list[torch.Tensor]] = []
@@ -393,6 +441,10 @@ class EmbodiedEnv(BaseEnv):
         super().__init__(cfg, **kwargs)
 
         try:
+            if self._explicit_policy_rollout and self.action_manager is None:
+                raise ValueError(
+                    "policy_request rollout recording requires an ActionManager."
+                )
             self._initialize_physical_objective()
             self.expert_action_spec = build_expert_action_spec(
                 joint_names=[
@@ -425,7 +477,7 @@ class EmbodiedEnv(BaseEnv):
             if dataset_terms and not self.cfg.filter_dataset_saving:
                 self.dataset_manager = DatasetManager(self.cfg.dataset, self)
                 self.cfg.init_rollout_buffer = True
-                self._record_raw_actions = self.dataset_manager.requires_raw_actions
+                self._record_raw_actions |= self.dataset_manager.requires_raw_actions
 
             self.rollout_buffer: TensorDict | None = None
             self._max_rollout_steps = 0
@@ -516,9 +568,6 @@ class EmbodiedEnv(BaseEnv):
             self._close_error: BaseException | None = None
             self._close_lock = threading.RLock()
 
-            all_env_ids = torch.arange(self.num_envs, device=self.device)
-            self._seed_recording_state(self._init_raw_obs, all_env_ids)
-
             self._log_initialization_summary()
         except Exception:
             if self.dataset_manager is not None:
@@ -605,37 +654,26 @@ class EmbodiedEnv(BaseEnv):
         names = [str(name) for name in active_functors]
         return [("terms", names)] if names else []
 
-    def reset(
-        self, seed: int | None = None, options: dict | None = None
-    ) -> tuple[EnvObs, Dict]:
-        """Reset environments and seed pre-action recording state.
-
-        Expert frames must pair the observation before an action with that
-        action. The base reset computes the authoritative post-reset
-        observation, so recording is seeded only after it returns.
-
-        Args:
-            seed: Optional random seed forwarded to :class:`BaseEnv`.
-            options: Reset options. ``reset_ids`` may select only some vector
-                environment rows. ``commit_env_ids`` may select a subset of
-                the reset rows whose pending dataset episodes are persisted.
-
-        Returns:
-            The reset observation and info dictionary.
-        """
-        obs, info = super().reset(seed=seed, options=options)
+    def _after_episode_reset(self, obs: EnvObs, env_ids: torch.Tensor) -> None:
         self._active_task_program_bridge = None
-        if options is None or "reset_ids" not in options:
-            reset_ids = torch.arange(self.num_envs, device=self.device)
-        else:
-            reset_ids = torch.as_tensor(
-                options["reset_ids"], dtype=torch.long, device=self.device
-            ).reshape(-1)
-        self._seed_recording_state(obs, reset_ids)
-        return obs, info
+        self._seed_recording_state(obs, env_ids)
+        if not self.cfg.events or self.event_manager is None or not len(env_ids):
+            return
+        from embodichain.lab.gym.envs.managers.record import record_camera_data
+
+        for mode_cfgs in self.event_manager._mode_functor_cfgs.values():
+            for functor_cfg in mode_cfgs:
+                if isinstance(functor_cfg.func, record_camera_data):
+                    recorder = functor_cfg.func
+                    # A reset event may capture before episode_prepare restores
+                    # the final state. Replace only the newly reset live rows.
+                    recorder.discard_and_clear(env_ids=env_ids)
+                    params = dict(functor_cfg.params)
+                    params.setdefault("name", recorder._name)
+                    recorder(self, env_ids=env_ids, **params)
 
     def _seed_recording_state(self, obs: EnvObs, env_ids: torch.Tensor) -> None:
-        """Seed all enabled recorders from the current environment state."""
+        """Seed pending expert observations and trajectory states."""
         self._seed_expert_observations(obs, env_ids)
         self._seed_trajectory_states(env_ids)
 
@@ -726,7 +764,8 @@ class EmbodiedEnv(BaseEnv):
     def _init_sim_state(self, **kwargs):
         """Initialize the simulation state at the beginning of scene creation."""
 
-        self._apply_functor_filter()
+        if not self.sim.has_native_renderer:
+            self._filter_native_visual_functors()
 
         # create event manager
         self.cfg: EmbodiedEnvCfg
@@ -763,9 +802,7 @@ class EmbodiedEnv(BaseEnv):
         )
 
         sensor_enabled = getattr(self.cfg, "enable_sensor", True)
-        sensor_uids = {
-            cfg.uid for cfg in getattr(self.cfg, "sensor", []) if cfg.uid is not None
-        }
+        sensor_uids = {cfg.uid for cfg in self._sensor_configs() if cfg.uid is not None}
 
         def uses_disabled_sensor(value: object, field_name: str | None = None) -> bool:
             """Return whether nested functor params reference a disabled sensor."""
@@ -825,15 +862,139 @@ class EmbodiedEnv(BaseEnv):
             if name.startswith("randomize_")
         }
         if self.cfg.filter_visual_rand and self.cfg.events:
-            # Iterate through all attributes of the events object
-            for attr_name in dir(self.cfg.events):
-                attr = getattr(self.cfg.events, attr_name)
-                if isinstance(attr, EventCfg):
-                    if attr.func.__name__ in functors_to_remove:
-                        logger.log_info(
-                            f"Filtering out visual randomization functor: {attr.func.__name__}"
-                        )
-                        setattr(self.cfg.events, attr_name, None)
+            for collection, name, term in self._iter_configured_functors():
+                if collection is not self.cfg.events:
+                    continue
+                func = self._configured_functor_callable(term)
+                if getattr(func, "__name__", None) in functors_to_remove:
+                    logger.log_info(
+                        f"Filtering out visual randomization functor: {func.__name__}"
+                    )
+                    if isinstance(collection, Mapping):
+                        collection[name] = None
+                    else:
+                        setattr(collection, name, None)
+
+    def _iter_configured_functors(
+        self,
+    ) -> Iterable[tuple[object, str, FunctorCfg | dict[str, Any]]]:
+        """Iterate terms of managers that will actually be initialized."""
+        for manager_name in ("events", "observations", "rewards", "actions", "dataset"):
+            if manager_name == "dataset" and getattr(
+                self.cfg, "filter_dataset_saving", False
+            ):
+                continue
+            collection = getattr(self.cfg, manager_name, None)
+            if collection is None:
+                continue
+            items = (
+                collection.items()
+                if isinstance(collection, Mapping)
+                else vars(collection).items()
+            )
+            for name, term in items:
+                if isinstance(term, FunctorCfg) or (
+                    manager_name == "dataset"
+                    and isinstance(term, dict)
+                    and "func" in term
+                ):
+                    yield collection, name, term
+
+    @staticmethod
+    def _configured_functor_callable(
+        term: FunctorCfg | dict[str, Any],
+    ) -> Callable[..., Any]:
+        """Resolve a configured function/class without constructing it."""
+        func = term["func"] if isinstance(term, dict) else term.func
+        return string_to_callable(func) if isinstance(func, str) else func
+
+    def _setup_scene(self, **kwargs) -> None:
+        """Filter configuration independently of the overridable demand hook."""
+        self._apply_functor_filter()
+        self.cfg.ground_plane_visible = self._resolve_ground_plane_visibility()
+        super()._setup_scene(**kwargs)
+
+    def _resolve_ground_plane_visibility(self) -> bool:
+        """Resolve the native ground default from filtered event configuration."""
+        visible = self.cfg.ground_plane_visible
+        if visible is not None:
+            if type(visible) is not bool:
+                raise TypeError("ground_plane_visible must be a bool or None.")
+            return visible
+
+        from embodichain.lab.gym.envs.managers.randomization.visual import (
+            randomize_indirect_lighting,
+        )
+
+        for collection, _, term in self._iter_configured_functors():
+            if collection is not self.cfg.events:
+                continue
+            func = self._configured_functor_callable(term)
+            if (
+                isinstance(func, type)
+                and issubclass(func, randomize_indirect_lighting)
+                and term.params.get("path") is not None
+            ):
+                return False
+        return True
+
+    def _requires_native_renderer(self) -> bool:
+        """Predict cameras from the already-filtered manager configuration."""
+        from embodichain.lab.gym.envs.managers.record import (
+            record_camera_data,
+            validation_cameras,
+        )
+        from embodichain.lab.sim import SimulationManager
+
+        if super()._requires_native_renderer():
+            return True
+        if self.cfg.enable_sensor:
+            for sensor_cfg in self._sensor_configs():
+                sensor_factory = SimulationManager.SUPPORTED_SENSOR_TYPES.get(
+                    sensor_cfg.sensor_type
+                )
+                if isinstance(sensor_factory, type) and issubclass(
+                    sensor_factory, Camera
+                ):
+                    return True
+        for _, _, term in self._iter_configured_functors():
+            func = self._configured_functor_callable(term)
+            if not isinstance(func, type):
+                continue
+            if issubclass(func, record_camera_data):
+                return True
+            if issubclass(func, validation_cameras):
+                params = (
+                    term.get("params", {}) if isinstance(term, dict) else term.params
+                )
+                if params.get("cameras", []):
+                    return True
+        return False
+
+    def _filter_native_visual_functors(self) -> None:
+        """Skip built-in native visual effects when the World uses NoRender."""
+        from embodichain.lab.gym.envs.managers.randomization import visual
+
+        visual_functions = {getattr(visual, name) for name in visual.__all__}
+        for collection, name, term in self._iter_configured_functors():
+            func = self._configured_functor_callable(term)
+            if any(func is builtin for builtin in visual_functions) or (
+                isinstance(func, type)
+                and issubclass(
+                    func,
+                    (
+                        visual.randomize_visual_material,
+                        visual.randomize_indirect_lighting,
+                    ),
+                )
+            ):
+                logger.log_info(
+                    f"Skipping native visual functor '{name}' in no-render mode."
+                )
+                if isinstance(collection, Mapping):
+                    collection[name] = None
+                else:
+                    setattr(collection, name, None)
 
     def _hook_after_sim_step(
         self,
@@ -902,7 +1063,9 @@ class EmbodiedEnv(BaseEnv):
             dtype=torch.bool,
             device=self.episode_success_status.device,
         )
-        self.episode_success_status[update_mask] = success[update_mask]
+        self.episode_success_status.copy_(
+            torch.where(update_mask, success, self.episode_success_status)
+        )
 
     def _extend_obs(self, obs: EnvObs, **kwargs) -> EnvObs:
         if self.observation_manager:
@@ -929,6 +1092,7 @@ class EmbodiedEnv(BaseEnv):
         return rewards
 
     def _prepare_scene(self, **kwargs) -> None:
+        self.sim.set_ground_plane_visibility(self.cfg.ground_plane_visible)
         self._setup_background()
         self._setup_interactive_objects()
         self._setup_lights()
@@ -987,10 +1151,13 @@ class EmbodiedEnv(BaseEnv):
         if objective is not None:
             objective.reset(env_ids)
 
-    def _initialize_episode(
+    def _before_episode_reset(
         self, env_ids: Sequence[int] | None = None, **kwargs
     ) -> None:
-        logger.log_debug(f"Initializing episode for env_ids: {env_ids}", color="blue")
+        if logger.logger.isEnabledFor(logging.DEBUG):
+            logger.log_debug(
+                f"Initializing episode for env_ids: {env_ids}", color="blue"
+            )
         save_data = kwargs.get("save_data", True)
 
         # Determine which environments to process
@@ -1028,6 +1195,20 @@ class EmbodiedEnv(BaseEnv):
                     "commit_env_ids must be a subset of the rows being reset."
                 )
 
+        # Persist replay state before the dataset recorder snapshots metadata
+        # (including asynchronous snapshots). The existing state buffer retains
+        # the source episode's initial state even when training exports fragments.
+        _traj_buffer = getattr(self, "_traj_buffer", None)
+        valid_recording_ids = self.episode_context.filter_recordable(env_ids_to_process)
+        if (
+            save_data
+            and _traj_buffer is not None
+            and getattr(self.cfg, "trajectory_auto_save", False)
+        ):
+            with self._profiler.section("trajectory_save"):
+                for env_id in valid_recording_ids.tolist():
+                    self._save_trajectory_for_env(env_id)
+
         # Save dataset before clearing buffers for environments that are being reset
         if env_ids_to_commit.numel() > 0 and self.dataset_manager:
             if "save" in self.dataset_manager.available_modes:
@@ -1051,6 +1232,9 @@ class EmbodiedEnv(BaseEnv):
                         successful_envs[env_ids_to_process] | fragment_envs
                     ]
 
+                env_ids_to_save = self.episode_context.filter_recordable(
+                    env_ids_to_save
+                )
                 if env_ids_to_save.numel() > 0:
                     with self._profiler.section("dataset_save"):
                         self.dataset_manager.apply(
@@ -1066,31 +1250,23 @@ class EmbodiedEnv(BaseEnv):
                 for mode_cfgs in self.event_manager._mode_functor_cfgs.values():
                     for functor_cfg in mode_cfgs:
                         if isinstance(functor_cfg.func, record_camera_data):
-                            if save_data:
+                            if save_data and valid_recording_ids.numel():
                                 functor_cfg.func.save_and_clear(
-                                    env_ids=env_ids_to_process
+                                    env_ids=valid_recording_ids
                                 )
-                            else:
-                                functor_cfg.func.discard_and_clear(
-                                    env_ids=env_ids_to_process
-                                )
-
-        # Auto-save + reset the per-env trajectory buffer for environments being
-        # reset. Use getattr so this no-ops on envs/subclasses that don't allocate
-        # a _traj_buffer (e.g. unit-test stubs of _initialize_episode).
-        _traj_buffer = getattr(self, "_traj_buffer", None)
-        if (
-            save_data
-            and _traj_buffer is not None
-            and getattr(self.cfg, "trajectory_auto_save", False)
-        ):
-            with self._profiler.section("trajectory_save"):
-                for env_id in env_ids_to_process.tolist():
-                    self._save_trajectory_for_env(env_id)
+                            discard_ids = (
+                                env_ids_to_process[
+                                    ~torch.isin(env_ids_to_process, valid_recording_ids)
+                                ]
+                                if save_data
+                                else env_ids_to_process
+                            )
+                            if discard_ids.numel():
+                                functor_cfg.func.discard_and_clear(env_ids=discard_ids)
 
         _traj_steps = getattr(self, "_traj_steps", None)
         if _traj_steps is not None:
-            _traj_steps[env_ids_to_process] = 0
+            _traj_steps.index_fill_(0, env_ids_to_process, 0)
 
         # Clear episode buffers only after every recorder has consumed them.
         if self.rollout_buffer is not None and self._rollout_buffer_mode != "rl":
@@ -1101,10 +1277,6 @@ class EmbodiedEnv(BaseEnv):
                 rollout_steps[rollout_ids] = 0
                 self.current_rollout_step = int(rollout_steps.max().item())
 
-        episode_metadata = getattr(self, "_demo_episode_metadata", None)
-        if episode_metadata is not None:
-            for env_id in env_ids_to_process.cpu().tolist():
-                episode_metadata[env_id] = self._new_demo_episode_metadata(env_id)
         active_segment_ids = getattr(self, "_demo_active_segment_ids", None)
         if active_segment_ids is not None:
             demo_ids = env_ids_to_process.to(active_segment_ids.device)
@@ -1115,8 +1287,16 @@ class EmbodiedEnv(BaseEnv):
             self._demo_active_rollout_start_steps[demo_ids] = 0
             self._demo_steps[demo_ids] = 0
 
-        self.episode_success_status[env_ids_to_process] = False
+        self.episode_success_status.index_fill_(0, env_ids_to_process, False)
 
+    def _initialize_episode(
+        self, env_ids: Sequence[int] | torch.Tensor | None = None, **kwargs: Any
+    ) -> None:
+        env_ids_to_process = self.episode_context._ids(env_ids)
+        episode_metadata = getattr(self, "_demo_episode_metadata", None)
+        if episode_metadata is not None:
+            for env_id in env_ids_to_process.cpu().tolist():
+                episode_metadata[env_id] = self._new_demo_episode_metadata(env_id)
         # Stateful managers reset selected rows before reset-mode events run.
         action_manager = getattr(self, "action_manager", None)
         if action_manager is not None:
@@ -1206,13 +1386,27 @@ class EmbodiedEnv(BaseEnv):
 
     def _new_demo_episode_metadata(self, env_id: int) -> dict[str, Any]:
         """Create an empty metadata record for one environment row."""
+        if getattr(self, "_recording_run_uuid", None) is None:
+            self._recording_run_uuid = str(uuid4())
+        if getattr(self, "_recording_provenance", None) is None:
+            self._recording_provenance = build_recording_provenance(self)
+        episode_uuid = str(uuid4())
         execution_cfg = getattr(self, "_demo_execution_cfg", None)
         if execution_cfg is None:
             execution_cfg = DemoExecutionCfg()
         attempt_id = int(getattr(self, "_demo_attempt_id", 0))
+        from .demo import _episode_instruction
+
+        instruction, instruction_source = _episode_instruction(self)
         metadata = {
+            "instruction": instruction,
+            "instruction_source": instruction_source,
             "schema_version": DEMO_SCHEMA_VERSION,
+            "run_uuid": self._recording_run_uuid,
+            "episode_uuid": episode_uuid,
+            "source_episode_uuid": episode_uuid,
             "episode_index": int(getattr(self, "_demo_episode_index", 0)),
+            "seed": getattr(getattr(self, "cfg", None), "seed", None),
             "output_mode": execution_cfg.mode,
             "save_failed_fragments": execution_cfg.save_failed_fragments,
             "attempt_id": attempt_id,
@@ -1233,6 +1427,7 @@ class EmbodiedEnv(BaseEnv):
             "terminal_reason": "unknown",
             "segments": [],
         }
+        metadata.update(copy.deepcopy(self._recording_provenance))
         expert_action_spec = getattr(self, "expert_action_spec", None)
         if expert_action_spec is not None:
             metadata.update(expert_action_spec.metadata(step_dt=self.step_dt))
@@ -1261,6 +1456,14 @@ class EmbodiedEnv(BaseEnv):
         self._demo_episode_metadata = [
             self._new_demo_episode_metadata(env_id) for env_id in range(self.num_envs)
         ]
+        bridge = getattr(self, "_active_task_program_bridge", None)
+        program = getattr(bridge, "_program", None)
+        if program is not None:
+            from embodichain.data_pipeline.recording import stable_config_hash
+
+            program_hash = stable_config_hash(program)
+            for metadata in self._demo_episode_metadata:
+                metadata["program_hash"] = program_hash
 
     def _begin_demo_segment_recording(
         self, segment_id: int, segment: DemoSegment
@@ -1333,6 +1536,13 @@ class EmbodiedEnv(BaseEnv):
 
     def _end_demo_episode_recording(self, result: DemoEpisodeResult) -> None:
         """Finalize per-environment metadata after demonstration execution."""
+        bridge = getattr(self, "_active_task_program_bridge", None)
+        program = getattr(bridge, "_program", None)
+        program_hash = None
+        if program is not None:
+            from embodichain.data_pipeline.recording import stable_config_hash
+
+            program_hash = stable_config_hash(program)
         for env_id in range(self.num_envs):
             metadata = self._demo_episode_metadata[env_id]
             length = (
@@ -1361,17 +1571,57 @@ class EmbodiedEnv(BaseEnv):
                     "terminal_reason": terminal_reason,
                 }
             )
+            if result.instruction is not None:
+                metadata["instruction"] = result.instruction
+                metadata["instruction_source"] = result.instruction_source
             collection_stats = getattr(self, "_collection_stats", None)
             if isinstance(collection_stats, Mapping):
                 metadata["collection"] = dict(collection_stats)
-            bridge = getattr(self, "_active_task_program_bridge", None)
             if bridge is not None:
+                metadata["program_hash"] = program_hash
                 records = bridge.expansion_records
-                metadata["expansion"] = [
-                    record.to_metadata()
-                    for record in records
-                    if getattr(record, "env_id", None) in (None, env_id)
-                ]
+                metadata["expansion"] = []
+                for record in records:
+                    if getattr(record, "env_id", None) not in (None, env_id):
+                        continue
+                    expansion_metadata = dict(record.to_metadata())
+                    selected_identity = next(
+                        (
+                            candidate.identity
+                            for candidate in getattr(record, "candidates", ())
+                            if candidate.identity.candidate_id
+                            == record.selected_candidate_id
+                        ),
+                        None,
+                    )
+                    if selected_identity is not None:
+                        # Keep the actual source/case identity. Some adapters
+                        # put a recipe candidate in template_id, so downstream
+                        # grouping must not assume it names a shared reference.
+                        expansion_metadata["selected_candidate_lineage"] = {
+                            name: getattr(selected_identity, name)
+                            for name in (
+                                "scene_case_id",
+                                "initial_state_id",
+                                "candidate_id",
+                                "geometry_family_id",
+                                "source_id",
+                                "source_revision",
+                                "template_id",
+                                "attempt_id",
+                                "parent_id",
+                            )
+                        }
+                    metadata["expansion"].append(expansion_metadata)
+                source_uuids = {
+                    record["source_episode_uuid"]
+                    for record in metadata["expansion"]
+                    if isinstance(record.get("source_episode_uuid"), str)
+                }
+                if len(source_uuids) == 1:
+                    metadata["source_episode_uuid"] = next(iter(source_uuids))
+                elif source_uuids:
+                    metadata["source_episode_uuids"] = sorted(source_uuids)
 
     def get_demo_episode_metadata(self, env_id: int) -> dict[str, Any]:
         """Return segment-aware metadata for one buffered episode.
@@ -1385,7 +1635,8 @@ class EmbodiedEnv(BaseEnv):
         Returns:
             A JSON-compatible metadata dictionary.
         """
-        metadata = dict(self._demo_episode_metadata[env_id])
+        metadata = copy.deepcopy(self._demo_episode_metadata[env_id])
+        metadata["episode_context"] = self.episode_context.snapshot([env_id])[0]
         metadata["segments"] = [
             dict(segment)
             for segment in self._demo_episode_metadata[env_id].get("segments", [])
@@ -1399,24 +1650,14 @@ class EmbodiedEnv(BaseEnv):
             ).item()
         )
         metadata["length"] = length
+        if metadata.get("instruction") is None:
+            from .demo import resolve_demo_instruction
+
+            metadata["instruction"], metadata["instruction_source"] = (
+                resolve_demo_instruction(self)
+            )
         if length > 0 and not metadata["segments"]:
-            env_metadata = getattr(self, "metadata", {})
-            dataset_metadata = (
-                env_metadata.get("dataset", {})
-                if isinstance(env_metadata, Mapping)
-                else {}
-            )
-            instruction_cfg = (
-                dataset_metadata.get("instruction")
-                if isinstance(dataset_metadata, Mapping)
-                else None
-            )
-            instruction = (
-                instruction_cfg.get("lang")
-                if isinstance(instruction_cfg, Mapping)
-                else instruction_cfg
-            )
-            instruction = str(instruction) if instruction else "unknown_task"
+            instruction = metadata["instruction"]
             success_status = getattr(self, "episode_success_status", None)
             task_success = getattr(self, "_task_success", None)
             success = bool(
@@ -1467,6 +1708,7 @@ class EmbodiedEnv(BaseEnv):
                     ),
                     "target_uid": None,
                     "instruction": instruction,
+                    "instruction_source": "task_fallback",
                     "failure_reason": None if success else terminal_reason,
                     "metadata": {},
                 }
@@ -2104,10 +2346,8 @@ class EmbodiedEnv(BaseEnv):
         Override this method in subclass to define task-specific logic for RL tasks.
 
         Returns:
-            Tuple of (success, fail, metrics):
-                - success: Boolean tensor of shape (num_envs,)
-                - fail: Boolean tensor of shape (num_envs,)
-                - metrics: Dict of metric tensors
+            tuple[torch.Tensor, torch.Tensor, dict[str, Any]]: Success and failure
+            masks of shape ``(num_envs,)``, followed by the metric tensor mapping.
         """
         success = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         fail = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
@@ -2133,6 +2373,7 @@ class EmbodiedEnv(BaseEnv):
         objective = getattr(self, "physical_objective", None)
         if objective is not None:
             info["physical_objective"] = objective.snapshot()
+        info["episode_context"] = self.episode_context.snapshot()
         return info
 
     def evaluate(self, **kwargs) -> Dict[str, Any]:
@@ -2194,11 +2435,15 @@ class EmbodiedEnv(BaseEnv):
         )
         if self.action_manager is not None and not is_controller_action:
             if policy_recording:
-                if self.dataset_manager is None:
+                explicit_policy = getattr(self, "_explicit_policy_rollout", False)
+                if explicit_policy:
+                    self._validate_policy_rollout_action(action)
+                if self.dataset_manager is not None:
+                    self.dataset_manager.validate_policy_action(action)
+                elif not explicit_policy:
                     raise RuntimeError(
                         "Policy action recording requires an initialized DatasetManager."
                     )
-                self.dataset_manager.validate_policy_action(action)
             self.action_manager.process_action(action)
             if getattr(self, "_demo_no_auto_reset", False):
                 self.action_manager.mask_inactive(self._demo_active_mask)
@@ -2258,6 +2503,23 @@ class EmbodiedEnv(BaseEnv):
         if is_controller_action:
             return ControllerAction(value=action, metadata=controller_metadata)
         return action
+
+    def _validate_policy_rollout_action(self, action: EnvAction) -> None:
+        """Validate explicit raw-policy recording before changing term state."""
+        if not isinstance(action, torch.Tensor) or not action.is_floating_point():
+            raise TypeError("Policy rollout actions must be floating tensors.")
+        expected = (self.num_envs, self.action_manager.total_action_dim)
+        if tuple(action.shape) != expected:
+            raise ValueError(f"Policy rollout action must have shape {expected}.")
+        if not bool(torch.isfinite(action).all()):
+            raise ValueError("Policy rollout actions must contain only finite values.")
+        space = self.action_manager.single_action_space
+        low = torch.as_tensor(space.low, dtype=action.dtype, device=action.device)
+        high = torch.as_tensor(space.high, dtype=action.dtype, device=action.device)
+        if bool(((action < low) | (action > high)).any()):
+            raise ValueError(
+                "Policy rollout actions must remain within action-space bounds."
+            )
 
     def _record_raw_action(self, action: EnvAction) -> None:
         """Keep a CPU copy of raw policy actions for explicit dataset contracts."""
@@ -2376,7 +2638,22 @@ class EmbodiedEnv(BaseEnv):
         del kwargs
         if self.cfg.robot is None:
             logger.log_error("Robot configuration is not provided.")
-        return self.sim.add_robot(self.cfg.robot)
+        robot_cfg = copy.deepcopy(self.cfg.robot)
+        if isinstance(robot_cfg, RobotPresetCfg):
+            for item in fields(robot_cfg):
+                candidate = getattr(robot_cfg, item.name)
+                if isinstance(candidate, RobotCfg):
+                    candidate.enable_sensor = self.cfg.enable_sensor
+            selected_cfg = robot_cfg.resolve(
+                self.sim.sim_config.physics_cfg,
+                newton_solver_type=self.sim._active_newton_solver_type,
+            )
+        else:
+            robot_cfg.enable_sensor = self.cfg.enable_sensor
+            selected_cfg = robot_cfg
+        _collect_sensor_cfgs(selected_cfg, self.cfg.sensor)
+        self._robot_sensor_cfgs = selected_cfg.sensors
+        return self.sim.add_robot(robot_cfg)
 
     def _setup_robot(self, **kwargs) -> Robot:
         """Configure the finalized robot interface for the environment.
@@ -2433,6 +2710,18 @@ class EmbodiedEnv(BaseEnv):
         )
         return robot
 
+    def _sensor_configs(self) -> list[SensorCfg]:
+        """Return independent and selected robot sensor declarations."""
+        robot_cfg = getattr(self.cfg, "robot", None)
+        if hasattr(self, "_robot_sensor_cfgs"):
+            return _collect_sensor_cfgs(
+                None, [*getattr(self.cfg, "sensor", []), *self._robot_sensor_cfgs]
+            )
+        if isinstance(robot_cfg, RobotPresetCfg):
+            # Filtering and render-demand prediction run before World creation.
+            robot_cfg = robot_cfg.resolve(self.sim_cfg.physics_cfg)
+        return _collect_sensor_cfgs(robot_cfg, getattr(self.cfg, "sensor", []))
+
     def _setup_sensors(self, **kwargs) -> Dict[str, BaseSensor]:
         """Setup the sensors in the environment.
 
@@ -2440,7 +2729,6 @@ class EmbodiedEnv(BaseEnv):
             Dict[str, BaseSensor]: A dictionary mapping sensor UIDs to sensor instances.
         """
 
-        # TODO: support sensor attachment to the robot.
         if not self.cfg.enable_sensor:
             logger.log_info(
                 "Sensor acquisition is disabled; configured sensors will not be instantiated."
@@ -2451,10 +2739,17 @@ class EmbodiedEnv(BaseEnv):
         for cfg in self.cfg.sensor:
             sensor = self.sim.add_sensor(cfg)
             sensors[cfg.uid] = sensor
+        for cfg in getattr(self, "_robot_sensor_cfgs", []):
+            sensor = self.sim.get_sensor(cfg.uid)
+            if sensor is None:
+                raise RuntimeError(f"Mounted sensor {cfg.uid!r} was not initialized.")
+            sensors[cfg.uid] = sensor
         return sensors
 
     def _setup_lights(self) -> None:
         """Setup the lights in the environment."""
+        if not self.sim.has_native_renderer:
+            return
         # Set direct lights.
         for cfg in self.cfg.light.direct:
             self.sim.add_light(cfg=cfg)
@@ -2469,6 +2764,8 @@ class EmbodiedEnv(BaseEnv):
 
     def _setup_background(self) -> None:
         """Setup the static rigid objects in the environment."""
+        for cfg in self.cfg.visual_object:
+            self.sim.add_visual_object(cfg)
         for cfg in self.cfg.background:
             if cfg.body_type == "dynamic":
                 logger.log_error(
@@ -2754,6 +3051,15 @@ class EmbodiedEnv(BaseEnv):
                     expansion_recipe_indices=expansion_recipe_indices,
                 )
             self._active_task_program_bridge = bridge
+            if getattr(self, "_demo_instruction_snapshot", None) is None:
+                from .demo import resolve_demo_instruction
+
+                text, source = resolve_demo_instruction(
+                    self, task_program=compiled_program
+                )
+                for metadata in getattr(self, "_demo_episode_metadata", []):
+                    metadata["instruction"] = text
+                    metadata["instruction_source"] = source
             return bridge.iter_segments()
 
         if expansion_profile is not None:
@@ -2772,7 +3078,13 @@ class EmbodiedEnv(BaseEnv):
             return None
         return (DemoSegment(actions=actions, name="legacy"),)
 
-    def save_trajectory(self, path: str, env_ids: Sequence[int] | None = None) -> str:
+    def save_trajectory(
+        self,
+        path: str,
+        env_ids: Sequence[int] | None = None,
+        *,
+        purpose: str = "recording",
+    ) -> str:
         """Save a causally aligned trajectory to a ``.pt`` file.
 
         ``states[t]`` is the state immediately before ``actions[t]`` is applied,
@@ -2782,6 +3094,7 @@ class EmbodiedEnv(BaseEnv):
             path: Destination ``.pt`` file path.
             env_ids: Env indices to save (default: all). Each saved env's actual
                 recorded length is stored in ``meta["lengths"]``.
+            purpose: Normal recording or explicitly labeled diagnostic export.
 
         Raises:
             RuntimeError: If trajectory recording was never enabled.
@@ -2793,6 +3106,14 @@ class EmbodiedEnv(BaseEnv):
         if env_ids is None:
             env_ids = list(range(self.num_envs))
         env_ids = list(env_ids)
+        if purpose not in ("recording", "diagnostic"):
+            raise ValueError("Trajectory purpose must be recording or diagnostic.")
+        if purpose == "recording" and len(
+            self.episode_context.filter_recordable(env_ids)
+        ) != len(env_ids):
+            raise RuntimeError(
+                "Cannot save uninitialized, pending or rejected recording rows."
+            )
         if not env_ids:
             raise ValueError("env_ids must contain at least one environment row.")
         env_ids_t = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
@@ -2802,6 +3123,7 @@ class EmbodiedEnv(BaseEnv):
         states = sub["states"][:, :max_len].clone()
         actions = sub["actions"][:, :max_len].clone()
         meta = {
+            "artifact_purpose": purpose,
             "lengths": lengths.tolist(),
             "num_steps": max_len,
             "num_envs": int(len(env_ids)),
@@ -2827,7 +3149,58 @@ class EmbodiedEnv(BaseEnv):
             ],
         }
         meta.update(self._trajectory_action_metadata())
-        torch.save({"states": states, "actions": actions, "meta": meta}, path)
+        meta["run_uuid"] = meta["demo_episodes"][0].get("run_uuid")
+        meta["episode_uuids"] = [
+            episode.get("episode_uuid") for episode in meta["demo_episodes"]
+        ]
+        meta["source_episode_uuids"] = [
+            episode.get("source_episode_uuid") for episode in meta["demo_episodes"]
+        ]
+        meta["config_hash"] = meta["demo_episodes"][0].get("config_hash")
+        meta["provenance"] = copy.deepcopy(
+            meta["demo_episodes"][0].get("provenance", {})
+        )
+        meta["initial_state_step"] = 0
+        if len(env_ids) == 1:
+            meta["episode_uuid"] = meta["episode_uuids"][0]
+            meta["source_episode_uuid"] = meta["source_episode_uuids"][0]
+            meta["program_hash"] = meta["demo_episodes"][0].get("program_hash")
+        replay_path = str(Path(path).resolve())
+        for episode in meta["demo_episodes"]:
+            episode["trajectory_path"] = replay_path
+            episode["replay_artifact"] = {
+                "path": replay_path,
+                "source_episode_uuid": episode.get("episode_uuid"),
+                "env_id": episode["env_id"],
+                "initial_state_step": 0,
+                "length": episode["length"],
+                "state_alignment": "source_episode",
+                "external": True,
+            }
+        destination = Path(path)
+        descriptor, temporary = tempfile.mkstemp(
+            prefix=f".{destination.name}.", dir=destination.parent
+        )
+        try:
+            with os.fdopen(descriptor, "wb") as stream:
+                torch.save({"states": states, "actions": actions, "meta": meta}, stream)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, destination)
+            directory = os.open(destination.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
+        if purpose == "recording":
+            for env_id, episode in zip(env_ids, meta["demo_episodes"]):
+                live_metadata = self._demo_episode_metadata[env_id]
+                live_metadata["trajectory_path"] = replay_path
+                live_metadata["replay_artifact"] = copy.deepcopy(
+                    episode["replay_artifact"]
+                )
         return path
 
     def _save_trajectory_for_env(self, env_id: int) -> str | None:
@@ -2841,6 +3214,15 @@ class EmbodiedEnv(BaseEnv):
             return None
         if int(self._traj_steps[env_id].item()) == 0:
             return None
+        metadata = self._demo_episode_metadata[env_id]
+        existing_path = metadata.get("trajectory_path")
+        replay = metadata.get("replay_artifact", {})
+        if (
+            existing_path is not None
+            and Path(existing_path).is_file()
+            and replay.get("length") == int(self._traj_steps[env_id].item())
+        ):
+            return existing_path
         base = self.cfg.trajectory_save_dir
         if base is None:
             base = os.path.join(

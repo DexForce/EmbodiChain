@@ -18,11 +18,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, fields, is_dataclass, replace
 from enum import Enum
 import math
 from types import MappingProxyType
+from typing import Generic, TypeVar
 
 import torch
 
@@ -419,6 +420,8 @@ def _motion_policy_to_metadata(policy: MotionPolicy) -> dict[str, object]:
     return {
         "strategy": policy.strategy,
         "sample_count": policy.sample_count,
+        "velocity_limit": _metadata_value(policy.velocity_limit),
+        "acceleration_limit": _metadata_value(policy.acceleration_limit),
         "dynamic_collision_mode": policy.dynamic_collision_mode.value,
         "plan_options": options_metadata,
     }
@@ -1569,6 +1572,92 @@ class SkillWorkflowRecoveryTrace:
         }
 
 
+_Trace = TypeVar("_Trace")
+_HISTORY_FIELDS = frozenset(
+    {"events", "calls", "effects", "workflow_recoveries", "failures"}
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _HistoryEntry(Generic[_Trace]):
+    value: _Trace
+    previous: _HistoryEntry[_Trace] | None
+    length: int
+
+
+class _HistoryJournal(Sequence[_Trace]):
+    """Append-only owned entries linked only toward the historical prefix."""
+
+    def __init__(self) -> None:
+        self._tail: _HistoryEntry[_Trace] | None = None
+
+    def __len__(self) -> int:
+        return 0 if self._tail is None else self._tail.length
+
+    def __iter__(self) -> Iterator[_Trace]:
+        values: list[_Trace] = []
+        entry = self._tail
+        while entry is not None:
+            values.append(entry.value)
+            entry = entry.previous
+        return reversed(values)
+
+    def __getitem__(self, index: int | slice) -> _Trace | tuple[_Trace, ...]:
+        if isinstance(index, slice):
+            start, stop, step = index.indices(len(self))
+            if step != 1:
+                return tuple(self)[index]
+            values: list[_Trace] = []
+            entry = self._tail
+            while entry is not None and entry.length > start:
+                if entry.length <= stop:
+                    values.append(entry.value)
+                entry = entry.previous
+            return tuple(reversed(values))
+        if index < 0:
+            index += len(self)
+        if not 0 <= index < len(self):
+            raise IndexError(index)
+        entry = self._tail
+        while entry.length != index + 1:
+            entry = entry.previous
+        return entry.value
+
+    def append(self, value: _Trace) -> None:
+        self._tail = _HistoryEntry(value, self._tail, len(self) + 1)
+
+    def extend(self, values: Iterable[_Trace]) -> None:
+        for value in values:
+            self.append(value)
+
+    def snapshot(
+        self, copy_entry: Callable[[_Trace], _Trace]
+    ) -> _HistorySnapshot[_Trace]:
+        return _HistorySnapshot(self._tail, copy_entry)
+
+
+@dataclass(frozen=True, slots=True)
+class _HistorySnapshot(Generic[_Trace]):
+    """Capture an owned immutable journal prefix without copying its history.
+
+    Only the runtime constructs these views. Journal entries already own their
+    inputs and are never changed after append. Old tails cannot retain future
+    entries, including after the runtime starts a new workflow.
+    Public access materializes independent copies, preserving result ownership.
+    """
+
+    tail: _HistoryEntry[_Trace] | None
+    copy_entry: Callable[[_Trace], _Trace]
+
+    def materialize(self) -> tuple[_Trace, ...]:
+        values: list[_Trace] = []
+        entry = self.tail
+        while entry is not None:
+            values.append(self.copy_entry(entry.value))
+            entry = entry.previous
+        return tuple(reversed(values))
+
+
 @dataclass(frozen=True, slots=True, eq=False)
 class SemanticExecutionResult:
     """Immutable workflow snapshot returned by sync and step-wise execution."""
@@ -1589,6 +1678,13 @@ class SemanticExecutionResult:
     failures: tuple[SkillFailure, ...] = ()
     wait_duration: float = 0.0
     message: str | None = None
+
+    def __getattribute__(self, name: str) -> object:
+        value = object.__getattribute__(self, name)
+        if name in _HISTORY_FIELDS and type(value) is _HistorySnapshot:
+            value = value.materialize()
+            object.__setattr__(self, name, value)
+        return value
 
     def __post_init__(self) -> None:
         if not isinstance(self.status, SemanticExecutionStatus):
@@ -1641,9 +1737,9 @@ class SemanticExecutionResult:
             raise ValueError("wait_duration must be finite and non-negative.")
         if self.message is not None and type(self.message) is not str:
             raise TypeError("message must be a string or None.")
-        if not all(
-            type(recovery) is SkillWorkflowRecoveryTrace
-            for recovery in self.workflow_recoveries
+        recoveries = object.__getattribute__(self, "workflow_recoveries")
+        if type(recoveries) is not _HistorySnapshot and not all(
+            type(recovery) is SkillWorkflowRecoveryTrace for recovery in recoveries
         ):
             raise TypeError(
                 "workflow_recoveries must contain SkillWorkflowRecoveryTrace values."
@@ -1657,31 +1753,18 @@ class SemanticExecutionResult:
         ):
             object.__setattr__(self, name, getattr(self, name).clone())
         object.__setattr__(self, "task_state", _snapshot_task_state(self.task_state))
-        object.__setattr__(
-            self,
-            "events",
-            tuple(_snapshot_event(event) for event in self.events),
-        )
-        object.__setattr__(
-            self,
-            "calls",
-            tuple(call.snapshot() for call in self.calls),
-        )
-        object.__setattr__(
-            self,
-            "effects",
-            tuple(effect.snapshot() for effect in self.effects),
-        )
-        object.__setattr__(
-            self,
-            "workflow_recoveries",
-            tuple(recovery.snapshot() for recovery in self.workflow_recoveries),
-        )
-        object.__setattr__(
-            self,
-            "failures",
-            tuple(failure.snapshot() for failure in self.failures),
-        )
+        for name, copy_entry in (
+            ("events", _snapshot_event),
+            ("calls", SkillCallTrace.snapshot),
+            ("effects", SkillEffectTrace.snapshot),
+            ("workflow_recoveries", SkillWorkflowRecoveryTrace.snapshot),
+            ("failures", SkillFailure.snapshot),
+        ):
+            history = object.__getattribute__(self, name)
+            if type(history) is not _HistorySnapshot:
+                object.__setattr__(
+                    self, name, tuple(copy_entry(entry) for entry in history)
+                )
 
     @property
     def terminal(self) -> bool:
