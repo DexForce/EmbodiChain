@@ -59,6 +59,33 @@ __all__ = []
 
 
 @pytest.mark.no_sim
+def test_reference_observation_preserves_reset_contact_rows() -> None:
+    """Observation reads preserve cleared contact rows and update other sensors."""
+    calls = []
+    contacts = SimpleNamespace(
+        update=lambda **kwargs: pytest.fail("reset contacts must not be queried"),
+        get_data=lambda: {"is_valid": torch.zeros((2, 1), dtype=torch.bool)},
+    )
+    camera = SimpleNamespace(
+        requires_substep_update=False,
+        update=lambda **kwargs: calls.append(kwargs),
+        get_data=lambda: torch.ones((2, 1)),
+    )
+    env = SimpleNamespace(
+        sim=SimpleNamespace(render_camera_group=lambda ids: calls.append(ids)),
+        _camera_group_ids=[3],
+        num_envs=2,
+        device=torch.device("cpu"),
+        sensors={"locomotion_contacts": contacts, "camera": camera},
+        _reference_sensor=contacts,
+    )
+    obs = IsaacVelocityEnv._get_sensor_obs(env)
+    assert not obs["locomotion_contacts"]["is_valid"].any()
+    assert obs["camera"].eq(1).all()
+    assert calls == [[3], {"fetch_only": True}]
+
+
+@pytest.mark.no_sim
 def test_reference_uses_control_frame_contacts_without_parent_histories() -> None:
     """Reference normal-force histories replace the generic substep histories."""
     from embodichain_tasks.locomotion.velocity._embodichain import (
