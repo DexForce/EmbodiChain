@@ -1,0 +1,114 @@
+---
+pretty_name: EmbodiChain Technical Report Assets
+language:
+  - en
+tags:
+  - robotics
+  - simulation
+  - benchmark
+  - reproducibility
+  - embodichain
+---
+
+# EmbodiChain Technical Report Assets
+
+Private asset repository: [DexForceAI/embodichain_reports](https://huggingface.co/datasets/DexForceAI/embodichain_reports).
+
+This repository stores report-specific benchmark inputs, published measurement
+artifacts, figures, and videos for EmbodiChain technical reports. It starts with
+documentation and an [empty asset index](index.json): **no asset bundles are
+available yet**. The [download design](DOWNLOAD_DESIGN.md) specifies future
+integration; the Python helper and benchmark download commands are not
+implemented by this initialization.
+
+## Ownership
+
+- Benchmark scripts, suite configurations, and runtime implementations remain in
+  [DexForce/EmbodiChain](https://github.com/DexForce/EmbodiChain).
+- General robot and scene assets continue to use the existing EmbodiChain asset
+  resolver and [embodichain_data](https://huggingface.co/datasets/DexForceAI/embodichain_data).
+- Model weights continue to use their existing model repositories and download
+  helpers. This repository does not duplicate those assets or change their
+  access requirements.
+- This repository owns report-specific inputs and supporting results/media.
+  Downloading benchmark inputs will not automatically download results or media.
+
+The three initialization files are maintained together in
+`docs/architecture/report-assets/` in the code repository. Publish those files
+to this dataset's root together;
+asset directories are created only when real files are uploaded. The code
+repository copy of `index.json` is the empty bootstrap template; after assets
+are published, the dataset index at the selected commit is authoritative and
+must not be replaced with that empty template during documentation updates.
+
+## Layout
+
+```text
+README.md
+DOWNLOAD_DESIGN.md
+index.json
+reports/<report-id>/
+  README.md
+  inputs/<benchmark-id>/...
+  results/<benchmark-id>/...
+  figures/...
+  videos/...
+```
+
+The `reports/` subtree above is a convention, not a claim that those files
+already exist. Hugging Face may also maintain repository metadata such as
+`.gitattributes`.
+
+## Access
+
+The dataset is private. Sign in with an account or token granted access to this
+repository. For the project's existing `huggingface_hub>=0.35.3,<1.0` dependency,
+use `hf auth login` or provide `HF_TOKEN` through the execution environment.
+Credentials must not be written into report files, commands recorded in reports,
+or benchmark provenance. Private downloads use `https://huggingface.co` directly.
+
+An authorized client can retrieve the current empty index using the existing
+Hugging Face SDK; this is not the proposed EmbodiChain download helper:
+
+```python
+from huggingface_hub import HfApi, hf_hub_download
+
+repo_id = "DexForceAI/embodichain_reports"
+endpoint = "https://huggingface.co"
+revision = HfApi(endpoint=endpoint).dataset_info(repo_id).sha
+index_path = hf_hub_download(
+    repo_id=repo_id,
+    repo_type="dataset",
+    filename="index.json",
+    revision=revision,
+    endpoint=endpoint,
+)
+```
+
+For reproducible benchmark runs, use a tested full commit SHA instead of
+discovering the latest revision. See the [version and cache contract](DOWNLOAD_DESIGN.md#versions-authentication-and-cache).
+
+## Publish report assets
+
+1. Assign a stable report ID and benchmark ID. Prepare the input files and
+   supporting outputs under the corresponding report directories.
+2. Add `reports/<report-id>/README.md` recording the report title/version,
+   EmbodiChain Git commit, benchmark/suite identity, exact run commands, seeds,
+   hardware/software environment, input sources, and output interpretation.
+3. Record each file's source and license in that report README, with attribution
+   or license files where required. No blanket asset license is assigned by
+   this initialization; the code repository's license does not automatically
+   license report data or third-party media.
+4. Add input bundles to `index.json` following the
+   [index contract](DOWNLOAD_DESIGN.md#asset-index). Compute byte sizes and
+   SHA-256 values from the actual uploaded bytes. Keep results/media outside
+   input bundles.
+5. Publish inputs, report metadata, and their index entries in one dataset
+   commit. Review files and checksums at that commit before declaring it usable.
+6. Record the verified dataset commit in the report release metadata and in
+   the future benchmark integration's tested default. An optional release tag
+   is a human-readable alias; record the resolved full SHA with results.
+
+Later corrections create a new dataset commit and a new validated pin. Public
+release, migration of historical assets, and implementation of the download
+interfaces are separate follow-up work.
