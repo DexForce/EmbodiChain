@@ -244,6 +244,11 @@ def create_cloth(sim: SimulationManager) -> SurfaceDeformableObject:
             # radius can make the gripper carry cloth while visibly separated.
             particle_radius=CLOTH_PARTICLE_RADIUS,
             attrs=SurfaceDeformablePhysicsCfg(
+                contact_material={
+                    "stiffness": CLOTH_RIGID_CONTACT_KE,
+                    "damping": CLOTH_RIGID_CONTACT_KD,
+                    "dynamic_friction": CLOTH_RIGID_CONTACT_MU,
+                },
                 # Give gravity enough authority to produce fabric-like drape.
                 # Stretch remains firmer than bending so the cloth folds
                 # instead of behaving like an elastic sheet.
@@ -456,9 +461,6 @@ def main(args: argparse.Namespace | None = None) -> None:
                 "collision_options": {
                     "soft_contact_margin": 0.008,
                 },
-                "soft_contact_ke": CLOTH_RIGID_CONTACT_KE,
-                "soft_contact_kd": CLOTH_RIGID_CONTACT_KD,
-                "soft_contact_mu": CLOTH_RIGID_CONTACT_MU,
             },
             # DexUni owns its particle-shape contacts and collision detection.
             collision_cfg=None,

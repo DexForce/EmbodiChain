@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import math
 from collections import deque
+from dataclasses import replace
 from typing import ClassVar
 from unittest.mock import Mock
 
@@ -823,6 +824,33 @@ def test_session_active_commands_return_an_owned_endpoint_snapshot() -> None:
     current_payload = runner.session.active_commands.frames[0].commands[0].payload
     assert isinstance(current_payload, JointPositionPayload)
     assert torch.all(current_payload.positions >= 0.0)
+
+
+def test_session_effect_inspection_owns_data_without_copying_commands(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, _, _, _, _ = _make_runner(with_effect=True)
+    session = runner.session
+    assert session._plan is not None
+    session._plan = replace(
+        session._plan, effect_candidates=session._plan.expected_effects
+    )
+    copy_plan = Mock(side_effect=AssertionError("Full trajectory copied"))
+    monkeypatch.setattr(type(session._plan), "snapshot", copy_plan)
+    effects = session.active_expected_effects
+    candidates = session.active_effect_candidates
+    effects.held_object_updates["arm"].object_to_eef.fill_(-1.0)
+    candidates.held_object_updates["arm"].grasp_xpos.fill_(-1.0)
+    assert torch.all(
+        session.active_expected_effects.held_object_updates["arm"].object_to_eef >= 0
+    )
+    assert torch.all(
+        session.active_effect_candidates.held_object_updates["arm"].grasp_xpos >= 0
+    )
+    copy_plan.assert_not_called()
+    session._plan = replace(session._plan, expected_effects=StateDelta())
+    assert not session.active_expected_effects.held_object_updates
+    assert effects.held_object_updates["arm"] is not None
 
 
 def test_runner_rejects_mismatched_active_batch_intervals_before_dispatch() -> None:

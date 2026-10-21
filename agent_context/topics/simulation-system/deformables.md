@@ -46,6 +46,12 @@ ownership. Volume elasticity uses Young's modulus/Poisson's ratio, translated
 to Lamé coefficients at Spawn; density units differ (kg/m³ volume, kg/m²
 surface). Exact fields and defaults stay in the typed config source.
 
+`attrs.contact_material` optionally owns a DexUni particle object's contact
+stiffness, damping and dynamic friction; it is independent of elasticity and
+lowers to the native cloth/soft-body physics descriptor. Native validation and
+pair-material mixing remain DexSim-owned. Older wheels still support omitted
+materials and reject an explicit block if their descriptor API is unavailable.
+
 ## Kinematic node controls
 
 Clear the Newton `ACTIVE` bit for all driven nodes in `particle_flags` before

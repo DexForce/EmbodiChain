@@ -370,9 +370,6 @@ def initialize_simulation(
                 "collision_options": {
                     "soft_contact_margin": 0.008,
                 },
-                "soft_contact_ke": 3.0e5,
-                "soft_contact_kd": 5.0e-2,
-                "soft_contact_mu": 0.5,
             },
             # DexUni owns its particle-shape contacts and collision detection.
             collision_cfg=None,
@@ -522,6 +519,11 @@ def create_shirt(
             init_rot=(0.0, 0.0, -90.0),
             particle_radius=0.008,
             attrs=SurfaceDeformablePhysicsCfg(
+                contact_material={
+                    "stiffness": 3.0e5,
+                    "damping": 5.0e-2,
+                    "dynamic_friction": 0.5,
+                },
                 density=200.0,
                 surface_props=SurfaceElementPropertiesCfg(
                     tri_ke=1.5e3,
@@ -560,12 +562,10 @@ def register_runtime_controls(
     w1_friction = friction_track((0.25, 1.2, 0.0, 0.25, 1.2, 0.0, 0.25))
     table_friction = friction_track((0.5, 0.12, 0.5, 0.5, 0.12, 0.5, 0.5))
 
-    # This global particle control is host-side. Graph mode keeps the initial
-    # soft_contact_mu while the graph-compatible rigid schedules still run.
-    if not use_cuda_graph:
-        sim.register_particle_contact_material_schedule(
-            {"dynamic_friction": particle_friction}
-        )
+    # The object material track participates in DexUni graph replay.
+    sim.register_particle_contact_material_schedule(
+        {"dynamic_friction": particle_friction}, uid="shirt"
+    )
     sim.register_contact_material_schedule(
         "w1",
         {"dynamic_friction": w1_friction},

@@ -3063,3 +3063,41 @@ def test_process_no_render_is_detected_after_world_cleanup(monkeypatch) -> None:
         lambda: SimpleNamespace(renderer=dexsim.types.Renderer.NORENDER),
     )
     assert SimulationManager._get_process_renderer() == "no-render"
+
+
+@pytest.mark.usefixtures("requires_particle_contact_material")
+def test_targeted_particle_material_schedule_expands_arena_paths() -> None:
+    from dexsim.engine import newton_physics
+    from dexsim.engine.newton_physics.runtime_control import GraphRuntimeControl
+
+    if not hasattr(newton_physics, "DexUniParticleContactMaterialSchedule"):
+        pytest.skip("Targeted particle schedules require a supporting DexSim build.")
+    sim, builder = _make_runtime_control_sim_manager()
+    sim.register_particle_contact_material_schedule(
+        {"dynamic_friction": ((0.0, 0.5), (1.0, 1.2))}, uid="cloth"
+    )
+    controls = [call.args[0] for call in builder.add_runtime_control.call_args_list]
+    assert [control.target for control in controls] == [
+        "arena_0/cloth",
+        "arena_1/cloth",
+    ]
+    assert all(isinstance(control, GraphRuntimeControl) for control in controls)
+
+
+def test_targeted_particle_material_schedule_rejects_unknown_uid() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+    with pytest.raises(KeyError, match="missing"):
+        sim.register_particle_contact_material_schedule(
+            {"stiffness": ((0.0, 1000.0),)}, uid="missing"
+        )
+    builder.add_runtime_control.assert_not_called()
+
+
+def test_targeted_particle_material_schedule_validates_before_registration() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+    sim._spawn_scene.arena_names = ("arena_0",)
+    with pytest.raises(RuntimeError, match="arena count"):
+        sim.register_particle_contact_material_schedule(
+            {"stiffness": ((0.0, 1000.0),)}, uid="cloth"
+        )
+    builder.add_runtime_control.assert_not_called()

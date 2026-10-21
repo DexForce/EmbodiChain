@@ -115,9 +115,6 @@ def initialize_simulation(args: argparse.Namespace) -> SimulationManager:
                 "collision_options": {
                     "soft_contact_margin": SOFT_CONTACT_MARGIN,
                 },
-                "soft_contact_ke": SOFT_CONTACT_KE,
-                "soft_contact_kd": SOFT_CONTACT_KD,
-                "soft_contact_mu": SOFT_CONTACT_MU,
             },
             # DexUni owns its particle-shape contacts and collision detection.
             collision_cfg=None,
@@ -189,6 +186,11 @@ def create_soft_cow(sim: SimulationManager) -> VolumeDeformableObject:
                 voxel_num_relaxation_iters=5,
             ),
             attrs=VolumeDeformablePhysicsCfg(
+                contact_material={
+                    "stiffness": SOFT_CONTACT_KE,
+                    "damping": SOFT_CONTACT_KD,
+                    "dynamic_friction": SOFT_CONTACT_MU,
+                },
                 youngs=5.0e3,
                 poissons=0.45,
                 density=100.0,

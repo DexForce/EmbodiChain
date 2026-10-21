@@ -124,6 +124,15 @@ class VolumeDeformablePhysicsCfg:
     add_surface_edges: bool = True
     """Whether Newton creates surface bending-edge constraints."""
 
+    contact_material: Mapping[str, float] | None = None
+    """Optional DexUni object contact material, separate from element elasticity.
+
+    Keys are ``stiffness`` [N/m], ``damping`` [N s/m], and
+    ``dynamic_friction``. Omitted keys use the native material defaults.
+    Values must be finite, nonnegative float32 values. ``None`` preserves the
+    backend defaults; explicit materials require a supporting DexSim build.
+    """
+
     def __post_init__(self) -> None:
         if isinstance(self.surface_props, Mapping):
             self.surface_props = SurfaceElementPropertiesCfg(**self.surface_props)
@@ -147,6 +156,15 @@ class SurfaceDeformablePhysicsCfg:
 
     spring_kd: float | None = None
     """Spring damping; ``None`` uses the Newton default."""
+
+    contact_material: Mapping[str, float] | None = None
+    """Optional DexUni object contact material, separate from element elasticity.
+
+    Keys are ``stiffness`` [N/m], ``damping`` [N s/m], and
+    ``dynamic_friction``. Omitted keys use the native material defaults.
+    Values must be finite, nonnegative float32 values. ``None`` preserves the
+    backend defaults; explicit materials require a supporting DexSim build.
+    """
 
     def __post_init__(self) -> None:
         if isinstance(self.surface_props, Mapping):

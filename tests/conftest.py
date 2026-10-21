@@ -36,6 +36,15 @@ def requires_dexuni_contact_query() -> None:
 
 
 @pytest.fixture
+def requires_particle_contact_material() -> None:
+    """Require the native per-object material descriptor."""
+    import dexsim.spawn
+
+    if not hasattr(dexsim.spawn, "NewtonParticleContactMaterialDesc"):
+        pytest.skip("Per-object particle materials require a supporting DexSim build.")
+
+
+@pytest.fixture
 def requires_dexuni_two_way() -> None:
     """Qualify dev-only contracts without excluding released-engine coverage."""
     from dexsim.engine.newton_physics import DexUniSolverCfg

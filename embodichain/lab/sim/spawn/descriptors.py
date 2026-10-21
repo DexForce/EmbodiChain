@@ -30,13 +30,13 @@ properties must be committed to its immutable model.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import MISSING, dataclass, field, fields, replace
 import math
 import numbers
 import os
 import warnings
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from embodichain.lab.sim.cfg.source import _asset_file_path
 
@@ -502,6 +502,24 @@ def _mesh_geometry_from_cfg(shape: MeshCfg, *, segment_name: str) -> GeometryDes
     )
 
 
+def _particle_contact_material_options(
+    value: Mapping[str, float] | None,
+) -> dict[str, Any]:
+    """Lower optional object materials without requiring the new API on old wheels."""
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise TypeError("Deformable contact_material must be a mapping.")
+    import dexsim.spawn as spawn
+
+    material_type = getattr(spawn, "NewtonParticleContactMaterialDesc", None)
+    if material_type is None:
+        raise RuntimeError(
+            "Deformable contact_material requires DexSim per-object particle materials."
+        )
+    return {"contact_material": material_type(**dict(value))}
+
+
 def volume_deformable_desc_from_cfg(
     cfg: VolumeDeformableObjectCfg,
     *,
@@ -544,6 +562,7 @@ def volume_deformable_desc_from_cfg(
         ),
         physics=SoftBodyPhysicsDesc(
             volume_density=density,
+            **_particle_contact_material_options(attrs.contact_material),
             k_mu=youngs / (2.0 * (1.0 + poissons)),
             k_lambda=(youngs * poissons / ((1.0 + poissons) * (1.0 - 2.0 * poissons))),
             k_damp=float(attrs.elasticity_damping),
@@ -636,6 +655,7 @@ def surface_deformable_desc_from_cfg(
         visual_binding_mode=cfg.visual_binding_mode,
         physics=ClothPhysicsDesc(
             surface_density=density,
+            **_particle_contact_material_options(attrs.contact_material),
             add_springs=bool(attrs.add_springs),
             spring_ke=attrs.spring_ke,
             spring_kd=attrs.spring_kd,

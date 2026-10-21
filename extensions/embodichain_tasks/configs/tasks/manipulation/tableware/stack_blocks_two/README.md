@@ -42,3 +42,20 @@ lift the block. The configured runtime rejects seed 2 earlier when contact moves
 the target during approach. The existing randomization ranges and physical
 acceptance thresholds remain unchanged; this task does not claim reliable success
 across those ranges.
+
+The dual-UR5 and Tianji Marvin deployments reuse this same program,
+reset distribution and measured acceptance gates. Their task-local integrations
+select the corresponding calibrated grasp and dual-arm policy. See the
+[deployment matrix](../../../../../README.md#dual-arm-task-deployments) for
+configuration selection and sensor differences.
+
+The Tianji deployment selects the left arm and a Toppra motion policy. Its root
+position `[0.125, -0.1, 0.125]` m keeps the fixed stand behind the tabletop, with
+at least 15 mm of mesh clearance checked by the native regression. The grasp
+inclines the approach by 30 degrees and keeps the jaw closing axis horizontal,
+so both fingers stay above the support while closing. The object-local TCP
+translation `[-0.017598, 0, 0.024481]` m puts the cube deeper between the pads
+with at least 4 mm of open-finger mesh clearance above the support. The wrist
+remains reachable from this position. Placement restores the authored
+upright orientation; the 25 mm XY, 12 mm Z and 45-degree upright acceptance
+limits remain unchanged.

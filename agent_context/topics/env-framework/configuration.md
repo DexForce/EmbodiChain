@@ -132,7 +132,15 @@ task integration's nested `scene_binding`. The shared
 `cobotmagic.yaml` component owns a top-view RGB camera and a skill profile with
 the right arm as primary and the left arm as a secondary resource. Its selected
 `CobotMagicCfg` owns the two mounted wrist cameras. Tableware Task Program
-deployments reuse the combined suite. Gym copies the selected robot configuration
+deployments reuse the combined suite.
+The dual-UR5 and Marvin embodiments also own the shared `cam_high`
+view; Marvin retains its robot-owned wrist cameras. Their `left` / `right`
+resources expose primary/secondary manipulator aliases as composite resources
+with the same physical leaves, so both program naming conventions retain
+physical conflict detection. See `extensions/embodichain_tasks/README.md` for
+the supported task/deployment matrix and qualification boundaries.
+
+Gym copies the selected robot configuration
 and overrides its
 `enable_sensor` with the environment-wide switch. `cfg.sensor` retains
 independent declarations; effective sensors combine those with
