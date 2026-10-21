@@ -32,7 +32,7 @@ import time
 from collections.abc import Callable, Iterator, Mapping
 from importlib.metadata import version
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 import numpy as np
 import torch
@@ -82,6 +82,9 @@ class StandardLeRobotWriter:
         fps: Simulation observation frequency.
         queue_size: Queued raw episodes, excluding the active writer/submission.
         operation_timeout: Bound on handoff/finalization and worker join.
+        events_path: Optional new JSONL file outside the corpus. The SDK-owner
+            thread streams chronological service intervals without callbacks;
+            log failures are terminal just like recording failures.
 
     Real video features use the pinned SDK's ordinary AV1 per-episode encoding
     path. A failed/partial corpus remains marked INCOMPLETE and is not readable
@@ -98,6 +101,7 @@ class StandardLeRobotWriter:
         fps: int = 30,
         queue_size: int = 2,
         operation_timeout: float = 1800.0,
+        events_path: Path | str | None = None,
     ) -> None:
         if episode_count is not None and (
             type(episode_count) is not int or episode_count < 1
@@ -110,6 +114,14 @@ class StandardLeRobotWriter:
             raise ValueError("operation_timeout must be finite and positive")
         _check_versions()
         self.root = Path(destination)
+        self._events_path = None if events_path is None else Path(events_path)
+        if self._events_path is not None:
+            resolved = self._events_path.resolve()
+            if (
+                self.root.resolve() == resolved
+                or self.root.resolve() in resolved.parents
+            ):
+                raise ValueError("Writer event log must be outside the recorded corpus")
         if self.root.exists():
             raise FileExistsError(self.root)
         self.root.mkdir(parents=True)
@@ -138,6 +150,8 @@ class StandardLeRobotWriter:
             "finalized": False,
             "worker_joined": False,
         }
+        if self._events_path is not None:
+            self._stats["event_log_rows"] = 0
         self._thread = threading.Thread(
             target=self._run, name="stream-lerobot-writer", daemon=True
         )
@@ -229,9 +243,37 @@ class StandardLeRobotWriter:
         self._record_submission(identity)
         return True
 
+    def _write_event(
+        self,
+        stream: TextIO | None,
+        event: Mapping[str, Any] | None,
+        *,
+        error: BaseException | None = None,
+    ) -> None:
+        if stream is None or event is None:
+            return
+        row = {
+            "schema": "ods-sdk-writer-service/v1",
+            "kind": "interval",
+            **event,
+            "end_ns": time.monotonic_ns(),
+            "worker_pid": os.getpid(),
+            "worker_thread_id": threading.get_ident(),
+            "status": "complete" if error is None else "failed",
+        }
+        if error is not None:
+            row["error"] = repr(error)
+        stream.write(json.dumps(row, allow_nan=False) + "\n")
+        self._stats["event_log_rows"] += 1
+
     def _run(self) -> None:
         dataset = None
+        events = None
+        active_event = None
         try:
+            if self._events_path is not None:
+                self._events_path.parent.mkdir(parents=True, exist_ok=True)
+                events = self._events_path.open("x", buffering=1, encoding="utf-8")
             from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
             features = {
@@ -271,6 +313,13 @@ class StandardLeRobotWriter:
             # create() requires a nonexistent root; retain the explicit partial marker.
             (self.root / "INCOMPLETE").unlink()
             self.root.rmdir()
+            active_event = {
+                "name": "sdk_create",
+                "start_ns": time.monotonic_ns(),
+                "source_id": None,
+                "episode_ordinal": None,
+                "scope": "LeRobotDataset.create; excludes SDK import, prior directory setup and event-log serialization",
+            }
             dataset = LeRobotDataset.create(
                 "local/ods-data-stream",
                 fps=self.fps,
@@ -284,6 +333,8 @@ class StandardLeRobotWriter:
                 vcodec="libsvtav1",
                 encoder_threads=1,
             )
+            self._write_event(events, active_event)
+            active_event = None
             (self.root / "INCOMPLETE").write_text(
                 "Accepted episodes are not finalized.\n"
             )
@@ -312,6 +363,13 @@ class StandardLeRobotWriter:
                 if episode is None:
                     break
                 started = time.monotonic()
+                active_event = {
+                    "name": "sdk_episode_write_encode",
+                    "start_ns": time.monotonic_ns(),
+                    "source_id": episode["frame_ids"][0, :2].tolist(),
+                    "episode_ordinal": len(manifest["episodes"]),
+                    "scope": "accepted-frame validation/provenance, add_frame, synchronous save_episode/AV1 encoding and raw-reference/hash/manifest bookkeeping; excludes queue wait and event-log serialization",
+                }
                 length = len(episode["valid"])
                 if not episode["valid"].all():
                     raise ValueError("Writer requires trimmed accepted frames")
@@ -373,6 +431,8 @@ class StandardLeRobotWriter:
                 self._stats["written_episodes"] += 1
                 self._stats["valid_frames"] += length
                 self._stats["sdk_write_encode_seconds"] += time.monotonic() - started
+                self._write_event(events, active_event)
+                active_event = None
                 del episode
             if self._abort.is_set():
                 raise RuntimeError("LeRobot recording aborted")
@@ -380,8 +440,17 @@ class StandardLeRobotWriter:
                 raise ValueError("Final accepted corpus episode count mismatch")
             manifest["accepted_episode_count"] = self._final_episode_count
             started = time.monotonic()
+            active_event = {
+                "name": "sdk_finalize",
+                "start_ns": time.monotonic_ns(),
+                "source_id": None,
+                "episode_ordinal": None,
+                "scope": "LeRobotDataset.finalize; excludes final provenance-sidecar/marker writes and event-log serialization",
+            }
             dataset.finalize()
             dataset = None
+            self._write_event(events, active_event)
+            active_event = None
             self._stats["sdk_finalize_seconds"] = time.monotonic() - started
             manifest["required_files"] = [
                 str(path.relative_to(self.root))
@@ -395,14 +464,36 @@ class StandardLeRobotWriter:
             self._stats["finalized"] = True
         except BaseException as error:
             self._error = error
+            if active_event is not None:
+                try:
+                    self._write_event(events, active_event, error=error)
+                except BaseException as event_error:
+                    self._stats["event_log_error"] = repr(event_error)
             self.root.mkdir(parents=True, exist_ok=True)
             (self.root / "INCOMPLETE").write_text(repr(error) + "\n")
         finally:
             if dataset is not None:
+                cleanup_event = {
+                    "name": "sdk_finalize",
+                    "start_ns": time.monotonic_ns(),
+                    "source_id": None,
+                    "episode_ordinal": None,
+                    "cleanup": True,
+                    "scope": "cleanup LeRobotDataset.finalize after a failed/aborted recording; excludes event-log serialization",
+                }
                 try:
                     dataset.finalize()
+                    self._write_event(events, cleanup_event)
                 except BaseException as error:
                     self._stats["cleanup_error"] = repr(error)
+            if events is not None:
+                try:
+                    events.close()
+                except BaseException as error:
+                    self._error = self._error or error
+                    self._stats["event_log_error"] = repr(error)
+                    self._stats["finalized"] = False
+                    (self.root / "INCOMPLETE").write_text(repr(self._error) + "\n")
 
     def _join(self, progress: Callable[[], None] | None, timeout: float) -> None:
         deadline = time.monotonic() + timeout
@@ -521,7 +612,7 @@ class _DecodedContexts(Dataset):
 
     def __getitem__(self, key: tuple[int, int]) -> dict[str, Any]:
         reservation, index = key
-        started = time.monotonic()
+        started_ns = time.monotonic_ns()
         if self._dataset is None:
             from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
@@ -641,7 +732,10 @@ class _DecodedContexts(Dataset):
             ):
                 mask = valid[:, None] if name == "frame_ids" else valid
                 result[name].masked_fill_(~mask, -1)
-        result["_service_seconds"] = time.monotonic() - started
+        ended_ns = time.monotonic_ns()
+        result["_service_seconds"] = (ended_ns - started_ns) / 1e9
+        result["_service_start_ns"] = started_ns
+        result["_service_end_ns"] = ended_ns
         result["_worker_pid"] = os.getpid()
         return result
 
@@ -964,7 +1058,12 @@ class StandardLeRobotReader:
                 raise RuntimeError("Mixed DataLoader exposure reservations")
             reservation = int(reservations[0])
             service = batch.pop("_service_seconds")
-            worker_pids = batch.pop("_worker_pid").unique().tolist()
+            started_ns = batch.pop("_service_start_ns")
+            ended_ns = batch.pop("_service_end_ns")
+            item_pids = batch.pop("_worker_pid")
+            worker_pids = item_pids.unique().tolist()
+            if (started_ns < 0).any() or (ended_ns < started_ns).any():
+                raise RuntimeError("Invalid SDK worker host-monotonic service interval")
             self._validate_batch(batch, reservation)
             # Collation, SDK decode and normalization all succeeded before debit.
             self._sampler.commit(reservation)
@@ -989,6 +1088,16 @@ class StandardLeRobotReader:
             batch["_service"] = {
                 "worker_fetch_seconds": service.sum().item(),
                 "worker_item_seconds": service.tolist(),
+                "worker_fetch_intervals": [
+                    {
+                        "worker_pid": pid,
+                        "start_ns": int(started_ns[item_pids == pid].min()),
+                        "end_ns": int(ended_ns[item_pids == pid].max()),
+                        "item_count": int((item_pids == pid).sum()),
+                        "scope": "contiguous batch item-fetch envelope including SDK Dataset startup/read, CPU video decode and temporal conversion/validation; excludes worker interpreter startup, collation, IPC and parent waiting; not pure decode, GPU busy time or critical-path time",
+                    }
+                    for pid in worker_pids
+                ],
                 "scope": "worker SDK fetch including decode, temporal conversion and padding; first item includes Dataset startup",
             }
             return batch

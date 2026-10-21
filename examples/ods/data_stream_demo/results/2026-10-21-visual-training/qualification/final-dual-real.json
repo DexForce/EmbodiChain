@@ -1,0 +1,41 @@
+{
+  "passed": true,
+  "scope": "Three real dual-camera C8/P2/B32/U40 engineering runs; final SDK service timing and full-frame integrity contract; not formal performance results",
+  "initial_final_model_and_normalization_equal": true,
+  "overlap_serial_update_trace_equal": true,
+  "runs": {
+    "ods_overlap": {
+      "status": "complete",
+      "updates": 40,
+      "valid_targets": 40960,
+      "sources": 16,
+      "generated": 24,
+      "full_camera_frames": 23664,
+      "timeline_contract": "sdk-worker-service/v1",
+      "normalization_sha256": "616e6298aa513d82cc70e11102f442f61be041c0e6a61f4bccffc0bab880db3e",
+      "final_model_sha256": "ed78293e21ed2adccb3bb5b68f72dd83a4c5662a29d446053a5b2a671396f8c5"
+    },
+    "offline": {
+      "status": "complete",
+      "updates": 40,
+      "valid_targets": 40960,
+      "sources": 16,
+      "generated": 16,
+      "full_camera_frames": 15572,
+      "timeline_contract": "sdk-worker-service/v1",
+      "normalization_sha256": "616e6298aa513d82cc70e11102f442f61be041c0e6a61f4bccffc0bab880db3e",
+      "final_model_sha256": "4455c597533dde158f52730f8725a7a8c1ad95bf347f9601c820ec87496a2309"
+    },
+    "ods_serial": {
+      "status": "complete",
+      "updates": 40,
+      "valid_targets": 40960,
+      "sources": 16,
+      "generated": 24,
+      "full_camera_frames": 23664,
+      "timeline_contract": "sdk-worker-service/v1",
+      "normalization_sha256": "616e6298aa513d82cc70e11102f442f61be041c0e6a61f4bccffc0bab880db3e",
+      "final_model_sha256": "ed78293e21ed2adccb3bb5b68f72dd83a4c5662a29d446053a5b2a671396f8c5"
+    }
+  }
+}

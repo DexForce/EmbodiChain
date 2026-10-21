@@ -70,6 +70,8 @@ _METRICS = (
     "unique_target_frames",
     "target_duplicate_fraction",
     "max_source_trained_chunks",
+    "dataset_bytes",
+    "checkpoint_bytes",
 )
 
 
@@ -225,6 +227,7 @@ def _qualification(run: dict[str, Any]) -> list[str]:
                 "normalization_sha256",
                 "gpu_step_milliseconds",
                 "engine_stats",
+                "timeline_contract",
             )
         )
     )
@@ -264,6 +267,8 @@ def _qualification(run: dict[str, Any]) -> list[str]:
             and len(evaluation.get("records", [])) == expected
         ):
             reasons.append("requested evaluation is pending, failed or incomplete")
+    if actual and summary["status"] == "complete":
+        reasons.extend(_new_formal_contract_errors(run))
     return reasons
 
 
@@ -551,6 +556,177 @@ def _fairness(run: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     return evidence, reasons
 
 
+def _new_formal_contract_errors(run: dict[str, Any]) -> list[str]:
+    """Require chronological worker services and full video QA in new formal runs.
+
+    Historical smoke/calibration/single engineering inputs retain their original
+    sparse-audit scope. Superseded formal inputs lack the new contract and may
+    be inspected as diagnostics, but cannot enter the refreshed formal claims.
+    """
+    if run["config"].get("phase") != "report":
+        return []
+    metrics, summary = run["metrics"], run["summary"]
+    errors = []
+    if metrics.get("timeline_contract") != "sdk-worker-service/v1":
+        errors.append("new formal run lacks sdk-worker-service/v1 timeline contract")
+    total = _number(metrics.get("total_seconds"))
+    intervals = metrics.get("intervals", [])
+    recording = [row for row in intervals if row.get("name") == "sdk_recording"]
+    decoding = [row for row in intervals if row.get("name") == "sdk_decode"]
+    for row in recording + decoding:
+        start, end = _number(row.get("start_seconds")), _number(row.get("end_seconds"))
+        if (
+            start is None
+            or end is None
+            or total is None
+            or not 0 <= start < end <= total + 1e-6
+            or type(row.get("worker_pid")) is not int
+            or row["worker_pid"] <= 0
+        ):
+            errors.append("invalid chronological SDK worker service interval")
+            break
+    phases = Counter(row.get("sdk_phase") for row in recording)
+    sources = metrics.get("episodes", [])
+    published = metrics.get("published_sources")
+    if (
+        type(published) is not int
+        or published < 1
+        or not isinstance(sources, list)
+        or type(metrics.get("completed_updates")) is not int
+        or type(metrics.get("batch_size")) is not int
+    ):
+        errors.append(
+            "new formal run lacks valid source/update counts for worker evidence"
+        )
+        return errors
+    if (
+        phases
+        != Counter(
+            {"sdk_create": 1, "sdk_episode_write_encode": published, "sdk_finalize": 1}
+        )
+        or len(recording) != (published or 0) + 2
+    ):
+        errors.append(
+            "SDK recording service lacks create, every accepted write, or finalize"
+        )
+    writes = [
+        row for row in recording if row.get("sdk_phase") == "sdk_episode_write_encode"
+    ]
+
+    def identity(value: Any) -> str:
+        return (
+            value
+            if isinstance(value, str)
+            else (
+                f"{value[0]}:{value[1]}"
+                if isinstance(value, (list, tuple)) and len(value) == 2
+                else "invalid"
+            )
+        )
+
+    expected_sources = {row.get("source_id"): row.get("ordinal") for row in sources}
+    actual_sources = {
+        identity(row.get("source_id")): row.get("episode_ordinal") for row in writes
+    }
+    if actual_sources != expected_sources or len(writes) != len(actual_sources):
+        errors.append(
+            "SDK write spans do not cover the exact immutable accepted sources"
+        )
+    if any(row.get("status", "complete") != "complete" for row in recording):
+        errors.append("SDK recording worker reported failure")
+    if run["config"].get("arm") == "offline":
+        item_counts: Counter[int] = Counter()
+        for row in decoding:
+            update, count = row.get("batch_update"), row.get("item_count")
+            if type(update) is not int or type(count) is not int or count <= 0:
+                errors.append("invalid SDK temporal fetch update/item attribution")
+                break
+            item_counts[update] += count
+        expected_counts = Counter(
+            {
+                i: metrics.get("batch_size")
+                for i in range(1, metrics.get("completed_updates", 0) + 1)
+            }
+        )
+        if not decoding or item_counts != expected_counts:
+            errors.append(
+                "SDK temporal fetch spans do not cover every delivered training batch"
+            )
+    audit = summary.get("post_audit") or {}
+    receipt = audit.get("full_video_integrity")
+    sidecar = Path(run["path"]).with_name("video-integrity.json")
+    try:
+        saved = _json(sidecar) if sidecar.is_file() else None
+        if receipt is not None and saved is not None and receipt != saved:
+            errors.append("inline and sidecar full-video receipts disagree")
+        receipt = receipt if isinstance(receipt, dict) else saved
+        if not isinstance(receipt, dict):
+            raise ValueError("missing revisioned full-video-integrity receipt")
+        cameras = _json(Path(run["path"]).with_name("initial-contract.json"))[
+            "camera_order"
+        ]
+        expected_frames = sum(row["frame_count"] for row in sources)
+        expected_cameras = {"observation.images." + camera for camera in cameras}
+        expected_decoded = {camera: expected_frames for camera in expected_cameras}
+        if not (
+            receipt.get("revision") == "full-video-integrity/v1"
+            and receipt.get("passed") is True
+            and receipt.get("all_saved_video_frames_decoded") is True
+            and receipt.get("expected_episodes") == published
+            and receipt.get("expected_frames_per_camera") == expected_frames
+            and receipt.get("decoded_frames_per_camera") == expected_decoded
+            and receipt.get("total_decoded_camera_frames")
+            == expected_frames * len(cameras)
+        ):
+            raise ValueError(
+                "full-video receipt counts/status do not cover the saved corpus"
+            )
+        verifier = receipt.get("verifier_sha256")
+        metadata = receipt.get("metadata_sha256")
+        valid_sha = (
+            lambda value: isinstance(value, str)
+            and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+        )
+        if (
+            not valid_sha(verifier)
+            or not isinstance(metadata, dict)
+            or not metadata
+            or not all(valid_sha(value) for value in metadata.values())
+        ):
+            raise ValueError("full-video verifier/metadata fingerprints are missing")
+        files = receipt.get("files")
+        file_frames: Counter[str] = Counter()
+        episode_coverage: dict[str, set[int]] = {
+            camera: set() for camera in expected_cameras
+        }
+        if not isinstance(files, list) or not files:
+            raise ValueError("full-video receipt has no per-file checks")
+        for row in files:
+            if not (
+                row.get("camera") in expected_cameras
+                and row.get("passed") is True
+                and row.get("probe_exitcode") == 0
+                and row.get("decode_exitcode") == 0
+                and type(row.get("expected_frames")) is int
+                and row["expected_frames"] > 0
+                and row.get("decoded_frames") == row["expected_frames"]
+                and row.get("decoded_pixel_format") == "yuv420p"
+                and valid_sha(row.get("compressed_sha256"))
+            ):
+                raise ValueError(
+                    "failed/incomplete per-file full-video decode evidence"
+                )
+            file_frames[row["camera"]] += row["decoded_frames"]
+            episode_coverage[row["camera"]].update(row.get("episodes", []))
+        if dict(file_frames) != expected_decoded or any(
+            coverage != set(range(published)) for coverage in episode_coverage.values()
+        ):
+            raise ValueError("per-file full-video evidence omits saved sources/frames")
+    except (OSError, ValueError, TypeError, KeyError) as error:
+        errors.append(f"new formal full-video integrity: {error}")
+    return errors
+
+
 def _paired(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows = []
     for vision in _VISIONS:
@@ -724,6 +900,10 @@ def _curves(runs: list[dict[str, Any]], plt: Any, output: Path) -> None:
 
 def _stage(name: str) -> str:
     lowered = name.lower()
+    if lowered == "sdk_recording":
+        return "SDK recording service"
+    if lowered == "sdk_decode":
+        return "SDK temporal fetch"
     if "generation_drain_wait" in lowered:
         return "finalize / cleanup"
     if lowered.endswith("_wait") or "quota_wait" in lowered:
@@ -735,11 +915,9 @@ def _stage(name: str) -> str:
         return "generation"
     if any(word in lowered for word in ("finaliz", "drain", "close", "shutdown")):
         return "finalize / cleanup"
-    if any(word in lowered for word in ("record", "encod", "writer")):
-        return "recording"
     if any(
         word in lowered
-        for word in ("decode", "copy", "sampl", "read", "batch", "data_wait")
+        for word in ("record", "decode", "copy", "sampl", "read", "batch", "transfer")
     ):
         return "data preparation"
     if any(word in lowered for word in ("train", "optimizer", "backward", "forward")):
@@ -750,7 +928,8 @@ def _stage(name: str) -> str:
 def _timeline(runs: list[dict[str, Any]], plt: Any, output: Path) -> None:
     stages = (
         "generation",
-        "recording",
+        "SDK recording service",
+        "SDK temporal fetch",
         "data preparation",
         "training",
         "waiting",
@@ -764,6 +943,7 @@ def _timeline(runs: list[dict[str, Any]], plt: Any, output: Path) -> None:
                 "#4c78a8",
                 "#f2b134",
                 "#b279a2",
+                "#b3a9cf",
                 "#159b80",
                 "#b7a36a",
                 "#c65656",
@@ -898,6 +1078,10 @@ def _resource_stats(runs: list[dict[str, Any]]) -> dict[str, Any]:
         "cpu_assigned_percent": [],
         "simulation_gpu_board_percent": [],
         "training_gpu_board_percent": [],
+        "sampled_pss_gib": [],
+        "sampled_owned_gpu_gib": [],
+        "dataset_mib": [],
+        "checkpoint_mib": [],
     }
     for run in runs:
         resources = run["metrics"].get("resources") or {}
@@ -908,6 +1092,15 @@ def _resource_stats(runs: list[dict[str, Any]]) -> dict[str, Any]:
         )
         if value is not None:
             values["cpu_assigned_percent"].append(value)
+        for key, container, field, scale in (
+            ("sampled_pss_gib", resources, "peak_pss_bytes", 1024**3),
+            ("sampled_owned_gpu_gib", resources, "peak_vram_bytes", 1024**3),
+            ("dataset_mib", run["metrics"], "dataset_bytes", 1024**2),
+            ("checkpoint_mib", run["metrics"], "checkpoint_bytes", 1024**2),
+        ):
+            value = _number(container.get(field))
+            if value is not None:
+                values[key].append(value / scale)
         pair = run["summary"].get("device_supervision", {}).get("primary_pair", {})
         boards = resources.get("primary_gpu_utilization") or {}
         for role in ("simulation", "training"):
@@ -1021,6 +1214,18 @@ def write_report(root: Path, output: Path | None = None) -> dict[str, Any]:
             "",
             "CPU values use continuing-PID sampled interval deltas normalized by the assigned cores; new or disappeared processes may be undercounted. GPU values are whole-board NVML samples and include foreign work; they do not attribute kernel utilization to this run. Missing observations remain unknown (—), not zero. See raw resources for sample counts and process-coverage gaps.",
             "",
+            "| Path | Sampled PSS max GiB | Sampled owned GPU max GiB | Dataset MiB | Checkpoints MiB |",
+            "| --- | ---: | ---: | ---: | ---: |",
+        ]
+        for arm in _ARMS:
+            resource = report["resource_aggregates"][vision][arm]
+            lines.append(
+                f"| {_LABELS[arm]} | {_formatted(resource['sampled_pss_gib'])} | {_formatted(resource['sampled_owned_gpu_gib'])} | {_formatted(resource['dataset_mib'])} | {_formatted(resource['checkpoint_mib'])} |"
+            )
+        lines += [
+            "",
+            "Memory maxima are sampled observations, not guaranteed allocator/process peaks. Disk sizes are logical finalized dataset and initial/final checkpoint bytes; they exclude temporary disk peaks, logs and post-timing audit/evaluation artifacts.",
+            "",
         ]
     lines += [
         "## Figures and interpretation",
@@ -1037,9 +1242,9 @@ def write_report(root: Path, output: Path | None = None) -> dict[str, Any]:
         "",
         "AV1 decoding is lossy. Compare source quality audits and held-out evaluation alongside timing. Differences between online raw pixels and decoded pixels prevent a claim of identical optimization trajectories. Serial trace replay isolates overlap only when its source/anchor manifest audit passes. A faster small offline run or broader large offline corpus is a valid result.",
         "",
-        "Intervals may overlap and are not summed into total time. Timeline rows use the first observed qualified seed per vision, without selecting the fastest run. PNG, SVG and PDF versions share measured inputs.",
+        "SDK recording spans cover real create/write/encode/bookkeeping/finalize service; SDK temporal fetch spans include worker initialization, dataset reads, decode, conversion and validation. Neither lane claims pure encoder/decoder CPU work or GPU kernel activity. Owner packing/copy and waiting remain separate. Intervals may overlap and are not summed into total time. Timeline rows use the first observed qualified seed per vision, without selecting the fastest run. PNG, SVG and PDF versions share measured inputs.",
         "",
-        "Formal ratios require matching initial-model/normalization SHA256, initial-C numeric prefix, camera order, declared/completed training budget, ordered primary GPU UUIDs and the same eight CPU cores. Retained supervisor launch masks/thread limits, placement guards, process exit and clocks must agree. Missing evidence blocks claims; smoke/calibration or legacy CPU rendering fixtures are not formal comparisons. Post-timing corpus audit and evaluation durations are excluded from pipeline time.",
+        "Formal ratios require matching initial-model/normalization SHA256, initial-C numeric prefix, camera order, declared/completed training budget, ordered primary GPU UUIDs and the same eight CPU cores. Retained supervisor launch masks/thread limits, placement guards, process exit and clocks must agree. New formal inputs additionally require chronological sdk-worker-service/v1 intervals and a revisioned full-video-integrity/v1 receipt for every saved frame; the original numeric/H2 audit remains required. Full-video YUV sequential integrity is distinct from lossless RGB fidelity or every SDK temporal seek. Missing evidence blocks claims; smoke/calibration or legacy CPU rendering fixtures are not formal comparisons. Post-timing corpus audit and evaluation durations are excluded from pipeline time.",
         "",
         "## Excluded paired claims",
         "",

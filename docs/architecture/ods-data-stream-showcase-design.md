@@ -553,6 +553,11 @@ The CPU corpus/decoder correctness audit and independent policy evaluation
 run as separate processes after normal timed-worker exit. Their durations are
 recorded outside pipeline time; a failure disqualifies the run while preserving
 the original timing and artifacts.
+The audit covers every numeric frame, one legal H2 SDK window per source,
+sparse RGB fidelity references and a strict sequential software decode/count
+check of every saved AV1 frame. Full-decode hashes describe YUV420p rawvideo
+planes, not lossless RGB or every SDK random-seek position. Audit receipts and
+their frame-hash artifacts use exclusive fresh paths, including for backfills.
 Pending or missing validation cannot qualify an actual run. The supervisor
 records the true requested evaluation count independently of the training
 worker's zero-scene configuration. Formal qualification requires the completed
@@ -567,6 +572,13 @@ the host timeline. Before the formal matrix, measure accepted episode rate
 gamma and real update rate nu, including a concurrent check, then freeze the
 configuration and report the producer/learner imbalance. Do not add delays,
 empty compute or unnecessary updates to create apparent savings.
+SDK recording spans come from the single writer thread and include writing,
+encoding and recording bookkeeping. Reader spans come from actual worker fetch
+timestamps, including SDK startup, temporal reads, decoding and validation;
+prefetch may finish before the parent's request. Plot these separately from
+owner copying and waiting, rather than substituting parent wait for service.
+Disk metrics use finalized logical dataset/checkpoint sizes; temporary disk
+peaks and post-timing audit/evaluation artifacts are separate.
 
 ### Metrics and figures
 

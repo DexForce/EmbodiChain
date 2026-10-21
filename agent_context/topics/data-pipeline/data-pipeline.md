@@ -50,6 +50,11 @@ and trained-state diversity are outcomes. Record only completed optimizer
 updates as training coverage, and include recording/finalization and normal
 teardown in total pipeline time. Serial trace replay separately attributes
 generation/training overlap.
+All acquisition controls may overlap recording and generation within the same
+storage bounds. Worker SDK service timestamps remain separate from owner
+copy/wait spans. `training_audit.py` combines full numeric checks, source-window
+SDK reads and `video_integrity.py`'s all-frame software video count/integrity
+check; fresh post-timing receipts preserve earlier evidence.
 The [recorded study](../../../examples/ods/data_stream_demo/results/2026-10-21/RESULTS.md)
 owns measured results, raw-log reproduction and workload-specific limitations;
 it does not establish training efficiency or policy performance.

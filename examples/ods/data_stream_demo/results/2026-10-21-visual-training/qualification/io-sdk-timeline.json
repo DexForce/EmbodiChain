@@ -1,0 +1,743 @@
+{
+  "passed": true,
+  "candidate_sha256": "aeec5641a3e50b1fbe6ff46829a0cbe0d1a498715e0de0aa38357d554c159d5f",
+  "baseline_sha256": "b391e5958aacff905b082be9b0747f48c42879ae5de4416fabb05bcd82280c9d",
+  "results": {
+    "single": {
+      "writer": {
+        "submitted_episodes": 3,
+        "written_episodes": 3,
+        "valid_frames": 120,
+        "queue_capacity": 2,
+        "peak_queued_episodes": 2,
+        "queue_wait_seconds": 1.343983116094023,
+        "sdk_create_seconds": 0.00637807184830308,
+        "sdk_write_encode_seconds": 1.3959888771642,
+        "sdk_finalize_seconds": 0.006318570114672184,
+        "finalized": true,
+        "worker_joined": true,
+        "event_log_rows": 5
+      },
+      "events": [
+        {
+          "schema": "ods-sdk-writer-service/v1",
+          "kind": "interval",
+          "name": "sdk_create",
+          "start_ns": 1741973720193464,
+          "source_id": null,
+          "episode_ordinal": null,
+          "scope": "LeRobotDataset.create; excludes SDK import, prior directory setup and event-log serialization",
+          "end_ns": 1741973726276594,
+          "worker_pid": 1855817,
+          "worker_thread_id": 140390337627712,
+          "status": "complete"
+        },
+        {
+          "schema": "ods-sdk-writer-service/v1",
+          "kind": "interval",
+          "name": "sdk_episode_write_encode",
+          "start_ns": 1741973727485634,
+          "source_id": [
+            101,
+            0
+          ],
+          "episode_ordinal": 0,
+          "scope": "accepted-frame validation/provenance, add_frame, synchronous save_episode/AV1 encoding and raw-reference/hash/manifest bookkeeping; excludes queue wait and event-log serialization",
+          "end_ns": 1741974210416809,
+          "worker_pid": 1855817,
+          "worker_thread_id": 140390337627712,
+          "status": "complete"
+        },
+        {
+          "schema": "ods-sdk-writer-service/v1",
+          "kind": "interval",
+          "name": "sdk_episode_write_encode",
+          "start_ns": 1741974210498123,
+          "source_id": [
+            101,
+            1
+          ],
+          "episode_ordinal": 1,
+          "scope": "accepted-frame validation/provenance, add_frame, synchronous save_episode/AV1 encoding and raw-reference/hash/manifest bookkeeping; excludes queue wait and event-log serialization",
+          "end_ns": 1741974660187952,
+          "worker_pid": 1855817,
+          "worker_thread_id": 140390337627712,
+          "status": "complete"
+        },
+        {
+          "schema": "ods-sdk-writer-service/v1",
+          "kind": "interval",
+          "name": "sdk_episode_write_encode",
+          "start_ns": 1741974660247023,
+          "source_id": [
+            101,
+            2
+          ],
+          "episode_ordinal": 2,
+          "scope": "accepted-frame validation/provenance, add_frame, synchronous save_episode/AV1 encoding and raw-reference/hash/manifest bookkeeping; excludes queue wait and event-log serialization",
+          "end_ns": 1741975123631312,
+          "worker_pid": 1855817,
+          "worker_thread_id": 140390337627712,
+          "status": "complete"
+        },
+        {
+          "schema": "ods-sdk-writer-service/v1",
+          "kind": "interval",
+          "name": "sdk_finalize",
+          "start_ns": 1741975123709321,
+          "source_id": null,
+          "episode_ordinal": null,
+          "scope": "LeRobotDataset.finalize; excludes final provenance-sidecar/marker writes and event-log serialization",
+          "end_ns": 1741975129995322,
+          "worker_pid": 1855817,
+          "worker_thread_id": 140390337627712,
+          "status": "complete"
+        }
+      ],
+      "reader_intervals": [
+        {
+          "worker_pid": 1855920,
+          "start_ns": 1741980963342270,
+          "end_ns": 1741983166127910,
+          "item_count": 2,
+          "scope": "contiguous batch item-fetch envelope including SDK Dataset startup/read, CPU video decode and temporal conversion/validation; excludes worker interpreter startup, collation, IPC and parent waiting; not pure decode, GPU busy time or critical-path time"
+        },
+        {
+          "worker_pid": 1855921,
+          "start_ns": 1741981071836778,
+          "end_ns": 1741983341705017,
+          "item_count": 2,
+          "scope": "contiguous batch item-fetch envelope including SDK Dataset startup/read, CPU video decode and temporal conversion/validation; excludes worker interpreter startup, collation, IPC and parent waiting; not pure decode, GPU busy time or critical-path time"
+        },
+        {
+          "worker_pid": 1855922,
+          "start_ns": 1741980552845234,
+          "end_ns": 1741983039199470,
+          "item_count": 2,
+          "scope": "contiguous batch item-fetch envelope including SDK Dataset startup/read, CPU video decode and temporal conversion/validation; excludes worker interpreter startup, collation, IPC and parent waiting; not pure decode, GPU busy time or critical-path time"
+        }
+      ],
+      "reader_stats": {
+        "delivered_batches": 3,
+        "sdk_getitem_calls": 6,
+        "returned_valid_camera_frames": 12,
+        "requested_camera_timestamps": 12,
+        "worker_fetch_seconds": 6.958944668000001,
+        "worker_pids": [
+          1855920,
+          1855921,
+          1855922
+        ],
+        "reader": "official LeRobotDataset.__getitem__ + delta_timestamps",
+        "video_backend": "torchcodec CPU",
+        "decoded_corpus_preloaded": false,
+        "prefetch_batches": 4,
+        "persistent_workers": true,
+        "ordered_delivery": true,
+        "pinned_memory": false,
+        "plan_batches": 3,
+        "image_timestamps_per_chunk": 2,
+        "numeric_timestamps_per_chunk": 33,
+        "complete_contexts_required": true,
+        "restart_supported": false
+      },
+      "reader_close": {
+        "unconsumed_prefetch": {
+          "episode_budget": null,
+          "delivered_chunks": 6,
+          "reserved_chunks": 0,
+          "cancelled_prefetch_chunks": 0,
+          "pending_batches": 0,
+          "remaining_chunks": null,
+          "episodes": [
+            {
+              "source_id": [
+                101,
+                0
+              ],
+              "assigned": null,
+              "delivered": 2,
+              "reserved": 0,
+              "remaining": null
+            },
+            {
+              "source_id": [
+                101,
+                1
+              ],
+              "assigned": null,
+              "delivered": 2,
+              "reserved": 0,
+              "remaining": null
+            },
+            {
+              "source_id": [
+                101,
+                2
+              ],
+              "assigned": null,
+              "delivered": 2,
+              "reserved": 0,
+              "remaining": null
+            }
+          ]
+        },
+        "worker_pids": [
+          1855920,
+          1855921,
+          1855922,
+          1855923
+        ],
+        "worker_exitcodes": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "workers_joined": true,
+        "forced_termination": false,
+        "discarded_prefetch_chunks": 0,
+        "shutdown_seconds": 2.816266898997128,
+        "cleanup_errors": []
+      },
+      "legacy_close": {
+        "unconsumed_prefetch": {
+          "episode_budget": 2,
+          "delivered_chunks": 6,
+          "reserved_chunks": 0,
+          "cancelled_prefetch_chunks": 4,
+          "pending_batches": 0,
+          "remaining_chunks": 0,
+          "episodes": [
+            {
+              "source_id": [
+                101,
+                0
+              ],
+              "assigned": 2,
+              "delivered": 2,
+              "reserved": 0,
+              "remaining": 0
+            },
+            {
+              "source_id": [
+                101,
+                1
+              ],
+              "assigned": 2,
+              "delivered": 2,
+              "reserved": 0,
+              "remaining": 0
+            },
+            {
+              "source_id": [
+                101,
+                2
+              ],
+              "assigned": 2,
+              "delivered": 2,
+              "reserved": 0,
+              "remaining": 0
+            }
+          ]
+        },
+        "worker_pids": [
+          1856297,
+          1856298,
+          1856299,
+          1856300
+        ],
+        "worker_exitcodes": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "workers_joined": true,
+        "forced_termination": false,
+        "discarded_prefetch_chunks": 0,
+        "shutdown_seconds": 2.574495463864878,
+        "cleanup_errors": []
+      },
+      "quality": {
+        "samples": [
+          {
+            "camera": "cam_high",
+            "index": 0,
+            "mae_uint8": 1.6666660411283374,
+            "psnr_db": 43.359594410479744,
+            "exact": false
+          },
+          {
+            "camera": "cam_high",
+            "index": 20,
+            "mae_uint8": 1.3333322604497273,
+            "psnr_db": 45.120508807661295,
+            "exact": false
+          },
+          {
+            "camera": "cam_high",
+            "index": 39,
+            "mae_uint8": 1.9999982416629791,
+            "psnr_db": 41.44074126288082,
+            "exact": false
+          }
+        ],
+        "worker_cleanup": {
+          "worker_pids": [
+            1856061
+          ],
+          "worker_exitcodes": [
+            0
+          ],
+          "workers_joined": true,
+          "forced_termination": false,
+          "discarded_prefetch_chunks": 0,
+          "shutdown_seconds": 0.00011262204498052597,
+          "cleanup_errors": []
+        },
+        "scope": "fixed raw RGB references versus standard CPU video decoding; excluded from timed consumption"
+      }
+    },
+    "dual": {
+      "writer": {
+        "submitted_episodes": 3,
+        "written_episodes": 3,
+        "valid_frames": 120,
+        "queue_capacity": 2,
+        "peak_queued_episodes": 2,
+        "queue_wait_seconds": 0.8618571111001074,
+        "sdk_create_seconds": 0.00493001495487988,
+        "sdk_write_encode_seconds": 2.5983660572674125,
+        "sdk_finalize_seconds": 0.00702961883507669,
+        "finalized": true,
+        "worker_joined": true,
+        "event_log_rows": 5
+      },
+      "events": [
+        {
+          "schema": "ods-sdk-writer-service/v1",
+          "kind": "interval",
+          "name": "sdk_create",
+          "start_ns": 1742012365305974,
+          "source_id": null,
+          "episode_ordinal": null,
+          "scope": "LeRobotDataset.create; excludes SDK import, prior directory setup and event-log serialization",
+          "end_ns": 1742012370049914,
+          "worker_pid": 1855817,
+          "worker_thread_id": 140390337627712,
+          "status": "complete"
+        },
+        {
+          "schema": "ods-sdk-writer-service/v1",
+          "kind": "interval",
+          "name": "sdk_episode_write_encode",
+          "start_ns": 1742012371183339,
+          "source_id": [
+            101,
+            0
+          ],
+          "episode_ordinal": 0,
+          "scope": "accepted-frame validation/provenance, add_frame, synchronous save_episode/AV1 encoding and raw-reference/hash/manifest bookkeeping; excludes queue wait and event-log serialization",
+          "end_ns": 1742013226893163,
+          "worker_pid": 1855817,
+          "worker_thread_id": 140390337627712,
+          "status": "complete"
+        },
+        {
+          "schema": "ods-sdk-writer-service/v1",
+          "kind": "interval",
+          "name": "sdk_episode_write_encode",
+          "start_ns": 1742013226961908,
+          "source_id": [
+            101,
+            1
+          ],
+          "episode_ordinal": 1,
+          "scope": "accepted-frame validation/provenance, add_frame, synchronous save_episode/AV1 encoding and raw-reference/hash/manifest bookkeeping; excludes queue wait and event-log serialization",
+          "end_ns": 1742014096905306,
+          "worker_pid": 1855817,
+          "worker_thread_id": 140390337627712,
+          "status": "complete"
+        },
+        {
+          "schema": "ods-sdk-writer-service/v1",
+          "kind": "interval",
+          "name": "sdk_episode_write_encode",
+          "start_ns": 1742014096982194,
+          "source_id": [
+            101,
+            2
+          ],
+          "episode_ordinal": 2,
+          "scope": "accepted-frame validation/provenance, add_frame, synchronous save_episode/AV1 encoding and raw-reference/hash/manifest bookkeeping; excludes queue wait and event-log serialization",
+          "end_ns": 1742014969714749,
+          "worker_pid": 1855817,
+          "worker_thread_id": 140390337627712,
+          "status": "complete"
+        },
+        {
+          "schema": "ods-sdk-writer-service/v1",
+          "kind": "interval",
+          "name": "sdk_finalize",
+          "start_ns": 1742014969778447,
+          "source_id": null,
+          "episode_ordinal": null,
+          "scope": "LeRobotDataset.finalize; excludes final provenance-sidecar/marker writes and event-log serialization",
+          "end_ns": 1742014976774845,
+          "worker_pid": 1855817,
+          "worker_thread_id": 140390337627712,
+          "status": "complete"
+        }
+      ],
+      "reader_intervals": [
+        {
+          "worker_pid": 1856581,
+          "start_ns": 1742020515732687,
+          "end_ns": 1742022952467552,
+          "item_count": 2,
+          "scope": "contiguous batch item-fetch envelope including SDK Dataset startup/read, CPU video decode and temporal conversion/validation; excludes worker interpreter startup, collation, IPC and parent waiting; not pure decode, GPU busy time or critical-path time"
+        },
+        {
+          "worker_pid": 1856582,
+          "start_ns": 1742020499483889,
+          "end_ns": 1742022812463879,
+          "item_count": 2,
+          "scope": "contiguous batch item-fetch envelope including SDK Dataset startup/read, CPU video decode and temporal conversion/validation; excludes worker interpreter startup, collation, IPC and parent waiting; not pure decode, GPU busy time or critical-path time"
+        },
+        {
+          "worker_pid": 1856583,
+          "start_ns": 1742020690184742,
+          "end_ns": 1742022951652985,
+          "item_count": 2,
+          "scope": "contiguous batch item-fetch envelope including SDK Dataset startup/read, CPU video decode and temporal conversion/validation; excludes worker interpreter startup, collation, IPC and parent waiting; not pure decode, GPU busy time or critical-path time"
+        }
+      ],
+      "reader_stats": {
+        "delivered_batches": 3,
+        "sdk_getitem_calls": 6,
+        "returned_valid_camera_frames": 24,
+        "requested_camera_timestamps": 24,
+        "worker_fetch_seconds": 7.011106621,
+        "worker_pids": [
+          1856581,
+          1856582,
+          1856583
+        ],
+        "reader": "official LeRobotDataset.__getitem__ + delta_timestamps",
+        "video_backend": "torchcodec CPU",
+        "decoded_corpus_preloaded": false,
+        "prefetch_batches": 4,
+        "persistent_workers": true,
+        "ordered_delivery": true,
+        "pinned_memory": false,
+        "plan_batches": 3,
+        "image_timestamps_per_chunk": 2,
+        "numeric_timestamps_per_chunk": 33,
+        "complete_contexts_required": true,
+        "restart_supported": false
+      },
+      "reader_close": {
+        "unconsumed_prefetch": {
+          "episode_budget": null,
+          "delivered_chunks": 6,
+          "reserved_chunks": 0,
+          "cancelled_prefetch_chunks": 0,
+          "pending_batches": 0,
+          "remaining_chunks": null,
+          "episodes": [
+            {
+              "source_id": [
+                101,
+                0
+              ],
+              "assigned": null,
+              "delivered": 2,
+              "reserved": 0,
+              "remaining": null
+            },
+            {
+              "source_id": [
+                101,
+                1
+              ],
+              "assigned": null,
+              "delivered": 2,
+              "reserved": 0,
+              "remaining": null
+            },
+            {
+              "source_id": [
+                101,
+                2
+              ],
+              "assigned": null,
+              "delivered": 2,
+              "reserved": 0,
+              "remaining": null
+            }
+          ]
+        },
+        "worker_pids": [
+          1856581,
+          1856582,
+          1856583,
+          1856584
+        ],
+        "worker_exitcodes": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "workers_joined": true,
+        "forced_termination": false,
+        "discarded_prefetch_chunks": 0,
+        "shutdown_seconds": 2.603573706932366,
+        "cleanup_errors": []
+      },
+      "legacy_close": {
+        "unconsumed_prefetch": {
+          "episode_budget": 2,
+          "delivered_chunks": 6,
+          "reserved_chunks": 0,
+          "cancelled_prefetch_chunks": 4,
+          "pending_batches": 0,
+          "remaining_chunks": 0,
+          "episodes": [
+            {
+              "source_id": [
+                101,
+                0
+              ],
+              "assigned": 2,
+              "delivered": 2,
+              "reserved": 0,
+              "remaining": 0
+            },
+            {
+              "source_id": [
+                101,
+                1
+              ],
+              "assigned": 2,
+              "delivered": 2,
+              "reserved": 0,
+              "remaining": 0
+            },
+            {
+              "source_id": [
+                101,
+                2
+              ],
+              "assigned": 2,
+              "delivered": 2,
+              "reserved": 0,
+              "remaining": 0
+            }
+          ]
+        },
+        "worker_pids": [
+          1856928,
+          1856929,
+          1856930,
+          1856931
+        ],
+        "worker_exitcodes": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "workers_joined": true,
+        "forced_termination": false,
+        "discarded_prefetch_chunks": 0,
+        "shutdown_seconds": 2.4789965548552573,
+        "cleanup_errors": []
+      },
+      "quality": {
+        "samples": [
+          {
+            "camera": "cam_high",
+            "index": 0,
+            "mae_uint8": 1.6666660411283374,
+            "psnr_db": 43.359594410479744,
+            "exact": false
+          },
+          {
+            "camera": "cam_high",
+            "index": 20,
+            "mae_uint8": 1.3333322604497273,
+            "psnr_db": 45.120508807661295,
+            "exact": false
+          },
+          {
+            "camera": "cam_high",
+            "index": 39,
+            "mae_uint8": 1.9999982416629791,
+            "psnr_db": 41.44074126288082,
+            "exact": false
+          },
+          {
+            "camera": "cam_wrist",
+            "index": 0,
+            "mae_uint8": 1.3333325739949942,
+            "psnr_db": 45.120507769526235,
+            "exact": false
+          },
+          {
+            "camera": "cam_wrist",
+            "index": 20,
+            "mae_uint8": 1.3333321859439213,
+            "psnr_db": 45.12050945481118,
+            "exact": false
+          },
+          {
+            "camera": "cam_wrist",
+            "index": 39,
+            "mae_uint8": 1.9999981671571732,
+            "psnr_db": 42.11021165533688,
+            "exact": false
+          }
+        ],
+        "worker_cleanup": {
+          "worker_pids": [
+            1856732
+          ],
+          "worker_exitcodes": [
+            0
+          ],
+          "workers_joined": true,
+          "forced_termination": false,
+          "discarded_prefetch_chunks": 0,
+          "shutdown_seconds": 0.00010218704119324684,
+          "cleanup_errors": []
+        },
+        "scope": "fixed raw RGB references versus standard CPU video decoding; excluded from timed consumption"
+      }
+    },
+    "no_events": {
+      "submitted_episodes": 1,
+      "written_episodes": 1,
+      "valid_frames": 40,
+      "queue_capacity": 2,
+      "peak_queued_episodes": 2,
+      "queue_wait_seconds": 1.0435935109853745e-05,
+      "sdk_create_seconds": 0.0054983049631118774,
+      "sdk_write_encode_seconds": 0.4589261959772557,
+      "sdk_finalize_seconds": 0.005602754885330796,
+      "finalized": true,
+      "worker_joined": true
+    },
+    "existing_event_error": "FileExistsError(17, 'File exists')",
+    "invalid_error": "ValueError('Writer requires trimmed accepted frames')",
+    "invalid_events": [
+      {
+        "schema": "ods-sdk-writer-service/v1",
+        "kind": "interval",
+        "name": "sdk_create",
+        "start_ns": 1742051185696905,
+        "source_id": null,
+        "episode_ordinal": null,
+        "scope": "LeRobotDataset.create; excludes SDK import, prior directory setup and event-log serialization",
+        "end_ns": 1742051190113714,
+        "worker_pid": 1855817,
+        "worker_thread_id": 140390350693952,
+        "status": "complete"
+      },
+      {
+        "schema": "ods-sdk-writer-service/v1",
+        "kind": "interval",
+        "name": "sdk_episode_write_encode",
+        "start_ns": 1742051191205656,
+        "source_id": [
+          101,
+          0
+        ],
+        "episode_ordinal": 0,
+        "scope": "accepted-frame validation/provenance, add_frame, synchronous save_episode/AV1 encoding and raw-reference/hash/manifest bookkeeping; excludes queue wait and event-log serialization",
+        "end_ns": 1742051191300070,
+        "worker_pid": 1855817,
+        "worker_thread_id": 140390350693952,
+        "status": "failed",
+        "error": "ValueError('Writer requires trimmed accepted frames')"
+      },
+      {
+        "schema": "ods-sdk-writer-service/v1",
+        "kind": "interval",
+        "name": "sdk_finalize",
+        "start_ns": 1742051191411460,
+        "source_id": null,
+        "episode_ordinal": null,
+        "cleanup": true,
+        "scope": "cleanup LeRobotDataset.finalize after a failed/aborted recording; excludes event-log serialization",
+        "end_ns": 1742051191423910,
+        "worker_pid": 1855817,
+        "worker_thread_id": 140390350693952,
+        "status": "complete"
+      }
+    ],
+    "sink_error": "OSError('controlled interval sink failure')",
+    "corrupt_error": "Caught RuntimeError in DataLoader worker process 0.\nOriginal Traceback (most recent call last):\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/torch/utils/data/_utils/worker.py\", line 349, in _worker_loop\n    data = fetcher.fetch(index)  # type: ignore[possibly-undefined]\n           ^^^^^^^^^^^^^^^^^^^^\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/torch/utils/data/_utils/fetch.py\", line 52, in fetch\n    data = [self.dataset[idx] for idx in possibly_batched_index]\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/torch/utils/data/_utils/fetch.py\", line 52, in <listcomp>\n    data = [self.dataset[idx] for idx in possibly_batched_index]\n            ~~~~~~~~~~~~^^^^^\n  File \"/tmp/ods-io-timeline-candidate/candidate_pkg/lerobot_io.py\", line 646, in __getitem__\n    item = self._dataset[index]  # Public SDK read, including real video decoding.\n           ~~~~~~~~~~~~~^^^^^^^\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/lerobot/datasets/lerobot_dataset.py\", line 1101, in __getitem__\n    video_frames = self._query_videos(query_timestamps, ep_idx)\n                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/lerobot/datasets/lerobot_dataset.py\", line 1064, in _query_videos\n    frames = decode_video_frames(video_path, shifted_query_ts, self.tolerance_s, self.video_backend)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/lerobot/datasets/video_utils.py\", line 150, in decode_video_frames\n    return decode_video_frames_torchcodec(video_path, timestamps, tolerance_s)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/lerobot/datasets/video_utils.py\", line 334, in decode_video_frames_torchcodec\n    decoder = decoder_cache.get_decoder(str(video_path))\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/lerobot/datasets/video_utils.py\", line 279, in get_decoder\n    decoder = VideoDecoder(file_handle, seek_mode=\"approximate\")\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/torchcodec/decoders/_video_decoder.py\", line 89, in __init__\n    self._decoder = create_decoder(source=source, seek_mode=seek_mode)\n                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/torchcodec/decoders/_decoder_utils.py\", line 45, in create_decoder\n    return core.create_from_file_like(source, seek_mode)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/root/miniconda3/envs/py311/lib/python3.11/site-packages/torchcodec/_core/ops.py\", line 151, in create_from_file_like\n    return _convert_to_tensor(_pybind_ops.create_from_file_like(file_like, seek_mode))\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nRuntimeError: Failed to open input buffer: Invalid data found when processing input\n",
+    "corrupt_close": {
+      "unconsumed_prefetch": {
+        "episode_budget": null,
+        "delivered_chunks": 0,
+        "reserved_chunks": 2,
+        "cancelled_prefetch_chunks": 0,
+        "pending_batches": 1,
+        "remaining_chunks": null,
+        "episodes": [
+          {
+            "source_id": [
+              101,
+              0
+            ],
+            "assigned": null,
+            "delivered": 0,
+            "reserved": 1,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              101,
+              1
+            ],
+            "assigned": null,
+            "delivered": 0,
+            "reserved": 1,
+            "remaining": null
+          },
+          {
+            "source_id": [
+              101,
+              2
+            ],
+            "assigned": null,
+            "delivered": 0,
+            "reserved": 0,
+            "remaining": null
+          }
+        ]
+      },
+      "worker_pids": [
+        1857095,
+        1857096,
+        1857097,
+        1857098
+      ],
+      "worker_exitcodes": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "workers_joined": true,
+      "forced_termination": false,
+      "discarded_prefetch_chunks": 0,
+      "shutdown_seconds": 2.306121262954548,
+      "cleanup_errors": []
+    }
+  },
+  "scope": "isolated real CPU AV1 SDK candidate qualification; repository file unchanged; no GPU"
+}

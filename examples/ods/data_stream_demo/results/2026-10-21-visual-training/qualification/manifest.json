@@ -112,6 +112,42 @@
     "scheduler-single-real.json": {
       "source": "independent reconstruction of preserved actual single-camera records",
       "sha256": "09adcff956233a615db758de0d00890309ee2c3a6ff9b6ca31c882d762387d9e"
+    },
+    "io-sdk-timeline.json": {
+      "source": "/tmp/ods-io-timeline-candidate/qualified-jhfrk3oj/qualification.json",
+      "sha256": "c901d7ba2c6e83ec3cde77be60afabdda9bcddc319fa07331f7bccac19f537b7"
+    },
+    "io-sdk-prefetch-b32.json": {
+      "source": "/tmp/ods-io-timeline-candidate/batch32-qualification.json",
+      "sha256": "c83eaa592d511a2bb695b5ec12dd71a1c9ce02ecde77315e7377dcd82c8153f7"
+    },
+    "video-all-frames.json": {
+      "source": "/tmp/ods-video-integrity-validation/repository-ready/qualified-final-k5pqki1u/qualification.json",
+      "sha256": "2d832828d6a7c477150534aa7eea29546c226b86acc0f428c3f8195f555f30eb"
+    },
+    "video-independent-readiness.json": {
+      "source": "/tmp/ods-visual-encoder-qualification/current-video-readiness/summary.json",
+      "sha256": "36e72ed6e7cbe132fef08a3b3f10dfcc302fdba136cb66732d57f9d186bcd39d"
+    },
+    "audit-receipt-containment.json": {
+      "source": "/tmp/ods-visual-encoder-qualification/audit-containment-regression.json",
+      "sha256": "74a5eee7f77717c6372e36f984bbd2c5b64405ba71a73994afa08dea0e50f7c4"
+    },
+    "report-worker-contract.json": {
+      "source": "/tmp/ods-training-worker-contract-whthnyxt/validation.json",
+      "sha256": "be80fc5ed0224f0fb2e9f3234f93ef8979dd06e397fb1591027bdb5e079729b1"
+    },
+    "scheduler-current-cpu.json": {
+      "source": "/tmp/ods-training-schedule-qualification-20261021/v3/summary.json",
+      "sha256": "3c224895b816beb78a403dda84d03cd0128b8cf40a69405b4b29c256a553572c"
+    },
+    "final-dual-real.json": {
+      "source": "/tmp/ods-visual-training-final-validation-20261021-v1/validation.json",
+      "sha256": "7f13c499094628b008334094a48a71bcb6706b8b33e333f6c635926f1dbda4a5"
+    },
+    "composite-full-audit.json": {
+      "source": "/tmp/ods-visual-composite-audit-20261021-v1/single/post-audit-v2.json",
+      "sha256": "473b1e7763063b5132fffc861681c56d198bf6fb26273da455b3e74f44f5ea56"
     }
   }
 }

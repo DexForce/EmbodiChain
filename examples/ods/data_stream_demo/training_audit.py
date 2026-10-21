@@ -412,32 +412,63 @@ def _audit(output: Path, result: dict[str, Any]) -> None:
     )
 
 
-def audit_run(output: Path) -> dict[str, Any]:
+def audit_run(output: Path, *, receipt: Path | None = None) -> dict[str, Any]:
     """Audit a run after timing; preserve a failed JSON result without using GPUs.
 
     Args:
         output: Completed run directory, containing its own standard corpus,
             training trace, summary and checkpoint.
+        receipt: Fresh result path. Defaults to ``output/post-audit.json``;
+            explicitly choose another path to preserve an earlier audit.
 
     Returns:
-        Qualification and independent decode/count/hash evidence. The same
-        result is always saved to ``output/post-audit.json``.
+        Qualification, source-window SDK checks and full video-frame integrity.
+
+    Raises:
+        FileExistsError: The receipt or its full-video artifacts already exist.
     """
-    output = Path(output)
+    from . import video_integrity
+
+    output = Path(output).resolve()
+    receipt = output / "post-audit.json" if receipt is None else Path(receipt).resolve()
+    video_receipt = receipt.with_name(receipt.stem + "-video-integrity.json")
+    video_artifacts = video_receipt.parent / (video_receipt.stem + "-artifacts")
+    if any(path.exists() for path in (receipt, video_receipt, video_artifacts)):
+        raise FileExistsError("Use a fresh audit receipt and artifact path")
+    corpus = (output / "lerobot_dataset").resolve()
+    if receipt == corpus or corpus in receipt.parents:
+        raise ValueError("Audit receipts must stay outside the immutable corpus")
+    receipt.parent.mkdir(parents=True, exist_ok=True)
+    with receipt.open("x", encoding="utf-8") as stream:
+        json.dump({"passed": False, "status": "pending"}, stream)
+        stream.write("\n")
     started = time.monotonic()
     result: dict[str, Any] = {
-        "schema": "ods-visual-training-post-audit-v1",
+        "schema": "ods-visual-training-post-audit-v2",
         "passed": False,
         "qualification_passed": False,
-        "scope": "post-timing CPU audit; no duration contributes to pipeline time",
+        "scope": "post-timing numeric/checkpoint, source-window SDK and all-frame video integrity audit; no duration contributes to pipeline time",
+        "audit_source_sha256": {
+            "training_audit": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+            "video_integrity": hashlib.sha256(
+                Path(video_integrity.__file__).read_bytes()
+            ).hexdigest(),
+        },
     }
     try:
         _audit(output, result)
+        result["full_video_integrity"] = video_integrity.verify_dataset(
+            output / "lerobot_dataset", video_receipt
+        )
+        _require(
+            result["full_video_integrity"].get("passed") is True,
+            "Full recorded video-frame integrity failed",
+        )
         result.update(passed=True, qualification_passed=True)
     except Exception as error:
         result.update(error=repr(error), traceback=traceback.format_exc())
     result["seconds_outside_pipeline"] = time.monotonic() - started
-    write_json(output / "post-audit.json", result)
+    write_json(receipt, result)
     return result
 
 
@@ -451,9 +482,7 @@ def main() -> None:
     os.environ["HF_HUB_OFFLINE"] = "1"
     os.environ["HF_DATASETS_OFFLINE"] = "1"
     torch.set_num_threads(1)
-    result = audit_run(args.run_dir)
-    if args.output is not None and args.output != args.run_dir / "post-audit.json":
-        write_json(args.output, result)
+    result = audit_run(args.run_dir, receipt=args.output)
     print(
         json.dumps(
             {

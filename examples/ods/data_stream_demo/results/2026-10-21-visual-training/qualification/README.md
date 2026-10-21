@@ -52,3 +52,17 @@ Three real single-camera C8/P2/B32/U40 runs also pass, with equal overlap/serial
 final model hashes and traces. The companion dual-camera attempt failed idle
 GPU admission before launch and remains in the record; it is not a passing
 dual-camera validation. See the `scheduler-*.json` receipts.
+
+Final metrology qualification adds actual writer-thread SDK service and
+prefetched reader-worker service intervals, a fail-closed formal report
+contract, and full-frame software video integrity. Fifty-two report negative
+cases pass. Single/dual video fixtures reject corrupt headers, truncated tails
+and clean frame-count mismatches; receipt collisions and ordinary/symlink
+corpus containment preserve old evidence.
+
+All three final dual-camera C8/P2/B32/U40 pipelines pass SDK/full-video audits
+and two rollout scenes. Overlap and serial have identical initial/final
+models, normalization and training traces. Their 24-episode corpora each decode
+23,664 camera frames; Offline-16 decodes 15,572. These are engineering checks,
+not the U128 formal matrix. A separately named strengthened audit also passes
+on the prior single-camera corpus without replacing its original receipt.

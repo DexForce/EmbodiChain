@@ -150,6 +150,27 @@ JSON/Markdown and four measured figures, each in PNG/SVG/PDF:
 3. Generation, recording, data preparation, training and cleanup timeline.
 4. Lifetime source use, including retired/unused sources and the ODS K line.
 
+`writer-sdk-events.jsonl` streams the recording thread's actual SDK service
+intervals. They include writing, encoding and recording bookkeeping, while
+prefetch-worker SDK fetch spans include temporal reads, decoding and validation.
+The timeline distinguishes both from owner copying and waiting; overlapping
+worker durations are not additive pipeline time or isolated codec CPU time.
+`dataset_bytes` and `checkpoint_bytes` record finalized logical file sizes,
+excluding temporary disk peaks and later audit/evaluation artifacts.
+
+The post-timing audit checks every numeric frame, an SDK H2 window from every
+source, sparse RGB PSNR/MAE references, and sequential software decoding of
+**every saved AV1 frame**, including untrained tails. Full-video frame hashes
+cover decoded YUV420p planes; they do not imply lossless RGB or exhaustive SDK
+random-seek equivalence. Fresh audit receipt/artifact paths are required, so
+rechecking a historical run preserves the original evidence:
+
+```bash
+python -m examples.ods.data_stream_demo.training_audit \
+  --run-dir outputs/ods-visual/overlap-single \
+  --output outputs/ods-visual/overlap-single/post-audit-new.json
+```
+
 Only completed optimizer updates increase training diversity. Metrics include
 unique sources, entropy-based effective sources, fixed 1 cm initial XY bins,
 2 cm cube-state voxels at trained anchors, unique anchor/history/target frame

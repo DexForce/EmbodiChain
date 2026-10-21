@@ -389,8 +389,7 @@ def _launch(
         "process": process,
         "stream": stream,
         "started_ns": started_ns,
-        "deadline": started_ns / 1e9
-        + (120.0 if stage == "audit" else float(job["settings"]["run_timeout"])),
+        "deadline": started_ns / 1e9 + float(job["settings"]["run_timeout"]),
         "supervision": supervision,
         "evaluation": stage == "evaluation",
         "stage": stage,

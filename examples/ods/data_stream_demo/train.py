@@ -174,6 +174,7 @@ class _Experiment:
         self.generation = self.completed_updates = 0
         self.generation_starts: dict[int, int] = {}
         self.writer_stats: dict[str, Any] = {}
+        self.recording_log_sha256: str | None = None
         self.resources: dict[str, Any] = {}
         self.cleanup: dict[str, Any] = {}
         self.gpu_step_ms: list[float] = []
@@ -333,6 +334,7 @@ class _Experiment:
                 self.args.offline_episodes if self.args.arm == "offline" else None
             ),
             queue_size=2,
+            events_path=self.output / "writer-sdk-events.jsonl",
         )
         self.stage(episodes)
         write_json(
@@ -353,6 +355,63 @@ class _Experiment:
         )
         if self.serial_trace:
             self.validate_trace()
+
+    def record_writer_intervals(self) -> None:
+        """Import the joined SDK thread's real service spans, without callbacks."""
+        if self.recording_log_sha256 is not None:
+            raise RuntimeError("Recording service intervals were already imported")
+        path = self.output / "writer-sdk-events.jsonl"
+        rows = [json.loads(line) for line in path.read_text().splitlines() if line]
+        phases = Counter(row.get("name") for row in rows)
+        if phases != {
+            "sdk_create": 1,
+            "sdk_episode_write_encode": len(self.registry),
+            "sdk_finalize": 1,
+        }:
+            raise ValueError("Recording service log is incomplete")
+        previous_end, ordinal, threads = self.origin_ns, 0, set()
+        for row in rows:
+            if (
+                row.get("schema") != "ods-sdk-writer-service/v1"
+                or row.get("kind") != "interval"
+                or row.get("status") != "complete"
+                or row.get("worker_pid") != os.getpid()
+                or type(row.get("worker_thread_id")) is not int
+                or row["worker_thread_id"] <= 0
+                or type(row.get("start_ns")) is not int
+                or type(row.get("end_ns")) is not int
+                or not previous_end <= row["start_ns"] <= row["end_ns"] <= self.now()
+            ):
+                raise ValueError("Recording service clock/owner/status is invalid")
+            if row["name"] == "sdk_episode_write_encode":
+                source = self.registry[ordinal]
+                if (
+                    row.get("source_id") != source["source_id"]
+                    or row.get("episode_ordinal") != ordinal
+                ):
+                    raise ValueError("Recording service source order differs")
+                ordinal += 1
+            elif (
+                row.get("source_id") is not None
+                or row.get("episode_ordinal") is not None
+            ):
+                raise ValueError("Dataset-wide recording service has an episode ID")
+            self.metrics.interval(
+                "sdk_recording",
+                row["start_ns"],
+                row["end_ns"],
+                sdk_phase=row["name"],
+                worker_pid=row["worker_pid"],
+                worker_thread_id=row["worker_thread_id"],
+                source_id=row.get("source_id"),
+                episode_ordinal=row.get("episode_ordinal"),
+                scope=row["scope"],
+            )
+            previous_end = row["end_ns"]
+            threads.add(row["worker_thread_id"])
+        if len(threads) != 1:
+            raise ValueError("Recording service did not have one SDK-owner thread")
+        self.recording_log_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
 
     def validate_trace(self) -> None:
         trace = self.serial_trace
@@ -554,6 +613,7 @@ class _Experiment:
         )
         self.writer = None
         self.metrics.interval("recording_finalize", started, self.now())
+        self.record_writer_intervals()
         self.stop_engine()
         manifest = read_lerobot_manifest(self.output / "lerobot_dataset")
         plans = build_offline_plan(
@@ -580,6 +640,30 @@ class _Experiment:
             batch = self.reader.next_batch()
             batch["geometry"] = unpack_geometry(batch["state"], self.metadata)
             self.metrics.interval("batch_service", started, self.now())
+            worker_spans = batch["_service"]["worker_fetch_intervals"]
+            if sum(row["item_count"] for row in worker_spans) != self.args.batch_size:
+                raise ValueError("SDK worker service does not cover the whole batch")
+            for row in worker_spans:
+                if (
+                    type(row["worker_pid"]) is not int
+                    or row["worker_pid"] <= 0
+                    or type(row["item_count"]) is not int
+                    or row["item_count"] <= 0
+                    or not self.origin_ns
+                    <= row["start_ns"]
+                    <= row["end_ns"]
+                    <= self.now()
+                ):
+                    raise ValueError("Invalid prefetched SDK worker service interval")
+                self.metrics.interval(
+                    "sdk_decode",
+                    row["start_ns"],
+                    row["end_ns"],
+                    worker_pid=row["worker_pid"],
+                    item_count=row["item_count"],
+                    batch_update=self.completed_updates + 1,
+                    scope=row["scope"],
+                )
             self.update(batch, plan, requested_ns=started, generation=0)
             del batch
         delivered = self.reader.snapshot_budget()
@@ -800,7 +884,10 @@ class _Experiment:
             )
             self.writer = None
             self.metrics.interval("recording_finalize", started, self.now())
+            self.record_writer_intervals()
         self.stop_engine()
+        if self.recording_log_sha256 is None:
+            raise ValueError("Recording SDK service intervals were not verified")
         if self.completed_updates != args.updates:
             raise ValueError("The actual optimizer budget is incomplete")
         final_hash = _digest(self.model.state_dict())
@@ -871,6 +958,14 @@ class _Experiment:
             or not {"simulation", "training"}.issubset(sampled_roles)
         ):
             raise RuntimeError("Timed CPU/GPU resource observations are incomplete")
+        dataset_bytes = sum(
+            path.stat().st_size
+            for path in (self.output / "lerobot_dataset").rglob("*")
+            if path.is_file()
+        )
+        checkpoint_bytes = sum(
+            (self.output / name).stat().st_size for name in ("initial.pt", "final.pt")
+        )
         total_seconds = (self.now() - self.origin_ns) / 1e9
         result = self.metrics.summary(
             total_seconds=total_seconds,
@@ -879,6 +974,11 @@ class _Experiment:
             ledger={"episodes": ledger_rows},
         )
         result.update(
+            timeline_contract="sdk-worker-service/v1",
+            writer_sdk_events_sha256=self.recording_log_sha256,
+            dataset_bytes=dataset_bytes,
+            checkpoint_bytes=checkpoint_bytes,
+            storage_scope="logical finalized dataset and initial/final checkpoint file sizes; excludes logs, temporary-file peaks and post-timing audit/evaluation artifacts",
             generated_episodes=len(self.registry),
             gpu_step_milliseconds=self.gpu_step_ms,
             writer=self.writer_stats,

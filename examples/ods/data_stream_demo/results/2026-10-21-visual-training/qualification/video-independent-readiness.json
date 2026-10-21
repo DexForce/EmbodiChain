@@ -1,0 +1,44 @@
+{
+  "passed": true,
+  "cases": [
+    {
+      "name": "single",
+      "expected_pass": true,
+      "passed": true,
+      "all_saved_video_frames_decoded": true,
+      "decoded_frames_per_camera": {
+        "observation.images.cam_high": 120
+      },
+      "error": null
+    },
+    {
+      "name": "dual",
+      "expected_pass": true,
+      "passed": true,
+      "all_saved_video_frames_decoded": true,
+      "decoded_frames_per_camera": {
+        "observation.images.cam_high": 120,
+        "observation.images.cam_wrist": 120
+      },
+      "error": null
+    },
+    {
+      "name": "clean-short",
+      "expected_pass": false,
+      "passed": false,
+      "all_saved_video_frames_decoded": false,
+      "decoded_frames_per_camera": null,
+      "error": "ValueError('Actual decoded frame count differs for videos/observation.images.cam_high/chunk-000/file-000.mp4: decoded=119, official=120')"
+    },
+    {
+      "name": "truncated-tail",
+      "expected_pass": false,
+      "passed": false,
+      "all_saved_video_frames_decoded": false,
+      "decoded_frames_per_camera": null,
+      "error": "ValueError('Strict full decode failed for videos/observation.images.cam_high/chunk-000/file-000.mp4 (exit=183): [libdav1d @ 0x56264bb77ec0] Invalid OBU length: 46, but only 36 bytes remaining in fragment.\\n[libdav1d @ 0x56264bb77ec0] Failed to parse temporal unit.\\n[in#0/mov,mp4,m4a,3gp,3g2,mj2 @ 0x56264bb722c0] corrupt input packet in stream 0\\n[in#0/mov,mp4,m4a,3gp,3g2,mj2 @ 0x56264bb722c0] Task finished with error code: -1094995529 (Invalid data found when processing input)\\n[in#0/mov,mp4,m4a,3gp,3g2,mj2 @ 0x56264bb722c0] Terminating thread with return code -1094995529 (Invalid data found when processing input)\\n')"
+    }
+  ],
+  "source_sha256": "e1286b2a60902fc7b0302e6d4decaeb024f36883d0b90066a8d4fc159a29c7d1",
+  "scope": "Independent current module CPU check on tiny existing immutable fixtures only; no GPU or formal dataset reads"
+}

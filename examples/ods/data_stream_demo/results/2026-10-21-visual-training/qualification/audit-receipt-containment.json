@@ -1,0 +1,21 @@
+{
+  "passed": true,
+  "results": [
+    {
+      "case": "ordinary",
+      "rejected_before_audit": true,
+      "corpus_unmodified": true
+    },
+    {
+      "case": "symlink",
+      "rejected_before_audit": true,
+      "corpus_unmodified": true
+    },
+    {
+      "case": "existing_receipt",
+      "prior_evidence_preserved": true
+    }
+  ],
+  "outside_receipt_allowed": true,
+  "scope": "CPU path containment/exclusive evidence regression; no real data or GPU"
+}
