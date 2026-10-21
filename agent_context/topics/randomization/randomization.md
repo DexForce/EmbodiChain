@@ -179,7 +179,7 @@ device, not assumed to share `env.device`.
 | Randomizer silently does nothing | `entity_cfg.uid` not found in `sim.get_rigid_object_uid_list()` — all randomizers early-return on UID mismatch |
 | Rigid-object mass is clamped | The sampled absolute mass or relative result was below positive `min_mass` |
 | `ValueError` on link name | `mass_range` dict key doesn't match any `articulation.link_names` |
-| Camera randomization error | Extrinsics config has neither `parent` nor `eye` set — unsupported mode |
+| Camera ranges are ignored | Ranges target a different representation; use the camera mode contract above to select pose or look-at ranges |
 | Light randomization not per-env | By design: `randomize_light` applies same values across all envs |
 | CoM randomization warning on static object | Object is `is_non_dynamic` — CoM cannot be randomized |
 | Scale has no visible effect | `scale_factor_range` is `None` — function returns immediately |

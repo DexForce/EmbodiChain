@@ -4,7 +4,7 @@
 
 | What | Path |
 |------|------|
-| Unified CLI | `embodichain train-rl --config <train.yaml-or-json>` |
+| Unified CLI | `embodichain train-rl --config <train.yaml-or-json>`; `--resume FILE` or `--resume latest/best --run RUN` |
 | CLI implementation | `embodichain/learning/rl/train.py` → `cli()` |
 | Standalone evaluation | `embodichain/learning/rl/policy_evaluation/cli.py`; local RUN/checkpoint, pretrained bundle or external Profile |
 | Programmatic training | `embodichain/learning/rl/train.py` → `train_from_config()` |
@@ -109,16 +109,10 @@ directories own default/Newton environment and PPO files. The package init hook
 registers locomotion observations and rewards; joint actions and root-velocity
 randomization use the standard manager components.
 
-The six flat velocity tasks omit renderer overrides in both environment and
-PPO files. Their headless, contact-only environments resolve auto to NoRender;
-custom viewers can still request a native renderer. Default deployments budget
-131,071 scene nodes for physical-link replication. G1 and MicroDuck Default PPO use 2,048
-environments with matching minibatch sizes to fit that native limit; other
-Default batches retain 4,096 environments. Newton deployments retain their
-existing batches. NoRender keeps their template nodes, but camera recording
-and Viewer paths still need capacity for native replicas. Newton configs
-reserve native capacity for those paths; automatic NoRender selection applies
-its own lower capacity limit without changing the training batch. See
+Headless, contact-only tasks can resolve auto rendering to NoRender. Camera
+recording and Viewer paths still require native replica capacity. Read the
+selected task's environment and PPO files for batch sizes and capacity budgets;
+these are deployment settings, not trainer defaults. See
 [render selection](../simulation-system/rendering.md#norender-initialization).
 
 Contact sampling and selective history reset follow the sensor-owned

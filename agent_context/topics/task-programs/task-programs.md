@@ -96,34 +96,28 @@ not by Task Program or Gym.
 - [Scene services](../scene-services/scene-services.md): shared layout, physical state, deterministic changes and measured checks; Task Program retains semantics and execution lifecycle.
 - [Scene expansion](../scene-expansion/scene-expansion.md): fixed scene proposals, injected preparation, independent measured acceptance and reset-time persistence gates.
 
-## Reference integrations
+## Find a configured deployment
 
-| Environment | Assurance | Source |
-|---|---|---|
-| `TaskProgramRubiksCubePickPlace-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/rubiks_cube_pick_place/` |
-| `TaskProgramRepeatedPickPlace-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/` |
-| `TaskProgramRepeatedPickPlace-Newton-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml` with `--physics newton` |
-| `TaskProgramRepeatedPickPlace-Franka-Newton-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml` with `--physics newton` |
-| `TaskProgramOpenDrawer-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/open_drawer/` |
-| `TaskProgramOpenDrawer-Newton-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/open_drawer/task.ur5.yaml` with `--physics newton` |
-| `HandOver-v1` | verified | `extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/` |
-| `PourWater-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/` |
-| `StackBlocksTwo-v1` | projected with measured segment validators | `extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/` |
-| `BlocksRankingRGB-v1` | projected with measured segment validators | `extensions/embodichain_tasks/configs/tasks/manipulation/tableware/blocks_ranking_rgb/` |
+Use `embodichain list-task` and the task-local `catalog.yaml` / runnable YAML
+under `extensions/embodichain_tasks/configs/tasks/` for current IDs, embodiments
+and available deployments. The catalog implementation is
+`embodichain/cli/_task_catalog.py`; this overview does not maintain a second
+inventory of IDs or backend-specific defaults.
 
-Marvin deployments use `task.tianji_marvin.yaml` in `repeated_pick_place`,
-`hand_over` and `tableware/pour_water`. The first two select verified tabletop
-programs; pouring selects a 750 mm table variant that lowers the scene and
-absolute targets by 125 mm while retaining the four-segment program behavior,
-dual-arm slow policy and independent measured checkpoints. All three inherit
-the shared compact ready pose. The shared embodiment owns calibrated
-grasp-frame TCPs and gripper evidence, not task-local object IDs.
+For a minimal projected workflow, start with
+[repeated pick/place](../../../extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/README.md).
+For measured handover, inspect the selected deployment and execution policy in
+`extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/`.
+Assurance belongs to that policy, not the task name or backend. Read the
+[environment selection contract](../env-framework/configuration.md#reusable-gym-deployment-components)
+for backend variants: selecting a physical component does not rename a Gym ID.
 
-The task-local configured expansion example is bound through the deployment's
-shared expansion policy; its README routes to
-`examples/expansion/trajectory/repeated_pick_place_expansion_showcase.py`. That showcase
-reports projected completion and candidate provenance, not measured physical
-success or receipt-confirmed coverage.
+Embodiments own robot/sensor calibration and skill profiles; deployment files
+own scene selection and task-local targets. Read their source configurations
+for dimensions, offsets and tuning values. The configured expansion showcase
+is linked from the repeated-pick/place README; projected completion and
+candidate provenance are distinct from measured physical success and
+receipt-confirmed coverage.
 
 ## Recommended change sites
 

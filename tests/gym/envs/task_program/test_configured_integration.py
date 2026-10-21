@@ -648,7 +648,7 @@ def test_pour_water_uses_shared_calibrated_embodiment(
     preset = _tableware_deployment(
         "pour_water"
     ).integration.registration.robot_profile_binding.presets[0]
-    assert preset.motion_policy.sample_count == 480
+    assert preset.motion_policy.sample_count == 160
     assert preset.effect_assurance.value == "projected"
 
 
@@ -977,7 +977,7 @@ def test_marvin_embodiment_grasp_defaults_compose_with_bimanual_task(
     assert robot.with_gripper is True
     assert len(robot.control_parts[f"{side}_arm"]) == 7
     assert len(robot.control_parts[f"{side}_eef"]) == 2
-    assert physical.config["sensor"] == []
+    assert [sensor["uid"] for sensor in physical.config["sensor"]] == ["cam_high"]
 
     profile = physical.embodiment_skill_profile
     assert profile is not None
@@ -1599,6 +1599,48 @@ def test_pour_dwell_duration_rejects_negative_or_nonfinite_values(
         _decode_action_options(
             {"kind": "pour", "dwell_duration": value},
             path="options",
+        )
+
+
+@pytest.mark.parametrize(
+    ("variant", "arm_dof", "velocity"),
+    [("dual_ur5", 6, 0.5), ("tianji_marvin", 7, 0.5)],
+)
+def test_configured_motion_budgets_reach_planner_options_and_metadata(
+    variant: str, arm_dof: int, velocity: float
+) -> None:
+    """The qualified speed budget survives deployment decoding and reporting."""
+    from embodichain.lab.task_program.runtime.results import _motion_policy_to_metadata
+
+    deployment = _deployment_from_path(
+        _CONFIG_DIRECTORY / "hand_over" / f"task.{variant}.yaml"
+    )
+    policy = deployment.integration.registration.robot_profile_binding.presets[
+        0
+    ].motion_policy
+    options = policy.to_motion_gen_options(
+        start_qpos=torch.zeros(1, arm_dof), control_part="left_arm"
+    )
+    assert options.velocity_limit == velocity
+    assert options.acceleration_limit == 0.5
+    metadata = _motion_policy_to_metadata(policy)
+    assert metadata["velocity_limit"] == velocity
+    assert metadata["acceleration_limit"] == 0.5
+
+
+@pytest.mark.parametrize("field", ["velocity_limit", "acceleration_limit"])
+@pytest.mark.parametrize("value", [0, -0.1, True, float("nan"), float("inf"), "fast"])
+def test_configured_motion_budgets_reject_invalid_values(
+    field: str, value: object
+) -> None:
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_motion_policy,
+    )
+
+    with pytest.raises((TypeError, ValueError), match=field):
+        _decode_motion_policy(
+            {"strategy": "motion_gen", "sample_count": 140, field: value},
+            path="motion",
         )
 
 
