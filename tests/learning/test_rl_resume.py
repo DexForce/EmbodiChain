@@ -34,6 +34,7 @@ from embodichain.learning.rl.policy_evaluation.manifest import RunManifest
 from embodichain.learning.rl.train import (
     _configure_checkpoints,
     _save_final_checkpoint,
+    cli,
     parse_args,
     train_from_config,
 )
@@ -179,6 +180,61 @@ def test_resume_trains_only_remaining_budget_and_restarts_schedule(tmp_path):
     assert again.num_updates == 3
 
 
+@pytest.mark.parametrize("algorithm", ["ppo", "grpo"])
+@pytest.mark.parametrize(
+    "scheduler,horizon_key,horizon",
+    [
+        (dict(name="linear"), "total_iters", 2),
+        (dict(name="cosine"), "T_max", 2),
+        (dict(name="linear", kwargs=dict(total_iters=4)), "total_iters", 4),
+        (dict(name="cosine", kwargs=dict(T_max=4)), "T_max", 4),
+        (dict(name="step", kwargs=dict(step_size=2, gamma=0.5)), None, None),
+    ],
+)
+def test_pending_scheduler_restart_survives_checkpoint_round_trip(
+    tmp_path, algorithm, scheduler, horizon_key, horizon
+):
+    trainer = _trainer(tmp_path / "first", algorithm, scheduler)
+    trainer.train(16)
+    path = trainer.save_checkpoint()
+
+    def restored(directory, checkpoint, **kwargs):
+        # Match fresh-episode initialization; simulator state is not checkpointed.
+        torch.manual_seed(7)
+        result = _trainer(tmp_path / directory, algorithm, scheduler)
+        result.load_checkpoint(checkpoint, **kwargs)
+        return result
+
+    direct = restored("direct", path, resume_scheduler="restart")
+    direct.train(48)
+    pending = restored("pending", path, resume_scheduler="restart")
+    again = restored("again", pending.save_checkpoint())
+    again.train(48)
+
+    assert again.global_step == 48
+    assert again.num_updates == 3
+    if horizon_key is not None:
+        assert again.algorithm._lr_scheduler_cfg.kwargs[horizon_key] == horizon
+    _assert_state_equal(direct.algorithm.state_dict(), again.algorithm.state_dict())
+    _assert_state_equal(direct.policy.state_dict(), again.policy.state_dict())
+
+
+def test_checkpoint_without_pending_restart_field_restores(tmp_path):
+    trainer = _trainer(
+        tmp_path / "first", scheduler=dict(name="linear", kwargs=dict(total_iters=4))
+    )
+    trainer.train(16)
+    path = trainer.save_checkpoint()
+    payload = torch.load(path, weights_only=True)
+    payload.pop("restart_schedule", None)
+    torch.save(payload, path)
+    restored = _trainer(tmp_path / "restored", scheduler=dict(name="linear"))
+    restored.load_checkpoint(path)
+    _assert_state_equal(trainer.algorithm.state_dict(), restored.algorithm.state_dict())
+    restored.train(48)
+    assert restored.algorithm._lr_scheduler_cfg.kwargs["total_iters"] == 4
+
+
 @pytest.mark.parametrize(
     "mutation,match",
     [
@@ -186,6 +242,7 @@ def test_resume_trains_only_remaining_budget_and_restarts_schedule(tmp_path):
         (lambda c: c.pop("rng_by_rank"), "required fields"),
         (lambda c: c["metadata"].update(environment="different"), "environment"),
         (lambda c: c.update(world_size=2), "world_size"),
+        (lambda c: c.update(restart_schedule="false"), "restart_schedule"),
         (
             lambda c: c["metadata"]["policy_attributes"].update(
                 actor_obs_groups=["different"]
@@ -290,6 +347,43 @@ def test_cli_contract_resumes_all_algorithms(tmp_path, monkeypatch, algorithm, s
     assert second["global_step"] == 48
     assert second["num_updates"] == 3
     assert Path(second["latest_checkpoint_path"]).resolve().parents[1] != run
+
+
+@pytest.mark.parametrize(
+    "scheduler,horizon_key", [("linear", "total_iters"), ("cosine", "T_max")]
+)
+def test_cli_zero_update_resume_preserves_scheduler_restart(
+    tmp_path, monkeypatch, scheduler, horizon_key
+):
+    monkeypatch.chdir(tmp_path)
+    config = _config("ppo")
+    config["algorithm"]["cfg"]["lr_scheduler"] = dict(name=scheduler)
+    config_path = tmp_path / "train.json"
+
+    def run(name, iterations, *args):
+        config["trainer"].update(exp_name=name, iterations=iterations)
+        config_path.write_text(json.dumps(config))
+        cli(["--config", str(config_path), *args])
+        manifests = list((tmp_path / "outputs").glob(f"{name}_*/run-manifest.json"))
+        assert len(manifests) == 1
+        path = RunManifest.load(manifests[0].parent).select_checkpoint()[1]
+        return str(path), torch.load(path, weights_only=True)
+
+    first, _ = run("first", 1)
+    pending, payload = run(
+        "pending", 1, "--resume", first, "--resume-scheduler", "restart"
+    )
+    assert payload["num_updates"] == 1
+    assert payload["global_step"] == 16
+    assert payload["lr_scheduler"] is None
+    _, expected = run("direct", 3, "--resume", first, "--resume-scheduler", "restart")
+    _, actual = run("resumed", 3, "--resume", pending)
+    assert actual["num_updates"] == 3
+    assert actual["global_step"] == 48
+    assert actual["lr_scheduler_cfg"]["kwargs"][horizon_key] == 2
+    assert actual["optimizer"]["param_groups"][0]["lr"] == pytest.approx(0.0)
+    for key in ("policy", "optimizer", "lr_scheduler", "lr_scheduler_cfg"):
+        _assert_state_equal(expected[key], actual[key])
 
 
 def _saved_run(run: Path) -> Trainer:

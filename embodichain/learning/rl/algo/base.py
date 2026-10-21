@@ -98,7 +98,8 @@ class BaseAlgorithm(ABC, Generic[RolloutT]):
         """Return optimizer and learning-rate state for a trainer checkpoint.
 
         Returns:
-            Optimizer state and the saved scheduler configuration/progress.
+            Optimizer state, scheduler configuration/progress, and any pending
+            restart that binds the schedule to the remaining update budget.
         """
         return {
             "optimizer": self.optimizer.state_dict(),
@@ -111,6 +112,7 @@ class BaseAlgorithm(ABC, Generic[RolloutT]):
                 "name": self._lr_scheduler_cfg.name,
                 "kwargs": dict(self._lr_scheduler_cfg.kwargs),
             },
+            "restart_schedule": self._restart_schedule,
         }
 
     def validate_state_dict(
@@ -127,6 +129,8 @@ class BaseAlgorithm(ABC, Generic[RolloutT]):
         """
         if resume_scheduler not in {"restore", "restart"}:
             raise ValueError("resume_scheduler must be 'restore' or 'restart'.")
+        if not isinstance(state.get("restart_schedule", False), bool):
+            raise ValueError("Checkpoint restart_schedule must be a boolean.")
         groups = state["optimizer"]["param_groups"]
         if len(groups) != len(self.optimizer.param_groups) or any(
             len(saved["params"]) != len(current["params"])
@@ -196,7 +200,9 @@ class BaseAlgorithm(ABC, Generic[RolloutT]):
                     self.optimizer, self._lr_scheduler_cfg
                 )
         self._checkpoint_loaded = True
-        self._restart_schedule = resume_scheduler == "restart"
+        self._restart_schedule = resume_scheduler == "restart" or state.get(
+            "restart_schedule", False
+        )
 
     def _prepare_schedule(self, total_updates: int, remaining_updates: int) -> None:
         if remaining_updates <= 0:
