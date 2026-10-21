@@ -124,7 +124,8 @@ def normalize_online_batch(
     """Convert one owned ODS context to the common RGB float32 contract.
 
     Args:
-        raw: Engine or OnlineDataSource context with batch axes ``[B,L]``.
+        raw: Owned, zero-padded Engine or OnlineDataSource context with batch
+            axes ``[B,L]``.
         metadata: Result of :func:`describe_raw_buffer`.
 
     Returns:
@@ -142,11 +143,16 @@ def normalize_online_batch(
         **_provenance(raw),
         "images": {},
     }
+    divisor = torch.tensor(255.0, device="cpu", dtype=torch.float32)
     for name, feature in metadata["cameras"].items():
         rgb = raw[("obs", *feature["path"])][..., :3].movedim(-1, -3)
         image = torch.empty(rgb.shape, device="cpu", dtype=torch.float32)
-        image.copy_(rgb).div_(255)
-        image.masked_fill_(~valid[..., None, None, None], 0)
+        if rgb.device.type == "cpu":
+            # Cast and normalize in one pass. Engine padding is already zero,
+            # and division preserves it without scanning the image again.
+            torch.div(rgb, divisor, out=image)
+        else:
+            image.copy_(rgb).div_(255)
         result["images"][name] = image
     for key in ("state", "actions"):
         result[key].masked_fill_(~valid[..., None], 0)
@@ -183,15 +189,15 @@ def pack_episode(rawrow: TensorDictBase, metadata: Mapping[str, Any]) -> dict[st
         raise ValueError("Accepted episode contains interior invalid gaps")
     row = rawrow[start:stop]
     episode: dict[str, Any] = {
-        "state": _numeric(row, metadata).clone(),
+        "state": _numeric(row, metadata),
         "actions": row["actions"].to(device="cpu", dtype=torch.float32).clone(),
         "valid": torch.ones(stop - start, dtype=torch.bool),
         **_provenance(row),
         "images": {},
     }
     for name, feature in metadata["cameras"].items():
-        episode["images"][name] = (
-            row[("obs", *feature["path"])][..., :3].cpu().contiguous().clone()
+        episode["images"][name] = row[("obs", *feature["path"])][..., :3].to(
+            device="cpu", copy=True, memory_format=torch.contiguous_format
         )
     for key in ("state", "actions"):
         if not torch.isfinite(episode[key]).all():

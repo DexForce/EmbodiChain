@@ -22,7 +22,7 @@
    samplers, writes the rollout, then clears the range after a full fill.
 5. `sample_batch()` is READY-only. While holding the lock it excludes the current write range,
    checks every row in a sampled window, enforces `continuity_id`, applies
-   segment/boundary/episode mode rules, and clones the final batch before releasing the lock
+   segment/boundary/episode mode rules, and copies the final batch before releasing the lock
    (`engine/data.py`).
    `sample_batch_with_context()` samples every valid anchor, including episode
    ends, with a fixed causal-history/future extent. The current frame is at
@@ -151,7 +151,7 @@ request schema remain independent. Configuration examples live in the
 within the stored episode. The timestamp is Unix nanoseconds at successful
 acceptance/publication, stamped while holding the publication lock before the
 row window becomes readable. It is not a monotonic or simulation timestamp.
-Samplers clone provenance with observations/actions under that same lock.
+Samplers copy provenance with observations/actions under that same lock.
 Invalid frames, including history padding, retain `-1` in every provenance field.
 `get_stats()` returns detached counters and excludes the active write window
 from valid-frame counts. These IDs do not provide shared-buffer checkpoint
@@ -219,7 +219,7 @@ separates acquisition-inclusive and data-ready budgets.
 before selecting a window. Invalid arguments raise `ValueError`. If no unlocked
 valid window satisfies `chunk_size` and `sampling_mode`, it raises `DataUnavailableError`
 immediately; that eligibility failure does not itself change the engine state.
-Refill accounting runs only after a successful clone. `OnlineDataset.__iter__()`
+Refill accounting runs only after a successful copy. `OnlineDataset.__iter__()`
 and `SequenceDataset` propagate these exceptions, so retry policy belongs to the
 consumer. `DataUnavailableError` subclasses `RuntimeError`; quota exhaustion
 and terminal worker/read failures remain distinct and must not be retried by
@@ -230,7 +230,7 @@ matching exception messages.
 | Symptom | Inspect |
 |---|---|
 | Engine times out or all readers fail | Inspect the shared worker error envelope and demo retry limit; do not catch only in one DataLoader consumer. |
-| Samples contain rows being replaced | Selection or clone moved outside the `lock_index` critical section; restore the shared lock boundary. |
+| Samples contain rows being replaced | Selection or copying moved outside the `lock_index` critical section; restore the shared lock boundary. |
 | Sequence crosses a reset or fragment | Fix validity/`continuity_id`/segment eligibility in `sample_batch()`, not downstream training code. |
 | Engine cannot restart | Expected after FAILED/STOPPED; create a new engine instance. |
 | Non-CPU online buffer is not truly process-shared | `_create_buffer()` currently does not reject it but skips `share_memory_()`; keep `buffer_device="cpu"` unless the implementation adds another explicit interprocess transport. |

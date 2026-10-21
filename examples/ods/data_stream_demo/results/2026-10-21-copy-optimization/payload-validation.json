@@ -1,0 +1,77 @@
+{
+  "cases": [
+    {
+      "batch_size": 1,
+      "cameras": 0,
+      "length": 33,
+      "resolution": [
+        256,
+        256
+      ],
+      "bitwise_equivalent": true,
+      "packed_equivalent": true,
+      "owned_after_overwrite": true
+    },
+    {
+      "batch_size": 1,
+      "cameras": 1,
+      "length": 33,
+      "resolution": [
+        256,
+        256
+      ],
+      "bitwise_equivalent": true,
+      "packed_equivalent": true,
+      "owned_after_overwrite": true
+    },
+    {
+      "batch_size": 1,
+      "cameras": 2,
+      "length": 33,
+      "resolution": [
+        256,
+        256
+      ],
+      "bitwise_equivalent": true,
+      "packed_equivalent": true,
+      "owned_after_overwrite": true
+    },
+    {
+      "batch_size": 32,
+      "cameras": 2,
+      "length": 33,
+      "resolution": [
+        256,
+        256
+      ],
+      "bitwise_equivalent": true,
+      "packed_equivalent": true,
+      "owned_after_overwrite": true
+    }
+  ],
+  "status": "passed",
+  "global_default_dtype_checks": [
+    {
+      "global_default_dtype": "torch.float32",
+      "all_256_channel_values_bitwise_equal": true,
+      "helper_rgb_bitwise_equal": true
+    },
+    {
+      "global_default_dtype": "torch.float64",
+      "all_256_channel_values_bitwise_equal": true,
+      "helper_rgb_bitwise_equal": true
+    },
+    {
+      "global_default_dtype": "torch.float16",
+      "all_256_channel_values_bitwise_equal": true,
+      "helper_rgb_bitwise_equal": true
+    },
+    {
+      "global_default_dtype": "torch.bfloat16",
+      "all_256_channel_values_bitwise_equal": true,
+      "helper_rgb_bitwise_equal": true
+    }
+  ],
+  "baseline_payload_sha256": "eb3bcaed0bcfe9f9d2109e6ad3b5ccb432392e5116877ac48446a09838f3911c",
+  "optimized_payload_sha256": "65a6e074aab6becb8a9fc46fffad0753f997bad22e10e69f25426b09af04379d"
+}

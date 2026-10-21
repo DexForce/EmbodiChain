@@ -156,6 +156,100 @@ def test_live_and_resident_sources_share_windows_masks_and_rng(
     assert not (resident.data["obs"] == -100).any()
 
 
+def test_nested_camera_context_padding_and_provenance_match_resident(paired_sources):
+    live, resident = paired_sources
+    shape = live.engine.shared_buffer.batch_size
+    camera = torch.arange(2 * 5 * 3 * 2 * 4, dtype=torch.uint8).reshape(2, 5, 3, 2, 4)
+    nested = TensorDict(
+        {
+            "joint": resident.data["obs"],
+            "cameras": TensorDict(
+                {"front": camera, "wrist": camera.flip(-1)}, batch_size=shape
+            ),
+        },
+        batch_size=shape,
+    )
+    raw = live.engine.shared_buffer.clone().unlock_()
+    raw["obs"] = nested.clone()
+    live.engine.shared_buffer = raw.share_memory_()
+    data = resident.data.clone()
+    data["obs"] = nested.clone()
+    schema = {"action": _SCHEMA["action"]}
+    online = OnlineDataSource(live.engine, schema=schema)
+    offline = TensorDataSource(data, schema=schema, source_id="nested-camera")
+    spec = SequenceSpecCfg(3, 5)
+    a = online.sample_context(32, spec, generator=torch.Generator().manual_seed(72))
+    b = offline.sample_context(32, spec, generator=torch.Generator().manual_seed(72))
+    assert set(a.keys(include_nested=True, leaves_only=True)) == set(
+        b.keys(include_nested=True, leaves_only=True)
+    )
+    assert (~a["valid"]).any()
+    assert not a["loss_mask"][:, : spec.history_length - 1].any()
+    for key, value in a.items(include_nested=True, leaves_only=True):
+        torch.testing.assert_close(value, b[key])
+        if isinstance(key, tuple) and key[0] == "obs":
+            assert (value[~a["valid"]] == 0).all()
+    for key in (
+        "frame_ids",
+        "generations",
+        "accepted_at_ns",
+        "published_at_monotonic_ns",
+        "task_index",
+        "subtask_index",
+    ):
+        assert (a[key][~a["valid"]] == -1).all()
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_online_observation_transform_zeroes_only_invalid_observations(
+    paired_sources, nested
+):
+    live, _ = paired_sources
+    schema = _SCHEMA if not nested else {"action": _SCHEMA["action"]}
+    original = live.engine.shared_buffer.clone()
+    observed_inputs = []
+
+    def transform(observation):
+        observed_inputs.append(observation.clone())
+        transformed = observation + 7
+        if nested:
+            return TensorDict(
+                {"joint": transformed, "offset": transformed[..., :1] + 3},
+                batch_size=observation.shape[:2],
+            )
+        return transformed
+
+    source = OnlineDataSource(
+        live.engine, schema=schema, observation_transform=transform
+    )
+    spec = SequenceSpecCfg(3, 5)
+    actual = source.sample_context(
+        32, spec, generator=torch.Generator().manual_seed(29)
+    )
+    reference = live.sample_context(
+        32, spec, generator=torch.Generator().manual_seed(29)
+    )
+    valid = actual["valid"]
+    assert (~valid).any()
+    torch.testing.assert_close(observed_inputs[0], reference["obs"])
+    leaves = (
+        {"joint": actual["obs", "joint"], "offset": actual["obs", "offset"]}
+        if nested
+        else {"joint": actual["obs"]}
+    )
+    for key, value in leaves.items():
+        expected = (
+            reference["obs"] + 7 if key == "joint" else reference["obs"][..., :1] + 10
+        )
+        torch.testing.assert_close(value[valid], expected[valid])
+        assert (value[~valid] == 0).all()
+    for key in actual.keys():
+        if key != "obs":
+            torch.testing.assert_close(actual[key], reference[key])
+    for key, value in original.items(include_nested=True, leaves_only=True):
+        torch.testing.assert_close(live.engine.shared_buffer[key], value)
+
+
 @pytest.mark.parametrize("with_continuity", [False, True])
 @pytest.mark.parametrize("generations", [None, (1,)])
 def test_segment_filter_preserves_source_validity_and_episode_anchors(

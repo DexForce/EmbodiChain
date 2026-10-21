@@ -1,0 +1,31 @@
+{
+  "baseline_commit": "6d86b81c3",
+  "scope": "CPU sampling component measurements and correctness only; no real-training end-to-end result",
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "83b65747ac3c3f8c5f9a5518e0195055ebf6d729e79a713f3a328607cc6799e4",
+      "bytes": 3375
+    },
+    {
+      "path": "payload-validation.json",
+      "sha256": "863bfdd106f83bf8a3053730bc884550b3400fc1c5dea1d7dfdd409c4eb46b98",
+      "bytes": 1822
+    },
+    {
+      "path": "raw.json",
+      "sha256": "29db03f2941489214b1973203a7f57c3c9446fdf95b321d4600d23358d93754a",
+      "bytes": 127094
+    },
+    {
+      "path": "report.md",
+      "sha256": "3d8d12362475a8a1316f07b1119ff049b150b15d21caf4e9dd4ad2a3f591b8eb",
+      "bytes": 7072
+    },
+    {
+      "path": "validation.json",
+      "sha256": "7a73cb90648960d705315bb1c2d915bc53479d6b67e1a1d666b8b11d1f32f49c",
+      "bytes": 977
+    }
+  ]
+}

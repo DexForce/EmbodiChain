@@ -117,6 +117,100 @@ def test_action_context_rejects_invalid_lengths(history, future) -> None:
         _make_fake_engine().sample_batch_with_context(2, history, future)
 
 
+@pytest.mark.parametrize("context", [False, True])
+def test_sample_owns_nested_noncontiguous_images_across_source_replacement(
+    context: bool,
+) -> None:
+    """Both sampling APIs detach every leaf, including repeated image indices."""
+    steps = 6
+    batch_size = 16  # One source row guarantees repeated anchors within the batch.
+    engine = _make_fake_engine(buffer_size=1, max_episode_steps=steps)
+    source = engine.shared_buffer
+    camera = torch.arange(steps * 2 * 3 * 4, dtype=torch.uint8).reshape(
+        1, steps, 2, 3, 4
+    )
+    source["obs"] = TensorDict(
+        {
+            "joint": source["obs"],
+            "cameras": TensorDict(
+                {"front": camera.transpose(-3, -2), "wrist": camera.flip(-1)},
+                batch_size=source.batch_size,
+            ),
+        },
+        batch_size=source.batch_size,
+    )
+    for key, value in (
+        ("ods_run_id", 17),
+        ("ods_episode_id", 23),
+        ("ods_generation", 1),
+        ("ods_accepted_at_ns", 100),
+        ("ods_published_at_monotonic_ns", 200),
+    ):
+        source[key] = torch.full(source.batch_size, value, dtype=torch.int64)
+    source["ods_frame_index"] = torch.arange(steps).reshape(1, steps)
+    source.share_memory_()
+    assert not source["obs", "cameras", "front"].is_contiguous()
+    original = source.clone()
+
+    def sample() -> TensorDict:
+        if context:
+            return engine.sample_batch_with_context(
+                batch_size, 2, 3, generator=torch.Generator().manual_seed(39)
+            )
+        return engine.sample_batch(batch_size, 1)
+
+    try:
+        batch = sample()
+        saved = batch.clone()
+        valid = batch["valid"]
+        frames = batch["ods_frame_index"].clamp(min=0)
+        anchor_index = 1 if context else 0
+        anchors = batch["ods_frame_index"][:, anchor_index]
+        assert anchors.unique().numel() < batch_size
+        for key, value in original.items(include_nested=True, leaves_only=True):
+            actual = batch[key]
+            assert (
+                actual.untyped_storage().data_ptr()
+                != source[key].untyped_storage().data_ptr()
+            )
+            expected = value[0, frames]
+            identifier = isinstance(key, str) and (
+                key.startswith("ods_") or key in {"task_index", "subtask_index"}
+            )
+            mask = valid.reshape(*valid.shape, *((1,) * (expected.ndim - valid.ndim)))
+            expected = expected.masked_fill(~mask, -1 if identifier else 0)
+            torch.testing.assert_close(actual, expected)
+            torch.testing.assert_close(source[key], value)
+
+        # Model a producer reusing the same physical slot, then another consumer read.
+        replacement = original.clone()
+        replacement["obs", "joint"].add_(10)
+        replacement["obs", "cameras", "front"].fill_(251)
+        replacement["obs", "cameras", "wrist"].fill_(252)
+        replacement["actions"].add_(10)
+        replacement["ods_episode_id"].fill_(24)
+        replacement["ods_generation"].fill_(2)
+        with engine._lock_index.get_lock():
+            source.copy_(replacement)
+        later = sample()
+        assert (later["ods_episode_id"][later["valid"]] == 24).all()
+        for key, value in saved.items(include_nested=True, leaves_only=True):
+            torch.testing.assert_close(batch[key], value)
+
+        # Duplicate gather positions own distinct output elements as well.
+        unique_anchors, counts = torch.unique(anchors, return_counts=True)
+        matches = (anchors == unique_anchors[counts.argmax()]).nonzero().flatten()
+        first, second = matches[:2].tolist()
+        for key, value in batch.items(include_nested=True, leaves_only=True):
+            second_before = value[second].clone()
+            value[first].zero_()
+            torch.testing.assert_close(value[second], second_before)
+            if key in source.keys(include_nested=True, leaves_only=True):
+                torch.testing.assert_close(source[key], replacement[key])
+    finally:
+        engine.stop()
+
+
 # ---------------------------------------------------------------------------
 # Helper
 # ---------------------------------------------------------------------------

@@ -1756,7 +1756,7 @@ class OnlineDataEngine:
         if sampling_mode == "boundary" and chunk_size < 2:
             raise ValueError("boundary sampling requires chunk_size >= 2.")
 
-        # Hold the producer's window lock through the final clone. The worker
+        # Hold the producer's window lock through the indexed copy. The worker
         # may continue writing its already-advertised window, which is excluded
         # below, but cannot switch to one of our selected rows until the copy is
         # complete.
@@ -1893,15 +1893,17 @@ class OnlineDataEngine:
                     future,
                     segment_ids if sampling_mode == "segment" else None,
                 )
-                result = self.shared_buffer[row_indices[:, None], indices].clone()
+                # Two tensor indices gather independent storage for every leaf;
+                # cloning that owned result would copy the complete batch twice.
+                result = self.shared_buffer[row_indices[:, None], indices]
                 _pad_context(result, mask, loss_mask)
             else:
                 time_offsets = torch.arange(chunk_size, device=start_indices.device)
                 time_indices = start_indices[:, None] + time_offsets[None, :]
-                result = self.shared_buffer[row_indices[:, None], time_indices].clone()
+                result = self.shared_buffer[row_indices[:, None], time_indices]
 
             if sampling_budget is not None:
-                # Clone and padding must succeed before any quota is spent.
+                # Copy and padding must succeed before any quota is spent.
                 # A later optimizer/consumer failure does not refund delivery.
                 error = self._receive_worker_error()
                 if error is not None:

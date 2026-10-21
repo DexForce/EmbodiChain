@@ -9,6 +9,15 @@ The [recorded study](results/2026-10-21/RESULTS.md) contains 27 main runs and ni
 appendix diagnostics validated in the py311 environment, with raw measurement
 logs, per-run tables and figures. It includes the current visual-throughput
 limitation and process-exit cleanup warnings.
+The subsequent [sampling-copy optimization](results/2026-10-21-copy-optimization/README.md)
+records CPU component measurements and bitwise equivalence checks separately.
+
+ODS's primary training-efficiency question is how long it takes to generate
+the same data and complete the same real training work when generation and
+training overlap. This no-model demo diagnoses delivery costs and correctness;
+the 36 runs are not evidence of end-to-end training acceleration. The separate
+[equal-work training protocol](../../../docs/architecture/ods-data-stream-showcase-design.md#6-follow-up-equal-work-end-to-end-training-time)
+is designed but has not been implemented or measured yet.
 
 Run commands from the repository root. The complete protocol, including the
 timing boundaries and comparison limits, is in the
@@ -302,3 +311,34 @@ This demo can establish measured availability, reuse protection, provenance
 and resource tradeoffs for these workloads. It does not establish policy
 quality, training acceleration, a universal ODS speedup, or that the broader
 LeRobot ecosystem cannot stream data.
+
+## Planned end-to-end training comparison
+
+The follow-up compares fresh collect-then-train standard LeRobot against
+ODS generation concurrent with actual BC updates. An additional ODS run
+alternates generation and training to isolate the contribution of overlap.
+The clock starts before producer/learner launch and stops only when accepted
+data, all required optimizer steps, the common final checkpoint and worker
+cleanup are complete. Video encoding/finalization is included where needed;
+asynchronous stage times are never summed to fabricate total time.
+
+The first protocol reuses the existing state-only `ChunkBC`, with N=32
+accepted episodes and q=32 registered legal anchors per episode. Four passes
+over this finite anchor set give 4,096 trained chunks, 128 B=32 updates and
+131,072 valid future action targets at F=32. One registered-anchor epoch
+means visiting each registered anchor once, not every possible trajectory
+frame. All paths must train every registered source/anchor/pass, with matching
+batch order, initial weights, normalization, optimizer and loss work. K=128
+is an upper delivery guard; merely staying under K does not prove equal
+training coverage. Retained data and prefetch are bounded, and generation
+waits rather than overwriting unfinished required work.
+
+Report launch-to-completion time, paired speedup, first real update, measured
+generation/training overlap, data waits and whole-pipeline resource usage.
+Give each path the same CPU/GPU allocation and account for contention. The
+source-ready LeRobot decoding rate remains a secondary diagnostic. A visual
+training result needs a common visual model and causal image-input contract;
+the existing geometry policy and full-context delivery figures do not supply
+that result. These are follow-up acceptance requirements, not extra CLI
+options already implemented in this example. See the linked design for the
+retention, persistence, matching and timing contracts.

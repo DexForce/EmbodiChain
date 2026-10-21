@@ -1,0 +1,23 @@
+{
+  "python_environment": "conda py311, Python 3.11.14",
+  "focused_production_tests": 342,
+  "context_tests": 40,
+  "api_documented_exports": 2792,
+  "api_public_exports": 2792,
+  "black_version": "26.3.1",
+  "black_full_repository": "1485 files unchanged",
+  "benchmark_cases": 36,
+  "payload_validation_cases": 4,
+  "scope": "CPU owned sampling, RGB payload equivalence and protocol documentation; no new simulation matrix or real-training E2E timing",
+  "benchmark_script_sha256": "00e7c33da125fda6dd18512abcb7e3d41ef1695255cc4ae0450095fa23d035b9",
+  "timed_source_comment_only_changes": [
+    {
+      "path": "embodichain/data_pipeline/engine/data.py",
+      "timed_sha256": "59fafea7ac8c15c2d8b8467fb09d99ed790612588575fddd6149142e62aed361",
+      "current_sha256": "3ec1bf41a7829e5024f9010f6341efc51d457a71f2443feed28319e7e51a2c87",
+      "ast_equal": true,
+      "difference": "Post-timing comment only: Clone -> Copy."
+    }
+  ],
+  "payload_default_dtype_checks": 4
+}

@@ -158,12 +158,19 @@ def test_every_sampling_api_obeys_shared_episode_budget(method: str) -> None:
 def test_failed_payload_copy_does_not_spend_quota(monkeypatch) -> None:
     engine = _engine()
     before = engine.get_sampling_budget_snapshot()
+    original_getitem = TensorDict.__getitem__
+
+    def fail_payload_gather(buffer, index):
+        if (
+            buffer is engine.shared_buffer
+            and isinstance(index, tuple)
+            and all(isinstance(value, torch.Tensor) for value in index)
+        ):
+            raise RuntimeError("copy failed")
+        return original_getitem(buffer, index)
+
     with monkeypatch.context() as context:
-        context.setattr(
-            TensorDict,
-            "clone",
-            lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("copy failed")),
-        )
+        context.setattr(TensorDict, "__getitem__", fail_payload_gather)
         with pytest.raises(RuntimeError, match="copy failed"):
             engine.sample_batch(2, 2)
     assert engine.get_sampling_budget_snapshot() == before

@@ -1,14 +1,22 @@
 # ODS data-stream showcase and standard LeRobot comparison
 
-Status: engineering implementation and validation in progress, updated
-2026-10-21. The showcase has real acquisition, standard decoder-backed IO and
-supervised experiment/report entry points; formal measurements are pending.
+Status: the delivery showcase completed 27 main runs and nine appendix
+diagnostics on 2026-10-21. The [recorded study](../../examples/ods/data_stream_demo/results/2026-10-21/RESULTS.md)
+contains the measurements and limitations. Those runs contain no training and
+do not establish end-to-end training acceleration. Section 6 defines that
+separate follow-up experiment; it has not been implemented or measured yet.
 Existing numeric LeRobot loading remains unchanged.
 
 This experiment measures how EmbodiChain generates, updates and delivers real
 robot trajectories under state-only, single-camera and two-camera workloads.
 It compares ODS with standard LeRobot file access and video decoding. There is
 no model, optimizer, student evaluation or learning-performance claim.
+
+ODS's training-efficiency objective is to overlap data generation with real
+training: measure the elapsed time to finish the same accepted data and
+training work, rather than treating faster batch delivery as the objective.
+The delivery showcase diagnoses availability, conversion and decoding costs;
+it cannot substitute for that completion-time comparison.
 
 ```mermaid
 flowchart LR
@@ -378,3 +386,163 @@ Implementation references: the
 [existing numeric loading contract](dataset-loading-design.md),
 [official pinned Dataset](https://github.com/huggingface/lerobot/blob/v0.4.4/src/lerobot/datasets/lerobot_dataset.py)
 and [video decoder/encoder](https://github.com/huggingface/lerobot/blob/v0.4.4/src/lerobot/datasets/video_utils.py).
+
+## 6. Follow-up: equal-work end-to-end training time
+
+This is a separate real-training experiment, not a new mode already supported
+by `data_stream_demo`. Reuse the existing BC learner for the first state-only
+experiment. Keep this delivery entry point free of models and optimizers, and
+preserve its 36 historical runs and their original measurement scopes.
+
+### Comparison and completion contract
+
+Run these paths from fresh acquisition, with the same expert, source seed
+schedule, accepted episode count N, device allocation and training recipe:
+
+| Path | When training starts | Why it is included |
+| --- | --- | --- |
+| Standard offline LeRobot | After all N episodes are recorded, encoded and finalized | Practical collect-then-train baseline, with actual SDK reads and video decoding |
+| ODS with overlapping generation | After the initial C episodes; subsequent generation runs concurrently with training | Primary proposed execution path |
+| ODS with blocked generation | Alternate generation and training, with the same batches and retention | Attribute any gain from overlap separately from format/IO differences |
+
+Use a common definition of `t0`: the supervisor's monotonic timestamp before
+launching any per-run producer, writer, reader or learner. Setup, CUDA/model
+initialization, warmup, rejected expert attempts, initial fill, transfers,
+decoder startup and finalization all remain inside the run. Define `t_done`
+only after all N accepted episodes are accounted for, every required optimizer
+step has completed on its device, the final common checkpoint is written,
+and owned workers/writers have drained and exited normally. Compare
+`T_total = t_done - t0`; a worker failure or unfinished work fails the run.
+
+The primary deliverable is a trained checkpoint plus auditable data and
+training-work ledgers. LeRobot retains a dataset; ODS need not retain one.
+This is a pipeline choice, so a total-time difference includes persistence
+costs and cannot all be attributed to overlap. If persistent data is also a
+required deliverable, add the same standard recorder to ODS and wait for its
+finalization at `t_done` in a separate, explicitly labeled comparison.
+
+### Equal data, registered anchors and actual training work
+
+The initial protocol uses N=32, C=8 and P=2, with H=2, F=32 and B=32. For
+each accepted trajectory register q=32 distinct legal anchors, selected by a
+fixed per-episode RNG without replacement. Each has a complete causal
+history and prediction window within one continuity segment; an episode with
+fewer than q such anchors is unsupported by this protocol. Freeze these
+selection rules before acquisition, and record each selected immutable
+source/frame identity in the manifest.
+
+Train E=4 passes over each registered anchor set. Here **one registered-anchor
+epoch** means each of the Nq registered anchors contributes to loss exactly
+once. It is not an epoch over every possible frame/window in a trajectory.
+The schedule processes each C-episode block for E local passes before moving
+to the next block, identically in all paths. It does not claim a global epoch
+barrier or a globally shuffled dataset. Required work is therefore:
+
+- NqE = 4,096 trained chunks, covering all 32 sources.
+- U = NqE/B = 128 completed optimizer updates, with no partial final batch.
+- NqEF = 131,072 valid future action targets; with the existing 10-component
+  pose/gripper targets this is 1,310,720 supervised scalar components.
+
+These numbers define a small work-accounting pilot, not a claim that 128
+updates suffice to learn PickPlace. Freeze any larger training budget in a
+new protocol, preserving equal work and the configured reuse protection.
+
+The source-local requirement is exactly qE=128 trained chunks. K=128 remains
+an **upper delivery limit**, not proof that the requirement was completed.
+Reconcile delivery, prefetch reservations and completed optimizer-step ledgers
+separately. Prefetch that is decoded but discarded is not trained work; the
+exact-work run must finish every required anchor/pass and have no abandoned
+required reservations. Do not reset K on iterator recreation. Other q/E/K
+settings require `qE <= K` and a separately frozen protocol; do not silently
+increase K or repeat the first available sources to hide a data wait.
+
+Match ordered episode manifests, valid lengths, state/action payload hashes,
+anchor identities and batch membership across paths. Equal N or U alone is
+insufficient. Failed matching invalidates a paired equal-work claim. For
+visual extensions also match source camera/frame identities and preprocessing;
+standard lossy video decoding is not pixel-identical to raw images, so keep
+the existing quality audit and disclose that difference. Use a separate
+lossless diagnostic if exact pixel-level training equivalence is required.
+
+### Retention, model and resource controls
+
+Finite cache replacement must not drop unfinished required training work.
+For this first protocol, retain one owned C-episode block before requesting
+its replacement, train that block while the next generation fills the cache,
+then release it after its last optimizer step. Bound retention to one block
+and batch prefetch to a fixed declared limit. At most C live-cache episodes
+plus C retained episodes are allowed, excluding explicitly bounded batches.
+Copy/staging time and memory are measured. Apply backpressure rather than
+evicting an unconsumed required block, replaying it unboundedly, or growing an
+implicit archive. This retention/completion scheduling is follow-up work;
+the current delivery demo intentionally retires unused credits on eviction.
+
+Start with the existing `ChunkBC` geometry policy: two 51-feature causal
+observations, 512/512 ReLU hidden layers and F=32 outputs of 10 pose/gripper
+components. Use its existing masked arm/gripper objective, FP32, AdamW
+learning rate 3e-4, weight decay 1e-6 and gradient clipping at norm 1. Freeze
+observation/target normalization from the paired initial C episodes; both
+paths compute the same statistics, without using later data or held-out test
+states. Disable observation noise for this timing protocol, start from the
+same parameter/RNG state, and freeze optimizer, batch order, loss weights and
+all preprocessing. Save the same initial/final checkpoint fields with the
+same write cadence in both paths. No-op, synthetic-matmul or sleep consumers
+are not real-training evidence.
+
+The first state-only result does not establish visual training performance.
+A subsequent single/dual-camera experiment must freeze a common visual model
+and repeat actual forward/backward/optimizer work. Request only the model's
+causal history images when that is its input contract; do not force the
+delivery demo's 33 image frames into a model using only two. Both backends
+must use that same contract, with standard LeRobot video decoding retained.
+The current geometry-only BC policy is not a visual-training implementation.
+
+Give every complete pipeline the same CPU affinity/thread budget, primary
+GPU set, producer parallelism, RAM limits and any explicitly reserved
+auxiliary graphics device. Freeze whether generation/training share a GPU or
+use separate GPUs; neither path gets an extra device. Record concurrent GPU
+and CPU contention, in-flight buffers, decoder threads and idle/data-wait
+time. Model warmup and checkpoint IO follow the same policy and stay timed.
+Defer visualization, report rendering and policy evaluation until after the
+timed run, or include identical work in both completion contracts. Use three
+fixed seeds with alternating execution order, retaining failures and slower
+results. Do not reuse an already generated corpus for the cold baseline.
+
+### Metrics and attribution
+
+| Metric | Definition |
+| --- | --- |
+| Primary elapsed time | `T_total` from fresh-run launch to the complete data/training/checkpoint/cleanup contract |
+| End-to-end speedup and saving | `T_total_offline / T_total_ODS` and `1 - T_total_ODS / T_total_offline`, only for qualified equal-work pairs |
+| Work completion | Accepted sources, valid frames, registered/trained anchors, valid loss targets and completed optimizer updates; all must match |
+| First optimizer update | Launch to the first completed real update, distinct from first delivered batch |
+| Observed overlap | Intersection of recorded producer-active and training-work intervals on the common monotonic timeline; exclude waits and retained prefetch alone |
+| Blocked-control benefit | Difference/ratio of blocked and overlapping ODS total time, with the same retention and work schedule |
+| Critical-path diagnostics | Generation acceptance/failures, writer/encoding drain, decode/transfer, data waits, optimizer service, checkpoint and shutdown spans, with overlapping spans identified |
+| Resource cost | Whole-run CPU/GPU utilization, sampled peak memory, owned GPU memory and disk IO/storage, including concurrent staging/prefetch |
+| Training quality check | Final loss and independent fixed evaluation, reported beside timing; equal work/order does not guarantee identical weights or policy quality |
+
+Use device events or a qualified profiler to identify GPU training work;
+CPU dispatch intervals alone do not prove simultaneous GPU execution.
+Report stage-active overlap separately from simultaneous device utilization,
+especially when producer and learner contend for one GPU. The intuitive
+`generation + training` versus `max(generation, training)` model describes an
+ideal pipeline only; fill/drain, contention, IO and work imbalance remain in
+measured `T_total`. Do not add overlapping collection, async encoding,
+training or wait durations to construct a fictional total or saving.
+
+Before freezing the training budget, measure accepted episode throughput
+`gamma` and real learner update throughput `nu` on the allocated resources.
+The rough service demands are `N/gamma` for generation and `N*q*E/(B*nu)`
+for training. Report whether the run is generation- or training-dominated;
+the small accounting pilot may offer little measurable overlap saving.
+Choose larger workloads from the actual training requirement and bounded
+reuse policy, not by adding unnecessary epochs solely to manufacture speedup.
+
+Retain source-ready offline read/decode throughput as a secondary diagnostic
+with an already finalized corpus. It answers a different question and its
+collection time must not be added to a cold total that already includes it.
+The 2026-10-21 delivery results, including the faster ready-source LeRobot
+visual diagnostic, remain valid under their original scope. They neither
+prove nor refute a total-time gain from generation/training overlap; that
+conclusion requires this equal-work real-training measurement.

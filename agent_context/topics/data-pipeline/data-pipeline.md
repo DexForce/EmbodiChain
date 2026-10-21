@@ -43,7 +43,8 @@ The [ODS capability-showcase design](../../../docs/architecture/ods-data-stream-
 owns the standard-decoded LeRobot/state/single/dual-camera comparison protocol.
 Its example-local decoded reader is separate from the public resident numeric
 reader. Follow it for the offline baseline, camera-profile qualification and
-timing boundaries; engineering success does not establish formal performance.
+timing boundaries. Delivery throughput is diagnostic; the planned training
+comparison measures end-to-end completion with equal data and training work.
 The [recorded study](../../../examples/ods/data_stream_demo/results/2026-10-21/RESULTS.md)
 owns measured results, raw-log reproduction and workload-specific limitations;
 it does not establish training efficiency or policy performance.
@@ -83,8 +84,8 @@ bounded attempts. Worker errors are published to all consumers; failed engines
 are replaced with new instances rather than restarted.
 
 `sample_batch()` is READY-only. Selection excludes the currently written range,
-checks validity/continuity/segment boundaries, and clones the result while
-holding the shared write lock. Moving selection or cloning outside that scope
+checks validity/continuity/segment boundaries, and copies the selected payload
+while holding the shared write lock. Moving selection or copying outside that scope
 can expose partially overwritten rows. Refill follows the configured automatic
 or manual policy. Explicit raw-policy recording validates its ordered live
 action contracts independently of the expert-controller schema; see
