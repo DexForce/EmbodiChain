@@ -63,6 +63,54 @@ class ReferenceTerrainCurriculum:
         ).long()
         self.env_origins = origins[self.levels, self.types].clone()
 
+    def state_dict(self) -> dict[str, torch.Tensor]:
+        """Return terrain assignments and the shared task generator state."""
+        return {
+            "levels": self.levels.detach().cpu().clone(),
+            "types": self.types.detach().cpu().clone(),
+            "origins": self.origins.detach().cpu().clone(),
+            "generator": self.generator.get_state().cpu().clone(),
+        }
+
+    def validate_state_dict(self, state: dict[str, torch.Tensor]) -> None:
+        """Check saved assignments without changing the current curriculum.
+
+        Args:
+            state: Terrain assignments, map origins and task RNG state.
+
+        Raises:
+            ValueError: The terrain map, instance count or indices differ.
+        """
+        levels = state["levels"].to(self.levels.device)
+        types = state["types"].to(self.types.device)
+        if levels.shape != self.levels.shape or types.shape != self.types.shape:
+            raise ValueError("Terrain curriculum instance count differs")
+        if not torch.equal(state["origins"].to(self.origins), self.origins):
+            raise ValueError("Terrain curriculum map differs")
+        if levels.dtype != torch.long or types.dtype != torch.long:
+            raise ValueError("Terrain curriculum indices must be int64")
+        if bool(((levels < 0) | (levels >= self.max_level)).any()):
+            raise ValueError("Terrain curriculum level is out of range")
+        if bool(((types < 0) | (types >= self.origins.shape[1])).any()):
+            raise ValueError("Terrain curriculum type is out of range")
+        torch.Generator(device=self.generator.device).set_state(
+            state["generator"].cpu()
+        )
+
+    def load_state_dict(self, state: dict[str, torch.Tensor]) -> None:
+        """Restore assignments after checking the terrain map and instance count.
+
+        Args:
+            state: Terrain assignments, map origins and task RNG state.
+        """
+        self.validate_state_dict(state)
+        levels = state["levels"].to(self.levels.device)
+        types = state["types"].to(self.types.device)
+        self.generator.set_state(state["generator"].cpu())
+        self.levels.copy_(levels)
+        self.types.copy_(types)
+        self.env_origins.copy_(self.origins[levels, types])
+
     def update(
         self,
         env_ids: torch.Tensor,
