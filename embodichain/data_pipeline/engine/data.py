@@ -31,6 +31,7 @@ from types import TracebackType
 from typing import TYPE_CHECKING, Literal
 from multiprocessing.sharedctypes import Synchronized, SynchronizedArray
 from multiprocessing.synchronize import Event as MpEvent
+from multiprocessing.connection import wait as wait_for_process_events
 
 import torch
 from tensordict import TensorDict
@@ -188,6 +189,7 @@ def _publish_worker_error(
 
 def _monitor_worker_process(
     process: mp.Process,
+    process_status_lock: threading.RLock,
     close_signal: MpEvent,
     error_buffer: SynchronizedArray,
     error_length: Synchronized,
@@ -196,13 +198,19 @@ def _monitor_worker_process(
 ) -> None:
     """Broadcast hard worker exits without retaining the engine instance."""
     try:
-        process.join()
-        if close_signal.is_set() or failed_signal.is_set():
-            return
-        error = RuntimeError(
-            "OnlineDataEngine simulation worker exited unexpectedly "
-            f"(exit code {process.exitcode})."
-        )
+        # Forkserver status lives in a single-consumer pipe: concurrent
+        # Process.join()/is_alive()/exitcode reads can replace a valid status
+        # with 255 after the second reader gets EOF. Readiness waiting does not
+        # consume that pipe and must not hold the owner-side shutdown lock.
+        wait_for_process_events([process.sentinel])
+        with process_status_lock:
+            if close_signal.is_set() or failed_signal.is_set():
+                return
+            process.join(timeout=0)
+            error = RuntimeError(
+                "OnlineDataEngine simulation worker exited unexpectedly "
+                f"(exit code {process.exitcode})."
+            )
     except BaseException as caught_error:
         if close_signal.is_set():
             return
@@ -1276,6 +1284,7 @@ class OnlineDataEngine:
         # Handle to the simulation subprocess, set in start() and used in stop().
         self._sim_process: mp.Process | None = None
         self._monitor_thread: threading.Thread | None = None
+        self._process_status_lock = threading.RLock()
         self._channel_error: BaseException | None = None
         self._worker_error: BaseException | None = None
 
@@ -1324,6 +1333,7 @@ class OnlineDataEngine:
                     target=_monitor_worker_process,
                     args=(
                         process,
+                        self._process_status_lock,
                         self._close_signal,
                         self._worker_error_buffer,
                         self._worker_error_length,
@@ -1427,19 +1437,23 @@ class OnlineDataEngine:
                 )
             return
 
-        if self._sim_process is None:
-            error = RuntimeError("OnlineDataEngine simulation worker was not created.")
-            self._record_worker_error(error)
-            raise error
-        if self._sim_process.is_alive():
-            return
-
-        self._sim_process.join(timeout=0)
+        with self._process_status_lock:
+            process = self._sim_process
+            if process is None:
+                error = RuntimeError(
+                    "OnlineDataEngine simulation worker was not created."
+                )
+                self._record_worker_error(error)
+                raise error
+            if process.is_alive():
+                return
+            process.join(timeout=0)
+            exit_code = process.exitcode
         worker_error = self._receive_worker_error()
         if worker_error is None:
             worker_error = RuntimeError(
                 "OnlineDataEngine simulation worker exited unexpectedly "
-                f"(exit code {self._sim_process.exitcode})."
+                f"(exit code {exit_code})."
             )
             self._record_worker_error(worker_error)
         self._set_state(OnlineDataEngineState.FAILED)
@@ -2251,10 +2265,11 @@ class OnlineDataEngine:
             return error
 
         try:
-            if process.is_alive():
-                return None
-            process.join(timeout=0)
-            exit_code = process.exitcode
+            with self._process_status_lock:
+                if process.is_alive():
+                    return None
+                process.join(timeout=0)
+                exit_code = process.exitcode
         except BaseException as inspection_error:
             error = RuntimeError(
                 "OnlineDataEngine could not inspect its simulation worker before "
@@ -2286,46 +2301,49 @@ class OnlineDataEngine:
 
         forced_shutdown = False
 
-        try:
-            is_alive = process.is_alive()
-        except ValueError:
-            is_alive = False
+        with self._process_status_lock:
+            try:
+                is_alive = process.is_alive()
+            except ValueError:
+                is_alive = False
 
-        try:
-            process.join(timeout=self.cfg.shutdown_timeout if is_alive else 0)
-        except (AssertionError, ValueError):
-            pass
+            try:
+                process.join(timeout=self.cfg.shutdown_timeout if is_alive else 0)
+            except (AssertionError, ValueError):
+                pass
 
-        try:
-            is_alive = process.is_alive()
-        except ValueError:
-            is_alive = False
-        if is_alive:
-            forced_shutdown = True
-            self._forced_shutdown_attempted = True
-            process.terminate()
-            process.join(timeout=3.0)
+            try:
+                is_alive = process.is_alive()
+            except ValueError:
+                is_alive = False
+            if is_alive:
+                forced_shutdown = True
+                self._forced_shutdown_attempted = True
+                process.terminate()
+                process.join(timeout=3.0)
 
-        try:
-            is_alive = process.is_alive()
-        except ValueError:
-            is_alive = False
-        if is_alive and hasattr(process, "kill"):
-            forced_shutdown = True
-            self._forced_shutdown_attempted = True
-            process.kill()
-            process.join(timeout=1.0)
+            try:
+                is_alive = process.is_alive()
+            except ValueError:
+                is_alive = False
+            if is_alive and hasattr(process, "kill"):
+                forced_shutdown = True
+                self._forced_shutdown_attempted = True
+                process.kill()
+                process.join(timeout=1.0)
 
-        try:
-            is_alive = process.is_alive()
-        except ValueError:
-            is_alive = False
-        if is_alive:
-            raise RuntimeError(
-                "OnlineDataEngine simulation worker remained alive after "
-                "graceful shutdown, terminate(), and kill()."
-            )
+            try:
+                is_alive = process.is_alive()
+            except ValueError:
+                is_alive = False
+            if is_alive:
+                raise RuntimeError(
+                    "OnlineDataEngine simulation worker remained alive after "
+                    "graceful shutdown, terminate(), and kill()."
+                )
 
+        # The monitor may be waiting for the status lock after its sentinel
+        # became ready. Never join that thread while holding the same lock.
         monitor_thread = self._monitor_thread
         if (
             monitor_thread is not None
@@ -2337,9 +2355,10 @@ class OnlineDataEngine:
                     "OnlineDataEngine worker monitor did not stop after the worker exited."
                 )
 
-        if hasattr(process, "close"):
-            process.close()
-        self._sim_process = None
+        with self._process_status_lock:
+            if hasattr(process, "close"):
+                process.close()
+            self._sim_process = None
         self._monitor_thread = None
         return forced_shutdown
 
@@ -2459,6 +2478,7 @@ class OnlineDataEngine:
         state["_sim_process"] = None
         state["_monitor_thread"] = None
         state["_lifecycle_condition"] = None
+        state["_process_status_lock"] = None
         state["_channel_error"] = None
         state["_worker_error"] = None
         return state
@@ -2467,6 +2487,7 @@ class OnlineDataEngine:
         """Restore process-local synchronization after consumer deserialization."""
         self.__dict__.update(state)
         self._lifecycle_condition = threading.Condition(threading.RLock())
+        self._process_status_lock = threading.RLock()
 
     def __del__(self) -> None:
         try:

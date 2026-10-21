@@ -1,0 +1,23 @@
+{
+  "torch.float32": {
+    "exact_uint8_values": 256,
+    "output_dtype": "torch.float32",
+    "pass": true
+  },
+  "torch.float64": {
+    "exact_uint8_values": 256,
+    "output_dtype": "torch.float32",
+    "pass": true
+  },
+  "torch.float16": {
+    "exact_uint8_values": 256,
+    "output_dtype": "torch.float32",
+    "pass": true
+  },
+  "torch.bfloat16": {
+    "exact_uint8_values": 256,
+    "output_dtype": "torch.float32",
+    "pass": true
+  },
+  "source_sha256": "dfae919f69d9e76f5e468ce3f7335f9fed130abf8673922d9757e5503c56da2b"
+}

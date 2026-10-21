@@ -261,7 +261,8 @@ topics:
   title: Differentiable Learning Layers
   aliases: [learning layers, differentiable IK layer, 可微 IK, 训练层, 学习模块分层]
   keywords: [DifferentiableIKLayer, KinematicsLayer, SerialChainKinematics, DifferentiableIKCfg,
-    solve_dls_ik, damped_least_squares_step, Jacobian gradient, dJ/dq, learn_grasp_yaw, grasp yaw, 抓取角度优化, 抓取姿态学习]
+    solve_dls_ik, damped_least_squares_step, Jacobian gradient, dJ/dq, learn_grasp_yaw, grasp yaw, 抓取角度优化, 抓取姿态学习,
+    ResNet10Encoder, ResNet10, visual encoder, 视觉编码器]
   paths: [topics/learning-layers/learning-layers.md]
   source_of_truth:
   - embodichain/compute/kinematics/dls.py

@@ -345,7 +345,13 @@ class StreamMetrics:
 
 
 class ResourceMonitor:
-    """Sample owned-process PSS and GPU contexts across devices, not exact peaks."""
+    """Stream sampled owned memory/CPU and explicitly whole-board GPU activity.
+
+    CPU deltas count continuing processes in the owner's descendant tree. New
+    and disappeared processes are reported instead of imputing unknown work.
+    NVML utilization is board-wide, including foreign work; only context-memory
+    accounting is filtered to owned PIDs. No CUDA context is initialized.
+    """
 
     def __init__(self, output: Path, interval: float = 2.0) -> None:
         self._output, self._interval = output, interval
@@ -357,15 +363,177 @@ class ResourceMonitor:
         self.context_peaks: dict[str, int] = {}
         self.samples = 0
         self.errors: list[str] = []
+        self._error_count = 0
+        self._previous_cpu: dict[tuple[int, float], tuple[float, float]] = {}
+        self._previous_cpu_at: float | None = None
+        self._affinity: list[int] = []
+        self._cpu_count = 0
+        self._cpu = {
+            "valid_interval_count": 0,
+            "observed_cpu_seconds": 0.0,
+            "observed_wall_seconds": 0.0,
+            "peak_core_equivalents": None,
+            "peak_assigned_capacity_percent": None,
+            "new_process_observations": 0,
+            "missing_process_observations": 0,
+        }
+        self._gpu: dict[str, dict[str, Any]] = {}
+        self._observer_failed = False
+
+    def _error(self, message: str) -> None:
+        self._error_count += 1
+        if message not in self.errors and len(self.errors) < 32:
+            self.errors.append(message)
 
     def start(self) -> None:
         """Start one bounded-lifetime CPU observer thread."""
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
+    def _owned_processes(self, owner: psutil.Process) -> list[psutil.Process]:
+        # psutil.children(recursive=True) builds a host-wide PID/PPID map on
+        # Linux. Follow only owned thread child files instead; include children
+        # created by native/Python threads, not only the main thread.
+        if not Path("/proc/self/task").is_dir():
+            return [owner, *owner.children(recursive=True)]
+        pending: list[tuple[int, int | None]] = [(owner.pid, None)]
+        seen: set[int] = set()
+        processes = []
+        while pending:
+            pid, parent = pending.pop()
+            if pid in seen:
+                continue
+            seen.add(pid)
+            try:
+                process = owner if parent is None else psutil.Process(pid)
+                if parent is not None and process.ppid() != parent:
+                    continue
+                processes.append(process)
+                for task in Path(f"/proc/{pid}/task").iterdir():
+                    try:
+                        pending.extend(
+                            (int(child), pid)
+                            for child in (task / "children").read_text().split()
+                        )
+                    except (FileNotFoundError, ProcessLookupError):
+                        continue
+            except (FileNotFoundError, ProcessLookupError, psutil.NoSuchProcess):
+                continue
+            except (PermissionError, psutil.AccessDenied) as error:
+                self._error(f"Owned child discovery unavailable: {error}")
+        return processes
+
+    def _cpu_sample(self, processes: list[psutil.Process], at: float) -> dict[str, Any]:
+        current = {}
+        for process in processes:
+            try:
+                identity = (process.pid, process.create_time())
+                values = process.cpu_times()
+                current[identity] = (float(values.user), float(values.system))
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        previous = self._previous_cpu
+        continuing = current.keys() & previous.keys()
+        added, missing = (
+            current.keys() - previous.keys(),
+            previous.keys() - current.keys(),
+        )
+        elapsed = None if self._previous_cpu_at is None else at - self._previous_cpu_at
+        deltas = [
+            (current[key][0] - previous[key][0], current[key][1] - previous[key][1])
+            for key in continuing
+        ]
+        valid = (
+            elapsed is not None
+            and elapsed > 0
+            and bool(deltas)
+            and all(user >= 0 and system >= 0 for user, system in deltas)
+        )
+        user = sum(value[0] for value in deltas) if valid else None
+        system = sum(value[1] for value in deltas) if valid else None
+        cores = (user + system) / elapsed if valid else None
+        capacity = 100 * cores / self._cpu_count if valid and self._cpu_count else None
+        if valid:
+            self._cpu["valid_interval_count"] += 1
+            self._cpu["observed_cpu_seconds"] += user + system
+            self._cpu["observed_wall_seconds"] += elapsed
+            self._cpu["peak_core_equivalents"] = max(
+                self._cpu["peak_core_equivalents"] or 0, cores
+            )
+            if capacity is not None:
+                self._cpu["peak_assigned_capacity_percent"] = max(
+                    self._cpu["peak_assigned_capacity_percent"] or 0, capacity
+                )
+        self._cpu["new_process_observations"] += len(added)
+        self._cpu["missing_process_observations"] += len(missing)
+        self._previous_cpu, self._previous_cpu_at = current, at
+        return {
+            "interval_seconds": elapsed,
+            "user_cpu_seconds": user,
+            "system_cpu_seconds": system,
+            "core_equivalents": cores,
+            "assigned_capacity_percent": capacity,
+            "observed_processes": len(current),
+            "continuing_processes": len(continuing),
+            "new_pids": sorted(key[0] for key in added),
+            "missing_pids": sorted(key[0] for key in missing),
+            "assigned_cpu_count": self._cpu_count,
+            "assigned_cpu_affinity": self._affinity,
+            "scope": "user+system CPU deltas for continuing owned PIDs; excludes unknown first/new/disappeared-process intervals; 100% capacity equals the owner's assigned affinity",
+        }
+
+    def _primary_devices(
+        self, nvml: Any
+    ) -> tuple[Any, dict[str, tuple[Any, list[str]]]]:
+        visible = [
+            value.strip()
+            for value in os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")
+            if value.strip()
+        ]
+        override = os.environ.get("ODS_GPU_UUID")
+        if not visible and override:
+            visible = [override]
+        config_file = self._output / "config.json"
+        config = json.loads(config_file.read_text()) if config_file.exists() else {}
+        roles: dict[int, list[str]] = {}
+        for field, role in (("sim_device", "simulation"), ("train_device", "training")):
+            device = config.get(field, "")
+            if device.startswith("cuda:"):
+                roles.setdefault(int(device.split(":")[-1]), []).append(role)
+        devices = {}
+        legacy = None
+        for index, value in enumerate(visible):
+            try:
+                handle = (
+                    nvml.nvmlDeviceGetHandleByIndex(int(value))
+                    if value.isdigit()
+                    else nvml.nvmlDeviceGetHandleByUUID(value)
+                )
+                uuid = nvml.nvmlDeviceGetUUID(handle)
+                if isinstance(uuid, bytes):
+                    uuid = uuid.decode()
+                assigned = roles.get(
+                    index, ["primary" if len(visible) == 1 else f"visible_cuda:{index}"]
+                )
+                devices[uuid] = (handle, assigned)
+                self._gpu[uuid] = {
+                    "roles": assigned,
+                    "sample_count": 0,
+                    "gpu_sum": 0.0,
+                    "gpu_peak": None,
+                    "memory_sum": 0.0,
+                    "memory_peak": None,
+                }
+                if legacy is None or value == override or uuid == override:
+                    legacy = handle
+            except Exception as error:
+                self._error(f"Primary GPU {value} unavailable: {error}")
+        return legacy, devices
+
     def _run(self) -> None:
         handle = None
         device_handles = []
+        primary_devices = {}
         try:
             import pynvml
 
@@ -374,96 +542,176 @@ class ResourceMonitor:
                 pynvml.nvmlDeviceGetHandleByIndex(i)
                 for i in range(pynvml.nvmlDeviceGetCount())
             ]
-            visible = (
-                os.environ.get("ODS_GPU_UUID")
-                or os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")[0]
-            )
-            if visible.startswith("GPU-"):
-                handle = pynvml.nvmlDeviceGetHandleByUUID(visible)
-            elif visible.isdigit():
-                handle = pynvml.nvmlDeviceGetHandleByIndex(int(visible))
+            handle, primary_devices = self._primary_devices(pynvml)
         except Exception as error:
-            self.errors.append(f"NVML unavailable: {error}")
+            self._error(f"NVML unavailable: {error}")
         owner = psutil.Process()
-        with (self._output / "resources.jsonl").open("w", buffering=1) as stream:
-            while not self._stop.is_set():
-                pss = 0
-                available = False
-                processes = [owner, *owner.children(recursive=True)]
-                owned_pids = {process.pid for process in processes}
-                for process in processes:
-                    try:
-                        value = getattr(process.memory_full_info(), "pss", None)
-                        if value is not None:
-                            available = True
-                            pss += value
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        continue
-                vram = None
-                if handle is not None:
-                    try:
-                        vram = int(pynvml.nvmlDeviceGetMemoryInfo(handle).used)
-                    except Exception as error:
-                        self.errors.append(str(error))
-                        handle = None
-                contexts = {}
-                context_supported = bool(device_handles)
-                for device_handle in device_handles:
-                    try:
-                        uuid = pynvml.nvmlDeviceGetUUID(device_handle)
-                        per_pid = {}
-                        total = pynvml.nvmlDeviceGetMemoryInfo(device_handle).total
-                        for query in (
-                            pynvml.nvmlDeviceGetComputeRunningProcesses,
-                            pynvml.nvmlDeviceGetGraphicsRunningProcesses,
-                        ):
-                            for item in query(device_handle):
-                                value = item.usedGpuMemory
-                                if (
-                                    item.pid in owned_pids
-                                    and isinstance(value, int)
-                                    and 0 <= value <= total
-                                ):
-                                    per_pid[item.pid] = max(
-                                        per_pid.get(item.pid, 0), value
-                                    )
-                        if per_pid:
-                            contexts[uuid] = sum(per_pid.values())
-                    except Exception:
-                        context_supported = False
-                if context_supported:
-                    self.peak_vram = max(self.peak_vram or 0, sum(contexts.values()))
-                    for uuid, value in contexts.items():
-                        self.context_peaks[uuid] = max(
-                            self.context_peaks.get(uuid, 0), value
+        try:
+            self._affinity = owner.cpu_affinity()
+        except (AttributeError, psutil.AccessDenied, NotImplementedError):
+            self._affinity = (
+                sorted(os.sched_getaffinity(0))
+                if hasattr(os, "sched_getaffinity")
+                else []
+            )
+        self._cpu_count = len(self._affinity) or os.cpu_count() or 1
+        try:
+            with (self._output / "resources.jsonl").open("w", buffering=1) as stream:
+                while not self._stop.is_set():
+                    sampled_at = time.monotonic()
+                    pss = 0
+                    available = False
+                    processes = self._owned_processes(owner)
+                    owned_pids = {process.pid for process in processes}
+                    cpu = self._cpu_sample(processes, sampled_at)
+                    for process in processes:
+                        try:
+                            value = getattr(process.memory_full_info(), "pss", None)
+                            if value is not None:
+                                available = True
+                                pss += value
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            continue
+                    vram = None
+                    if handle is not None:
+                        try:
+                            vram = int(pynvml.nvmlDeviceGetMemoryInfo(handle).used)
+                        except Exception as error:
+                            self._error(str(error))
+                            handle = None
+                    gpu = {}
+                    for uuid, (device_handle, roles) in primary_devices.items():
+                        try:
+                            utilization = pynvml.nvmlDeviceGetUtilizationRates(
+                                device_handle
+                            )
+                            active, memory = float(utilization.gpu), float(
+                                utilization.memory
+                            )
+                            if not (0 <= active <= 100 and 0 <= memory <= 100):
+                                raise ValueError("NVML utilization is outside [0,100]")
+                            gpu[uuid] = {
+                                "roles": roles,
+                                "gpu_percent": active,
+                                "memory_controller_percent": memory,
+                                "scope": "whole board including foreign work; not owned kernel attribution",
+                            }
+                            aggregate = self._gpu[uuid]
+                            aggregate["sample_count"] += 1
+                            aggregate["gpu_sum"] += active
+                            aggregate["memory_sum"] += memory
+                            aggregate["gpu_peak"] = max(
+                                aggregate["gpu_peak"] or 0, active
+                            )
+                            aggregate["memory_peak"] = max(
+                                aggregate["memory_peak"] or 0, memory
+                            )
+                        except Exception as error:
+                            self._error(f"GPU utilization {uuid} unavailable: {error}")
+                            gpu[uuid] = {
+                                "roles": roles,
+                                "gpu_percent": None,
+                                "memory_controller_percent": None,
+                                "scope": "whole board including foreign work; unavailable sample",
+                            }
+                    contexts = {}
+                    context_supported = bool(device_handles)
+                    for device_handle in device_handles:
+                        try:
+                            uuid = pynvml.nvmlDeviceGetUUID(device_handle)
+                            if isinstance(uuid, bytes):
+                                uuid = uuid.decode()
+                            per_pid = {}
+                            total = pynvml.nvmlDeviceGetMemoryInfo(device_handle).total
+                            for query in (
+                                pynvml.nvmlDeviceGetComputeRunningProcesses,
+                                pynvml.nvmlDeviceGetGraphicsRunningProcesses,
+                            ):
+                                for item in query(device_handle):
+                                    value = item.usedGpuMemory
+                                    if (
+                                        item.pid in owned_pids
+                                        and isinstance(value, int)
+                                        and 0 <= value <= total
+                                    ):
+                                        per_pid[item.pid] = max(
+                                            per_pid.get(item.pid, 0), value
+                                        )
+                            if per_pid:
+                                contexts[uuid] = sum(per_pid.values())
+                        except Exception:
+                            context_supported = False
+                    if context_supported:
+                        self.peak_vram = max(
+                            self.peak_vram or 0, sum(contexts.values())
                         )
-                if available:
-                    self.peak_pss = max(self.peak_pss or 0, pss)
-                if vram is not None:
-                    self.primary_device_peak = max(self.primary_device_peak or 0, vram)
-                self.samples += 1
-                stream.write(
-                    json.dumps(
-                        {
-                            "monotonic": time.monotonic(),
-                            "pss_bytes": pss if available else None,
-                            "device_used_bytes": vram,
-                            "owned_context_bytes": (
-                                contexts if context_supported else None
-                            ),
-                        }
+                        for uuid, value in contexts.items():
+                            self.context_peaks[uuid] = max(
+                                self.context_peaks.get(uuid, 0), value
+                            )
+                    if available:
+                        self.peak_pss = max(self.peak_pss or 0, pss)
+                    if vram is not None:
+                        self.primary_device_peak = max(
+                            self.primary_device_peak or 0, vram
+                        )
+                    self.samples += 1
+                    stream.write(
+                        json.dumps(
+                            {
+                                "monotonic": sampled_at,
+                                "pss_bytes": pss if available else None,
+                                "device_used_bytes": vram,
+                                "owned_context_bytes": (
+                                    contexts if context_supported else None
+                                ),
+                                "cpu_utilization": cpu,
+                                "primary_gpu_utilization": gpu,
+                            },
+                            allow_nan=False,
+                        )
+                        + "\n"
                     )
-                    + "\n"
-                )
-                self._stop.wait(self._interval)
+                    self._stop.wait(self._interval)
+        except Exception as error:
+            self._observer_failed = True
+            self._error(f"Resource observer failed: {error}")
 
     def close(self) -> dict[str, Any]:
-        """Join instrumentation and return explicitly sampled resource maxima."""
+        """Join instrumentation and return sampled maxima/utilization aggregates."""
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=10)
             if self._thread.is_alive():
                 raise RuntimeError("Resource observer did not join")
+        cpu = dict(self._cpu)
+        elapsed = cpu["observed_wall_seconds"]
+        cores = cpu["observed_cpu_seconds"] / elapsed if elapsed else None
+        cpu.update(
+            mean_core_equivalents=cores,
+            mean_assigned_capacity_percent=(
+                100 * cores / self._cpu_count if cores is not None else None
+            ),
+            assigned_cpu_affinity=self._affinity,
+            assigned_cpu_count=self._cpu_count,
+            scope="continuing owned PID-tree CPU time; short-lived/new/missing PID intervals may be omitted; capacity denominator is owner's assigned affinity",
+        )
+        gpu = {}
+        for uuid, aggregate in self._gpu.items():
+            count = aggregate["sample_count"]
+            gpu[uuid] = {
+                "roles": aggregate["roles"],
+                "sample_count": count,
+                "mean_sampled_gpu_percent": (
+                    aggregate["gpu_sum"] / count if count else None
+                ),
+                "peak_sampled_gpu_percent": aggregate["gpu_peak"],
+                "mean_sampled_memory_controller_percent": (
+                    aggregate["memory_sum"] / count if count else None
+                ),
+                "peak_sampled_memory_controller_percent": aggregate["memory_peak"],
+                "scope": "whole-board NVML recent-window utilization including foreign work; sample mean, not exclusive owned-kernel busy time",
+            }
         return {
             "peak_pss_bytes": self.peak_pss,
             "peak_vram_bytes": self.peak_vram,
@@ -471,5 +719,9 @@ class ResourceMonitor:
             "owned_device_context_sampled_peaks": self.context_peaks,
             "resource_sample_count": self.samples,
             "resource_errors": self.errors,
+            "resource_error_count": self._error_count,
+            "observer_complete": not self._observer_failed,
+            "cpu_utilization": cpu,
+            "primary_gpu_utilization": gpu,
             "memory_scope": "sampled owned-process PSS and NVML context memory across devices (max per PID/device before sum); primary device total separately diagnostic; not guaranteed peaks",
         }

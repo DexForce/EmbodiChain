@@ -1,0 +1,8 @@
+{
+  "passed": true,
+  "checkpoint_reload": true,
+  "camera_mismatch_rejected": true,
+  "rgb_channel_range_ownership": true,
+  "relative_pose_conversion": true,
+  "python310_ast": true
+}

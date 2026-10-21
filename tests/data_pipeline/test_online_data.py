@@ -335,6 +335,7 @@ def _make_fake_engine(
     engine._worker_error = None
     engine._owner_pid = os.getpid()
     engine._lifecycle_condition = threading.Condition(threading.RLock())
+    engine._process_status_lock = threading.RLock()
     engine._stop_requested = False
     engine._cleanup_complete = False
     engine._forced_shutdown_attempted = False
@@ -588,20 +589,187 @@ def _install_fake_starting_worker(
     """Install a process mock that optionally completes the initial fill."""
     process = MagicMock(pid=1234, exitcode=None)
     process.is_alive.return_value = True
+    sentinel_read, sentinel_write = os.pipe()
+    process.sentinel = sentinel_read
+    write_closed = False
 
     def join(timeout=None) -> None:
+        nonlocal write_closed
         if timeout is None:
             engine._close_signal.wait(timeout=5.0)
         if engine._close_signal.is_set():
             process.is_alive.return_value = False
+            if not write_closed:
+                os.close(sentinel_write)
+                write_closed = True
 
     process.join.side_effect = join
+    process.close.side_effect = lambda: os.close(sentinel_read)
     if initialize:
         process.start.side_effect = engine._init_signal.set
     process_context = MagicMock()
     process_context.Process.return_value = process
     engine._mp_ctx = process_context
     return process
+
+
+def _forkserver_lifecycle_worker(
+    started: mp.Event,
+    finish: mp.Event,
+    exit_code: int,
+    error_channels: tuple | None,
+) -> None:
+    """Exercise parent status handling without importing a simulator."""
+    started.set()
+    if not finish.wait(CONSUMER_RESULT_TIMEOUT):
+        os._exit(124)
+    if error_channels is not None:
+        engine_module._publish_worker_error(
+            *error_channels, ValueError("original recorder close failure")
+        )
+    os._exit(exit_code)
+
+
+def _start_lifecycle_worker(
+    engine: OnlineDataEngine,
+    *,
+    finish: mp.Event | None = None,
+    exit_code: int = 0,
+    publish_close_error: bool = False,
+) -> mp.Process:
+    started = engine._mp_ctx.Event()
+    channels = (
+        engine._worker_error_buffer,
+        engine._worker_error_length,
+        engine._worker_failed_signal,
+        engine._state_value,
+    )
+    process = engine._mp_ctx.Process(
+        target=_forkserver_lifecycle_worker,
+        args=(
+            started,
+            engine._close_signal if finish is None else finish,
+            exit_code,
+            channels if publish_close_error else None,
+        ),
+    )
+    process.start()
+    engine._sim_process = process
+    assert started.wait(CONSUMER_RESULT_TIMEOUT), "Lifecycle worker did not start"
+    engine._monitor_thread = threading.Thread(
+        target=engine_module._monitor_worker_process,
+        args=(
+            process,
+            engine._process_status_lock,
+            engine._close_signal,
+            *channels,
+        ),
+        daemon=True,
+    )
+    engine._monitor_thread.start()
+    return process
+
+
+def test_forkserver_monitor_preserves_normal_shutdown_status() -> None:
+    """A monitor and owner must preserve the real zero status after close()."""
+    engine = _make_fake_engine()
+    process = _start_lifecycle_worker(engine)
+    popen = process._popen
+    monitor = engine._monitor_thread
+    try:
+        engine.stop()
+        assert popen.returncode == 0
+        assert monitor is not None and not monitor.is_alive()
+        assert engine.state is OnlineDataEngineState.STOPPED
+        assert not engine._worker_failed_signal.is_set()
+    finally:
+        engine.stop()
+
+
+def test_forkserver_status_pipe_has_one_reader_during_shutdown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pause the real status read where competing joins formerly produced 255."""
+    import multiprocessing.forkserver as forkserver
+
+    engine = _make_fake_engine()
+    process = _start_lifecycle_worker(engine)
+    popen = process._popen
+    original_read = forkserver.read_signed
+    first_read, second_read, release_read = (
+        threading.Event(),
+        threading.Event(),
+        threading.Event(),
+    )
+    readers: list[int] = []
+    errors: list[BaseException] = []
+
+    def paused_read(sentinel: int) -> int:
+        readers.append(threading.get_ident())
+        first_read.set()
+        if len(readers) > 1:
+            second_read.set()
+        assert release_read.wait(PROCESS_CLEANUP_TIMEOUT)
+        return original_read(sentinel)
+
+    def stop() -> None:
+        try:
+            engine.stop()
+        except BaseException as error:
+            errors.append(error)
+
+    monkeypatch.setattr(forkserver, "read_signed", paused_read)
+    owner = threading.Thread(target=stop)
+    owner.start()
+    try:
+        assert first_read.wait(PROCESS_CLEANUP_TIMEOUT)
+        # An old monitor.join() enters the same pipe read while the first
+        # reader is paused. The status lock now permits only one consumer.
+        competing_read = second_read.wait(0.2)
+    finally:
+        release_read.set()
+        owner.join(PROCESS_CLEANUP_TIMEOUT)
+        monkeypatch.setattr(forkserver, "read_signed", original_read)
+        if owner.is_alive():
+            engine._close_signal.set()
+    assert not owner.is_alive()
+    assert errors == []
+    assert not competing_read and len(readers) == 1
+    assert popen.returncode == 0
+    assert engine._cleanup_complete
+
+
+def test_forkserver_monitor_broadcasts_real_hard_exit_code() -> None:
+    """Sentinel monitoring still publishes an unexpected nonzero worker exit."""
+    engine = _make_fake_engine()
+    finish = engine._mp_ctx.Event()
+    process = _start_lifecycle_worker(engine, finish=finish, exit_code=23)
+    popen = process._popen
+    finish.set()
+    try:
+        assert engine._worker_failed_signal.wait(PROCESS_CLEANUP_TIMEOUT)
+        with pytest.raises(RuntimeError, match="exit code 23"):
+            engine.stop()
+        assert popen.returncode == 23
+        assert engine.state is OnlineDataEngineState.FAILED
+        assert engine._cleanup_complete
+    finally:
+        engine.stop()
+
+
+def test_forkserver_shutdown_preserves_original_worker_exception() -> None:
+    """A real close-time exception survives monitor/owner status serialization."""
+    engine = _make_fake_engine()
+    process = _start_lifecycle_worker(engine, publish_close_error=True)
+    popen = process._popen
+    try:
+        with pytest.raises(ValueError, match="original recorder close failure"):
+            engine.stop()
+        assert popen.returncode == 0
+        assert engine.state is OnlineDataEngineState.FAILED
+        assert engine._cleanup_complete
+    finally:
+        engine.stop()
 
 
 def _sample_engine_in_subprocess(

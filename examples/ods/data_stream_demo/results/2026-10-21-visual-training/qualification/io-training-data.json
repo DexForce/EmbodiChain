@@ -1,0 +1,52 @@
+{
+  "pass": true,
+  "metadata_state_width": 59,
+  "full_numeric_shape": [
+    4,
+    33,
+    59
+  ],
+  "geometry_shape": [
+    4,
+    33,
+    51
+  ],
+  "image_shape_per_camera": [
+    4,
+    2,
+    3,
+    64,
+    64
+  ],
+  "protected_final": {
+    "episode_budget": 8,
+    "reserved_chunks": 0,
+    "delivered_chunks": 16,
+    "trained_chunks": 16,
+    "episodes": [
+      {
+        "ordinal": 8,
+        "source_id": [
+          99,
+          8
+        ],
+        "reserved": 0,
+        "delivered": 8,
+        "trained": 8
+      },
+      {
+        "ordinal": 9,
+        "source_id": [
+          99,
+          9
+        ],
+        "reserved": 0,
+        "delivered": 8,
+        "trained": 8
+      }
+    ]
+  },
+  "offline_chunks": 4096,
+  "offline_sources": 128,
+  "source_sha256": "dfae919f69d9e76f5e468ce3f7335f9fed130abf8673922d9757e5503c56da2b"
+}

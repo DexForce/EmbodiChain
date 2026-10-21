@@ -1,0 +1,9 @@
+{
+  "passed": true,
+  "invalid_batch_atomic_cases": 8,
+  "same_state_different_ids_deduplicated": true,
+  "zero_qualified_report": true,
+  "early_unsupported_retained": true,
+  "duplicate_seed_attempts_excluded": true,
+  "interval_event_written": true
+}

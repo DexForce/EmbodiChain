@@ -1,27 +1,179 @@
-# ODS data-stream capability demo
+# ODS visual training: diversity and end-to-end cost
 
-Generate real Franka PickPlace trajectories and measure how they reach a
-consumer. There is no learner, optimizer or student evaluation. The experiment
-compares ODS with standard LeRobot files and real video decoding, independently
-of whether a policy can learn the task.
+The main experiment asks: **with the same actual training budget and hardware,
+how much distinct data reaches the model, and how long does the complete
+pipeline take?** It runs real BC training from scratch on the existing Franka
+PickPlace task. Only third-person (`single`) and third-person plus wrist
+(`dual`) camera policies participate in the training comparison.
 
-The [recorded study](results/2026-10-21/RESULTS.md) contains 27 main runs and nine
-appendix diagnostics validated in the py311 environment, with raw measurement
-logs, per-run tables and figures. It includes the current visual-throughput
-limitation and process-exit cleanup warnings.
-The subsequent [sampling-copy optimization](results/2026-10-21-copy-optimization/README.md)
-records CPU component measurements and bitwise equivalence checks separately.
+Accepted data volume and trained-state coverage may differ. The common budget
+is optimizer updates, batch size and valid supervision, not epochs over
+unequal datasets. All paths save a standard LeRobot dataset, checkpoint and
+an auditable training manifest. A faster result is interpreted together with
+the achieved data coverage and independent policy evaluation.
 
-ODS's primary training-efficiency question is how long it takes to generate
-the same data and complete the same real training work when generation and
-training overlap. This no-model demo diagnoses delivery costs and correctness;
-the 36 runs are not evidence of end-to-end training acceleration. The separate
-[equal-work training protocol](../../../docs/architecture/ods-data-stream-showcase-design.md#6-follow-up-equal-work-end-to-end-training-time)
-is designed but has not been implemented or measured yet.
+The complete contract is in the
+[fixed-budget visual design](../../../docs/architecture/ods-data-stream-showcase-design.md#6-fixed-training-budget-visual-comparison).
 
-Run commands from the repository root. The complete protocol, including the
-timing boundaries and comparison limits, is in the
-[design](../../../docs/architecture/ods-data-stream-showcase-design.md).
+## Primary training paths
+
+| CLI path | Data | Purpose |
+| --- | --- | --- |
+| `--arm offline --offline-episodes 8` | Finalize 8 episodes, then SDK read/decode and train | Small corpus, low acquisition cost |
+| `--arm offline --offline-episodes 32` | Same, with 32 episodes | Intermediate time–coverage point |
+| `--arm offline --offline-episodes 128` | Same, with 128 episodes | Larger corpus, higher acquisition cost |
+| `--arm ods_overlap` | Start after C episodes, generate and record the next block during training | Main ODS demonstration |
+| `--arm ods_serial --trace ...` | Regenerate overlap sources and replay its training manifest without generation/training overlap | Attribution control |
+
+Defaults are U=128 updates, B=32, H=2, F=32, C=8 shared episodes, P=2 producer
+environments and K=128 per-source lifetime ODS deliveries. Qualified runs
+complete 4,096 chunks and 131,072 valid future action targets. K is a guarded
+engineering setting, not a demonstrated best learning-reuse value. Offline
+paths reuse their fixed corpora as required and disclose the resulting reuse.
+
+ODS switches to a ready new block at a batch boundary after at least one
+completed batch has covered every current source. It keeps training the
+current block while production runs, within K, and waits when credits are
+exhausted. It does not repeat early data without a bound. At update U it stops
+requesting new generations, completes any in-flight generation and records
+all accepted data, including untrained final sources. Those sources do not
+increase diversity metrics.
+
+The model follows the pinned RLInf ResNet10/GroupNorm/spatial-embedding design,
+with a shared trainable CNN, eight spatial embeddings and 256-dimensional
+projection, followed by a 512/512 BC head. Both camera histories share encoder
+weights. It starts from scratch, uses only two causal RGB images per camera
+and two 27-feature robot states, and predicts 32 future TCP/rotation/gripper
+targets. Cube geometry is retained only for supervision/auditing, not policy
+input. ImageNet normalization runs once on RGB float32 [0,1]. Reference
+alignment, gradients, image-dependent small-data fitting and reload checks
+must pass before formal measurements.
+
+## Run the visual training experiment
+
+Use the py311 environment with matching DexSim/Franka assets, PyTorch 2.7,
+torchvision 0.22, LeRobot 0.4.4 and TorchCodec 0.5. The example requires two idle
+primary GPUs with sufficient memory: one for simulation, one for CNN training.
+Use the qualified native device mapping and disclose any explicitly reserved
+auxiliary graphics device. Physical IDs below are examples, not reservations;
+replace them with idle devices on the current machine.
+
+```bash
+conda activate py311
+python -m pip install 'torch==2.7.0' 'torchvision==0.22.0' \
+  --index-url https://download.pytorch.org/whl/cu128
+python -m pip install -e '.[vision]' 'lerobot==0.4.4' 'torchcodec==0.5'
+python -m examples.ods.data_stream_demo.train --help
+
+python -m examples.ods.data_stream_demo.train \
+  --suite smoke --gpu-ids 2 3 --output outputs/ods-visual-smoke
+
+python -m examples.ods.data_stream_demo.train \
+  --suite calibrate --gpu-ids 2 3 --output outputs/ods-visual-calibration
+
+python -m examples.ods.data_stream_demo.train \
+  --suite report --gpu-ids 2 3 --output outputs/ods-visual-formal
+```
+
+Freeze model, camera profile, hardware and training budget after preflight;
+do not increase epochs or insert delays to manufacture overlap. Formal
+execution has 24 primary runs: four paths×two camera modes×three fixed seeds,
+plus six matching serial replays, for 30 runs total. Primary runs regenerate
+their data, rotate path order and retain failed/slower attempts. Preflight
+measures real producer and learner throughput, not a sleep consumer.
+
+The supervisor also owns device selection for single runs. It masks the
+selected UUID pair, assigns logical `cuda:0` to generation and `cuda:1` to
+training, and audits the owned process group:
+
+```bash
+python -m examples.ods.data_stream_demo.train \
+  --suite single --arm ods_overlap --vision single --gpu-ids 2 3 \
+  --output outputs/ods-visual/overlap-single
+
+python -m examples.ods.data_stream_demo.train \
+  --suite single --arm offline --offline-episodes 32 --vision dual \
+  --gpu-ids 2 3 \
+  --output outputs/ods-visual/offline32-dual
+```
+
+Do not reuse already finalized files as the cold offline baseline. Both
+pipelines include fresh acquisition, failed expert attempts, encoding,
+initialization, actual optimizer work, checkpoint writing, finalization and
+normal shutdown. Last-update time is recorded separately from total time,
+so pending recording work cannot disappear from the comparison.
+
+The supervisor then launches a separate CPU corpus/decoder audit and the
+independent policy evaluation. Their durations are saved and excluded from
+pipeline time. A failed audit or evaluation retains the original measured
+pipeline time and disqualifies that run for comparative claims.
+Actual runs remain unqualified while validation is pending. The supervisor
+persists the requested evaluation scene count; formal reports require all
+requested scenes and normal evaluation closure, or an explicit zero-scene
+`not_requested` status.
+
+On a qualified driver, the new training supervisor can accept an explicit
+`--aux-graphics-gpu-id` for the native driver's passive graphics footprint.
+It permits only owned pure-G contexts of at most 8 MiB per PID, requires
+16 GiB free, and records any foreign activity on that auxiliary board; it
+does not admit that board as extra compute capacity. Both primary GPUs still
+need three idle readings. This exception belongs to the training supervisor.
+The historical delivery supervisor below retains its stricter requirement
+that an auxiliary board also pass three idle readings.
+
+## Training outputs and interpretation
+
+Render only retained training logs after workers exit:
+
+```bash
+python -m examples.ods.data_stream_demo.training_report \
+  outputs/ods-visual-formal --output outputs/ods-visual-report
+```
+
+Per-run `summary.json` contains the fixed work ledger and `training_metrics`.
+`training-events.jsonl` records immutable completed-update source/anchor IDs,
+losses and monotonic stage timestamps. `training-sources.json` retains exact
+per-source frame counters, including retired sources. The report writes
+JSON/Markdown and four measured figures, each in PNG/SVG/PDF:
+
+1. Total time versus initial-state coverage and effective trained sources.
+2. Coverage growth against wall time and completed optimizer updates.
+3. Generation, recording, data preparation, training and cleanup timeline.
+4. Lifetime source use, including retired/unused sources and the ODS K line.
+
+Only completed optimizer updates increase training diversity. Metrics include
+unique sources, entropy-based effective sources, fixed 1 cm initial XY bins,
+2 cm cube-state voxels at trained anchors, unique anchor/history/target frame
+IDs and duplicate-target fraction. New source IDs alone do not demonstrate
+physical-state novelty; overlapping prediction windows are deduplicated.
+A registered-but-untrained source contributes to acquisition cost, not coverage.
+
+Failed, unsupported or unqualified runs remain in the report but are excluded
+from ratios. Formal same-vision/seed ratios require matching initial-model and
+normalization hashes, the common initial-C numeric prefix and camera order,
+the exact declared/completed U/B/H/F budget, the same assigned generation and
+training GPU UUIDs, and the same eight CPU cores. Supervisor launch masks,
+thread budgets, placement audits, normal-exit records and total times must
+agree; missing evidence excludes the comparison. Smoke/calibration and legacy
+CPU metric fixtures do not produce formal speedup claims. AV1 is lossy;
+retain PSNR/MAE audits and the independent
+20-state development evaluation beside timing. A smaller offline corpus may
+finish sooner or a larger one may cover more states. No universal speedup or
+policy-learning improvement is assumed.
+
+## Historical delivery diagnostic
+
+The original no-model entry point below remains available to isolate cache,
+delivery, conversion and standard video-decode costs. Its state-only condition
+belongs to that diagnostic, not the visual training matrix above. It does not
+import a learner or produce policy-performance evidence.
+
+The [2026-10-21 study](results/2026-10-21/RESULTS.md) contains 27 main runs and
+nine appendix diagnostics validated in py311, raw logs and figures. It records
+the visual delivery limitation and teardown cleanup warnings. The subsequent
+[copy optimization](results/2026-10-21-copy-optimization/README.md) records CPU
+component timings and bitwise checks. These historical measurements are not
+relabelled as end-to-end visual training results.
 
 ## Compared paths
 
@@ -311,34 +463,3 @@ This demo can establish measured availability, reuse protection, provenance
 and resource tradeoffs for these workloads. It does not establish policy
 quality, training acceleration, a universal ODS speedup, or that the broader
 LeRobot ecosystem cannot stream data.
-
-## Planned end-to-end training comparison
-
-The follow-up compares fresh collect-then-train standard LeRobot against
-ODS generation concurrent with actual BC updates. An additional ODS run
-alternates generation and training to isolate the contribution of overlap.
-The clock starts before producer/learner launch and stops only when accepted
-data, all required optimizer steps, the common final checkpoint and worker
-cleanup are complete. Video encoding/finalization is included where needed;
-asynchronous stage times are never summed to fabricate total time.
-
-The first protocol reuses the existing state-only `ChunkBC`, with N=32
-accepted episodes and q=32 registered legal anchors per episode. Four passes
-over this finite anchor set give 4,096 trained chunks, 128 B=32 updates and
-131,072 valid future action targets at F=32. One registered-anchor epoch
-means visiting each registered anchor once, not every possible trajectory
-frame. All paths must train every registered source/anchor/pass, with matching
-batch order, initial weights, normalization, optimizer and loss work. K=128
-is an upper delivery guard; merely staying under K does not prove equal
-training coverage. Retained data and prefetch are bounded, and generation
-waits rather than overwriting unfinished required work.
-
-Report launch-to-completion time, paired speedup, first real update, measured
-generation/training overlap, data waits and whole-pipeline resource usage.
-Give each path the same CPU/GPU allocation and account for contention. The
-source-ready LeRobot decoding rate remains a secondary diagnostic. A visual
-training result needs a common visual model and causal image-input contract;
-the existing geometry policy and full-context delivery figures do not supply
-that result. These are follow-up acceptance requirements, not extra CLI
-options already implemented in this example. See the linked design for the
-retention, persistence, matching and timing contracts.

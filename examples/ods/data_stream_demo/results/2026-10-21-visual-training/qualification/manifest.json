@@ -1,0 +1,97 @@
+{
+  "scope": "Component qualification; not formal training performance results",
+  "files": {
+    "encoder-reference.json": {
+      "source": "/tmp/ods-visual-encoder-qualification/cpu.json",
+      "sha256": "19707e583a2522ced946d065b92f98ee15ba6a5eece7d70f32eca759828443d1"
+    },
+    "encoder-image-fit.json": {
+      "source": "/tmp/ods-visual-encoder-qualification/cpu-fit.json",
+      "sha256": "67ca03c0db2f35702942e76ce193e72ee419a90475fb03ccaec221937a07ffd0"
+    },
+    "encoder-cuda.json": {
+      "source": "/tmp/ods-visual-encoder-qualification/cuda.json",
+      "sha256": "eb5ab2b7c931e55b37dc4af691d2a939e978c139b869671c9047fcc11338293e"
+    },
+    "encoder-cuda-devices.json": {
+      "source": "/tmp/ods-visual-encoder-qualification/cuda-device-audit.json",
+      "sha256": "c503803154bc3929f0de26f8cd5d2e07631259fd3720b0da4ea9b7b9784742ba"
+    },
+    "evaluation-static.json": {
+      "source": "/tmp/ods-visual-encoder-qualification/evaluation-static/summary.json",
+      "sha256": "1c1c5ecc6ed697aeb5014d531eabd24c642e674ccc2c471534023611cc3c69a5"
+    },
+    "evaluation-no-grad.json": {
+      "source": "/tmp/ods-visual-encoder-qualification/evaluation-no-grad-static.json",
+      "sha256": "34ad71dc64efbf6e97e6206258a31a4a60e2309299434f1666915e1fc4637b1b"
+    },
+    "io-roundtrip.json": {
+      "source": "/tmp/ods-visual-training-io-validation/results.json",
+      "sha256": "b4c8d0dcc537c378a4d6d8ffe458956c714eea01eaa715cea3ee17fdbb9ba5d1"
+    },
+    "io-exact-frame-alignment.json": {
+      "source": "/tmp/ods-visual-training-io-validation/exact-images.json",
+      "sha256": "7b7354663333e02cdd4c0a2cdf0c1b891e7522f848b71bf9d07467639a924a2b"
+    },
+    "io-default-dtype.json": {
+      "source": "/tmp/ods-visual-training-io-validation/default-dtype.json",
+      "sha256": "fbf23c16344f871cfdd4d749e322da46f0632545cd99b5223eab1130a6fca767"
+    },
+    "io-training-data.json": {
+      "source": "/tmp/ods-visual-training-io-validation/training-data.json",
+      "sha256": "2e8ddcb6886fa9bc21b235b9f333278e08bae40bd0d2395b9691fd1a0c37c3e5"
+    },
+    "io-post-audit.json": {
+      "source": "/tmp/ods-visual-training-io-validation/audit-qualification.json",
+      "sha256": "865c58ce95a5a26f2d1152f705a7daebbf83e4164a092cb6fe52d56c72af0083"
+    },
+    "io-source-hashes.json": {
+      "source": "/tmp/ods-visual-training-io-validation/final-source-hashes.json",
+      "sha256": "e483196e6f24c738c1ce8ef52a9788a512d2393c9c25a6f118d0055bcd0ef944"
+    },
+    "metrics-positive.json": {
+      "source": "/tmp/ods-visual-metrics-fixture-8dgi02s4/fixture-result.json",
+      "sha256": "a4110c82a413b47a3938eda26a1cc4737c9bc130b897d6618ec4a276d7a0fcf2"
+    },
+    "metrics-negative.json": {
+      "source": "/tmp/ods-visual-metrics-edges-r1g0rliv/fixture-result.json",
+      "sha256": "2a8f278ab9f53b6f2cc1e60f300223d80dac4d3c5201abe183ca475ccfda13e5"
+    },
+    "supervisor-cpu.json": {
+      "source": "/tmp/ods-training-suite-cpu-7utdhnp2/validation.json",
+      "sha256": "af3963bea2c056ba35ef7afd5ca492e4e88bcf7c5886d9ede77cfb4b58eedaa8"
+    },
+    "supervisor-guard.json": {
+      "source": "/tmp/ods-training-suite-guard-tqxzggct/validation.json",
+      "sha256": "df5ae9407f2d0d818a0dcb5646282dbcf5088284e21cc3221b418a54afc2795e"
+    },
+    "worker-status-baseline.json": {
+      "source": "/tmp/ods-worker-status-race-validation/reproduced.json",
+      "sha256": "a7a756fa5ec3d9ff6b1ad5b3ae63d2975ad9ca990c9492c499b45a59a80c6755"
+    },
+    "worker-status-source-hashes.json": {
+      "source": "/tmp/ods-worker-status-race-validation/source-hashes.json",
+      "sha256": "97570eaef3fed23cc3b3b529d9a3068fa2f72f46fa38d87c95e9ee025eea6d6e"
+    },
+    "resource-utilization.json": {
+      "source": "/tmp/ods-resource-utilization-validation/summary.json",
+      "sha256": "1a23809b20eb9528b51d73f26b5067c5132e582a569ad6a6d8db7bcd46797f4e"
+    },
+    "report-fairness.json": {
+      "source": "/tmp/ods-training-report-fairness-qw4tptlx/validation.json",
+      "sha256": "0574aecf0dc33a298e4d9103973c1f138fc74ed1f2f37bb1c9a9c8d30d798bf7"
+    },
+    "report-smoke-audit.json": {
+      "source": "/tmp/ods-training-report-actual-audit-ojorpm3k/validation.json",
+      "sha256": "f8731bc13481bd3feb31621d7c1ff5731697de19886bea4346a19617fbe9f7d7"
+    },
+    "smoke-v2.json": {
+      "source": "/tmp/ods-visual-training-smoke-20261021-v2/suite-summary.json",
+      "sha256": "07caecbee17c87fb2306829d23d653bb2601e0116accf2f82609630782bf612d"
+    },
+    "wait-utilization-probe.json": {
+      "source": "/tmp/ods-visual-training-wait-utilization-20261021-v1/summary.json",
+      "sha256": "a1b05e12b344ce3b9ef6f4f0c138397e53adc39c6c12d454ef8bc16bab47219d"
+    }
+  }
+}

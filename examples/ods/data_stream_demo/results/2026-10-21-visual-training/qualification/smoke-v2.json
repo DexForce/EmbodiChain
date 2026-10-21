@@ -1,0 +1,774 @@
+{
+  "status": "complete",
+  "phase": "smoke",
+  "results": [
+    {
+      "output": "/tmp/ods-visual-training-smoke-20261021-v2/ods_overlap/single/seed19001",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 119.918652907,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 1638371,
+      "process_launch_monotonic_ns": 1732046635147699,
+      "device_guard": {
+        "samples": 57,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 1638607,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-smoke-20261021-v2/ods_overlap/single/seed19001",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 44.303459754,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 1642621,
+        "process_launch_monotonic_ns": 1732177629167779,
+        "device_guard": {
+          "samples": 21,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 1642621,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-smoke-20261021-v2/ods_overlap/single/seed19001",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 11.068407881,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 1642434,
+        "process_launch_monotonic_ns": 1732166557135851,
+        "device_guard": {
+          "samples": 5,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-smoke-20261021-v2/offline4/single/seed19001",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 93.850930297,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 1643079,
+      "process_launch_monotonic_ns": 1732222186427385,
+      "device_guard": {
+        "samples": 44,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 1643176,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-smoke-20261021-v2/offline4/single/seed19001",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 43.995094019,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 1644646,
+        "process_launch_monotonic_ns": 1732327116394549,
+        "device_guard": {
+          "samples": 21,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 1644646,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-smoke-20261021-v2/offline4/single/seed19001",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 11.073342852,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 1644466,
+        "process_launch_monotonic_ns": 1732316040256559,
+        "device_guard": {
+          "samples": 5,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-smoke-20261021-v2/ods_serial/single/seed19001",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 119.910951283,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 1646582,
+      "process_launch_monotonic_ns": 1732371365127262,
+      "device_guard": {
+        "samples": 57,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 1646680,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-smoke-20261021-v2/ods_serial/single/seed19001",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 43.983834325,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 1648706,
+        "process_launch_monotonic_ns": 1732502190296579,
+        "device_guard": {
+          "samples": 20,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 1648706,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-smoke-20261021-v2/ods_serial/single/seed19001",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 10.90726304,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 1648530,
+        "process_launch_monotonic_ns": 1732491279384594,
+        "device_guard": {
+          "samples": 5,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-smoke-20261021-v2/offline4/dual/seed19001",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 109.728755888,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 1650510,
+      "process_launch_monotonic_ns": 1732546429199928,
+      "device_guard": {
+        "samples": 52,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 1650605,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-smoke-20261021-v2/offline4/dual/seed19001",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 48.737367406,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 1652857,
+        "process_launch_monotonic_ns": 1732667168775693,
+        "device_guard": {
+          "samples": 23,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 1652857,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-smoke-20261021-v2/offline4/dual/seed19001",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 11.003744228,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 1652647,
+        "process_launch_monotonic_ns": 1732656160648568,
+        "device_guard": {
+          "samples": 5,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-smoke-20261021-v2/ods_overlap/dual/seed19001",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 134.09211722,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 1653726,
+      "process_launch_monotonic_ns": 1732716160919685,
+      "device_guard": {
+        "samples": 63,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 1653827,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-smoke-20261021-v2/ods_overlap/dual/seed19001",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 52.420822281,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 1656634,
+        "process_launch_monotonic_ns": 1732860987376689,
+        "device_guard": {
+          "samples": 25,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 1656634,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-smoke-20261021-v2/ods_overlap/dual/seed19001",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 10.724812632,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 1656442,
+        "process_launch_monotonic_ns": 1732850257736949,
+        "device_guard": {
+          "samples": 5,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    },
+    {
+      "output": "/tmp/ods-visual-training-smoke-20261021-v2/ods_serial/dual/seed19001",
+      "status": "complete",
+      "returncode": 0,
+      "elapsed_seconds": 133.308539097,
+      "stage": "training",
+      "evaluation": false,
+      "timeout": false,
+      "cancelled": false,
+      "leaked_process_group": false,
+      "pgid": 1657403,
+      "process_launch_monotonic_ns": 1732913662928744,
+      "device_guard": {
+        "samples": 63,
+        "unexpected_contexts": [],
+        "allowed_aux_contexts": [
+          {
+            "pid": 1657507,
+            "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "type": "G",
+            "used_memory": "6 MiB"
+          }
+        ],
+        "seen_primary_uuids": [
+          "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+        ]
+      },
+      "evaluation_process": {
+        "output": "/tmp/ods-visual-training-smoke-20261021-v2/ods_serial/dual/seed19001",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 47.637183017,
+        "stage": "evaluation",
+        "evaluation": true,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 1660268,
+        "process_launch_monotonic_ns": 1733057962688992,
+        "device_guard": {
+          "samples": 23,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [
+            {
+              "pid": 1660268,
+              "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+              "type": "G",
+              "used_memory": "6 MiB"
+            }
+          ],
+          "seen_primary_uuids": [
+            "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c"
+          ]
+        }
+      },
+      "audit_process": {
+        "output": "/tmp/ods-visual-training-smoke-20261021-v2/ods_serial/dual/seed19001",
+        "status": "complete",
+        "returncode": 0,
+        "elapsed_seconds": 10.982858581,
+        "stage": "audit",
+        "evaluation": false,
+        "timeout": false,
+        "cancelled": false,
+        "leaked_process_group": false,
+        "pgid": 1659683,
+        "process_launch_monotonic_ns": 1733046975582469,
+        "device_guard": {
+          "samples": 5,
+          "unexpected_contexts": [],
+          "allowed_aux_contexts": [],
+          "seen_primary_uuids": []
+        }
+      }
+    }
+  ],
+  "gpu_preflight": {
+    "readings": [
+      {
+        "monotonic_ns": 1732040839575182,
+        "gpus": [
+          {
+            "index": 0,
+            "uuid": "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 34499,
+            "total_mib": 73415
+          },
+          {
+            "index": 1,
+            "uuid": "GPU-3b85e500-27ff-35d9-eb8d-d54f9ff0898d",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 81,
+            "free_mib": 71020,
+            "total_mib": 73415
+          },
+          {
+            "index": 2,
+            "uuid": "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 34858,
+            "total_mib": 73415
+          },
+          {
+            "index": 3,
+            "uuid": "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 72831,
+            "total_mib": 73415
+          },
+          {
+            "index": 4,
+            "uuid": "GPU-a5477f57-58a6-4f89-6e7a-338d8fcfc6f1",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 94,
+            "free_mib": 70979,
+            "total_mib": 73415
+          },
+          {
+            "index": 5,
+            "uuid": "GPU-569c23a7-9291-45ef-c727-ba74d63708db",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 87,
+            "free_mib": 70803,
+            "total_mib": 73415
+          },
+          {
+            "index": 6,
+            "uuid": "GPU-624342e0-6d34-01ea-c202-1d15bf69f63f",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 89,
+            "free_mib": 69829,
+            "total_mib": 73415
+          },
+          {
+            "index": 7,
+            "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 62185,
+            "total_mib": 73415
+          }
+        ]
+      },
+      {
+        "monotonic_ns": 1732042988248307,
+        "gpus": [
+          {
+            "index": 0,
+            "uuid": "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 34499,
+            "total_mib": 73415
+          },
+          {
+            "index": 1,
+            "uuid": "GPU-3b85e500-27ff-35d9-eb8d-d54f9ff0898d",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 81,
+            "free_mib": 71020,
+            "total_mib": 73415
+          },
+          {
+            "index": 2,
+            "uuid": "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 34858,
+            "total_mib": 73415
+          },
+          {
+            "index": 3,
+            "uuid": "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 72831,
+            "total_mib": 73415
+          },
+          {
+            "index": 4,
+            "uuid": "GPU-a5477f57-58a6-4f89-6e7a-338d8fcfc6f1",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 95,
+            "free_mib": 70979,
+            "total_mib": 73415
+          },
+          {
+            "index": 5,
+            "uuid": "GPU-569c23a7-9291-45ef-c727-ba74d63708db",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 90,
+            "free_mib": 70803,
+            "total_mib": 73415
+          },
+          {
+            "index": 6,
+            "uuid": "GPU-624342e0-6d34-01ea-c202-1d15bf69f63f",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 89,
+            "free_mib": 69829,
+            "total_mib": 73415
+          },
+          {
+            "index": 7,
+            "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 62185,
+            "total_mib": 73415
+          }
+        ]
+      },
+      {
+        "monotonic_ns": 1732045188387772,
+        "gpus": [
+          {
+            "index": 0,
+            "uuid": "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 34499,
+            "total_mib": 73415
+          },
+          {
+            "index": 1,
+            "uuid": "GPU-3b85e500-27ff-35d9-eb8d-d54f9ff0898d",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 82,
+            "free_mib": 71020,
+            "total_mib": 73415
+          },
+          {
+            "index": 2,
+            "uuid": "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 34858,
+            "total_mib": 73415
+          },
+          {
+            "index": 3,
+            "uuid": "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 72831,
+            "total_mib": 73415
+          },
+          {
+            "index": 4,
+            "uuid": "GPU-a5477f57-58a6-4f89-6e7a-338d8fcfc6f1",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 94,
+            "free_mib": 70979,
+            "total_mib": 73415
+          },
+          {
+            "index": 5,
+            "uuid": "GPU-569c23a7-9291-45ef-c727-ba74d63708db",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 95,
+            "free_mib": 70803,
+            "total_mib": 73415
+          },
+          {
+            "index": 6,
+            "uuid": "GPU-624342e0-6d34-01ea-c202-1d15bf69f63f",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 88,
+            "free_mib": 69829,
+            "total_mib": 73415
+          },
+          {
+            "index": 7,
+            "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+            "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+            "utilization_percent": 0,
+            "free_mib": 61673,
+            "total_mib": 73415
+          }
+        ]
+      }
+    ],
+    "pairs": [
+      {
+        "simulation": {
+          "index": 0,
+          "uuid": "GPU-5fbdbdd3-4b93-066a-cf17-bd62a5261b2c",
+          "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+          "utilization_percent": 0,
+          "free_mib": 34499,
+          "total_mib": 73415
+        },
+        "training": {
+          "index": 2,
+          "uuid": "GPU-72b782e4-97d4-c0fa-c0f8-78956448d7b4",
+          "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+          "utilization_percent": 0,
+          "free_mib": 34858,
+          "total_mib": 73415
+        },
+        "cpu_affinity": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ]
+      }
+    ],
+    "rejected": [
+      {
+        "index": 4,
+        "reason": "not present, not idle in all three readings, or below 16 GiB free"
+      },
+      {
+        "index": 5,
+        "reason": "not present, not idle in all three readings, or below 16 GiB free"
+      }
+    ],
+    "aux_graphics_gpu": {
+      "index": 7,
+      "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+      "name": "NVIDIA RTX PRO 5000 72GB Blackwell",
+      "utilization_percent": 0,
+      "free_mib": 61673,
+      "total_mib": 73415,
+      "scope": "passive pure-G driver footprint only",
+      "max_per_pid_bytes": 8388608,
+      "idle_required": false
+    },
+    "limitations": [
+      "Each primary GPU passes three zero-utilization readings and has at least 16 GiB free; admission is not an exclusive reservation.",
+      "One generation/training UUID pair and eight disjoint CPUs are held for each seed/vision group; at most two groups run concurrently.",
+      "An explicit auxiliary UUID permits only owned pure-G contexts with known per-PID memory <=8 MiB. Foreign auxiliary activity is disclosed, not used as compute capacity.",
+      "Periodic process-tree/process-group GPU audits can miss short-lived contexts; matching native UUID placement still needs qualification.",
+      "Total pipeline time ends after normal training-worker exit; independent evaluation is outside that time."
+    ]
+  },
+  "source_sha256": {
+    "embodichain/data_pipeline/engine/data.py": "3297f1b6d036bd63b71595e08ef9fe981eb58be02db7e9fe117a91e11bcf5bb3",
+    "embodichain/data_pipeline/runtime.py": "0992cd749605df1cd79d0f64ce2b5dbac0c9e7b48124fec2a5fd3b454c263819",
+    "examples/ods/data_stream_demo/__init__.py": "c9041fac160c5ee047510a80b557bb60b3d92de74a291ed68744365508d72fe0",
+    "examples/ods/data_stream_demo/acquisition.py": "a2188f50b0fc1dba3de02b8fde2a3b20b76ea510770abf271d2caaecc122d89c",
+    "examples/ods/data_stream_demo/lerobot_io.py": "b391e5958aacff905b082be9b0747f48c42879ae5de4416fabb05bcd82280c9d",
+    "examples/ods/data_stream_demo/metrics.py": "4aa2372643d565ef9d87621fe118820536689aeea479d5bafac6bbf0cd5bac32",
+    "examples/ods/data_stream_demo/payload.py": "65a6e074aab6becb8a9fc46fffad0753f997bad22e10e69f25426b09af04379d",
+    "examples/ods/data_stream_demo/qualify_encoder.py": "043a94098f5672d50b58c06ec82ea84f4b9c23b9ca27fff469f309cb7f0b4647",
+    "examples/ods/data_stream_demo/report.py": "796d64a3604f692478a3023cf2242e19311d8726ccfb95e9773571ff58a66fde",
+    "examples/ods/data_stream_demo/run.py": "dd4369b5f83f728bce1feafca6ba397ba9db3a3434b8f1681bd74699106bed17",
+    "examples/ods/data_stream_demo/suite.py": "bde907ce27499f73c35686f42f4cdcf7f9d94d868e90317a6e9bc3500286a278",
+    "examples/ods/data_stream_demo/train.py": "d89024c236de528bde4a9f78a6f2df45691ab12fded491fe97cb69b92346fd7b",
+    "examples/ods/data_stream_demo/training_audit.py": "ea763ee15d81feca64a02a9382840f5aa0ed876fd9f6e9cb2cc652f1650eb626",
+    "examples/ods/data_stream_demo/training_data.py": "dfae919f69d9e76f5e468ce3f7335f9fed130abf8673922d9757e5503c56da2b",
+    "examples/ods/data_stream_demo/training_eval.py": "e65b3def87df59531caf997577635d66beb0a2f5f695d7e0b2233817ca2003ee",
+    "examples/ods/data_stream_demo/training_metrics.py": "2bb613b2235bb8fa9f09b383beb8c27b8a4810e648adf290848063d6b34dcd72",
+    "examples/ods/data_stream_demo/training_report.py": "d96bb1056e5fcffc2596aa633d096c6203d9088abbad336ef757638989cf17b9",
+    "examples/ods/data_stream_demo/training_suite.py": "65b1b97b25a1b68dbce6e85bd7f8ec569afc6a140410a8eea5ee1a3ef7d6358b",
+    "examples/ods/data_stream_demo/visual_policy.py": "c587fa2f9120c9163777ae9567a22cd77039fda2566b70ebf9836d5a4c50fbf4",
+    "examples/ods/simple_bc_demo/config.py": "57b27cf7f38806c8a0993990dc2767de320f8f2102d47d9a4b1fdaf7e8ffdac4",
+    "examples/ods/simple_bc_demo/configs/env.yaml": "c801ab47187fbd0e9079208149077a781ce48dda0afd4c0ccd7a5bbe8f63dfa9",
+    "examples/ods/simple_bc_demo/configs/franka.yaml": "592bf09371e3e1c74a3aff9ee951cccb853f8a41d06dba314842fd49e0cb3366",
+    "examples/ods/simple_bc_demo/configs/task.yaml": "5d33898f4b18821ee5b8dff680663258de4e231202474259cf4c38bc416a9a4e",
+    "examples/ods/simple_bc_demo/environment.py": "107e0037361ea4e7635d503be9764622f50130a253de544f5bf9eebb41362329",
+    "embodichain/learning/models/resnet_encoder.py": "32f2fb7463d80f317569084d908f3e7e741a36590d5a00ac177bc54f20ff8b90",
+    "embodichain/learning/models/mlp.py": "c607360edb8bff98f234b84400155da680129b5653c5b2e7b41b869b050e8a81",
+    "embodichain/learning/models/normalizer.py": "f9e59e8eadf568d7533aa4e91d639aaf207b0843d6c8aaaa24954c870afb4764",
+    "embodichain/learning/models/__init__.py": "62dfb80b90068ab82f28a9d312f865a6e68014eaed6655a13f6779f2b6b41a0e"
+  },
+  "limitations": [
+    "Each primary GPU passes three zero-utilization readings and has at least 16 GiB free; admission is not an exclusive reservation.",
+    "One generation/training UUID pair and eight disjoint CPUs are held for each seed/vision group; at most two groups run concurrently.",
+    "An explicit auxiliary UUID permits only owned pure-G contexts with known per-PID memory <=8 MiB. Foreign auxiliary activity is disclosed, not used as compute capacity.",
+    "Periodic process-tree/process-group GPU audits can miss short-lived contexts; matching native UUID placement still needs qualification.",
+    "Total pipeline time ends after normal training-worker exit; independent evaluation is outside that time."
+  ]
+}

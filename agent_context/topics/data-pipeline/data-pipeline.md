@@ -17,6 +17,7 @@ belongs to [data-assets](../data-assets/data-assets.md).
 | Bounded numeric LeRobot loading | `embodichain/data_pipeline/datasets/lerobot.py`: `LeRobotDataSource`, explicit field mapping |
 | Local Franka ChunkBC demo and offline comparisons | `examples/ods/simple_bc_demo/train.py`; local task/config/model/trainer/evaluator and evidence in the same directory |
 | Pure delivery capability and standard video decoding comparison | `examples/ods/data_stream_demo/run.py`, `suite.py`, `report.py`; no learner, real SDK/DataLoader decode and parent-owned prefetch quotas |
+| Fixed-budget visual training, diversity and total pipeline time | `examples/ods/data_stream_demo/train.py`, `training_metrics.py`, `training_report.py`; single/dual-camera BC, standard dataset recording and completed-training accounting |
 | Commit/discard/finalization dispatch | `embodichain/lab/gym/envs/managers/dataset_manager.py` |
 | Synchronous LeRobot persistence | `embodichain/lab/gym/envs/managers/datasets.py`: `LeRobotRecorder` |
 | Background persistence | `embodichain/lab/gym/envs/managers/async_datasets.py`: `AsyncLeRobotRecorder` |
@@ -40,11 +41,15 @@ comparison protocol and historical evidence. Keep generic operational contracts
 in the core guides.
 
 The [ODS capability-showcase design](../../../docs/architecture/ods-data-stream-showcase-design.md)
-owns the standard-decoded LeRobot/state/single/dual-camera comparison protocol.
-Its example-local decoded reader is separate from the public resident numeric
-reader. Follow it for the offline baseline, camera-profile qualification and
-timing boundaries. Delivery throughput is diagnostic; the planned training
-comparison measures end-to-end completion with equal data and training work.
+owns the fixed-budget single/dual-camera BC comparison and the historical
+state/single/dual delivery diagnostic. Its example-local decoded reader is
+separate from the public resident numeric reader. Follow it for offline corpus
+sizes, source-reuse protection, camera qualification and timing boundaries.
+Training comparisons match actual updates and valid supervision; data volume
+and trained-state diversity are outcomes. Record only completed optimizer
+updates as training coverage, and include recording/finalization and normal
+teardown in total pipeline time. Serial trace replay separately attributes
+generation/training overlap.
 The [recorded study](../../../examples/ods/data_stream_demo/results/2026-10-21/RESULTS.md)
 owns measured results, raw-log reproduction and workload-specific limitations;
 it does not establish training efficiency or policy performance.
@@ -82,6 +87,10 @@ shared memory: `CREATED → STARTING → READY`; `FAILED` and `STOPPED` are term
 Startup waits for initial fill with a timeout and demonstration generation has
 bounded attempts. Worker errors are published to all consumers; failed engines
 are replaced with new instances rather than restarted.
+The monitor waits for sentinel readiness without consuming the forkserver's
+single-reader exit-status pipe. Owner and monitor serialize status reads and
+process-handle closure with a local lock; shutdown releases it before joining
+the monitor. Consumer deserialization recreates that process-local lock.
 
 `sample_batch()` is READY-only. Selection excludes the currently written range,
 checks validity/continuity/segment boundaries, and copies the selected payload

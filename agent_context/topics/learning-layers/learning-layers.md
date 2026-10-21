@@ -8,8 +8,12 @@ These modules do not import learning or simulation. `SerialChainKinematics`
 returns TCP poses and geometric Jacobians from one FK pass, retaining dJ/dq.
 
 `learning/layers/` owns `KinematicsLayer` and `DifferentiableIKLayer` Torch
-module interfaces. `learning/models/` owns general MLPs, feature normalization
-and configuration-driven MLP construction. These components do not import RL,
+module interfaces. `learning/models/` owns general MLPs, feature normalization,
+configuration-driven MLP construction, and the trainable `ResNet10Encoder`.
+The encoder is imported lazily so torchvision is required only by visual clients;
+it consumes float32 NCHW RGB in `[0, 1]` and owns ImageNet normalization.
+The ODS visual demo owns the shared-view/history BC head and task losses, not
+the general encoder. These components do not import RL,
 TensorDict or simulation. RL policy interfaces, actor-critic composition and
 policy registration/builders belong to `learning/rl/policies/`; RL code consumes
 the shared networks and normalizer. See [RL learning](../rl-learning/rl-learning.md)
@@ -57,7 +61,11 @@ part of the training/evaluation entry point. The demo does not execute physical
 motion; keep task predictors out of production policy registries until a reusable
 contract exists.
 
-Tests live under `tests/compute/kinematics/` and `tests/learning/layers/`.
+Tests live under `tests/compute/kinematics/`, `tests/learning/layers/`, and
+`tests/learning/models/`. The visual encoder tests verify reference-structure
+forward/gradient equivalence, image ownership and checkpoint round trips;
+the ODS demo's `qualify_encoder.py` additionally verifies pinned RLInf classes,
+causal multiview inputs, image-only fitting, and explicitly selected CUDA.
 Validate FK, dJ/dq, full IK and recurrent-state gradients separately; include
 nonzero TCP offsets, repeated solves, checkpoint migration and import boundaries. GPU validation runs serially with `--run-gpu`.
 The unified kinematic benchmark's `differentiable` mode measures training and

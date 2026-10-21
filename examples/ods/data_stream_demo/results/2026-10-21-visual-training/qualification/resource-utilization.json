@@ -1,0 +1,159 @@
+{
+  "passed": true,
+  "deterministic_first": {
+    "interval_seconds": null,
+    "user_cpu_seconds": null,
+    "system_cpu_seconds": null,
+    "core_equivalents": null,
+    "assigned_capacity_percent": null,
+    "observed_processes": 1,
+    "continuing_processes": 0,
+    "new_pids": [
+      100
+    ],
+    "missing_pids": [],
+    "assigned_cpu_count": 2,
+    "assigned_cpu_affinity": [
+      2,
+      3
+    ],
+    "scope": "user+system CPU deltas for continuing owned PIDs; excludes unknown first/new/disappeared-process intervals; 100% capacity equals the owner's assigned affinity"
+  },
+  "deterministic_intervals": [
+    {
+      "interval_seconds": 2,
+      "user_cpu_seconds": 1.0,
+      "system_cpu_seconds": 0.5,
+      "core_equivalents": 0.75,
+      "assigned_capacity_percent": 37.5,
+      "observed_processes": 2,
+      "continuing_processes": 1,
+      "new_pids": [
+        101
+      ],
+      "missing_pids": [],
+      "assigned_cpu_count": 2,
+      "assigned_cpu_affinity": [
+        2,
+        3
+      ],
+      "scope": "user+system CPU deltas for continuing owned PIDs; excludes unknown first/new/disappeared-process intervals; 100% capacity equals the owner's assigned affinity"
+    },
+    {
+      "interval_seconds": 2,
+      "user_cpu_seconds": 3.0,
+      "system_cpu_seconds": 0.0,
+      "core_equivalents": 1.5,
+      "assigned_capacity_percent": 75.0,
+      "observed_processes": 2,
+      "continuing_processes": 2,
+      "new_pids": [],
+      "missing_pids": [],
+      "assigned_cpu_count": 2,
+      "assigned_cpu_affinity": [
+        2,
+        3
+      ],
+      "scope": "user+system CPU deltas for continuing owned PIDs; excludes unknown first/new/disappeared-process intervals; 100% capacity equals the owner's assigned affinity"
+    },
+    {
+      "interval_seconds": 2,
+      "user_cpu_seconds": 0.0,
+      "system_cpu_seconds": 0.0,
+      "core_equivalents": 0.0,
+      "assigned_capacity_percent": 0.0,
+      "observed_processes": 2,
+      "continuing_processes": 1,
+      "new_pids": [
+        101
+      ],
+      "missing_pids": [
+        101
+      ],
+      "assigned_cpu_count": 2,
+      "assigned_cpu_affinity": [
+        2,
+        3
+      ],
+      "scope": "user+system CPU deltas for continuing owned PIDs; excludes unknown first/new/disappeared-process intervals; 100% capacity equals the owner's assigned affinity"
+    }
+  ],
+  "deterministic_summary": {
+    "valid_interval_count": 3,
+    "observed_cpu_seconds": 4.5,
+    "observed_wall_seconds": 6.0,
+    "peak_core_equivalents": 1.5,
+    "peak_assigned_capacity_percent": 75.0,
+    "new_process_observations": 3,
+    "missing_process_observations": 1,
+    "mean_core_equivalents": 0.75,
+    "mean_assigned_capacity_percent": 37.5,
+    "assigned_cpu_affinity": [
+      2,
+      3
+    ],
+    "assigned_cpu_count": 2,
+    "scope": "continuing owned PID-tree CPU time; short-lived/new/missing PID intervals may be omitted; capacity denominator is owner's assigned affinity"
+  },
+  "live": {
+    "peak_pss_bytes": 572213248,
+    "peak_vram_bytes": 400,
+    "primary_device_sampled_peak_bytes": 6001,
+    "owned_device_context_sampled_peaks": {
+      "GPU-mock-training": 200,
+      "GPU-mock-simulation": 200
+    },
+    "resource_sample_count": 23,
+    "resource_errors": [],
+    "resource_error_count": 0,
+    "observer_complete": true,
+    "cpu_utilization": {
+      "valid_interval_count": 22,
+      "observed_cpu_seconds": 1.99,
+      "observed_wall_seconds": 2.374301665928215,
+      "peak_core_equivalents": 1.099602467255344,
+      "peak_assigned_capacity_percent": 54.980123362767195,
+      "new_process_observations": 2,
+      "missing_process_observations": 1,
+      "mean_core_equivalents": 0.8381411800180939,
+      "mean_assigned_capacity_percent": 41.907059000904695,
+      "assigned_cpu_affinity": [
+        254,
+        255
+      ],
+      "assigned_cpu_count": 2,
+      "scope": "continuing owned PID-tree CPU time; short-lived/new/missing PID intervals may be omitted; capacity denominator is owner's assigned affinity"
+    },
+    "primary_gpu_utilization": {
+      "GPU-mock-training": {
+        "roles": [
+          "training"
+        ],
+        "sample_count": 23,
+        "mean_sampled_gpu_percent": 10.0,
+        "peak_sampled_gpu_percent": 10.0,
+        "mean_sampled_memory_controller_percent": 30.0,
+        "peak_sampled_memory_controller_percent": 30.0,
+        "scope": "whole-board NVML recent-window utilization including foreign work; sample mean, not exclusive owned-kernel busy time"
+      },
+      "GPU-mock-simulation": {
+        "roles": [
+          "simulation"
+        ],
+        "sample_count": 23,
+        "mean_sampled_gpu_percent": 80.0,
+        "peak_sampled_gpu_percent": 80.0,
+        "mean_sampled_memory_controller_percent": 60.0,
+        "peak_sampled_memory_controller_percent": 60.0,
+        "scope": "whole-board NVML recent-window utilization including foreign work; sample mean, not exclusive owned-kernel busy time"
+      }
+    },
+    "memory_scope": "sampled owned-process PSS and NVML context memory across devices (max per PID/device before sum); primary device total separately diagnostic; not guaranteed peaks"
+  },
+  "live_child_pid": 1668745,
+  "host_wide_process_scan_forbidden": true,
+  "nvml_mocked": true,
+  "retained_error_strings": 32,
+  "error_count": 100,
+  "source_sha256": "c67bd79d04eb8c79361cecc18d937e1531125cbe6f4f4ad079c1133ea79ed90b"
+}

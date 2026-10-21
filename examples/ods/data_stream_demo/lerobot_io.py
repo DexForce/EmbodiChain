@@ -46,6 +46,8 @@ __all__ = [
     "LeRobotReaderCfg",
     "StandardLeRobotWriter",
     "StandardLeRobotReader",
+    "TrainingLeRobotReader",
+    "read_lerobot_manifest",
     "audit_video_quality",
 ]
 
@@ -76,7 +78,7 @@ class StandardLeRobotWriter:
     Args:
         destination: New output directory; existing destinations are rejected.
         metadata: Canonical payload description.
-        episode_count: Exact accepted count required before finalization.
+        episode_count: Exact accepted count, or ``None`` for a dynamic corpus.
         fps: Simulation observation frequency.
         queue_size: Queued raw episodes, excluding the active writer/submission.
         operation_timeout: Bound on handoff/finalization and worker join.
@@ -92,16 +94,16 @@ class StandardLeRobotWriter:
         destination: Path | str,
         metadata: Mapping[str, Any],
         *,
-        episode_count: int,
+        episode_count: int | None = None,
         fps: int = 30,
         queue_size: int = 2,
         operation_timeout: float = 1800.0,
     ) -> None:
-        for name, value in (
-            ("episode_count", episode_count),
-            ("fps", fps),
-            ("queue_size", queue_size),
+        if episode_count is not None and (
+            type(episode_count) is not int or episode_count < 1
         ):
+            raise ValueError("episode_count must be a positive integer or None")
+        for name, value in (("fps", fps), ("queue_size", queue_size)):
             if type(value) is not int or value < 1:
                 raise ValueError(f"{name} must be a positive integer")
         if not math.isfinite(operation_timeout) or operation_timeout <= 0:
@@ -121,6 +123,7 @@ class StandardLeRobotWriter:
         self._error: BaseException | None = None
         self._closed = False
         self._submitted = 0
+        self._final_episode_count = episode_count
         self._identities: set[tuple[int, int]] = set()
         self._stats: dict[str, Any] = {
             "submitted_episodes": 0,
@@ -153,6 +156,10 @@ class StandardLeRobotWriter:
         """Return detached counters; component wall times can overlap generation."""
         return copy.deepcopy(self._stats)
 
+    def check_health(self) -> None:
+        """Surface asynchronous recording errors from the creator thread."""
+        self._check()
+
     def _put(
         self, item: dict[str, Any] | None, progress: Callable[[], None] | None
     ) -> None:
@@ -184,16 +191,43 @@ class StandardLeRobotWriter:
             episode: ``pack_episode`` output; caller must not mutate it afterwards.
             progress: Creator-thread cancellation/ODS-event-draining callback.
         """
+        identity = self._validate_submission(episode)
+        self._put(episode, progress)
+        self._record_submission(identity)
+
+    def _validate_submission(self, episode: Mapping[str, Any]) -> tuple[int, int]:
         self._check()
-        if self._submitted >= self.episode_count:
+        if self.episode_count is not None and self._submitted >= self.episode_count:
             raise ValueError("More accepted episodes than the declared corpus size")
         identity = tuple(int(v) for v in episode["frame_ids"][0, :2])
         if identity in self._identities:
             raise ValueError("Duplicate immutable source episode")
-        self._put(episode, progress)
+        return identity
+
+    def _record_submission(self, identity: tuple[int, int]) -> None:
         self._identities.add(identity)
         self._submitted += 1
         self._stats["submitted_episodes"] = self._submitted
+        self._stats["peak_queued_episodes"] = max(
+            self._stats["peak_queued_episodes"], self._queue.qsize()
+        )
+
+    def try_submit(self, episode: dict[str, Any]) -> bool:
+        """Transfer an owned packed episode only if the bounded queue has room.
+
+        A ``False`` result transfers no ownership and changes neither accepted
+        identities nor submission counts. Caller retains the same episode for a
+        later retry. Worker failures remain terminal and are never hidden as a
+        full-queue result. On success, caller must not mutate the episode.
+        """
+        identity = self._validate_submission(episode)
+        try:
+            self._queue.put_nowait(episode)
+        except queue.Full:
+            self._check()
+            return False
+        self._record_submission(identity)
+        return True
 
     def _run(self) -> None:
         dataset = None
@@ -342,8 +376,9 @@ class StandardLeRobotWriter:
                 del episode
             if self._abort.is_set():
                 raise RuntimeError("LeRobot recording aborted")
-            if len(manifest["episodes"]) != self.episode_count:
+            if len(manifest["episodes"]) != self._final_episode_count:
                 raise ValueError("Final accepted corpus episode count mismatch")
+            manifest["accepted_episode_count"] = self._final_episode_count
             started = time.monotonic()
             dataset.finalize()
             dataset = None
@@ -382,20 +417,37 @@ class StandardLeRobotWriter:
             self._thread.join(min(0.05, remaining))
         self._stats["worker_joined"] = True
 
-    def finalize(self, *, progress: Callable[[], None] | None = None) -> dict[str, Any]:
+    def finalize(
+        self,
+        *,
+        expected_episode_count: int | None = None,
+        progress: Callable[[], None] | None = None,
+    ) -> dict[str, Any]:
         """Drain encoding/finalization and return detached component counters.
 
         Args:
+            expected_episode_count: Required actual accepted count for a dynamic
+                corpus. A fixed-count writer permits only its declared count.
             progress: Owner-thread event/cancellation callback while waiting.
 
         Returns:
             Recording counters. A failed corpus is never exposed as finalized.
         """
         self._check()
-        if self._submitted != self.episode_count:
+        if expected_episode_count is None:
+            expected_episode_count = self.episode_count
+        if type(expected_episode_count) is not int or expected_episode_count < 1:
+            raise ValueError("Dynamic finalization requires a positive episode count")
+        if (
+            self.episode_count is not None
+            and expected_episode_count != self.episode_count
+        ):
+            raise ValueError("Final count differs from the declared corpus size")
+        if self._submitted != expected_episode_count:
             raise ValueError(
                 "Cannot finalize before all accepted episodes are submitted"
             )
+        self._final_episode_count = expected_episode_count
         self._put(None, progress)
         self._join(progress, self.operation_timeout)
         self._check()
@@ -451,9 +503,17 @@ class LeRobotReaderCfg:
 
 class _DecodedContexts(Dataset):
     def __init__(
-        self, root: Path, manifest: Mapping[str, Any], cfg: LeRobotReaderCfg
+        self,
+        root: Path,
+        manifest: Mapping[str, Any],
+        cfg: LeRobotReaderCfg,
+        *,
+        history_only_images: bool = False,
+        require_complete: bool = False,
     ) -> None:
         self.root, self.manifest, self.cfg = root, manifest, cfg
+        self.history_only_images = history_only_images
+        self.require_complete = require_complete
         self._dataset: Any = None
 
     def __len__(self) -> int:
@@ -471,15 +531,24 @@ class _DecodedContexts(Dataset):
                     1 - self.cfg.history_length, self.cfg.prediction_horizon
                 )
             ]
-            fields = ["observation.state", "action", _PROVENANCE]
-            fields.extend(
-                f"observation.images.{name}"
-                for name in self.manifest["payload"]["cameras"]
+            delta_timestamps = {
+                field: offsets for field in ("observation.state", "action", _PROVENANCE)
+            }
+            image_offsets = (
+                offsets[: self.cfg.history_length]
+                if self.history_only_images
+                else offsets
+            )
+            delta_timestamps.update(
+                {
+                    f"observation.images.{name}": image_offsets
+                    for name in self.manifest["payload"]["cameras"]
+                }
             )
             self._dataset = LeRobotDataset(
                 "local/ods-data-stream",
                 root=self.root,
-                delta_timestamps={field: offsets for field in fields},
+                delta_timestamps=delta_timestamps,
                 tolerance_s=1e-4,
                 video_backend="torchcodec",
             )
@@ -500,6 +569,26 @@ class _DecodedContexts(Dataset):
             ).min()
         )
         valid = compatible & (positions >= lower) & (positions <= upper)
+        if self.require_complete:
+            if not valid.all():
+                raise ValueError(
+                    "Training plan requested an incomplete or discontinuous context"
+                )
+            for field in ("observation.state", "action"):
+                if item[f"{field}_is_pad"].bool().any():
+                    raise ValueError(
+                        "Training numeric context unexpectedly requires padding"
+                    )
+            if (provenance[:, :2] != provenance[anchor, :2]).any() or (
+                provenance[1:, 2] != provenance[:-1, 2] + 1
+            ).any():
+                raise ValueError("Training context frame/source order is inconsistent")
+            if (provenance[:, 3] != provenance[anchor, 3]).any():
+                raise ValueError("Training context crosses generation boundaries")
+            if int(item["index"]) != index:
+                raise ValueError(
+                    "SDK anchor index differs from the fixed training plan"
+                )
         result: dict[str, Any] = {
             "state": item["observation.state"].float(),
             "actions": item["action"].float(),
@@ -512,26 +601,46 @@ class _DecodedContexts(Dataset):
             "images": {},
             "_reservation_id": reservation,
         }
+        if self.require_complete:
+            result["_global_anchor_index"] = index
         for name in self.manifest["payload"]["cameras"]:
             field = f"observation.images.{name}"
-            if not torch.equal(item[f"{field}_is_pad"].bool(), padding):
+            image_valid = (
+                valid[: self.cfg.history_length] if self.history_only_images else valid
+            )
+            image_padding = (
+                padding[: self.cfg.history_length]
+                if self.history_only_images
+                else padding
+            )
+            if not torch.equal(item[f"{field}_is_pad"].bool(), image_padding):
                 raise ValueError("SDK image/numeric timestamp padding differs")
             image = item[field]
-            if image.ndim == 3 and len(valid) == 1:
+            if image.ndim == 3 and len(image_valid) == 1:
                 image = image.unsqueeze(0)
-            if image.dtype != torch.float32 or image.ndim != 4 or image.shape[1] != 3:
+            if (
+                image.dtype != torch.float32
+                or image.ndim != 4
+                or image.shape[0] != len(image_valid)
+                or image.shape[1] != 3
+            ):
                 raise ValueError("SDK decoder must return temporal RGB float32 CHW")
-            result["images"][name] = image.masked_fill(~valid[:, None, None, None], 0)
-        for name in ("state", "actions"):
-            result[name] = result[name].masked_fill(~valid[:, None], 0)
-        for name in (
-            "frame_ids",
-            "generations",
-            "continuity_id",
-            "published_at_monotonic_ns",
-        ):
-            mask = valid[:, None] if name == "frame_ids" else valid
-            result[name].masked_fill_(~mask, -1)
+            result["images"][name] = (
+                image
+                if self.require_complete
+                else image.masked_fill(~image_valid[:, None, None, None], 0)
+            )
+        if not self.require_complete:
+            for name in ("state", "actions"):
+                result[name] = result[name].masked_fill(~valid[:, None], 0)
+            for name in (
+                "frame_ids",
+                "generations",
+                "continuity_id",
+                "published_at_monotonic_ns",
+            ):
+                mask = valid[:, None] if name == "frame_ids" else valid
+                result[name].masked_fill_(~mask, -1)
         result["_service_seconds"] = time.monotonic() - started
         result["_worker_pid"] = os.getpid()
         return result
@@ -677,6 +786,80 @@ class _ReservationSampler:
         self.reserved = [0] * len(self.episodes)
 
 
+class _PlannedReservationSampler(_ReservationSampler):
+    """Finite parent-only reservations with no plan generation in workers."""
+
+    def __init__(
+        self,
+        episodes: list[dict[str, Any]],
+        cfg: LeRobotReaderCfg,
+        batch_plan: list[list[tuple[int, int]]],
+    ) -> None:
+        super().__init__(episodes, cfg)
+        self.batch_plan = copy.deepcopy(batch_plan)
+        self.planned_indices: dict[int, list[int]] = {}
+        self.cursor = 0
+        for batch in self.batch_plan:
+            if len(batch) != cfg.batch_size:
+                raise ValueError("All planned training batches must have the same size")
+            for pair in batch:
+                if not isinstance(pair, (tuple, list)) or len(pair) != 2:
+                    raise ValueError(
+                        "Plan entries must be (episode_ordinal, anchor_frame)"
+                    )
+                episode, anchor = pair
+                if type(episode) is not int or episode < 0 or episode >= len(episodes):
+                    raise ValueError("Planned episode ordinal is outside the corpus")
+                if (
+                    type(anchor) is not int
+                    or anchor < cfg.history_length - 1
+                    or anchor + cfg.prediction_horizon > episodes[episode]["length"]
+                ):
+                    raise ValueError("Planned anchor does not have a complete context")
+
+    def __iter__(self) -> Iterator[list[tuple[int, int]]]:
+        while self.dispatch_enabled and self.cursor < len(self.batch_plan):
+            batch = self.batch_plan[self.cursor]
+            self.cursor += 1
+            reservation = self.next_reservation
+            self.next_reservation += 1
+            rows = [row for row, _ in batch]
+            indices = [self.episodes[row]["offset"] + anchor for row, anchor in batch]
+            for row in rows:
+                self.reserved[row] += 1
+            self.pending[reservation] = rows
+            self.planned_indices[reservation] = indices
+            yield [(reservation, index) for index in indices]
+
+    def commit(self, reservation: int) -> None:
+        super().commit(reservation)
+        del self.planned_indices[reservation]
+
+    def cancel_outstanding(self) -> None:
+        super().cancel_outstanding()
+        self.planned_indices.clear()
+
+
+def read_lerobot_manifest(root: Path | str) -> dict[str, Any]:
+    """Inspect a finalized corpus without loading decoded frames or the SDK.
+
+    Args:
+        root: Standard corpus directory with the showcase sidecar.
+
+    Returns:
+        Detached payload metadata and episode ordinals, offsets, lengths,
+        immutable sources, generations and numeric payload digests.
+    """
+    root = Path(root)
+    if (root / "INCOMPLETE").exists():
+        raise RuntimeError("Cannot read an incomplete LeRobot corpus")
+    manifest = json.loads((root / _SIDECAR).read_text())
+    for filename in manifest["required_files"]:
+        if not (root / filename).is_file():
+            raise FileNotFoundError(f"Incomplete local corpus: {filename}")
+    return manifest
+
+
 class StandardLeRobotReader:
     """Deliver decoded contexts using spawned SDK workers and parent reservations.
 
@@ -696,12 +879,7 @@ class StandardLeRobotReader:
     ) -> None:
         _check_versions()
         self.root = Path(root)
-        if (self.root / "INCOMPLETE").exists():
-            raise RuntimeError("Cannot read an incomplete LeRobot corpus")
-        self.manifest = json.loads((self.root / _SIDECAR).read_text())
-        for filename in self.manifest["required_files"]:
-            if not (self.root / filename).is_file():
-                raise FileNotFoundError(f"Incomplete local corpus: {filename}")
+        self.manifest = read_lerobot_manifest(self.root)
         self.metadata = copy.deepcopy(self.manifest["payload"])
         self.cfg = LeRobotReaderCfg(**kwargs)
         self._owner = (os.getpid(), threading.get_ident())
@@ -717,8 +895,8 @@ class StandardLeRobotReader:
         selected = (
             all_episodes if episodes is None else [all_episodes[i] for i in episodes]
         )
-        self._sampler = _ReservationSampler(selected, self.cfg)
-        self._dataset = _DecodedContexts(self.root, self.manifest, self.cfg)
+        self._sampler = self._make_sampler(selected)
+        self._dataset = self._make_dataset()
         self._loader: DataLoader | None = None
         self._iterator: Any = None
         self._failed = False
@@ -741,6 +919,12 @@ class StandardLeRobotReader:
             "pinned_memory": False,
         }
         self._start()
+
+    def _make_sampler(self, episodes: list[dict[str, Any]]) -> _ReservationSampler:
+        return _ReservationSampler(episodes, self.cfg)
+
+    def _make_dataset(self) -> _DecodedContexts:
+        return _DecodedContexts(self.root, self.manifest, self.cfg)
 
     def _check(self) -> None:
         if self._owner != (os.getpid(), threading.get_ident()):
@@ -781,29 +965,23 @@ class StandardLeRobotReader:
             reservation = int(reservations[0])
             service = batch.pop("_service_seconds")
             worker_pids = batch.pop("_worker_pid").unique().tolist()
-            selected = self._sampler.pending[reservation]
-            expected_ids = torch.tensor(
-                [self._sampler.episodes[row]["source_id"] for row in selected],
-                dtype=torch.int64,
-            )
-            anchor = self.cfg.history_length - 1
-            if not batch["valid"][:, anchor].all() or not torch.equal(
-                batch["frame_ids"][:, anchor, :2], expected_ids
-            ):
-                raise RuntimeError(
-                    "Decoded batch source identities differ from its reservation"
-                )
+            self._validate_batch(batch, reservation)
             # Collation, SDK decode and normalization all succeeded before debit.
             self._sampler.commit(reservation)
             self._stats["delivered_batches"] += 1
             self._stats["sdk_getitem_calls"] += self.cfg.batch_size
             self._stats["worker_fetch_seconds"] += service.sum().item()
             cameras = len(self.metadata["cameras"])
+            image_length = (
+                next(iter(batch["images"].values())).shape[1]
+                if cameras
+                else batch["valid"].shape[1]
+            )
             self._stats["returned_valid_camera_frames"] += (
-                int(batch["valid"].sum()) * cameras
+                int(batch["valid"][:, :image_length].sum()) * cameras
             )
             self._stats["requested_camera_timestamps"] += (
-                batch["valid"].numel() * cameras
+                len(batch["valid"]) * image_length * cameras
             )
             self._stats["worker_pids"] = sorted(
                 set(self._stats["worker_pids"]) | set(worker_pids)
@@ -819,6 +997,20 @@ class StandardLeRobotReader:
         except BaseException:
             self._failed = True
             raise
+
+    def _validate_batch(self, batch: Mapping[str, Any], reservation: int) -> None:
+        selected = self._sampler.pending[reservation]
+        expected_ids = torch.tensor(
+            [self._sampler.episodes[row]["source_id"] for row in selected],
+            dtype=torch.int64,
+        )
+        anchor = self.cfg.history_length - 1
+        if not batch["valid"][:, anchor].all() or not torch.equal(
+            batch["frame_ids"][:, anchor, :2], expected_ids
+        ):
+            raise RuntimeError(
+                "Decoded batch source identities differ from its reservation"
+            )
 
     @property
     def stats(self) -> dict[str, Any]:
@@ -916,6 +1108,100 @@ class StandardLeRobotReader:
 
     def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
         self.close()
+
+
+class TrainingLeRobotReader(StandardLeRobotReader):
+    """Read an exact training plan with history-only standard video decoding.
+
+    Args:
+        root: Finalized corpus. :func:`read_lerobot_manifest` inspects its
+            episode offsets/lengths before constructing a plan.
+        batch_plan: Ordered batches of ``(episode_ordinal, anchor_frame)``.
+            Anchors are zero-based positions within the saved episode, not
+            immutable source frame IDs. Every context must be complete and
+            remain within one continuity segment. Batches must be equal-sized.
+        history_length: Numeric and image causal history, including the anchor.
+        prediction_horizon: Numeric supervised horizon, including the anchor.
+        num_workers: Spawned official SDK/TorchCodec CPU reader workers.
+        prefetch_factor: Maximum prefetched batches per worker.
+        timeout: Worker fetch and bounded shutdown timeout in seconds.
+        seed: DataLoader worker seeding only; the caller owns all plan sampling.
+
+    Numeric tensors cover ``history_length + prediction_horizon - 1`` frames.
+    Image tensors cover only ``history_length`` frames; future image timestamps
+    are never requested from the SDK. Plans are single-use, and ``restart`` is
+    explicitly unsupported so consumed training work cannot silently repeat.
+    """
+
+    def __init__(
+        self,
+        root: Path | str,
+        batch_plan: list[list[tuple[int, int]]],
+        *,
+        history_length: int = 2,
+        prediction_horizon: int = 32,
+        num_workers: int = 4,
+        prefetch_factor: int = 1,
+        timeout: float = 120.0,
+        seed: int = 29001,
+    ) -> None:
+        if not isinstance(batch_plan, list) or not batch_plan or not batch_plan[0]:
+            raise ValueError("Training requires a nonempty finite batch plan")
+        self._training_batch_plan = copy.deepcopy(batch_plan)
+        super().__init__(
+            root,
+            batch_size=len(batch_plan[0]),
+            history_length=history_length,
+            prediction_horizon=prediction_horizon,
+            episode_budget=None,
+            num_workers=num_workers,
+            prefetch_factor=prefetch_factor,
+            timeout=timeout,
+            seed=seed,
+        )
+        self._stats.update(
+            plan_batches=len(batch_plan),
+            image_timestamps_per_chunk=history_length,
+            numeric_timestamps_per_chunk=history_length + prediction_horizon - 1,
+            complete_contexts_required=True,
+            restart_supported=False,
+        )
+
+    @property
+    def episodes(self) -> list[dict[str, Any]]:
+        """Return detached ordinal, offset, length and immutable-source metadata."""
+        return copy.deepcopy(self.manifest["episodes"])
+
+    def _make_sampler(
+        self, episodes: list[dict[str, Any]]
+    ) -> _PlannedReservationSampler:
+        return _PlannedReservationSampler(episodes, self.cfg, self._training_batch_plan)
+
+    def _make_dataset(self) -> _DecodedContexts:
+        if len(self.metadata["cameras"]) not in (1, 2):
+            raise ValueError("Visual training requires one or two configured cameras")
+        return _DecodedContexts(
+            self.root,
+            self.manifest,
+            self.cfg,
+            history_only_images=True,
+            require_complete=True,
+        )
+
+    def _validate_batch(self, batch: dict[str, Any], reservation: int) -> None:
+        super()._validate_batch(batch, reservation)
+        indices = batch.pop("_global_anchor_index")
+        expected = torch.tensor(
+            self._sampler.planned_indices[reservation], dtype=torch.int64
+        )
+        if not torch.equal(indices, expected) or not batch["valid"].all():
+            raise RuntimeError("Decoded training anchors differ from the fixed plan")
+
+    def restart(self) -> None:
+        """Reject replay of a single-use training plan; create a new reader instead."""
+        raise NotImplementedError(
+            "Fixed training plans are single-use and cannot restart"
+        )
 
 
 def audit_video_quality(root: Path | str) -> dict[str, Any]:
