@@ -57,7 +57,7 @@ class _RLAsset(EmbodiChainDataset):
 class UnitreeG1Rough(_RLAsset):
     """Bundled model inputs for UnitreeG1Rough."""
 
-    archive_md5 = "7c221d16a0c0f684264a78906acd5a96"
+    archive_md5 = "b2ff7af5456458a38f96c03dc4ae39db"
 
 
 class G1RoughTerrains(_RLAsset):
