@@ -963,6 +963,31 @@ def test_different_max_episode_steps():
 
 
 class TestConfigToCfgFromFile:
+    @pytest.mark.parametrize("value", [True, False, None])
+    def test_episode_context_info_config(self, value: bool | None) -> None:
+        config = {
+            "id": "EpisodeContextInfo-v0",
+            "physics": "default",
+            "env": {},
+            "robot": {"uid": "ConfigOnly"},
+        }
+        if value is not None:
+            config["env"]["episode_context_in_info"] = value
+        assert config_to_cfg(config).episode_context_in_info is (
+            True if value is None else value
+        )
+
+    @pytest.mark.parametrize("value", ["false", 0, None])
+    def test_episode_context_info_rejects_non_boolean(self, value: object) -> None:
+        config = {
+            "id": "EpisodeContextInfo-v0",
+            "physics": "default",
+            "env": {"episode_context_in_info": value},
+            "robot": {"uid": "ConfigOnly"},
+        }
+        with pytest.raises(TypeError, match="episode_context_in_info must be a bool"):
+            config_to_cfg(config)
+
     @pytest.mark.parametrize("value", (True, False))
     def test_config_to_cfg_forwards_ignore_terminations(self, value: bool) -> None:
         """The explicit environment field reaches the public typed config."""
