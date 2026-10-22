@@ -158,7 +158,7 @@ topics:
   title: Simulation Visualization
   aliases: [browser visualization, viser, sim visualization, marker visualization, 标志物可视化, 仿真可视化]
   keywords: [VisualizationCfg, ViserServerCfg, SceneManifest, visualization, EntityGizmoManipulator, robot_ik_gizmo,
-    GizmoCfg, MarkerGroup, MarkerPrototypeCfg, RobotVisual, VisualizationMarkers, robot visual, ghost robot, 机器人可视化, backpressure, capture_visualization, Newton deformable, particle set,
+    GizmoCfg, MarkerGroup, MarkerPrototypeCfg, RobotMarkers, VisualizationMarkers, robot markers, ghost robot, 机器人可视化, backpressure, capture_visualization, Newton deformable, particle set,
     render topology, quaternion, xyzw]
   paths: [topics/sim-visualization/sim-visualization.md]
   source_of_truth:

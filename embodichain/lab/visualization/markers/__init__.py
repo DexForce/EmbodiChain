@@ -21,12 +21,12 @@ from __future__ import annotations
 from .cfg import MarkerGroupCfg, MarkerPrototypeCfg
 from .group import MarkerGroup
 from .visualization_markers import VisualizationMarkers, VisualizationMarkersCfg
-from .robot_visual import RobotVisual, RobotVisualCfg, RobotVisualAppearanceCfg
+from .robot_markers import RobotMarkers, RobotMarkersCfg, RobotMarkersAppearanceCfg
 
 __all__ = [
-    "RobotVisual",
-    "RobotVisualCfg",
-    "RobotVisualAppearanceCfg",
+    "RobotMarkers",
+    "RobotMarkersCfg",
+    "RobotMarkersAppearanceCfg",
     "MarkerGroupCfg",
     "MarkerPrototypeCfg",
     "MarkerGroup",

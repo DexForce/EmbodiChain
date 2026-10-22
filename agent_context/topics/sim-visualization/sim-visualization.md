@@ -74,12 +74,12 @@ rendering carries detached mesh snapshots in `SceneOverlays`.
 
 `VisualizationMarkers` adapts flat Isaac-style arrays (xyzw) with explicit
 `environment_ids`. It defaults to world coordinates and environment 0.
-`RobotVisual` reads URDF/USD visuals and composes externally supplied link poses
+`RobotMarkers` reads URDF/USD visuals and composes externally supplied link poses
 with visual origins. URDF FK accepts all `joint_names`, including caller-resolved
 mimic joints. Multiple poses can be displayed in one environment. Tasks own
 motion loading, sampling and alignment.
 
-`RobotVisualAppearanceCfg` selects source appearance or a base-color override,
+`RobotMarkersAppearanceCfg` selects source appearance or a base-color override,
 with adjustable opacity. Source textures and material parameters are preserved;
 opaque visuals use scene lighting. Transparent shading may differ by renderer.
 `unlit=True` selects a uniform color. Offscreen cameras exclude visuals until
@@ -174,7 +174,7 @@ Recorded task visualization uses `examples/sim/reference_trajectory.py`: named
 world link poses have axes `(T,K,L,7)`, while task objects use `VisualObject`
 and paths/targets use `VisualizationMarkers`. Offset layouts translate the
 robot, object, target and path together. Policy execution stays task-owned.
-`RobotVisualCfg.source` accepts the same `UsdSourceCfg` selector as scene
+`RobotMarkersCfg.source` accepts the same `UsdSourceCfg` selector as scene
 assets. USD singleton selection and USDZ texture extraction are shared through
 `sim/spawn/_usd_assets.py`; ghost-owned extraction directories survive until
 removal. Scaled marker transforms use the Scene visual batch, while rigid

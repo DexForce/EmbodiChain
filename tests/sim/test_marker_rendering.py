@@ -352,7 +352,7 @@ def test_native_environment_batches_selected_mutations_without_preparation():
         SimulationManager.flush_cleanup_queue()
 
 
-def test_robot_visual_textures_opacity_and_material_switch(tmp_path):
+def test_robot_markers_textures_opacity_and_material_switch(tmp_path):
     from PIL import Image
     import trimesh
     from embodichain.lab.sim.cfg import DenoisingCfg
@@ -403,9 +403,9 @@ def test_robot_visual_textures_opacity_and_material_switch(tmp_path):
 def _exercise_textured_ghost(sim, path):
     from dexsim import spawn
     from embodichain.lab.visualization.markers import (
-        RobotVisualAppearanceCfg,
-        RobotVisual,
-        RobotVisualCfg,
+        RobotMarkersAppearanceCfg,
+        RobotMarkers,
+        RobotMarkersCfg,
     )
 
     sim.prepare()
@@ -431,11 +431,11 @@ def _exercise_textured_ghost(sim, path):
 
     baseline = render()
     before = set(scene.handles)
-    ghost = RobotVisual(
-        RobotVisualCfg(
+    ghost = RobotMarkers(
+        RobotMarkersCfg(
             name="texture",
             asset_path=str(path),
-            appearance=RobotVisualAppearanceCfg(mode="asset", opacity=1),
+            appearance=RobotMarkersAppearanceCfg(mode="asset", opacity=1),
         ),
         sim,
     )
@@ -446,16 +446,16 @@ def _exercise_textured_ghost(sim, path):
     camera.set_visual_overlay_enabled(True)
     opaque = render()
     assert colored(opaque, 0) > 100 and colored(opaque, 2) > 100
-    ghost.set_appearance(RobotVisualAppearanceCfg(mode="asset", opacity=0))
+    ghost.set_appearance(RobotMarkersAppearanceCfg(mode="asset", opacity=0))
     invisible = render()
     assert colored(invisible, 0) <= colored(baseline, 0) + 2
     assert colored(invisible, 2) <= colored(baseline, 2) + 2
     ghost.set_appearance(
-        RobotVisualAppearanceCfg(mode="override", color=(0, 1, 0), opacity=0.6)
+        RobotMarkersAppearanceCfg(mode="override", color=(0, 1, 0), opacity=0.6)
     )
     green = render()
     assert colored(green, 1) > 100 and colored(green, 0) == 0
-    ghost.set_appearance(RobotVisualAppearanceCfg(mode="asset", opacity=0.6))
+    ghost.set_appearance(RobotMarkersAppearanceCfg(mode="asset", opacity=0.6))
     translucent = render()
     assert colored(translucent, 0) > 100 and colored(translucent, 2) > 100
     ghost.remove()

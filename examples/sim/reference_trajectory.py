@@ -44,10 +44,10 @@ from embodichain.lab.visualization import (
     visualization_cfg_from_args,
 )
 from embodichain.lab.visualization.markers import (
-    RobotVisualAppearanceCfg,
+    RobotMarkersAppearanceCfg,
     MarkerPrototypeCfg,
-    RobotVisual,
-    RobotVisualCfg,
+    RobotMarkers,
+    RobotMarkersCfg,
     VisualizationMarkers,
     VisualizationMarkersCfg,
 )
@@ -177,11 +177,11 @@ def main() -> None:
             )
         for k in range(count):
             original = args.original_first and k == 0
-            item = RobotVisual(
-                RobotVisualCfg(
+            item = RobotMarkers(
+                RobotMarkersCfg(
                     name=f"trajectory_{k}",
                     asset_path=args.asset,
-                    appearance=RobotVisualAppearanceCfg(
+                    appearance=RobotMarkersAppearanceCfg(
                         mode="asset" if original else "override",
                         color=COLORS[(k - int(args.original_first)) % len(COLORS)],
                         opacity=1.0 if original else args.opacity,
