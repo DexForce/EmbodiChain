@@ -30,6 +30,15 @@ Reinstall editable metadata after changing entry points. The command runs
 headlessly and prints a JSON result with positions and nonzero gradients. It
 checks numerical equality and state isolation before reporting success.
 
+For feature acceptance, first require the SDK capability, then run the provider
+tests. Ordinary CI using the released SDK skips this optional test module; that
+skip is not validation of the solver:
+
+```bash
+python -c 'from dexsim.engine.newton_physics import FunctionalDynamics'
+python -m pytest tests/sim/physics/test_simple_solver.py -q --run-gpu
+```
+
 ## Dynamics and supported model
 
 For each independent prismatic leaf, with coordinate `q`, velocity `v`, input

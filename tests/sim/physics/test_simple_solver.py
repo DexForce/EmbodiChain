@@ -25,6 +25,15 @@ import pytest
 import torch
 import warp as wp
 
+from dexsim.engine import newton_physics
+
+if not hasattr(newton_physics, "FunctionalDynamics"):
+    pytest.skip(
+        "Optional simple solver requires the DexSim FunctionalDynamics SDK; "
+        "run its integration acceptance with the matching SDK wheel",
+        allow_module_level=True,
+    )
+
 from dexsim.engine.newton_physics import NewtonSolverContext, resolve_newton_solver
 from embodichain.lab.sim.cfg import NewtonPhysicsCfg
 
