@@ -10,8 +10,10 @@ own owners. Inline configurations remain available for calibrated hardware.
 The reusable Franka Panda embodiment selects `franka_panda_hand` for `hand`.
 The CobotMagic embodiment selects `cobotmagic_v100_gripper` for its declared
 `right_eef` grasp endpoint. The Tianji Marvin embodiment selects
-`tianji_marvin_gripper` for both `left_hand` and `right_hand`, reusing the
-registered `TianjiMarvinCfg` with `with_gripper: true`. For example:
+`tianji_marvin_gripper` for both `left_eef` and `right_eef`, reusing the
+registered `TianjiMarvinCfg` with `with_gripper: true`. Its task embodiment
+aligns the TCP opening/approach axes with the physical finger span; the
+standalone catalog keeps its source-tool convention. For example:
 
 ```yaml
 runtime_services:

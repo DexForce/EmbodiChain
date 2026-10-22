@@ -88,7 +88,7 @@ supplies the trusted integration, robot embodiment, and execution policy. See
 Run the shipped example from the repository root:
 
 ```bash
-embodichain run-env \
+embodichain run-task \
     --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml \
     --headless \
     --max_episodes 1
@@ -140,21 +140,37 @@ cfg = EmbodiedEnvCfg(task_instruction="Stack block 2 on block 1.")
 ```
 
 Return explicit descriptions from the task's `create_demo_segments()` method.
-The shipped stacking task implements the complete planner, action conversion,
-and validators, so the following example stays synchronized with production:
+The following schematic method assumes your subclass supplies its planner and
+physical validators:
 
-```{literalinclude} ../../../embodichain_tasks/embodichain_tasks/manipulation/tableware/stack_blocks_two.py
-:language: python
-:start-at:     def create_demo_segments(
-:end-before:     def _plan_stack(
+```python
+from embodichain.lab.gym.envs import DemoSegment
+
+
+def create_demo_segments(self, **kwargs):
+    pick_actions, place_actions = self.plan_pick_and_place(**kwargs)
+    yield DemoSegment(
+        actions=pick_actions,
+        name="pick_object",
+        instruction="Grasp and lift the object.",
+        validator=self.validate_lift,
+    )
+    yield DemoSegment(
+        actions=place_actions,
+        name="place_object",
+        instruction="Place the object, release it, and let it settle.",
+        validator=self.validate_placement,
+    )
 ```
 
-The task yields two segments from the existing PickUp/Place trajectory split.
-The grasp segment checks measured lift; the placement segment owns release
-settling and final stack validation. For your own planner, retain its actual
-action order and choose boundaries around describable subgoals. Use lazy
-iterables when later planning depends on the state left by an earlier segment.
+Keep release settling in the placement action iterable and use validators to
+measure the physical outcomes. Choose boundaries around describable subgoals
+and yield lazily when later planning depends on an earlier segment's result.
 The planner yields actions; the common executor calls `env.step()`.
+
+The official stacking and RGB-ranking experts use configured Task Programs.
+Their `task_program/program.yaml` files own segment instructions and measured
+validators; see {doc}`/tutorial/data_expansion` for the shared execution path.
 
 Legacy `create_demo_action_list()` tasks continue to work as one `legacy`
 segment. A single action list does not acquire finer labels merely because an
@@ -191,7 +207,7 @@ env.reset(options={"save_data": result.success})
 ```
 
 If planning or execution raises an exception, discard the attempt with
-`env.reset(options={"save_data": False})` before retrying. The `run-env`
+`env.reset(options={"save_data": False})` before retrying. The `run-task`
 collector manages commit/discard and retries for CLI collection. Finalizing or
 closing a recorder drains committed writes; it does not commit an unfinished
 rollout.

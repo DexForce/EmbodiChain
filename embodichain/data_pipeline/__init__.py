@@ -27,9 +27,9 @@ from types import ModuleType
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from . import datasets, depth_video, engine, recording
+    from . import configuration, datasets, depth_video, engine, recording
 
-__all__ = ["datasets", "depth_video", "engine", "recording"]
+__all__ = ["configuration", "datasets", "depth_video", "engine", "recording"]
 
 
 def __getattr__(name: str) -> ModuleType:

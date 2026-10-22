@@ -10,12 +10,13 @@ Lightweight RL environments have a separate owner in
 | Request | Owning file / resolution path |
 |---|---|
 | Command dispatch | `embodichain/cli/main.py`; `embodichain/__main__.py` is the module entry wrapper |
+| Example discovery / launch | `embodichain/cli/run_example.py` → script path in the ordinary `examples/` tree → `_example_runner.py`; see [running and adding examples](../../../examples/README.md) |
 | Task discovery / gallery / `show-task` | `embodichain/cli/_task_catalog.py` → shared logical-task/deployment records; `list_task.py` and `show_task.py` render them |
-| Launch / CLI overrides | `embodichain/lab/scripts/run_env.py` → `build_env_cfg_from_args()` → `config_to_cfg()` |
+| Launch / CLI overrides | `embodichain/lab/scripts/run_task.py` → `build_env_cfg_from_args()` → `config_to_cfg()` |
 | Generic component expansion | `embodichain/lab/gym/utils/_component_composition.py` |
 | Config decoding | `embodichain/lab/gym/utils/gym_utils.py` |
 | Robot selector decoding | `robot.class_type` → `embodichain/robot_registry.py`; catalog ownership is in [robot-system](../robot-system/robot-system.md) |
-| Import registration | `embodichain/lab/gym/utils/registration.py`; official task imports under `embodichain_tasks/embodichain_tasks/` |
+| Import registration | `embodichain/lab/gym/utils/registration.py`; official task imports under `extensions/embodichain_tasks/embodichain_tasks/` |
 | Environment timing and loop | `embodichain/lab/gym/envs/base_env.py`: `EnvCfg`, `BaseEnv` |
 | Scene, manager and demonstration integration | `embodichain/lab/gym/envs/embodied_env.py` |
 | Expert trajectory control and stored-action schema | `embodichain/lab/gym/envs/expert_trajectory.py` |
@@ -31,6 +32,10 @@ Read [execution](execution.md) for hooks, bridge acceptance, reset ordering,
 wrappers, and replay. Read [profiling](profiling.md) only for instrumentation.
 
 ## Launcher argument ownership
+
+`embodichain run-task` is the sole task execution command, dispatched to
+`embodichain.lab.scripts.run_task:cli`. The former `run-env` command and
+`embodichain.lab.scripts.run_env` module are removed.
 
 `add_env_launcher_args_to_parser()` composes the lightweight simulation options
 from `embodichain.cli.sim` with Gym config, seed and recording options. When
@@ -100,7 +105,9 @@ The isolation cases are in `tests/gym/envs/test_embodied_env_joint_setup.py`.
 Construction seeds before scene setup, constructs the robot and enabled sensors, then
 initializes simulation state and configured managers. An explicit effective
 seed on reset also reaches the event manager; scoped randomization behavior is
-owned by [randomization](../randomization/randomization.md).
+owned by [randomization](../randomization/randomization.md). Robot-mounted cameras
+use the same acquisition switch and participate in the environment sensor
+registry; see [configuration](configuration.md) for declaration ownership.
 
 The policy step order is:
 
@@ -129,12 +136,22 @@ Optional physical objectives publish separate measured results; they do not
 change termination, program acceptance or persistence. Read [execution](execution.md)
 for snapshot/reset ordering and expert-versus-replay qualification.
 
+A trusted B=1 host can pass a zero-argument `episode_prepare` reset
+callback. `BaseEnv.reset` consumes it after ordinary reset events and before
+physical-objective initialization and final observations; it is not forwarded
+to functors. `BaseEnv` owns `EpisodeContext`; successful initialization seeds recording from
+the final observation. `EmbodiedEnv` consumes old records before physical reset.
+Failed checks remain attached to buffers until the selected rows are consumed
+and a new episode begins. Info and recorder metadata carry owned context snapshots. The concrete preparation/restore host and
+snapshot limitations belong to [scene expansion](../scene-expansion/scene-expansion.md).
+
 ## Change sites and focused validation
 
 | Change | Validation surface |
 |---|---|
 | Timing in `base_env.py` | `tests/gym/envs/test_env_timing.py` |
 | Seeding and reset | `tests/gym/envs/test_env_seed.py`, `tests/gym/envs/managers/test_event_manager_seed.py` |
+| Scene preparation ordering and saved initial-state restore | `tests/gym/envs/task_program/test_simulation_scene_expansion.py` |
 | Config, registration, or sensor acquisition switch | Relevant tests under `tests/gym/`; use `rg --files tests` to select the component/registration case |
 | Controller or demo bridge | Relevant action/demo/Task Program tests under `tests/gym/envs/` |
 | Expert trajectory mode, action layout, or retiming | `tests/gym/envs/test_expert_trajectory.py`, `tests/gym/envs/test_demo.py`, `tests/gym/envs/test_replay.py` |

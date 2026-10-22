@@ -1,0 +1,15 @@
+task_key: place_object_drawer
+title: Place Object in Drawer
+summary: Place a tableware object into a drawer.
+tags:
+- tableware
+- manipulation
+- reinforcement_learning
+default_deployment: default
+deployments:
+  default:
+    config: env.json
+  dual_ur5_dh_pgi_140_80:
+    config: task.dual_ur5_dh_pgi_140_80.yaml
+  tianji_marvin:
+    config: task.tianji_marvin.yaml

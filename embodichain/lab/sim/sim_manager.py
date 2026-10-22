@@ -60,7 +60,9 @@ REACHABLE_XPOS_DIR = SIM_CACHE_DIR / "robot_reachable_xpos"
 
 def _is_usd_path(path: object | None) -> bool:
     """Return whether a source path is a USD stage."""
-    return path is not None and str(path).lower().endswith((".usd", ".usda", ".usdc"))
+    return path is not None and str(path).lower().endswith(
+        (".usd", ".usda", ".usdc", ".usdz")
+    )
 
 
 from dexsim.types import (
@@ -75,6 +77,7 @@ from dexsim.render import LightType, Windows
 
 from embodichain.lab.sim.objects import (
     RigidObject,
+    VisualObject,
     RigidObjectGroup,
     DeformableObject,
     SurfaceDeformableObject,
@@ -106,6 +109,8 @@ from embodichain.lab.sim.cfg import (
     WindowCameraPoseCfg,
     LightCfg,
     RigidObjectCfg,
+    VisualObjectCfg,
+    UsdSourceCfg,
     DeformableObjectCfg,
     SurfaceDeformableObjectCfg,
     VolumeDeformableObjectCfg,
@@ -117,16 +122,19 @@ from embodichain.lab.sim.cfg import (
     RigidConstraintCfg,
 )
 from embodichain.lab.sim.physics import make_physics_backend
+from embodichain.lab.sim.cfg.source import _asset_file_path
 from embodichain.lab.sim.spawn.descriptors import (
     articulation_desc_from_cfg,
     configure_articulation_desc,
     rigid_desc_from_cfg,
+    visual_desc_from_cfg,
     surface_deformable_desc_from_cfg,
     volume_deformable_desc_from_cfg,
 )
 from embodichain.lab.sim.spawn.usd import (
     articulation_desc_from_usd,
     rigid_desc_from_usd,
+    visual_desc_from_usd,
 )
 from embodichain.lab.sim.spawn.scene import SpawnScene
 from embodichain.lab.sim import VisualMaterial, VisualMaterialCfg
@@ -709,6 +717,7 @@ class SimulationManager:
         # time and user-created Gizmos are never touched.
         self._picker_gizmo: tuple[str, str | None] | None = None
 
+        self._visual_objects: dict[str, VisualObject] = {}
         self._rigid_objects: Dict[str, RigidObject] = dict()
         self._rigid_object_groups: Dict[str, RigidObjectGroup] = dict()
         self._deformable_objects: Dict[str, DeformableObject] = dict()
@@ -969,7 +978,7 @@ class SimulationManager:
     def asset_uids(self) -> List[str]:
         """Get all assets uid in the simulation.
 
-        The assets include lights, sensors, robots, rigid objects and articulations.
+        The assets include lights, sensors, visual objects, robots, rigid objects and articulations.
 
         Returns:
             List[str]: list of all assets uid.
@@ -978,6 +987,7 @@ class SimulationManager:
         uid_list.extend(list(self._lights.keys()))
         uid_list.extend(list(self._sensors.keys()))
         uid_list.extend(list(self._robots.keys()))
+        uid_list.extend(getattr(self, "_visual_objects", {}))
         uid_list.extend(list(self._rigid_objects.keys()))
         uid_list.extend(list(self._rigid_object_groups.keys()))
         uid_list.extend(list(self._deformable_objects.keys()))
@@ -1046,6 +1056,7 @@ class SimulationManager:
         if self.sim_config.visualization.backend == "none":
             return None
         visualizable_assets = (
+            getattr(self, "_visual_objects", {}),
             getattr(self, "_rigid_objects", {}),
             getattr(self, "_rigid_object_groups", {}),
             getattr(self, "_deformable_objects", {}),
@@ -1737,6 +1748,9 @@ class SimulationManager:
         scene.prepare_runtime_config(result)
         self._prepare_spawn_runtime(result)
         scene.bind()
+        for visual in getattr(self, "_visual_objects", {}).values():
+            if visual.is_spawn_bound:
+                visual._sync_spawn_state()
         self._sync_spawn_render_state(result)
 
         topology_revision = int(result.topology_revision)
@@ -2218,14 +2232,12 @@ class SimulationManager:
     def set_default_global_lighting(self) -> None:
         """Set default global lighting for the scene.
 
-        Configures both the environment emission (ambient) light and a
-        directional light to provide default scene illumination. The
-        directional light is a global scene light (infinite distance)
-        pointing downward along the -Z axis.
+        Initialize environment emission without creating direct lights or
+        changing existing scene lights. Add direct lights explicitly through
+        :meth:`add_light` or the task's lighting configuration.
         """
         self._require_native_renderer("Default global lighting")
-        # Environment emission light
-        self.set_emission_light([1.0, 1.0, 1.0], 100.0)
+        self.set_emission_light([0.92, 0.95, 1.0], 80.0)
 
     def set_default_background(self) -> None:
         """Set default background."""
@@ -2251,13 +2263,17 @@ class SimulationManager:
         self._visual_materials[mat_name] = mat
 
     def set_ground_plane_visibility(self, visible: bool) -> None:
-        """_summary_
+        """Set native ground rendering visibility while preserving collisions.
+
+        Applies to native windows and cameras. The setting is retained until
+        the ground is materialized, and does not control the Viser grid.
+        NoRender stores the setting without accessing native visual resources.
 
         Args:
-            visible (bool): _description_
+            visible: Whether the default ground plane is rendered.
         """
         self._spawn_default_plane_visibility = bool(visible)
-        if self._default_plane is None:
+        if self._default_plane is None or not self.has_native_renderer:
             return
         self._default_plane.set_visible(bool(visible))
 
@@ -2298,6 +2314,7 @@ class SimulationManager:
         | BaseSensor
         | Robot
         | RigidObject
+        | VisualObject
         | RigidObjectGroup
         | DeformableObject
         | FluidObject
@@ -2306,7 +2323,7 @@ class SimulationManager:
     ):
         """Get an asset by its UID.
 
-        The asset can be a light, sensor, robot, rigid object, deformable, or
+        The asset can be a light, sensor, robot, visual object, rigid object, deformable, or
         articulation.
 
         Args:
@@ -2321,6 +2338,8 @@ class SimulationManager:
             return self._sensors[uid]
         if uid in self._robots:
             return self._robots[uid]
+        if uid in getattr(self, "_visual_objects", {}):
+            return self._visual_objects[uid]
         if uid in self._rigid_objects:
             return self._rigid_objects[uid]
         if uid in self._rigid_object_groups:
@@ -2444,12 +2463,17 @@ class SimulationManager:
         *,
         pose: np.ndarray | None = None,
         robot_cfgs: dict[str, RobotCfg] | None = None,
-    ) -> dict[str, RigidObject | Articulation | Robot]:
+    ) -> dict[str, VisualObject | RigidObject | Articulation | Robot]:
         """Declare the supported entities in a USD scene.
 
         The returned facades are keyed by their USD prim paths. They remain in
         declared state until :meth:`prepare` finalizes the shared Spawn scene,
         then bind in place to the resulting DexSim handles.
+
+        Objects without physics or collision geometry become VisualObjects.
+        Conflicting render-only names receive a ``name_`` prefix; dictionary
+        keys retain their original USD prim paths. Other UID conflicts fail
+        before native declarations.
 
         USD does not identify which articulations should expose EmbodiChain's
         robot interface. Pass those explicitly through ``robot_cfgs``; all
@@ -2457,7 +2481,7 @@ class SimulationManager:
 
         Args:
             name: Name passed to DexSim's USD scene parser.
-            file_path: USD, USDA, or USDC file path.
+            file_path: USD, USDA, USDC, or USDZ file path.
             pose: Optional scene-root transform.
             robot_cfgs: Robot configurations keyed by USD prim path. These
                 provide robot-side metadata while physics remains authored by
@@ -2476,13 +2500,47 @@ class SimulationManager:
 
         from dexsim.spawn import ArticulationDesc, MeshObjectDesc
 
-        descriptors = self._spawn_scene.builder.add_usd(
-            name,
-            file_path,
-            pose=pose,
-            per_env=True,
-        )
-        assets: dict[str, RigidObject | Articulation | Robot] = {}
+        from dexsim.kit.usd import parse_usd
+
+        source = parse_usd(file_path, root_name=name)
+        occupied = set(self.asset_uids)
+        for descriptor in (
+            *getattr(self._spawn_scene.builder, "mesh_objects", ()),
+            *getattr(self._spawn_scene.builder, "scene_entities", ()),
+        ):
+            occupied.add(descriptor.name)
+        # Exported scenes can contain a visual ground named like our global
+        # physical ground. Keep both and retain the original USD path as the key.
+        for descriptor in source.mesh_objects:
+            if (
+                descriptor.name in occupied
+                and descriptor.physics is None
+                and not descriptor.collisions
+            ):
+                descriptor.name = f"{name}_{descriptor.name}"
+        for collection in (
+            "mesh_objects",
+            "articulations",
+            "particle_sets",
+            "cameras",
+            "lights",
+            "cables",
+            "records",
+        ):
+            for descriptor in getattr(source, collection, ()):
+                if descriptor.name in occupied:
+                    raise ValueError(
+                        f"USD asset UID already exists: {descriptor.name!r}."
+                    )
+                occupied.add(descriptor.name)
+                if pose is not None and hasattr(descriptor, "pose"):
+                    descriptor.pose = (
+                        np.asarray(pose, dtype=np.float32).reshape(4, 4)
+                        @ descriptor.pose
+                    )
+        source.materials = self._spawn_scene._resolve_materials(source.materials)
+        descriptors = self._spawn_scene.builder.add_scene(source, per_env=True)
+        assets: dict[str, VisualObject | RigidObject | Articulation | Robot] = {}
         robot_cfgs = robot_cfgs or {}
 
         for descriptor in descriptors:
@@ -2493,6 +2551,29 @@ class SimulationManager:
             )
 
             if type(descriptor) is MeshObjectDesc:
+                if descriptor.physics is None and not descriptor.collisions:
+                    cfg = VisualObjectCfg(
+                        uid=descriptor.name,
+                        source=UsdSourceCfg(
+                            file_path=file_path,
+                            source_prim_path=(
+                                descriptor.usd.prim_path
+                                if descriptor.usd is not None
+                                else None
+                            ),
+                        ),
+                        init_local_pose=descriptor.pose.copy(),
+                        body_scale=tuple(
+                            float(value) for value in descriptor.body_scale
+                        ),
+                    )
+                    facade = VisualObject(cfg=cfg, device=self.device)
+                    self._spawn_scene.track(
+                        "visual_object", descriptor.name, descriptor, facade=facade
+                    )
+                    self._visual_objects[descriptor.name] = facade
+                    assets[source_path] = facade
+                    continue
                 body_type = "static"
                 if descriptor.physics is not None:
                     body_type = {
@@ -2502,6 +2583,14 @@ class SimulationManager:
                     }[descriptor.physics.actor_type]
                 cfg = RigidObjectCfg(
                     uid=descriptor.name,
+                    source=UsdSourceCfg(
+                        file_path=file_path,
+                        source_prim_path=(
+                            descriptor.usd.prim_path
+                            if descriptor.usd is not None
+                            else None
+                        ),
+                    ),
                     init_local_pose=descriptor.pose.copy(),
                     body_type=body_type,
                     body_scale=tuple(float(value) for value in descriptor.body_scale),
@@ -2533,7 +2622,13 @@ class SimulationManager:
                     else ArticulationCfg(uid=descriptor.name)
                 )
                 cfg.uid = descriptor.name
-                cfg.fpath = file_path
+                cfg.fpath = None
+                cfg.source = UsdSourceCfg(
+                    file_path=file_path,
+                    source_prim_path=(
+                        descriptor.usd.prim_path if descriptor.usd is not None else None
+                    ),
+                )
                 cfg.init_local_pose = descriptor.pose.copy()
                 cfg.asset_physics_mode = "preserve"
                 if robot_cfg is None:
@@ -2563,6 +2658,54 @@ class SimulationManager:
 
         self.notify_visualization_topology_changed()
         return assets
+
+    def add_visual_object(self, cfg: VisualObjectCfg) -> VisualObject:
+        """Declare a render-only mesh or primitive, without physics or colliders.
+
+        Args:
+            cfg: Appearance and initial state. ``source=UsdSourceCfg(...)``
+                selects a source USD object; only its appearance is imported.
+
+        Returns:
+            The declared facade, bound after ``prepare()``.
+        """
+        if cfg.uid is None or cfg.uid in self.asset_uids:
+            raise ValueError("Visual object requires a unique, nonempty UID.")
+        path = _asset_file_path(cfg)
+        if _is_usd_path(path):
+            descriptor, materials = visual_desc_from_usd(cfg)
+        else:
+            descriptor, materials = visual_desc_from_cfg(cfg)
+        visual = VisualObject(cfg, self.device)
+        was_materialized = self.spawn_result is not None
+        self._spawn_scene.builder.materials.update(
+            self._spawn_scene._resolve_materials(materials)
+        )
+        self._spawn_scene.declare("visual_object", cfg.uid, descriptor, facade=visual)
+        self._visual_objects[cfg.uid] = visual
+        self.notify_visualization_topology_changed()
+        if was_materialized:
+            self.prepare()
+        return visual
+
+    def get_visual_object(self, uid: str) -> VisualObject | None:
+        """Find a registered render-only object.
+
+        Args:
+            uid: Logical asset identifier.
+
+        Returns:
+            The visual object, or ``None`` if absent.
+        """
+        return getattr(self, "_visual_objects", {}).get(uid)
+
+    def get_visual_object_uid_list(self) -> list[str]:
+        """Return the registered render-only object identifiers.
+
+        Returns:
+            Identifiers in declaration order.
+        """
+        return list(getattr(self, "_visual_objects", {}))
 
     def add_rigid_object(
         self,
@@ -2652,7 +2795,7 @@ class SimulationManager:
 
         declarations = []
         for cfg in cfgs:
-            source_path = getattr(cfg.shape, "fpath", None)
+            source_path = _asset_file_path(cfg)
             if _is_usd_path(source_path):
                 descriptor, materials = rigid_desc_from_usd(
                     cfg,
@@ -2670,7 +2813,9 @@ class SimulationManager:
 
         was_materialized = self.spawn_result is not None
         for uid, descriptor, materials, rigid_obj in declarations:
-            self._spawn_scene.builder.materials.update(materials)
+            self._spawn_scene.builder.materials.update(
+                self._spawn_scene._resolve_materials(materials)
+            )
             if replace:
                 self._spawn_scene.remove(uid)
             self._spawn_scene.declare("rigid_object", uid, descriptor, facade=rigid_obj)
@@ -2885,7 +3030,9 @@ class SimulationManager:
                 f"{config_cls.__name__}, got {type(cfg).__name__}."
             )
         descriptor, materials = descriptor_factory(cfg, per_env=True)
-        self._spawn_scene.builder.materials.update(materials)
+        self._spawn_scene.builder.materials.update(
+            self._spawn_scene._resolve_materials(materials)
+        )
         deformable = object_cls(
             cfg,
             device=self.device,
@@ -3198,7 +3345,7 @@ class SimulationManager:
             member_cfg = deepcopy(member)
             member_cfg.uid = f"{uid}__member_{index}"
             member_cfg.body_type = cfg.body_type
-            source_path = getattr(member_cfg.shape, "fpath", None)
+            source_path = _asset_file_path(member_cfg)
             if _is_usd_path(source_path):
                 descriptor, materials = rigid_desc_from_usd(
                     member_cfg,
@@ -3216,7 +3363,9 @@ class SimulationManager:
                     f"Rigid object group member {index} has no rigid-body physics."
                 )
             descriptor.physics.actor_type = actor_type
-            self._spawn_scene.builder.materials.update(materials)
+            self._spawn_scene.builder.materials.update(
+                self._spawn_scene._resolve_materials(materials)
+            )
             descriptors.append(descriptor)
 
         group = RigidObjectGroup(
@@ -3306,12 +3455,13 @@ class SimulationManager:
         """
         uid = cfg.uid
         if uid is None:
-            if cfg.fpath is None:
+            source_path = _asset_file_path(cfg)
+            if source_path is None:
                 raise ValueError(
                     "Articulation configuration must provide fpath when uid "
                     "is not specified."
                 )
-            uid = os.path.splitext(os.path.basename(cfg.fpath))[0]
+            uid = os.path.splitext(os.path.basename(source_path))[0]
             cfg.uid = uid
         if uid in self._articulations:
             raise ValueError(f"Articulation {uid!r} already exists.")
@@ -3351,7 +3501,8 @@ class SimulationManager:
         Args:
             cfg: A concrete robot configuration or a replace-only backend
                 preset. Presets are resolved from ``physics_cfg`` before the
-                robot is declared.
+                robot is declared. Mounted cameras are created only when
+                ``cfg.enable_sensor`` is True and attach during preparation.
 
         Returns:
             Robot | None: The added robot instance handle, or None if failed.
@@ -3370,7 +3521,8 @@ class SimulationManager:
             )
 
         uid = cfg.uid
-        if cfg.fpath is None:
+        source_path = _asset_file_path(cfg)
+        if source_path is None:
             if cfg.urdf_cfg is None:
                 logger.log_error(
                     "Robot configuration must have a valid fpath or urdf_cfg."
@@ -3378,6 +3530,7 @@ class SimulationManager:
                 return None
 
             cfg.fpath = cfg.urdf_cfg.assemble_urdf()
+            source_path = cfg.fpath
 
             if cfg.solver_cfg is not None:
                 if isinstance(cfg.solver_cfg, dict):
@@ -3386,17 +3539,43 @@ class SimulationManager:
                             value.urdf_path = cfg.fpath
 
         if uid is None:
-            uid = os.path.splitext(os.path.basename(cfg.fpath))[0]
+            uid = os.path.splitext(os.path.basename(source_path))[0]
             cfg.uid = uid
         if uid in self._robots:
             logger.log_error(f"Robot {uid} already exists.")
             return self._robots[uid]
+
+        mounted_sensors = []
+        if cfg.enable_sensor:
+            sensor_uids = set(self._sensors)
+            for sensor_cfg in cfg.sensors:
+                if not isinstance(sensor_cfg, CameraCfg):
+                    raise TypeError("RobotCfg.sensors supports mounted cameras only.")
+                if not isinstance(sensor_cfg.uid, str) or not sensor_cfg.uid.strip():
+                    raise ValueError("Mounted sensors require a non-empty uid.")
+                if sensor_cfg.uid in sensor_uids:
+                    raise ValueError(f"Sensor {sensor_cfg.uid!r} already exists.")
+                sensor_uids.add(sensor_cfg.uid)
+                parent = sensor_cfg.extrinsics.parent
+                if not isinstance(parent, str) or not parent.strip():
+                    raise ValueError("Mounted sensors require a parent link.")
+                link_name = parent.removeprefix(f"{uid}/")
+                if not link_name or "/" in link_name:
+                    raise ValueError(
+                        f"Mounted sensor {sensor_cfg.uid!r} must refer to a "
+                        f"local link on robot {uid!r}."
+                    )
+                bound_cfg = deepcopy(sensor_cfg)
+                bound_cfg.extrinsics.parent = f"{uid}/{link_name}"
+                mounted_sensors.append(bound_cfg)
 
         was_materialized = self.spawn_result is not None
         robot = self._declare_spawn_articulation(cfg, Robot)
         self._robots[uid] = robot
         if was_materialized:
             self.prepare()
+        for sensor_cfg in mounted_sensors:
+            self.add_sensor(sensor_cfg)
         return robot
 
     def _declare_spawn_articulation(
@@ -3411,13 +3590,15 @@ class SimulationManager:
         backend materializes it. Runtime Batch data is created at the shared
         prepare boundary.
         """
-        if _is_usd_path(cfg.fpath):
+        if _is_usd_path(_asset_file_path(cfg)):
             descriptor, materials = articulation_desc_from_usd(
                 cfg,
                 per_env=True,
                 newton_solver_type=self._active_newton_solver_type,
             )
-            self._spawn_scene.builder.materials.update(materials)
+            self._spawn_scene.builder.materials.update(
+                self._spawn_scene._resolve_materials(materials)
+            )
         else:
             descriptor = articulation_desc_from_cfg(
                 cfg,
@@ -4013,7 +4194,8 @@ class SimulationManager:
         """Remove an asset by its UID.
 
         Native render lights are not removed by this method. Sensors and
-        Spawn-owned physical assets are supported.
+        Spawn-owned physical assets are supported. Removing a robot also
+        destroys its automatically initialized mounted cameras.
 
         Args:
             uid (str): The UID of the asset.
@@ -4034,12 +4216,25 @@ class SimulationManager:
         if uid == "default_plane":
             raise ValueError("The Spawn-owned default plane cannot be removed.")
 
+        robot = self._robots.get(uid)
+        if robot is not None and robot.cfg.enable_sensor:
+            for sensor_cfg in robot.cfg.sensors:
+                sensor = self._sensors.get(sensor_cfg.uid)
+                if (
+                    isinstance(sensor, Camera)
+                    and sensor.cfg.extrinsics.parent is not None
+                    and sensor.cfg.extrinsics.parent.startswith(f"{uid}/")
+                ):
+                    self.remove_asset(sensor_cfg.uid)
+
         was_materialized = scene.builder.is_finalized
         scene.remove(uid)
+        visual = getattr(self, "_visual_objects", {}).get(uid)
+        if visual is not None:
+            visual._release_spawn_references()
         if was_materialized:
             self.prepare()
 
-        robot = self._robots.get(uid)
         if robot is not None:
             for key, gizmo in self.get_gizmo_items():
                 if gizmo.target is robot:
@@ -4050,6 +4245,7 @@ class SimulationManager:
                 if key != uid and not key.startswith(f"{uid}:")
             }
 
+        getattr(self, "_visual_objects", {}).pop(uid, None)
         self._rigid_objects.pop(uid, None)
         self._rigid_object_groups.pop(uid, None)
         self._deformable_objects.pop(uid, None)
@@ -4841,6 +5037,9 @@ class SimulationManager:
                     articulation.reset(env_ids, clear_dynamics=False)
                 else:
                     articulation.reset(env_ids)
+        for uid, visual in getattr(self, "_visual_objects", {}).items():
+            if uid not in excluded_uids:
+                visual.reset(env_ids)
         for uid, rigid_obj in self._rigid_objects.items():
             if uid not in excluded_uids:
                 rigid_obj.reset(env_ids)
@@ -5028,6 +5227,7 @@ class SimulationManager:
             # Release result-scoped batches/facades before closing the
             # Scene and, finally, the World that owns native resources.
             for registry_name in (
+                "_visual_objects",
                 "_rigid_objects",
                 "_rigid_object_groups",
                 "_deformable_objects",
@@ -5036,6 +5236,8 @@ class SimulationManager:
                 "_robots",
             ):
                 for asset in getattr(self, registry_name, {}).values():
+                    if isinstance(asset, VisualObject):
+                        asset._release_spawn_references()
                     if hasattr(asset, "_data"):
                         asset._data = None
                     if hasattr(asset, "_spawn_result"):
@@ -5079,6 +5281,7 @@ class SimulationManager:
 
         _sever_wrapper_refs("_gizmos")
         _sever_wrapper_refs("_markers")
+        _sever_wrapper_refs("_visual_objects")
         _sever_wrapper_refs("_rigid_objects")
         _sever_wrapper_refs("_constraints")
         _sever_wrapper_refs("_rigid_object_groups")

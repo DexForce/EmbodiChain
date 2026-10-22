@@ -132,3 +132,19 @@ def test_download_command_finishes_batch_and_exits_nonzero_on_failure(
     assert exc.value.code == 1
     assert calls == ["Broken", "Good"]
     assert "Failed assets: Broken" in capsys.readouterr().err
+
+
+@pytest.mark.no_sim
+def test_standard_w1_v030_asset_is_discoverable_without_downloading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from embodichain.data import get_data_class
+    from embodichain.data.assets.w1_assets import DexforceW1V030
+    from embodichain.data.dataset import EmbodiChainDataset
+
+    def forbid_download(*args, **kwargs):
+        raise AssertionError("Asset discovery must not construct a dataset")
+
+    monkeypatch.setattr(EmbodiChainDataset, "__init__", forbid_download)
+    assert get_data_class("DexforceW1V030") is DexforceW1V030
+    assert ("DexforceW1V030", DexforceW1V030) in download.get_registry()["w1"]

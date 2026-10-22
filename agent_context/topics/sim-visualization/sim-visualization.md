@@ -46,6 +46,11 @@ VisualizationBackend
              └── ViserBackend → HTTP/WebSocket browser UI
 ```
 
+Render-only `VisualObject` meshes export as `visual_object` nodes with root poses
+and live per-environment visibility. They share the mesh manifest/frame protocol
+without entering physical-object registries; non-mesh representations require a
+separate protocol extension.
+
 The simulation owns physics and assets. Scene export is read-only. When
 `allow_commands=True`, Viser Gizmo callbacks enqueue pose commands that
 `SimulationManager` later applies on the simulation thread.

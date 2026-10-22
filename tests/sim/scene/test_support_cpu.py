@@ -57,3 +57,14 @@ def test_mutated_detection_threshold_rejected_before_mesh_search() -> None:
     cfg.normal_z_min = float("nan")
     with pytest.raises(ValueError, match="finite"):
         detector.detect()
+
+
+@pytest.mark.parametrize("value", [1, "true", None])
+def test_hole_preservation_requires_boolean_configuration(value: object) -> None:
+    from embodichain.lab.sim.scene._support_cpu import SupportSurfaceConfig
+
+    mesh = trimesh.creation.box()
+    with pytest.raises(ValueError, match="preserve_holes"):
+        SupportSurfaceDetector(
+            mesh.vertices, mesh.faces, config=SupportSurfaceConfig(preserve_holes=value)
+        )

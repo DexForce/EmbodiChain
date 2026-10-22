@@ -357,20 +357,15 @@ def test_w1_variant_catalog_covers_body_and_independent_hand_registries():
         DexforceW1Version,
         DexforceW1HandBrand,
     )
-    from embodichain_robots.dexforce_w1.hand_specs import (
-        get_default_w1_hand_version,
-        get_w1_hand_spec,
-    )
 
     assert set(_W1_VERSIONS) == {version.value for version in DexforceW1Version}
     assert set(_W1_HANDS) == {brand.value for brand in DexforceW1HandBrand}
-    for brand in DexforceW1HandBrand:
-        assert get_w1_hand_spec(brand, get_default_w1_hand_version(brand))
     variants = ROBOT_CONFIGS["DexforceW1"]["variants"]
-    expected_count = len(DexforceW1Version) * (
+    expected_count = (len(DexforceW1Version) - 1) * (
         1 + (len(DexforceW1HandBrand) - 1) ** 2 + 1
-    )
+    ) + 1
     assert len(variants) == expected_count
+    assert {name for name in variants if name.startswith("v030/")} == {"v030/bare"}
     assert ROBOT_CONFIGS["DexforceW1"]["default_variant"] == "v021/BrainCo"
 
 
@@ -387,7 +382,8 @@ def test_w1_variant_catalog_covers_body_and_independent_hand_registries():
             "L=DH_PGC,R=DH_PGC_M",
             "L=DH_PGC_M,R=DH_PGC",
         )
-    ],
+    ]
+    + ["v030/bare"],
 )
 def test_w1_variant_metadata_matches_config(catalogs, local_robot_assets, variant):
     from embodichain_robots._catalog import ROBOT_CONFIGS
@@ -441,6 +437,44 @@ def test_gym_decodes_external_robot_through_catalog(external_robot):
     assert isinstance(cfg.robot, external_robot[0])
     assert cfg.robot.uid == "gym_robot"
     assert config == original
+
+
+def test_external_robot_mounted_defaults_reach_gym_and_online_buffers(external_robot):
+    from embodichain.lab.gym.utils.gym_utils import (
+        config_to_cfg,
+        init_rollout_buffer_from_config,
+    )
+    from embodichain.lab.sim.sensors import CameraCfg
+
+    cfg_cls, spec = external_robot
+    spec["defaults"]["sensors"] = [
+        {
+            "sensor_type": "Camera",
+            "uid": "vendor_wrist",
+            "width": 16,
+            "height": 12,
+            "extrinsics": {"parent": "tip"},
+        }
+    ]
+    original = deepcopy(spec)
+    config = {
+        "id": "EmbodiedEnv-v1",
+        "physics": "default",
+        "env": {},
+        "robot": {"class_type": "vendor.arm"},
+    }
+    cfg = config_to_cfg(config)
+    buffer = init_rollout_buffer_from_config(
+        config, max_episode_steps=1, batch_size=1, state_dim=1
+    )
+
+    assert isinstance(cfg.robot, cfg_cls)
+    assert cfg.robot.enable_sensor is True
+    assert isinstance(cfg.robot.sensors[0], CameraCfg)
+    assert cfg.robot.sensors[0].extrinsics.parent == "tip"
+    assert set(buffer["obs", "sensor"].keys()) == {"vendor_wrist"}
+    assert buffer["obs", "sensor", "vendor_wrist", "color"].shape == (1, 1, 12, 16, 4)
+    assert spec == original
 
 
 def test_workspace_cli_accepts_and_builds_external_robot(external_robot):

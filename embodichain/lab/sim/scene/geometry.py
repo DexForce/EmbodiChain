@@ -38,7 +38,8 @@ class SupportRegion:
 
     Geometry is measured in metres in arena-local Z-up coordinates. Polygon
     holes and disconnected regions are supported by placement; mesh detection
-    currently selects one largest outer contour, matching the GenSim contract.
+    selects one largest contour, retaining openings when ``preserve_holes`` is
+    enabled in :class:`SupportSurfaceConfig`.
     This descriptor neither owns nor creates simulation resources.
     """
 

@@ -44,7 +44,7 @@ The official catalog currently groups configurations into these families:
 |---|---|---|
 | `AlohaMini` | 15 | Complete Aloha Mini 2 Pro default control groups |
 | `CobotMagic` | 14 | Default dual six-joint arms and two independent gripper commands |
-| `DexforceW1` | 20, 22, or 32 | Three body releases and six hand profiles per release |
+| `DexforceW1` | 20, 22, or 32 | Four body releases: six profiles per V021/V022/V025 and standard V030 bare body |
 | `DualArmRobot` | 12 or 16 | Six UR bases or a pair of Franka Panda arms with grippers |
 | `FrankaPanda` | 8 | Seven arm joints and one independent gripper command |
 | `TianjiMarvin` | 16 | Default dual seven-joint arms with grippers |
@@ -92,27 +92,37 @@ See {doc}`/resources/robot/dual_arm` for mounts and the base-robot contract.
 
 ### W1 Body and Hand Profiles
 
-W1 advertises body releases `v021`, `v022`, and `v025`. Each release has six
-hand profiles, for 18 combinations. Equivalent body releases share a display
-row while retaining their version labels and hand-specific DOFs.
+W1 advertises body releases `v021`, `v022`, `v025`, and `v030`, for **19
+variants**. V021/V022/V025 each have the six profiles below. V030 adds only
+`v030/bare`. Equivalent profiles can share a display row while retaining
+their version labels and hand-specific DOFs.
 
-| Hand profile | Left hand | Right hand | Control DOF |
-|---|---|---|---|
-| `BrainCo` | `BRAINCO_HAND` | `BRAINCO_HAND` | 32 |
-| `DH_PGC` | `DH_PGC_GRIPPER` | `DH_PGC_GRIPPER` | 22 |
-| `DH_PGC_M` | `DH_PGC_GRIPPER_M` | `DH_PGC_GRIPPER_M` | 22 |
-| `L=DH_PGC,R=DH_PGC_M` | `DH_PGC_GRIPPER` | `DH_PGC_GRIPPER_M` | 22 |
-| `L=DH_PGC_M,R=DH_PGC` | `DH_PGC_GRIPPER_M` | `DH_PGC_GRIPPER` | 22 |
-| `bare` | No default end effector | No default end effector | 20 |
+| Hand profile | Body revisions | Left hand | Right hand | Control DOF |
+|---|---|---|---|---|
+| `BrainCo` | V021/V022/V025 | `BRAINCO_HAND` | `BRAINCO_HAND` | 32 |
+| `DH_PGC` | V021/V022/V025 | `DH_PGC_GRIPPER` | `DH_PGC_GRIPPER` | 22 |
+| `DH_PGC_M` | V021/V022/V025 | `DH_PGC_GRIPPER_M` | `DH_PGC_GRIPPER_M` | 22 |
+| `L=DH_PGC,R=DH_PGC_M` | V021/V022/V025 | `DH_PGC_GRIPPER` | `DH_PGC_GRIPPER_M` | 22 |
+| `L=DH_PGC_M,R=DH_PGC` | V021/V022/V025 | `DH_PGC_GRIPPER_M` | `DH_PGC_GRIPPER` | 22 |
+| `bare` | V021/V022/V025/V030 | No default end effector | No default end effector | 20 |
 
 The default is `v021/BrainCo`. Dexterous-hand/two-finger-gripper mixtures are
 omitted from the advertised profiles. Body and hand release versions are
-independent: all registered hand brands currently use hand revision `v021`,
-including with body `v022` or `v025`.
+independent: all registered hand brands currently use hand revision `v021`.
+V030 defaults to no hands and uses FEP with flange TCPs. Its optional tool
+assemblies require their own mount/TCP validation before catalog promotion;
+there are no advertised V030 hand-equipped variants.
 
-Choose a displayed profile through `version`, `hand_types`, and
-`with_default_eef`; labels such as `v025/DH_PGC` describe a profile rather than
-an additional registered robot ID:
+Choose an exact displayed profile with `variant`. The slash-qualified label
+is a variant of `DexforceW1`, not a separate robot ID:
+
+```python
+w1_gripper_cfg = resolve_robot_cfg("DexforceW1", variant="v025/DH_PGC")
+w1_bare_cfg = resolve_robot_cfg("DexforceW1", variant="v030/bare")
+```
+
+Equivalent configuration fields can be supplied through `version`,
+`hand_types`, and `with_default_eef`:
 
 ```python
 w1_gripper_cfg = resolve_robot_cfg(
@@ -127,7 +137,7 @@ w1_gripper_cfg = resolve_robot_cfg(
     },
 )
 w1_bare_cfg = resolve_robot_cfg(
-    "DexforceW1", {"version": "v025", "with_default_eef": False}
+    "DexforceW1", {"version": "v030", "with_default_eef": False}
 )
 ```
 

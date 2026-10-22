@@ -23,6 +23,7 @@ import torch
 
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     assemble_full_robot_trajectory,
+    find_symmetric_nearest_xpos,
     repeat_qpos,
     resolve_batched_pose,
     resolve_object_target,
@@ -32,6 +33,25 @@ from embodichain.lab.sim.atomic_actions.primitives._helpers import (
 BATCH_SIZE = 2
 ROBOT_DOF = 6
 WAYPOINT_COUNT = 3
+
+
+def test_symmetric_pose_selection_is_row_local_and_does_not_mutate_inputs() -> None:
+    target = torch.eye(4).repeat(3, 1, 1)
+    target[:, :3, 3] = torch.tensor([1.0, 2.0, 3.0])
+    reference = target.clone()
+    reference[1, :2, :2] *= -1
+    # An exact quarter turn is a tie; preserve the previous symmetric tie rule.
+    reference[2, :2, :2] = torch.tensor([[0.0, -1.0], [1.0, 0.0]])
+    original = target.clone()
+    original_reference = reference.clone()
+
+    result = find_symmetric_nearest_xpos(target, reference)
+
+    expected = target.clone()
+    expected[1:, :2, :2] *= -1
+    torch.testing.assert_close(result, expected)
+    torch.testing.assert_close(target, original)
+    torch.testing.assert_close(reference, original_reference)
 
 
 def test_resolve_batched_pose_broadcasts_and_owns_global_pose() -> None:
@@ -87,6 +107,38 @@ def test_resample_planned_trajectory_fits_native_path_to_phase_length() -> None:
     assert result.shape == (1, 3, 2)
     torch.testing.assert_close(result[:, 0], trajectory[:, 0])
     torch.testing.assert_close(result[:, -1], trajectory[:, -1])
+
+
+def test_resample_planned_trajectory_preserves_native_duration_on_control_grid() -> (
+    None
+):
+    trajectory = torch.tensor([[[0.0], [0.5], [1.0]]])
+    dt = torch.tensor([[0.0, 0.2, 0.3]])
+
+    result = resample_planned_trajectory(
+        trajectory,
+        sample_count=3,
+        dt=dt,
+        control_dt=0.1,
+    )
+
+    assert result.shape == (1, 6, 1)
+    assert torch.equal(result[:, 0], trajectory[:, 0])
+    assert torch.equal(result[:, -1], trajectory[:, -1])
+
+
+def test_resample_planned_trajectory_pads_but_never_shortens_native_timing() -> None:
+    trajectory = torch.tensor([[[0.0], [1.0]]])
+
+    result = resample_planned_trajectory(
+        trajectory,
+        sample_count=5,
+        dt=torch.tensor([[0.0, 0.1]]),
+        control_dt=0.1,
+    )
+
+    assert result.shape == (1, 5, 1)
+    assert torch.equal(result[:, -3:], torch.ones(1, 3, 1))
 
 
 def test_resolve_object_target_uses_custom_name_in_shape_error() -> None:

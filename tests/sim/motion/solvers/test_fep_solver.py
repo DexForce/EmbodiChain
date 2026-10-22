@@ -13,9 +13,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""FEP geometric branch accuracy on the registered Franka arm, without simulation."""
+"""FEP branch accuracy on Franka and calibrated W1 arms, without simulation."""
 
 from __future__ import annotations
+
+from itertools import product
+from pathlib import Path
+import xml.etree.ElementTree as ET
 
 import numpy as np
 import pytest
@@ -64,16 +68,26 @@ def _verify_fk_residuals(
         ),
     ]
 )
-def solver(request: pytest.FixtureRequest) -> FEPSolver:
+def fep_device(request: pytest.FixtureRequest) -> str:
+    return request.param
+
+
+@pytest.fixture
+def solver(fep_device: str) -> FEPSolver:
     return FEPSolverCfg(
         urdf_path=get_data_path("Franka/Panda/PandaWithHand.urdf"),
         root_link_name="base",
         end_link_name="fr3_hand_tcp",
         batch_size=16,
-    ).init_solver(device=request.param)
+    ).init_solver(device=fep_device)
 
 
-def _assert_pose_accuracy(target: torch.Tensor, actual: torch.Tensor) -> None:
+def _assert_pose_accuracy(
+    target: torch.Tensor,
+    actual: torch.Tensor,
+    position_tolerance: float = 1e-5,
+    rotation_tolerance: float = 1e-5,
+) -> None:
     expected = target.cpu().numpy().astype(np.float64)
     result = actual.cpu().numpy().astype(np.float64)
     translation = np.linalg.norm(expected[:, :3, 3] - result[:, :3, 3], axis=-1)
@@ -81,14 +95,85 @@ def _assert_pose_accuracy(target: torch.Tensor, actual: torch.Tensor) -> None:
         Rotation.from_matrix(expected[:, :3, :3]).inv()
         * Rotation.from_matrix(result[:, :3, :3])
     ).magnitude()
-    assert np.all(translation <= 1e-5)
-    assert np.all(rotation <= 1e-5)
+    assert np.all(translation <= position_tolerance)
+    assert np.all(rotation <= rotation_tolerance)
 
 
 def _assert_limits(solver: FEPSolver, joints: torch.Tensor) -> None:
     assert bool(torch.isfinite(joints).all())
     assert bool((joints >= solver.lower_qpos_limits).all())
     assert bool((joints <= solver.upper_qpos_limits).all())
+
+
+def _xml_fk(solver: FEPSolver, joints: torch.Tensor) -> np.ndarray:
+    """Compose original URDF transforms in float64, independently of PK/FEP."""
+    root = ET.parse(solver.cfg.urdf_path).getroot()
+    parents = {
+        joint.find("child").get("link"): joint for joint in root.findall("joint")
+    }
+    path = []
+    link = solver.cfg.end_link_name
+    while link != solver.cfg.root_link_name:
+        joint = parents[link]
+        path.append(joint)
+        link = joint.find("parent").get("link")
+    qpos = joints.detach().cpu().numpy().astype(np.float64)
+    transform = np.broadcast_to(np.eye(4), (len(qpos), 4, 4)).copy()
+    index = 0
+    for joint in reversed(path):
+        origin = joint.find("origin")
+        offset = np.eye(4)
+        if origin is not None:
+            offset[:3, :3] = Rotation.from_euler(
+                "xyz", np.fromstring(origin.get("rpy", "0 0 0"), sep=" ")
+            ).as_matrix()
+            offset[:3, 3] = np.fromstring(origin.get("xyz", "0 0 0"), sep=" ")
+        transform = transform @ offset
+        if joint.get("type") == "fixed":
+            continue
+        assert joint.get("type") == "revolute"
+        assert joint.get("name") == solver.joint_names[index]
+        axis = np.fromstring(joint.find("axis").get("xyz"), sep=" ")
+        axis /= np.linalg.norm(axis)
+        rotation = np.broadcast_to(np.eye(4), (len(qpos), 4, 4)).copy()
+        rotation[:, :3, :3] = Rotation.from_rotvec(
+            qpos[:, index, None] * axis
+        ).as_matrix()
+        transform = transform @ rotation
+        index += 1
+    assert index == 7
+    return transform @ solver.tcp_xpos
+
+
+@pytest.mark.parametrize("position_tolerance, expected", [(1e-5, False), (1e-3, True)])
+def test_boundary_projection_obeys_original_fk_tolerances(
+    solver: FEPSolver, position_tolerance: float, expected: bool
+) -> None:
+    # A small q6 overshoot rotates a long tool enough to exceed the strict
+    # position threshold, while remaining within the angular threshold.
+    # Locking every joint leaves exactly one possible projected result.
+    seed = solver.get_default_qpos_seed()[None]
+    seed[:, 1] = 0.4
+    tcp = np.eye(4)
+    tcp[2, 3] = 5.0
+    solver.set_tcp(tcp)
+    outside = seed.clone()
+    outside[:, 5] += 4e-6
+    target = torch.as_tensor(
+        _xml_fk(solver, outside), device=solver.device, dtype=torch.float32
+    )
+    solver.set_qpos_limits(seed[0], seed[0])
+    solver.cfg.position_tolerance = position_tolerance
+    valid, result = solver.get_ik(target, seed)
+    assert valid.tolist() == [expected]
+    torch.testing.assert_close(result, seed, atol=0, rtol=0)
+    _assert_limits(solver, result)
+    if expected:
+        _assert_pose_accuracy(
+            target,
+            torch.from_numpy(_xml_fk(solver, result)),
+            position_tolerance=position_tolerance,
+        )
 
 
 @pytest.mark.parametrize("with_tcp", [False, True])
@@ -495,6 +580,237 @@ def test_geometry_is_extracted_from_modified_urdf(tmp_path) -> None:
     valid, joints = solver.get_ik(solver.get_fk(qpos), seed)
     assert bool(valid.all())
     _assert_pose_accuracy(solver.get_fk(qpos), solver.get_fk(joints))
+
+
+def _w1_solver(side: str, device: str = "cpu") -> FEPSolver:
+    path = Path(__file__).parents[3] / "fixtures/kinematics" / f"w1_v030_{side}.urdf"
+    return FEPSolverCfg(
+        urdf_path=str(path),
+        root_link_name=f"{side}_arm_base",
+        end_link_name=f"{side}_ee",
+        reference_qpos=[
+            0.0,
+            0.0,
+            -np.pi / 2,
+            0.0,
+            0.0,
+            -np.pi / 2 if side == "left" else np.pi / 2,
+            0.0,
+        ],
+        # The left CAD joint origin tilts J7 by 1.8027e-5 rad. Keep the
+        # original URDF and check every solution against its actual FK.
+        axis_alignment_tolerance=2e-5 if side == "left" else 1e-6,
+        rotation_tolerance=5e-5 if side == "left" else 1e-5,
+        batch_size=16,
+    ).init_solver(device)
+
+
+@pytest.mark.parametrize("side", ["left", "right"])
+@pytest.mark.parametrize("search", [False, True])
+@pytest.mark.parametrize("with_tcp", [False, True])
+def test_w1_v030_boundary_projection_from_distant_seed(
+    fep_device: str, side: str, search: bool, with_tcp: bool
+) -> None:
+    solver = _w1_solver(side, fep_device)
+    solver.cfg.redundancy_search = search
+    solver.cfg.arm_angle_weight = 0.0
+    if with_tcp:
+        tcp = np.eye(4)
+        tcp[:3, :3] = Rotation.from_euler("xyz", [0.2, -0.1, 0.3]).as_matrix()
+        tcp[:3, 3] = [0.05, -0.03, 0.1]
+        solver.set_tcp(tcp)
+    lower, upper = solver.lower_qpos_limits, solver.upper_qpos_limits
+    corners = lower.new_tensor(list(product((0.0, 1.0), repeat=7)))
+    boundary = torch.where(corners.bool(), upper, lower)
+    # Include strict interior targets so this also catches model error rather
+    # than only roundoff at the exact public limits.
+    qpos = torch.cat((boundary, boundary.clamp(lower + 1e-5, upper - 1e-5)))
+    seed = lower + (upper - lower) * torch.rand(
+        len(qpos), 7, generator=torch.Generator().manual_seed(30)
+    ).to(solver.device)
+    seed[:, 6] = qpos[:, 6]
+    target = torch.as_tensor(
+        _xml_fk(solver, qpos), device=solver.device, dtype=torch.float32
+    )
+    valid, candidates = solver.get_ik(target, seed, return_all_solutions=True)
+    assert bool(valid.any(-1).all())
+    accepted = candidates[valid]
+    _assert_limits(solver, accepted)
+    _assert_pose_accuracy(
+        target[:, None].expand(-1, 8, -1, -1)[valid],
+        torch.from_numpy(_xml_fk(solver, accepted)),
+        position_tolerance=solver.cfg.position_tolerance,
+        rotation_tolerance=solver.cfg.rotation_tolerance,
+    )
+    if not search:
+        torch.testing.assert_close(
+            candidates[..., 6][valid], seed[:, 6:7].expand(-1, 8)[valid], atol=0, rtol=0
+        )
+
+
+@pytest.mark.parametrize("side", ["left", "right"])
+@pytest.mark.parametrize("with_tcp", [False, True])
+def test_w1_v030_calibrated_distant_seed_roundtrip(side: str, with_tcp: bool) -> None:
+    solver = _w1_solver(side)
+    # Dimensions are the source joint-axis separations in metres, shared by
+    # both arms; joint signs and reference postures account for mirroring.
+    np.testing.assert_allclose(
+        solver._dimensions[:5].cpu().numpy(),
+        [0.260, 0.227, 0.015, 0.015, 0.075],
+        atol=1e-8,
+        rtol=0,
+    )
+    if with_tcp:
+        tcp = np.eye(4)
+        tcp[:3, :3] = Rotation.from_euler("xyz", [0.2, -0.1, 0.3]).as_matrix()
+        tcp[:3, 3] = [0.05, -0.03, 0.1]
+        solver.set_tcp(tcp)
+    generator = torch.Generator().manual_seed(30)
+    lower, upper = solver.lower_qpos_limits, solver.upper_qpos_limits
+    qpos = lower + (upper - lower) * (
+        0.1 + 0.8 * torch.rand(128, 7, generator=generator)
+    )
+    seed = lower + (upper - lower) * torch.rand(128, 7, generator=generator)
+    seed[:, 6] = qpos[:, 6]
+    target = solver.get_fk(qpos)
+    valid, joints = solver.get_ik(target, seed)
+    assert bool(valid.all())
+    _assert_limits(solver, joints)
+    _assert_pose_accuracy(
+        target,
+        solver.get_fk(joints),
+        rotation_tolerance=solver.cfg.rotation_tolerance,
+    )
+    torch.testing.assert_close(joints[:, 6], seed[:, 6], atol=0, rtol=0)
+    # FK uses the untouched source chain rather than the canonical model.
+    actual_chain = solver.pk_serial_chain.forward_kinematics(qpos).get_matrix()
+    expected_fk = actual_chain @ torch.as_tensor(solver.tcp_xpos, dtype=qpos.dtype)
+    torch.testing.assert_close(target, expected_fk)
+
+
+@pytest.mark.parametrize("side", ["left", "right"])
+def test_w1_v030_reference_pose_does_not_relax_fk_or_limits(side: str) -> None:
+    solver = _w1_solver(side)
+    # The raw zero posture is not the canonical FEP reference posture.
+    with pytest.raises(ValueError, match="Franka-compatible"):
+        FEPSolverCfg(
+            urdf_path=solver.cfg.urdf_path,
+            root_link_name=solver.cfg.root_link_name,
+            end_link_name=solver.cfg.end_link_name,
+        ).init_solver("cpu")
+    if side == "left":
+        strict = solver.cfg.copy()
+        strict.axis_alignment_tolerance = 1e-6
+        with pytest.raises(ValueError, match="Franka-compatible"):
+            strict.init_solver("cpu")
+    seed = solver.get_default_qpos_seed()[None]
+    target = solver.get_fk(seed)
+    target[:, 0, 3] += 10.0
+    valid, joints = solver.get_ik(target, seed)
+    assert not bool(valid.any())
+    torch.testing.assert_close(joints, seed, atol=0, rtol=0)
+
+
+@pytest.mark.parametrize("side", ["left", "right"])
+def test_w1_v030_reference_pose_redundancy_search(side: str) -> None:
+    solver = _w1_solver(side)
+    solver.cfg.redundancy_search = True
+    seed = solver.get_default_qpos_seed()[None].repeat(8, 1)
+    seed[:, 1] += 0.3
+    reference = seed + 0.05 * torch.sin(torch.arange(56).reshape(8, 7))
+    target = solver.get_fk(reference)
+    valid, joints = solver.get_ik(target, seed)
+    assert bool(valid.all())
+    _assert_limits(solver, joints)
+    _assert_pose_accuracy(
+        target, solver.get_fk(joints), rotation_tolerance=solver.cfg.rotation_tolerance
+    )
+
+
+@pytest.mark.parametrize(
+    "fields, match",
+    [
+        ({"reference_qpos": [0.0] * 6}, "reference_qpos"),
+        ({"reference_qpos": [0.0] * 6 + [float("nan")]}, "reference_qpos"),
+        ({"axis_alignment_tolerance": 0.0}, "axis_alignment_tolerance"),
+        ({"axis_alignment_tolerance": float("inf")}, "axis_alignment_tolerance"),
+    ],
+)
+def test_fep_calibration_rejects_invalid_parameters(fields: dict, match: str) -> None:
+    with pytest.raises(ValueError, match=match):
+        FEPSolverCfg(**fields)
+
+
+def test_reference_posture_rebases_every_joint_in_original_coordinates(
+    solver: FEPSolver, tmp_path: Path
+) -> None:
+    import xml.etree.ElementTree as ET
+
+    # Re-express an exact Franka chain with a different encoder zero at every
+    # joint. This also exercises nonzero q4/q7 offsets, absent on the W1 model.
+    offsets = np.array([0.1, -0.2, 0.3, -0.15, 0.2, 0.25, -0.3])
+    tree = ET.parse(solver.cfg.urdf_path)
+    joints = {j.get("name"): j for j in tree.getroot().findall("joint")}
+    for name, offset in zip(solver.joint_names, offsets):
+        joint = joints[name]
+        origin, axis, limit = (
+            joint.find("origin"),
+            joint.find("axis"),
+            joint.find("limit"),
+        )
+        rotation = Rotation.from_euler("xyz", np.fromstring(origin.get("rpy"), sep=" "))
+        rotation *= Rotation.from_rotvec(
+            -offset * np.fromstring(axis.get("xyz"), sep=" ")
+        )
+        origin.set("rpy", " ".join(str(value) for value in rotation.as_euler("xyz")))
+        for bound in ("lower", "upper"):
+            limit.set(bound, str(float(limit.get(bound)) + offset))
+    path = tmp_path / "rebased_franka.urdf"
+    tree.write(path)
+    config = solver.cfg.copy()
+    config.urdf_path = str(path)
+    config.reference_qpos = offsets.tolist()
+    calibrated = config.init_solver(solver.device)
+    generator = torch.Generator().manual_seed(30)
+    qpos = solver.lower_qpos_limits + (
+        solver.upper_qpos_limits - solver.lower_qpos_limits
+    ) * (0.25 + 0.5 * torch.rand(16, 7, generator=generator).to(solver.device))
+    offset_tensor = qpos.new_tensor(offsets)
+    target = solver.get_fk(qpos)
+    _assert_pose_accuracy(target, calibrated.get_fk(qpos + offset_tensor))
+    seed = calibrated.get_default_qpos_seed()[None].expand(16, -1).clone()
+    seed[:, 6] = qpos[:, 6] + offset_tensor[6]
+    valid, result = calibrated.get_ik(target, seed)
+    assert bool(valid.all())
+    _assert_limits(calibrated, result)
+    _assert_pose_accuracy(target, calibrated.get_fk(result))
+    torch.testing.assert_close(
+        calibrated.get_arm_angle(qpos + offset_tensor),
+        solver.get_arm_angle(qpos),
+        atol=1e-5,
+        rtol=0,
+    )
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")
+@pytest.mark.parametrize("side", ["left", "right"])
+def test_w1_v030_calibrated_cuda_roundtrip(side: str) -> None:
+    solver = _w1_solver(side, "cuda")
+    generator = torch.Generator().manual_seed(30)
+    lower, upper = solver.lower_qpos_limits, solver.upper_qpos_limits
+    qpos = lower + (upper - lower) * (
+        0.1 + 0.8 * torch.rand(16, 7, generator=generator).to("cuda")
+    )
+    seed = solver.get_default_qpos_seed()[None].expand(16, -1).clone()
+    seed[:, 6] = qpos[:, 6]
+    target = solver.get_fk(qpos)
+    valid, result = solver.get_ik(target, seed)
+    assert bool(valid.all())
+    _assert_limits(solver, result)
+    _assert_pose_accuracy(
+        target, solver.get_fk(result), rotation_tolerance=solver.cfg.rotation_tolerance
+    )
 
 
 def test_nonrigid_targets_are_rejected(solver: FEPSolver) -> None:

@@ -84,7 +84,7 @@ def _run_scenario(scenario: str, task: str, report: Path) -> None:
     importlib.import_module(f"embodichain_tasks.locomotion.velocity.{task}")
     sim_cfg.DEFAULT_RENDERER = "auto"
     task_path = Path(
-        f"embodichain_tasks/configs/tasks/locomotion/velocity/{task}/env.newton.yaml"
+        f"extensions/embodichain_tasks/configs/tasks/locomotion/velocity/{task}/env.newton.yaml"
     )
     raw = load_config(task_path)
     agent = load_config(task_path.parent / "agents/ppo.newton.yaml")

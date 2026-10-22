@@ -18,16 +18,84 @@
 
 from __future__ import annotations
 
-from dataclasses import fields
+from dataclasses import MISSING, fields
+from enum import Enum
+import re
 from typing import ClassVar
 
+import pytest
+import torch
+
 from embodichain.utils import configclass
+from embodichain.utils.configclass import class_to_dict
 
 
 @configclass
 class _DeferredClassVarCfg:
     values: list[int] = []
     label: ClassVar[str] = "shared"
+
+
+@configclass
+class _PropertyCfg:
+    values: list[int] = []
+
+    @property
+    def derived_values(self) -> list[int]:
+        raise AssertionError("Configuration copying must not evaluate properties.")
+
+
+@configclass
+class _InheritedPropertyCfg(_PropertyCfg):
+    label: str = "inherited"
+
+
+class _PropertyOverriddenByFieldCfg(_PropertyCfg):
+    derived_values: list[int] = [1]
+
+
+@configclass
+class _PostInitCfg:
+    required: str = MISSING
+    values: list[int] = []
+    shared_values: ClassVar[list[int]] = [0]
+
+    def __post_init__(self) -> None:
+        self.values.append(1)
+
+
+@pytest.mark.parametrize("cfg_type", [_PropertyCfg, _InheritedPropertyCfg])
+def test_config_copying_does_not_evaluate_properties(cfg_type: type) -> None:
+    supplied = [1]
+
+    first = cfg_type(values=supplied)
+    second = first.copy()
+    first.values.append(2)
+
+    assert supplied == [1]
+    assert first.values == [1, 2]
+    assert second.values == [1]
+
+
+def test_field_overriding_an_inherited_property_is_copied() -> None:
+    cfg = _PropertyOverriddenByFieldCfg()
+    cfg.derived_values.append(2)
+
+    assert _PropertyOverriddenByFieldCfg.derived_values == [1]
+    assert cfg.derived_values == [1, 2]
+
+
+def test_copying_preserves_post_init_missing_and_classvar_contracts() -> None:
+    first = _PostInitCfg()
+    second = _PostInitCfg()
+    first.values.append(2)
+
+    assert first.values == [1, 2]
+    assert second.values == [1]
+    assert first.required is second.required is MISSING
+    assert first.shared_values is second.shared_values is _PostInitCfg.shared_values
+    with pytest.raises(TypeError, match="required"):
+        first.validate()
 
 
 def test_deferred_classvar_is_not_converted_to_a_dataclass_field() -> None:
@@ -39,3 +107,46 @@ def test_deferred_classvar_is_not_converted_to_a_dataclass_field() -> None:
     assert first.to_dict() == {"values": [1]}
     assert second.values == []
     assert _DeferredClassVarCfg.label == "shared"
+
+
+class _ArmKey(Enum):
+    LEFT = "left"
+
+
+@configclass
+class _MappingCfg:
+    entries: dict[object, object] = {}
+
+
+@pytest.mark.parametrize("key", [_ArmKey.LEFT, 0, ("arm", 0), "left"])
+def test_validate_preserves_non_string_mapping_keys(key: object) -> None:
+    cfg = _MappingCfg(entries={key: {"values": [1, 2]}})
+
+    assert cfg.validate() == []
+    assert list(cfg.entries) == [key]
+
+
+@pytest.mark.parametrize("key", [_ArmKey.LEFT, 0, ("arm", 0), "left"])
+def test_validate_reports_missing_values_under_mapping_keys(key: object) -> None:
+    cfg = _MappingCfg(entries={key: {"required": MISSING}})
+
+    with pytest.raises(TypeError, match=re.escape(f"entries.{key}.required")):
+        cfg.validate()
+
+
+def test_legacy_serializer_preserves_nested_tensor_and_callable_contract() -> None:
+    from types import SimpleNamespace
+
+    from embodichain.utils.utility import class_to_dict as legacy_class_to_dict
+
+    tensor = torch.tensor([1.0, 2.0])
+    source = SimpleNamespace(
+        nested={"items": (SimpleNamespace(tensor=tensor),)},
+        callback=class_to_dict,
+    )
+
+    assert legacy_class_to_dict is class_to_dict
+    result = legacy_class_to_dict(source)
+    assert isinstance(result["nested"]["items"], tuple)
+    assert result["nested"]["items"][0]["tensor"] is tensor
+    assert result["callback"] == "embodichain.utils.configclass:class_to_dict"

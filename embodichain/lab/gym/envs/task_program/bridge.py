@@ -274,6 +274,14 @@ class SegmentValidatorPort(Protocol):
         """Return JSON-safe metadata after one validator has run."""
 
 
+@runtime_checkable
+class _SegmentValidatorLifecyclePort(Protocol):
+    """Optional pre-action measurement boundary for stateful validators."""
+
+    def begin_segment(self, *, segment: Any, active_mask: torch.Tensor | None) -> None:
+        """Capture segment-start evidence before planning or actions."""
+
+
 class GymPlanningObservationProvider:
     """Callback-backed observation port that also exposes the latest qpos.
 
@@ -1360,6 +1368,11 @@ class TaskProgramDemoBridge:
         ) = self._runtime
         is_parallel = getattr(segment, "parallel_block", None) is not None
         try:
+            if isinstance(self._validator_port, _SegmentValidatorLifecyclePort):
+                self._validator_port.begin_segment(
+                    segment=segment,
+                    active_mask=self._eligible_mask,
+                )
             if is_parallel:
                 segment_runtime = self._parallel_runtime(segment)
                 lifecycle.runtime = segment_runtime

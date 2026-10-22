@@ -12,11 +12,17 @@ embodichain preview-robot --robot FrankaPanda
 embodichain preview-robot --robot URRobot --variant ur5e
 embodichain preview-robot --robot DualArmRobot --variant ur5 --viser
 embodichain preview-robot --robot DexforceW1 --variant v025/DH_PGC --viser
+embodichain preview-robot --robot DexforceW1 --variant v030/bare --viser
 ```
 
 IDs are exact catalog names, including installed third-party providers.
 `--variant` uses the variant name displayed by `list-robot`. Omitting it
 preserves the robot's existing construction defaults.
+
+W1 lists V021/V022/V025 hand and bare-body profiles, plus the standard V030
+bare body. See {doc}`/resources/robot/dexforce_w1` for version-specific solvers,
+TCPs and optional attachments.
+
 `--robot-params` accepts a JSON object of robot configuration overrides:
 
 ```bash

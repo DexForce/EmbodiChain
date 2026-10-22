@@ -126,14 +126,14 @@ class CheckResult:
 
 DEFAULT_PACKAGE_ROOTS = (
     PackageRoot("embodichain", REPO_ROOT / "embodichain"),
-    PackageRoot("embodichain_robots", REPO_ROOT / "embodichain_robots"),
+    PackageRoot("embodichain_robots", REPO_ROOT / "extensions" / "embodichain_robots"),
     PackageRoot(
         "embodichain_tasks",
-        REPO_ROOT / "embodichain_tasks" / "embodichain_tasks",
+        REPO_ROOT / "extensions" / "embodichain_tasks" / "embodichain_tasks",
     ),
     PackageRoot(
         "embodichain_tasks.configs",
-        REPO_ROOT / "embodichain_tasks" / "configs",
+        REPO_ROOT / "extensions" / "embodichain_tasks" / "configs",
     ),
 )
 

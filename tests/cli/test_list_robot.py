@@ -303,6 +303,7 @@ def test_w1_variants_show_body_releases_and_hand_specific_dofs(
     assert by_hand["DH_PGC"]["dof"] == 22
     assert by_hand["DH_PGC_M"]["dof"] == 22
     assert by_hand["bare"]["dof"] == 20
+    assert any("v030" in label and label.endswith("\nbare") for label, _ in profiles)
     assert by_hand["L=DH_PGC,R=DH_PGC_M"]["dof"] == 22
     assert not any("L=BrainCo" in label or "R=BrainCo" in label for label in by_hand)
 

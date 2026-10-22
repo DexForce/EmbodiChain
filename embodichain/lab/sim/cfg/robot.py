@@ -23,7 +23,7 @@ from copy import deepcopy
 from dataclasses import MISSING, fields
 import enum
 import json
-from typing import Dict, List
+from typing import TYPE_CHECKING, Dict, List
 
 import numpy as np
 import torch
@@ -39,6 +39,7 @@ from .articulation import (
     link_attrs_from_dict,
 )
 from .asset import AssetPhysicsMode
+from .source import UsdSourceCfg, _usd_source_from_value
 from .rigid import _rigid_body_physics_from_dict
 from .simulation import (
     PhysicsBackendCfg,
@@ -46,6 +47,11 @@ from .simulation import (
     physics_backend_from_cfg,
 )
 from .urdf import URDFCfg
+
+if TYPE_CHECKING:
+    from embodichain.lab.sim.sensors import SensorCfg
+
+__all__ = ["RobotCfg", "RobotPresetCfg"]
 
 
 def _get_data_path(path: str) -> str:
@@ -67,7 +73,7 @@ class RobotCfg(ArticulationCfg):
         stiffness=1e4,
         damping=1e3,
         max_effort=1e10,
-        max_velocity=1e10,
+        max_velocity=None,
         friction=0.0,
         armature=0.0,
     )
@@ -109,6 +115,19 @@ class RobotCfg(ArticulationCfg):
     workspace_cfg: Dict[str, RobotWorkspaceCfg] | None = None
     """Runtime workspace cache configuration keyed by control-part name."""
 
+    sensors: list[SensorCfg] = []
+    """Mounted camera configurations with robot-local parent link names.
+
+    An explicit list replaces the robot's default suite; an empty list clears
+    it. Sensor UIDs must be unique in the simulation. Runtime parent binding
+    uses a copy, preserving these local calibration declarations.
+    """
+
+    enable_sensor: bool = False
+    """Initialize mounted sensors when adding the robot. Gym overrides this
+    with its environment-wide acquisition switch, which defaults to True.
+    """
+
     @classmethod
     def from_dict(cls, init_dict: Dict[str, str | float | tuple]) -> RobotCfg:
         """Initialize the configuration from a dictionary."""
@@ -123,7 +142,9 @@ class RobotCfg(ArticulationCfg):
 
         cfg = cls()  # Create a new instance of the class (cls)
         for key, value in init_dict.items():
-            if key == "link_attrs" and isinstance(value, dict):
+            if key == "source":
+                cfg.source = _usd_source_from_value(value)
+            elif key == "link_attrs" and isinstance(value, dict):
                 cfg.link_attrs = link_attrs_from_dict(value)
             elif key == "attrs" and isinstance(value, Mapping):
                 cfg.attrs = _rigid_body_physics_from_dict(value)
@@ -133,6 +154,23 @@ class RobotCfg(ArticulationCfg):
                     from embodichain.lab.sim.cfg import URDFCfg
 
                     setattr(cfg, key, URDFCfg.from_dict(value))
+                elif key == "sensors":
+                    from embodichain.lab.sim.sensors import SensorCfg
+
+                    if not isinstance(value, list):
+                        raise TypeError("RobotCfg.sensors must be a list.")
+                    cfg.sensors = [
+                        (
+                            deepcopy(item)
+                            if isinstance(item, SensorCfg)
+                            else SensorCfg.from_dict(item)
+                        )
+                        for item in value
+                    ]
+                elif key == "enable_sensor":
+                    if type(value) is not bool:
+                        raise TypeError("RobotCfg.enable_sensor must be a bool.")
+                    cfg.enable_sensor = value
                 elif key == "workspace_cfg" and isinstance(value, dict):
                     setattr(
                         cfg,
@@ -147,7 +185,7 @@ class RobotCfg(ArticulationCfg):
                         },
                     )
                 elif key == "fpath":
-                    setattr(cfg, key, _get_data_path(value))
+                    setattr(cfg, key, None if value is None else _get_data_path(value))
                 elif isinstance(attr, JointDrivePropertiesCfg) and isinstance(
                     value, dict
                 ):

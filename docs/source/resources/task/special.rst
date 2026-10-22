@@ -17,20 +17,14 @@ belong to the main control, locomotion, or manipulation families.
      - Python registration in
        ``embodichain_tasks.special.franka_reach_apg``; no standard Gym config
      - Differentiable RL / APG
-   * - Simple Task
-     - ``SimpleTask-v1``
-     - ``simple_task/env_ur10.json``
-     - Environment only
-   * - Stay Still Save
-     - ``StayStillSave-v1``
-     - ``stay_still_save/env_ur10.json`` or
-       ``stay_still_save/env_async_ur10.json``
-     - Environment only
 
-Launch a configuration-backed special task in the same way as other task
-families:
+The simple UR10 end-effector motion example is a Task Program tutorial rather
+than an official task catalog entry:
 
 .. code-block:: bash
 
-   embodichain run-env \
-       --gym_config embodichain_tasks/configs/tasks/special/simple_task/env_ur10.json
+   python scripts/tutorials/gym/simple_task_program.py --headless --seed 7
+
+The tutorial moves through four Cartesian waypoints and returns near the initial
+TCP pose. ``ScoopIce-v1``, ``StayStillSave-v1``, ``StayStillSave3Cam-v1``, and
+``SimpleTask-v1`` are retired from the official task catalog.

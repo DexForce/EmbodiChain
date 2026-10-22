@@ -24,20 +24,25 @@ from .atomic_objects import (
     create_atomic_object,
     register_atomic_object_kind,
 )
-from .atomic_task import (
+from ..atomic_skill import (
     AtomicSkillCaseProvider,
-    AtomicTaskScenario,
     atomic_skill_provider_names,
     create_atomic_skill_provider,
     register_atomic_skill_provider,
 )
+from .atomic_skill import AtomicSkillScenario
+from . import atomic_motion_cases as _atomic_motion_cases  # noqa: F401
+from . import atomic_manipulation_cases as _atomic_manipulation_cases  # noqa: F401
+from . import atomic_contact_cases as _atomic_contact_cases  # noqa: F401
+from . import atomic_dual_arm_providers as _atomic_dual_arm_providers  # noqa: F401
+from . import atomic_skill_providers as _atomic_skill_providers  # noqa: F401
 from .base import ScenarioEvaluation, ScenarioProvider
 from .free_space import FreeSpaceScenario
 
 __all__ = [
     "AtomicObjectHandle",
     "AtomicSkillCaseProvider",
-    "AtomicTaskScenario",
+    "AtomicSkillScenario",
     "atomic_object_kind_names",
     "atomic_skill_provider_names",
     "create_atomic_object",

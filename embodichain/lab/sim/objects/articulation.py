@@ -54,6 +54,7 @@ from embodichain.utils.string import (
     resolve_matching_names_values,
 )
 from embodichain.lab.sim.common import BatchEntity
+from embodichain.lab.sim.cfg.source import _asset_file_path
 from embodichain.lab.sim.objects.backends import SceneArticulationView
 from embodichain.lab.sim.objects.backends.articulation_drive import (
     apply_joint_drive,
@@ -872,14 +873,17 @@ class Articulation(BatchEntity):
         self.default_joint_max_effort = self._data.qf_limits.clone()
         self.default_joint_max_velocity = self._data.qvel_limits.clone()
 
-        is_usd_source = str(self.cfg.fpath).lower().endswith((".usd", ".usda", ".usdc"))
+        source_path = _asset_file_path(self.cfg)
+        is_usd_source = (
+            str(source_path).lower().endswith((".usd", ".usda", ".usdc", ".usdz"))
+        )
         self.pk_chain = None
         if self.cfg.build_pk_chain:
             if is_usd_source:
                 self.pk_chain = _build_pk_chain(entities[0], device=self.device)
             else:
                 self.pk_chain = create_pk_chain(
-                    urdf_path=self.cfg.fpath, device=self.device
+                    urdf_path=source_path, device=self.device
                 )
 
         self._visual_material = [{} for _ in range(len(entities))]
@@ -1909,11 +1913,13 @@ class Articulation(BatchEntity):
                     fields[name], local_env_ids, local_joint_ids, velocity=velocity
                 )
         if (
-            root_pose is not None
+            (root_pose is not None or qpos is not None)
             and self.device.type == "cpu"
             and not self._data.is_newton_backend
         ):
-            # Publish native CPU link transforms without advancing physics.
+            # Direct root/joint writes update native kinematics, but CPU link
+            # transforms are published by World.update. Do not advance physics
+            # or publish target-only control commands here.
             self._world.update(0.0)
 
     def set_qpos(

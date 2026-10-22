@@ -1,7 +1,7 @@
 # Robot catalogs
 
 Catalog selection and display metadata are owned by `embodichain/robot_registry.py`,
-`embodichain/cli/list_robot.py` and `embodichain_robots/_catalog.py`.
+`embodichain/cli/list_robot.py` and `extensions/embodichain_robots/_catalog.py`.
 For runtime configuration, return to [robot-system](robot-system.md).
 
 The `embodichain.robots` entry points provide lightweight catalog mappings from
@@ -15,9 +15,11 @@ marking follower membership. `mimic_joints` maps URDF followers to leaders,
 including passive followers outside control groups. Missing summaries stay
 unknown. UR presets use `variant_of` to share a family row; DualArmRobot summaries
 are derived from catalog bases explicitly declaring `supports_dual_arm`.
-W1 variants advertise body releases with dual BrainCo, DH/DH-M pairings,
-and `with_default_eef=False`, omitting dexterous/gripper mixtures; hand release versions remain independent
-of body release versions. Tests compare each declared profile with config defaults.
+W1 V021/V022/V025 variants advertise dual BrainCo, DH/DH-M pairings,
+and `with_default_eef=False`, omitting dexterous/gripper mixtures. V030 advertises
+only the standard `v030/bare` profile; optional tool assemblies need their own
+mount/TCP validation before catalog promotion. Hand release versions remain
+independent of body releases. Tests compare each declared profile with config defaults.
 Resolution imports the selected `RobotCfg` subclass and calls `from_dict()`
 with isolated defaults/overrides. Duplicate IDs fail explicitly. Gym
 `robot.class_type`, workspace `--robot`, and dual-arm `base_robot` share this

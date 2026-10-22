@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""Run the trajectory PR's main features one scenario at a time.
+"""Run trajectory geometry and timing features one scenario at a time.
 
 This lightweight diagnostic does not start simulation. Each scenario prints
 the quantities that are useful when comparing behavior with HolisticMotion and
@@ -36,43 +36,19 @@ from embodichain.lab.sim.motion.planners.bezier import (
     quintic_blend_segments,
 )
 from embodichain.lab.sim.motion.planners.se3 import plan_se3_line
-from embodichain.lab.sim.motion.planners.trapezoidal_planner import (
-    TrapezoidalPlanOptions,
-    _plan_linear_profiles,
-)
-from embodichain.lab.sim.motion.planners.utils import PlanResult
+
+if __package__:
+    from ._profile_examples import plan_example
+else:
+    from _profile_examples import plan_example
+
+
+_plan = plan_example
 
 
 def _print_tensor(name: str, value: torch.Tensor) -> None:
     """Print a tensor using stable precision and compact formatting."""
     print(f"{name}: {value.detach().cpu().numpy()}")
-
-
-def _plan(
-    waypoints: torch.Tensor,
-    *,
-    profile: Literal["trapezoidal", "double_s"],
-    samples: int = 201,
-    blend_tolerance: float = 0.0,
-    minimum_duration: float | None = None,
-    backend: Literal["auto", "torch", "warp"] = "torch",
-) -> PlanResult:
-    return _plan_linear_profiles(
-        waypoints,
-        TrapezoidalPlanOptions(
-            profile=profile,
-            constraints={
-                "velocity": [0.8, 0.6],
-                "acceleration": [1.5, 1.2],
-                "jerk": [4.0, 3.0],
-            },
-            sample_interval=samples,
-            stop_at_waypoints=blend_tolerance == 0.0,
-            blend_tolerance=blend_tolerance,
-            minimum_duration=minimum_duration,
-            backend=backend,
-        ),
-    )
 
 
 def run_bezier() -> None:

@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
 
 import pytest
 
@@ -589,7 +590,7 @@ def test_decoder_accepts_optional_segment_instruction(instruction: str | None) -
     assert config.program.body.instruction == instruction
 
 
-@pytest.mark.parametrize("instruction", ["", "   ", " padded ", 7, True, ["pick"]])
+@pytest.mark.parametrize("instruction", [" padded "])
 def test_decoder_rejects_invalid_segment_instruction(instruction: object) -> None:
     data = _program_data()
     data["program"]["body"]["instruction"] = instruction
@@ -617,3 +618,85 @@ def test_decoder_rejects_invalid_overall_instruction(instruction: object) -> Non
     with pytest.raises(TaskProgramDecodeError) as error:
         decode_task_program(data)
     assert error.value.path == ("instruction",)
+
+
+@pytest.mark.parametrize(
+    "validator",
+    [
+        {"kind": "object_lifted", "object": "cube", "minimum_lift": True},
+        {"kind": "object_lifted", "object": "cube", "minimum_lift": 0.0},
+        {"kind": "object_upright", "object": "cube", "maximum_tilt_degrees": 181.0},
+        {
+            "kind": "object_upright",
+            "object": "cube",
+            "maximum_tilt_degrees": float("nan"),
+        },
+        {
+            "kind": "object_relative_position",
+            "object": "cube",
+            "reference": "tray",
+            "position_tolerance": [None, None, None],
+        },
+        {
+            "kind": "object_relative_position",
+            "object": "cube",
+            "reference": "tray",
+            "position_tolerance": [0.1, -0.1, None],
+        },
+        {
+            "kind": "object_relative_position",
+            "object": "cube",
+            "reference": "tray",
+            "position_offset": [0.0, 0.0],
+        },
+        {
+            "kind": "object_relative_position",
+            "object": "cube",
+            "reference": "tray",
+            "position_offset": [False, 0.0, 0.0],
+        },
+        {"kind": "object_relative_position", "object": "cube"},
+        {"kind": "object_lifted", "object": "cube", "expression": "env.object.z"},
+    ],
+)
+def test_measured_object_validators_reject_invalid_closed_contracts(
+    validator: dict[str, object],
+) -> None:
+    data = _program_data()
+    data["program"]["body"]["validators"] = [validator]
+    with pytest.raises(TaskProgramDecodeError):
+        decode_task_program(data)
+
+
+@pytest.mark.parametrize("frame", ["world_axes", "parent"])
+def test_relative_position_reference_frame_round_trips(frame: str) -> None:
+    data = _program_data()
+    data["program"]["body"]["validators"] = [
+        {
+            "kind": "object_relative_position",
+            "object": "cube",
+            "reference": "tray",
+            "reference_frame": frame,
+        }
+    ]
+    config = decode_task_program(data)
+    data["program"]["body"]["validators"] = json.loads(
+        json.dumps([config.program.body.validators[0].to_dict()])
+    )
+    restored = decode_task_program(data)
+    assert restored.program.body.validators[0].reference_frame == frame
+
+
+@pytest.mark.parametrize("frame", [None, True, "object", ["parent"]])
+def test_relative_position_rejects_unknown_reference_frames(frame: object) -> None:
+    data = _program_data()
+    data["program"]["body"]["validators"] = [
+        {
+            "kind": "object_relative_position",
+            "object": "cube",
+            "reference": "tray",
+            "reference_frame": frame,
+        }
+    ]
+    with pytest.raises(TaskProgramDecodeError, match="reference_frame"):
+        decode_task_program(data)

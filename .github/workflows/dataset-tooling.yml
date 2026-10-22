@@ -2,6 +2,7 @@ name: Expert dataset tools
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'embodichain/data_pipeline/**'
       - 'embodichain/cli/dataset.py'
@@ -23,6 +24,7 @@ concurrency:
 
 jobs:
   offline-tools:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -43,6 +45,7 @@ jobs:
           tests/data_pipeline/recording/test_segments.py
 
   lerobot-export:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

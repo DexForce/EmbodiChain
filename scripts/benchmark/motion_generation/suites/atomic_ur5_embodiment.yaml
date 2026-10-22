@@ -1,0 +1,77 @@
+schema_version: 1
+name: atomic_ur5_embodiment
+suite_version: atomic_ur5_embodiment_v2
+profile: smoke
+
+embodiment:
+  component: embodichain_tasks/configs/components/embodiments/ur5_dh_pgi_140_80.yaml
+  initial_qpos: [0.0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.0, 0.0]
+
+planners:
+  - id: curobo
+    adapter: curobo
+    role: primary_baseline
+    enabled: true
+    config:
+      interpolation_dt: 0.025
+      max_attempts: 5
+      use_cuda_graph: true
+      cuda_graph_fallback: true
+      warmup_iterations: 1
+
+protocol:
+  report_schema_version: "3"
+  # Explicitly retain the previous cuRobo default acceleration budget.
+  joint_velocity_limit_rad_s: null
+  joint_acceleration_limit_rad_s2: 15.0
+  warmup_trials: 0
+  measured_trials: 1
+  sample_interval: 80
+  validation_samples: 128
+  seeds: [11]
+
+tracks:
+  - id: pickup
+    scenario: atomic_skill
+    domains:
+      - id: nominal
+        version: v1
+        kind: nominal
+      - id: object_xy
+        version: v1
+        kind: robustness
+        overrides:
+          randomization:
+            enabled: true
+            mode: translation
+            pose_batch_size: 2
+            object_translation_jitter_m: [0.02, 0.02, 0.0]
+    config:
+      physics:
+        steps_per_waypoint: 4
+        hold_steps: 80
+        hold_sim_steps: 2
+        joint_tracking_tolerance_rad: 0.05
+      objects:
+        - id: cube
+          kind: cube
+          size: [0.05, 0.05, 0.05]
+          position: [-0.42, -0.08, 0.05]
+          mass: 0.05
+          dynamic_friction: 0.97
+          static_friction: 0.99
+          settle_steps: 10
+      skills:
+        - id: pick_up
+          sample_count: 80
+          grasp_source: fixed
+          hand_interp_steps: 12
+          pre_grasp_distance_m: 0.15
+          lift_height_m: 0.16
+          approach_direction: [0.0, 0.0, -1.0]
+          pre_pick_height_m: 0.36
+          cases:
+            - name: cube_pick
+              object: cube
+              task_difficulty: simple
+              grasp_offset_m: [0.0, 0.0, 0.0]

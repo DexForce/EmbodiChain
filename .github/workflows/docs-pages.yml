@@ -12,9 +12,17 @@ on:
         required: false
         type: string
       artifact_run_id:
-        description: "Existing CI/CD Pipeline run ID to deploy from instead of rebuilding"
+        description: "Existing workflow run ID to deploy from instead of rebuilding"
         required: false
         type: string
+      artifact_name:
+        description: "Site artifact to recover (set ref to the version it rebuilt)"
+        required: false
+        default: docs-site
+        type: choice
+        options:
+          - docs-site
+          - docs-site-manual
   release:
     types: [published]
 
@@ -25,8 +33,8 @@ permissions:
   id-token: write
 
 concurrency:
-  # The release run waits for its dispatched deployment, so it must not hold
-  # the deployment concurrency group while the child workflow is queued.
+  # Release dispatches must not hold the deployment group while queuing a child.
+  # All actual deployments share this lock through merge, publish and verification.
   group: ${{ github.event_name == 'release' && format('github-pages-release-{0}', github.run_id) || 'github-pages' }}
   cancel-in-progress: false
 
@@ -41,10 +49,9 @@ jobs:
       github.event.action == 'published' &&
       startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 5
     permissions:
       actions: write
-      checks: read
       contents: read
     steps:
       - name: Dispatch release docs build
@@ -62,12 +69,9 @@ jobs:
             echo "Could not determine dispatched workflow run ID from: ${dispatched_url}" >&2
             exit 1
           fi
-          echo "Waiting for dispatched docs workflow ${dispatched_run_id}."
-          gh run watch "${dispatched_run_id}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --compact \
-            --exit-status \
-            --interval 10
+          echo "Release docs queued: ${dispatched_url}"
+          echo "### Release documentation" >> "${GITHUB_STEP_SUMMARY}"
+          echo "Build and deployment status: [${RELEASE_TAG}](${dispatched_url})" >> "${GITHUB_STEP_SUMMARY}"
 
   inspect-docs-artifact:
     if: >
@@ -112,10 +116,31 @@ jobs:
       - name: Download docs site artifact from CI/CD Pipeline run
         uses: actions/download-artifact@v4
         with:
-          name: docs-site
+          name: ${{ inputs.artifact_name || 'docs-site' }}
           run-id: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || inputs.artifact_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: ./docs-site
+
+      # Deployment tooling comes from this workflow revision, not the release tag.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: deployment-tools
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install deployment dependencies
+        run: python -m pip install --index-url https://pypi.org/simple packaging
+
+      - name: Preserve currently published versions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SITE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+          BUILT_VERSION: ${{ github.event_name == 'workflow_run' && 'main' || startsWith(inputs.ref, 'v') && inputs.ref || 'main' }}
+        run: |
+          python deployment-tools/docs/scripts/prepare_docs_deployment.py prepare \
+            --build-dir ./docs-site --site-url "${SITE_URL}" \
+            --version "${BUILT_VERSION}" --repository "${GITHUB_REPOSITORY}"
 
       - name: Stamp Pages artifact
         env:
@@ -126,6 +151,7 @@ jobs:
         uses: actions/upload-pages-artifact@v3
         with:
           name: github-pages-${{ github.run_attempt }}
+          retention-days: 90
           path: ./docs-site
 
       - name: Deploy GitHub Pages
@@ -139,18 +165,9 @@ jobs:
           EXPECTED_DEPLOYMENT_ID: ${{ github.run_id }}-${{ github.run_attempt }}
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
         run: |
-          for attempt in {1..30}; do
-            marker_url="${PAGE_URL%/}/pages-deployment-id.txt?run=${EXPECTED_DEPLOYMENT_ID}&attempt=${attempt}"
-            deployed_id="$(curl --location --connect-timeout 5 --max-time 10 --fail --silent --show-error "${marker_url}" || true)"
-            if [[ "${deployed_id}" == "${EXPECTED_DEPLOYMENT_ID}" ]]; then
-              echo "Verified Pages deployment ${EXPECTED_DEPLOYMENT_ID}."
-              exit 0
-            fi
-            echo "Waiting for Pages deployment ${EXPECTED_DEPLOYMENT_ID} (attempt ${attempt}/30)..."
-            sleep 10
-          done
-          echo "Pages did not serve deployment ${EXPECTED_DEPLOYMENT_ID}." >&2
-          exit 1
+          python deployment-tools/docs/scripts/prepare_docs_deployment.py verify \
+            --build-dir ./docs-site --site-url "${PAGE_URL}" \
+            --deployment-id "${EXPECTED_DEPLOYMENT_ID}"
 
   build-and-deploy:
     if: github.event_name == 'workflow_dispatch' && inputs.artifact_run_id == ''
@@ -269,6 +286,27 @@ jobs:
           name: docs-site-manual
           path: ./docs-site
 
+      # Deployment tooling comes from this workflow revision, not the release tag.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: deployment-tools
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install deployment dependencies
+        run: python -m pip install --index-url https://pypi.org/simple packaging
+
+      - name: Preserve currently published versions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SITE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+          BUILT_VERSION: ${{ github.event_name == 'workflow_run' && 'main' || startsWith(inputs.ref, 'v') && inputs.ref || 'main' }}
+        run: |
+          python deployment-tools/docs/scripts/prepare_docs_deployment.py prepare \
+            --build-dir ./docs-site --site-url "${SITE_URL}" \
+            --version "${BUILT_VERSION}" --repository "${GITHUB_REPOSITORY}"
+
       - name: Stamp Pages artifact
         env:
           DEPLOYMENT_ID: ${{ github.run_id }}-${{ github.run_attempt }}
@@ -278,6 +316,7 @@ jobs:
         uses: actions/upload-pages-artifact@v3
         with:
           name: github-pages-${{ github.run_attempt }}
+          retention-days: 90
           path: ./docs-site
 
       - name: Deploy GitHub Pages
@@ -291,15 +330,6 @@ jobs:
           EXPECTED_DEPLOYMENT_ID: ${{ github.run_id }}-${{ github.run_attempt }}
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
         run: |
-          for attempt in {1..30}; do
-            marker_url="${PAGE_URL%/}/pages-deployment-id.txt?run=${EXPECTED_DEPLOYMENT_ID}&attempt=${attempt}"
-            deployed_id="$(curl --location --connect-timeout 5 --max-time 10 --fail --silent --show-error "${marker_url}" || true)"
-            if [[ "${deployed_id}" == "${EXPECTED_DEPLOYMENT_ID}" ]]; then
-              echo "Verified Pages deployment ${EXPECTED_DEPLOYMENT_ID}."
-              exit 0
-            fi
-            echo "Waiting for Pages deployment ${EXPECTED_DEPLOYMENT_ID} (attempt ${attempt}/30)..."
-            sleep 10
-          done
-          echo "Pages did not serve deployment ${EXPECTED_DEPLOYMENT_ID}." >&2
-          exit 1
+          python deployment-tools/docs/scripts/prepare_docs_deployment.py verify \
+            --build-dir ./docs-site --site-url "${PAGE_URL}" \
+            --deployment-id "${EXPECTED_DEPLOYMENT_ID}"

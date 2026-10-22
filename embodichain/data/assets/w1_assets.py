@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import os
 import open3d as o3d
 from embodichain.data.dataset import EmbodiChainDataset
@@ -21,6 +23,19 @@ from embodichain.data.constants import (
     EMBODICHAIN_DOWNLOAD_PREFIX,
     EMBODICHAIN_DEFAULT_DATA_ROOT,
 )
+
+__all__ = [
+    "DexforceW1V021",
+    "DexforceW1V022",
+    "DexforceW1V025",
+    "DexforceW1V030",
+    "DexforceW1ChassisV021",
+    "DexforceW1TorsoV021",
+    "DexforceW1EyesV021",
+    "DexforceW1HeadV021",
+    "DexforceW1LeftArmV021",
+    "DexforceW1RightArmV021",
+]
 
 # ================= Dexforce W1 Asset Dataset Overview =================
 # This file provides dataset classes for the Dexforce W1 humanoid robot
@@ -136,6 +151,28 @@ class DexforceW1V025(EmbodiChainDataset):
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
+
+
+class DexforceW1V030(EmbodiChainDataset):
+    """Standard V030 body archive, excluding detachable end effectors.
+
+    The archive is published at ``dexforce_w1/v030/w1.zip`` with
+    ``w1/robot.urdf`` and the five component URDFs. Component visuals and
+    inertials match the corrected full body. Wrist camera and gripper assets
+    belong to independently assembled attachments.
+
+    Args:
+        data_root: Download and extraction cache root. Defaults to the configured
+            EmbodiChain asset cache.
+    """
+
+    def __init__(self, data_root: str | None = None) -> None:
+        descriptor = o3d.data.DataDescriptor(
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, w1_assets, "v030", "w1.zip"),
+            "45fd6e516997d85cbac01f3d955acb4f",
+        )
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+        super().__init__(type(self).__name__, descriptor, path)
 
 
 class DexforceW1ChassisV021(EmbodiChainDataset):

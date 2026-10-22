@@ -147,6 +147,7 @@ class SceneExporter:
 
     _COLORS = {
         "rigid_object": (90, 200, 255),
+        "visual_object": (170, 190, 220),
         "rigid_group_object": (125, 185, 255),
         "robot_link": (80, 210, 140),
         "articulation_link": (255, 175, 70),
@@ -316,36 +317,50 @@ class SceneExporter:
         camera_sources: list[_CameraSource] = []
         gizmo_sources: list[_GizmoSource] = []
 
-        for uid in self._sim.get_rigid_object_uid_list():
-            asset = self._sim.get_rigid_object(uid)
-            if asset is None:
-                continue
-            selected_env_ids = list(self._env_ids)
-            vertices_by_env = asset.get_vertices(
-                env_ids=selected_env_ids,
-                scale=True,
-            )
-            faces_by_env = asset.get_triangles(env_ids=selected_env_ids)
-            for selected_index, env_id in enumerate(self._env_ids):
-                vertices = vertices_by_env[selected_index]
-                faces = faces_by_env[selected_index]
-                geometry_id = self._add_geometry(
-                    geometries, vertices, faces, self._COLORS["rigid_object"]
-                )
-                if geometry_id is None:
+        for kind, uid_getter, getter, key in (
+            (
+                "rigid_object",
+                self._sim.get_rigid_object_uid_list,
+                getattr(self._sim, "get_rigid_object", lambda uid: None),
+                "rigid",
+            ),
+            (
+                "visual_object",
+                getattr(self._sim, "get_visual_object_uid_list", lambda: []),
+                getattr(self._sim, "get_visual_object", lambda uid: None),
+                "visual",
+            ),
+        ):
+            for uid in uid_getter():
+                asset = getter(uid)
+                if asset is None:
                     continue
-                uid_component = safe_path_component(uid)
-                node = SceneNode(
-                    node_id=f"env:{env_id}/rigid:{uid_component}",
-                    path=f"/envs/{env_id}/rigid_objects/{uid_component}",
-                    parent_id=f"env:{env_id}",
-                    env_id=env_id,
-                    kind="rigid_object",
-                    geometry_id=geometry_id,
+                selected_env_ids = list(self._env_ids)
+                vertices_by_env = asset.get_vertices(
+                    env_ids=selected_env_ids,
+                    scale=True,
                 )
-                sources.append(
-                    _NodeSource(node=node, asset_key=("rigid", uid), asset=asset)
-                )
+                faces_by_env = asset.get_triangles(env_ids=selected_env_ids)
+                for selected_index, env_id in enumerate(self._env_ids):
+                    vertices = vertices_by_env[selected_index]
+                    faces = faces_by_env[selected_index]
+                    geometry_id = self._add_geometry(
+                        geometries, vertices, faces, self._COLORS[kind]
+                    )
+                    if geometry_id is None:
+                        continue
+                    uid_component = safe_path_component(uid)
+                    node = SceneNode(
+                        node_id=f"env:{env_id}/{key}:{uid_component}",
+                        path=f"/envs/{env_id}/{kind}s/{uid_component}",
+                        parent_id=f"env:{env_id}",
+                        env_id=env_id,
+                        kind=kind,
+                        geometry_id=geometry_id,
+                    )
+                    sources.append(
+                        _NodeSource(node=node, asset_key=(key, uid), asset=asset)
+                    )
 
         self._append_rigid_object_groups(sources, geometries)
         self._append_articulations(
@@ -847,7 +862,11 @@ class SceneExporter:
             )
 
         for batch in self._pose_batches:
-            if batch.asset_kind in {"rigid", "rigid_group"}:
+            if batch.asset_kind == "visual":
+                visible[batch.destination_indices] = _to_numpy(
+                    batch.asset.get_visibility(batch.env_ids), np.bool_
+                )
+            if batch.asset_kind in {"rigid", "rigid_group", "visual"}:
                 pose = batch.asset.get_local_pose(to_matrix=False)
             else:
                 pose = batch.asset.body_data.body_link_pose

@@ -26,7 +26,7 @@ from typing import ClassVar, Literal
 import torch
 
 from embodichain.utils import logger
-from embodichain.utils.math import get_relative_rotation, pose_inv
+from embodichain.utils.math import pose_inv
 
 from embodichain.lab.sim.atomic_actions.affordance import AntipodalAffordance
 from embodichain.lab.sim.atomic_actions.affordance_sampling import (
@@ -65,7 +65,9 @@ from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
     make_manipulation_slot,
 )
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+    find_symmetric_nearest_xpos,
     assemble_full_robot_trajectory,
+    pad_trajectory_to_length,
     plan_named_arm_trajectory,
     repeat_qpos,
     require_shared_task_state_key,
@@ -447,9 +449,10 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                 second_root_pose,
                 resources.first,
                 resources.second,
-                segment_lengths,
+                dict(segment_lengths),
                 eligible,
             )
+            segment_lengths = selected.segment_lengths
             success = selected.success & eligible
             full = selected.trajectory
             first_object_to_eef = selected.handover_object_to_eef
@@ -469,9 +472,10 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                 first_root_pose,
                 resources.second,
                 resources.first,
-                segment_lengths,
+                dict(segment_lengths),
                 eligible,
             )
+            segment_lengths = selected.segment_lengths
             success = selected.success & eligible
             full = selected.trajectory
             first_object_to_eef = selected.receive_object_to_eef
@@ -491,7 +495,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                 second_root_pose,
                 resources.first,
                 resources.second,
-                segment_lengths,
+                dict(segment_lengths),
                 first_is_handover & eligible,
             )
             second_to_first = self._plan_direction(
@@ -505,13 +509,30 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                 first_root_pose,
                 resources.second,
                 resources.first,
-                segment_lengths,
+                dict(segment_lengths),
                 ~first_is_handover & eligible,
             )
-            if first_to_second.trajectory.shape != second_to_first.trajectory.shape:
+            if tuple(first_to_second.segment_lengths) != tuple(
+                second_to_first.segment_lengths
+            ):
                 raise ValueError(
-                    "Both HandOver arm assignments must produce matching trajectory shapes."
+                    "Both HandOver arm assignments must produce matching segment names."
                 )
+            segment_lengths = {
+                name: max(
+                    first_to_second.segment_lengths[name],
+                    second_to_first.segment_lengths[name],
+                )
+                for name in first_to_second.segment_lengths
+            }
+            first_trajectory = self._pad_directional_trajectory(
+                first_to_second,
+                segment_lengths,
+            )
+            second_trajectory = self._pad_directional_trajectory(
+                second_to_first,
+                segment_lengths,
+            )
             success = (
                 torch.where(
                     first_is_handover,
@@ -522,8 +543,8 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             )
             full = torch.where(
                 first_is_handover[:, None, None],
-                first_to_second.trajectory,
-                second_to_first.trajectory,
+                first_trajectory,
+                second_trajectory,
             )
             pose_selector = first_is_handover[:, None, None]
             first_object_to_eef = torch.where(
@@ -629,7 +650,10 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             scene_dependency_monitor_until=(
                 {}
                 if goal.semantics.entity_id is None
-                else {goal.semantics.entity_id: segment_lengths["pickup_approach"]}
+                else {
+                    goal.semantics.entity_id: segment_lengths["pickup_approach"]
+                    + segment_lengths["pickup_reach"]
+                }
             ),
         )
 
@@ -846,6 +870,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             device=self.device,
             name="HandOver existing-hold source transfer success",
         )
+        lengths["transfer"] = source_transfer.shape[1]
         source_hold_qpos = source_transfer[:, -1]
         phase_success, destination_approach = plan_named_arm_trajectory(
             self.motion_generator,
@@ -862,6 +887,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             device=self.device,
             name="HandOver existing-hold destination approach success",
         )
+        lengths["approach"] = destination_approach.shape[1]
         destination_hold_qpos = destination_approach[:, -1]
         phase_success, source_retreat = plan_named_arm_trajectory(
             self.motion_generator,
@@ -878,12 +904,16 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             device=self.device,
             name="HandOver existing-hold source retreat success",
         )
+        lengths["retreat"] = source_retreat.shape[1]
 
         # An existing hold is already physically established.  Preserve the
         # observed source-hand closure until the release phase instead of
         # commanding a configured grasp setpoint that may be tighter than the
         # contact-supported pose.
         source_hand_qpos = context.last_qpos[:, list(resources.first.hand.joint_ids)]
+        destination_hand_qpos = context.last_qpos[
+            :, list(resources.second.hand.joint_ids)
+        ]
 
         segment_values: list[tuple[str, torch.Tensor]] = [
             (
@@ -893,7 +923,11 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                     source_transfer,
                     repeat_qpos(destination_start_qpos, lengths["transfer"]),
                     repeat_qpos(source_hand_qpos, lengths["transfer"]),
-                    repeat_qpos(resources.second.hand_open_qpos, lengths["transfer"]),
+                    interpolate_hand_qpos(
+                        destination_hand_qpos,
+                        resources.second.hand_open_qpos,
+                        n_waypoints=lengths["transfer"],
+                    ),
                     resources.first,
                     resources.second,
                 ),
@@ -1109,7 +1143,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         release = max(2, options.hand_interp_steps)
         hold = options.hold_steps
         retreat = max(2, options.retreat_steps)
-        reserved = close + release + hold + retreat
+        reserved = close + release + retreat
         remaining = sample_count - reserved
         if remaining < 4:
             raise ValueError(
@@ -1130,23 +1164,6 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             "release": release,
             "retreat": retreat,
         }
-
-    def _find_symmetric_nearest_xpos(
-        self, target_xpos: torch.Tensor, reference_xpos: torch.Tensor
-    ) -> torch.Tensor:
-        """Find the nearest symmetric pose to the reference pose."""
-        symmetric_xpos = target_xpos.clone()
-        symmetric_xpos[:, :3, 0] = -symmetric_xpos[:, :3, 0]
-        symmetric_xpos[:, :3, 1] = -symmetric_xpos[:, :3, 1]
-        angle_a = get_relative_rotation(
-            reference_xpos[:, :3, :3], target_xpos[:, :3, :3]
-        )
-        angle_b = get_relative_rotation(
-            reference_xpos[:, :3, :3], symmetric_xpos[:, :3, :3]
-        )
-        choose_target = (angle_a < angle_b)[..., None, None]
-        target_xpos = torch.where(choose_target, target_xpos, symmetric_xpos)
-        return target_xpos
 
     def _plan_direction(
         self,
@@ -1233,9 +1250,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         )
         handover_grasp_success = handover_sample.success
         handover_grasp = handover_sample.poses
-        handover_grasp = self._find_symmetric_nearest_xpos(
-            handover_grasp, handover_start_eef
-        )
+        handover_grasp = find_symmetric_nearest_xpos(handover_grasp, handover_start_eef)
         handover_pre_grasp = translate_pose_world(
             handover_grasp,
             -handover_grasp[:, :3, 2] * options.pre_grasp_distance,
@@ -1286,9 +1301,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         )
         receive_grasp_success = receive_sample.success
         receive_grasp = receive_sample.poses
-        receive_grasp = self._find_symmetric_nearest_xpos(
-            receive_grasp, receive_start_eef
-        )
+        receive_grasp = find_symmetric_nearest_xpos(receive_grasp, receive_start_eef)
 
         receive_pre_grasp = translate_pose_world(
             receive_grasp,
@@ -1365,9 +1378,10 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             & receive_grasp_success
             & lowering_direction_valid
         )
-        pickup_approach_targets = torch.stack(
-            [handover_pre_grasp, handover_grasp], dim=1
-        )
+        # Export the pre-grasp as an explicit phase boundary. Spatial
+        # expansion may vary the empty-hand approach, while the final reach
+        # and every subsequent grasp/held-object motion stay exact.
+        pickup_approach_targets = handover_pre_grasp[:, None]
         phase_success, pickup_approach = plan_named_arm_trajectory(
             self.motion_generator,
             handover.arm.control_part,
@@ -1386,14 +1400,44 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         self._report_phase_failure(
             context,
             phase_name="pickup_approach",
-            waypoint_names=("pickup_pre_grasp", "pickup_grasp"),
+            waypoint_names=("pickup_pre_grasp",),
             target_poses=pickup_approach_targets,
             start_qpos=handover_start_qpos,
             arm=handover.arm,
             failed_mask=active_mask & ~pickup_approach_success,
         )
         success &= pickup_approach_success
-        handover_grasp_qpos = pickup_approach[:, -1]
+        segment_lengths["pickup_approach"] = pickup_approach.shape[1]
+        phase_success, pickup_reach = plan_named_arm_trajectory(
+            self.motion_generator,
+            handover.arm.control_part,
+            pickup_approach[:, -1],
+            handover_grasp[:, None],
+            segment_lengths["pickup_reach"] + 1,
+            request.motion_policy,
+            context.control_dt,
+        )
+        pickup_reach_success = normalize_success_mask(
+            phase_success,
+            num_envs=self.num_envs,
+            device=self.device,
+            name="HandOver pickup-reach success",
+        )
+        self._report_phase_failure(
+            context,
+            phase_name="pickup_reach",
+            waypoint_names=("pickup_grasp",),
+            target_poses=handover_grasp[:, None],
+            start_qpos=pickup_approach[:, -1],
+            arm=handover.arm,
+            failed_mask=active_mask & ~pickup_reach_success,
+        )
+        success &= pickup_reach_success
+        # The pre-grasp sample already belongs to pickup_approach. Removing
+        # this duplicate retains the configured total sample budget.
+        pickup_reach = pickup_reach[:, 1:]
+        segment_lengths["pickup_reach"] = pickup_reach.shape[1]
+        handover_grasp_qpos = pickup_reach[:, -1]
 
         pickup_transport_targets = torch.stack(
             [handover_lift_eef, handover_middle_eef], dim=1
@@ -1423,6 +1467,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             failed_mask=active_mask & ~pickup_transport_success,
         )
         success &= pickup_transport_success
+        segment_lengths["pickup_transport"] = pickup_transport.shape[1]
         handover_middle_qpos = pickup_transport[:, -1]
 
         receive_approach_targets = torch.stack(
@@ -1453,6 +1498,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             failed_mask=active_mask & ~receive_approach_success,
         )
         success &= receive_approach_success
+        segment_lengths["receive_approach"] = receive_approach.shape[1]
         receive_grasp_qpos = receive_approach[:, -1]
 
         source_retreat: torch.Tensor | None = None
@@ -1496,6 +1542,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                 failed_mask=active_mask & ~source_retreat_success,
             )
             success &= source_retreat_success
+            segment_lengths["source_retreat"] = source_retreat.shape[1]
 
         receive_place: torch.Tensor | None = None
         receive_final_qpos: torch.Tensor | None = None
@@ -1529,17 +1576,35 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                 failed_mask=active_mask & ~placement_success,
             )
             success &= placement_success
+            segment_lengths["place"] = receive_place.shape[1]
             receive_final_qpos = receive_place[:, -1]
 
+        handover_start_hand = state.last_qpos[:, list(handover.hand.joint_ids)]
+        receive_start_hand = state.last_qpos[:, list(receive.hand.joint_ids)]
         segments = [
             self._assemble_segment(
                 state,
                 pickup_approach,
                 repeat_qpos(receive_start_qpos, segment_lengths["pickup_approach"]),
-                repeat_qpos(
-                    handover.hand_open_qpos, segment_lengths["pickup_approach"]
+                interpolate_hand_qpos(
+                    handover_start_hand,
+                    handover.hand_open_qpos,
+                    n_waypoints=segment_lengths["pickup_approach"],
                 ),
-                repeat_qpos(receive.hand_open_qpos, segment_lengths["pickup_approach"]),
+                interpolate_hand_qpos(
+                    receive_start_hand,
+                    receive.hand_open_qpos,
+                    n_waypoints=segment_lengths["pickup_approach"],
+                ),
+                handover,
+                receive,
+            ),
+            self._assemble_segment(
+                state,
+                pickup_reach,
+                repeat_qpos(receive_start_qpos, segment_lengths["pickup_reach"]),
+                repeat_qpos(handover.hand_open_qpos, segment_lengths["pickup_reach"]),
+                repeat_qpos(receive.hand_open_qpos, segment_lengths["pickup_reach"]),
                 handover,
                 receive,
             ),
@@ -1594,6 +1659,15 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                     receive.hand_grasp_qpos,
                     n_waypoints=segment_lengths["receive_close"],
                 ),
+                handover,
+                receive,
+            ),
+            self._assemble_segment(
+                state,
+                repeat_qpos(handover_middle_qpos, segment_lengths["receive_hold"]),
+                repeat_qpos(receive_grasp_qpos, segment_lengths["receive_hold"]),
+                repeat_qpos(handover.hand_grasp_qpos, segment_lengths["receive_hold"]),
+                repeat_qpos(receive.hand_grasp_qpos, segment_lengths["receive_hold"]),
                 handover,
                 receive,
             ),
@@ -1953,30 +2027,73 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         handover_root_pose: torch.Tensor,
         receive_root_pose: torch.Tensor,
     ) -> torch.Tensor:
-        """Move only the dominant root-separation coordinate to its midpoint."""
+        """Use the root midpoint only when the two roots define a separation.
+
+        Some humanoid assets locate both arm-chain roots at the torso origin.
+        Their lifted object pose already has to lie in the shared workspace;
+        choosing an arbitrary axis for coincident roots would pull it into the
+        torso instead.
+        """
         handover_root_position = handover_root_pose[:, :3, 3]
         receive_root_position = receive_root_pose[:, :3, 3]
-        dominant_axis = torch.argmax(
-            torch.abs(handover_root_position - receive_root_position), dim=1
-        )
+        separation = torch.abs(handover_root_position - receive_root_position)
+        dominant_axis = torch.argmax(separation, dim=1)
+        separated = torch.linalg.vector_norm(separation, dim=1) > 1.0e-6
         root_midpoint = 0.5 * (handover_root_position + receive_root_position)
         middle = lifted_object_pose.clone()
         middle_position = middle[:, :3, 3]
         selected_midpoint = root_midpoint.gather(1, dominant_axis[:, None])
-        middle_position.scatter_(1, dominant_axis[:, None], selected_midpoint)
+        selected_position = middle_position.gather(1, dominant_axis[:, None])
+        middle_position.scatter_(
+            1,
+            dominant_axis[:, None],
+            torch.where(separated[:, None], selected_midpoint, selected_position),
+        )
         return middle
+
+    @staticmethod
+    def _pad_directional_trajectory(
+        plan: _DirectionalPlan,
+        segment_lengths: Mapping[str, int],
+    ) -> torch.Tensor:
+        """Pad corresponding phases without shifting handover boundaries."""
+        if tuple(plan.segment_lengths) != tuple(segment_lengths):
+            raise ValueError(
+                "Both HandOver arm assignments must produce matching segment names."
+            )
+        offset = 0
+        segments: list[torch.Tensor] = []
+        for name, source_length in plan.segment_lengths.items():
+            stop = offset + source_length
+            segment = plan.trajectory[:, offset:stop]
+            if source_length == 0:
+                if segment_lengths[name] != 0:
+                    raise ValueError(
+                        "HandOver cannot expand an empty directional phase."
+                    )
+                offset = stop
+                continue
+            segments.append(pad_trajectory_to_length(segment, segment_lengths[name]))
+            offset = stop
+        if offset != plan.trajectory.shape[1]:
+            raise ValueError(
+                "HandOver directional segment lengths do not cover the trajectory."
+            )
+        return torch.cat(segments, dim=1)
 
     @staticmethod
     def _compute_segment_lengths(
         sample_count: int,
         options: HandOverOptions,
     ) -> dict[str, int]:
-        """Split the sample budget across enabled arm and hand phases."""
+        """Split the sample budget, then add the required receive-side hold."""
         hand_count = options.hand_interp_steps
         hand_phase_count = 4 if options.release_at_target else 3
         motion_phase_count = 4
         motion_budget = sample_count - hand_phase_count * hand_count
-        if motion_budget < 2 * motion_phase_count:
+        # Pickup needs start, pre-grasp and grasp samples; each of the other
+        # motion phases needs at least its two endpoints.
+        if motion_budget < 2 * motion_phase_count + 1:
             raise ValueError(
                 "Not enough HandOver waypoints. Increase sample_count or decrease "
                 "hand_interp_steps."
@@ -1984,12 +2101,15 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         motion_counts = [motion_budget // motion_phase_count] * motion_phase_count
         for index in range(motion_budget % motion_phase_count):
             motion_counts[index] += 1
+        approach_count = (motion_counts[0] + 1) // 2
         result = {
-            "pickup_approach": motion_counts[0],
+            "pickup_approach": approach_count,
+            "pickup_reach": motion_counts[0] - approach_count,
             "pickup_close": hand_count,
             "pickup_transport": motion_counts[1],
             "receive_approach": motion_counts[2],
             "receive_close": hand_count,
+            "receive_hold": options.hold_steps,
             "handover_release": hand_count,
         }
         if options.release_at_target:

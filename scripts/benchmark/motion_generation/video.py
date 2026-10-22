@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Optional Atomic Task replay recording helpers.
+"""Optional Atomic Skill replay recording helpers.
 
 Recording is a second, untimed physics pass. Failures never change trial
 success and never add a fourth Markdown table.
@@ -58,7 +58,7 @@ LookAt = tuple[Sequence[float], Sequence[float], Sequence[float]]
 
 @dataclass(frozen=True)
 class VideoRecordCfg:
-    """CLI-resolved recording policy for Atomic Task measured replays."""
+    """CLI-resolved recording policy for Atomic Skill measured replays."""
 
     enabled: bool = False
     record_failed: bool = False
@@ -82,7 +82,7 @@ class VideoRecordCfg:
 
 
 def should_record_case(cfg: VideoRecordCfg, recorded_count: int, success: bool) -> bool:
-    """Return whether one measured Atomic Task case should emit a video."""
+    """Return whether one measured Atomic Skill case should emit a video."""
     if not cfg.enabled:
         return False
     if not success and not cfg.record_failed:
@@ -151,7 +151,7 @@ def record_with_window(
         except Exception:
             pass
         print(
-            "Warning: failed to record Atomic Task replay video "
+            "Warning: failed to record Atomic Skill replay video "
             f"{video_path}: {type(exc).__name__}: {exc}"
         )
         return None
@@ -165,12 +165,12 @@ def summarize_video_recording(
         return ["Video policy: disabled."]
     if cfg.record_failed:
         policy = (
-            "records Atomic Task measured success replays and failed-case "
+            "records Atomic Skill measured success replays and failed-case "
             "static scenes when capture is available."
         )
     else:
         policy = (
-            "records Atomic Task measured success replays only; failed "
+            "records Atomic Skill measured success replays only; failed "
             "cases are reported in the tables but do not emit videos."
         )
     rendered = ", ".join(video_paths) if video_paths else "none"

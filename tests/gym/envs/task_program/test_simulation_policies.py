@@ -761,3 +761,197 @@ def test_policy_port_rejects_unbound_native_entities_and_foreign_members() -> No
 
 
 __all__: list[str] = []
+
+
+def _object_state_payload(validators: list[dict[str, object]]) -> dict[str, object]:
+    """Build a segment using the public strict decoder and ordinary calls."""
+    return {
+        "program_id": "measured_objects",
+        "targets": {},
+        "integration": {
+            "robot_profile": "test_robot",
+            "scene_registry": "test_scene",
+            "runtime_preset": "safe",
+        },
+        "program": {
+            "kind": "segment",
+            "name": "pick",
+            "steps": {"kind": "invoke", "call": {"kind": "pick", "object": "cube"}},
+            "validators": validators,
+        },
+    }
+
+
+def _measured_object_segment(validators: list[dict[str, object]]):
+    """Resolve both measured object references without constructing a simulator."""
+    registry = SceneRegistry(
+        tuple(
+            SceneEntityRegistration(
+                ref=SceneObjectRef(entity_id), state_provider=_StaticStateProvider()
+            )
+            for entity_id in ("cube", "reference")
+        )
+    )
+    compiled = TaskProgramCompiler.from_scene_registry(registry).compile(
+        decode_task_program(_object_state_payload(validators))
+    )
+    return next(compiled.iter_segments())
+
+
+def _measured_object_port(batch_size: int = 2):
+    """Keep stable logical IDs distinct from simulator row indices."""
+    objects = {
+        name: _RigidObject(torch.zeros(batch_size, 3, dtype=torch.float64))
+        for name in ("cube", "reference")
+    }
+    # Use double poses so exact binary tolerance boundaries stay exact.
+    for entity in objects.values():
+        entity._pose = entity._pose.to(dtype=torch.float64)
+    port = SimulationSegmentPolicyPort(
+        SimpleNamespace(get_rigid_object=objects.get),
+        _Robot(torch.zeros(batch_size, 2)),
+        SimulationSceneBinding(
+            registry_id="test_scene",
+            rigid_objects=tuple(
+                SimulationRigidObjectBinding(entity_id=name, simulation_uid=name)
+                for name in objects
+            ),
+        ),
+        env_ids=torch.arange(batch_size - 1, -1, -1),
+    )
+    return port, objects
+
+
+def test_lift_requires_segment_start_and_uses_observed_row_baselines() -> None:
+    segment = _measured_object_segment(
+        [{"kind": "object_lifted", "object": "cube", "minimum_lift": 0.05}]
+    )
+    validator = segment.validators[0]
+    port, objects = _measured_object_port()
+    with pytest.raises(RuntimeError, match="begin_segment"):
+        port.validate(validator, segment=segment)
+
+    objects["cube"]._pose[:, 2, 3] = torch.tensor([0.0, 0.5])
+    port.begin_segment(segment=segment, active_mask=None)
+    objects["cube"]._pose[:, 2, 3] = torch.tensor([0.05, 0.54], dtype=torch.float64)
+    assert port.validate(validator, segment=segment).tolist() == [True, False]
+    trace = port.validator_metadata(validator, segment=segment)
+    assert trace["initial_height"] == [0.0, 0.5]
+    assert trace["env_ids"] == [1, 0]
+    assert trace["measured_lift"] == pytest.approx([0.05, 0.04])
+    json.dumps(trace, allow_nan=False)
+
+
+def test_lift_rejects_nonfinite_baseline_per_row_and_preserves_inactive_mask() -> None:
+    segment = _measured_object_segment([{"kind": "object_lifted", "object": "cube"}])
+    port, objects = _measured_object_port(3)
+    objects["cube"]._pose[0, 0, 3] = float("nan")
+    port.begin_segment(segment=segment, active_mask=torch.tensor([True, True, False]))
+    objects["cube"]._pose[:, 0, 3] = 0.0
+    objects["cube"]._pose[:, 2, 3] = 0.1
+    validator = segment.validators[0]
+    assert port.validate(validator, segment=segment).tolist() == [False, True, False]
+    json.dumps(port.validator_metadata(validator, segment=segment), allow_nan=False)
+
+
+def test_relative_position_uses_live_world_axes_ignores_disabled_z_and_is_strict() -> (
+    None
+):
+    segment = _measured_object_segment(
+        [
+            {
+                "kind": "object_relative_position",
+                "object": "cube",
+                "reference": "reference",
+                "position_offset": [0.5, 0.0, 0.0],
+                "position_tolerance": [0.125, 0.125, None],
+            }
+        ]
+    )
+    port, objects = _measured_object_port()
+    port.begin_segment(segment=segment, active_mask=None)
+    # The reference moves and rotates after the segment starts; its local X
+    # points along world Y, but the declared offset remains along world X.
+    objects["reference"]._pose[:, :3, :3] = torch.tensor(
+        [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], dtype=torch.float64
+    )
+    objects["reference"]._pose[:, :3, 3] = torch.tensor([1.0, 2.0, 3.0])
+    objects["cube"]._pose[:, :3, 3] = torch.tensor(
+        [[1.5, 2.0, 99.0], [1.625, 2.0, -99.0]], dtype=torch.float64
+    )
+    assert port.validate(segment.validators[0], segment=segment).tolist() == [
+        True,
+        False,
+    ]
+    objects["reference"]._pose[0, 0, 3] = float("nan")
+    assert port.validate(segment.validators[0], segment=segment).tolist() == [
+        False,
+        False,
+    ]
+    json.dumps(
+        port.validator_metadata(segment.validators[0], segment=segment), allow_nan=False
+    )
+
+
+def test_relative_position_parent_frame_follows_live_reference_rotation() -> None:
+    segment = _measured_object_segment(
+        [
+            {
+                "kind": "object_relative_position",
+                "object": "cube",
+                "reference": "reference",
+                "reference_frame": "parent",
+                "position_offset": [0.5, 0.0, 0.0],
+                "position_tolerance": [0.125, 0.125, None],
+            }
+        ]
+    )
+    port, objects = _measured_object_port()
+    port.begin_segment(segment=segment, active_mask=None)
+    # Local X follows world Y after a quarter turn, including after begin_segment.
+    objects["reference"]._pose[:, :3, :3] = torch.tensor(
+        [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], dtype=torch.float64
+    )
+    objects["reference"]._pose[:, :3, 3] = torch.tensor([1.0, 2.0, 3.0])
+    objects["cube"]._pose[:, :3, 3] = torch.tensor(
+        [[1.0, 2.5, 99.0], [1.0, 2.625, -99.0]], dtype=torch.float64
+    )
+    validator = segment.validators[0]
+    assert port.validate(validator, segment=segment).tolist() == [True, False]
+    evidence = port.validator_metadata(validator, segment=segment)
+    assert evidence["reference_frame"] == "parent"
+    assert evidence["position_error"][0][:2] == [0.0, 0.0]
+    objects["reference"]._pose[0, 0, 0] = float("nan")
+    assert port.validate(validator, segment=segment).tolist() == [False, False]
+    json.dumps(port.validator_metadata(validator, segment=segment), allow_nan=False)
+
+
+def test_upright_rejects_angle_boundary_and_nonfinite_rows() -> None:
+    segment = _measured_object_segment(
+        [{"kind": "object_upright", "object": "cube", "maximum_tilt_degrees": 90.0}]
+    )
+    port, objects = _measured_object_port(3)
+    objects["cube"]._pose[1, :3, :3] = torch.tensor(
+        [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]], dtype=torch.float64
+    )
+    objects["cube"]._pose[2, 2, 2] = float("inf")
+    assert port.validate(segment.validators[0], segment=segment).tolist() == [
+        True,
+        False,
+        False,
+    ]
+    json.dumps(
+        port.validator_metadata(segment.validators[0], segment=segment), allow_nan=False
+    )
+
+
+def test_measured_validator_rejects_a_different_segment_and_missing_binding() -> None:
+    segment = _measured_object_segment(
+        [{"kind": "object_lifted", "object": "reference"}]
+    )
+    port, _, _ = _port(torch.zeros(2, 3))
+    with pytest.raises(KeyError, match="reference"):
+        port.validate_validator(segment.validators[0], segment=segment)
+    other = _measured_object_segment([{"kind": "object_lifted", "object": "cube"}])
+    with pytest.raises(ValueError, match="does not belong"):
+        port.validate_validator(other.validators[0], segment=segment)

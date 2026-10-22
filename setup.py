@@ -24,16 +24,18 @@ from pathlib import Path
 
 from setuptools import Command, find_namespace_packages, setup
 
-__all__ = ["get_package_dir", "get_packages", "get_version"]
+__all__ = ["get_example_data_files", "get_package_dir", "get_packages", "get_version"]
 
 logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 logger = logging.getLogger()
 
 THIS_DIR = Path(__file__).resolve().parent
 CORE_PACKAGE_PATTERNS = ["embodichain", "embodichain.*"]
-TASKS_PROJECT_DIR = THIS_DIR / "embodichain_tasks"
+EXTENSIONS_DIR = THIS_DIR / "extensions"
+TASKS_PROJECT_DIR = EXTENSIONS_DIR / "embodichain_tasks"
 TASKS_PACKAGE_PATTERNS = ["embodichain_tasks", "embodichain_tasks.*"]
 ROBOTS_PACKAGE_PATTERNS = ["embodichain_robots", "embodichain_robots.*"]
+EXAMPLES_DIR = THIS_DIR / "examples"
 
 # Defer importing torch until it's actually needed (when building extensions).
 # This prevents `setup.py` from failing at import time in environments where
@@ -58,7 +60,7 @@ class CleanCommand(Command):
             "build",
             "dist",
             "embodichain.egg-info",
-            "embodichain_tasks/embodichain_tasks.egg-info",
+            "extensions/embodichain_tasks/embodichain_tasks.egg-info",
         ]:
             rm_path = THIS_DIR / d
             if not rm_path.exists():
@@ -83,7 +85,7 @@ class CleanCommand(Command):
 
 
 def get_packages() -> list[str]:
-    """Return core, task, and robot packages shipped in the main wheel."""
+    """Return core and bundled task and robot packages."""
     core_packages = find_namespace_packages(
         where=str(THIS_DIR), include=CORE_PACKAGE_PATTERNS
     )
@@ -91,7 +93,7 @@ def get_packages() -> list[str]:
         where=str(TASKS_PROJECT_DIR), include=TASKS_PACKAGE_PATTERNS
     )
     robot_packages = find_namespace_packages(
-        where=str(THIS_DIR), include=ROBOTS_PACKAGE_PATTERNS
+        where=str(EXTENSIONS_DIR), include=ROBOTS_PACKAGE_PATTERNS
     )
     return sorted(
         set(
@@ -106,11 +108,36 @@ def get_packages() -> list[str]:
 
 
 def get_package_dir() -> dict[str, str]:
-    """Map the task package and configs without moving their source paths."""
+    """Map bundled extension sources to their stable Python package names."""
     return {
-        "embodichain_tasks": "embodichain_tasks/embodichain_tasks",
-        "embodichain_tasks.configs": "embodichain_tasks/configs",
+        "embodichain_tasks": "extensions/embodichain_tasks/embodichain_tasks",
+        "embodichain_tasks.configs": "extensions/embodichain_tasks/configs",
+        "embodichain_robots": "extensions/embodichain_robots",
     }
+
+
+def get_example_data_files() -> list[tuple[str, list[str]]]:
+    """Preserve the ordinary examples tree as installed distribution data.
+
+    Returns:
+        Destination directories and source files, without Python package discovery.
+    """
+    directories: dict[str, list[str]] = {}
+    for source in sorted(EXAMPLES_DIR.rglob("*")):
+        relative = source.relative_to(EXAMPLES_DIR)
+        if (
+            not source.is_file()
+            or any(
+                part.startswith(".") or part == "__pycache__" for part in relative.parts
+            )
+            or source.suffix in {".pyc", ".pyo"}
+        ):
+            continue
+        destination = Path("share/embodichain/examples") / relative.parent
+        directories.setdefault(destination.as_posix(), []).append(
+            source.relative_to(THIS_DIR).as_posix()
+        )
+    return sorted(directories.items())
 
 
 def get_version() -> str:
@@ -145,7 +172,6 @@ def main():
         package_data={
             "embodichain": ["VERSION"],
             "embodichain.gen_sim.simready_pipeline.configs": ["*.json"],
-            "embodichain.lab.scripts._atomic_action": ["README.md"],
             "embodichain_tasks.configs": [
                 "**/*.json",
                 "**/*.yaml",
@@ -153,6 +179,7 @@ def main():
                 "**/README.md",
             ],
         },
+        data_files=get_example_data_files(),
         cmdclass=cmdclass,
         include_package_data=False,
     )

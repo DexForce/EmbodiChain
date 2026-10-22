@@ -81,6 +81,12 @@ the concrete Python class is an implementation detail. Use
 `/add-functor` for the precise scaffold; do not apply the event signature to
 observations, rewards or action terms.
 
+`normalize_robot_joint_data` selects either observation-column `joint_ids` or
+named `control_parts`. Named selection resolves current robot joint IDs and
+maps them into `env.active_joint_ids`; observed mimic joints are included.
+Use this selector for reusable arm/gripper observations across robot DOFs and
+state orders. Physical joint IDs are not observation-column indices.
+
 ## Lifecycle
 
 Managers resolve callable strings, validate parameters, resolve `SceneEntityCfg`
@@ -144,3 +150,9 @@ rows with zero before applying terms.
 arm IK and `ParallelGripperAction` maps one scalar to explicit independent
 gripper joints. ActionManager dispatches selected-row reset to every term so
 untouched rows retain their action history.
+
+Prepared semantic asset combinations use the existing
+`events.replace_assets_from_group` event's `deployment` mode at a cleared batch
+boundary. It shares the original directory replacement entry point; preparation,
+Task Program adaptation and reused-environment collection are owned by
+[asset generalization](../asset-generalization/asset-generalization.md).

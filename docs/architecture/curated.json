@@ -556,7 +556,7 @@
       ],
       "evidence": [
         {
-          "path": "embodichain_tasks/embodichain_tasks/__init__.py",
+          "path": "extensions/embodichain_tasks/embodichain_tasks/__init__.py",
           "symbol": "<module>",
           "start_line": 17,
           "end_line": 23,
@@ -946,7 +946,7 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/lab/scripts/run_env.py",
+          "path": "embodichain/lab/scripts/run_task.py",
           "symbol": "cli",
           "start_line": 994,
           "end_line": 994,
@@ -955,11 +955,11 @@
       ],
       "documentation": [
         {
-          "docname": "guides/run_env",
+          "docname": "guides/run_task",
           "label": "Environment launch guide"
         }
       ],
-      "details": "The run-env launcher discovers task packages, decodes the selected deployment, and creates the registered Gym environment. Use its launch guide to inspect a task, configure a run, and understand where configuration becomes a live environment."
+      "details": "The run-task launcher discovers task packages, decodes the selected deployment, and creates the registered Gym environment. Use its launch guide to inspect a task, configure a run, and understand where configuration becomes a live environment."
     },
     {
       "id": "config-loader",
@@ -1022,10 +1022,11 @@
       "label": "Data assets",
       "kind": "module",
       "topic_ids": [
-        "data-assets"
+        "data-assets",
+        "asset-generalization"
       ],
       "summary": "Resolves asset paths and coordinates registered dataset downloads and caches.",
-      "details": "Asset lookup can resolve a local path or instantiate a registered dataset to download and extract its assets. This layer owns asset discovery and cache roots; online trajectory sampling and demonstration recording are separate workflows.",
+      "details": "Asset lookup can resolve a local path or instantiate a registered dataset to download and extract its assets. This layer owns asset discovery and cache roots; online trajectory sampling and demonstration recording are separate workflows. Provider-neutral asset catalog contracts describe normalized rigid resources and prepared snapshots; Task Program owns the role requirements used to select compatible assets.",
       "boundaries": [
         "Asset lookup may trigger downloads; it does not generate or record demonstrations."
       ],
@@ -1036,12 +1037,23 @@
           "start_line": 17,
           "end_line": 17,
           "excerpt": "from __future__ import annotations"
+        },
+        {
+          "path": "embodichain/data/asset_catalog/contracts.py",
+          "symbol": "AssetDescriptor",
+          "start_line": 182,
+          "end_line": 182,
+          "excerpt": "class AssetDescriptor(_Record):"
         }
       ],
       "documentation": [
         {
           "docname": "resources/assets",
           "label": "Data assets documentation"
+        },
+        {
+          "docname": "api_reference/asset_generalization",
+          "label": "Asset catalog and task role contracts"
         }
       ]
     },
@@ -1219,7 +1231,7 @@
         "scene-expansion"
       ],
       "summary": "Defines immutable arena-local scene proposals and bounded authored candidate sources.",
-      "details": "The scene expansion core represents existing-entity pose changes with stable proposal identity, movable-entity permissions, provenance, and a bounded fixed-candidate source. Task semantics, physical preparation, execution, and persistence remain host responsibilities. The canonical package is sim.scene.expansion; legacy sim.scene_expansion imports re-export the same types and candidate identities.",
+      "details": "The scene expansion core represents existing-entity pose changes with stable proposal identity, movable-entity permissions, provenance, and a bounded fixed-candidate source. Task semantics, physical preparation, execution, and persistence remain host responsibilities. The package is sim.scene.expansion.",
       "boundaries": [
         "The core does not import Task Program, GenSim or Gym and does not reset, step or validate task success."
       ],
@@ -1530,10 +1542,11 @@
       "label": "Kinematics computation",
       "kind": "package",
       "topic_ids": [
-        "ik-solvers"
+        "ik-solvers",
+        "learning-layers"
       ],
       "summary": "Shared numerical kinematics and manipulability algorithms.",
-      "details": "This package owns reusable numerical routines and private Warp kernels. Stateful robot solving remains in motion.solvers, while workspace analysis consumes shared metrics and kinematic computation.",
+      "details": "This package owns reusable numerical routines and private Warp kernels. Differentiable fixed-step IK, SE(3) residuals, and serial-chain FK/Jacobians provide simulation-independent computation for Torch learning layers. Stateful robot solving remains in motion.solvers, while workspace analysis consumes shared metrics and kinematic computation.",
       "boundaries": [
         "Numerical kernels do not own live robot or environment state."
       ],
@@ -1542,8 +1555,8 @@
           "path": "embodichain/compute/kinematics/__init__.py",
           "symbol": "<module>",
           "start_line": 17,
-          "end_line": 22,
-          "excerpt": "\"\"\"Kinematics computations and scalar motion profiles.\n\nPrivate Warp kernels implement FEP, OPW, SRS, UR, and trapezoidal/Double-S profiles.\nStateful solver interfaces and robot configuration remain in\n``embodichain.lab.sim.motion.solvers``.\nPure batched manipulability helpers live in :mod:`.manipulability`.\"\"\""
+          "end_line": 24,
+          "excerpt": "\"\"\"Kinematics computations and scalar motion profiles.\n\nPrivate Warp kernels implement FEP, OPW, SRS, UR, and trapezoidal/Double-S profiles.\nStateful solver interfaces and robot configuration remain in\n``embodichain.lab.sim.motion.solvers``.\nPure batched manipulability helpers live in :mod:`.manipulability`.\nDifferentiable fixed-step IK, SE(3) residuals and serial-chain FK/Jacobians\nprovide simulation-independent computation for Torch learning layers.\"\"\""
         }
       ],
       "documentation": [
@@ -1763,7 +1776,7 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/learning/rl/models/policy.py",
+          "path": "embodichain/learning/rl/policies/policy.py",
           "symbol": "Policy",
           "start_line": 35,
           "end_line": 35,
@@ -2577,7 +2590,7 @@
           "symbol": "<module>",
           "start_line": 24,
           "end_line": 35,
-          "excerpt": "\"\"\"Depth quantization/dequantization for compressed depth sidecar videos.\n\nDepth maps are packed into 12-bit integer codes (``uint16``, values\n``0…DEPTH_QMAX``) so they fit the ``gray12le`` pixel format and can be encoded\nlosslessly by HEVC (``libx265``). Logarithmic quantization is the default\nbecause it allocates more quanta to near-range depth, matching the\n``1/depth`` error profile of typical depth sensors.\n\nThe math is ported from lerobot 0.6.0 (itself adapted from BEHAVIOR-1K's\n``obs_utils.py``) and depends only on :mod:`av`, :mod:`numpy` and\n:mod:`torch` -- all of which run on Python 3.10--3.12. See issue #424.\n\"\"\""
+          "excerpt": "\"\"\"Depth quantization/dequantization for compressed depth sidecar videos.\n\nDepth maps are packed into 12-bit integer codes (``uint16``, values\n``0\u2026DEPTH_QMAX``) so they fit the ``gray12le`` pixel format and can be encoded\nlosslessly by HEVC (``libx265``). Logarithmic quantization is the default\nbecause it allocates more quanta to near-range depth, matching the\n``1/depth`` error profile of typical depth sensors.\n\nThe math is ported from lerobot 0.6.0 (itself adapted from BEHAVIOR-1K's\n``obs_utils.py``) and depends only on :mod:`av`, :mod:`numpy` and\n:mod:`torch` -- all of which run on Python 3.10--3.12. See issue #424.\n\"\"\""
         }
       ],
       "documentation": [
@@ -2881,7 +2894,7 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/learning/rl/models/actor_critic.py",
+          "path": "embodichain/learning/rl/policies/actor_critic.py",
           "symbol": "ActorCritic",
           "start_line": 34,
           "end_line": 34,
@@ -2890,7 +2903,7 @@
       ],
       "documentation": [
         {
-          "docname": "api_reference/embodichain/embodichain.learning.rl.models",
+          "docname": "api_reference/embodichain/embodichain.learning.rl.policies",
           "label": "ActorCritic documentation"
         }
       ]
@@ -2909,7 +2922,7 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/learning/rl/models/actor_only.py",
+          "path": "embodichain/learning/rl/policies/actor_only.py",
           "symbol": "ActorOnly",
           "start_line": 31,
           "end_line": 31,
@@ -2918,7 +2931,7 @@
       ],
       "documentation": [
         {
-          "docname": "api_reference/embodichain/embodichain.learning.rl.models",
+          "docname": "api_reference/embodichain/embodichain.learning.rl.policies",
           "label": "ActorOnly documentation"
         }
       ]
@@ -3790,8 +3803,8 @@
       "source": "cli",
       "target": "env-launcher",
       "relation": "calls",
-      "description": "Dispatch the run-env command to the environment launcher.",
-      "scope": "Lazy command dispatch for run-env (and its run-task alias), not an unconditional startup call.",
+      "description": "Dispatch the run-task command to the environment launcher.",
+      "scope": "Lazy command dispatch for run-task, not an unconditional startup call.",
       "provenance": "source-reviewed",
       "evidence": [
         {
@@ -3799,7 +3812,7 @@
           "symbol": "<module>",
           "start_line": 68,
           "end_line": 68,
-          "excerpt": "        target=\"embodichain.lab.scripts.run_env:cli\","
+          "excerpt": "        target=\"embodichain.lab.scripts.run_task:cli\","
         },
         {
           "path": "embodichain/cli/main.py",
@@ -3859,7 +3872,7 @@
       "provenance": "source-reviewed",
       "evidence": [
         {
-          "path": "embodichain/lab/scripts/run_env.py",
+          "path": "embodichain/lab/scripts/run_task.py",
           "symbol": "cli",
           "start_line": 1018,
           "end_line": 1018,
@@ -3916,7 +3929,7 @@
       "provenance": "source-reviewed",
       "evidence": [
         {
-          "path": "embodichain/lab/scripts/run_env.py",
+          "path": "embodichain/lab/scripts/run_task.py",
           "symbol": "cli",
           "start_line": 1628,
           "end_line": 1628,
@@ -3966,7 +3979,7 @@
           "excerpt": "        cfg: EmbodiedEnvCfg = config_to_cfg(\n            gym_config,\n            manager_modules=get_manager_modules(),\n            source_path=gym_config_source_path,\n            task_program_path_override=getattr(args, \"task_program\", None),\n        )"
         },
         {
-          "path": "embodichain/lab/scripts/run_env.py",
+          "path": "embodichain/lab/scripts/run_task.py",
           "symbol": "cli",
           "start_line": 1680,
           "end_line": 1680,
@@ -4029,9 +4042,9 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_robot",
-          "start_line": 3021,
-          "end_line": 3024,
-          "excerpt": "        self._robots[uid] = robot\n        if was_materialized:\n            self.prepare()\n        return robot"
+          "start_line": 3287,
+          "end_line": 3292,
+          "excerpt": "        self._robots[uid] = robot\n        if was_materialized:\n            self.prepare()\n        for sensor_cfg in mounted_sensors:\n            self.add_sensor(sensor_cfg)\n        return robot"
         }
       ]
     },
@@ -4041,15 +4054,15 @@
       "target": "simulation-manager",
       "relation": "calls",
       "description": "Delegate robot declaration to the simulation manager.",
-      "scope": "EmbodiedEnv._declare_robot uses the robot configuration owned by the assembled environment.",
+      "scope": "EmbodiedEnv._declare_robot passes an isolated configuration with the Gym acquisition switch to SimulationManager.add_robot.",
       "provenance": "source-reviewed",
       "evidence": [
         {
           "path": "embodichain/lab/gym/envs/embodied_env.py",
           "symbol": "EmbodiedEnv._declare_robot",
-          "start_line": 1987,
-          "end_line": 1987,
-          "excerpt": "        return self.sim.add_robot(self.cfg.robot)"
+          "start_line": 2609,
+          "end_line": 2609,
+          "excerpt": "        return self.sim.add_robot(robot_cfg)"
         }
       ]
     },
@@ -5132,7 +5145,7 @@
       "scope": "Direct Python inheritance; not an algorithm-to-model compatibility matrix.",
       "evidence": [
         {
-          "path": "embodichain/learning/rl/models/actor_critic.py",
+          "path": "embodichain/learning/rl/policies/actor_critic.py",
           "symbol": "ActorCritic",
           "start_line": 34,
           "end_line": 34,
@@ -5150,7 +5163,7 @@
       "scope": "Direct Python inheritance; not an algorithm-to-model compatibility matrix.",
       "evidence": [
         {
-          "path": "embodichain/learning/rl/models/actor_only.py",
+          "path": "embodichain/learning/rl/policies/actor_only.py",
           "symbol": "ActorOnly",
           "start_line": 31,
           "end_line": 31,
@@ -5478,7 +5491,7 @@
           "symbol": "execute_scene_variant",
           "start_line": 294,
           "end_line": 296,
-          "excerpt": "        segments = EmbodiedEnv.create_demo_segments(\n            target, task_program=selected_program\n        )"
+          "excerpt": "            segments = EmbodiedEnv.create_demo_segments("
         }
       ]
     },

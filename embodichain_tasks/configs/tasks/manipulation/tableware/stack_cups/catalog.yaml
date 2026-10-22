@@ -1,8 +1,0 @@
-task_key: stack_cups
-title: Stack Cups
-summary: A tableware environment with cup alignment and uprightness success checks.
-tags: [tableware, stacking]
-default_deployment: default
-deployments:
-  default:
-    config: env.json
