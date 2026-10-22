@@ -8,6 +8,16 @@ EmbodiChain's shared scene, object, sensor, and stepping APIs. Select it with
 {class}`~cfg.NewtonPhysicsCfg`, or with `physics: newton` in a Gym environment
 configuration.
 
+## Package compatibility
+
+This integration requires `dexsim_engine>=0.5.1,<0.6`. The earlier `0.5.1rc1`
+package does not contain the batched RL and contact fixes required here.
+When testing locally built candidates, install the EmbodiChain and DexSim wheels
+in the same `python -m pip install` command, with dependency resolution enabled,
+then run `python -m pip check`. A local version such as `0.5.1+<revision>` satisfies
+the requirement. Use the paired candidate wheels until DexSim 0.5.1 is published
+to the package index.
+
 ```{important}
 For scenes that combine an articulated robot with cloth or a volume soft body,
 start with **DexUni**. It is the DexSim coupled solver configuration for this
