@@ -29,6 +29,7 @@ import numpy as np
 import warp as wp
 
 from pathlib import Path
+from uuid import uuid4
 from copy import deepcopy
 from datetime import datetime
 from functools import cached_property, partial
@@ -134,6 +135,7 @@ from embodichain.lab.sim.spawn.usd import (
 )
 from embodichain.lab.sim.spawn.scene import SpawnScene
 from embodichain.lab.sim import VisualMaterial, VisualMaterialCfg
+from embodichain.lab.sim.material import _material_desc_from_cfg
 from embodichain.lab.sim.profiler import Profiler, ProfilerCfg
 from embodichain.lab.visualization.cfg import VisualizationCfg
 from embodichain.utils import configclass, logger
@@ -4814,19 +4816,31 @@ class SimulationManager:
         """
 
         self._require_native_renderer("Native visual materials")
+        cfg = cfg.replace(uid=cfg.uid or f"visual_material_{uuid4().hex}")
+        descriptor = _material_desc_from_cfg(cfg, cfg.uid)
+        definitions = self._spawn_scene.builder.materials
+        registered = definitions.get(cfg.uid)
+        if registered is not None and registered != descriptor:
+            raise ValueError(f"Conflicting visual material definition for {cfg.uid!r}.")
         if cfg.uid in self._visual_materials:
-            logger.log_warning(
-                f"Visual material {cfg.uid} already exists. Returning the existing one."
-            )
-            return self._visual_materials[cfg.uid]
+            existing = self._visual_materials[cfg.uid]
+            if _material_desc_from_cfg(existing.cfg, cfg.uid) != descriptor:
+                raise ValueError(
+                    f"Conflicting visual material definition for {cfg.uid!r}."
+                )
+            return existing
 
-        mat: Material = self._env.create_pbr_material(cfg.uid, True)
-        visual_mat = VisualMaterial(cfg, mat)
+        mat: Material | None = self._env.find_material(cfg.uid)
+        initialize_default = mat is None or registered is None
+        if mat is None:
+            mat = self._env.create_pbr_material(cfg.uid, True)
+        visual_mat = VisualMaterial(cfg, mat, initialize_default=initialize_default)
 
+        definitions[cfg.uid] = descriptor
         self._visual_materials[cfg.uid] = visual_mat
         return visual_mat
 
-    def get_visual_material(self, uid: str) -> VisualMaterial:
+    def get_visual_material(self, uid: str) -> VisualMaterial | None:
         """Get visual material by UID.
 
         Args:
@@ -4838,7 +4852,13 @@ class SimulationManager:
 
         return self._visual_materials[uid]
 
-    def clean_materials(self):
+    def clean_materials(self) -> None:
+        """Clear runtime wrappers and ask the native owner to release unused materials.
+
+        Explicit material definitions remain reserved in the Scene for the World
+        lifetime. Cleaning does not permit a conflicting definition to replace a
+        UID that declarations or live native handles may still reference.
+        """
         self._visual_materials = {}
         if self._env:
             self._env.clean_materials()

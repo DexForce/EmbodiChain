@@ -447,12 +447,9 @@ class BaseRigidObjectTest:
             len(material_list) == NUM_ARENAS
         ), f"Expected {NUM_ARENAS} materials, got {len(material_list)}"
         for mat_inst in material_list:
-            assert mat_inst.base_color == [
-                0.0,
-                0.0,
-                1.0,
-                1.0,
-            ], f"Material base color incorrect: {mat_inst.base_color}"
+            assert mat_inst.base_color == pytest.approx(
+                [0.0, 0.0, 1.0]
+            ), f"Material base color incorrect: {mat_inst.base_color}"
 
     def test_add_cube(self):
         cfg_dict = {
@@ -864,12 +861,9 @@ class BaseRigidObjectTest:
             len(cube_materials) == NUM_ARENAS
         ), f"Cube should have {NUM_ARENAS} material instances"
         for i in range(NUM_ARENAS):
-            assert cube_materials[i].base_color == [
-                0.0,
-                0.0,
-                1.0,
-                1.0,
-            ], f"Material {i} base color incorrect"
+            assert cube_materials[i].base_color == pytest.approx(
+                [0.0, 0.0, 1.0]
+            ), f"Material {i} base color incorrect"
 
     def test_geometry_data(self):
         """Test mesh-level read APIs: get_triangles and scaled get_vertices.

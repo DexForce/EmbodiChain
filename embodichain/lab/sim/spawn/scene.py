@@ -70,10 +70,18 @@ class SpawnScene:
         )
         self._assets: dict[str, _AssetDeclaration] = {}
         self._usd_texture_files = _UsdTextureFiles()
+        self._pending_material_assignments: (
+            dict[tuple[str, int, str | None], list[Any]] | None
+        ) = None
 
     def _resolve_materials(self, materials: dict[str, Any]) -> dict[str, Any]:
         """Resolve package images before DexSim creates native materials."""
-        return self._usd_texture_files.resolve(materials)
+        resolved = self._usd_texture_files.resolve(materials)
+        for uid, descriptor in resolved.items():
+            existing = self.builder.materials.get(uid)
+            if existing is not None and existing != descriptor:
+                raise ValueError(f"Conflicting visual material definition for {uid!r}.")
+        return resolved
 
     @property
     def arena_names(self) -> tuple[str, ...]:
@@ -202,6 +210,11 @@ class SpawnScene:
             if removed is None:
                 raise KeyError(f"Spawn asset is absent from SceneBuilder: {uid!r}.")
         del self._assets[uid]
+        pending = getattr(self, "_pending_material_assignments", None)
+        if pending is not None:
+            self._pending_material_assignments = {
+                key: materials for key, materials in pending.items() if key[0] != uid
+            }
 
     def commit(self) -> Any:
         """Finalize once or let the current ``Scene`` consume pending changes."""
@@ -212,12 +225,62 @@ class SpawnScene:
             result = self.builder.result
             assert result is not None
             if self.builder.has_pending_changes or result.needs_rebuild:
+                if getattr(self, "_pending_material_assignments", None) is None:
+                    self._pending_material_assignments = (
+                        self._capture_material_assignments()
+                    )
                 result = result.rebuild(self.builder)
 
         for uid in self._assets:
             self._configure_materialized_source(uid)
         self.builder.result = result
         return result
+
+    def _capture_material_assignments(
+        self,
+    ) -> dict[tuple[str, int, str | None], list[Any]]:
+        """Snapshot current per-segment assignments before native resources rebuild."""
+        from embodichain.lab.sim.material import _capture_render_materials
+
+        assignments = {}
+        for uid, declaration in self._assets.items():
+            facade = declaration.facade
+            if facade is None or not getattr(facade, "is_spawn_bound", False):
+                continue
+            links = facade.link_names if declaration.kind == "articulation" else [None]
+            for instance_idx, entity in enumerate(self.handles(uid)):
+                for link in links:
+                    render_body = (
+                        entity.get_render_body()
+                        if link is None
+                        else entity.get_render_body(link)
+                    )
+                    if render_body is not None:
+                        assignments[(uid, instance_idx, link)] = (
+                            _capture_render_materials(render_body)
+                        )
+        return assignments
+
+    def _restore_material_assignments(self) -> None:
+        """Replay current assignments; retain the snapshot when preparation must retry."""
+        from embodichain.lab.sim.material import _restore_render_materials
+
+        assignments = getattr(self, "_pending_material_assignments", None)
+        if assignments is None:
+            return
+        for (uid, instance_idx, link), materials in assignments.items():
+            if uid not in self._assets:
+                continue
+            entity = self.handles(uid)[instance_idx]
+            render_body = (
+                entity.get_render_body()
+                if link is None
+                else entity.get_render_body(link)
+            )
+            if render_body is None or render_body.get_mesh_count() != len(materials):
+                raise RuntimeError(f"Render material topology changed for {uid!r}.")
+            _restore_render_materials(render_body, materials)
+        self._pending_material_assignments = None
 
     def bind(self) -> None:
         """Complete post-finalize runtime binding for declared facades.
@@ -232,6 +295,7 @@ class SpawnScene:
         if result is None or not self.builder.is_finalized:
             raise RuntimeError("Spawn scene must be materialized before binding.")
 
+        self._restore_material_assignments()
         for uid, declaration in self._assets.items():
             facade = declaration.facade
             if facade is None or not facade.is_declared:
@@ -262,6 +326,7 @@ class SpawnScene:
     def close(self) -> None:
         """Release Spawn resources and facade references."""
         result = self.builder.result
+        self._pending_material_assignments = None
         try:
             if result is not None:
                 result.close()

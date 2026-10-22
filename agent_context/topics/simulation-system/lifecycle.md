@@ -12,7 +12,8 @@ readiness; `spawn/scene.py` owns declaration coordination. The ordering is:
    native parents. Resolve/configure sources and commit Spawn topology.
 2. Apply Default articulation root properties before Direct GPU buffers capture
    them. Delegate runtime setup to `PhysicsBackend.prepare_spawn_runtime()`.
-3. Bind declared facades in place; publish their state through
+3. Replay the current per-segment [material assignments](materials.md) captured
+   before rebuilding, then bind declared facades in place; publish their state through
    `PhysicsBackend.sync_render_state()` without a physics step.
 4. Attach parented cameras and publish the ready topology revision only after
    every stage succeeds.
