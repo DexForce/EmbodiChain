@@ -2381,7 +2381,8 @@ class EmbodiedEnv(BaseEnv):
         objective = getattr(self, "physical_objective", None)
         if objective is not None:
             info["physical_objective"] = objective.snapshot()
-        info["episode_context"] = self.episode_context.snapshot()
+        if self.cfg.episode_context_in_info:
+            info["episode_context"] = self.episode_context.snapshot()
         return info
 
     def evaluate(self, **kwargs) -> Dict[str, Any]:

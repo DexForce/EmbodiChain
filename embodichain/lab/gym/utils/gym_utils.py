@@ -819,6 +819,12 @@ def config_to_cfg(
     if type(ignore_terminations) is not bool:
         raise TypeError("env.ignore_terminations must be a bool.")
     env_cfg.ignore_terminations = ignore_terminations
+    episode_context_in_info = config["env"].get(
+        "episode_context_in_info", env_cfg.episode_context_in_info
+    )
+    if type(episode_context_in_info) is not bool:
+        raise TypeError("env.episode_context_in_info must be a bool.")
+    env_cfg.episode_context_in_info = episode_context_in_info
     task_instruction = config["env"].get("task_instruction")
     if task_instruction is not None and (
         type(task_instruction) is not str
