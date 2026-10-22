@@ -92,6 +92,7 @@ class _SliderDynamics(FunctionalDynamics):
             or not np.isin(
                 types, [int(newton.JointType.FIXED), int(newton.JointType.PRISMATIC)]
             ).all()
+            or len(children) != model.body_count
             or len(set(children.tolist())) != model.body_count
             or any(int(children[j]) in parents for j in moving)
             or not model.joint_enabled.numpy().all()

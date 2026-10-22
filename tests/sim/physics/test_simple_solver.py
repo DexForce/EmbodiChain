@@ -151,6 +151,23 @@ def test_named_config_and_independent_provider_parameters():
     assert second.functional.parameters()["force_scale"].item() == 1
 
 
+def test_fixed_loop_cannot_be_treated_as_an_independent_slider():
+    builder = newton.ModelBuilder(gravity=(0, 0, 0))
+    inertia = wp.mat33(np.eye(3))
+    base = builder.add_link(mass=1.0, inertia=inertia)
+    slider = builder.add_link(mass=2.0, inertia=inertia)
+    other = builder.add_link(mass=1.0, inertia=inertia)
+    root = builder.add_joint_fixed(-1, base)
+    slide = builder.add_joint_prismatic(base, slider, axis=(1, 0, 0))
+    builder.add_articulation([root, slide])
+    other_root = builder.add_joint_fixed(-1, other)
+    builder.add_articulation([other_root])
+    builder.add_joint_fixed(other, slider, label="closed_loop_weld")
+    model = builder.finalize("cpu")
+    with pytest.raises(ValueError, match="independent prismatic leaf"):
+        _extension(model)
+
+
 @pytest.mark.requires_sim
 @pytest.mark.parametrize("owner", ["articulation", "manager"])
 def test_effort_only_reset_restores_selected_environment(tmp_path, owner):

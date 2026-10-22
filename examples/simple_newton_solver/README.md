@@ -77,3 +77,10 @@ and DexSim owns native buffers, clocks and lifecycle. A topology rebuild creates
 a new provider; save and restore learned parameters explicitly across rebuilds.
 Training loops and optimizers remain downstream. The example adds no manager or
 registry of its own.
+
+The demonstrated gradients are with respect to effort and `force_scale`.
+Functional state includes both joint and body coordinates. To differentiate a
+Cartesian loss with respect to initial joint positions, initialize body poses
+through a differentiable FK graph consistent with those positions. Promoting
+only `joint_q` to a trainable tensor while keeping the initial `body_q` detached
+instead differentiates a redundant state with its initial body pose held fixed.
