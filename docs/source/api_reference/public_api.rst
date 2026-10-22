@@ -1474,7 +1474,7 @@ embodichain.lab.sim.physics.newton
    NewtonPhysicsBackend
 
 embodichain.lab.sim.physics.solvers.simple
-----------------------------------------
+------------------------------------------
 
 .. currentmodule:: embodichain.lab.sim.physics.solvers.simple
 

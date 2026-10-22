@@ -20,7 +20,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 from contextlib import nullcontext
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
 import newton
 import numpy as np
@@ -35,18 +35,18 @@ __all__ = ["SimpleSolverProvider"]
 
 # Catalogues and autodoc may inspect the provider with the released SDK.
 # Resolve annotations when available; instance creation enforces the runtime API.
-if TYPE_CHECKING:
+try:
     from dexsim.engine.newton_physics import (
         FunctionalSolverState,
         NewtonSolverCapabilities,
         NewtonSolverContext,
         NewtonSolverExtension,
     )
-else:
-    FunctionalSolverState = getattr(_sdk, "FunctionalSolverState", Any)
-    NewtonSolverCapabilities = getattr(_sdk, "NewtonSolverCapabilities", Any)
-    NewtonSolverContext = getattr(_sdk, "NewtonSolverContext", Any)
-    NewtonSolverExtension = getattr(_sdk, "NewtonSolverExtension", Any)
+except ImportError:
+    FunctionalSolverState = Any
+    NewtonSolverCapabilities = Any
+    NewtonSolverContext = Any
+    NewtonSolverExtension = Any
 
 
 def _torch_scope(device: wp.context.Device) -> Any:
