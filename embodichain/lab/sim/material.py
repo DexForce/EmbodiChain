@@ -22,7 +22,7 @@ import dexsim
 import numpy as np
 
 from dataclasses import dataclass
-from typing import Dict, Union
+from typing import Any, Dict, Union
 from functools import cached_property
 
 from dexsim.engine import MaterialInst, Material
@@ -103,7 +103,7 @@ class VisualMaterialCfg:
 def _apply_volume_material_properties(
     native: MaterialInst, cfg: VisualMaterialCfg
 ) -> None:
-    """Apply optical volume parameters not carried by Spawn MaterialDesc."""
+    """Apply explicit optical parameters to an existing native material."""
     for name in (
         "transmission",
         "volume_thickness",
@@ -491,12 +491,19 @@ class ReuseSegmentState:
     working_inst: VisualMaterialInst
 
 
-def _capture_render_materials(render_body) -> list[MaterialInst | None]:
-    """Capture the material attached to every render-body mesh segment."""
-    return [
+def _capture_render_materials(
+    render_body: Any, *, cfg: VisualMaterialCfg | None = None
+) -> list[MaterialInst | None]:
+    """Capture every segment material and apply configured optical properties."""
+    materials = [
         render_body.get_material(mesh_id)
         for mesh_id in range(render_body.get_mesh_count())
     ]
+    if cfg is not None:
+        for material in materials:
+            if material is not None:
+                _apply_volume_material_properties(material, cfg)
+    return materials
 
 
 def _wrap_first_render_material(

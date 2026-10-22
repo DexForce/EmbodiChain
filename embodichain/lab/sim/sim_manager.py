@@ -2883,6 +2883,9 @@ class SimulationManager:
             ):
                 raise ValueError("All fluids must share density and particle_spacing.")
         configured = self.sim_config.physics_cfg.solver_cfg
+        from dexsim.engine.newton_physics import SPHSolverCfg
+
+        defaults = SPHSolverCfg()
         for key, value in (
             ("rest_density", cfg.density),
             ("particle_diameter", cfg.particle_spacing),
@@ -2892,8 +2895,10 @@ class SimulationManager:
                 if isinstance(configured, Mapping)
                 else getattr(configured, key, None)
             )
-            if existing is not None and not np.isclose(
-                existing, value, rtol=1e-7, atol=0
+            if (
+                existing is not None
+                and not np.isclose(existing, getattr(defaults, key), rtol=1e-7, atol=0)
+                and not np.isclose(existing, value, rtol=1e-7, atol=0)
             ):
                 raise ValueError(f"Fluid {key} conflicts with solver_cfg.{key}.")
         points = cfg.spawn.sample(cfg.particle_spacing)

@@ -2380,3 +2380,49 @@ def test_rigid_descriptor_rejects_orientation_without_principal_moments() -> Non
     )
     with pytest.raises(ValueError, match="requires explicit principal inertia"):
         rigid_desc_from_cfg(cfg)
+
+
+@pytest.mark.parametrize(
+    "kind", ["rigid", "visual", "volume", "surface", "surface_visual"]
+)
+def test_shape_optical_transmission_reaches_spawn_material(kind):
+    from embodichain.lab.sim.cfg import (
+        RigidObjectCfg,
+        VisualObjectCfg,
+        VolumeDeformableObjectCfg,
+        SurfaceDeformableObjectCfg,
+    )
+    from embodichain.lab.sim.material import VisualMaterialCfg
+    from embodichain.lab.sim.spawn.descriptors import (
+        visual_desc_from_cfg,
+        volume_deformable_desc_from_cfg,
+        surface_deformable_desc_from_cfg,
+    )
+
+    cfg_type, compile_descriptor = {
+        "rigid": (RigidObjectCfg, rigid_desc_from_cfg),
+        "visual": (VisualObjectCfg, visual_desc_from_cfg),
+        "volume": (VolumeDeformableObjectCfg, volume_deformable_desc_from_cfg),
+        "surface": (SurfaceDeformableObjectCfg, surface_deformable_desc_from_cfg),
+        "surface_visual": (
+            SurfaceDeformableObjectCfg,
+            surface_deformable_desc_from_cfg,
+        ),
+    }[kind]
+    cfg = cfg_type(
+        uid="glass",
+        shape=MeshCfg(
+            fpath="/assets/glass.obj",
+            visual_material=VisualMaterialCfg(transmission=0.85),
+        ),
+    )
+
+    if kind == "surface_visual":
+        cfg.visual_shape = MeshCfg(
+            fpath="/assets/render.obj", visual_material=cfg.shape.visual_material
+        )
+        cfg.shape.visual_material = VisualMaterialCfg(transmission=0.1)
+
+    _, materials = compile_descriptor(cfg)
+
+    assert next(iter(materials.values())).transmission == 0.85

@@ -332,11 +332,16 @@ class DeformableObject(BatchEntity):
         """Capture and wrap materials parsed from the source asset."""
         self._original_visual_material = [[] for _ in self._entities]
         self._original_visual_material_inst = [None] * len(self._entities)
+        cfg = getattr(self, "cfg", None)
+        shape = getattr(cfg, "visual_shape", None) or getattr(cfg, "shape", None)
+        material_cfg = getattr(shape, "visual_material", None)
         for env_idx, entity in enumerate(self._entities):
             render_body = entity.get_render_body()
             if render_body is None:
                 continue
-            original_materials = _capture_render_materials(render_body)
+            original_materials = _capture_render_materials(
+                render_body, cfg=material_cfg
+            )
             self._original_visual_material[env_idx] = original_materials
             wrapped = _wrap_first_render_material(original_materials)
             if wrapped is not None:

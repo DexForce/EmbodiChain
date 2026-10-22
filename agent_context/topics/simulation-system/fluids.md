@@ -6,6 +6,11 @@ remain DexSim `SPHSolverCfg`, accepted directly or through
 `SimulationManager.add_fluid_object()` declares through SpawnScene and binds
 `objects/fluid.py` in place at `prepare()`.
 
+The fluid declaration owns density and spacing. Default native SPH values for
+`rest_density` and `particle_diameter` are placeholders, equally for mappings
+and native config objects; non-default solver values must match the fluid.
+DexSim derives the effective solver values from the fluid descriptors.
+
 ## Runtime requirements
 
 The foundation supports the published `dexsim_engine==0.5.1rc1` artifact

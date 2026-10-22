@@ -493,3 +493,42 @@ def test_visual_material_read_respects_selected_environments():
     visual, _ = _visual()
     assert visual.get_visual_material_inst([1]) == [None]
     assert visual.get_visual_material_inst([]) == []
+
+
+def test_visual_binding_applies_optics_to_all_materials_and_preserves_reset():
+    from unittest.mock import call
+    from embodichain.lab.sim.material import VisualMaterialCfg
+
+    material_cfg = VisualMaterialCfg(
+        transmission=0.85,
+        volume_thickness=0.08,
+        volume_attenuation_distance=0.5,
+        volume_attenuation_color=(0.2, 0.6, 0.8),
+    )
+    visual = VisualObject(
+        VisualObjectCfg(
+            uid="glass",
+            shape=MeshCfg(fpath="/assets/glass.obj", visual_material=material_cfg),
+        )
+    )
+    visual._initialize_spawn_declaration(1)
+    handle = _Handle(0.0)
+    originals = [MagicMock(name="first"), MagicMock(name="second")]
+    for i, material in enumerate(originals):
+        material.get_name.return_value = f"material_{i}"
+        material.get_template.return_value.get_name.return_value = f"template_{i}"
+    handle.render.materials = originals.copy()
+    visual.attach_spawn_handles([handle])
+
+    visual.bind_spawn(SimpleNamespace(topology_revision=1, world=_World([handle])))
+    handle.render.materials = [None, None]
+    visual.reset()
+
+    assert handle.render.materials == originals
+    for material in originals:
+        assert material.set_pbr_param.call_args_list == [
+            call("transmission", 0.85),
+            call("volume_thickness", 0.08),
+            call("volume_attenuation_distance", 0.5),
+            call("volume_attenuation_color", 0.2, 0.6, 0.8),
+        ]

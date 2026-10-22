@@ -1744,6 +1744,7 @@ def _compile_visual_material(
         metallic_map=cfg.metallic_texture,
         ao_map=cfg.ao_texture,
         ior=float(cfg.ior),
+        transmission=cfg.transmission,
     )
     return key, (key, desc)
 

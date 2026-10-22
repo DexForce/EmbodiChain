@@ -283,3 +283,78 @@ def test_fluid_renderer_gate_allows_supported_backends(
     assert SimulationManager.add_fluid_object(manager, cfg) is facade
     assert manager._fluid_objects["water"] is facade
     manager._spawn_scene.declare.assert_called_once()
+
+
+@pytest.mark.parametrize("representation", ["native", "mapping", "full_mapping"])
+@pytest.mark.parametrize("density,spacing", [(1000.0, 0.0015), (800.0, 0.003)])
+def test_solver_defaults_allow_fluid_owned_density_and_spacing(
+    representation, density, spacing, monkeypatch
+):
+    from dataclasses import asdict
+    from unittest.mock import Mock
+    from dexsim.engine.newton_physics import SPHSolverCfg
+    from embodichain.lab.sim import SimulationManager
+
+    solver = SPHSolverCfg(sph_method="dfsph")
+    if representation == "mapping":
+        solver = {"solver_type": "sph", "sph_method": "dfsph"}
+    elif representation == "full_mapping":
+        solver = asdict(solver)
+    manager = _fluid_manager_for_renderer("no-render")
+    manager.sim_config.physics_cfg.solver_cfg = solver
+    monkeypatch.setattr(SimulationManager, "_get_process_renderer", lambda: None)
+    monkeypatch.setattr("embodichain.lab.sim.sim_manager.FluidObject", Mock())
+    cfg = FluidObjectCfg(
+        uid="water",
+        density=density,
+        particle_spacing=spacing,
+        spawn=FluidSpawnCfg(positions=[[0.0, 0.0, 0.0]]),
+        render={"mode": "none"},
+    )
+
+    SimulationManager.add_fluid_object(manager, cfg)
+
+    descriptor = manager._spawn_scene.declare.call_args.args[2]
+    assert descriptor.density == density
+    assert descriptor.particle_spacing == spacing
+    if representation != "mapping":
+        values = asdict(solver) if representation == "native" else solver
+        assert values["rest_density"] == SPHSolverCfg().rest_density
+        assert values["particle_diameter"] == SPHSolverCfg().particle_diameter
+
+
+@pytest.mark.parametrize("representation", ["native", "mapping"])
+@pytest.mark.parametrize("conflict", ["rest_density", "particle_diameter", None])
+def test_solver_nondefault_physical_values_must_match_fluid(
+    representation, conflict, monkeypatch
+):
+    from dataclasses import asdict
+    from unittest.mock import Mock
+    from dexsim.engine.newton_physics import SPHSolverCfg
+    from embodichain.lab.sim import SimulationManager
+
+    density, spacing = 800.0, 0.003
+    solver = SPHSolverCfg(rest_density=density, particle_diameter=spacing)
+    if conflict is not None:
+        setattr(solver, conflict, 1200.0 if conflict == "rest_density" else 0.02)
+    if representation == "mapping":
+        solver = asdict(solver)
+    manager = _fluid_manager_for_renderer("no-render")
+    manager.sim_config.physics_cfg.solver_cfg = solver
+    monkeypatch.setattr(SimulationManager, "_get_process_renderer", lambda: None)
+    monkeypatch.setattr("embodichain.lab.sim.sim_manager.FluidObject", Mock())
+    cfg = FluidObjectCfg(
+        uid="water",
+        density=density,
+        particle_spacing=spacing,
+        spawn=FluidSpawnCfg(positions=[[0.0, 0.0, 0.0]]),
+        render={"mode": "none"},
+    )
+
+    if conflict is None:
+        SimulationManager.add_fluid_object(manager, cfg)
+        manager._spawn_scene.declare.assert_called_once()
+    else:
+        with pytest.raises(ValueError, match=f"Fluid {conflict} conflicts"):
+            SimulationManager.add_fluid_object(manager, cfg)
+        manager._spawn_scene.declare.assert_not_called()
