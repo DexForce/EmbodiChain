@@ -2577,7 +2577,8 @@ class EmbodiedEnv(BaseEnv):
         outcome = getattr(self, "termination_manager", None)
         if outcome is not None:
             info["task_outcome"] = outcome.snapshot()
-        info["episode_context"] = self.episode_context.snapshot()
+        if self.cfg.episode_context_in_info:
+            info["episode_context"] = self.episode_context.snapshot()
         return info
 
     def check_truncated(self, obs: EnvObs, info: dict[str, Any]) -> torch.Tensor:

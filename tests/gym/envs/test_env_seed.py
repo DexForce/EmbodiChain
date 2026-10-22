@@ -28,7 +28,7 @@ import pytest
 import torch
 
 import embodichain.lab.gym.envs.base_env as base_env_module
-from embodichain.lab.gym.envs import BaseEnv
+from embodichain.lab.gym.envs import BaseEnv, EnvCfg, EmbodiedEnv
 from embodichain.lab.sim import SimulationManager
 
 # This module calls one unbound manager method on registry stubs; no World is
@@ -48,7 +48,7 @@ class _ResetEnv(BaseEnv):
 
     def __init__(self, num_envs: int = 1) -> None:
         self.reset_events: list[str] = []
-        self.cfg = SimpleNamespace(seed=None)
+        self.cfg = EnvCfg(seed=None)
         self._num_envs = num_envs
         self.episode_context = EpisodeContext(num_envs)
         self.sim = SimpleNamespace(
@@ -241,3 +241,35 @@ def test_explicit_zero_seed_is_reproducible():
     first.cfg.seed = second.cfg.seed = 0
     a, b = first.get_generator("commands"), second.get_generator("commands")
     assert torch.equal(torch.rand(8, generator=a), torch.rand(8, generator=b))
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+@pytest.mark.parametrize("info_owner", [BaseEnv, EmbodiedEnv])
+def test_episode_context_info_is_optional_without_changing_lifecycle(
+    enabled: bool, info_owner: type, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Opting out avoids snapshots while partial reset and provenance stay valid."""
+    env = _ResetEnv(num_envs=2)
+    assert env.cfg.episode_context_in_info is True
+    env.cfg.episode_context_in_info = enabled
+    env.compute_task_state = lambda **_: (
+        torch.zeros(2, dtype=torch.bool),
+        torch.zeros(2, dtype=torch.bool),
+        {},
+    )
+    env.get_info = lambda **kwargs: info_owner.get_info(env, **kwargs)
+    snapshot = MagicMock(wraps=env.episode_context.snapshot)
+    monkeypatch.setattr(env.episode_context, "snapshot", snapshot)
+    _, info = env.reset()
+    assert ("episode_context" in info) is enabled
+    assert snapshot.call_count == int(enabled)
+    # Recording remains eligible and can still request an owned snapshot.
+    assert env.episode_context.filter_recordable([0, 1]).tolist() == [0, 1]
+    saved = snapshot()
+    env.get_info()
+    _, partial_info = env.reset(options={"reset_ids": [1]})
+    assert ("episode_context" in partial_info) is enabled
+    assert snapshot.call_count == 1 + 3 * int(enabled)
+    assert [row["episode"] for row in saved] == [0, 0]
+    assert [row["episode"] for row in snapshot()] == [0, 1]
+    assert env.episode_context.filter_recordable([0, 1]).tolist() == [0, 1]
