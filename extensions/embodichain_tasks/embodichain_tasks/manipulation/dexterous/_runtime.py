@@ -165,6 +165,7 @@ class DexSimManipulationEnv:
         self.action_format = "tensor"
         self.elapsed_steps = torch.zeros(num_envs, dtype=torch.long, device=device)
         self._episode_return = torch.zeros(num_envs, device=device)
+        self._episode_success = torch.zeros(num_envs, dtype=torch.bool, device=device)
         self._last_observation: dict[str, torch.Tensor] | None = None
         self._closed = False
         config = dexsim.WorldConfig()
@@ -612,6 +613,7 @@ class DexSimManipulationEnv:
         self.mujoco_solver._mujoco_warp.forward(self.mujoco_solver.mjw_model, self.data)
         self.elapsed_steps[ids] = 0
         self._episode_return[ids] = 0
+        self._episode_success[ids] = False
         state = self._state()
         if self.task_id in ("M1", "M2"):
             fresh = self._observation(self.task.observe(state))
@@ -676,6 +678,10 @@ class DexSimManipulationEnv:
         result = self._observation(obs)
         self._last_observation = result
         info = {"metrics": {key: value.clone() for key, value in metrics.items()}}
+        if "success" in metrics:
+            # Task success is an event; evaluation consumes the completed episode.
+            self._episode_success |= metrics["success"].bool()
+            info["success"] = self._episode_success.clone()
         if bool(done.any()):
             ids = torch.where(done)[0]
             info["episode"] = {

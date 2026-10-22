@@ -43,6 +43,21 @@ and Z-axis rotation use separate actor and critic observation groups.
 Selective reset preserves unselected physical rows; completed rows return the
 next initial observation with terminal reward and done flags.
 
+Evaluation reports `eval/success_rate` for pen spinning, cube face turning and
+cube reorientation. An episode succeeds if it reaches at least one task success
+event before termination or truncation, including an event on the final step.
+Pen spinning requires one complete positive revolution while retaining the pen;
+face turning requires holding the target face angle for 20 steps; reorientation
+requires reaching the target orientation. The environment retains these events
+in `info["success"]` until the corresponding episode resets. Per-step events
+remain available in `info["metrics"]["success"]`.
+
+Continuous Z-axis rotation has no binary success criterion. Its success rate is
+unavailable; evaluate `rotation`, `angular_velocity_z`, `retained`, episode length
+and return instead. A numeric zero success rate for the other tasks means no
+evaluated episode met its success criterion. Short training verifies execution
+and checkpoint compatibility, not policy convergence.
+
 The runtime currently contains version-specific MJCF import and compact-state
 adapters for DexSim/Newton. Model audits check imported masses, inertia,
 actuators, tendons and collision masks before stepping. These adapters need
