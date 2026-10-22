@@ -13,6 +13,7 @@ Online sampling and demonstration persistence belong to
 | Locked download and ZIP integrity | `embodichain/data/dataset.py`: `EmbodiChainDataset`, `_dataset_download_lock()` |
 | CLI list/download | `embodichain/data/download.py`: `CATEGORY_MODULES`, `get_registry()`, `download_asset()` |
 | Dataset class visibility | `embodichain/data/__init__.py`, `embodichain/data/assets/__init__.py` |
+| YAM source download and conversion | `scripts/tools/prepare_yam_i2rt_assets.py` |
 | Pretrained policy bundles | `embodichain/data/assets/policy_assets.py`: `download_pretrained_policy()` |
 | Unified CLI registration | `embodichain/cli/main.py`: `embodichain data` |
 
@@ -37,6 +38,15 @@ can trigger download/extraction and still name a nonexistent nested file.
 Inspect `get_data_class()` and package imports when a newly added class is invisible.
 
 ## Download and registry boundaries
+
+YAM uses an explicit preparation script rather than a published dataset ZIP.
+The script downloads a pinned upstream revision, converts the robot and verifies
+all source/generated files against the qualified bundle before installation.
+Its default directory is `<data_root>/YamI2rt`; `YamI2rtCfg` reads that URDF or
+an explicit `fpath` and reports the preparation command when it is absent.
+Generated assets are excluded from source control and the wheel. Offline input
+and destination overrides belong to the script; task usage is documented in
+`extensions/embodichain_tasks/configs/tasks/manipulation/cable/route_the_cable/README.md`.
 
 `EmbodiChainDataset` locks `<data_root>/download/.locks/<prefix>.lock` around
 both ZIP integrity repair and the Open3D constructor's download/extraction.

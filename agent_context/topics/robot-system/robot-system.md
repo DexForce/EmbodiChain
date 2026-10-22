@@ -11,6 +11,7 @@
 | Robot listing CLI | `embodichain/cli/list_robot.py` → `embodichain list-robot` |
 | Generic robot preview and standalone RobotCfg files | `embodichain/lab/scripts/preview_robot.py` → `embodichain preview-robot` |
 | W1 variants and serialization | `extensions/embodichain_robots/dexforce_w1/` → `cfg.py`, `specs.py`, `hand_specs.py` |
+| YAM dual arm / asset provenance | `extensions/embodichain_robots/yam_i2rt.py`; `scripts/tools/prepare_yam_i2rt_assets.py` → external data-cache `PROVENANCE.json` |
 | Composed robot frames and joint-name mapping | `embodichain/lab/sim/robots/dual_arm.py` |
 | Shared articulation state and drive properties | `embodichain/lab/sim/objects/articulation.py`, `embodichain/lab/sim/cfg/articulation.py` |
 

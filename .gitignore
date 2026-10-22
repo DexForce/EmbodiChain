@@ -192,6 +192,8 @@ outputs
 /output/
 test_configs/*
 embodichain_data/
+# Downloaded/generated YAM assets are prepared in the external data cache.
+/embodichain/data/robot_assets/yam_i2rt/
 scripts/tutorials/atomic_action/*.glb
 
 wandb/

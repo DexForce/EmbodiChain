@@ -21,6 +21,12 @@ the native articulation before Direct GPU initialization and initial reset.
 Iteration counts are configured together because the native setter is atomic.
 Applying them only during facade binding is too late for captured GPU settings.
 
+`ArticulationCfg.newton_gravity_compensation` is also creation intent, independent
+of link/joint overlay mode. Both URDF and USD conversion validate and copy it
+before scene finalization; zero explicitly disables compensation even when the
+USD source contains a nonzero value. Newton solver ownership determines support;
+the Default backend does not consume this setting.
+
 `joint_drive_props` is the sole joint-property entry point; sparse fields retain
 source values. `drive_type` describes the response and `target_mode` the active
 command components. Lowering masks inactive gains: none/effort clear both,

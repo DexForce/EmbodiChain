@@ -28,6 +28,7 @@ _CONFIG_CLASSES = {
     "FrankaPanda": "embodichain_robots.franka_panda:FrankaPandaCfg",
     "FrankaPandaPgi": "embodichain_robots.franka_panda:FrankaPandaPgiCfg",
     "URRobot": "embodichain_robots.ur_robot:URRobotCfg",
+    "YamI2rt": "embodichain_robots.yam_i2rt:YamI2rtCfg",
 }
 
 _DEFAULT_CONTROL_INFO = {
@@ -81,6 +82,10 @@ _DEFAULT_CONTROL_INFO = {
         "control_parts": {"arm": 7, "eef": 1},
     },
     "URRobot": {"dof": 6, "control_parts": {"arm": 6}},
+    "YamI2rt": {
+        "dof": 16,
+        "control_parts": {"right_arm": 6, "left_arm": 6, "right_eef": 2, "left_eef": 2},
+    },
 }
 
 _MIMIC_JOINTS = {

@@ -29,6 +29,9 @@ command reference and :doc:`/guides/robot_catalog` for variant selection.
    * - :doc:`CobotMagic <cobotmagic>`
      - ``CobotMagicCfg``
      - Fixed-base dual arms and grippers for bimanual tasks.
+   * - :doc:`YAM i2rt <yam_i2rt>`
+     - ``YamI2rtCfg``
+     - Dual six-joint arms and independent fingers using prepared external assets.
    * - :doc:`Dual-arm composition <dual_arm>`
      - ``DualArmRobotCfg``
      - Registry-based composition of compatible single-arm configs in multiple layouts.
@@ -50,6 +53,7 @@ command reference and :doc:`/guides/robot_catalog` for variant selection.
    dual_arm
    aloha_mini
    tianji_marvin
+   yam_i2rt
 
 To add another model, follow :doc:`/guides/add_robot` and include its page in
 this catalog and toctree.
