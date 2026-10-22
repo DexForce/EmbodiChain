@@ -1,0 +1,53 @@
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+import subprocess
+import time
+
+ROOT = Path('/tmp/ods-publication-20261023')
+REPO = Path('/root/sources/EmbodiChain-ods-stream-design')
+PYTHON = '/root/miniconda3/envs/py311/bin/python'
+env = os.environ.copy()
+for key in ('DISPLAY', 'WAYLAND_DISPLAY'):
+    env.pop(key, None)
+env.update(PYTHONPATH=f'{REPO}:{REPO}/extensions:/tmp/ods-dexsim-runtime',
+           OMP_NUM_THREADS='1', MKL_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1',
+           SDL_VIDEODRIVER='dummy')
+jobs = {}
+deadline = time.monotonic() + 5400
+while len(jobs) < 2 or any(row['process'].poll() is None for row in jobs.values()):
+    if time.monotonic() > deadline:
+        raise TimeoutError('Generation controls did not reach terminal state')
+    for vision, devices, cpus in (('single', ['3','4'], '0-7'), ('dual', ['5','7'], '8-15')):
+        if vision in jobs:
+            continue
+        paths = [ROOT/'pilot'/'main'/arm/vision/'seed19001'/'summary.json'
+                 for arm in ('ods_overlap','offline32','ods_serial')]
+        paths += [ROOT/'pilot'/'controls'/'eager'/vision/'seed19001'/'summary.json']
+        if not all(path.is_file() for path in paths):
+            continue
+        summaries = [json.loads(path.read_text()) for path in paths]
+        if not all(s.get('post_audit_status') == 'complete' and s.get('qualification_passed') is True for s in summaries):
+            continue
+        output = ROOT/'generation-controls'/vision
+        command = ['taskset','-c',cpus,PYTHON,'-m','examples.ods.data_stream_demo.train',
+                   '--suite','single','--arm','ods_overlap','--vision',vision,
+                   '--handoff-mode','generation','--encoder-threads','2',
+                   '--producer-envs','4','--updates','128','--batch-size','32',
+                   '--buffer-size','8','--episode-budget','128','--evaluation-scenes','0',
+                   '--gpu-ids',*devices,'--aux-graphics-gpu-id','7','--output',str(output)]
+        log = (ROOT/f'generation-control-{vision}.log').open('x')
+        process = subprocess.Popen(command, cwd=REPO, env=env, stdout=log, stderr=subprocess.STDOUT)
+        jobs[vision] = {'process': process, 'stream': log, 'command': command, 'output': str(output)}
+        print(f'Started {vision} generation control PID {process.pid}', flush=True)
+    time.sleep(5)
+results = []
+for vision, row in jobs.items():
+    row['stream'].close()
+    results.append({'vision':vision,'command':row['command'],'output':row['output'],
+                    'returncode':row['process'].returncode})
+(ROOT/'generation-control-processes.json').write_text(json.dumps(results, indent=2)+'\n')
+print(json.dumps(results), flush=True)
+raise SystemExit(0 if all(r['returncode']==0 for r in results) else 1)

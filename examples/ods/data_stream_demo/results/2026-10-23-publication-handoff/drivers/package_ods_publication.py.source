@@ -1,0 +1,50 @@
+from pathlib import Path
+import hashlib,json,shutil,tarfile,subprocess
+repo=Path('/root/sources/EmbodiChain-ods-stream-design')
+out=repo/'examples/ods/data_stream_demo/results/2026-10-23-publication-handoff'
+raw=Path('/tmp/ods-publication-20261023')
+def sha(p):
+ h=hashlib.sha256()
+ with p.open('rb') as f:
+  for block in iter(lambda:f.read(1024*1024),b''):h.update(block)
+ return h.hexdigest()
+def copy(p,target):
+ dest=out/target;dest.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(p,dest)
+for name in ('independent-audit.json','INDEPENDENT-AUDIT.md'):
+ copy(Path('/tmp/ods-publication-result-audit-final-20261023')/name,name)
+for p in [Path('/tmp/ods_publication_result_audit.py'),Path('/tmp/ods_incremental_acquisition_qualification.py'),Path('/tmp/ods_publication_training_qualification.py'),Path('/tmp/ods_publication_generation_controls.py'),Path('/tmp/package_ods_publication.py')]:
+ copy(p,'drivers/'+p.name+'.source')
+for p in [Path('/tmp/ods_incremental_acquisition_qualification.json'),Path('/tmp/ods_publication_training_qualification.json'),Path('/tmp/ods-publication-current-cpu.log'),Path('/tmp/ods-publication-current-cpu-v2.log'),Path('/tmp/ods-publication-result-audit-final-20261023-first-attempt.log')]:
+ copy(p,'qualification/'+p.name)
+prof=Path('/tmp/ods-recorder-profile-20261023')
+for p in [prof/'qualify.py',prof/'profile_real.py',prof/'thread_sweep.py']:
+ copy(p,'drivers/'+p.name+'.source')
+for rel in ('run-0uxtgt37/qualification.json','real-profile-nbcsj0x1/profile.json','thread-sweep-3pjgu8dp/profile.json','thread-sweep-3pjgu8dp/README.md'):
+ copy(prof/rel,'recorder/'+rel)
+for p in (raw/'pilot/training-report').iterdir():
+ if p.suffix in ('.png','.svg','.pdf','.md'):copy(p,'main-report/'+p.name)
+# Keep originals byte-for-byte. Decoded per-frame digests and binary corpora
+# stay external; the inventory records every original file including exclusions.
+inventory=[];members=[]
+for p in sorted(raw.rglob('*')):
+ if not p.is_file():continue
+ rel=p.relative_to(raw)
+ archived=p.suffix in ('.json','.jsonl','.log','.stderr') and 'training-report' not in p.parts
+ row={'path':str(p),'relative_path':str(rel),'bytes':p.stat().st_size,'sha256':sha(p),'archived':archived}
+ inventory.append(row)
+ if archived:members.append(p)
+with tarfile.open(out/'raw-metadata.tar.gz','w:gz') as tar:
+ for p in members:tar.add(p,arcname=str(p.relative_to(raw)),recursive=False)
+(out/'raw-inventory.json').write_text(json.dumps({'root':str(raw),'files':inventory},indent=2)+'\n')
+with tarfile.open(out/'raw-metadata.tar.gz','r:gz') as tar:
+ for row in inventory:
+  if row['archived']:
+   assert hashlib.sha256(tar.extractfile(row['relative_path']).read()).hexdigest()==row['sha256']
+libs=json.loads((out/'native-libraries.json').read_text());checks=[]
+for r in libs['libraries']:
+ p=Path(r['path']);checks.append({'path':str(p),'sha256':sha(p),'unchanged':sha(p)==r['sha256'] and p.stat().st_ino==r['mapped_inode']})
+assert all(r['unchanged'] for r in checks)
+(out/'native-library-final-check.json').write_text(json.dumps({'passed':True,'libraries':checks},indent=2)+'\n')
+for name in ('ods-publication-pilot.log','ods-publication-smoke-v1.log','ods-publication-generation-controls.log'):
+ copy(Path('/tmp')/name,'qualification/'+name)
+print(json.dumps({'inventoried':len(inventory),'archived':len(members),'archive_bytes':(out/'raw-metadata.tar.gz').stat().st_size,'native_libraries':len(checks)}))

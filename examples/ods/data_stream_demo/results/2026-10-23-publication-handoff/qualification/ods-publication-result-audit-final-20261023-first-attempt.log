@@ -1,0 +1,17 @@
+Auditing eager//tmp/ods-publication-20261023/pilot/controls/eager/dual/seed19001
+/root/miniconda3/envs/py311/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+Auditing eager//tmp/ods-publication-20261023/pilot/controls/eager/single/seed19001
+Auditing ods_overlap//tmp/ods-publication-20261023/pilot/main/ods_overlap/dual/seed19001
+Auditing ods_overlap//tmp/ods-publication-20261023/pilot/main/ods_overlap/single/seed19001
+Auditing ods_serial//tmp/ods-publication-20261023/pilot/main/ods_serial/dual/seed19001
+Auditing ods_serial//tmp/ods-publication-20261023/pilot/main/ods_serial/single/seed19001
+Auditing offline32//tmp/ods-publication-20261023/pilot/main/offline32/dual/seed19001
+Auditing offline32//tmp/ods-publication-20261023/pilot/main/offline32/single/seed19001
+Auditing generation_control//tmp/ods-publication-20261023/generation-controls/dual
+Auditing generation_control//tmp/ods-publication-20261023/generation-controls/single
+{
+  "passed": true,
+  "runs": 10,
+  "errors": []
+}

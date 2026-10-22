@@ -30,6 +30,16 @@ the pilot establishes neither a diversity advantage nor a positive isolated
 generation/training-overlap benefit. The three-stage guide explains how to
 measure and choose producer capacity without raising the protected reuse cap.
 
+The [publication-handoff follow-up](results/2026-10-23-publication-handoff/README.md)
+adds bounded consumption of published producer subbatches and recorder-stage
+profiling. Ten fresh fixed-budget runs pass independent audit. In both camera
+modes, 48 of 128 updates complete before their generation finishes publishing.
+Post-initial publish-to-training latency falls substantially; complete time
+changes only modestly, serial remains slightly faster, and trained coverage
+remains similar. This establishes earlier usable data, not an isolated overlap
+speedup or a diversity advantage. Recorder thread settings are matched across
+all arms; the isolated CPU thread sweep is not an end-to-end speed claim.
+
 ## Primary training paths
 
 | CLI path | Data | Purpose |

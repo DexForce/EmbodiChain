@@ -1,0 +1,121 @@
+from __future__ import annotations
+import os
+os.environ.update(CUDA_VISIBLE_DEVICES='', OMP_NUM_THREADS='1', MKL_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1', HF_HUB_OFFLINE='1', HF_DATASETS_OFFLINE='1')
+import copy, hashlib, importlib.util, json, math, multiprocessing, sys, tempfile, time
+from pathlib import Path
+import torch
+from examples.ods.data_stream_demo.lerobot_io import StandardLeRobotWriter, read_lerobot_manifest
+from examples.ods.data_stream_demo.payload import numeric_episode_digest
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
+BASE = Path('/tmp/ods-recorder-profile-20261023')
+RUN = Path(tempfile.mkdtemp(prefix='run-', dir=BASE))
+sys.path.insert(0, '/tmp/ods-visual-training-io-validation')
+from validate import fixture
+STAGES = ('validation_provenance', 'add_frame', 'save_episode', 'references_manifest')
+
+def old_class():
+    spec = importlib.util.spec_from_file_location('examples.ods.data_stream_demo._baseline_lerobot_io', BASE/'baseline_lerobot_io.py')
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module.StandardLeRobotWriter
+
+def decode(root, episodes):
+    ds = LeRobotDataset('local/ods-data-stream', root=root, video_backend='torchcodec', tolerance_s=1e-4)
+    decoded = {name: [] for name in episodes[0]['images']}
+    quality = {}
+    for index in range(len(ds)):
+        row = ds[index]
+        e, frame = divmod(index, 40)
+        torch.testing.assert_close(row['observation.state'], episodes[e]['state'][frame], rtol=0, atol=0)
+        torch.testing.assert_close(row['action'], episodes[e]['actions'][frame], rtol=0, atol=0)
+        for name in decoded:
+            decoded[name].append(row[f'observation.images.{name}'].movedim(0,-1).mul(255))
+    for name in decoded:
+        decoded[name] = torch.stack(decoded[name])
+        raw = torch.cat([e['images'][name] for e in episodes]).float()
+        diff = decoded[name] - raw
+        mse = float(diff.square().mean())
+        quality[name] = {'mae_uint8': float(diff.abs().mean()), 'psnr_db': 10*math.log10(255**2/mse) if mse else None}
+        assert quality[name]['mae_uint8'] < 5, quality
+    return decoded, quality
+
+def main():
+    torch.set_num_threads(1)
+    metadata, episodes = fixture(['cam_high', 'cam_wrist'])
+    episodes = episodes[:2]
+    result = {'runs': {}, 'invalid_settings': [], 'cpu_only': True, 'multiprocessing_start_method': multiprocessing.get_start_method()}
+    initial_children = {c.pid for c in multiprocessing.active_children()}
+    baseline_images = None
+    for label, cls, kwargs in [('baseline', old_class(), {}), ('default', StandardLeRobotWriter, {}), ('threads2', StandardLeRobotWriter, {'encoder_threads': 2})]:
+        root, events = RUN/label/'corpus', RUN/label/'events.jsonl'
+        before = time.monotonic_ns()
+        writer = cls(root, metadata, episode_count=2, queue_size=2, operation_timeout=120, events_path=events, **kwargs)
+        for episode in episodes:
+            writer.submit(copy.deepcopy(episode))
+        stats = writer.finalize()
+        after = time.monotonic_ns()
+        assert stats['finalized'] and stats['worker_joined']
+        rows = [json.loads(line) for line in events.read_text().splitlines()]
+        assert len(rows) == stats['event_log_rows'] == 4
+        assert [r['name'] for r in rows] == ['sdk_create', 'sdk_episode_write_encode', 'sdk_episode_write_encode', 'sdk_finalize']
+        assert all(r['schema'] == 'ods-sdk-writer-service/v1' and r['status'] == 'complete' and before <= r['start_ns'] <= r['end_ns'] <= after for r in rows)
+        assert all(a['end_ns'] <= b['start_ns'] for a,b in zip(rows, rows[1:]))
+        if label != 'baseline':
+            for row in rows[1:-1]:
+                stages = row['stage_intervals']
+                assert tuple(stages) == STAGES
+                last = row['start_ns']
+                for stage in stages.values():
+                    assert last <= stage['start_ns'] <= stage['end_ns'] <= row['end_ns']
+                    assert stage['duration_ns'] == stage['end_ns'] - stage['start_ns']
+                    assert stage['status'] == 'complete'
+                    last = stage['end_ns']
+                assert sum(s['duration_ns'] for s in stages.values()) <= row['end_ns'] - row['start_ns']
+            for name in STAGES:
+                assert math.isclose(stats['sdk_episode_stage_seconds'][name], sum(r['stage_intervals'][name]['duration_ns']/1e9 for r in rows[1:-1]), rel_tol=1e-12)
+        manifest = read_lerobot_manifest(root)
+        assert [e['numeric_sha256'] for e in manifest['episodes']] == [numeric_episode_digest(e) for e in episodes]
+        assert {k:manifest['video'][k] for k in ('codec','pix_fmt','gop','crf')} == {'codec':'libsvtav1','pix_fmt':'yuv420p','gop':2,'crf':30}
+        if label != 'baseline':
+            assert manifest['video']['encoder_threads'] == kwargs.get('encoder_threads',1)
+            assert manifest['video']['parallel_encoding'] == kwargs.get('parallel_encoding',False)
+        images, quality = decode(root, episodes)
+        if baseline_images is None:
+            baseline_images = images
+        matches = {name: torch.equal(image, baseline_images[name]) for name,image in images.items()}
+        if label == 'default':
+            assert all(matches.values()), matches
+        result['runs'][label] = {'stats':stats,'events':rows,'quality':quality,'decoded_identical_to_baseline':matches,'manifest_video':manifest['video']}
+    for kwargs in ({'encoder_threads':0},{'encoder_threads':True},{'encoder_threads':1.5}):
+        root = RUN/f'invalid-{len(result["invalid_settings"])}'
+        try:
+            StandardLeRobotWriter(root, metadata, **kwargs)
+            raise AssertionError(f'Accepted {kwargs}')
+        except ValueError as error:
+            assert not root.exists()
+            result['invalid_settings'].append({'settings':kwargs,'error':str(error)})
+    broken = copy.deepcopy(episodes[0]); broken['valid'][0] = False
+    writer = StandardLeRobotWriter(RUN/'failed/corpus',metadata,episode_count=1,events_path=RUN/'failed/events.jsonl',operation_timeout=120)
+    writer.submit(broken)
+    deadline = time.monotonic()+120
+    while True:
+        try:
+            writer.check_health()
+        except RuntimeError as error:
+            assert isinstance(error.__cause__, ValueError)
+            break
+        assert time.monotonic()<deadline
+        time.sleep(.01)
+    writer.abort()
+    assert (RUN/'failed/corpus/INCOMPLETE').is_file()
+    rows = [json.loads(s) for s in (RUN/'failed/events.jsonl').read_text().splitlines()]
+    failure = next(r for r in rows if r['name']=='sdk_episode_write_encode')
+    assert failure['status']=='failed' and failure['stage_intervals']['validation_provenance']['status']=='failed'
+    assert not any(writer.stats['sdk_episode_stage_seconds'].values())
+    assert {c.pid for c in multiprocessing.active_children()} == initial_children
+    result.update(passed=True, failure=rows, source_sha256=hashlib.sha256(Path('examples/ods/data_stream_demo/lerobot_io.py').read_bytes()).hexdigest())
+    (RUN/'qualification.json').write_text(json.dumps(result,indent=2)+'\n')
+    print(json.dumps({'passed':True,'path':str(RUN/'qualification.json')}),flush=True)
+if __name__=='__main__':
+    main()

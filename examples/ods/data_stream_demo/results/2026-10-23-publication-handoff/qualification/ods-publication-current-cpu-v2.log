@@ -1,0 +1,204 @@
+/root/miniconda3/envs/py311/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+VERSION file not found.
+{
+  "status": "passed",
+  "cases": [
+    "partial generation trained before completion with bounded C/P blocks and per-source K",
+    "queue<=2, owned raw<=C, completed recording FIFO exact and raw references released",
+    "serial exact boundaries/anchors/digests; recording overlaps generation while all training follows generation completion",
+    "slow-writer serial pool remains bounded, fully recorded, and releases unused tail sources",
+    "v2 validates handoff/encoder/source boundaries; legacy v1 recipe still accepted",
+    "already requested tail generation fully accepted and recorded without training inflation",
+    "unpublished data and stalled recording time out; producer failure propagates"
+  ],
+  "overlap_updates": [
+    [
+      1,
+      1
+    ],
+    [
+      1,
+      1
+    ],
+    [
+      1,
+      1
+    ],
+    [
+      2,
+      1
+    ],
+    [
+      2,
+      1
+    ],
+    [
+      2,
+      2
+    ],
+    [
+      2,
+      2
+    ],
+    [
+      3,
+      3
+    ],
+    [
+      3,
+      3
+    ],
+    [
+      3,
+      3
+    ],
+    [
+      3,
+      3
+    ],
+    [
+      4,
+      4
+    ]
+  ],
+  "retained_blocks": [
+    {
+      "generation": 1,
+      "ordinals": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "first_update": 1
+    },
+    {
+      "generation": 2,
+      "ordinals": [
+        4,
+        5
+      ],
+      "first_update": 4
+    },
+    {
+      "generation": 2,
+      "ordinals": [
+        6,
+        7
+      ],
+      "first_update": 6
+    },
+    {
+      "generation": 3,
+      "ordinals": [
+        8,
+        9
+      ],
+      "first_update": 8
+    },
+    {
+      "generation": 3,
+      "ordinals": [
+        10,
+        11
+      ],
+      "first_update": 10
+    },
+    {
+      "generation": 4,
+      "ordinals": [
+        12,
+        13
+      ],
+      "first_update": 12
+    }
+  ],
+  "accepted": 16,
+  "peak_raw": 4,
+  "tail_accepted": 8,
+  "serial_exact": true,
+  "serial_submissions": [
+    [
+      0,
+      1,
+      1
+    ],
+    [
+      1,
+      1,
+      1
+    ],
+    [
+      2,
+      1,
+      1
+    ],
+    [
+      3,
+      1,
+      1
+    ],
+    [
+      4,
+      2,
+      1
+    ],
+    [
+      5,
+      2,
+      1
+    ],
+    [
+      6,
+      2,
+      2
+    ],
+    [
+      7,
+      2,
+      2
+    ],
+    [
+      8,
+      3,
+      2
+    ],
+    [
+      9,
+      3,
+      2
+    ],
+    [
+      10,
+      3,
+      3
+    ],
+    [
+      11,
+      3,
+      3
+    ],
+    [
+      12,
+      4,
+      3
+    ],
+    [
+      13,
+      4,
+      3
+    ],
+    [
+      14,
+      4,
+      4
+    ],
+    [
+      15,
+      4,
+      4
+    ]
+  ],
+  "slow_serial_peak_raw": 4
+}

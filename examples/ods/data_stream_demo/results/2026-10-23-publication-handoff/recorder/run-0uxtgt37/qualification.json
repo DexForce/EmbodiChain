@@ -1,0 +1,496 @@
+{
+  "runs": {
+    "baseline": {
+      "stats": {
+        "submitted_episodes": 2,
+        "written_episodes": 2,
+        "valid_frames": 80,
+        "queue_capacity": 2,
+        "peak_queued_episodes": 2,
+        "queue_wait_seconds": 0.005929614882916212,
+        "sdk_create_seconds": 0.011246782029047608,
+        "sdk_write_encode_seconds": 1.3988534559030086,
+        "sdk_finalize_seconds": 0.004881041124463081,
+        "finalized": true,
+        "worker_joined": true,
+        "event_log_rows": 4
+      },
+      "events": [
+        {
+          "schema": "ods-sdk-writer-service/v1",
+          "kind": "interval",
+          "name": "sdk_create",
+          "start_ns": 1851796250713051,
+          "source_id": null,
+          "episode_ordinal": null,
+          "scope": "LeRobotDataset.create; excludes SDK import, prior directory setup and event-log serialization",
+          "end_ns": 1851796258697011,
+          "worker_pid": 2601942,
+          "worker_thread_id": 140264880453184,
+          "status": "complete"
+        },
+        {
+          "schema": "ods-sdk-writer-service/v1",
+          "kind": "interval",
+          "name": "sdk_episode_write_encode",
+          "start_ns": 1851796259733427,
+          "source_id": [
+            101,
+            0
+          ],
+          "episode_ordinal": 0,
+          "scope": "accepted-frame validation/provenance, add_frame, synchronous save_episode/AV1 encoding and raw-reference/hash/manifest bookkeeping; excludes queue wait and event-log serialization",
+          "end_ns": 1851796937704487,
+          "worker_pid": 2601942,
+          "worker_thread_id": 140264880453184,
+          "status": "complete"
+        },
+        {
+          "schema": "ods-sdk-writer-service/v1",
+          "kind": "interval",
+          "name": "sdk_episode_write_encode",
+          "start_ns": 1851796937766592,
+          "source_id": [
+            101,
+            1
+          ],
+          "episode_ordinal": 1,
+          "scope": "accepted-frame validation/provenance, add_frame, synchronous save_episode/AV1 encoding and raw-reference/hash/manifest bookkeeping; excludes queue wait and event-log serialization",
+          "end_ns": 1851797658656239,
+          "worker_pid": 2601942,
+          "worker_thread_id": 140264880453184,
+          "status": "complete"
+        },
+        {
+          "schema": "ods-sdk-writer-service/v1",
+          "kind": "interval",
+          "name": "sdk_finalize",
+          "start_ns": 1851797658736161,
+          "source_id": null,
+          "episode_ordinal": null,
+          "scope": "LeRobotDataset.finalize; excludes final provenance-sidecar/marker writes and event-log serialization",
+          "end_ns": 1851797663589649,
+          "worker_pid": 2601942,
+          "worker_thread_id": 140264880453184,
+          "status": "complete"
+        }
+      ],
+      "quality": {
+        "cam_high": {
+          "mae_uint8": 1.337499976158142,
+          "psnr_db": 44.4899861945684
+        },
+        "cam_wrist": {
+          "mae_uint8": 1.274999976158142,
+          "psnr_db": 44.92587878834091
+        }
+      },
+      "decoded_identical_to_baseline": {
+        "cam_high": true,
+        "cam_wrist": true
+      },
+      "manifest_video": {
+        "codec": "libsvtav1",
+        "pix_fmt": "yuv420p",
+        "gop": 2,
+        "crf": 30,
+        "encoder_threads": 1
+      }
+    },
+    "default": {
+      "stats": {
+        "submitted_episodes": 2,
+        "written_episodes": 2,
+        "valid_frames": 80,
+        "queue_capacity": 2,
+        "peak_queued_episodes": 2,
+        "queue_wait_seconds": 0.003932968946173787,
+        "sdk_create_seconds": 0.005633672000840306,
+        "sdk_write_encode_seconds": 1.3873660338576883,
+        "sdk_episode_stage_seconds": {
+          "validation_provenance": 0.00030131099999999996,
+          "add_frame": 0.093344892,
+          "save_episode": 1.292221467,
+          "references_manifest": 0.001304636
+        },
+        "sdk_finalize_seconds": 0.004905667854472995,
+        "finalized": true,
+        "worker_joined": true,
+        "event_log_rows": 4
+      },
+      "events": [
+        {
+          "schema": "ods-sdk-writer-service/v1",
+          "kind": "interval",
+          "name": "sdk_create",
+          "start_ns": 1851798132141558,
+          "source_id": null,
+          "episode_ordinal": null,
+          "scope": "LeRobotDataset.create; excludes SDK import, prior directory setup and event-log serialization",
+          "end_ns": 1851798137181130,
+          "worker_pid": 2601942,
+          "worker_thread_id": 140264854226496,
+          "status": "complete"
+        },
+        {
+          "schema": "ods-sdk-writer-service/v1",
+          "kind": "interval",
+          "name": "sdk_episode_write_encode",
+          "start_ns": 1851798138188943,
+          "source_id": [
+            101,
+            0
+          ],
+          "episode_ordinal": 0,
+          "scope": "accepted-frame validation/provenance, add_frame, synchronous save_episode/AV1 encoding and raw-reference/hash/manifest bookkeeping; excludes queue wait and event-log serialization",
+          "stage_intervals": {
+            "validation_provenance": {
+              "start_ns": 1851798138332172,
+              "status": "complete",
+              "end_ns": 1851798138494400,
+              "duration_ns": 162228
+            },
+            "add_frame": {
+              "start_ns": 1851798138498056,
+              "status": "complete",
+              "end_ns": 1851798185098196,
+              "duration_ns": 46600140
+            },
+            "save_episode": {
+              "start_ns": 1851798185104075,
+              "status": "complete",
+              "end_ns": 1851798812597230,
+              "duration_ns": 627493155
+            },
+            "references_manifest": {
+              "start_ns": 1851798812606745,
+              "status": "complete",
+              "end_ns": 1851798813727520,
+              "duration_ns": 1120775
+            }
+          },
+          "stage_scope": "disjoint substages within this interval; add_frame includes frame assembly and synchronous image writes; save_episode includes SDK validation, statistics, numeric commit and AV1 encoding; aggregate stages only across successful episodes",
+          "end_ns": 1851798813737185,
+          "worker_pid": 2601942,
+          "worker_thread_id": 140264854226496,
+          "status": "complete"
+        },
+        {
+          "schema": "ods-sdk-writer-service/v1",
+          "kind": "interval",
+          "name": "sdk_episode_write_encode",
+          "start_ns": 1851798813802585,
+          "source_id": [
+            101,
+            1
+          ],
+          "episode_ordinal": 1,
+          "scope": "accepted-frame validation/provenance, add_frame, synchronous save_episode/AV1 encoding and raw-reference/hash/manifest bookkeeping; excludes queue wait and event-log serialization",
+          "stage_intervals": {
+            "validation_provenance": {
+              "start_ns": 1851798813812450,
+              "status": "complete",
+              "end_ns": 1851798813951533,
+              "duration_ns": 139083
+            },
+            "add_frame": {
+              "start_ns": 1851798813953596,
+              "status": "complete",
+              "end_ns": 1851798860698348,
+              "duration_ns": 46744752
+            },
+            "save_episode": {
+              "start_ns": 1851798860703025,
+              "status": "complete",
+              "end_ns": 1851799525431337,
+              "duration_ns": 664728312
+            },
+            "references_manifest": {
+              "start_ns": 1851799525439400,
+              "status": "complete",
+              "end_ns": 1851799525623261,
+              "duration_ns": 183861
+            }
+          },
+          "stage_scope": "disjoint substages within this interval; add_frame includes frame assembly and synchronous image writes; save_episode includes SDK validation, statistics, numeric commit and AV1 encoding; aggregate stages only across successful episodes",
+          "end_ns": 1851799525633316,
+          "worker_pid": 2601942,
+          "worker_thread_id": 140264854226496,
+          "status": "complete"
+        },
+        {
+          "schema": "ods-sdk-writer-service/v1",
+          "kind": "interval",
+          "name": "sdk_finalize",
+          "start_ns": 1851799525704105,
+          "source_id": null,
+          "episode_ordinal": null,
+          "scope": "LeRobotDataset.finalize; excludes final provenance-sidecar/marker writes and event-log serialization",
+          "end_ns": 1851799530585366,
+          "worker_pid": 2601942,
+          "worker_thread_id": 140264854226496,
+          "status": "complete"
+        }
+      ],
+      "quality": {
+        "cam_high": {
+          "mae_uint8": 1.337499976158142,
+          "psnr_db": 44.4899861945684
+        },
+        "cam_wrist": {
+          "mae_uint8": 1.274999976158142,
+          "psnr_db": 44.92587878834091
+        }
+      },
+      "decoded_identical_to_baseline": {
+        "cam_high": true,
+        "cam_wrist": true
+      },
+      "manifest_video": {
+        "codec": "libsvtav1",
+        "pix_fmt": "yuv420p",
+        "gop": 2,
+        "crf": 30,
+        "encoder_threads": 1,
+        "parallel_encoding": false
+      }
+    },
+    "threads2": {
+      "stats": {
+        "submitted_episodes": 2,
+        "written_episodes": 2,
+        "valid_frames": 80,
+        "queue_capacity": 2,
+        "peak_queued_episodes": 2,
+        "queue_wait_seconds": 0.0038996380753815174,
+        "sdk_create_seconds": 0.005452253855764866,
+        "sdk_write_encode_seconds": 1.3720583762042224,
+        "sdk_episode_stage_seconds": {
+          "validation_provenance": 0.00030000999999999997,
+          "add_frame": 0.092154702,
+          "save_episode": 1.278142009,
+          "references_manifest": 0.0012728989999999999
+        },
+        "sdk_finalize_seconds": 0.004945379216223955,
+        "finalized": true,
+        "worker_joined": true,
+        "event_log_rows": 4
+      },
+      "events": [
+        {
+          "schema": "ods-sdk-writer-service/v1",
+          "kind": "interval",
+          "name": "sdk_create",
+          "start_ns": 1851799878866563,
+          "source_id": null,
+          "episode_ordinal": null,
+          "scope": "LeRobotDataset.create; excludes SDK import, prior directory setup and event-log serialization",
+          "end_ns": 1851799883366049,
+          "worker_pid": 2601942,
+          "worker_thread_id": 140264854226496,
+          "status": "complete"
+        },
+        {
+          "schema": "ods-sdk-writer-service/v1",
+          "kind": "interval",
+          "name": "sdk_episode_write_encode",
+          "start_ns": 1851799884351578,
+          "source_id": [
+            101,
+            0
+          ],
+          "episode_ordinal": 0,
+          "scope": "accepted-frame validation/provenance, add_frame, synchronous save_episode/AV1 encoding and raw-reference/hash/manifest bookkeeping; excludes queue wait and event-log serialization",
+          "stage_intervals": {
+            "validation_provenance": {
+              "start_ns": 1851799884489338,
+              "status": "complete",
+              "end_ns": 1851799884651847,
+              "duration_ns": 162509
+            },
+            "add_frame": {
+              "start_ns": 1851799884655412,
+              "status": "complete",
+              "end_ns": 1851799930123571,
+              "duration_ns": 45468159
+            },
+            "save_episode": {
+              "start_ns": 1851799930129249,
+              "status": "complete",
+              "end_ns": 1851800545657422,
+              "duration_ns": 615528173
+            },
+            "references_manifest": {
+              "start_ns": 1851800545666936,
+              "status": "complete",
+              "end_ns": 1851800546744576,
+              "duration_ns": 1077640
+            }
+          },
+          "stage_scope": "disjoint substages within this interval; add_frame includes frame assembly and synchronous image writes; save_episode includes SDK validation, statistics, numeric commit and AV1 encoding; aggregate stages only across successful episodes",
+          "end_ns": 1851800546753930,
+          "worker_pid": 2601942,
+          "worker_thread_id": 140264854226496,
+          "status": "complete"
+        },
+        {
+          "schema": "ods-sdk-writer-service/v1",
+          "kind": "interval",
+          "name": "sdk_episode_write_encode",
+          "start_ns": 1851800546817467,
+          "source_id": [
+            101,
+            1
+          ],
+          "episode_ordinal": 1,
+          "scope": "accepted-frame validation/provenance, add_frame, synchronous save_episode/AV1 encoding and raw-reference/hash/manifest bookkeeping; excludes queue wait and event-log serialization",
+          "stage_intervals": {
+            "validation_provenance": {
+              "start_ns": 1851800546826481,
+              "status": "complete",
+              "end_ns": 1851800546963982,
+              "duration_ns": 137501
+            },
+            "add_frame": {
+              "start_ns": 1851800546965674,
+              "status": "complete",
+              "end_ns": 1851800593652217,
+              "duration_ns": 46686543
+            },
+            "save_episode": {
+              "start_ns": 1851800593656554,
+              "status": "complete",
+              "end_ns": 1851801256270390,
+              "duration_ns": 662613836
+            },
+            "references_manifest": {
+              "start_ns": 1851801256281136,
+              "status": "complete",
+              "end_ns": 1851801256476395,
+              "duration_ns": 195259
+            }
+          },
+          "stage_scope": "disjoint substages within this interval; add_frame includes frame assembly and synchronous image writes; save_episode includes SDK validation, statistics, numeric commit and AV1 encoding; aggregate stages only across successful episodes",
+          "end_ns": 1851801256486911,
+          "worker_pid": 2601942,
+          "worker_thread_id": 140264854226496,
+          "status": "complete"
+        },
+        {
+          "schema": "ods-sdk-writer-service/v1",
+          "kind": "interval",
+          "name": "sdk_finalize",
+          "start_ns": 1851801256565722,
+          "source_id": null,
+          "episode_ordinal": null,
+          "scope": "LeRobotDataset.finalize; excludes final provenance-sidecar/marker writes and event-log serialization",
+          "end_ns": 1851801261483017,
+          "worker_pid": 2601942,
+          "worker_thread_id": 140264854226496,
+          "status": "complete"
+        }
+      ],
+      "quality": {
+        "cam_high": {
+          "mae_uint8": 1.337499976158142,
+          "psnr_db": 44.4899861945684
+        },
+        "cam_wrist": {
+          "mae_uint8": 1.274999976158142,
+          "psnr_db": 44.92587878834091
+        }
+      },
+      "decoded_identical_to_baseline": {
+        "cam_high": true,
+        "cam_wrist": true
+      },
+      "manifest_video": {
+        "codec": "libsvtav1",
+        "pix_fmt": "yuv420p",
+        "gop": 2,
+        "crf": 30,
+        "encoder_threads": 2,
+        "parallel_encoding": false
+      }
+    }
+  },
+  "invalid_settings": [
+    {
+      "settings": {
+        "encoder_threads": 0
+      },
+      "error": "encoder_threads must be a positive integer"
+    },
+    {
+      "settings": {
+        "encoder_threads": true
+      },
+      "error": "encoder_threads must be a positive integer"
+    },
+    {
+      "settings": {
+        "encoder_threads": 1.5
+      },
+      "error": "encoder_threads must be a positive integer"
+    }
+  ],
+  "cpu_only": true,
+  "multiprocessing_start_method": "fork",
+  "passed": true,
+  "failure": [
+    {
+      "schema": "ods-sdk-writer-service/v1",
+      "kind": "interval",
+      "name": "sdk_create",
+      "start_ns": 1851801605704391,
+      "source_id": null,
+      "episode_ordinal": null,
+      "scope": "LeRobotDataset.create; excludes SDK import, prior directory setup and event-log serialization",
+      "end_ns": 1851801609275537,
+      "worker_pid": 2601942,
+      "worker_thread_id": 140264854226496,
+      "status": "complete"
+    },
+    {
+      "schema": "ods-sdk-writer-service/v1",
+      "kind": "interval",
+      "name": "sdk_episode_write_encode",
+      "start_ns": 1851801610282788,
+      "source_id": [
+        101,
+        0
+      ],
+      "episode_ordinal": 0,
+      "scope": "accepted-frame validation/provenance, add_frame, synchronous save_episode/AV1 encoding and raw-reference/hash/manifest bookkeeping; excludes queue wait and event-log serialization",
+      "stage_intervals": {
+        "validation_provenance": {
+          "start_ns": 1851801610389021,
+          "status": "failed",
+          "end_ns": 1851801610487241,
+          "duration_ns": 98220
+        }
+      },
+      "stage_scope": "disjoint substages within this interval; add_frame includes frame assembly and synchronous image writes; save_episode includes SDK validation, statistics, numeric commit and AV1 encoding; aggregate stages only across successful episodes",
+      "end_ns": 1851801610497797,
+      "worker_pid": 2601942,
+      "worker_thread_id": 140264854226496,
+      "status": "failed",
+      "error": "ValueError('Writer requires trimmed accepted frames')"
+    },
+    {
+      "schema": "ods-sdk-writer-service/v1",
+      "kind": "interval",
+      "name": "sdk_finalize",
+      "start_ns": 1851801610618181,
+      "source_id": null,
+      "episode_ordinal": null,
+      "cleanup": true,
+      "scope": "cleanup LeRobotDataset.finalize after a failed/aborted recording; excludes event-log serialization",
+      "end_ns": 1851801610623129,
+      "worker_pid": 2601942,
+      "worker_thread_id": 140264854226496,
+      "status": "complete"
+    }
+  ],
+  "source_sha256": "1ca60e69b1603d9cc45f9dcddfb95677f9445ac9589776baab9cf8448ae4b780"
+}
