@@ -480,6 +480,74 @@ python -m embodichain.learning.rl.train --config embodichain_tasks/configs/tasks
 | ``--distributed`` | ``None`` | Enable multi-GPU distributed training. If omitted, uses ``trainer.distributed`` from the config. Use ``--no-distributed`` to force single-process training. |
 | ``--profile`` | ``False`` | Same as ``run-task --profile``; profiles the training gym env during rollouts. Requires ``trainer.gym_config``. |
 | ``--profile_output`` | ``None`` | Dump the profiling report as JSON on ``env.close()`` (requires ``--profile``). |
+| ``--resume`` | ``None`` | Resume an explicit checkpoint file, or select ``latest`` / ``best`` from ``--run``. |
+| ``--run`` | ``None`` | Source training run for ``--resume latest`` or ``--resume best``. |
+| ``--resume-scheduler`` | ``restore`` | Continue the saved learning-rate curve. ``restart`` keeps optimizer momentum and starts the curve from the current config's learning rate. |
+
+### Resume training
+
+PPO, GRPO, and APG use the same resume arguments:
+
+```bash
+embodichain train-rl --config train.yaml --resume outputs/source/checkpoints/policy.pt
+embodichain train-rl --config train.yaml --resume latest --run outputs/source
+embodichain train-rl --config train.yaml --resume best --run outputs/source
+embodichain train-rl --config train.yaml --resume latest --run outputs/source --resume-scheduler restart
+```
+
+Training resumes into a new output run. Budgets remain cumulative: a checkpoint
+with 100 completed updates and a target of 300 continues for 200 updates. A
+target already reached performs zero updates. APG complete-rollout mode uses
+``iterations`` as its update target unless ``total_timesteps`` is supplied.
+
+Resume restores policy and normalization statistics, optimizer, scheduler,
+counters, best evaluation state, and Python/NumPy/Torch RNG. The environment
+starts a new episode. Compatibility checks run before collection and report
+the differing algorithm, policy, environment, input/output layout, or optimizer
+fields. Existing standard checkpoints and APG schema-v1 checkpoints load their
+available state; missing metadata and RNG are reported. GRPO with KL requires
+its saved reference policy.
+
+CLI and programmatic trainers can exchange checkpoints. When either trainer
+lacks CLI configuration context, loading reports that limitation and checks
+the runtime policy, algorithm, spaces, and available trainer metadata.
+APG additionally checks its effective rollout, gradient-accumulation, and
+action settings. Older schema-v2 files without APG settings load with a warning.
+
+``restore`` preserves the original scheduler horizon. Extending a zero-ending
+linear curve past that horizon requires ``restart``; an unspecified new horizon
+is bound to the remaining update budget. Subsequent checkpoints preserve the
+restarted curve.
+
+``latest`` and ``best`` resolve the exact path recorded in ``run-manifest.json``.
+A missing manifest, absent selected entry, missing file, or invalid checkpoint
+raises an error; training resume never substitutes another checkpoint. In
+particular, ``best`` requires a run that has produced a best checkpoint.
+Schema-v2 learning state can be restored from an explicit file without its
+source run. Selector-based resume also works when unselected historical
+checkpoints or archived configuration snapshots are missing; the current
+``--config`` still supplies the environment and policy construction settings.
+
+The historical best score is restored, but historical best files are not copied
+into the new run. Its ``best`` entry remains empty until a new evaluation improves
+that score. The source run retains its own best entry.
+
+Variable-horizon APG accepts an update budget or an explicit scheduler horizon.
+With a transition budget, the restored linear horizon is checked before each
+actual optimizer update.
+
+Periodic and best saves update ``run-manifest.json`` after atomically writing
+a completed-update checkpoint. Configuration snapshots are frozen from the
+loaded configuration on the first save and reused by subsequent saves. A final
+save reuses a periodic or best checkpoint from the same update. Before a
+subsequent save or final reuse, the active run checks its last saved checkpoint,
+manifest, and the files referenced by that manifest. Missing files raise an
+error at that boundary with their paths; deleted artifacts are not recreated.
+Unreferenced historical checkpoints may be removed. An interrupted update
+retains the preceding checkpoint. Distributed resume requires the same
+process count; every rank
+participates in saving and loading, while rank zero owns file writes. Each rank
+restores its own RNG and observation-normalization buffers.
 
 See the Profiling section under Run Env for report format. Outputs are written to ``./outputs/<exp_name>_<timestamp>/`` (TensorBoard logs and checkpoints). See the :doc:`../tutorial/rl` tutorial for config structure and training workflow.
 

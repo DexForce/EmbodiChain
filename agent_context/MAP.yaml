@@ -42,7 +42,7 @@ topics:
   title: Environment Framework
   aliases: [env framework, environment framework, task registration, list task, expert trajectory, 环境框架, 任务环境,
     专家轨迹]
-  keywords: [BaseEnv, EmbodiedEnv, EpisodeContext, EnvCfg, register_env, list-task, run-task, target_control_frequency,
+  keywords: [BaseEnv, EmbodiedEnv, EpisodeContext, EnvCfg, register_env, list-task, run-task, run-example, target_control_frequency,
     sim_steps_per_control, step_dt, environment.component, embodiment.component, file-owned physics backend,
     physics_config, ControllerAction, EnvProfiler, startup_summary, dexsim_startup_info,
     ExpertTrajectoryCfg, joint_command_mode, position_velocity, qpos qvel, expert action schema,
@@ -54,6 +54,9 @@ topics:
   - embodichain/cli/list_task.py
   - embodichain/cli/_task_catalog.py
   - embodichain/cli/show_task.py
+  - embodichain/cli/run_example.py
+  - embodichain/cli/_example_runner.py
+  - examples/README.md
   - embodichain/lab/gym/envs/objectives/
   - embodichain/lab/scripts/evaluate_task_objective.py
   - embodichain/lab/scripts/run_task.py
@@ -200,6 +203,8 @@ topics:
   - embodichain/lab/sim/motion/planners/toppra_planner.py
   - embodichain/lab/sim/motion/planners/trapezoidal_planner.py
   - embodichain/lab/sim/motion/planners/bezier.py
+  - embodichain/lab/sim/motion/planners/_cartesian_profiles.py
+  - embodichain/compute/kinematics/_path_derivatives.py
   - embodichain/lab/sim/motion/planners/se3.py
   - embodichain/compute/kinematics/_warp/trapezoidal.py
   - embodichain/lab/sim/motion/planners/curobo/curobo_planner.py
@@ -209,6 +214,7 @@ topics:
   - embodichain/compute/trajectory/
   - embodichain/lab/sim/utility/action_utils.py
   watch_paths: [embodichain/lab/sim/motion/motion_generator.py, embodichain/lab/sim/motion/execution.py,
+    embodichain/compute/kinematics/_path_derivatives.py,
     tests/sim/motion/test_motion_generator.py,
     tests/sim/motion/test_motion_generator_batched.py, embodichain/lab/sim/motion/planners/, embodichain/lab/sim/motion/expansion/,
     tests/sim/motion/expansion/, embodichain/lab/sim/utility/action_utils.py, embodichain/compute/trajectory/,
@@ -360,10 +366,10 @@ topics:
   - embodichain/lab/sim/atomic_actions/articulation_geometry.py
   - embodichain/lab/sim/atomic_actions/affordance_sampling.py
   - embodichain/lab/sim/atomic_actions/primitives/
-  - embodichain/lab/scripts/run_atomic_action.py
-  - embodichain/lab/scripts/_atomic_action/
+  - embodichain/cli/run_example.py
+  - examples/sim/atomic_action/
   watch_paths: [embodichain/lab/sim/atomic_actions/, tests/sim/atomic_actions/, scripts/tutorials/atomic_action/,
-    embodichain/lab/scripts/run_atomic_action.py, embodichain/lab/scripts/_atomic_action/, tests/lab/scripts/test_run_atomic_action.py]
+    embodichain/cli/run_example.py, examples/sim/atomic_action/, tests/examples/atomic_action/]
   related_topics: [simulation-system, motion-planning, robot-system, ik-solvers, task-programs]
   status: active
 - id: task-programs

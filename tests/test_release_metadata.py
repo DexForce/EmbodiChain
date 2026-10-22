@@ -71,7 +71,11 @@ def test_package_discovery_includes_only_runtime_trees() -> None:
     packages = get_packages()
     package_dir = get_package_dir()
 
-    runtime_roots = {"embodichain", "embodichain_tasks", "embodichain_robots"}
+    runtime_roots = {
+        "embodichain",
+        "embodichain_tasks",
+        "embodichain_robots",
+    }
     assert runtime_roots | {
         "embodichain_tasks.configs",
         "embodichain_robots.dexforce_w1",

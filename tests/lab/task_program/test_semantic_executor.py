@@ -2010,10 +2010,8 @@ def test_phase_effect_gate_uses_independent_monitor_and_records_boundary_trace()
     )
     system.runtime._runner = SimpleNamespace(
         session=SimpleNamespace(
-            active_plan=SimpleNamespace(
-                expected_effects=StateDelta(held_object_updates={"arm": None}),
-                effect_candidates=StateDelta(held_object_updates={"arm": held}),
-            )
+            active_expected_effects=StateDelta(held_object_updates={"arm": None}),
+            active_effect_candidates=StateDelta(held_object_updates={"arm": held}),
         )
     )
     system.runtime._current_call_index = 0

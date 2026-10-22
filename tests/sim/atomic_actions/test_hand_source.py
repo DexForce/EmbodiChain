@@ -189,7 +189,7 @@ def test_source_selection_reaches_real_command_payloads_without_mutating_observa
 
 @pytest.mark.parametrize("cls", [MoveHeldObjectOptions, PlaceOptions, PourOptions])
 def test_hand_source_defaults_and_strict_enum(cls):
-    assert cls().hand_source == "observed"
+    assert cls().hand_source == "grasp_command"
     for bad in (None, True, "nominal", 7):
         with pytest.raises(ValueError, match="hand_source"):
             cls(hand_source=bad)

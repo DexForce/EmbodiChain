@@ -67,7 +67,7 @@ class PourOptions(ActionOptions):
     """Per-invocation pouring behavior."""
 
     hand_source: Literal["observed", "grasp_command"] = field(
-        default="observed", kw_only=True
+        default="grasp_command", kw_only=True
     )
     """Hand target retained throughout pouring, independent of measured deflection."""
 
@@ -221,10 +221,10 @@ class Pour(AtomicAction[PourGoal, PourOptions]):
             .clone()
         )
         full[:, :, arm_joint_ids] = arm_trajectory
-        # Preserve the measured contact-supported grasp instead of tightening
-        # the hand to a configured nominal value on the first frame.
+        # Explicit observed mode preserves the measured hand posture.
         full[:, :, hand_joint_ids] = context.last_qpos[:, hand_joint_ids].unsqueeze(1)
         if options.hand_source == "grasp_command":
+            # Retain closing effort while rotating, dwelling and returning.
             full[:, :, hand_joint_ids] = grasp_endpoint.joint_positions(
                 GRASP_COMMAND,
                 num_envs=context.batch_size,

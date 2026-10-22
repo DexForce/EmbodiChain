@@ -27,7 +27,6 @@ from argparse import Namespace
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
-import numpy as np
 import pytest
 import torch
 
@@ -127,6 +126,22 @@ ATOMIC_ACTION_TUTORIAL_MODULES = (
     "pickup",
     "place",
     "pour",
+    "press",
+    "slide",
+    "twist",
+)
+RIGID_SCENE_TUTORIAL_MODULES = (
+    "assemble",
+    "axis_align",
+    "coordinated_placement",
+    "hand_over",
+    "move_held_object",
+    "pickup",
+    "place",
+    "pour",
+)
+STATIC_POSE_TUTORIAL_MODULES = (
+    "coordinated_pickment",
     "press",
     "slide",
     "twist",
@@ -524,7 +539,7 @@ def test_ur5_and_franka_configs_share_place_binding_contract() -> None:
     assert all(set(cfg.control_parts) == {"arm", "eef"} for cfg in configs)
     assert all(set(cfg.solver_cfg) == {"arm"} for cfg in configs)
     assert configs[0].control_parts["eef"] == configs[1].control_parts["eef"]
-    from embodichain.lab.scripts._atomic_action.tcp_presets import sample_tool_tcp
+    from examples.sim.atomic_action.tcp_presets import sample_tool_tcp
 
     for robot_type, cfg in zip(("ur5", "franka"), configs, strict=True):
         assert torch.allclose(
@@ -1213,6 +1228,29 @@ def test_move_held_object_cup_starts_above_the_ground() -> None:
     assert module.OBJECT_INITIAL_Z == pytest.approx(0.05)
 
 
+@pytest.mark.parametrize("module_name", RIGID_SCENE_TUTORIAL_MODULES)
+def test_rigid_scene_tutorials_use_simulation_engine_factory(
+    module_name: str,
+) -> None:
+    module = importlib.import_module(f"scripts.tutorials.atomic_action.{module_name}")
+    source = inspect.getsource(module)
+
+    assert "create_simulation_atomic_action_engine(" in source
+    assert "RigidObjectSceneProvider" not in source
+    assert "SceneSnapshot" not in source
+
+
+@pytest.mark.parametrize("module_name", STATIC_POSE_TUTORIAL_MODULES)
+def test_static_pose_tutorials_do_not_construct_scene_snapshots(
+    module_name: str,
+) -> None:
+    module = importlib.import_module(f"scripts.tutorials.atomic_action.{module_name}")
+    source = inspect.getsource(module)
+
+    assert "SceneSnapshot" not in source
+    assert "SceneEntityPose" not in source
+
+
 def test_axis_align_tutorial_exposes_upright_and_horizontal_modes() -> None:
     module = importlib.import_module("scripts.tutorials.atomic_action.axis_align")
 
@@ -1275,7 +1313,7 @@ def test_replay_timed_trajectory_uses_arrival_intervals() -> None:
             hold_steps=0,
         )
 
-    assert sim.update.call_args_list == [call(step=2), call(step=3), call(step=3)]
+    assert sim.update.call_args_list == [call(0.1, 2), call(0.1, 3)]
     assert robot.set_qpos.call_count == 3
 
 
@@ -1302,7 +1340,7 @@ def test_replay_timed_trajectory_settles_once_after_newton_native_grasp() -> Non
             hold_steps=0,
         )
 
-    assert sim.update.call_args_list == [call(step=1), call(step=4), call(step=1)]
+    assert sim.update.call_args_list == [call(0.1, 1), call(0.1, 4)]
     robot.get_joint_ids.assert_called_once_with(name="eef")
 
 
@@ -1341,12 +1379,12 @@ def test_replay_timed_trajectory_settles_after_each_native_hand_phase() -> None:
         )
 
     assert sim.update.call_args_list == [
-        call(step=1),
-        call(step=1),
-        call(step=4),
-        call(step=1),
-        call(step=1),
-        call(step=4),
+        call(0.1, 1),
+        call(0.1, 1),
+        call(0.1, 4),
+        call(0.1, 1),
+        call(0.1, 1),
+        call(0.1, 3),
     ]
 
 

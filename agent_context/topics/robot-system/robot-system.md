@@ -66,6 +66,15 @@ and `from_dict()` restores it. Body and hand versions have independent registrie
 do not infer one from the other. `DexforceW1Cfg` represents a complete dual-arm
 robot; inspect its decoder for rejected structural options.
 
+W1 V030 defaults to the standard 20-DOF bare body and version-owned FEP
+configuration; earlier revisions retain their SRS and attached-hand defaults.
+V030 redundancy search defaults to joint distance and limit-margin scoring;
+its outstretched home pose has no defined GeoFIK swivel angle.
+Its default TCPs are the `left_ee` / `right_ee` flanges. Select optional hands
+explicitly and configure their tool TCPs independently. V030 preserves source
+arm link names and omits uncalibrated wrist-camera attachments. Its unified
+asset archive keeps component visuals and inertials aligned with the full body.
+
 `DualArmRobotCfg.build_pk_serial_chain()` resolves each solver's root/end
 frames against that arm's source URDF. It translates assembled names back to
 source link names, keeps chains arm-local, and rejects opposite-arm/unknown
@@ -178,6 +187,7 @@ metadata. Acceleration budgets and missing-speed fallback belong to the
 | Removed legacy imports and lazy canonical robot imports | `tests/sim/robots/test_imports.py` |
 | Bundled robot package discovery/staging | `tests/test_robot_package.py` |
 | Config merge, W1 versions/TCP round-trips, chain DOFs | `tests/sim/objects/test_robot_cfg.py` |
+| W1 V030 component assembly, source FK agreement and configured FEP branches | `tests/sim/robots/test_dexforce_w1_v030.py` |
 | Dual-arm source/assembled frames and properties | `tests/sim/objects/test_dual_arm.py` |
 | Runtime part/joint/frame behavior | `tests/sim/objects/test_robot.py` |
 | Spawn binding and joint order | `tests/sim/spawn/test_create_robot_integration.py` |

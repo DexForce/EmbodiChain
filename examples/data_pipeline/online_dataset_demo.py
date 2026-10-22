@@ -66,14 +66,16 @@ def _parse_args() -> argparse.Namespace:
 
 def _build_engine(args: argparse.Namespace) -> OnlineDataEngine:
     """Construct and start an OnlineDataEngine from the given CLI args."""
-    config_path = (
-        Path(__file__).resolve().parents[2]
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml"
+    from embodichain.utils.config_paths import resolve_config_path
+
+    config_path = resolve_config_path(
+        "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml",
+        base_dir=Path(__file__).parent,
     )
     if not config_path.exists():
         raise FileNotFoundError(
             f"Gym config not found: {config_path}. "
-            "Run this example from a checkout containing the official task configs."
+            "Reinstall EmbodiChain with the official task configs."
         )
 
     from embodichain.utils.utility import load_config

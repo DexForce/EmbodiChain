@@ -54,15 +54,13 @@ from embodichain.lab.sim.motion.expansion import (
 from embodichain.lab.task_program.integrations import TaskProgramExpansionRecord
 from embodichain.utils.config_paths import resolve_config_path
 
-_TASK_ROOT = (
-    _REPOSITORY_ROOT
-    / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place"
+_TASK_ROOT = resolve_config_path(
+    "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place",
+    base_dir=Path(__file__).parent,
 )
 _DEFAULT_TASK_CONFIG = _TASK_ROOT / "task.ur5.yaml"
 _DEFAULT_GENERATION_PROFILE = None
-_DEFAULT_OUTPUT_DIR = (
-    _REPOSITORY_ROOT / "output" / "repeated_pick_place_expansion_showcase"
-)
+_DEFAULT_OUTPUT_DIR = Path("output/repeated_pick_place_expansion_showcase")
 _VIDEO_LOOK_AT = (
     (-1.25, -1.15, 0.95),
     (-0.25, -0.02, 0.25),

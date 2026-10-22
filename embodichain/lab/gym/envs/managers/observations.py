@@ -209,25 +209,53 @@ def get_rigid_object_velocity(
 def normalize_robot_joint_data(
     env: EmbodiedEnv,
     data: torch.Tensor,
-    joint_ids: Sequence[int],
+    joint_ids: Sequence[int] | None = None,
     limit: Literal["qpos_limits", "qvel_limits"] = "qpos_limits",
     range: Sequence[float] = [0.0, 1.0],
+    *,
+    control_parts: Sequence[str] | None = None,
 ) -> torch.Tensor:
-    """Normalize the robot joint positions to the range of [0, 1] based on the joint limits.
+    """Normalize selected observation columns using their robot joint limits.
 
     Args:
         env: The environment instance.
-        obs: The observation dictionary.
-        joint_ids: The indices of the joints to be normalized.
+        data: Joint data in the environment's active-joint observation order.
+        joint_ids: Observation-column indices to normalize. Mutually exclusive
+            with ``control_parts``.
         limit: The type of joint limits to be used for normalization. Options are:
             - `qpos_limits`: Use the joint position limits for normalization.
             - `qvel_limits`: Use the joint velocity limits for normalization.
         range: The range to normalize the joint data to. Defaults to [0.0, 1.0].
+        control_parts: Robot control parts whose observed joints are normalized.
+            Joint names are resolved against the current robot and mapped into
+            ``env.active_joint_ids``, including observed mimic joints.
+
+    Returns:
+        The input tensor with the selected columns normalized in place.
+
+    Raises:
+        ValueError: If neither or both selectors are given, or the selected
+            control parts have no joints in the observation.
     """
 
+    if (joint_ids is None) == (control_parts is None):
+        raise ValueError("Specify exactly one of joint_ids or control_parts.")
     robot = env.robot
+    if control_parts is not None:
+        selected = {
+            joint_id
+            for part in control_parts
+            for joint_id in robot.get_joint_ids(name=part)
+        }
+        joint_ids = [
+            column
+            for column, joint_id in enumerate(env.active_joint_ids)
+            if joint_id in selected
+        ]
+        if not joint_ids:
+            raise ValueError("Selected control_parts have no observed joints.")
 
-    joint_ids_set = torch.as_tensor(env.active_joint_ids)[joint_ids]
+    joint_ids_set = torch.as_tensor(env.active_joint_ids, device=data.device)[joint_ids]
     # shape of target_limits: (num_envs, len(joint_ids), 2)
     target_limits = getattr(robot.body_data, limit)[:, joint_ids_set, :]
     low = target_limits[:, :, 0]

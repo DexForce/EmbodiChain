@@ -9,6 +9,7 @@
 | Strategy, IK preparation, result normalization | `embodichain/lab/sim/motion/motion_generator.py` → `MotionGenerator` |
 | Joint-path timing | `embodichain/lab/sim/motion/planners/toppra_planner.py`, `trapezoidal_planner.py` in that directory |
 | Cartesian geometry and scalar timing | `embodichain/lab/sim/motion/planners/se3.py`, `bezier.py`, `_scalar_time_law.py`, `_blend_constraints.py` in that directory |
+| Sampled Cartesian geometry → timing → robot IK | `embodichain/lab/sim/motion/planners/_cartesian_profiles.py` (internal adapter) |
 | Collision planning and scene conversion | `embodichain/lab/sim/motion/planners/curobo/` |
 | NMG policy rollout and export metadata | `embodichain/lab/sim/motion/planners/neural_planner.py` |
 | Pure interpolation, resampling and retiming | `embodichain/compute/trajectory/` |
@@ -68,6 +69,14 @@ warping. New consumers import it directly; `lab.sim.utility.action_utils` keeps
 solver-dependent pose/IK adaptation and compatibility re-exports. Trapezoidal/
 Double-S Warp profiles live in `compute/kinematics/_warp/trapezoidal.py`; compute
 must not import simulation objects.
+
+The internal Cartesian profile adapter accepts caller-owned endpoint poses and
+optional Bézier geometry, times distance before batched IK, and derives joint
+references using the root-frame Jacobian. Its pure derivative and joint-wrap
+calculations live in `compute/kinematics/_path_derivatives.py`; tests target those
+owners rather than tutorial functions. Tutorial geometry, CLI and plots remain
+sample-owned. This adapter is not a new planner backend or a collision/joint-limit
+compliance certificate.
 
 `retime_to_control_grid()` maps source trajectories onto a fixed command clock
 without shortening their durations and recomputes velocity references.
@@ -141,7 +150,7 @@ standoff poses the caller must replan. The resolved config is reported on the re
 
 `scripts/tutorials/atomic_action/place.py` is the demonstration host, hooked
 the way the Affordance sampling tutorials are: shared helpers live in
-`lab/scripts/_atomic_action/support.py` through the `tutorial_utils.py` adapter;
+`examples/sim/atomic_action/support.py` through the `tutorial_utils.py` adapter;
 the tutorial declares only which named segments may move,
 and one variant replays per simulation row. Phases come from the action's own
 `TrajectorySegment` ranges; only motion at or after the lift is retimed so the
@@ -154,8 +163,8 @@ genuinely different variants are discarded as duplicates; an enabled spatial
 factor at or below the tolerance now fails configuration decoding instead of
 silently keeping the nominal variant alone.
 
-The configured ten-scene CLI uses the same variant operators and owns its
-compiled-plan adaptation and replay provenance; see the
+The twelve-scene Atomic CLI uses the same variant operators through the
+shared Atomic plan adapter and owns its replay provenance; see the
 [Atomic host boundary](../atomic-actions/atomic-actions.md). It does not extend
 the Gym Task Program collection lifecycle.
 

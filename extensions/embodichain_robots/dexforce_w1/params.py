@@ -54,6 +54,10 @@ class W1ArmKineParams:
 
     def __post_init__(self):
         spec = get_w1_version_spec(self.version)
+        if spec.arm_d_list is None or spec.arm_base_z is None:
+            raise ValueError(
+                f"W1 {spec.version.value} has no SRS geometry; use its configured FEP solver."
+            )
         self.d_list = np.asarray(spec.arm_d_list, dtype=float)
         self.link_lengths = np.array(
             [

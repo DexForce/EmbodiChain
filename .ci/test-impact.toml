@@ -345,6 +345,20 @@ resource_hints = ["sim"]
 risk = "medium"
 
 [[rules]]
+id = "runnable-examples"
+paths = [
+  "embodichain/cli/run_example.py",
+  "embodichain/cli/_example_runner.py",
+  "examples/**",
+]
+tests = [
+  "tests/cli/test_run_example.py",
+  "tests/test_example_package.py",
+  "tests/examples/**",
+]
+risk = "medium"
+
+[[rules]]
 id = "atomic-action-tutorials"
 paths = ["scripts/tutorials/atomic_action/*.py"]
 tests = ["tests/sim/atomic_actions/**"]

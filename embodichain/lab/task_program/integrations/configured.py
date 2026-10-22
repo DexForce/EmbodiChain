@@ -85,6 +85,9 @@ from embodichain.lab.sim.atomic_actions import (
     SlideOptions,
     TrackingPolicy,
 )
+from embodichain.lab.sim.motion.planners.trapezoidal_planner import (
+    TrapezoidalPlanOptions,
+)
 from embodichain.lab.task_program.semantics import (
     EffectAssurance,
     EffectMonitorRef,
@@ -1547,8 +1550,12 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
                 "acceleration_limit",
                 "dynamic_collision_mode",
                 "velocity_targets",
+                "plan_opts",
             }
         ),
+    )
+    sample_count = _integer(
+        config["sample_count"], path=f"{path}.sample_count", minimum=2
     )
     kwargs: dict[str, object] = {
         "strategy": _identifier(
@@ -1559,11 +1566,7 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
             config.get("velocity_targets", "auto"),
             path=f"{path}.velocity_targets",
         ),
-        "sample_count": _integer(
-            config["sample_count"],
-            path=f"{path}.sample_count",
-            minimum=2,
-        ),
+        "sample_count": sample_count,
         "dynamic_collision_mode": _enum(
             config.get("dynamic_collision_mode", DynamicCollisionMode.AUTO.value),
             DynamicCollisionMode,
@@ -1578,6 +1581,45 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
                 minimum=0.0,
                 strict_minimum=True,
             )
+    if "plan_opts" in config:
+        option_path = f"{path}.plan_opts"
+        options = _mapping(
+            config["plan_opts"],
+            path=option_path,
+            required=frozenset({"kind"}),
+            optional=frozenset(
+                {"stop_at_waypoints", "blend_tolerance", "collinearity_tolerance"}
+            ),
+        )
+        if _identifier(options["kind"], path=f"{option_path}.kind") != "trapezoidal":
+            raise ValueError(f"{option_path}.kind must be 'trapezoidal'.")
+        plan_opts = TrapezoidalPlanOptions(
+            sample_interval=sample_count,
+            stop_at_waypoints=_boolean(
+                options.get("stop_at_waypoints", True),
+                path=f"{option_path}.stop_at_waypoints",
+            ),
+            blend_tolerance=_real(
+                options.get("blend_tolerance", 0.0),
+                path=f"{option_path}.blend_tolerance",
+                minimum=0.0,
+            ),
+            collinearity_tolerance=_real(
+                options.get("collinearity_tolerance", 1e-5),
+                path=f"{option_path}.collinearity_tolerance",
+                minimum=0.0,
+                maximum=1.0,
+            ),
+        )
+        # Explicit backend options own their constraints in MotionGenerator.
+        # Carry YAML policy limits into those options rather than losing them.
+        for field_name, constraint in (
+            ("velocity_limit", "velocity"),
+            ("acceleration_limit", "acceleration"),
+        ):
+            if field_name in kwargs:
+                plan_opts.constraints[constraint] = kwargs[field_name]
+        kwargs["plan_opts"] = plan_opts
     return MotionPolicy(**kwargs)
 
 
@@ -1814,6 +1856,16 @@ def _decode_policy_preset(value: object, *, path: str) -> SkillPolicyPreset:
         path=f"{path}.workflow_recovery",
         required=frozenset({"max_recovery_attempts"}),
     )
+    motion_policy = _decode_motion_policy(config["motion"], path=f"{path}.motion")
+    required_planner = _optional_identifier(
+        config.get("required_planner"), path=f"{path}.required_planner"
+    )
+    if isinstance(motion_policy.plan_opts, TrapezoidalPlanOptions):
+        if required_planner not in (None, "trapezoidal"):
+            raise ValueError(
+                f"{path}.motion.plan_opts requires the trapezoidal planner."
+            )
+        required_planner = "trapezoidal"
     return SkillPolicyPreset(
         _identifier(config["preset_id"], path=f"{path}.preset_id"),
         action_option_templates=action_options,
@@ -1822,7 +1874,7 @@ def _decode_policy_preset(value: object, *, path: str) -> SkillPolicyPreset:
             EffectAssurance,
             path=f"{path}.effect_assurance",
         ),
-        motion_policy=_decode_motion_policy(config["motion"], path=f"{path}.motion"),
+        motion_policy=motion_policy,
         tracking_policy=_decode_tracking_policy(
             config["tracking"],
             path=f"{path}.tracking",
@@ -1844,10 +1896,7 @@ def _decode_policy_preset(value: object, *, path: str) -> SkillPolicyPreset:
             config["effect_monitors"],
             path=f"{path}.effect_monitors",
         ),
-        required_planner=_optional_identifier(
-            config.get("required_planner"),
-            path=f"{path}.required_planner",
-        ),
+        required_planner=required_planner,
     )
 
 

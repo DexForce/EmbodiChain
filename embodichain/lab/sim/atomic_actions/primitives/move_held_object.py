@@ -109,7 +109,7 @@ class MoveHeldObjectOptions(ActionOptions):
     """Per-invocation held-object transport behavior."""
 
     hand_source: Literal["observed", "grasp_command"] = field(
-        default="observed", kw_only=True
+        default="grasp_command", kw_only=True
     )
     """Keep the measured hand posture or actively retain its bound grasp command."""
 
@@ -231,6 +231,7 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
 
         base_qpos = state.last_qpos.clone()
         if options.hand_source == "grasp_command":
+            # Retain closing effort instead of a contact-blocked aperture.
             base_qpos[:, hand_joint_ids] = grasp.joint_positions(
                 GRASP_COMMAND,
                 num_envs=context.batch_size,

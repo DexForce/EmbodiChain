@@ -53,7 +53,7 @@ def main(argv: list[str] | None = None) -> None:
         help="Directory for variant plots and replay output.",
     )
     args, forwarded = parser.parse_known_args(argv)
-    from scripts.tutorials.atomic_action import place
+    from examples.sim.atomic_action import place
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     forwarded = list(forwarded)

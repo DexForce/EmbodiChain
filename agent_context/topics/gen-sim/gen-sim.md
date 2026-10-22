@@ -67,7 +67,7 @@ budget. Explicit authored motion limits require `lab.motion_limits/v1`; bundles
 without the contract keep that shared path. Native runs save `motion_contract.json`.
 Generated MoveHeldObject, Pour and Place options select
 `hand_source: grasp_command` to preserve drive authority under measured finger
-deflection. Shared defaults remain `observed`; final open commands and physical
+deflection. Shared defaults also retain the grasp command; final open commands and physical
 release gates are unchanged. These declarations participate in bundle identity
 and require new full-task qualification, not reuse of old receipts.
 UR10 ready/Park shoulder pan faces the table under the shared mount; its zero

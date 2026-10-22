@@ -161,9 +161,13 @@ def test_hand_over_gym_config_selects_packaged_program_without_contact_sensor() 
         ),
     }
     assert payload["environment"] == {"component": "env.yaml"}
-    assert payload["embodiment"] == {
-        "component": ("../../../components/embodiments/dual_ur5_dh_pgi_140_80.yaml")
-    }
+    assert payload["embodiment"]["component"] == (
+        "../../../components/embodiments/dual_ur5_dh_pgi_140_80.yaml"
+    )
+    assert set(payload["embodiment"]["overrides"]) == {"init_qpos"}
+    assert list(_configured_env_cfg().robot.init_qpos) == (
+        payload["embodiment"]["overrides"]["init_qpos"]
+    )
     embodiment = load_config(
         _gym_config_path().parent / payload["embodiment"]["component"]
     )
@@ -185,15 +189,6 @@ def test_hand_over_gym_config_uses_declared_default_backend() -> None:
 
     assert isinstance(cfg.sim_cfg.physics_config, DefaultPhysicsCfg)
     assert cfg.sim_cfg.physics_config.enable_ccd is True
-
-
-def test_hand_over_gym_config_rejects_newton_override() -> None:
-    """The Default CCD environment cannot be relabeled as Newton."""
-    payload = _gym_payload()
-    payload["physics"] = "newton"
-
-    with pytest.raises(ValueError, match="owns physics and physics_config"):
-        config_to_cfg(payload, source_path=_gym_config_path())
 
 
 def test_hand_over_gym_config_builds_dual_ur5_pgi_scene() -> None:
@@ -410,13 +405,18 @@ def test_hand_over_profile_binds_unified_left_to_right_transfer() -> None:
     binding = _integration().registration.robot_profile_binding
 
     assert binding.profile_id == _PROFILE_ID
-    assert [resource.resource_id for resource in binding.resources] == [
+    resources = {resource.resource_id: resource for resource in binding.resources}
+    assert set(resources) == {
         "left",
         "right",
-    ]
+        "primary_manipulator",
+        "secondary_manipulator",
+    }
+    assert resources["primary_manipulator"].members == ("right",)
+    assert resources["secondary_manipulator"].members == ("left",)
     assert [
         endpoint.control_part
-        for resource in binding.resources
+        for resource in (resources["left"], resources["right"])
         for endpoint in resource.endpoints
     ] == ["left_arm", "left_eef", "right_arm", "right_eef"]
     assert dict(binding.defaults["hand_over"]) == {

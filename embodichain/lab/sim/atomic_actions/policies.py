@@ -23,6 +23,7 @@ from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
+from numbers import Real
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
@@ -99,8 +100,14 @@ class MotionPolicy:
             value = getattr(self, name)
             if value is None and name == "velocity_limit":
                 continue
-            if not math.isfinite(value) or value <= 0.0:
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, Real)
+                or not math.isfinite(value)
+                or value <= 0.0
+            ):
                 raise ValueError(f"{name} must be finite and greater than zero.")
+            object.__setattr__(self, name, float(value))
         mode = self.dynamic_collision_mode
         if isinstance(mode, str):
             try:
