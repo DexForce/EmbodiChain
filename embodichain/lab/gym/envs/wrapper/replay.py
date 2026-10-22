@@ -29,7 +29,10 @@ from embodichain.lab.gym.envs.expert_trajectory import (
 )
 from embodichain.lab.gym.envs.types import ControllerAction
 from embodichain.lab.gym.utils.gym_utils import load_trajectory
-from embodichain.lab.gym.utils.trajectory_state import restore_trajectory_state
+from embodichain.lab.gym.utils.trajectory_state import (
+    capture_trajectory_state,
+    restore_trajectory_state,
+)
 from embodichain.utils import logger
 
 if TYPE_CHECKING:
@@ -60,6 +63,10 @@ class ReplayWrapper(gym.Wrapper):
     full resets only. Stepping past exhaustion raises instead of extending
     objective dwell time by repeating the final command.
 
+    Cable recordings support dynamic replay from matching full-reset states
+    only. Their visible state omits contact/solver history, so state scrubbing,
+    partial resets and broadcasting world-space cable recordings are rejected.
+
     Args:
         env: The environment to wrap (constructed without ``record_trajectory``).
         trajectory: A ``.pt`` path or loaded dict from
@@ -82,6 +89,23 @@ class ReplayWrapper(gym.Wrapper):
         self._mode = mode
         self._trajectory = load_trajectory(trajectory)
         meta = self._trajectory["meta"]
+        self._cable_replay = "cables" in self._trajectory["states"].keys()
+        if (
+            getattr(getattr(env, "sim", None), "_cable_objects", {})
+            and not self._cable_replay
+        ):
+            raise ValueError(
+                "Cable replay requires recorded initial states for every scene cable; include them in trajectory_uids."
+            )
+        if self._cable_replay:
+            if mode != "dynamic":
+                raise NotImplementedError(
+                    "Cable recordings require dynamic replay from reset."
+                )
+            if int(meta["num_envs"]) != env.num_envs:
+                raise ValueError(
+                    "World-space cable recordings require matching environment counts."
+                )
         self._controller_spec = None
         self._objective_replay = (
             mode == "dynamic" and getattr(env, "physical_objective", None) is not None
@@ -189,13 +213,22 @@ class ReplayWrapper(gym.Wrapper):
     def reset(
         self, *, seed: int | None = None, options: dict | None = None
     ) -> tuple[EnvObs, dict]:
-        if self._objective_replay and options is not None and "reset_ids" in options:
-            raise ValueError("Physical-objective replay does not support reset_ids.")
+        if (
+            (self._objective_replay or self._cable_replay)
+            and options is not None
+            and "reset_ids" in options
+        ):
+            raise ValueError(
+                "Physical-objective/cable replay does not support reset_ids."
+            )
         obs, info = self.env.reset(seed=seed, options=options)
         # Disable physics during restore so set_local_pose's internal update
         # does not integrate dynamics.
-        self.env.sim.enable_physics(False)
-        restore_trajectory_state(self.env, self._trajectory["states"][:, 0])
+        if self._cable_replay:
+            self._validate_cable_reset_state()
+        else:
+            self.env.sim.enable_physics(False)
+            restore_trajectory_state(self.env, self._trajectory["states"][:, 0])
         if self._mode == "dynamic":
             self.env.sim.enable_physics(True)
             self.env._replay_no_auto_reset = True
@@ -211,6 +244,37 @@ class ReplayWrapper(gym.Wrapper):
         if seed_recording_state is not None:
             seed_recording_state(obs, env_ids)
         return obs, info
+
+    def _validate_cable_reset_state(self) -> None:
+        """Validate initial observations without approximating a checkpoint."""
+        initial = self._trajectory["states"][:, 0]
+        for category, assets in (
+            ("cables", getattr(self.env.sim, "_cable_objects", {})),
+            ("articulations", self.env.sim._articulations),
+            ("rigid_objects", self.env.sim._rigid_objects),
+        ):
+            recorded = (
+                set(initial[category].keys()) if category in initial.keys() else set()
+            )
+            if not recorded.issubset(assets) or (
+                category == "cables" and recorded != set(assets)
+            ):
+                raise ValueError(
+                    f"Cable replay scene does not match recorded {category}."
+                )
+        current = initial.clone()
+        capture_trajectory_state(
+            self.env, current, torch.arange(self.env.num_envs, device=self.env.device)
+        )
+        for key, expected in initial.items(include_nested=True, leaves_only=True):
+            observed = current[key].to(expected)
+            if observed.shape != expected.shape or not torch.allclose(
+                observed, expected, rtol=1e-5, atol=1e-6
+            ):
+                raise ValueError(
+                    f"Cable replay initial state {key!r} differs from the full reset; "
+                    "a recorded observation cannot restore solver history."
+                )
 
     def step(
         self, action: Any
@@ -260,6 +324,10 @@ class ReplayWrapper(gym.Wrapper):
         Returns:
             The observation at the target step.
         """
+        if self._cable_replay:
+            raise NotImplementedError(
+                "Cable recordings do not support state scrubbing."
+            )
         env = self.env
         max_step = self.control_max_step
         step = max(0, min(int(step), max_step))

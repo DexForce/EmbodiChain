@@ -326,6 +326,81 @@ def test_runtime_keeps_backend_lifecycle_on_update_thread() -> None:
     assert runtime.stats.published_image_frames == 1
 
 
+@pytest.mark.parametrize("timeout", [None, 5.0], ids=["default", "explicit-timeout"])
+def test_runtime_allows_client_build_but_honors_explicit_startup_deadline(
+    monkeypatch: pytest.MonkeyPatch, timeout: float | None
+) -> None:
+    """Model a 20-second frontend build without slowing down the test suite."""
+    build_seconds = 20.0
+    finish_build = threading.Event()
+
+    class _BuildingBackend(_Backend):
+        def start(self) -> None:
+            super().start()
+            assert finish_build.wait(timeout=2.0)
+
+    published = threading.Event()
+    backend = _BuildingBackend(published, threading.Event())
+    runtime = VisualizationRuntime(
+        _Exporter(published), VisualizationCfg(backend="viser"), backend=backend
+    )
+    real_wait = runtime._ready_event.wait
+
+    def wait_for_build(timeout: float) -> bool:
+        # Model elapsed build time at the readiness boundary; keep the actual
+        # worker, manifest publication, and cleanup running on their real thread.
+        finish_build.set()
+        if timeout < build_seconds:
+            return False
+        return real_wait(timeout=2.0)
+
+    monkeypatch.setattr(runtime._ready_event, "wait", wait_for_build)
+    try:
+        if timeout is None:
+            runtime.start()
+            assert runtime.health.status == "running"
+            assert runtime.health.published_scene_revision == 1
+            assert not backend.stopped
+        else:
+            with pytest.raises(
+                TimeoutError, match="starting the visualization backend"
+            ):
+                runtime.start(timeout=timeout)
+            assert not runtime.is_running
+            assert backend.stopped
+    finally:
+        finish_build.set()
+        runtime.stop()
+    assert len(set(backend.thread_ids)) == 1
+
+
+def test_runtime_reports_backend_start_failure_without_waiting_for_timeout() -> None:
+    failure = ValueError("Viser client build failed")
+
+    class _FailingBackend(_Backend):
+        def start(self) -> None:
+            super().start()
+            raise failure
+
+    published = threading.Event()
+    backend = _FailingBackend(published, threading.Event())
+    runtime = VisualizationRuntime(
+        _Exporter(published), VisualizationCfg(backend="viser"), backend=backend
+    )
+    try:
+        with pytest.raises(
+            RuntimeError, match="Visualization update thread failed"
+        ) as error:
+            runtime.start()
+        assert error.value.__cause__ is failure
+        assert runtime.health.status == "failed"
+    finally:
+        with pytest.raises(RuntimeError, match="Visualization update thread failed"):
+            runtime.stop()
+    assert backend.stopped
+    assert not runtime.is_running
+
+
 @pytest.mark.parametrize("due", ["none", "pose", "deformable", "image", "forced"])
 def test_capture_publishes_source_once_and_only_when_a_consumer_is_due(due):
     published = threading.Event()

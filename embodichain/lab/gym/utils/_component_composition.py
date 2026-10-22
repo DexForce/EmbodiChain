@@ -60,6 +60,7 @@ _SCENE_SIMULATION_FIELDS = frozenset(
         "rigid_object",
         "rigid_object_group",
         "articulation",
+        "cable_object",
     }
 )
 

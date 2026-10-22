@@ -138,3 +138,49 @@ def test_restore_trajectory_state_writes_complete_robot_state() -> None:
 
     robot.set_qpos.assert_called_once_with(recorded_qpos, target=False)
     robot.set_qvel.assert_called_once_with(recorded_qvel, target=False)
+
+
+def test_cable_capture_is_world_observation_and_selected_rows_only() -> None:
+    from embodichain.lab.gym.utils.gym_utils import build_trajectory_buffer
+
+    cable_state = torch.arange(2 * 3 * 13, dtype=torch.float32).reshape(2, 3, 13)
+    robot = SimpleNamespace(
+        dof=2,
+        get_local_pose=lambda: torch.zeros(2, 7),
+        get_qpos=lambda: torch.zeros(2, 2),
+        get_qvel=lambda: torch.zeros(2, 2),
+    )
+    cable = SimpleNamespace(
+        data=SimpleNamespace(num_segments=3, segment_state_w=cable_state)
+    )
+    env = SimpleNamespace(
+        robot=robot,
+        sim=SimpleNamespace(
+            _articulations={}, _rigid_objects={}, _cable_objects={"wire": cable}
+        ),
+    )
+    buffer = build_trajectory_buffer(env, max_steps=3, num_envs=2, device="cpu")
+    capture_trajectory_state(
+        env, buffer["states"], torch.tensor([1]), torch.tensor([2])
+    )
+    torch.testing.assert_close(
+        buffer["states", "cables", "wire", "segment_state_w"][1, 2], cable_state[1]
+    )
+    assert not buffer["states", "cables", "wire", "segment_state_w"][0].any()
+    filtered = build_trajectory_buffer(
+        env, max_steps=3, num_envs=2, device="cpu", uids=["other"]
+    )
+    assert "cables" not in filtered["states"].keys()
+
+
+def test_cable_restore_fails_before_any_robot_or_scene_write() -> None:
+    import pytest
+
+    robot = MagicMock()
+    states = {
+        "robot": {"qpos": torch.ones(2, 2), "root_pose": torch.ones(2, 7)},
+        "cables": {"wire": {"segment_state_w": torch.zeros(2, 3, 13)}},
+    }
+    with pytest.raises(NotImplementedError, match="solver-history"):
+        restore_trajectory_state(SimpleNamespace(robot=robot, sim=MagicMock()), states)
+    assert robot.mock_calls == []

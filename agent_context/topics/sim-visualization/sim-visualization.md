@@ -98,7 +98,8 @@ this invariant.
 | Symptom | Cause / action |
 |---|---|
 | `Visualization env_ids ... outside simulation range` | Selected IDs do not exist in the configured arenas. Validate them against `SimulationManager.num_envs`. |
-| Startup timeout or address-in-use error | The Viser worker did not become ready or the configured port is occupied. Select another port and inspect `visualization_health.worker_error`. |
+| Startup timeout, possibly just after Viser starts listening | The worker startup budget includes Viser frontend dependency installation/build and initial manifest publication. `VisualizationRuntime.start()` waits up to 120 seconds by default and returns as soon as ready; an unusually slow build may need a longer explicit `start(timeout=...)`. Inspect startup logs before retrying. |
+| Address-in-use error | The configured port is occupied. Select another port and inspect `visualization_health.worker_error`. |
 | Asset added after startup is missing | Step once, call `refresh_visualization()`, or mark topology dirty if the change bypassed manager APIs. |
 | Newton Viser shows only the grid after declaring a robot | Check that Viser startup did not finalize an empty Spawn scene before asset declaration and that link poses remain finite after the first update. |
 | A Newton articulation link is missing geometry or emits `mesh_id 0 out of range` | Export all render-body mesh segments and treat a zero-mesh link as empty geometry. Do not use the single-mesh articulation helper for Newton render bodies. |

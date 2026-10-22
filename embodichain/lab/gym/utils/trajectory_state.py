@@ -62,7 +62,10 @@ def capture_trajectory_state(
     env_ids: torch.Tensor,
     step_ids: torch.Tensor | None = None,
 ) -> None:
-    """Capture restorable simulation state into a trajectory state view.
+    """Capture robot/rigid states and cable observations into a trajectory view.
+
+    Cable segment states contain world XYZ, XYZW, COM linear velocity and
+    angular velocity. They omit solver history and do not define a checkpoint.
 
     Args:
         env: Environment containing the robot and simulation scene entities.
@@ -101,6 +104,16 @@ def capture_trajectory_state(
                     step_ids,
                 )
 
+    if "cables" in states.keys():
+        for uid, cable in env.sim._cable_objects.items():
+            if uid in states["cables"].keys():
+                _assign_state(
+                    states["cables"][uid]["segment_state_w"],
+                    cable.data.segment_state_w,
+                    env_ids,
+                    step_ids,
+                )
+
     if "rigid_objects" in states.keys():
         rigid_states = states["rigid_objects"]
         for uid, rigid_object in env.sim._rigid_objects.items():
@@ -135,10 +148,22 @@ def restore_trajectory_state(
 ) -> None:
     """Restore one trajectory timestep into an environment scene.
 
+    Cable recordings require action replay from an episode reset. A cable
+    entry is rejected before any robot or object write, because restoring its
+    visible pose and velocity cannot restore solver/contact history.
+
     Args:
         env: Environment containing the robot and simulation scene entities.
         states: One timestep of recorded robot and scene-object states.
+
+    Raises:
+        NotImplementedError: The recording contains cable observations.
     """
+    if "cables" in states.keys():
+        raise NotImplementedError(
+            "Recorded cable state is an observation, not a solver-history "
+            "checkpoint. Reset the episode and replay its commands instead."
+        )
     robot_states = states["robot"]
     env.robot.set_local_pose(robot_states["root_pose"])
     # Restore complete qpos, including mimic joints. Kinematic replay disables
