@@ -22,6 +22,7 @@ Lightweight RL environments have a separate owner in
 | Expert trajectory control and stored-action schema | `embodichain/lab/gym/envs/expert_trajectory.py` |
 | Optional measured physical objectives | `embodichain/lab/gym/envs/objectives/`; Gym owns observation/reset hooks independently of expert acceptance |
 | Controller-ready commands | `embodichain/lab/gym/envs/types.py`: `ControllerAction` |
+| Cable routing expert / deployment | `embodichain_tasks/embodichain_tasks/manipulation/cable/route_the_cable.py`; deployments under `embodichain_tasks/configs/tasks/manipulation/cable/route_the_cable/` |
 | Demo segment execution / outcomes | `embodichain/lab/gym/envs/demo.py` |
 | Configured Task Program registration | `embodichain/lab/gym/envs/task_program/registration.py` |
 | Timing instrumentation | `embodichain/lab/gym/utils/profiler.py` |

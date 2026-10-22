@@ -204,3 +204,71 @@ def test_dynamic_replay_decodes_position_velocity_expert_action(fake_restore):
 def test_replay_rejects_unknown_mode():
     with pytest.raises(ValueError, match="Invalid replay mode"):
         ReplayWrapper(_FakeEnv(), _trajectory(), mode="unsupported")
+
+
+def _cable_replay_case():
+    env = _FakeEnv()
+    trajectory = _trajectory()
+    cable_state = torch.zeros(1, 3, 13)
+    cable_state[..., 6] = 1
+    trajectory["states"]["cables"] = TensorDict(
+        {
+            "wire": {
+                "segment_state_w": cable_state[:, None].expand(-1, 2, -1, -1).clone()
+            }
+        },
+        batch_size=[1, 2],
+    )
+    env.sim._cable_objects = {
+        "wire": SimpleNamespace(data=SimpleNamespace(segment_state_w=cable_state))
+    }
+    env.sim._articulations = {}
+    env.sim._rigid_objects = {}
+    env.robot.get_qpos = lambda: torch.tensor([[0.0, 1.0]])
+    env.robot.get_local_pose = lambda: torch.zeros(1, 7)
+    return env, trajectory
+
+
+def test_cable_dynamic_replay_uses_reset_without_restoring_observations(fake_restore):
+    env, trajectory = _cable_replay_case()
+    wrapper = ReplayWrapper(env, trajectory, mode="dynamic")
+    wrapper.reset()
+    assert env.last_restored is None
+    assert env.sim.physics_enabled == [True]
+    wrapper.step(None)
+    torch.testing.assert_close(env.received_actions[0], trajectory["actions"][:, 0])
+    with pytest.raises(NotImplementedError, match="scrubbing"):
+        wrapper.go_to_step(1)
+    with pytest.raises(ValueError, match="reset_ids"):
+        wrapper.reset(options={"reset_ids": [0]})
+
+
+def test_cable_dynamic_replay_rejects_a_mid_episode_initial_observation(fake_restore):
+    env, trajectory = _cable_replay_case()
+    trajectory["states"]["cables", "wire", "segment_state_w"][0, 0, 0, 0] = 0.1
+    wrapper = ReplayWrapper(env, trajectory, mode="dynamic")
+    with pytest.raises(ValueError, match="differs from the full reset"):
+        wrapper.reset()
+    assert env.last_restored is None and not env.received_actions
+
+
+@pytest.mark.parametrize("mode", ["kinematic", "control"])
+def test_cable_replay_rejects_history_free_state_modes_before_mutation(mode):
+    env, trajectory = _cable_replay_case()
+    with pytest.raises(NotImplementedError, match="dynamic"):
+        ReplayWrapper(env, trajectory, mode=mode)
+    assert env.sim.physics_enabled == []
+
+
+def test_cable_replay_rejects_broadcast_world_states():
+    env, trajectory = _cable_replay_case()
+    with pytest.raises(ValueError, match="environment counts"):
+        ReplayWrapper(_FakeEnv(num_envs=2), trajectory, mode="dynamic")
+
+
+def test_cable_scene_replay_rejects_recording_without_cable_initial_observations():
+    env, trajectory = _cable_replay_case()
+    del trajectory["states"]["cables"]
+    with pytest.raises(ValueError, match="every scene cable"):
+        ReplayWrapper(env, trajectory, mode="dynamic")
+    assert env.sim.physics_enabled == []

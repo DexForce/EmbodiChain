@@ -837,6 +837,24 @@ def test_viser_launcher_flag_implies_headless_viser_commands():
     assert merged_config["visualization"]["allow_commands"] is True
 
 
+@pytest.mark.parametrize("allow_commands", [False, True])
+def test_viser_launcher_preserves_explicit_command_policy(allow_commands):
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser)
+    config = {
+        "id": "Dummy-v0",
+        "physics": "default",
+        "visualization": {"allow_commands": allow_commands},
+    }
+    original = deepcopy(config)
+
+    merged = merge_args_with_gym_config(parser.parse_args(["--viser"]), config)
+
+    assert merged["visualization"]["backend"] == "viser"
+    assert merged["visualization"]["allow_commands"] is allow_commands
+    assert config == original
+
+
 def test_sensor_and_extra_obs_together():
     """Test that both sensors and extra observations work together."""
     config = {
@@ -2549,6 +2567,24 @@ def test_build_trajectory_buffer_uids_filter():
     assert "rigid_objects" in buf["states"].keys()
     assert "cube" in buf["states"]["rigid_objects"].keys()
     assert "ball" not in buf["states"]["rigid_objects"].keys()
+
+
+@pytest.mark.parametrize("uids", [None, ["wire"], ["other"]])
+def test_cable_trajectory_buffer_preserves_topology_and_uid_selection(uids):
+    env = _stub_env()
+    env.sim._cable_objects = {
+        "wire": SimpleNamespace(data=SimpleNamespace(num_segments=3)),
+        "other": SimpleNamespace(data=SimpleNamespace(num_segments=5)),
+    }
+    buffer = build_trajectory_buffer(
+        env, max_steps=4, num_envs=2, device="cpu", uids=uids
+    )
+    cables = buffer["states", "cables"]
+    assert set(cables.keys()) == set(uids or env.sim._cable_objects)
+    for uid in cables.keys():
+        state = cables[uid, "segment_state_w"]
+        assert state.shape == (2, 4, env.sim._cable_objects[uid].data.num_segments, 13)
+        assert state.dtype == torch.float32
 
 
 def test_load_trajectory_validates_and_returns_dict(tmp_path):

@@ -277,6 +277,13 @@ not orchestrate multiple experiments or qualify kinematic playback.
   accepted. Objective-enabled dynamic replay requires one row and a full reset.
   `control` exposes `go_to_step(step)` for O(1) scrubbing. The replay env must
   use the same robot/objects/`actions` config as the recording env.
+- **Cable observations**: `states.cables[uid].segment_state_w` records world
+  segment pose/velocity, not solver history. `ReplayWrapper` accepts dynamic
+  replay only when every recorded initial state matches the full reset; it
+  rejects scrubbing, partial reset and broadcasting world-space cable states.
+  `trajectory_state.restore_trajectory_state()` rejects cable entries before
+  any write. Use action replay to validate a new episode, not a visible-state
+  restore as a history-preserving checkpoint.
 - **Decoupled from `rollout_buffer`**: the trajectory buffer is separate from the
   shared `rollout_buffer` (obs/actions/rewards) used by LeRobot/RL.
   `current_rollout_step`, LeRobot recorder, and RL mode are untouched.
