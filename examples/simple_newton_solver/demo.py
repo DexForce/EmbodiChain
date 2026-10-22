@@ -30,12 +30,14 @@ from embodichain.lab.sim.cfg import (
     NewtonPhysicsCfg,
     RigidBodyPhysicsCfg,
 )
+from embodichain.lab.visualization import VisualizationCfg
 
 
 def run(device: str) -> dict[str, object]:
     """Demonstrate discovery, parity, gradients, publication and partial reset."""
     config = SimulationManagerCfg(
         headless=True,
+        visualization=VisualizationCfg(backend="none"),
         num_envs=2,
         enable_entity_gizmo=False,
         startup_summary="off",

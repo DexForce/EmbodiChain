@@ -20,31 +20,33 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 from contextlib import nullcontext
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import newton
 import numpy as np
 import torch
 import warp as wp
 from newton.solvers import SolverBase
+from dexsim.engine import newton_physics as _sdk
 
-try:
+from embodichain.utils.math import quat_apply
+
+__all__ = ["SimpleSolverProvider"]
+
+# Catalogues and autodoc may inspect the provider with the released SDK.
+# Resolve annotations when available; instance creation enforces the runtime API.
+if TYPE_CHECKING:
     from dexsim.engine.newton_physics import (
-        FunctionalDynamics,
         FunctionalSolverState,
         NewtonSolverCapabilities,
         NewtonSolverContext,
         NewtonSolverExtension,
     )
-except ImportError as exc:
-    raise ImportError(
-        "The simple solver requires DexSim's FunctionalDynamics extension API "
-        "(MR !1483 service revision); install a compatible DexSim wheel."
-    ) from exc
-
-from embodichain.utils.math import quat_apply
-
-__all__ = ["SimpleSolverProvider"]
+else:
+    FunctionalSolverState = getattr(_sdk, "FunctionalSolverState", Any)
+    NewtonSolverCapabilities = getattr(_sdk, "NewtonSolverCapabilities", Any)
+    NewtonSolverContext = getattr(_sdk, "NewtonSolverContext", Any)
+    NewtonSolverExtension = getattr(_sdk, "NewtonSolverExtension", Any)
 
 
 def _torch_scope(device: wp.context.Device) -> Any:
@@ -62,7 +64,7 @@ def _tensor(array: wp.array) -> torch.Tensor:
     return wp.to_torch(array)
 
 
-class _SliderDynamics(FunctionalDynamics):
+class _SliderDynamics:
     def __init__(self, model: newton.Model, options: Mapping[str, Any]) -> None:
         unknown = set(options) - {"stiffness", "damping", "force_scale"}
         if unknown:
@@ -278,14 +280,27 @@ class SimpleSolverProvider:
     belong to one finalized model and must be checkpointed across rebuilds.
     """
 
-    capabilities = NewtonSolverCapabilities(
-        reset=True,
-        cuda_graph=False,
-        external_wrenches=False,
-        supported_control_fields=("joint_f",),
-        runtime_controls=False,
-        native_body_accelerations=True,
-    )
+    def __init__(self) -> None:
+        """Require the extension SDK when the provider is selected.
+
+        Raises:
+            ImportError: The installed SDK lacks the functional service contract.
+        """
+        if not hasattr(_sdk, "FunctionalDynamics") or not hasattr(
+            NewtonSolverCapabilities, "native_body_accelerations"
+        ):
+            raise ImportError(
+                "The simple solver requires DexSim's FunctionalDynamics extension API "
+                "(MR !1483 service revision); install a compatible DexSim wheel."
+            )
+        self.capabilities = NewtonSolverCapabilities(
+            reset=True,
+            cuda_graph=False,
+            external_wrenches=False,
+            supported_control_fields=("joint_f",),
+            runtime_controls=False,
+            native_body_accelerations=True,
+        )
 
     def register_custom_attributes(
         self,
