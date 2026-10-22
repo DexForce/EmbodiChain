@@ -36,7 +36,7 @@ MIRROR = "https://mirror.example.com/embodichain_data/resolve/main/"
 _COLLECT_URLS = """
 import json
 from embodichain.data import dataset
-from embodichain.data.assets import CobotMagicArm, UnitreeGo2Locomotion, PourCupAssets, PourCupDemoData
+from embodichain.data.assets import CobotMagicArm, UnitreeGo2Locomotion
 
 urls = {}
 
@@ -48,7 +48,7 @@ def capture(self, prefix, descriptor, path):
     raise Captured  # stop before anything is downloaded
 
 dataset.EmbodiChainDataset.__init__ = capture
-for cls in (CobotMagicArm, UnitreeGo2Locomotion, PourCupAssets, PourCupDemoData):
+for cls in (CobotMagicArm, UnitreeGo2Locomotion):
     try:
         cls()
     except Captured:
@@ -107,11 +107,6 @@ def test_download_prefix_gets_a_trailing_slash(monkeypatch, reload_constants) ->
 def test_assets_download_from_the_configured_prefix(prefix: str) -> None:
     urls = _consumer_urls(prefix)
     assert urls["CobotMagicArm"] == [f"{MIRROR}robot_assets/CobotMagicArmV4.zip"]
-    for name in ("PourCupAssets", "PourCupDemoData"):
-        assert urls[name] == [
-            f"{MIRROR}task_assets/{name}.zip",
-            f"{HF_PREFIX}task_assets/{name}.zip",
-        ]
     # Locomotion tries the configured source first and keeps the Hub as fallback.
     assert urls["UnitreeGo2Locomotion"] == [
         f"{MIRROR}robot_assets/UnitreeGo2Locomotion.zip",
@@ -120,10 +115,8 @@ def test_assets_download_from_the_configured_prefix(prefix: str) -> None:
 
 
 @pytest.mark.no_sim
-def test_assets_do_not_repeat_the_hub_url() -> None:
+def test_locomotion_does_not_repeat_the_hub_url() -> None:
     urls = _consumer_urls(HF_PREFIX)
     assert urls["UnitreeGo2Locomotion"] == [
         f"{HF_PREFIX}robot_assets/UnitreeGo2Locomotion.zip"
     ]
-    for name in ("PourCupAssets", "PourCupDemoData"):
-        assert urls[name] == [f"{HF_PREFIX}task_assets/{name}.zip"]

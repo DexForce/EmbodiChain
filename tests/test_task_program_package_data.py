@@ -98,8 +98,6 @@ _DEPLOYMENTS = {
 }
 _RESOURCE_PATHS = frozenset(
     {
-        Path("tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"),
-        Path("tasks/manipulation/tableware/pour_cup/env.fluid.yaml"),
         *_PROGRAMS,
         *_DEPLOYMENTS,
         Path("tasks/manipulation/repeated_pick_place/catalog.yaml"),
@@ -241,10 +239,6 @@ def test_setup_stages_all_official_task_programs(
         for relative_path in _RESOURCE_PATHS
     }
     assert expected_outputs <= staged_config_package.relative_outputs
-    assert not (
-        staged_config_package.build_lib
-        / "embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/assets"
-    ).exists()
 
 
 def test_staged_task_program_resources_decode_through_installed_paths(

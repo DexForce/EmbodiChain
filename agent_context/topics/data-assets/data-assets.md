@@ -35,9 +35,6 @@ base URL for asset archives (default: the hf-mirror.com copy of
 The final nested asset path is not independently verified. A successful lookup
 can trigger download/extraction and still name a nonexistent nested file.
 Inspect `get_data_class()` and package imports when a newly added class is invisible.
-Gym `config_to_cfg()` applies the same resolver to file-backed `shape` and
-`visual_shape` meshes in backgrounds, rigid objects and rigid-object groups.
-An independent visual mesh must resolve through the cache before native creation.
 
 ## Download and registry boundaries
 
@@ -49,11 +46,7 @@ receive the project's locking/repair behavior.
 
 The CLI imports the fixed `CATEGORY_MODULES` and finds `DownloadDataset`
 subclasses defined in each module. Adding an asset module alone does not add a
-CLI category. The `task` category exposes `assets/task_assets.py`: `PourCupAssets`
-provides runtime meshes and `PourCupDemoData` provides recorded demo inputs and
-evidence. They use `task_assets/<ClassName>.zip`, honor the configured prefix
-with a Hub fallback, and reuse the shared MD5-checked cache. Task configurations
-use class-prefixed paths; demo/media files are not wheel resources. `get_registry()` also appends public classes from
+CLI category. `get_registry()` also appends public classes from
 `assets/locomotion_assets.py` to the robot category and excludes underscore-prefixed
 helper classes. These seven classes use `robot_assets/<ClassName>.zip` on the
 configured remote sources, with the model entry at the ZIP root.

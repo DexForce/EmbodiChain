@@ -24,9 +24,7 @@ from embodichain.lab.sim.cfg import (
     FluidObjectCfg,
     FluidSpawnCfg,
     NewtonPhysicsCfg,
-    RigidObjectCfg,
 )
-from embodichain.lab.sim.spawn.descriptors import rigid_desc_from_cfg
 from embodichain.compute.geometry.particles import sample_volume_particles
 
 pytestmark = pytest.mark.no_sim
@@ -108,41 +106,6 @@ def test_fill_mesh_must_be_closed(tmp_path):
     ).export(path)
     with pytest.raises(ValueError, match="closed"):
         sample_volume_particles("mesh_volume", 0.01, mesh_path=str(path))
-
-
-def test_rigid_visual_mesh_does_not_replace_sdf_collision():
-    cfg = RigidObjectCfg.from_dict(
-        {
-            "uid": "cup",
-            "body_type": "kinematic",
-            "shape": {
-                "shape_type": "Mesh",
-                "vertices": [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
-                "triangles": [[0, 1, 2]],
-                "collision": {
-                    "approximation": "sdf",
-                    "force_sdf": False,
-                    "sdf_resolution": 192,
-                },
-            },
-            "visual_shape": {"shape_type": "Mesh", "fpath": "cup.glb"},
-        }
-    )
-    desc, _ = rigid_desc_from_cfg(cfg, newton_solver_type="sph")
-    assert desc.renders[0].file_path == "cup.glb"
-    assert desc.collisions[0].newton.force_sdf is False
-    assert desc.collisions[0].render_source_index is None
-
-
-def test_rigid_material_preserves_transmission():
-    from embodichain.lab.sim.shapes import CubeCfg
-    from embodichain.lab.sim.material import VisualMaterialCfg
-
-    cfg = RigidObjectCfg(
-        uid="glass", shape=CubeCfg(visual_material=VisualMaterialCfg(transmission=0.8))
-    )
-    _, materials = rigid_desc_from_cfg(cfg, newton_solver_type="sph")
-    assert next(iter(materials.values())).transmission == 0.8
 
 
 @pytest.mark.parametrize("backend,num_envs", [("default", 1), ("newton", 2)])

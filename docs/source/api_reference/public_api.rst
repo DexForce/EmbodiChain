@@ -23,15 +23,15 @@ decoding and compiling the constrained Task Program schema surface.
    decode_mllm_task_program
 
 embodichain.compute.geometry.particles
------------------------------------------
+--------------------------------------
 
-Deterministic initial-fill volume sampling without simulation dependencies.
-
-.. currentmodule:: embodichain.compute.geometry.particles
+Deterministic lattice sampling for primitive, revolved and closed mesh fill volumes.
 
 .. autosummary::
 
-   sample_volume_particles
+   embodichain.compute.geometry.particles.sample_volume_particles
+
+.. autofunction:: embodichain.compute.geometry.particles.sample_volume_particles
 
 embodichain.data.assets.demo_assets
 -----------------------------------
@@ -82,25 +82,6 @@ embodichain.data.assets.solver_assets
 .. autosummary::
 
    download_neural_ik_checkpoint
-
-embodichain.data.assets.task_assets
------------------------------------
-
-Task mesh bundles and reference demonstration data downloaded through the shared
-asset cache. Runtime meshes and demo recordings are separate downloads so task
-initialization does not require video assets.
-
-.. currentmodule:: embodichain.data.assets.task_assets
-
-.. autosummary::
-   :nosignatures:
-
-   PourCupAssets
-   PourCupDemoData
-
-.. autoclass:: PourCupAssets
-
-.. autoclass:: PourCupDemoData
 
 embodichain.data_pipeline.depth_video
 -------------------------------------
@@ -373,29 +354,35 @@ embodichain.lab.gym.envs.embodied_env
    EmbodiedEnv
 
 embodichain.lab.sim.cfg.fluid
---------------------------------
+-----------------------------
 
-Fixed-count fluid source and render configuration. Numerical solver parameters remain owned by DexSim SPHSolverCfg.
-
-.. currentmodule:: embodichain.lab.sim.cfg.fluid
+Fixed-count fluid sources, physical properties and native particle or surface display.
 
 .. autosummary::
 
-   FluidSpawnCfg
-   FluidRenderCfg
-   FluidObjectCfg
+   embodichain.lab.sim.cfg.fluid.FluidSpawnCfg
+   embodichain.lab.sim.cfg.fluid.FluidRenderCfg
+   embodichain.lab.sim.cfg.fluid.FluidObjectCfg
+
+.. autoclass:: embodichain.lab.sim.cfg.fluid.FluidSpawnCfg
+
+.. autoclass:: embodichain.lab.sim.cfg.fluid.FluidRenderCfg
+
+.. autoclass:: embodichain.lab.sim.cfg.fluid.FluidObjectCfg
 
 embodichain.lab.sim.objects.fluid
-------------------------------------
+---------------------------------
 
-Scene-bound fluid state with detached particle snapshots and explicit state writes. Fluid rendering has no fixed mesh-connectivity contract.
-
-.. currentmodule:: embodichain.lab.sim.objects.fluid
+Scene-owned fluid state snapshots, explicit writes and initial-state restoration.
 
 .. autosummary::
 
-   FluidObject
-   FluidObjectData
+   embodichain.lab.sim.objects.fluid.FluidObject
+   embodichain.lab.sim.objects.fluid.FluidObjectData
+
+.. autoclass:: embodichain.lab.sim.objects.fluid.FluidObject
+
+.. autoclass:: embodichain.lab.sim.objects.fluid.FluidObjectData
 
 embodichain.lab.task_program.integrations.simulation.handover
 -------------------------------------------------------------
@@ -405,22 +392,6 @@ embodichain.lab.task_program.integrations.simulation.handover
 .. autosummary::
 
    ConfiguredHandOverPoseProvider
-
-embodichain.lab.gym.envs.fluid_replay
--------------------------------------
-
-.. currentmodule:: embodichain.lab.gym.envs.fluid_replay
-
-One-way evaluation of qualified Task Program recordings with live SPH. Each
-row has an independent replay clock and reset. Policy action recording is
-unsupported because the measured source states drive motion.
-
-.. autosummary::
-
-   FluidReplayEnv
-
-.. autoclass:: FluidReplayEnv
-   :members:
 
 embodichain.lab.gym.envs.managers.action_manager
 ------------------------------------------------
@@ -661,21 +632,6 @@ embodichain.lab.scripts.run_env
    generate_function
    main
    preview
-
-embodichain.lab.scripts.run_fluid_task_program
-----------------------------------------------
-
-.. currentmodule:: embodichain.lab.scripts.run_fluid_task_program
-
-Generate and qualify the pour-cup Task Program in MuJoCo, then run fluid Gym
-replay in a separate world. The source trajectory and fluid metrics have
-separate acceptance records.
-
-.. autosummary::
-
-   main
-
-.. autofunction:: main
 
 embodichain.lab.sim
 -------------------
@@ -2479,20 +2435,6 @@ kernel policy; callers log and apply that seed to their own generators.
 
 .. autofunction:: resolve_seed
 
-
-embodichain_tasks.manipulation.tableware.pour_cup
--------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.manipulation.tableware.pour_cup
-
-The registered Franka pouring replay deployment requires a previously
-qualified Task Program trajectory passed to the environment constructor.
-
-.. autosummary::
-
-   PourCupFluidReplayEnv
-
-.. autoclass:: PourCupFluidReplayEnv
 
 .. toctree::
    :hidden:

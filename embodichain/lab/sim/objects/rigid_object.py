@@ -75,7 +75,6 @@ from embodichain.lab.sim.material import (
     _restore_render_materials,
     _set_render_material,
     _wrap_first_render_material,
-    _apply_volume_material_properties,
 )
 from ._mesh_utils import (
     get_combined_triangles,
@@ -497,9 +496,7 @@ class RigidObject(BatchEntity):
 
     def _apply_spawn_visual_uv(self) -> None:
         """Apply configured projective UV mapping to spawned render bodies."""
-        shape = getattr(self.cfg, "visual_shape", None) or getattr(
-            self.cfg, "shape", None
-        )
+        shape = self.cfg.shape
         if not isinstance(shape, MeshCfg) or not shape.compute_uv:
             return
 
@@ -937,78 +934,6 @@ class RigidObject(BatchEntity):
             )
         else:
             logger.log_error("Cannot apply force or torque before body view is ready.")
-
-    def set_kinematic_state(
-        self,
-        pose_w: torch.Tensor,
-        lin_vel_w: torch.Tensor,
-        ang_vel_w: torch.Tensor,
-        env_ids: Sequence[int] | None = None,
-    ) -> None:
-        """Set a kinematic boundary's world pose and twist without stepping.
-
-        Args:
-            pose_w: World poses, ``(E, 7)`` xyz+xyzw or ``(E, 4, 4)``.
-            lin_vel_w: World linear velocity ``(E, 3)``, m/s.
-            ang_vel_w: World angular velocity ``(E, 3)``, rad/s.
-            env_ids: Selected replicas, or None for all.
-        """
-        if self.body_type != "kinematic":
-            raise ValueError("set_kinematic_state requires a kinematic rigid body.")
-        selection = torch.as_tensor(self._all_indices if env_ids is None else env_ids)
-        if selection.ndim != 1 or (
-            selection.numel() and selection.dtype not in (torch.int32, torch.int64)
-        ):
-            raise ValueError("env_ids must be a one-dimensional integer selection.")
-        ids = selection.tolist()
-        if len(set(ids)) != len(ids) or any(
-            i < 0 or i >= self.num_instances for i in ids
-        ):
-            raise ValueError("env_ids must be unique valid indices.")
-        if tuple(pose_w.shape) not in {(len(ids), 7), (len(ids), 4, 4)}:
-            raise ValueError("pose_w has an invalid shape.")
-        if any(tuple(v.shape) != (len(ids), 3) for v in (lin_vel_w, ang_vel_w)):
-            raise ValueError("Boundary velocities must have shape (E, 3).")
-        if not all(torch.isfinite(v).all() for v in (pose_w, lin_vel_w, ang_vel_w)):
-            raise ValueError("Kinematic state must be finite.")
-        if pose_w.ndim == 2:
-            if not torch.allclose(
-                pose_w[:, 3:].norm(dim=-1),
-                torch.ones(len(ids), device=pose_w.device, dtype=pose_w.dtype),
-                atol=1e-5,
-            ):
-                raise ValueError("pose_w requires unit xyzw quaternions.")
-        else:
-            rotations = pose_w[:, :3, :3]
-            identity = torch.eye(3, device=pose_w.device, dtype=pose_w.dtype).expand(
-                len(ids), -1, -1
-            )
-            if (
-                not torch.allclose(
-                    rotations.transpose(-1, -2) @ rotations, identity, atol=1e-5
-                )
-                or not torch.allclose(
-                    torch.linalg.det(rotations),
-                    torch.ones(len(ids), device=pose_w.device, dtype=pose_w.dtype),
-                    atol=1e-5,
-                )
-                or not torch.allclose(
-                    pose_w[:, 3], pose_w.new_tensor([0, 0, 0, 1]).expand(len(ids), -1)
-                )
-            ):
-                raise ValueError("pose_w requires rigid homogeneous transforms.")
-        if self._data is None or not self._data.body_view.is_ready:
-            raise RuntimeError("Kinematic state requires prepare().")
-        if pose_w.ndim == 2:
-            pose = torch.eye(4).repeat(len(ids), 1, 1)
-            pose[:, :3, :3] = matrix_from_quat(pose_w[:, 3:].cpu())
-            pose[:, :3, 3] = pose_w[:, :3].cpu()
-        else:
-            pose = pose_w.cpu()
-        for row, index in enumerate(ids):
-            self._entities[index].set_world_pose(pose[row].numpy())
-            self._entities[index].set_linear_velocity(lin_vel_w[row].cpu().numpy())
-            self._entities[index].set_angular_velocity(ang_vel_w[row].cpu().numpy())
 
     def set_velocity(
         self,
@@ -1581,14 +1506,6 @@ class RigidObject(BatchEntity):
             if render_body is None:
                 continue
             original_materials = _capture_render_materials(render_body)
-            shape = getattr(self.cfg, "visual_shape", None) or getattr(
-                self.cfg, "shape", None
-            )
-            material_cfg = getattr(shape, "visual_material", None)
-            if material_cfg is not None:
-                for native in original_materials:
-                    if native is not None:
-                        _apply_volume_material_properties(native, material_cfg)
             self._original_visual_material[env_idx] = original_materials
             wrapped = _wrap_first_render_material(original_materials)
             if wrapped is not None:
