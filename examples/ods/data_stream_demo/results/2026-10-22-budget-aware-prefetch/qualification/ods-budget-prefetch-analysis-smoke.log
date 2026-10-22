@@ -1,0 +1,9 @@
+Traceback (most recent call last):
+  File "/root/sources/EmbodiChain-ods-stream-design/examples/ods/data_stream_demo/results/2026-10-22-budget-aware-prefetch/analyze.py", line 292, in <module>
+    main()
+  File "/root/sources/EmbodiChain-ods-stream-design/examples/ods/data_stream_demo/results/2026-10-22-budget-aware-prefetch/analyze.py", line 263, in main
+    rows = _runs(args.root / "pilot")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/sources/EmbodiChain-ods-stream-design/examples/ods/data_stream_demo/results/2026-10-22-budget-aware-prefetch/analyze.py", line 43, in _runs
+    from examples.ods.data_stream_demo.training_report import _fairness
+ModuleNotFoundError: No module named 'examples.ods'

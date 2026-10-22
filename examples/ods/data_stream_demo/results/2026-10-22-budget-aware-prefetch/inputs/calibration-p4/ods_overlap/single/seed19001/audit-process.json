@@ -1,0 +1,39 @@
+{
+  "output": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p4/ods_overlap/single/seed19001",
+  "status": "complete",
+  "returncode": 0,
+  "elapsed_seconds": 12.940221543,
+  "stage": "audit",
+  "evaluation": false,
+  "timeout": false,
+  "cancelled": false,
+  "leaked_process_group": false,
+  "process_group_shutdown": {
+    "grace_seconds": 2.0,
+    "wait_seconds": 1.7486046999692917e-05,
+    "poll_count": 1,
+    "group_disappeared": true,
+    "initial": {
+      "monotonic_ns": 1840884413359862,
+      "pgid": 2527929,
+      "exists": false,
+      "members": [],
+      "inspection_errors": []
+    },
+    "final": {
+      "monotonic_ns": 1840884413359862,
+      "pgid": 2527929,
+      "exists": false,
+      "members": [],
+      "inspection_errors": []
+    }
+  },
+  "pgid": 2527929,
+  "process_launch_monotonic_ns": 1840871473156407,
+  "device_guard": {
+    "samples": 6,
+    "unexpected_contexts": [],
+    "allowed_aux_contexts": [],
+    "seen_primary_uuids": []
+  }
+}

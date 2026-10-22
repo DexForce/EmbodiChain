@@ -1,0 +1,595 @@
+{
+  "schema": "ods-visual-training-post-audit-v2",
+  "passed": true,
+  "qualification_passed": true,
+  "scope": "post-timing numeric/checkpoint, source-window SDK and all-frame video integrity audit; no duration contributes to pipeline time",
+  "audit_source_sha256": {
+    "training_audit": "75e3ce65d8130972265d55b5819a70d9d4d73c91cd5adcb0ef8a2f2ae717e3ce",
+    "video_integrity": "e1286b2a60902fc7b0302e6d4decaeb024f36883d0b90066a8d4fc159a29c7d1"
+  },
+  "recording": {
+    "episodes": 32,
+    "frames": 16342,
+    "cameras": [
+      "cam_high"
+    ],
+    "all_numeric_sha256_verified": true,
+    "sdk_metadata_verified": true
+  },
+  "training": {
+    "updates": 128,
+    "chunks": 4096,
+    "valid_targets": 131072,
+    "trained_sources": 32,
+    "untrained_saved_sources": 0,
+    "ledger_sources": 32,
+    "checkpoint_verified": true
+  },
+  "decode": {
+    "episodes": 32,
+    "stats": {
+      "delivered_batches": 32,
+      "sdk_getitem_calls": 32,
+      "returned_valid_camera_frames": 64,
+      "requested_camera_timestamps": 64,
+      "worker_fetch_seconds": 3.866365311000001,
+      "worker_pids": [
+        2536343,
+        2536344,
+        2536345,
+        2536346
+      ],
+      "reader": "official LeRobotDataset.__getitem__ + delta_timestamps",
+      "video_backend": "torchcodec CPU",
+      "decoded_corpus_preloaded": false,
+      "prefetch_batches": 4,
+      "persistent_workers": true,
+      "ordered_delivery": true,
+      "pinned_memory": false,
+      "plan_batches": 32,
+      "image_timestamps_per_chunk": 2,
+      "numeric_timestamps_per_chunk": 33,
+      "complete_contexts_required": true,
+      "restart_supported": false
+    }
+  },
+  "decode_shutdown": {
+    "unconsumed_prefetch": {
+      "episode_budget": null,
+      "delivered_chunks": 32,
+      "reserved_chunks": 0,
+      "cancelled_prefetch_chunks": 0,
+      "pending_batches": 0,
+      "remaining_chunks": null,
+      "episodes": [
+        {
+          "source_id": [
+            469073354730506286,
+            0
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            469073354730506286,
+            1
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            469073354730506286,
+            2
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            469073354730506286,
+            3
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            469073354730506286,
+            4
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            469073354730506286,
+            5
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            469073354730506286,
+            6
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            469073354730506286,
+            7
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            469073354730506286,
+            8
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            469073354730506286,
+            9
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            469073354730506286,
+            10
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            469073354730506286,
+            11
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            469073354730506286,
+            12
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            469073354730506286,
+            13
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            469073354730506286,
+            14
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            469073354730506286,
+            15
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            469073354730506286,
+            16
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            469073354730506286,
+            17
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            469073354730506286,
+            18
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            469073354730506286,
+            19
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            469073354730506286,
+            20
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            469073354730506286,
+            21
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            469073354730506286,
+            22
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            469073354730506286,
+            23
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            469073354730506286,
+            24
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            469073354730506286,
+            25
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            469073354730506286,
+            26
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            469073354730506286,
+            27
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            469073354730506286,
+            28
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            469073354730506286,
+            29
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            469073354730506286,
+            30
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        },
+        {
+          "source_id": [
+            469073354730506286,
+            31
+          ],
+          "assigned": null,
+          "delivered": 1,
+          "reserved": 0,
+          "remaining": null
+        }
+      ]
+    },
+    "worker_pids": [
+      2536343,
+      2536344,
+      2536345,
+      2536346
+    ],
+    "worker_exitcodes": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "workers_joined": true,
+    "forced_termination": false,
+    "discarded_prefetch_chunks": 0,
+    "shutdown_seconds": 0.9953485040459782,
+    "cleanup_errors": []
+  },
+  "video_quality": {
+    "samples": [
+      {
+        "camera": "cam_high",
+        "index": 0,
+        "mae_uint8": 1.6996283453710817,
+        "psnr_db": 40.422038604270995,
+        "exact": false
+      },
+      {
+        "camera": "cam_high",
+        "index": 245,
+        "mae_uint8": 1.956632111193585,
+        "psnr_db": 38.607107611928214,
+        "exact": false
+      },
+      {
+        "camera": "cam_high",
+        "index": 490,
+        "mae_uint8": 1.8020706778419016,
+        "psnr_db": 40.10627973218312,
+        "exact": false
+      }
+    ],
+    "worker_cleanup": {
+      "worker_pids": [
+        2536397
+      ],
+      "worker_exitcodes": [
+        0
+      ],
+      "workers_joined": true,
+      "forced_termination": false,
+      "discarded_prefetch_chunks": 0,
+      "shutdown_seconds": 5.935109220445156e-05,
+      "cleanup_errors": []
+    },
+    "scope": "fixed raw RGB references versus standard CPU video decoding; excluded from timed consumption"
+  },
+  "full_video_integrity": {
+    "revision": "full-video-integrity/v1",
+    "passed": true,
+    "all_saved_video_frames_decoded": true,
+    "dataset": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/offline32/single/seed19001/lerobot_dataset",
+    "scope": "post-timing sequential software decode/count integrity; no lossless RGB, policy-quality or all-SDK-seek claim",
+    "decoded_pixel_format": "yuv420p",
+    "frame_hash_scope": "SHA256 of decoded rawvideo YUV420p planes; not RGB or BC-normalized tensors",
+    "files": [
+      {
+        "file": "videos/observation.images.cam_high/chunk-000/file-000.mp4",
+        "camera": "observation.images.cam_high",
+        "expected_frames": 16342,
+        "episodes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ],
+        "compressed_sha256": "748807281ceab154cf3cad99f86b49119d18aafeb0c1c27be36be36693269dca",
+        "decoded_pixel_format": "yuv420p",
+        "frame_hash_scope": "SHA256 of FFmpeg decoded rawvideo YUV420p planes; not RGB or BC-normalized tensors",
+        "probe_command": [
+          "/root/miniconda3/envs/py311/bin/ffprobe",
+          "-v",
+          "error",
+          "-select_streams",
+          "v",
+          "-show_entries",
+          "stream=index,codec_name,codec_type,width,height,pix_fmt,r_frame_rate,nb_frames,time_base,duration",
+          "-of",
+          "json",
+          "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/offline32/single/seed19001/lerobot_dataset/videos/observation.images.cam_high/chunk-000/file-000.mp4"
+        ],
+        "probe_exitcode": 0,
+        "probe": {
+          "index": 0,
+          "codec_name": "av1",
+          "codec_type": "video",
+          "width": 256,
+          "height": 256,
+          "pix_fmt": "yuv420p",
+          "r_frame_rate": "30/1",
+          "time_base": "1/15360",
+          "duration": "544.733333",
+          "nb_frames": "16342"
+        },
+        "decode_command": [
+          "/root/miniconda3/envs/py311/bin/ffmpeg",
+          "-nostdin",
+          "-hide_banner",
+          "-loglevel",
+          "error",
+          "-xerror",
+          "-err_detect",
+          "explode",
+          "-hwaccel",
+          "none",
+          "-threads:v",
+          "1",
+          "-i",
+          "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/offline32/single/seed19001/lerobot_dataset/videos/observation.images.cam_high/chunk-000/file-000.mp4",
+          "-map",
+          "0:v:0",
+          "-an",
+          "-sn",
+          "-dn",
+          "-fps_mode",
+          "passthrough",
+          "-c:v",
+          "rawvideo",
+          "-pix_fmt",
+          "yuv420p",
+          "-threads:v",
+          "1",
+          "-filter_threads",
+          "1",
+          "-filter_complex_threads",
+          "1",
+          "-f",
+          "framehash",
+          "-hash",
+          "sha256",
+          "-y",
+          "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/offline32/single/seed19001/post-audit-video-integrity-artifacts/0000.decoded-frame-sha256.txt"
+        ],
+        "decode_exitcode": 0,
+        "decode_seconds": 4.269134559901431,
+        "decoded_frame_hashes": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/offline32/single/seed19001/post-audit-video-integrity-artifacts/0000.decoded-frame-sha256.txt",
+        "decode_error_log": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/offline32/single/seed19001/post-audit-video-integrity-artifacts/0000.decode.stderr",
+        "decoded_frames": 16342,
+        "decoded_frame_hash_file_sha256": "2090dbf87af2135e47ace83e23bd31f67fd37e6785892296e7aec9b7a01485e1",
+        "passed": true
+      }
+    ],
+    "cpu_affinity": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "threads_per_file": 1,
+    "files_in_parallel": 1,
+    "verifier_sha256": "e1286b2a60902fc7b0302e6d4decaeb024f36883d0b90066a8d4fc159a29c7d1",
+    "ffmpeg_version": "ffmpeg version 7.1.1 Copyright (c) 2000-2025 the FFmpeg developers",
+    "ffprobe_version": "ffprobe version 7.1.1 Copyright (c) 2007-2025 the FFmpeg developers",
+    "expected_episodes": 32,
+    "expected_frames_per_camera": 16342,
+    "metadata_sha256": {
+      "meta/info.json": "26aa1aaeb34fe1ebdfe7ed838eba33991b76762be74fc9a57675194d6b9f2e89",
+      "meta/episodes/chunk-000/file-000.parquet": "0db8a80aae8bf1062900f539b94e11a3be9a96d899db9b0278b85c7d0c659ef1"
+    },
+    "decoded_frames_per_camera": {
+      "observation.images.cam_high": 16342
+    },
+    "total_decoded_camera_frames": 16342,
+    "seconds_outside_training_pipeline": 4.402711833128706
+  },
+  "seconds_outside_pipeline": 12.13833963102661
+}

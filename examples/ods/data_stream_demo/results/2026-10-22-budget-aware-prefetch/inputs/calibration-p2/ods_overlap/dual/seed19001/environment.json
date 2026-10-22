@@ -1,0 +1,54 @@
+{
+  "python": "3.11.14 (main, Oct 21 2025, 18:31:21) [GCC 11.2.0]",
+  "packages": {
+    "torch": "2.7.0+cu128",
+    "lerobot": "0.4.4",
+    "torchcodec": "0.5",
+    "av": "15.1.0",
+    "dexsim": null
+  },
+  "commit": "915510b58ceb63d028d295a2e2532780e6f79967",
+  "source_sha256": {
+    "examples/ods/data_stream_demo/qualify_encoder.py": "043a94098f5672d50b58c06ec82ea84f4b9c23b9ca27fff469f309cb7f0b4647",
+    "examples/ods/data_stream_demo/training_eval.py": "e65b3def87df59531caf997577635d66beb0a2f5f695d7e0b2233817ca2003ee",
+    "examples/ods/data_stream_demo/visual_policy.py": "c587fa2f9120c9163777ae9567a22cd77039fda2566b70ebf9836d5a4c50fbf4",
+    "examples/ods/data_stream_demo/training_throughput.py": "a5f720c773cc933bc278b573f8da950d16a748a50bbc96554696dcaf636a77de",
+    "examples/ods/data_stream_demo/training_audit.py": "75e3ce65d8130972265d55b5819a70d9d4d73c91cd5adcb0ef8a2f2ae717e3ce",
+    "examples/ods/data_stream_demo/lerobot_io.py": "aeec5641a3e50b1fbe6ff46829a0cbe0d1a498715e0de0aa38357d554c159d5f",
+    "examples/ods/data_stream_demo/training_suite.py": "8b34baca726feec3bfefe52dc621c10382d21a52ba7bd934f6a320a4dbe1b3a7",
+    "examples/ods/data_stream_demo/train.py": "60908870dd863f70ab5e8f29ab2db147051712313f0764358592ea3bdace06a9",
+    "examples/ods/data_stream_demo/training_metrics.py": "2bb613b2235bb8fa9f09b383beb8c27b8a4810e648adf290848063d6b34dcd72",
+    "examples/ods/data_stream_demo/metrics.py": "c67bd79d04eb8c79361cecc18d937e1531125cbe6f4f4ad079c1133ea79ed90b",
+    "examples/ods/data_stream_demo/training_data.py": "dfae919f69d9e76f5e468ce3f7335f9fed130abf8673922d9757e5503c56da2b",
+    "examples/ods/data_stream_demo/run.py": "dd4369b5f83f728bce1feafca6ba397ba9db3a3434b8f1681bd74699106bed17",
+    "examples/ods/data_stream_demo/report.py": "796d64a3604f692478a3023cf2242e19311d8726ccfb95e9773571ff58a66fde",
+    "examples/ods/data_stream_demo/video_integrity.py": "e1286b2a60902fc7b0302e6d4decaeb024f36883d0b90066a8d4fc159a29c7d1",
+    "examples/ods/data_stream_demo/acquisition.py": "a2188f50b0fc1dba3de02b8fde2a3b20b76ea510770abf271d2caaecc122d89c",
+    "examples/ods/data_stream_demo/suite.py": "bde907ce27499f73c35686f42f4cdcf7f9d94d868e90317a6e9bc3500286a278",
+    "examples/ods/data_stream_demo/payload.py": "65a6e074aab6becb8a9fc46fffad0753f997bad22e10e69f25426b09af04379d",
+    "examples/ods/data_stream_demo/training_report.py": "a6a213db74429a7c3730651e6190f46e4f2ff9fdb9805e33a87fc3ed65272aca",
+    "examples/ods/data_stream_demo/__init__.py": "c9041fac160c5ee047510a80b557bb60b3d92de74a291ed68744365508d72fe0",
+    "examples/ods/simple_bc_demo/environment.py": "107e0037361ea4e7635d503be9764622f50130a253de544f5bf9eebb41362329",
+    "embodichain/data_pipeline/engine/data.py": "3297f1b6d036bd63b71595e08ef9fe981eb58be02db7e9fe117a91e11bcf5bb3",
+    "embodichain/data_pipeline/runtime.py": "0992cd749605df1cd79d0f64ce2b5dbac0c9e7b48124fec2a5fd3b454c263819"
+  },
+  "cuda_visible_devices": "GPU-569c23a7-9291-45ef-c727-ba74d63708db,GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+  "auxiliary_graphics_gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+  "headless_environment": {
+    "SDL_VIDEODRIVER": "dummy",
+    "DISPLAY": null,
+    "WAYLAND_DISPLAY": null
+  },
+  "cpu_affinity": [
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+  ],
+  "torch_threads": 1,
+  "cache_policy": "fresh processes; warm software/filesystem caches; no global cache purge"
+}

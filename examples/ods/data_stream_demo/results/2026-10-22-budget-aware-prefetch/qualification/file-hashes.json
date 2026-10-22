@@ -1,0 +1,18 @@
+{
+  "black.log": "17cfb0f111ae7db012e40244623b70870d2283c09506f48ca73d42f0930de4dd",
+  "capacity-report-fixtures.json": "ef1054eccdb9ff5d72e5c02490f46e209244d834c3d22708b212c2c461e4ecfd",
+  "capacity-report-fixtures.py.source": "4b494c854bc08b473180576ec8b3b22b643454a11ebef613611e9c4a926e2c6e",
+  "final-black.log": "e96c915749d42ef59e9097bd841d8bbcabd02efe47562f6b465b110d58a0c216",
+  "independent-audit-self-test-initial-failed.json": "fe8b9ffbdea52d782e0a675cee0c132aee228735a40b0e5da4b0da6de820e8b8",
+  "independent-audit-self-test-v3.json": "b8d60389778781770f9ab7f4d6dbed9da18f5e2445675939ec94b4bc874c6cf7",
+  "independent-audit-self-test.json": "f633406b270711ca13be7bd60ffd9c4023085597b23ee2f3cdd35073bcb3ed63",
+  "independent-audit-v2.py.source": "cec2b46fdf950a03a1e06de940c848ebdad0bc3e102493f8bf7c3545f06cc7b0",
+  "independent-audit.py.source": "c2cb53c7b454de1ba077ece075958bb90c913a91315a104b5a4860059452c106",
+  "ods-budget-prefetch-analysis-smoke-v2.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "ods-budget-prefetch-analysis-smoke.log": "eace77711653984d3ffd9d288a6008cca8d46c22211d03d3f0f0b6f6facf9d18",
+  "prefetch-driver.py.source": "1cf7b1a622a4a9440408670065cbd325bb055071cf542d83e82e61d8b8bb2a13",
+  "prefetch-post-black.json": "7c8b654129d7d36690f92f7650bbfbc233ce0457ceaf9d6ccb1f50e6e22a5cd1",
+  "result-review.json": "870356f33012db6fbe175de7f8376c0a999214f135a94c3cd34589be2bcd5396",
+  "result-review.md": "b780e5040162f618d5148b34c20a8f6cb920183b81972fe517bb2a0dd61bb01d",
+  "source-manifest-assumption-failed.json": "212cfbc6cb5c0f71f212824ea66ba3600915d9a1c7dc14c0544736d28c77124f"
+}

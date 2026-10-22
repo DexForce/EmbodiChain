@@ -1,0 +1,923 @@
+{
+  "runs": [
+    {
+      "vision": "dual",
+      "arm": "ODS Eager",
+      "seed": 19001,
+      "producer_envs": 4,
+      "status": "complete",
+      "qualification_passed": true,
+      "path": "examples/ods/data_stream_demo/results/2026-10-22-budget-aware-prefetch/inputs/pilot/controls/eager/dual/seed19001",
+      "comparison_evidence": {
+        "requested_evaluation_scenes": 0,
+        "prefetch_policy": "eager",
+        "initial_model_sha256": "b5b4d0b552217056e350c0ba862c63988259b8b923c575bf6b7f8cc201613b11",
+        "normalization_sha256": "2046d3ea48243a508338b2b5d10aec434871962d6f388ab88c4c40fab88b6cd2",
+        "training_budget": {
+          "updates": 128,
+          "batch_size": 32,
+          "history": 2,
+          "future": 32
+        },
+        "initial_numeric_prefix": [
+          {
+            "ordinal": 0,
+            "length": 491,
+            "numeric_sha256": "b891c3032f33bec0a5f04af58ea334e6f14f79dadf1cf1fa5ad3b49a57894f74"
+          },
+          {
+            "ordinal": 1,
+            "length": 490,
+            "numeric_sha256": "777c20d5c2876f32de07f149d6e3ebba25b8fab8625726a9cfc86613b54f9cfb"
+          },
+          {
+            "ordinal": 2,
+            "length": 490,
+            "numeric_sha256": "75a71205ff73b0dfc69aeecd7b7e382aacb33319ae1e65643bf7e64f49d86985"
+          },
+          {
+            "ordinal": 3,
+            "length": 490,
+            "numeric_sha256": "2a84f9cfa30a02c8f50dcff5ea44560e6011ebafe57294a2d2ee09b80ac2f403"
+          },
+          {
+            "ordinal": 4,
+            "length": 585,
+            "numeric_sha256": "8a42204920fd1760a0352d57326f649a24600c1fe31342d08645ab629b2d6ba4"
+          },
+          {
+            "ordinal": 5,
+            "length": 580,
+            "numeric_sha256": "a68c4aaac9fd5590cb4cc8fce74b12d30899a567aa2bc0f050816eb26faf0aeb"
+          },
+          {
+            "ordinal": 6,
+            "length": 580,
+            "numeric_sha256": "0d8366332ade4abf0484b191ff605513019fa69bb206df6d012d8cd5babc4e4f"
+          },
+          {
+            "ordinal": 7,
+            "length": 581,
+            "numeric_sha256": "9cb1341608bdce328e67b050362141e63ede7fa76c67bfcfcf158b557d3ff101"
+          }
+        ],
+        "camera_order": [
+          "cam_high",
+          "cam_wrist"
+        ],
+        "allocation": {
+          "simulation_uuid": "GPU-569c23a7-9291-45ef-c727-ba74d63708db",
+          "training_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+          "cpu_affinity": [
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15
+          ],
+          "cpu_cores": 8
+        },
+        "auxiliary_graphics": {
+          "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+          "scope": "passive pure-G driver footprint only",
+          "max_per_pid_bytes": 8388608,
+          "idle_required": false
+        },
+        "launch_path": "examples/ods/data_stream_demo/results/2026-10-22-budget-aware-prefetch/inputs/pilot/_supervision/controls/eager/dual/seed19001/training/launch.json",
+        "normal_exit_audited": true
+      },
+      "fairness_errors": [],
+      "total_seconds": 451.64906612,
+      "first_update_seconds": 65.131899026,
+      "training_complete_seconds": 271.234695704,
+      "post_training_drain_seconds": 180.414370416,
+      "completed_updates": 128,
+      "trained_chunks": 4096,
+      "valid_target_occurrences": 131072,
+      "published_sources": 40,
+      "trained_sources": 32,
+      "untrained_sources": 8,
+      "effective_sources": 31.999999999999943,
+      "initial_xy_occupied_cells": 26,
+      "anchor_xyz_occupied_voxels": 192,
+      "unique_anchors": 4096,
+      "unique_target_frames": 16100,
+      "target_duplicate_fraction": 0.877166748046875,
+      "max_source_trained_chunks": 128,
+      "dataset_bytes": 76322378
+    },
+    {
+      "vision": "single",
+      "arm": "ODS Eager",
+      "seed": 19001,
+      "producer_envs": 4,
+      "status": "complete",
+      "qualification_passed": true,
+      "path": "examples/ods/data_stream_demo/results/2026-10-22-budget-aware-prefetch/inputs/pilot/controls/eager/single/seed19001",
+      "comparison_evidence": {
+        "requested_evaluation_scenes": 0,
+        "prefetch_policy": "eager",
+        "initial_model_sha256": "8374ba7bc7290460a52e2a8bb3df51cb473f25265be612f813998da165b86288",
+        "normalization_sha256": "2046d3ea48243a508338b2b5d10aec434871962d6f388ab88c4c40fab88b6cd2",
+        "training_budget": {
+          "updates": 128,
+          "batch_size": 32,
+          "history": 2,
+          "future": 32
+        },
+        "initial_numeric_prefix": [
+          {
+            "ordinal": 0,
+            "length": 491,
+            "numeric_sha256": "b891c3032f33bec0a5f04af58ea334e6f14f79dadf1cf1fa5ad3b49a57894f74"
+          },
+          {
+            "ordinal": 1,
+            "length": 490,
+            "numeric_sha256": "777c20d5c2876f32de07f149d6e3ebba25b8fab8625726a9cfc86613b54f9cfb"
+          },
+          {
+            "ordinal": 2,
+            "length": 490,
+            "numeric_sha256": "75a71205ff73b0dfc69aeecd7b7e382aacb33319ae1e65643bf7e64f49d86985"
+          },
+          {
+            "ordinal": 3,
+            "length": 490,
+            "numeric_sha256": "2a84f9cfa30a02c8f50dcff5ea44560e6011ebafe57294a2d2ee09b80ac2f403"
+          },
+          {
+            "ordinal": 4,
+            "length": 585,
+            "numeric_sha256": "8a42204920fd1760a0352d57326f649a24600c1fe31342d08645ab629b2d6ba4"
+          },
+          {
+            "ordinal": 5,
+            "length": 580,
+            "numeric_sha256": "a68c4aaac9fd5590cb4cc8fce74b12d30899a567aa2bc0f050816eb26faf0aeb"
+          },
+          {
+            "ordinal": 6,
+            "length": 580,
+            "numeric_sha256": "0d8366332ade4abf0484b191ff605513019fa69bb206df6d012d8cd5babc4e4f"
+          },
+          {
+            "ordinal": 7,
+            "length": 581,
+            "numeric_sha256": "9cb1341608bdce328e67b050362141e63ede7fa76c67bfcfcf158b557d3ff101"
+          }
+        ],
+        "camera_order": [
+          "cam_high"
+        ],
+        "allocation": {
+          "simulation_uuid": "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5",
+          "training_uuid": "GPU-a5477f57-58a6-4f89-6e7a-338d8fcfc6f1",
+          "cpu_affinity": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "cpu_cores": 8
+        },
+        "auxiliary_graphics": {
+          "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+          "scope": "passive pure-G driver footprint only",
+          "max_per_pid_bytes": 8388608,
+          "idle_required": false
+        },
+        "launch_path": "examples/ods/data_stream_demo/results/2026-10-22-budget-aware-prefetch/inputs/pilot/_supervision/controls/eager/single/seed19001/training/launch.json",
+        "normal_exit_audited": true
+      },
+      "fairness_errors": [],
+      "total_seconds": 277.191170997,
+      "first_update_seconds": 54.931513563,
+      "training_complete_seconds": 172.659990484,
+      "post_training_drain_seconds": 104.53118051299998,
+      "completed_updates": 128,
+      "trained_chunks": 4096,
+      "valid_target_occurrences": 131072,
+      "published_sources": 40,
+      "trained_sources": 32,
+      "untrained_sources": 8,
+      "effective_sources": 31.999999999999943,
+      "initial_xy_occupied_cells": 26,
+      "anchor_xyz_occupied_voxels": 192,
+      "unique_anchors": 4096,
+      "unique_target_frames": 16100,
+      "target_duplicate_fraction": 0.877166748046875,
+      "max_source_trained_chunks": 128,
+      "dataset_bytes": 53371335
+    },
+    {
+      "vision": "dual",
+      "arm": "ODS Budget",
+      "seed": 19001,
+      "producer_envs": 4,
+      "status": "complete",
+      "qualification_passed": true,
+      "path": "examples/ods/data_stream_demo/results/2026-10-22-budget-aware-prefetch/inputs/pilot/main/ods_overlap/dual/seed19001",
+      "comparison_evidence": {
+        "requested_evaluation_scenes": 0,
+        "prefetch_policy": "budget",
+        "initial_model_sha256": "b5b4d0b552217056e350c0ba862c63988259b8b923c575bf6b7f8cc201613b11",
+        "normalization_sha256": "2046d3ea48243a508338b2b5d10aec434871962d6f388ab88c4c40fab88b6cd2",
+        "training_budget": {
+          "updates": 128,
+          "batch_size": 32,
+          "history": 2,
+          "future": 32
+        },
+        "initial_numeric_prefix": [
+          {
+            "ordinal": 0,
+            "length": 491,
+            "numeric_sha256": "b891c3032f33bec0a5f04af58ea334e6f14f79dadf1cf1fa5ad3b49a57894f74"
+          },
+          {
+            "ordinal": 1,
+            "length": 490,
+            "numeric_sha256": "777c20d5c2876f32de07f149d6e3ebba25b8fab8625726a9cfc86613b54f9cfb"
+          },
+          {
+            "ordinal": 2,
+            "length": 490,
+            "numeric_sha256": "75a71205ff73b0dfc69aeecd7b7e382aacb33319ae1e65643bf7e64f49d86985"
+          },
+          {
+            "ordinal": 3,
+            "length": 490,
+            "numeric_sha256": "2a84f9cfa30a02c8f50dcff5ea44560e6011ebafe57294a2d2ee09b80ac2f403"
+          },
+          {
+            "ordinal": 4,
+            "length": 585,
+            "numeric_sha256": "8a42204920fd1760a0352d57326f649a24600c1fe31342d08645ab629b2d6ba4"
+          },
+          {
+            "ordinal": 5,
+            "length": 580,
+            "numeric_sha256": "a68c4aaac9fd5590cb4cc8fce74b12d30899a567aa2bc0f050816eb26faf0aeb"
+          },
+          {
+            "ordinal": 6,
+            "length": 580,
+            "numeric_sha256": "0d8366332ade4abf0484b191ff605513019fa69bb206df6d012d8cd5babc4e4f"
+          },
+          {
+            "ordinal": 7,
+            "length": 581,
+            "numeric_sha256": "9cb1341608bdce328e67b050362141e63ede7fa76c67bfcfcf158b557d3ff101"
+          }
+        ],
+        "camera_order": [
+          "cam_high",
+          "cam_wrist"
+        ],
+        "allocation": {
+          "simulation_uuid": "GPU-569c23a7-9291-45ef-c727-ba74d63708db",
+          "training_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+          "cpu_affinity": [
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15
+          ],
+          "cpu_cores": 8
+        },
+        "auxiliary_graphics": {
+          "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+          "scope": "passive pure-G driver footprint only",
+          "max_per_pid_bytes": 8388608,
+          "idle_required": false
+        },
+        "launch_path": "examples/ods/data_stream_demo/results/2026-10-22-budget-aware-prefetch/inputs/pilot/_supervision/main/ods_overlap/dual/seed19001/training/launch.json",
+        "normal_exit_audited": true
+      },
+      "fairness_errors": [],
+      "total_seconds": 364.625540552,
+      "first_update_seconds": 64.302548014,
+      "training_complete_seconds": 269.476136901,
+      "post_training_drain_seconds": 95.149403651,
+      "completed_updates": 128,
+      "trained_chunks": 4096,
+      "valid_target_occurrences": 131072,
+      "published_sources": 32,
+      "trained_sources": 32,
+      "untrained_sources": 0,
+      "effective_sources": 31.999999999999943,
+      "initial_xy_occupied_cells": 26,
+      "anchor_xyz_occupied_voxels": 192,
+      "unique_anchors": 4096,
+      "unique_target_frames": 16100,
+      "target_duplicate_fraction": 0.877166748046875,
+      "max_source_trained_chunks": 128,
+      "dataset_bytes": 60385953
+    },
+    {
+      "vision": "single",
+      "arm": "ODS Budget",
+      "seed": 19001,
+      "producer_envs": 4,
+      "status": "complete",
+      "qualification_passed": true,
+      "path": "examples/ods/data_stream_demo/results/2026-10-22-budget-aware-prefetch/inputs/pilot/main/ods_overlap/single/seed19001",
+      "comparison_evidence": {
+        "requested_evaluation_scenes": 0,
+        "prefetch_policy": "budget",
+        "initial_model_sha256": "8374ba7bc7290460a52e2a8bb3df51cb473f25265be612f813998da165b86288",
+        "normalization_sha256": "2046d3ea48243a508338b2b5d10aec434871962d6f388ab88c4c40fab88b6cd2",
+        "training_budget": {
+          "updates": 128,
+          "batch_size": 32,
+          "history": 2,
+          "future": 32
+        },
+        "initial_numeric_prefix": [
+          {
+            "ordinal": 0,
+            "length": 491,
+            "numeric_sha256": "b891c3032f33bec0a5f04af58ea334e6f14f79dadf1cf1fa5ad3b49a57894f74"
+          },
+          {
+            "ordinal": 1,
+            "length": 490,
+            "numeric_sha256": "777c20d5c2876f32de07f149d6e3ebba25b8fab8625726a9cfc86613b54f9cfb"
+          },
+          {
+            "ordinal": 2,
+            "length": 490,
+            "numeric_sha256": "75a71205ff73b0dfc69aeecd7b7e382aacb33319ae1e65643bf7e64f49d86985"
+          },
+          {
+            "ordinal": 3,
+            "length": 490,
+            "numeric_sha256": "2a84f9cfa30a02c8f50dcff5ea44560e6011ebafe57294a2d2ee09b80ac2f403"
+          },
+          {
+            "ordinal": 4,
+            "length": 585,
+            "numeric_sha256": "8a42204920fd1760a0352d57326f649a24600c1fe31342d08645ab629b2d6ba4"
+          },
+          {
+            "ordinal": 5,
+            "length": 580,
+            "numeric_sha256": "a68c4aaac9fd5590cb4cc8fce74b12d30899a567aa2bc0f050816eb26faf0aeb"
+          },
+          {
+            "ordinal": 6,
+            "length": 580,
+            "numeric_sha256": "0d8366332ade4abf0484b191ff605513019fa69bb206df6d012d8cd5babc4e4f"
+          },
+          {
+            "ordinal": 7,
+            "length": 581,
+            "numeric_sha256": "9cb1341608bdce328e67b050362141e63ede7fa76c67bfcfcf158b557d3ff101"
+          }
+        ],
+        "camera_order": [
+          "cam_high"
+        ],
+        "allocation": {
+          "simulation_uuid": "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5",
+          "training_uuid": "GPU-a5477f57-58a6-4f89-6e7a-338d8fcfc6f1",
+          "cpu_affinity": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "cpu_cores": 8
+        },
+        "auxiliary_graphics": {
+          "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+          "scope": "passive pure-G driver footprint only",
+          "max_per_pid_bytes": 8388608,
+          "idle_required": false
+        },
+        "launch_path": "examples/ods/data_stream_demo/results/2026-10-22-budget-aware-prefetch/inputs/pilot/_supervision/main/ods_overlap/single/seed19001/training/launch.json",
+        "normal_exit_audited": true
+      },
+      "fairness_errors": [],
+      "total_seconds": 232.635745274,
+      "first_update_seconds": 57.415646307,
+      "training_complete_seconds": 175.626453119,
+      "post_training_drain_seconds": 57.009292155,
+      "completed_updates": 128,
+      "trained_chunks": 4096,
+      "valid_target_occurrences": 131072,
+      "published_sources": 32,
+      "trained_sources": 32,
+      "untrained_sources": 0,
+      "effective_sources": 31.999999999999943,
+      "initial_xy_occupied_cells": 26,
+      "anchor_xyz_occupied_voxels": 192,
+      "unique_anchors": 4096,
+      "unique_target_frames": 16100,
+      "target_duplicate_fraction": 0.877166748046875,
+      "max_source_trained_chunks": 128,
+      "dataset_bytes": 42173257
+    },
+    {
+      "vision": "dual",
+      "arm": "ODS Serial",
+      "seed": 19001,
+      "producer_envs": 4,
+      "status": "complete",
+      "qualification_passed": true,
+      "path": "examples/ods/data_stream_demo/results/2026-10-22-budget-aware-prefetch/inputs/pilot/main/ods_serial/dual/seed19001",
+      "comparison_evidence": {
+        "requested_evaluation_scenes": 0,
+        "prefetch_policy": "budget",
+        "initial_model_sha256": "b5b4d0b552217056e350c0ba862c63988259b8b923c575bf6b7f8cc201613b11",
+        "normalization_sha256": "2046d3ea48243a508338b2b5d10aec434871962d6f388ab88c4c40fab88b6cd2",
+        "training_budget": {
+          "updates": 128,
+          "batch_size": 32,
+          "history": 2,
+          "future": 32
+        },
+        "initial_numeric_prefix": [
+          {
+            "ordinal": 0,
+            "length": 491,
+            "numeric_sha256": "b891c3032f33bec0a5f04af58ea334e6f14f79dadf1cf1fa5ad3b49a57894f74"
+          },
+          {
+            "ordinal": 1,
+            "length": 490,
+            "numeric_sha256": "777c20d5c2876f32de07f149d6e3ebba25b8fab8625726a9cfc86613b54f9cfb"
+          },
+          {
+            "ordinal": 2,
+            "length": 490,
+            "numeric_sha256": "75a71205ff73b0dfc69aeecd7b7e382aacb33319ae1e65643bf7e64f49d86985"
+          },
+          {
+            "ordinal": 3,
+            "length": 490,
+            "numeric_sha256": "2a84f9cfa30a02c8f50dcff5ea44560e6011ebafe57294a2d2ee09b80ac2f403"
+          },
+          {
+            "ordinal": 4,
+            "length": 585,
+            "numeric_sha256": "8a42204920fd1760a0352d57326f649a24600c1fe31342d08645ab629b2d6ba4"
+          },
+          {
+            "ordinal": 5,
+            "length": 580,
+            "numeric_sha256": "a68c4aaac9fd5590cb4cc8fce74b12d30899a567aa2bc0f050816eb26faf0aeb"
+          },
+          {
+            "ordinal": 6,
+            "length": 580,
+            "numeric_sha256": "0d8366332ade4abf0484b191ff605513019fa69bb206df6d012d8cd5babc4e4f"
+          },
+          {
+            "ordinal": 7,
+            "length": 581,
+            "numeric_sha256": "9cb1341608bdce328e67b050362141e63ede7fa76c67bfcfcf158b557d3ff101"
+          }
+        ],
+        "camera_order": [
+          "cam_high",
+          "cam_wrist"
+        ],
+        "allocation": {
+          "simulation_uuid": "GPU-569c23a7-9291-45ef-c727-ba74d63708db",
+          "training_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+          "cpu_affinity": [
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15
+          ],
+          "cpu_cores": 8
+        },
+        "auxiliary_graphics": {
+          "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+          "scope": "passive pure-G driver footprint only",
+          "max_per_pid_bytes": 8388608,
+          "idle_required": false
+        },
+        "launch_path": "examples/ods/data_stream_demo/results/2026-10-22-budget-aware-prefetch/inputs/pilot/_supervision/main/ods_serial/dual/seed19001/training/launch.json",
+        "normal_exit_audited": true
+      },
+      "fairness_errors": [],
+      "total_seconds": 361.901135439,
+      "first_update_seconds": 63.432722357,
+      "training_complete_seconds": 267.217911658,
+      "post_training_drain_seconds": 94.68322378099998,
+      "completed_updates": 128,
+      "trained_chunks": 4096,
+      "valid_target_occurrences": 131072,
+      "published_sources": 32,
+      "trained_sources": 32,
+      "untrained_sources": 0,
+      "effective_sources": 31.999999999999943,
+      "initial_xy_occupied_cells": 26,
+      "anchor_xyz_occupied_voxels": 192,
+      "unique_anchors": 4096,
+      "unique_target_frames": 16100,
+      "target_duplicate_fraction": 0.877166748046875,
+      "max_source_trained_chunks": 128,
+      "dataset_bytes": 60385943
+    },
+    {
+      "vision": "single",
+      "arm": "ODS Serial",
+      "seed": 19001,
+      "producer_envs": 4,
+      "status": "complete",
+      "qualification_passed": true,
+      "path": "examples/ods/data_stream_demo/results/2026-10-22-budget-aware-prefetch/inputs/pilot/main/ods_serial/single/seed19001",
+      "comparison_evidence": {
+        "requested_evaluation_scenes": 0,
+        "prefetch_policy": "budget",
+        "initial_model_sha256": "8374ba7bc7290460a52e2a8bb3df51cb473f25265be612f813998da165b86288",
+        "normalization_sha256": "2046d3ea48243a508338b2b5d10aec434871962d6f388ab88c4c40fab88b6cd2",
+        "training_budget": {
+          "updates": 128,
+          "batch_size": 32,
+          "history": 2,
+          "future": 32
+        },
+        "initial_numeric_prefix": [
+          {
+            "ordinal": 0,
+            "length": 491,
+            "numeric_sha256": "b891c3032f33bec0a5f04af58ea334e6f14f79dadf1cf1fa5ad3b49a57894f74"
+          },
+          {
+            "ordinal": 1,
+            "length": 490,
+            "numeric_sha256": "777c20d5c2876f32de07f149d6e3ebba25b8fab8625726a9cfc86613b54f9cfb"
+          },
+          {
+            "ordinal": 2,
+            "length": 490,
+            "numeric_sha256": "75a71205ff73b0dfc69aeecd7b7e382aacb33319ae1e65643bf7e64f49d86985"
+          },
+          {
+            "ordinal": 3,
+            "length": 490,
+            "numeric_sha256": "2a84f9cfa30a02c8f50dcff5ea44560e6011ebafe57294a2d2ee09b80ac2f403"
+          },
+          {
+            "ordinal": 4,
+            "length": 585,
+            "numeric_sha256": "8a42204920fd1760a0352d57326f649a24600c1fe31342d08645ab629b2d6ba4"
+          },
+          {
+            "ordinal": 5,
+            "length": 580,
+            "numeric_sha256": "a68c4aaac9fd5590cb4cc8fce74b12d30899a567aa2bc0f050816eb26faf0aeb"
+          },
+          {
+            "ordinal": 6,
+            "length": 580,
+            "numeric_sha256": "0d8366332ade4abf0484b191ff605513019fa69bb206df6d012d8cd5babc4e4f"
+          },
+          {
+            "ordinal": 7,
+            "length": 581,
+            "numeric_sha256": "9cb1341608bdce328e67b050362141e63ede7fa76c67bfcfcf158b557d3ff101"
+          }
+        ],
+        "camera_order": [
+          "cam_high"
+        ],
+        "allocation": {
+          "simulation_uuid": "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5",
+          "training_uuid": "GPU-a5477f57-58a6-4f89-6e7a-338d8fcfc6f1",
+          "cpu_affinity": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "cpu_cores": 8
+        },
+        "auxiliary_graphics": {
+          "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+          "scope": "passive pure-G driver footprint only",
+          "max_per_pid_bytes": 8388608,
+          "idle_required": false
+        },
+        "launch_path": "examples/ods/data_stream_demo/results/2026-10-22-budget-aware-prefetch/inputs/pilot/_supervision/main/ods_serial/single/seed19001/training/launch.json",
+        "normal_exit_audited": true
+      },
+      "fairness_errors": [],
+      "total_seconds": 228.038762304,
+      "first_update_seconds": 55.277622192,
+      "training_complete_seconds": 178.001840681,
+      "post_training_drain_seconds": 50.036921622999984,
+      "completed_updates": 128,
+      "trained_chunks": 4096,
+      "valid_target_occurrences": 131072,
+      "published_sources": 32,
+      "trained_sources": 32,
+      "untrained_sources": 0,
+      "effective_sources": 31.999999999999943,
+      "initial_xy_occupied_cells": 26,
+      "anchor_xyz_occupied_voxels": 192,
+      "unique_anchors": 4096,
+      "unique_target_frames": 16100,
+      "target_duplicate_fraction": 0.877166748046875,
+      "max_source_trained_chunks": 128,
+      "dataset_bytes": 42173232
+    },
+    {
+      "vision": "dual",
+      "arm": "Offline-32",
+      "seed": 19001,
+      "producer_envs": 4,
+      "status": "complete",
+      "qualification_passed": true,
+      "path": "examples/ods/data_stream_demo/results/2026-10-22-budget-aware-prefetch/inputs/pilot/main/offline32/dual/seed19001",
+      "comparison_evidence": {
+        "requested_evaluation_scenes": 0,
+        "prefetch_policy": "budget",
+        "initial_model_sha256": "b5b4d0b552217056e350c0ba862c63988259b8b923c575bf6b7f8cc201613b11",
+        "normalization_sha256": "2046d3ea48243a508338b2b5d10aec434871962d6f388ab88c4c40fab88b6cd2",
+        "training_budget": {
+          "updates": 128,
+          "batch_size": 32,
+          "history": 2,
+          "future": 32
+        },
+        "initial_numeric_prefix": [
+          {
+            "ordinal": 0,
+            "length": 491,
+            "numeric_sha256": "b891c3032f33bec0a5f04af58ea334e6f14f79dadf1cf1fa5ad3b49a57894f74"
+          },
+          {
+            "ordinal": 1,
+            "length": 490,
+            "numeric_sha256": "777c20d5c2876f32de07f149d6e3ebba25b8fab8625726a9cfc86613b54f9cfb"
+          },
+          {
+            "ordinal": 2,
+            "length": 490,
+            "numeric_sha256": "75a71205ff73b0dfc69aeecd7b7e382aacb33319ae1e65643bf7e64f49d86985"
+          },
+          {
+            "ordinal": 3,
+            "length": 490,
+            "numeric_sha256": "2a84f9cfa30a02c8f50dcff5ea44560e6011ebafe57294a2d2ee09b80ac2f403"
+          },
+          {
+            "ordinal": 4,
+            "length": 585,
+            "numeric_sha256": "8a42204920fd1760a0352d57326f649a24600c1fe31342d08645ab629b2d6ba4"
+          },
+          {
+            "ordinal": 5,
+            "length": 580,
+            "numeric_sha256": "a68c4aaac9fd5590cb4cc8fce74b12d30899a567aa2bc0f050816eb26faf0aeb"
+          },
+          {
+            "ordinal": 6,
+            "length": 580,
+            "numeric_sha256": "0d8366332ade4abf0484b191ff605513019fa69bb206df6d012d8cd5babc4e4f"
+          },
+          {
+            "ordinal": 7,
+            "length": 581,
+            "numeric_sha256": "9cb1341608bdce328e67b050362141e63ede7fa76c67bfcfcf158b557d3ff101"
+          }
+        ],
+        "camera_order": [
+          "cam_high",
+          "cam_wrist"
+        ],
+        "allocation": {
+          "simulation_uuid": "GPU-569c23a7-9291-45ef-c727-ba74d63708db",
+          "training_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+          "cpu_affinity": [
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15
+          ],
+          "cpu_cores": 8
+        },
+        "auxiliary_graphics": {
+          "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+          "scope": "passive pure-G driver footprint only",
+          "max_per_pid_bytes": 8388608,
+          "idle_required": false
+        },
+        "launch_path": "examples/ods/data_stream_demo/results/2026-10-22-budget-aware-prefetch/inputs/pilot/_supervision/main/offline32/dual/seed19001/training/launch.json",
+        "normal_exit_audited": true
+      },
+      "fairness_errors": [],
+      "total_seconds": 385.822882654,
+      "first_update_seconds": 365.212711768,
+      "training_complete_seconds": 380.574729878,
+      "post_training_drain_seconds": 5.2481527759999835,
+      "completed_updates": 128,
+      "trained_chunks": 4096,
+      "valid_target_occurrences": 131072,
+      "published_sources": 32,
+      "trained_sources": 32,
+      "untrained_sources": 0,
+      "effective_sources": 31.999999999999943,
+      "initial_xy_occupied_cells": 26,
+      "anchor_xyz_occupied_voxels": 188,
+      "unique_anchors": 4096,
+      "unique_target_frames": 16157,
+      "target_duplicate_fraction": 0.8767318725585938,
+      "max_source_trained_chunks": 128,
+      "dataset_bytes": 60385884
+    },
+    {
+      "vision": "single",
+      "arm": "Offline-32",
+      "seed": 19001,
+      "producer_envs": 4,
+      "status": "complete",
+      "qualification_passed": true,
+      "path": "examples/ods/data_stream_demo/results/2026-10-22-budget-aware-prefetch/inputs/pilot/main/offline32/single/seed19001",
+      "comparison_evidence": {
+        "requested_evaluation_scenes": 0,
+        "prefetch_policy": "budget",
+        "initial_model_sha256": "8374ba7bc7290460a52e2a8bb3df51cb473f25265be612f813998da165b86288",
+        "normalization_sha256": "2046d3ea48243a508338b2b5d10aec434871962d6f388ab88c4c40fab88b6cd2",
+        "training_budget": {
+          "updates": 128,
+          "batch_size": 32,
+          "history": 2,
+          "future": 32
+        },
+        "initial_numeric_prefix": [
+          {
+            "ordinal": 0,
+            "length": 491,
+            "numeric_sha256": "b891c3032f33bec0a5f04af58ea334e6f14f79dadf1cf1fa5ad3b49a57894f74"
+          },
+          {
+            "ordinal": 1,
+            "length": 490,
+            "numeric_sha256": "777c20d5c2876f32de07f149d6e3ebba25b8fab8625726a9cfc86613b54f9cfb"
+          },
+          {
+            "ordinal": 2,
+            "length": 490,
+            "numeric_sha256": "75a71205ff73b0dfc69aeecd7b7e382aacb33319ae1e65643bf7e64f49d86985"
+          },
+          {
+            "ordinal": 3,
+            "length": 490,
+            "numeric_sha256": "2a84f9cfa30a02c8f50dcff5ea44560e6011ebafe57294a2d2ee09b80ac2f403"
+          },
+          {
+            "ordinal": 4,
+            "length": 585,
+            "numeric_sha256": "8a42204920fd1760a0352d57326f649a24600c1fe31342d08645ab629b2d6ba4"
+          },
+          {
+            "ordinal": 5,
+            "length": 580,
+            "numeric_sha256": "a68c4aaac9fd5590cb4cc8fce74b12d30899a567aa2bc0f050816eb26faf0aeb"
+          },
+          {
+            "ordinal": 6,
+            "length": 580,
+            "numeric_sha256": "0d8366332ade4abf0484b191ff605513019fa69bb206df6d012d8cd5babc4e4f"
+          },
+          {
+            "ordinal": 7,
+            "length": 581,
+            "numeric_sha256": "9cb1341608bdce328e67b050362141e63ede7fa76c67bfcfcf158b557d3ff101"
+          }
+        ],
+        "camera_order": [
+          "cam_high"
+        ],
+        "allocation": {
+          "simulation_uuid": "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5",
+          "training_uuid": "GPU-a5477f57-58a6-4f89-6e7a-338d8fcfc6f1",
+          "cpu_affinity": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "cpu_cores": 8
+        },
+        "auxiliary_graphics": {
+          "uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+          "scope": "passive pure-G driver footprint only",
+          "max_per_pid_bytes": 8388608,
+          "idle_required": false
+        },
+        "launch_path": "examples/ods/data_stream_demo/results/2026-10-22-budget-aware-prefetch/inputs/pilot/_supervision/main/offline32/single/seed19001/training/launch.json",
+        "normal_exit_audited": true
+      },
+      "fairness_errors": [],
+      "total_seconds": 243.006238481,
+      "first_update_seconds": 227.767897972,
+      "training_complete_seconds": 238.236763133,
+      "post_training_drain_seconds": 4.769475347999986,
+      "completed_updates": 128,
+      "trained_chunks": 4096,
+      "valid_target_occurrences": 131072,
+      "published_sources": 32,
+      "trained_sources": 32,
+      "untrained_sources": 0,
+      "effective_sources": 31.999999999999943,
+      "initial_xy_occupied_cells": 26,
+      "anchor_xyz_occupied_voxels": 188,
+      "unique_anchors": 4096,
+      "unique_target_frames": 16157,
+      "target_duplicate_fraction": 0.8767318725585938,
+      "max_source_trained_chunks": 128,
+      "dataset_bytes": 42173249
+    }
+  ],
+  "comparisons": [
+    {
+      "vision": "single",
+      "baseline": "Offline-32",
+      "complete_qualified_outcomes": true,
+      "exclusion_reasons": [],
+      "budget_time_saving_fraction": 0.04267583117135021,
+      "scope": "one seed; inspect strict primary report and independent manifest audit before attribution"
+    },
+    {
+      "vision": "single",
+      "baseline": "ODS Eager",
+      "complete_qualified_outcomes": true,
+      "exclusion_reasons": [],
+      "budget_time_saving_fraction": 0.1607389786721678,
+      "scope": "one seed; inspect strict primary report and independent manifest audit before attribution"
+    },
+    {
+      "vision": "single",
+      "baseline": "ODS Serial",
+      "complete_qualified_outcomes": true,
+      "exclusion_reasons": [],
+      "budget_time_saving_fraction": -0.020158778812664035,
+      "scope": "one seed; inspect strict primary report and independent manifest audit before attribution"
+    },
+    {
+      "vision": "dual",
+      "baseline": "Offline-32",
+      "complete_qualified_outcomes": true,
+      "exclusion_reasons": [],
+      "budget_time_saving_fraction": 0.054940603719996206,
+      "scope": "one seed; inspect strict primary report and independent manifest audit before attribution"
+    },
+    {
+      "vision": "dual",
+      "baseline": "ODS Eager",
+      "complete_qualified_outcomes": true,
+      "exclusion_reasons": [],
+      "budget_time_saving_fraction": 0.19267952066323646,
+      "scope": "one seed; inspect strict primary report and independent manifest audit before attribution"
+    },
+    {
+      "vision": "dual",
+      "baseline": "ODS Serial",
+      "complete_qualified_outcomes": true,
+      "exclusion_reasons": [],
+      "budget_time_saving_fraction": -0.007528036931122806,
+      "scope": "one seed; inspect strict primary report and independent manifest audit before attribution"
+    }
+  ],
+  "limits": "Measured one-seed systems pilot, not a formal aggregate or policy-performance result"
+}

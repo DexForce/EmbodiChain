@@ -1,0 +1,8 @@
+{
+  "passed": false,
+  "scope": "Driver self-qualification, not an experiment failure",
+  "error": "First wrapper assumption used worker evaluation_scenes=0 as outer request; prior U4 fixture actually has independently supervised 2 scenes",
+  "source_evidence": "training_suite._command deliberately sends evaluation_scenes=0 to worker; outer requested_evaluation_scenes controls post-run evaluation",
+  "original_run_records_modified": false,
+  "current_calibration_corpora_or_checkpoints_read": false
+}

@@ -1,0 +1,8 @@
+inputs/** -text -whitespace linguist-generated=true
+frozen-source/** -text linguist-generated=true
+qualification/** -text -whitespace linguist-generated=true
+report/** -text -whitespace linguist-generated=true
+*.svg -text -whitespace linguist-generated=true
+*.csv -text -whitespace linguist-generated=true
+*.tar.gz -text linguist-generated=true
+**/*.json linguist-generated=true

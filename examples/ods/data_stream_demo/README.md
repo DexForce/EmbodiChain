@@ -21,6 +21,15 @@ failure. ODS starts updates earlier, but its complete pipeline is slower than
 Offline-32 at comparable observed coverage under this budget. The short
 training budget does not produce a reliable PickPlace policy.
 
+The [budget-aware follow-up](results/2026-10-22-budget-aware-prefetch/README.md)
+retains six capacity preflights and eight matched pilot outcomes. It removes
+eight untrained tail episodes and reduces complete time by 16–19% versus the
+eager control, and 4–5.5% versus Offline-32 in this single-seed measurement.
+Trained coverage remains similar, and serial is slightly faster than overlap;
+the pilot establishes neither a diversity advantage nor a positive isolated
+generation/training-overlap benefit. The three-stage guide explains how to
+measure and choose producer capacity without raising the protected reuse cap.
+
 ## Primary training paths
 
 | CLI path | Data | Purpose |
@@ -123,7 +132,10 @@ Sweep only feasible P values that divide C, holding camera settings, hardware,
 CPU affinity, B, K and model fixed. Select the smallest measured P reaching
 90% of the best measured effective supply for that condition. Incompatible
 hardware/recipes or unqualified runs cannot enter that selection. Increasing P
-cannot solve a recorder bottleneck. The implied K for full learner utilization
+cannot solve a recorder bottleneck. If one producer setting must serve both
+camera conditions, use the smallest tested P reaching that threshold in both,
+and retain each condition's individual choice. The implied K for full learner
+utilization
 is reported as a diagnostic, **not** permission to raise the reuse guard or a
 recommended learning setting. Keep K bounded and report unavoidable waiting
 when production cannot support the actual model workload.

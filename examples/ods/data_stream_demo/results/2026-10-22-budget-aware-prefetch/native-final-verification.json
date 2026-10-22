@@ -1,0 +1,81 @@
+{
+  "passed": true,
+  "scope": "post-cohort files compared to mid-cohort producer mappings; not a new numerical determinism claim",
+  "libraries": [
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libcuda_compute.so",
+      "inode_match": true,
+      "sha256_match": true
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libPVDRuntime_64.so",
+      "inode_match": true,
+      "sha256_match": true
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libPhysXGpu_64.so",
+      "inode_match": true,
+      "sha256_match": true
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/librealtime-denoiser.so",
+      "inode_match": true,
+      "sha256_match": true
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libvisacd_core.so",
+      "inode_match": true,
+      "sha256_match": true
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libcore.so",
+      "inode_match": true,
+      "sha256_match": true
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libcompute.so",
+      "inode_match": true,
+      "sha256_match": true
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libadaptation.so",
+      "inode_match": true,
+      "sha256_match": true
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libscript.so",
+      "inode_match": true,
+      "sha256_match": true
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/librender-optix.so",
+      "inode_match": true,
+      "sha256_match": true
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/librender-filament.so",
+      "inode_match": true,
+      "sha256_match": true
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/librender-hybrid.so",
+      "inode_match": true,
+      "sha256_match": true
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libengine.so",
+      "inode_match": true,
+      "sha256_match": true
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/lib/libDexSim.so",
+      "inode_match": true,
+      "sha256_match": true
+    },
+    {
+      "path": "/root/sources/dexsim/build_Release/lib/python_package/dexsim/cuda/pybind.cpython-311-x86_64-linux-gnu.so",
+      "inode_match": true,
+      "sha256_match": true
+    }
+  ]
+}

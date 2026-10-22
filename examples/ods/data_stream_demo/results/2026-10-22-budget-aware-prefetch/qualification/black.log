@@ -1,0 +1,5 @@
+Warning: Python 3.11 cannot parse code formatted for Python 3.14. To fix this: run Black with Python 3.14, set --target-version to py311, or use --fast to skip the safety check. Black's safety check verifies equivalence by parsing the AST, which fails when the running Python is older than the target version.
+reformatted /root/sources/EmbodiChain-ods-stream-design/examples/ods/data_stream_demo/train.py
+
+All done! ✨ 🍰 ✨
+1 file reformatted, 1526 files left unchanged.

@@ -1,0 +1,1166 @@
+[
+  {
+    "path": "inputs/calibration-p2/_supervision/ods_overlap/dual/seed19001/audit/launch.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p2/_supervision/ods_overlap/dual/seed19001/audit/launch.json",
+    "sha256": "2340a456c3fe52f7c480e710e53429730d22316c1e47dff2ca33ce6abdff589a",
+    "bytes": 1937
+  },
+  {
+    "path": "inputs/calibration-p2/_supervision/ods_overlap/dual/seed19001/training/launch.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p2/_supervision/ods_overlap/dual/seed19001/training/launch.json",
+    "sha256": "d56b0393921c89ff468b5716513a632d39b26eb6f6700012b8c265ef208fd598",
+    "bytes": 2598
+  },
+  {
+    "path": "inputs/calibration-p2/_supervision/ods_overlap/single/seed19001/audit/launch.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p2/_supervision/ods_overlap/single/seed19001/audit/launch.json",
+    "sha256": "5c22174fbf6b316d9a5eb1aac09fc6494bf1acab9e178848a57ba936c27a6720",
+    "bytes": 1929
+  },
+  {
+    "path": "inputs/calibration-p2/_supervision/ods_overlap/single/seed19001/training/launch.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p2/_supervision/ods_overlap/single/seed19001/training/launch.json",
+    "sha256": "d5f027d11cc204ec8d47676feb38dc9c89149fa81d48c22bda13ea9d0612839f",
+    "bytes": 2590
+  },
+  {
+    "path": "inputs/calibration-p2/calibration.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p2/calibration.json",
+    "sha256": "483dad710f830b4038cbc1231a849920d215a29dcb5dca9a671eb859da5e68ca",
+    "bytes": 17459
+  },
+  {
+    "path": "inputs/calibration-p2/calibration.md",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p2/calibration.md",
+    "sha256": "f12a507ab2c3cf45072d13e748eddbb17b5918c9cf81de93d8ad2fabb8b26c4d",
+    "bytes": 1577
+  },
+  {
+    "path": "inputs/calibration-p2/gpu-preflight.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p2/gpu-preflight.json",
+    "sha256": "2f615d6abbf4493dacc9273db2cceef334ada493fe1469006185cc3355fdfc32",
+    "bytes": 8834
+  },
+  {
+    "path": "inputs/calibration-p2/ods_overlap/dual/seed19001/audit-process.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p2/ods_overlap/dual/seed19001/audit-process.json",
+    "sha256": "49537e0c18b1063ad75d0563f61bcbfcf09ab0e6b6071ceeb3167ead6608aa0a",
+    "bytes": 977
+  },
+  {
+    "path": "inputs/calibration-p2/ods_overlap/dual/seed19001/config.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p2/ods_overlap/dual/seed19001/config.json",
+    "sha256": "4c26137a08cfbae57230519ae232e4c239094cef476a6527ce282dda559c2636",
+    "bytes": 787
+  },
+  {
+    "path": "inputs/calibration-p2/ods_overlap/dual/seed19001/environment.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p2/ods_overlap/dual/seed19001/environment.json",
+    "sha256": "494a4fcc973cd15ccf1b4e9545c80bc003ad0f2397737e26ed576b3a96b40b95",
+    "bytes": 3416
+  },
+  {
+    "path": "inputs/calibration-p2/ods_overlap/dual/seed19001/initial-contract.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p2/ods_overlap/dual/seed19001/initial-contract.json",
+    "sha256": "2342f3bf9b3be80f33e3938213cc24b8ab720d630bea6b9edb9433323f7cf006",
+    "bytes": 3286
+  },
+  {
+    "path": "inputs/calibration-p2/ods_overlap/dual/seed19001/payload_schema.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p2/ods_overlap/dual/seed19001/payload_schema.json",
+    "sha256": "37f884aa25e3297758fc3c392517e1c1690fd5036dff9af8803dec3089e91296",
+    "bytes": 2293
+  },
+  {
+    "path": "inputs/calibration-p2/ods_overlap/dual/seed19001/post-audit-video-integrity.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p2/ods_overlap/dual/seed19001/post-audit-video-integrity.json",
+    "sha256": "0da1249741d9ea9e86d85aa92f188d068ce4371d5d6cf541144c312380bd11a4",
+    "bytes": 7571
+  },
+  {
+    "path": "inputs/calibration-p2/ods_overlap/dual/seed19001/post-audit.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p2/ods_overlap/dual/seed19001/post-audit.json",
+    "sha256": "77cc27172029b56694ee618472efc776e6919fa3992cd38d538b087baf3199e1",
+    "bytes": 15286
+  },
+  {
+    "path": "inputs/calibration-p2/ods_overlap/dual/seed19001/process.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p2/ods_overlap/dual/seed19001/process.json",
+    "sha256": "5ec5f7ad26175adb38c9afd77c1af49b5aca129721de8096add4f57e7246af20",
+    "bytes": 1088
+  },
+  {
+    "path": "inputs/calibration-p2/ods_overlap/dual/seed19001/roles.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p2/ods_overlap/dual/seed19001/roles.json",
+    "sha256": "5885f8ea82c37e49c07418d04671ed8591837e3118b762bea69b32c38c079e75",
+    "bytes": 56
+  },
+  {
+    "path": "inputs/calibration-p2/ods_overlap/dual/seed19001/summary.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p2/ods_overlap/dual/seed19001/summary.json",
+    "sha256": "63137fba910ab4b55309bf51974462c8b3e2c5d3330959639403cd9bba3f9921",
+    "bytes": 419770
+  },
+  {
+    "path": "inputs/calibration-p2/ods_overlap/dual/seed19001/training-trace.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p2/ods_overlap/dual/seed19001/training-trace.json",
+    "sha256": "350946c2cb33141526ed927f736eb48a46358ab40f6e0a64553ba371e98e3e44",
+    "bytes": 70922
+  },
+  {
+    "path": "inputs/calibration-p2/ods_overlap/single/seed19001/audit-process.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p2/ods_overlap/single/seed19001/audit-process.json",
+    "sha256": "59316a62603abea3d1a0aa95840b2cd8f2add7c66d992af03cd8fd57987292a8",
+    "bytes": 980
+  },
+  {
+    "path": "inputs/calibration-p2/ods_overlap/single/seed19001/config.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p2/ods_overlap/single/seed19001/config.json",
+    "sha256": "df0c002d52ed6518f35c20a66820011f53056e0bca5e8360739b19da9e06e2e0",
+    "bytes": 791
+  },
+  {
+    "path": "inputs/calibration-p2/ods_overlap/single/seed19001/environment.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p2/ods_overlap/single/seed19001/environment.json",
+    "sha256": "28772f99d6ae9f72da71af5a9566b3fec325aaba1e25aab062eafca137ba7989",
+    "bytes": 3410
+  },
+  {
+    "path": "inputs/calibration-p2/ods_overlap/single/seed19001/initial-contract.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p2/ods_overlap/single/seed19001/initial-contract.json",
+    "sha256": "c7261397d18a1ce7127360c695627d1fe3415d259dfb229294309541b2f26a37",
+    "bytes": 3269
+  },
+  {
+    "path": "inputs/calibration-p2/ods_overlap/single/seed19001/payload_schema.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p2/ods_overlap/single/seed19001/payload_schema.json",
+    "sha256": "9b85c5ce63a1f6a46ce322b7ce75fa79d75e7135a56cffaa0f935ec2ac52c16d",
+    "bytes": 2126
+  },
+  {
+    "path": "inputs/calibration-p2/ods_overlap/single/seed19001/post-audit-video-integrity.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p2/ods_overlap/single/seed19001/post-audit-video-integrity.json",
+    "sha256": "0a664da1c168dc64272b75eaaa13461a9a566a3b6591f077e08d2cf90be0f8b9",
+    "bytes": 4458
+  },
+  {
+    "path": "inputs/calibration-p2/ods_overlap/single/seed19001/post-audit.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p2/ods_overlap/single/seed19001/post-audit.json",
+    "sha256": "48f3f12e2b20eaef21bbd6f9fa077efb6c1c282a84479af4dba3717c49b87246",
+    "bytes": 11445
+  },
+  {
+    "path": "inputs/calibration-p2/ods_overlap/single/seed19001/process.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p2/ods_overlap/single/seed19001/process.json",
+    "sha256": "9bfea3fec397df2f0fff1ec4441c5f12c0b8e6d4f39875f41167be63137f928d",
+    "bytes": 1250
+  },
+  {
+    "path": "inputs/calibration-p2/ods_overlap/single/seed19001/roles.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p2/ods_overlap/single/seed19001/roles.json",
+    "sha256": "8568cc6db873aac0ca4c7e3b5c516582380e6fcaeb215661b35453fce07b38cc",
+    "bytes": 56
+  },
+  {
+    "path": "inputs/calibration-p2/ods_overlap/single/seed19001/summary.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p2/ods_overlap/single/seed19001/summary.json",
+    "sha256": "3ea57241ed164dad277e912bf428beecd75a03b6ebecc23a970b7496623bbc30",
+    "bytes": 415967
+  },
+  {
+    "path": "inputs/calibration-p2/ods_overlap/single/seed19001/training-trace.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p2/ods_overlap/single/seed19001/training-trace.json",
+    "sha256": "48eff4fe8658317d85a053d06366ca4ff66822a08d92f8b5b9b435491695909f",
+    "bytes": 70924
+  },
+  {
+    "path": "inputs/calibration-p4/_supervision/ods_overlap/dual/seed19001/audit/launch.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p4/_supervision/ods_overlap/dual/seed19001/audit/launch.json",
+    "sha256": "91f6195ea37235663dfe3123e988878b90e80cc6e1f7d314fcf60f8239b873e1",
+    "bytes": 1937
+  },
+  {
+    "path": "inputs/calibration-p4/_supervision/ods_overlap/dual/seed19001/training/launch.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p4/_supervision/ods_overlap/dual/seed19001/training/launch.json",
+    "sha256": "067f6e1c469f4c99b574594ead93aae5d9a313e87cf22df6963d66b173a9734b",
+    "bytes": 2598
+  },
+  {
+    "path": "inputs/calibration-p4/_supervision/ods_overlap/single/seed19001/audit/launch.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p4/_supervision/ods_overlap/single/seed19001/audit/launch.json",
+    "sha256": "9358a555361ba6433c2490542977512704c9b466c2362c74c1904d7ca0fc797a",
+    "bytes": 1929
+  },
+  {
+    "path": "inputs/calibration-p4/_supervision/ods_overlap/single/seed19001/training/launch.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p4/_supervision/ods_overlap/single/seed19001/training/launch.json",
+    "sha256": "a2a4417ae7d787dab2bc0658ea429412663e3aaf84bf8909a791dca704206ea4",
+    "bytes": 2590
+  },
+  {
+    "path": "inputs/calibration-p4/calibration.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p4/calibration.json",
+    "sha256": "c4f7550bdf02c576bb6b2893a2a241c757856657a12ee66b5a5fd09a027c2dff",
+    "bytes": 17454
+  },
+  {
+    "path": "inputs/calibration-p4/calibration.md",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p4/calibration.md",
+    "sha256": "f12a507ab2c3cf45072d13e748eddbb17b5918c9cf81de93d8ad2fabb8b26c4d",
+    "bytes": 1577
+  },
+  {
+    "path": "inputs/calibration-p4/gpu-preflight.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p4/gpu-preflight.json",
+    "sha256": "b48e4c0cff4bed397ae34f0c3d0c599f07a980b5b5d344d444ee41bf67238c78",
+    "bytes": 8834
+  },
+  {
+    "path": "inputs/calibration-p4/ods_overlap/dual/seed19001/audit-process.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p4/ods_overlap/dual/seed19001/audit-process.json",
+    "sha256": "a30f1b9a39676895016d7e40ceae63d9193b01949b792ede757c78f11767db1d",
+    "bytes": 977
+  },
+  {
+    "path": "inputs/calibration-p4/ods_overlap/dual/seed19001/config.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p4/ods_overlap/dual/seed19001/config.json",
+    "sha256": "8fb3a03e886d0aecc04064b6edcaeca28842647863abda4f95d7d033ff90a1d5",
+    "bytes": 787
+  },
+  {
+    "path": "inputs/calibration-p4/ods_overlap/dual/seed19001/environment.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p4/ods_overlap/dual/seed19001/environment.json",
+    "sha256": "494a4fcc973cd15ccf1b4e9545c80bc003ad0f2397737e26ed576b3a96b40b95",
+    "bytes": 3416
+  },
+  {
+    "path": "inputs/calibration-p4/ods_overlap/dual/seed19001/initial-contract.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p4/ods_overlap/dual/seed19001/initial-contract.json",
+    "sha256": "cb9bdcb49179e116c4ae417a21e6aaeaaae130063acc23eb51aa3214d4a8abb8",
+    "bytes": 3272
+  },
+  {
+    "path": "inputs/calibration-p4/ods_overlap/dual/seed19001/payload_schema.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p4/ods_overlap/dual/seed19001/payload_schema.json",
+    "sha256": "37f884aa25e3297758fc3c392517e1c1690fd5036dff9af8803dec3089e91296",
+    "bytes": 2293
+  },
+  {
+    "path": "inputs/calibration-p4/ods_overlap/dual/seed19001/post-audit-video-integrity.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p4/ods_overlap/dual/seed19001/post-audit-video-integrity.json",
+    "sha256": "a0adcc92dae8515fac023a14bb8dec2df0d53274e2391e5337034b5d5a743f1a",
+    "bytes": 7571
+  },
+  {
+    "path": "inputs/calibration-p4/ods_overlap/dual/seed19001/post-audit.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p4/ods_overlap/dual/seed19001/post-audit.json",
+    "sha256": "4d542fb8bd71d6cd06ea03e9bd5c45a93661346a7f1218b5db85d4686e32a946",
+    "bytes": 15248
+  },
+  {
+    "path": "inputs/calibration-p4/ods_overlap/dual/seed19001/process.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p4/ods_overlap/dual/seed19001/process.json",
+    "sha256": "9888647c958759674637f0f5b5b3b51aa3762f686090b6d2525061a747345e41",
+    "bytes": 1088
+  },
+  {
+    "path": "inputs/calibration-p4/ods_overlap/dual/seed19001/roles.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p4/ods_overlap/dual/seed19001/roles.json",
+    "sha256": "39b305f1d0c7543404da0120a7d54d4e0f2e783fbe79625b3912992621259fea",
+    "bytes": 56
+  },
+  {
+    "path": "inputs/calibration-p4/ods_overlap/dual/seed19001/summary.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p4/ods_overlap/dual/seed19001/summary.json",
+    "sha256": "549c09538aeae82b03fd0a534c4597a932124ef39953b4bc97da207793caa81e",
+    "bytes": 447574
+  },
+  {
+    "path": "inputs/calibration-p4/ods_overlap/dual/seed19001/training-trace.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p4/ods_overlap/dual/seed19001/training-trace.json",
+    "sha256": "96cb5c31a73f7a46f8ed5563d6cd513d8dcfd62b3ea7301e24c163e28058f3c8",
+    "bytes": 70903
+  },
+  {
+    "path": "inputs/calibration-p4/ods_overlap/single/seed19001/audit-process.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p4/ods_overlap/single/seed19001/audit-process.json",
+    "sha256": "76208c71508969d96448d6872df363541b0b1c84e2994a88cec177aa8d275452",
+    "bytes": 980
+  },
+  {
+    "path": "inputs/calibration-p4/ods_overlap/single/seed19001/config.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p4/ods_overlap/single/seed19001/config.json",
+    "sha256": "fd818ab53751bfb81aaae70c19c9e3ab52228a13be625b0a17ff3c2571f2ec01",
+    "bytes": 791
+  },
+  {
+    "path": "inputs/calibration-p4/ods_overlap/single/seed19001/environment.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p4/ods_overlap/single/seed19001/environment.json",
+    "sha256": "28772f99d6ae9f72da71af5a9566b3fec325aaba1e25aab062eafca137ba7989",
+    "bytes": 3410
+  },
+  {
+    "path": "inputs/calibration-p4/ods_overlap/single/seed19001/initial-contract.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p4/ods_overlap/single/seed19001/initial-contract.json",
+    "sha256": "5cb00e9a06e59079297723f05a2ccd8125ffdb144f3e038fb9148c1c8ce724ae",
+    "bytes": 3271
+  },
+  {
+    "path": "inputs/calibration-p4/ods_overlap/single/seed19001/payload_schema.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p4/ods_overlap/single/seed19001/payload_schema.json",
+    "sha256": "9b85c5ce63a1f6a46ce322b7ce75fa79d75e7135a56cffaa0f935ec2ac52c16d",
+    "bytes": 2126
+  },
+  {
+    "path": "inputs/calibration-p4/ods_overlap/single/seed19001/post-audit-video-integrity.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p4/ods_overlap/single/seed19001/post-audit-video-integrity.json",
+    "sha256": "8cead5e3368317f28616e7721111dcad90eecb4d0a1a0665d91dea584d1a5381",
+    "bytes": 4458
+  },
+  {
+    "path": "inputs/calibration-p4/ods_overlap/single/seed19001/post-audit.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p4/ods_overlap/single/seed19001/post-audit.json",
+    "sha256": "21f484002f26b9d1b6caaf774fd5ba57c2e42928dace0e77a9841749740eeb81",
+    "bytes": 11443
+  },
+  {
+    "path": "inputs/calibration-p4/ods_overlap/single/seed19001/process.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p4/ods_overlap/single/seed19001/process.json",
+    "sha256": "d56c06ab0cb2fd22d9ac6c501d483cacb801c2dd8bd087537f5c5b326caac222",
+    "bytes": 1250
+  },
+  {
+    "path": "inputs/calibration-p4/ods_overlap/single/seed19001/roles.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p4/ods_overlap/single/seed19001/roles.json",
+    "sha256": "afbf8eda75c547a446a1f3bbbc8041b02f3fd932ebe8ae1a75864bbc56ce4721",
+    "bytes": 56
+  },
+  {
+    "path": "inputs/calibration-p4/ods_overlap/single/seed19001/summary.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p4/ods_overlap/single/seed19001/summary.json",
+    "sha256": "d7ff8abe6ee3b026aa79aa1b568ad6019e87ed5e9eef42cac13caeee673ca4d0",
+    "bytes": 443806
+  },
+  {
+    "path": "inputs/calibration-p4/ods_overlap/single/seed19001/training-trace.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p4/ods_overlap/single/seed19001/training-trace.json",
+    "sha256": "0126e5af984a8c21fca47f634e25de48e4b72a1fe3214e70d9278ecd901249f9",
+    "bytes": 70937
+  },
+  {
+    "path": "inputs/calibration-p8/_supervision/ods_overlap/dual/seed19001/audit/launch.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p8/_supervision/ods_overlap/dual/seed19001/audit/launch.json",
+    "sha256": "b9be868af86d9f3eb765d3f04987bf8dc251e779512d159bd2af52978698702a",
+    "bytes": 1937
+  },
+  {
+    "path": "inputs/calibration-p8/_supervision/ods_overlap/dual/seed19001/training/launch.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p8/_supervision/ods_overlap/dual/seed19001/training/launch.json",
+    "sha256": "ed18e22f59ad7299afe94ed8c71d055919140103ea2bd353df94cd10801475c5",
+    "bytes": 2598
+  },
+  {
+    "path": "inputs/calibration-p8/_supervision/ods_overlap/single/seed19001/audit/launch.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p8/_supervision/ods_overlap/single/seed19001/audit/launch.json",
+    "sha256": "2329d4906c9a4faef16cfe2300510e39880fe7abac358b1108b89b3fdac53b3c",
+    "bytes": 1929
+  },
+  {
+    "path": "inputs/calibration-p8/_supervision/ods_overlap/single/seed19001/training/launch.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p8/_supervision/ods_overlap/single/seed19001/training/launch.json",
+    "sha256": "0bff67fad5d1430cc674ae1ce642e593ac516addae726e1841bd27d207cf6c7d",
+    "bytes": 2590
+  },
+  {
+    "path": "inputs/calibration-p8/calibration.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p8/calibration.json",
+    "sha256": "935413c71a0a014bcb95c7a192f61a2e88935846f3ee18d31c3f4168212062d1",
+    "bytes": 17457
+  },
+  {
+    "path": "inputs/calibration-p8/calibration.md",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p8/calibration.md",
+    "sha256": "f12a507ab2c3cf45072d13e748eddbb17b5918c9cf81de93d8ad2fabb8b26c4d",
+    "bytes": 1577
+  },
+  {
+    "path": "inputs/calibration-p8/gpu-preflight.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p8/gpu-preflight.json",
+    "sha256": "3fb5a2a613b887d2d9e0402cab299e6242c26ec3cc2a6dfd6760a29512da0ed7",
+    "bytes": 8834
+  },
+  {
+    "path": "inputs/calibration-p8/ods_overlap/dual/seed19001/audit-process.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p8/ods_overlap/dual/seed19001/audit-process.json",
+    "sha256": "77f77a8b0f95cff6add51aef1b0dc1c7305a0edc4850558881661efbd4fe4501",
+    "bytes": 978
+  },
+  {
+    "path": "inputs/calibration-p8/ods_overlap/dual/seed19001/config.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p8/ods_overlap/dual/seed19001/config.json",
+    "sha256": "3ba9bec605546e16dfeeb3822ee2379862ac30e07b08530962edf59751f335c3",
+    "bytes": 787
+  },
+  {
+    "path": "inputs/calibration-p8/ods_overlap/dual/seed19001/environment.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p8/ods_overlap/dual/seed19001/environment.json",
+    "sha256": "494a4fcc973cd15ccf1b4e9545c80bc003ad0f2397737e26ed576b3a96b40b95",
+    "bytes": 3416
+  },
+  {
+    "path": "inputs/calibration-p8/ods_overlap/dual/seed19001/initial-contract.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p8/ods_overlap/dual/seed19001/initial-contract.json",
+    "sha256": "fdcae2ea4d8ccd426f31a1f9e826fd855f627619c813e88c25483af3e725c157",
+    "bytes": 3288
+  },
+  {
+    "path": "inputs/calibration-p8/ods_overlap/dual/seed19001/payload_schema.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p8/ods_overlap/dual/seed19001/payload_schema.json",
+    "sha256": "37f884aa25e3297758fc3c392517e1c1690fd5036dff9af8803dec3089e91296",
+    "bytes": 2293
+  },
+  {
+    "path": "inputs/calibration-p8/ods_overlap/dual/seed19001/post-audit-video-integrity.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p8/ods_overlap/dual/seed19001/post-audit-video-integrity.json",
+    "sha256": "6cddb015db566cfba76df4dbaa2d15f363472f2b1f7d0adcc844bcbcc2c3191d",
+    "bytes": 7572
+  },
+  {
+    "path": "inputs/calibration-p8/ods_overlap/dual/seed19001/post-audit.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p8/ods_overlap/dual/seed19001/post-audit.json",
+    "sha256": "59fb4411a4f88c32df5487a16a438657438da5be8c6a4a047f94ae4a3ba08b0c",
+    "bytes": 15289
+  },
+  {
+    "path": "inputs/calibration-p8/ods_overlap/dual/seed19001/process.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p8/ods_overlap/dual/seed19001/process.json",
+    "sha256": "6b81fb9780b7437f5e31c5bedf824d0f1b7a4ebdf96144d6f6df258cc4ac6698",
+    "bytes": 1087
+  },
+  {
+    "path": "inputs/calibration-p8/ods_overlap/dual/seed19001/roles.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p8/ods_overlap/dual/seed19001/roles.json",
+    "sha256": "235c645b29ae27b3c718c54f75e823832a92eb26e51d7de89a23f09fc185d55d",
+    "bytes": 56
+  },
+  {
+    "path": "inputs/calibration-p8/ods_overlap/dual/seed19001/summary.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p8/ods_overlap/dual/seed19001/summary.json",
+    "sha256": "f8749540410e4dacf250cedd2090c5e93e7a64782c4838429a65adf0fb1142bf",
+    "bytes": 476350
+  },
+  {
+    "path": "inputs/calibration-p8/ods_overlap/dual/seed19001/training-trace.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p8/ods_overlap/dual/seed19001/training-trace.json",
+    "sha256": "7f8129891e410d50d84809c0131481eb05c232c159cc2199a57f9170d2940eb7",
+    "bytes": 70939
+  },
+  {
+    "path": "inputs/calibration-p8/ods_overlap/single/seed19001/audit-process.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p8/ods_overlap/single/seed19001/audit-process.json",
+    "sha256": "38f7de62ed2d7df48d7e87983090e6f50c2960d6f32fd6a18651a00d033ac057",
+    "bytes": 980
+  },
+  {
+    "path": "inputs/calibration-p8/ods_overlap/single/seed19001/config.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p8/ods_overlap/single/seed19001/config.json",
+    "sha256": "12420d3d7f2b5edc6d6c8968e52764b5f07c751f31e40b01e4d9e40c8f090478",
+    "bytes": 791
+  },
+  {
+    "path": "inputs/calibration-p8/ods_overlap/single/seed19001/environment.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p8/ods_overlap/single/seed19001/environment.json",
+    "sha256": "28772f99d6ae9f72da71af5a9566b3fec325aaba1e25aab062eafca137ba7989",
+    "bytes": 3410
+  },
+  {
+    "path": "inputs/calibration-p8/ods_overlap/single/seed19001/initial-contract.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p8/ods_overlap/single/seed19001/initial-contract.json",
+    "sha256": "f344c3e3a07b3271bcbcfeb99620a0cc2c9d59651525d82bb85b0ce3c23ba708",
+    "bytes": 3263
+  },
+  {
+    "path": "inputs/calibration-p8/ods_overlap/single/seed19001/payload_schema.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p8/ods_overlap/single/seed19001/payload_schema.json",
+    "sha256": "9b85c5ce63a1f6a46ce322b7ce75fa79d75e7135a56cffaa0f935ec2ac52c16d",
+    "bytes": 2126
+  },
+  {
+    "path": "inputs/calibration-p8/ods_overlap/single/seed19001/post-audit-video-integrity.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p8/ods_overlap/single/seed19001/post-audit-video-integrity.json",
+    "sha256": "c4078e8913552e05ab6bfba06e145dd13ab755bb0d65e6560273f0cebd97891e",
+    "bytes": 4456
+  },
+  {
+    "path": "inputs/calibration-p8/ods_overlap/single/seed19001/post-audit.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p8/ods_overlap/single/seed19001/post-audit.json",
+    "sha256": "9e9c130ee129d40557689a41fa58a7832061e6dc0fcbcd6356a89161692914bb",
+    "bytes": 11427
+  },
+  {
+    "path": "inputs/calibration-p8/ods_overlap/single/seed19001/process.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p8/ods_overlap/single/seed19001/process.json",
+    "sha256": "911560b9187734785c750b4e48d15e234a50ed3f4239fc710cd01cd5966156ab",
+    "bytes": 1250
+  },
+  {
+    "path": "inputs/calibration-p8/ods_overlap/single/seed19001/roles.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p8/ods_overlap/single/seed19001/roles.json",
+    "sha256": "cc989ef3807c11a36c51ba4771b46f9ce73708a6f022b5d6502508c3cb21f02c",
+    "bytes": 56
+  },
+  {
+    "path": "inputs/calibration-p8/ods_overlap/single/seed19001/summary.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p8/ods_overlap/single/seed19001/summary.json",
+    "sha256": "663cb9e7b2469697f9266fc4489879181ba98538ffe00b160767f87654fe3d61",
+    "bytes": 472423
+  },
+  {
+    "path": "inputs/calibration-p8/ods_overlap/single/seed19001/training-trace.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/calibration-p8/ods_overlap/single/seed19001/training-trace.json",
+    "sha256": "c0f2e96fe4094cd5fc81ac6ec1c250952505ca5ea52cac9afae92bd87bd6405d",
+    "bytes": 70925
+  },
+  {
+    "path": "inputs/pilot/_supervision/controls/eager/dual/seed19001/audit/launch.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/_supervision/controls/eager/dual/seed19001/audit/launch.json",
+    "sha256": "ee44b3fedad1f4816d46af3b3dc6d2091b64540de8916295fc169cd6cb6d9c7c",
+    "bytes": 1925
+  },
+  {
+    "path": "inputs/pilot/_supervision/controls/eager/dual/seed19001/training/launch.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/_supervision/controls/eager/dual/seed19001/training/launch.json",
+    "sha256": "bdbbd6047928bed2718e612644679e9fd16e93220fa66c32be6025bad42d09e7",
+    "bytes": 2586
+  },
+  {
+    "path": "inputs/pilot/_supervision/controls/eager/single/seed19001/audit/launch.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/_supervision/controls/eager/single/seed19001/audit/launch.json",
+    "sha256": "a1f0fd6d7af86b22a5d5b71f2b144e28c4b0999e99af9175d57a596237df504d",
+    "bytes": 1917
+  },
+  {
+    "path": "inputs/pilot/_supervision/controls/eager/single/seed19001/training/launch.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/_supervision/controls/eager/single/seed19001/training/launch.json",
+    "sha256": "73e3d5bad4ca312907c33eadae679b5d103ac66074c8ef3c404e2d557a4e8866",
+    "bytes": 2578
+  },
+  {
+    "path": "inputs/pilot/_supervision/main/ods_overlap/dual/seed19001/audit/launch.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/_supervision/main/ods_overlap/dual/seed19001/audit/launch.json",
+    "sha256": "4c505990ea5f98008766c1a43f463941349baf384513a8662bd7981537a6fabe",
+    "bytes": 1929
+  },
+  {
+    "path": "inputs/pilot/_supervision/main/ods_overlap/dual/seed19001/training/launch.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/_supervision/main/ods_overlap/dual/seed19001/training/launch.json",
+    "sha256": "a9e6a52298a9db40e42acc87ef0fcca144e395997f8fd3bcefacf8e983568b80",
+    "bytes": 2589
+  },
+  {
+    "path": "inputs/pilot/_supervision/main/ods_overlap/single/seed19001/audit/launch.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/_supervision/main/ods_overlap/single/seed19001/audit/launch.json",
+    "sha256": "a8bbee8e5676ad92f70d81877b52dd57dfbce05bbcda3d9d5af309adadabeb3a",
+    "bytes": 1921
+  },
+  {
+    "path": "inputs/pilot/_supervision/main/ods_overlap/single/seed19001/training/launch.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/_supervision/main/ods_overlap/single/seed19001/training/launch.json",
+    "sha256": "d85214f9264332bbee874285178cf0ff31ad79702fefb649fbd4e1d11780b2e7",
+    "bytes": 2581
+  },
+  {
+    "path": "inputs/pilot/_supervision/main/ods_serial/dual/seed19001/audit/launch.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/_supervision/main/ods_serial/dual/seed19001/audit/launch.json",
+    "sha256": "e37169b85d7256317ed31358c3bcf8eb8e1c8111e3997e6b0e2fe9f02cd75dad",
+    "bytes": 1927
+  },
+  {
+    "path": "inputs/pilot/_supervision/main/ods_serial/dual/seed19001/training/launch.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/_supervision/main/ods_serial/dual/seed19001/training/launch.json",
+    "sha256": "167e6ecaab8ab7c91e27e511abb0006aa2dec0148ac5b083dbcd8bb00abb7a5c",
+    "bytes": 2708
+  },
+  {
+    "path": "inputs/pilot/_supervision/main/ods_serial/single/seed19001/audit/launch.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/_supervision/main/ods_serial/single/seed19001/audit/launch.json",
+    "sha256": "8a17246277b4edaa3a619201ffc1901e4077f75c6035a8a35b9998e2d36f79a8",
+    "bytes": 1919
+  },
+  {
+    "path": "inputs/pilot/_supervision/main/ods_serial/single/seed19001/training/launch.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/_supervision/main/ods_serial/single/seed19001/training/launch.json",
+    "sha256": "70dc642251b27a0e269f461aaa66c098a71de0d5f597826f17425c7b5ba16dbe",
+    "bytes": 2702
+  },
+  {
+    "path": "inputs/pilot/_supervision/main/offline32/dual/seed19001/audit/launch.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/_supervision/main/offline32/dual/seed19001/audit/launch.json",
+    "sha256": "b8193d1313ca276d7f6a97f2daf0bc2a0e5bc47d82a0cab2f88072762799a284",
+    "bytes": 1925
+  },
+  {
+    "path": "inputs/pilot/_supervision/main/offline32/dual/seed19001/training/launch.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/_supervision/main/offline32/dual/seed19001/training/launch.json",
+    "sha256": "394830f1bff56b81583ccc2e49562bff62015b731eb59d69b1a43c0703807fe1",
+    "bytes": 2583
+  },
+  {
+    "path": "inputs/pilot/_supervision/main/offline32/single/seed19001/audit/launch.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/_supervision/main/offline32/single/seed19001/audit/launch.json",
+    "sha256": "149ea2448bda6fae0a93d540784fd510262f2fb8029632be95f653eefa5839ac",
+    "bytes": 1917
+  },
+  {
+    "path": "inputs/pilot/_supervision/main/offline32/single/seed19001/training/launch.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/_supervision/main/offline32/single/seed19001/training/launch.json",
+    "sha256": "ac6f1b176aac8ee16f0c803c4fd690b174773c06a80ac6841e774e121798040f",
+    "bytes": 2575
+  },
+  {
+    "path": "inputs/pilot/controls/eager/dual/seed19001/audit-process.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/controls/eager/dual/seed19001/audit-process.json",
+    "sha256": "1da84ad850418d429d53b058860aacab2997ee0e7191ca0729eed6d1330a6d13",
+    "bytes": 973
+  },
+  {
+    "path": "inputs/pilot/controls/eager/dual/seed19001/config.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/controls/eager/dual/seed19001/config.json",
+    "sha256": "9bdc17bdbf4ebd538e8b6ef0de7133d4dcf952b5361880007b0af81ac95a1a45",
+    "bytes": 775
+  },
+  {
+    "path": "inputs/pilot/controls/eager/dual/seed19001/environment.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/controls/eager/dual/seed19001/environment.json",
+    "sha256": "494a4fcc973cd15ccf1b4e9545c80bc003ad0f2397737e26ed576b3a96b40b95",
+    "bytes": 3416
+  },
+  {
+    "path": "inputs/pilot/controls/eager/dual/seed19001/initial-contract.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/controls/eager/dual/seed19001/initial-contract.json",
+    "sha256": "e718eb43aa981f4ed19d0c17c5d378f9214de124d1257e158b3af66979226f0f",
+    "bytes": 3290
+  },
+  {
+    "path": "inputs/pilot/controls/eager/dual/seed19001/payload_schema.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/controls/eager/dual/seed19001/payload_schema.json",
+    "sha256": "37f884aa25e3297758fc3c392517e1c1690fd5036dff9af8803dec3089e91296",
+    "bytes": 2293
+  },
+  {
+    "path": "inputs/pilot/controls/eager/dual/seed19001/post-audit-video-integrity.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/controls/eager/dual/seed19001/post-audit-video-integrity.json",
+    "sha256": "4ed647c31af5fe4a0db6bccf9a78089d72e235426504d025d2e43b7fb5e0c28b",
+    "bytes": 8090
+  },
+  {
+    "path": "inputs/pilot/controls/eager/dual/seed19001/post-audit.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/controls/eager/dual/seed19001/post-audit.json",
+    "sha256": "93544a1fb741051148dd5787e5f343e3c75cc8c73f7d0d430833a4c40a613497",
+    "bytes": 21035
+  },
+  {
+    "path": "inputs/pilot/controls/eager/dual/seed19001/process.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/controls/eager/dual/seed19001/process.json",
+    "sha256": "9aeb166b9114fe320c23bf314684d50bf3eacc36bd3d1d71f9176e2ffb0d8220",
+    "bytes": 1081
+  },
+  {
+    "path": "inputs/pilot/controls/eager/dual/seed19001/roles.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/controls/eager/dual/seed19001/roles.json",
+    "sha256": "298d524bd02db3409515e5a69fa8cfb4d1352829446dcebaee08ac1b10cd0472",
+    "bytes": 56
+  },
+  {
+    "path": "inputs/pilot/controls/eager/dual/seed19001/summary.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/controls/eager/dual/seed19001/summary.json",
+    "sha256": "bf9f7f4e7a35d6f6b32206fd206d0362622fb58b2b211599cfb4c38c2c54d9d7",
+    "bytes": 1094909
+  },
+  {
+    "path": "inputs/pilot/controls/eager/dual/seed19001/training-trace.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/controls/eager/dual/seed19001/training-trace.json",
+    "sha256": "15053ccf3776e1348dc6b4377c1dba90ecf3a30a8612e39ade1fb79e5fada2e3",
+    "bytes": 224004
+  },
+  {
+    "path": "inputs/pilot/controls/eager/single/seed19001/audit-process.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/controls/eager/single/seed19001/audit-process.json",
+    "sha256": "e5e63fbf8378237a2e892e26a7903d1596c32cb6aec41b5f1364ddec31bb41df",
+    "bytes": 974
+  },
+  {
+    "path": "inputs/pilot/controls/eager/single/seed19001/config.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/controls/eager/single/seed19001/config.json",
+    "sha256": "893d5ad05cde6246717dd94ecc1b01b3e483ee7f53cd06f4ed178ba1a0154d4c",
+    "bytes": 779
+  },
+  {
+    "path": "inputs/pilot/controls/eager/single/seed19001/environment.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/controls/eager/single/seed19001/environment.json",
+    "sha256": "28772f99d6ae9f72da71af5a9566b3fec325aaba1e25aab062eafca137ba7989",
+    "bytes": 3410
+  },
+  {
+    "path": "inputs/pilot/controls/eager/single/seed19001/initial-contract.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/controls/eager/single/seed19001/initial-contract.json",
+    "sha256": "68dde062ea9d0af8a389ed73dbb2952019111d1cf529749eec770c0d3b8cf0f1",
+    "bytes": 3273
+  },
+  {
+    "path": "inputs/pilot/controls/eager/single/seed19001/payload_schema.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/controls/eager/single/seed19001/payload_schema.json",
+    "sha256": "9b85c5ce63a1f6a46ce322b7ce75fa79d75e7135a56cffaa0f935ec2ac52c16d",
+    "bytes": 2126
+  },
+  {
+    "path": "inputs/pilot/controls/eager/single/seed19001/post-audit-video-integrity.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/controls/eager/single/seed19001/post-audit-video-integrity.json",
+    "sha256": "f0604672347db4990369f46fd726d274a4f22f01d7885fa703946a3e6863d745",
+    "bytes": 4715
+  },
+  {
+    "path": "inputs/pilot/controls/eager/single/seed19001/post-audit.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/controls/eager/single/seed19001/post-audit.json",
+    "sha256": "9f5e07c1eba67e48139b76fbb10941d20f3e654b38d517dc31d95ddd137d90aa",
+    "bytes": 16881
+  },
+  {
+    "path": "inputs/pilot/controls/eager/single/seed19001/process.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/controls/eager/single/seed19001/process.json",
+    "sha256": "6842dcc6d64008bac5825eaaecd93e22f874495721f079c6f405c9ed45315ad0",
+    "bytes": 1245
+  },
+  {
+    "path": "inputs/pilot/controls/eager/single/seed19001/roles.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/controls/eager/single/seed19001/roles.json",
+    "sha256": "d393fd6e4f3255e1cb3fe2c4f0451855c7791c7fb9ac507d935644f3f94f98f5",
+    "bytes": 56
+  },
+  {
+    "path": "inputs/pilot/controls/eager/single/seed19001/summary.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/controls/eager/single/seed19001/summary.json",
+    "sha256": "09a57d403ed1848f697c4a7a829652f0a6d62248b2a03e2de3fa4fc8400cbe4e",
+    "bytes": 1090722
+  },
+  {
+    "path": "inputs/pilot/controls/eager/single/seed19001/training-trace.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/controls/eager/single/seed19001/training-trace.json",
+    "sha256": "7107f7abf2ddd7cb30c98c552605416707b741ce74f176b76f374b1131b81adc",
+    "bytes": 224006
+  },
+  {
+    "path": "inputs/pilot/gpu-preflight.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/gpu-preflight.json",
+    "sha256": "7b11dd98c0cbf813548392478d4d9440e9f4dd7e698dd6272ece8e13464986ee",
+    "bytes": 8834
+  },
+  {
+    "path": "inputs/pilot/main/ods_overlap/dual/seed19001/audit-process.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_overlap/dual/seed19001/audit-process.json",
+    "sha256": "dff6de410986e2c5c2d38729f91c51ba23657b3c4a6da32cd2472cd7826d9d53",
+    "bytes": 974
+  },
+  {
+    "path": "inputs/pilot/main/ods_overlap/dual/seed19001/config.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_overlap/dual/seed19001/config.json",
+    "sha256": "c8412a8c19efd9df91c89f5db35915a96e91d1b68f3c0ea53da5fb454f3c6dc3",
+    "bytes": 778
+  },
+  {
+    "path": "inputs/pilot/main/ods_overlap/dual/seed19001/environment.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_overlap/dual/seed19001/environment.json",
+    "sha256": "494a4fcc973cd15ccf1b4e9545c80bc003ad0f2397737e26ed576b3a96b40b95",
+    "bytes": 3416
+  },
+  {
+    "path": "inputs/pilot/main/ods_overlap/dual/seed19001/initial-contract.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_overlap/dual/seed19001/initial-contract.json",
+    "sha256": "9b5bf4a9ae9decafd227e7e19ae77ae09092e9780ce525c18b214564c98fc799",
+    "bytes": 3290
+  },
+  {
+    "path": "inputs/pilot/main/ods_overlap/dual/seed19001/payload_schema.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_overlap/dual/seed19001/payload_schema.json",
+    "sha256": "37f884aa25e3297758fc3c392517e1c1690fd5036dff9af8803dec3089e91296",
+    "bytes": 2293
+  },
+  {
+    "path": "inputs/pilot/main/ods_overlap/dual/seed19001/post-audit-video-integrity.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_overlap/dual/seed19001/post-audit-video-integrity.json",
+    "sha256": "50d3cce3c30aec5f760c99c74d8dd324f271782e74fc09f8976d4aa4ff7579d6",
+    "bytes": 7920
+  },
+  {
+    "path": "inputs/pilot/main/ods_overlap/dual/seed19001/post-audit.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_overlap/dual/seed19001/post-audit.json",
+    "sha256": "7bd03d548bea809c549d8740007dde82dfcd23c3db93743eaca356c2862143c6",
+    "bytes": 19123
+  },
+  {
+    "path": "inputs/pilot/main/ods_overlap/dual/seed19001/process.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_overlap/dual/seed19001/process.json",
+    "sha256": "8ed98ffd5fe36512bfb0851dd8f364de1150ee9cfc4086327356a1258dcd79a4",
+    "bytes": 1084
+  },
+  {
+    "path": "inputs/pilot/main/ods_overlap/dual/seed19001/roles.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_overlap/dual/seed19001/roles.json",
+    "sha256": "d0b5426379ee894584b59ac9a4b4f708a5c8ae88616395b454a16d8c6f76ac46",
+    "bytes": 56
+  },
+  {
+    "path": "inputs/pilot/main/ods_overlap/dual/seed19001/summary.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_overlap/dual/seed19001/summary.json",
+    "sha256": "9fc7dc81d0f33f12c52adba2ed786fe6bc4a11f7d53fbd0af6a01e24f47e545f",
+    "bytes": 903909
+  },
+  {
+    "path": "inputs/pilot/main/ods_overlap/dual/seed19001/training-trace.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_overlap/dual/seed19001/training-trace.json",
+    "sha256": "b9d3260f70a5a2a7a86e688990663f95a95b9e52bc126a245d1ebb47c4f51bbe",
+    "bytes": 221066
+  },
+  {
+    "path": "inputs/pilot/main/ods_overlap/single/seed19001/audit-process.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_overlap/single/seed19001/audit-process.json",
+    "sha256": "75b34c9e11971c5ec8651418e23794ae629a4a4a4309eacb6ed126bb4364704a",
+    "bytes": 975
+  },
+  {
+    "path": "inputs/pilot/main/ods_overlap/single/seed19001/config.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_overlap/single/seed19001/config.json",
+    "sha256": "ae6bce87e019c4bf1b6e506f14087304bb0336fc47450b66be051a2df29cd467",
+    "bytes": 782
+  },
+  {
+    "path": "inputs/pilot/main/ods_overlap/single/seed19001/environment.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_overlap/single/seed19001/environment.json",
+    "sha256": "28772f99d6ae9f72da71af5a9566b3fec325aaba1e25aab062eafca137ba7989",
+    "bytes": 3410
+  },
+  {
+    "path": "inputs/pilot/main/ods_overlap/single/seed19001/initial-contract.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_overlap/single/seed19001/initial-contract.json",
+    "sha256": "8895ee577585495c919c4808a44e7b79be56ebdf35120d48a8c3cd69e7adf750",
+    "bytes": 3273
+  },
+  {
+    "path": "inputs/pilot/main/ods_overlap/single/seed19001/payload_schema.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_overlap/single/seed19001/payload_schema.json",
+    "sha256": "9b85c5ce63a1f6a46ce322b7ce75fa79d75e7135a56cffaa0f935ec2ac52c16d",
+    "bytes": 2126
+  },
+  {
+    "path": "inputs/pilot/main/ods_overlap/single/seed19001/post-audit-video-integrity.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_overlap/single/seed19001/post-audit-video-integrity.json",
+    "sha256": "9e3d47bb58217d021b5c85c9390f8308ea53be325fe8181c7aace693aeea2bdf",
+    "bytes": 4631
+  },
+  {
+    "path": "inputs/pilot/main/ods_overlap/single/seed19001/post-audit.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_overlap/single/seed19001/post-audit.json",
+    "sha256": "0ee68871000411a0c24a3e403f709314713b64385fbf4d4beaf2be77929dd96a",
+    "bytes": 15076
+  },
+  {
+    "path": "inputs/pilot/main/ods_overlap/single/seed19001/process.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_overlap/single/seed19001/process.json",
+    "sha256": "eafc76d6478584b22565829cddbe0cb1baa76aeab2d6710d4c1d0e0590006c6d",
+    "bytes": 1247
+  },
+  {
+    "path": "inputs/pilot/main/ods_overlap/single/seed19001/roles.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_overlap/single/seed19001/roles.json",
+    "sha256": "73ac055b8ea4aaa03a92c38fc83e26117b83704563df60263d0a363048081edd",
+    "bytes": 56
+  },
+  {
+    "path": "inputs/pilot/main/ods_overlap/single/seed19001/summary.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_overlap/single/seed19001/summary.json",
+    "sha256": "f184ec191ab02620ceab2ee202ea669930e0b44aa8a37907c99ffdba65853d19",
+    "bytes": 899773
+  },
+  {
+    "path": "inputs/pilot/main/ods_overlap/single/seed19001/training-trace.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_overlap/single/seed19001/training-trace.json",
+    "sha256": "43844052fd6d7837ecc7817ecbceb63aebd82cffcdd8e6911f8acb8b91981e53",
+    "bytes": 221068
+  },
+  {
+    "path": "inputs/pilot/main/ods_serial/dual/seed19001/audit-process.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_serial/dual/seed19001/audit-process.json",
+    "sha256": "839307a5cbf0fc8114ac2e0b95549b890301e5e3da16078c5698d02c6a6dad7c",
+    "bytes": 973
+  },
+  {
+    "path": "inputs/pilot/main/ods_serial/dual/seed19001/config.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_serial/dual/seed19001/config.json",
+    "sha256": "155256f606a276688f48a59e55a6721d0af9bf5ec920db439ae0cfcf4412003a",
+    "bytes": 872
+  },
+  {
+    "path": "inputs/pilot/main/ods_serial/dual/seed19001/environment.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_serial/dual/seed19001/environment.json",
+    "sha256": "494a4fcc973cd15ccf1b4e9545c80bc003ad0f2397737e26ed576b3a96b40b95",
+    "bytes": 3416
+  },
+  {
+    "path": "inputs/pilot/main/ods_serial/dual/seed19001/initial-contract.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_serial/dual/seed19001/initial-contract.json",
+    "sha256": "50bbca96257f1104064452c1d99919155bce51942b971b9b8cecc3213d44e1bb",
+    "bytes": 3290
+  },
+  {
+    "path": "inputs/pilot/main/ods_serial/dual/seed19001/payload_schema.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_serial/dual/seed19001/payload_schema.json",
+    "sha256": "37f884aa25e3297758fc3c392517e1c1690fd5036dff9af8803dec3089e91296",
+    "bytes": 2293
+  },
+  {
+    "path": "inputs/pilot/main/ods_serial/dual/seed19001/post-audit-video-integrity.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_serial/dual/seed19001/post-audit-video-integrity.json",
+    "sha256": "ca20512d1e61f8879a5b211409810bf4aea0a3f3daf8b5f98472978cbb3db742",
+    "bytes": 7909
+  },
+  {
+    "path": "inputs/pilot/main/ods_serial/dual/seed19001/post-audit.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_serial/dual/seed19001/post-audit.json",
+    "sha256": "b76ab2741062aaac5d437770bfd214b006616a960f76d664154644419ac7e074",
+    "bytes": 19113
+  },
+  {
+    "path": "inputs/pilot/main/ods_serial/dual/seed19001/process.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_serial/dual/seed19001/process.json",
+    "sha256": "4460f7e49fbaf0f2d354ca1661e7fb8ca8ed9fa5e6503283b1dee7ef5c7b99a2",
+    "bytes": 1082
+  },
+  {
+    "path": "inputs/pilot/main/ods_serial/dual/seed19001/roles.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_serial/dual/seed19001/roles.json",
+    "sha256": "a2c857a7a9735b289c2a74e1a6ec87ae07f4611a99a11694b1c2e3dfba764d78",
+    "bytes": 56
+  },
+  {
+    "path": "inputs/pilot/main/ods_serial/dual/seed19001/summary.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_serial/dual/seed19001/summary.json",
+    "sha256": "a26e41f39ea98816b49570ff5f3828a9ab0a4916e3cb13e08150b7c8f2789381",
+    "bytes": 903369
+  },
+  {
+    "path": "inputs/pilot/main/ods_serial/dual/seed19001/training-trace.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_serial/dual/seed19001/training-trace.json",
+    "sha256": "7a8fb19d83a6a41f740b85e6b10535c43fa1f3430f460ec85ccb3df294bb2415",
+    "bytes": 221066
+  },
+  {
+    "path": "inputs/pilot/main/ods_serial/single/seed19001/audit-process.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_serial/single/seed19001/audit-process.json",
+    "sha256": "8b3b80a225c4e15c1786acd7edfab208fd210d9986ac71c185fb5df51a2e6556",
+    "bytes": 975
+  },
+  {
+    "path": "inputs/pilot/main/ods_serial/single/seed19001/config.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_serial/single/seed19001/config.json",
+    "sha256": "0c8d5f38e138c9a7c870c535bdb3ec911b017bbe0c341253e6cb1088e2ac3d13",
+    "bytes": 878
+  },
+  {
+    "path": "inputs/pilot/main/ods_serial/single/seed19001/environment.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_serial/single/seed19001/environment.json",
+    "sha256": "28772f99d6ae9f72da71af5a9566b3fec325aaba1e25aab062eafca137ba7989",
+    "bytes": 3410
+  },
+  {
+    "path": "inputs/pilot/main/ods_serial/single/seed19001/initial-contract.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_serial/single/seed19001/initial-contract.json",
+    "sha256": "9b940842c254f0e40338a4e39c61dee8fd2c14aed424ffabad3eb98de10dd23d",
+    "bytes": 3273
+  },
+  {
+    "path": "inputs/pilot/main/ods_serial/single/seed19001/payload_schema.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_serial/single/seed19001/payload_schema.json",
+    "sha256": "9b85c5ce63a1f6a46ce322b7ce75fa79d75e7135a56cffaa0f935ec2ac52c16d",
+    "bytes": 2126
+  },
+  {
+    "path": "inputs/pilot/main/ods_serial/single/seed19001/post-audit-video-integrity.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_serial/single/seed19001/post-audit-video-integrity.json",
+    "sha256": "6e46f5a2216822b4c491432a398b5be86010badd9b9f1d7bae1ea2ef09cf66cb",
+    "bytes": 4625
+  },
+  {
+    "path": "inputs/pilot/main/ods_serial/single/seed19001/post-audit.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_serial/single/seed19001/post-audit.json",
+    "sha256": "9986bc35d07fcdaddde83da893010f07360405f8b57d4f20ce97da52247c1eaf",
+    "bytes": 15071
+  },
+  {
+    "path": "inputs/pilot/main/ods_serial/single/seed19001/process.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_serial/single/seed19001/process.json",
+    "sha256": "86cb3e794b0cb423395de5d004ea2ec7bba392a196b13c169dfe2324588e6863",
+    "bytes": 1246
+  },
+  {
+    "path": "inputs/pilot/main/ods_serial/single/seed19001/roles.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_serial/single/seed19001/roles.json",
+    "sha256": "7d67f4a92fe754f55ff52ddcf3b1e7e2a340964d603312931ab5e22203756273",
+    "bytes": 56
+  },
+  {
+    "path": "inputs/pilot/main/ods_serial/single/seed19001/summary.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_serial/single/seed19001/summary.json",
+    "sha256": "b59501d81fea5b96df5f3834b9b7503893dc614b2b6cbefdde14451f616e1d5b",
+    "bytes": 899258
+  },
+  {
+    "path": "inputs/pilot/main/ods_serial/single/seed19001/training-trace.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_serial/single/seed19001/training-trace.json",
+    "sha256": "1ecf4083780ffc52008392bbb07f3026f704e4498d67fbe3c4133cc492cb1808",
+    "bytes": 221068
+  },
+  {
+    "path": "inputs/pilot/main/offline32/dual/seed19001/audit-process.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/offline32/dual/seed19001/audit-process.json",
+    "sha256": "a38d40a37ccfbc7e7d01d6575f0a02f0ae8a482dab14bdb26903aad4f9022a0a",
+    "bytes": 971
+  },
+  {
+    "path": "inputs/pilot/main/offline32/dual/seed19001/config.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/offline32/dual/seed19001/config.json",
+    "sha256": "1c746eae99816a0201605e21a74364f4a80ec30ee9808e0b981465c4088b21a8",
+    "bytes": 772
+  },
+  {
+    "path": "inputs/pilot/main/offline32/dual/seed19001/environment.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/offline32/dual/seed19001/environment.json",
+    "sha256": "494a4fcc973cd15ccf1b4e9545c80bc003ad0f2397737e26ed576b3a96b40b95",
+    "bytes": 3416
+  },
+  {
+    "path": "inputs/pilot/main/offline32/dual/seed19001/initial-contract.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/offline32/dual/seed19001/initial-contract.json",
+    "sha256": "8741d8375d8c5b1afd1945d60c97616f5ead5192e3ef196d7a9f77535ddaca02",
+    "bytes": 3290
+  },
+  {
+    "path": "inputs/pilot/main/offline32/dual/seed19001/payload_schema.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/offline32/dual/seed19001/payload_schema.json",
+    "sha256": "37f884aa25e3297758fc3c392517e1c1690fd5036dff9af8803dec3089e91296",
+    "bytes": 2293
+  },
+  {
+    "path": "inputs/pilot/main/offline32/dual/seed19001/post-audit-video-integrity.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/offline32/dual/seed19001/post-audit-video-integrity.json",
+    "sha256": "7d9f593ba3ad5088666509582ba64248c9c9846cb2250c396053dd74e50a0de6",
+    "bytes": 7898
+  },
+  {
+    "path": "inputs/pilot/main/offline32/dual/seed19001/post-audit.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/offline32/dual/seed19001/post-audit.json",
+    "sha256": "1edaf538b80a7d39f1625ec99599a4be33214b2fda7ce8d5e736f6b74dd44a43",
+    "bytes": 19100
+  },
+  {
+    "path": "inputs/pilot/main/offline32/dual/seed19001/process.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/offline32/dual/seed19001/process.json",
+    "sha256": "6960d8179989478e5e5d5467bb260a16f769fc590f40f788feb4635810efbb04",
+    "bytes": 1082
+  },
+  {
+    "path": "inputs/pilot/main/offline32/dual/seed19001/roles.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/offline32/dual/seed19001/roles.json",
+    "sha256": "f7a55b20139450fd0753acacdbe3921e961c14fc48ac1b57f990a2b58c9b247f",
+    "bytes": 56
+  },
+  {
+    "path": "inputs/pilot/main/offline32/dual/seed19001/summary.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/offline32/dual/seed19001/summary.json",
+    "sha256": "541ed4af8bfeb171e068688de70b45ff8dda43a7517181eb248a453e25f6a808",
+    "bytes": 980631
+  },
+  {
+    "path": "inputs/pilot/main/offline32/dual/seed19001/training-trace.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/offline32/dual/seed19001/training-trace.json",
+    "sha256": "e6942292302ba4ca02bec4f93a6da07d8bc9904de108d0021b7aa8a5a98a9570",
+    "bytes": 221042
+  },
+  {
+    "path": "inputs/pilot/main/offline32/single/seed19001/audit-process.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/offline32/single/seed19001/audit-process.json",
+    "sha256": "476bc21ae4f888e749edbeed5c62289fc36a39776b9904ea9287a29b947474a4",
+    "bytes": 974
+  },
+  {
+    "path": "inputs/pilot/main/offline32/single/seed19001/config.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/offline32/single/seed19001/config.json",
+    "sha256": "a9f19c1167ebbef6bb00c582dc4c75b002e8df6dd3149f5d9b7ee330d22c0271",
+    "bytes": 776
+  },
+  {
+    "path": "inputs/pilot/main/offline32/single/seed19001/environment.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/offline32/single/seed19001/environment.json",
+    "sha256": "28772f99d6ae9f72da71af5a9566b3fec325aaba1e25aab062eafca137ba7989",
+    "bytes": 3410
+  },
+  {
+    "path": "inputs/pilot/main/offline32/single/seed19001/initial-contract.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/offline32/single/seed19001/initial-contract.json",
+    "sha256": "1618b3250686e00e0e21eb28e93bbbba10bbd0978356890e292bde0088886286",
+    "bytes": 3265
+  },
+  {
+    "path": "inputs/pilot/main/offline32/single/seed19001/payload_schema.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/offline32/single/seed19001/payload_schema.json",
+    "sha256": "9b85c5ce63a1f6a46ce322b7ce75fa79d75e7135a56cffaa0f935ec2ac52c16d",
+    "bytes": 2126
+  },
+  {
+    "path": "inputs/pilot/main/offline32/single/seed19001/post-audit-video-integrity.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/offline32/single/seed19001/post-audit-video-integrity.json",
+    "sha256": "06442020e44db5c6d3ea9e0b8c3d9c751339b08459cae50806a5a7086166dd4d",
+    "bytes": 4619
+  },
+  {
+    "path": "inputs/pilot/main/offline32/single/seed19001/post-audit.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/offline32/single/seed19001/post-audit.json",
+    "sha256": "ecc67f5d47db3faf7d628d4458ea224762414858830cc08077607e5888c405b5",
+    "bytes": 15031
+  },
+  {
+    "path": "inputs/pilot/main/offline32/single/seed19001/process.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/offline32/single/seed19001/process.json",
+    "sha256": "debdd0d649bafca57a7e07573fc91f80a50a1c73b73f8434ea9b71773dd2ca34",
+    "bytes": 1245
+  },
+  {
+    "path": "inputs/pilot/main/offline32/single/seed19001/roles.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/offline32/single/seed19001/roles.json",
+    "sha256": "c143156cbd045133961fbe4a4bc8963c2a49898cab801b6859dfc1af2bbeeb2e",
+    "bytes": 56
+  },
+  {
+    "path": "inputs/pilot/main/offline32/single/seed19001/summary.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/offline32/single/seed19001/summary.json",
+    "sha256": "852f34e7c78e127acd15c5beda728f5c6283ec72ad1fd61ab9069e9b90fcf8e9",
+    "bytes": 976632
+  },
+  {
+    "path": "inputs/pilot/main/offline32/single/seed19001/training-trace.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/offline32/single/seed19001/training-trace.json",
+    "sha256": "5f9dd60955b0ef07c483649f6497ff115d3707c26be10a9956da582793622c51",
+    "bytes": 221012
+  },
+  {
+    "path": "inputs/selection/producer-selection.json",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/selection/producer-selection.json",
+    "sha256": "70c485cb9c217bbcf36d5c549dd853178677226e274f19f0010506996be1d308",
+    "bytes": 44504
+  },
+  {
+    "path": "inputs/selection/producer-selection.md",
+    "original": "/tmp/ods-visual-budget-prefetch-20261022/selection/producer-selection.md",
+    "sha256": "fcc885430ebb772742ff431a88fe4fc9e6a2df664991f2bb455da1265e327ad5",
+    "bytes": 1808
+  }
+]

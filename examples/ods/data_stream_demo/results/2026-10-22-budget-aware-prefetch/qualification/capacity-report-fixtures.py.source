@@ -1,0 +1,120 @@
+from __future__ import annotations
+import copy, hashlib, importlib.util, json, math, subprocess, sys, tempfile
+from pathlib import Path
+REPO=Path('/root/sources/EmbodiChain-ods-stream-design');sys.path.insert(0,str(REPO))
+from examples.ods.data_stream_demo import training_suite as suite, training_report as report, training_throughput as throughput
+from examples.ods.data_stream_demo.train import build_parser
+SOURCE_FILES = (
+    'examples/ods/data_stream_demo/training_suite.py',
+    'examples/ods/data_stream_demo/training_report.py',
+    'examples/ods/data_stream_demo/training_throughput.py',
+)
+head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=REPO, text=True).strip()
+FROZEN_SOURCE_SHA256 = {
+    'examples/ods/data_stream_demo/training_suite.py': '8b34baca726feec3bfefe52dc621c10382d21a52ba7bd934f6a320a4dbe1b3a7',
+    'examples/ods/data_stream_demo/training_report.py': 'a6a213db74429a7c3730651e6190f46e4f2ff9fdb9805e33a87fc3ed65272aca',
+    'examples/ods/data_stream_demo/training_throughput.py': 'a5f720c773cc933bc278b573f8da950d16a748a50bbc96554696dcaf636a77de',
+}
+source_sha256 = {name: hashlib.sha256((REPO/name).read_bytes()).hexdigest() for name in SOURCE_FILES}
+assert source_sha256 == FROZEN_SOURCE_SHA256, 'The three qualified source files differ from their frozen SHA256 contracts'
+out=Path(tempfile.mkdtemp(prefix='ods-oct22-service-pilot-'))
+def write(path,value):
+ path.parent.mkdir(parents=True,exist_ok=True);path.write_text(json.dumps(value))
+def args(*flags): return build_parser().parse_args(['--output',str(out/'launch'),*flags])
+cal=args('--suite','calibrate','--producer-envs','4','--buffer-size','12','--batch-size','16','--episode-budget','64')
+groups=suite._groups(cal)
+assert len(groups)==2
+assert all(g[0]['settings']['updates']==56 and g[0]['settings']['producer_envs']==4 and g[0]['settings']['buffer_size']==12 and g[0]['settings']['batch_size']==16 and g[0]['settings']['episode_budget']==64 for g in groups)
+assert suite._groups(args('--suite','calibrate'))[0][0]['settings']['updates']==40
+assert suite._groups(args('--suite','calibrate','--calibration-updates','7'))[0][0]['settings']['updates']==7
+pilot=suite._groups(args('--suite','pilot','--producer-envs','4','--evaluation-scenes','0'))
+jobs=[j for group in pilot for j in group]
+assert len(pilot)==2 and len(jobs)==8 and len({str(j['output']) for j in jobs})==8
+for group in pilot:
+ assert len(group)==4 and sum('/controls/eager/' in str(j['output']) for j in group)==1
+ main=[j for j in group if '/main/' in str(j['output'])]
+ assert {j['arm'] for j in main}=={'offline','ods_overlap','ods_serial'}
+ assert all(j['settings']['prefetch_policy']=='budget' and j['evaluation_scenes']==0 for j in main)
+ assert next(j for j in group if '/controls/eager/' in str(j['output']))['settings']['prefetch_policy']=='eager'
+ assert group.index(next(j for j in main if j['arm']=='ods_overlap'))<group.index(next(j for j in main if j['arm']=='ods_serial'))
+ for j in group:
+  command=suite._command(j);assert command[command.index('--prefetch-policy')+1]==j['settings']['prefetch_policy']
+  if j['arm']=='ods_serial':assert str(j['trace']).startswith(str(out/'launch'/'main'/'ods_overlap'))
+# Independent known service calculation: gen1=4ep/20s, gen2=4ep/10s;
+# writer=8ep/40s, hot=2s/update, pure train=1s/update. A 100s drain
+# wait deliberately contains 'generation' but is not generator service.
+fixture=out/'service';fixture.mkdir()
+config={'vision':'single','updates':16,'batch_size':4,'buffer_size':4,'episode_budget':8,'producer_envs':2,'history_length':2,'prediction_horizon':32,'action_horizon':16,'max_episode_steps':600,'seed':19001,'prefetch_policy':'budget'}
+intervals=[{'name':'generation','generation':1,'start_seconds':0.,'end_seconds':20.},{'name':'generation','generation':2,'start_seconds':20.,'end_seconds':30.},{'name':'generation_drain_wait','start_seconds':30.,'end_seconds':130.}]
+intervals += [{'name':'sdk_recording','sdk_phase':'sdk_episode_write_encode','start_seconds':5.*i,'end_seconds':5.*(i+1)} for i in range(8)]
+events=[]
+for i in range(16):
+ t=140+3*i
+ intervals.extend([{'name':n,'start_seconds':a,'end_seconds':b} for n,a,b in [('batch_service',t,t+.5),('device_transfer',t+.5,t+1),('training',t+1,t+2)]])
+ events.append({'kind':'update_completed','time_seconds':t+2,'train_started_seconds':t+1,'chunks':[{'generation':1 if i<8 else 2}]})
+summary={'config':config,'status':'complete','qualification_passed':True,'training_metrics':{'completed_updates':16,'published_sources':8,'episodes':[{'generation':1 if i<4 else 2} for i in range(8)],'intervals':intervals},'device_supervision':{'primary_pair':{'simulation':{'uuid':'GPU-A'},'training':{'uuid':'GPU-B'},'cpu_affinity':list(range(8))}}}
+write(fixture/'summary.json',summary);(fixture/'training-events.jsonl').write_text('\n'.join(json.dumps(r) for r in events))
+observed=throughput.analyze_run(fixture,{'fixture':'fixed'})
+for k,v in {'accepted_episode_rate':8/30,'generation_episodes_per_busy_second':.4,'recording_episodes_per_busy_second':.2,'effective_data_episodes_per_second':.2,'learner_updates_per_second':1.,'hot_learner_updates_per_second':.5,'supply_updates_per_second':.4,'hot_demand_over_supply':1.25,'implied_episode_budget_for_full_hot_utilization':10}.items(): assert math.isclose(observed[k],v),(k,observed[k],v)
+assert observed['selection_eligible'] and observed['later_generation_service_count']==1 and observed['implied_budget_within_declared_cap'] is False
+assert throughput._duration([{'start_seconds':0,'end_seconds':3},{'start_seconds':2,'end_seconds':5}])==5
+# A too-short explicit calibration is kept, never silently qualified.
+(fixture/'training-events.jsonl').write_text('\n'.join(json.dumps(r) for r in events[:8]));summary['training_metrics']['completed_updates']=8;write(fixture/'summary.json',summary)
+assert not throughput.analyze_run(fixture,{'fixture':'fixed'})['selection_eligible']
+# Exactly 90% qualifies; <90% does not. Actual contract objects, not their
+# cached fingerprints, determine whether differing hardware/recipes compare.
+roots=[]
+for p,rate in [(2,.089),(4,.09),(8,.1)]:
+ root=out/f'P{p}';row=copy.deepcopy(observed);row.update(producer_envs=p,effective_data_episodes_per_second=rate,output=str(root));write(root/'calibration.json',{'observations':[row]});roots.append(root)
+selection=throughput.compare_calibrations(roots,out/'selection')['selections'][0]
+assert selection['selected_producer_envs']==4 and selection['comparable']
+bad=json.loads((roots[1]/'calibration.json').read_text());bad['observations'][0]['comparison_contract']['hardware']['training_uuid']='GPU-OTHER';write(roots[1]/'calibration.json',bad)
+assert not throughput.compare_calibrations(roots,out/'mismatch')['selections'][0]['comparable']
+# Build pilot fairness inputs from the frozen actual first-seed records, but
+# change only phase/evaluation/prefetch launch contracts in a temporary tree.
+archive=REPO/'examples/ods/data_stream_demo/results/2026-10-21-visual-training'
+if not archive.is_dir():raise RuntimeError('actual retained study is required for compatibility fixture')
+source=archive/'main';pilotroot=out/'pilot'
+for vision in ('single','dual'):
+ for arm in ('offline32','ods_overlap','ods_serial'):
+  old=source/arm/vision/'seed19001';new=pilotroot/'main'/arm/vision/'seed19001';new.mkdir(parents=True)
+  for name in ('summary.json','initial-contract.json','process.json'):
+   value=json.loads((old/name).read_text())
+   if name=='summary.json':
+    value['config'].update(phase='pilot',prefetch_policy='budget',evaluation_scenes=0)
+    value.update(requested_evaluation_scenes=0,evaluation_status='not_requested');value.pop('evaluation',None)
+   write(new/name,value)
+  launch=json.loads((source/'_supervision'/arm/vision/'seed19001'/'training'/'launch.json').read_text()) if (source/'_supervision'/arm/vision/'seed19001'/'training'/'launch.json').is_file() else json.loads((archive/'main'/'_supervision'/arm/vision/'seed19001'/'training'/'launch.json').read_text())
+  command=launch['command'];command[command.index('--phase')+1]='pilot';command.extend(['--prefetch-policy','budget']);write(pilotroot/'_supervision'/'main'/arm/vision/'seed19001'/'training'/'launch.json',launch)
+write(pilotroot/'suite-summary.json',{'phase':'pilot'})
+runs=report._load(pilotroot/'main')
+assert len(runs)==6 and all(not report._qualification(r) for r in runs),[(r['arm'],report._qualification(r)) for r in runs]
+pairs=report._paired(runs);assert len(pairs)==4 and all(not p['excluded_reason'] for p in pairs)
+negative=copy.deepcopy(runs);negative[0]['summary']['requested_evaluation_scenes']=None;assert report._qualification(negative[0])
+negative=copy.deepcopy(runs);negative[0]['config']['prefetch_policy']='eager';assert report._qualification(negative[0])
+negative=copy.deepcopy(runs);negative[0]['summary']['device_supervision']['primary_pair']['training']['uuid']='GPU-OTHER';assert report._qualification(negative[0])
+# Real launch mask/CPU checks stay active for a pilot: using a mismatched
+# affinity breaks qualification, rather than merely retaining a pilot label.
+negative=copy.deepcopy(runs);negative[0]['summary']['device_supervision']['primary_pair']['cpu_affinity']=list(range(8,16));assert report._qualification(negative[0])
+# Compare old and new qualification, pairing and numeric/resource aggregates
+# using the same immutable inputs. No files under the retained study are edited.
+oldpath=archive/'frozen-source/examples/ods/data_stream_demo/training_report.py'
+spec=importlib.util.spec_from_file_location('ods_frozen_report_fixture',oldpath);oldreport=importlib.util.module_from_spec(spec);spec.loader.exec_module(oldreport)
+oldruns=report._load(source)
+assert len(oldruns)==30 and sum(not report._qualification(r) for r in oldruns)==29
+assert all(report._qualification(r)==oldreport._qualification(r) for r in oldruns)
+assert report._paired(oldruns)==oldreport._paired(oldruns)
+assert sum(not p['excluded_reason'] for p in report._paired(oldruns))==23
+assert report._aggregate(oldruns)==oldreport._aggregate(oldruns)
+assert all(report._resource_stats(report._group(oldruns,a,v))==oldreport._resource_stats(oldreport._group(oldruns,a,v)) for a in report._ARMS for v in report._VISIONS)
+# Avoid 12 plot files merely to test scope routing: plotting itself is an
+# unchanged historical code path, already verified by the retained study.
+for name in ('_tradeoff','_curves','_timeline','_reuse'):setattr(report,name,lambda *_:None)
+render=report.write_report(pilotroot,out/'pilot-report')
+assert render['qualified_runs']==6 and render['qualified_paired_comparisons']==4 and 'pilot' in render['experiment_scope']
+assert 'single-seed' in (out/'pilot-report/report.md').read_text().lower()
+result={'passed':True,'scope':'CPU fixture only: known service arithmetic, P selection, eight pilot job paths, strict six-main pilot evidence, and immutable historical report parity; no GPU or model training','default_calibration_updates':40,'custom_calibration_updates':56,'pilot_jobs':8,'qualified_main_pilot':6,'qualified_pilot_pairs':4,'historical_observed':30,'historical_qualified':29,'historical_pairs':23,'historical_qualification_pairs_aggregates_resources_unchanged':True,'actual_model_or_video_bytes_loaded':False,'output':str(out)}
+after = {name: hashlib.sha256((REPO/name).read_bytes()).hexdigest() for name in SOURCE_FILES}
+assert after == source_sha256, 'Source files changed during the CPU fixture'
+result.update(implementation_commit=head, fixture_source=str(Path(__file__).resolve()), fixture_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(), source_sha256=source_sha256, source_files_unchanged_during_fixture=True, frozen_source_contract_commit='915510b58ceb63d028d295a2e2532780e6f79967', head_is_informational=True)
+write(out/'qualification.json',result);print(json.dumps(result,indent=2))

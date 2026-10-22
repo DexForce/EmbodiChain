@@ -1,0 +1,49 @@
+{
+  "output": "/tmp/ods-visual-budget-prefetch-20261022/pilot/main/ods_serial/single/seed19001",
+  "status": "complete",
+  "returncode": 0,
+  "elapsed_seconds": 228.038762304,
+  "stage": "training",
+  "evaluation": false,
+  "timeout": false,
+  "cancelled": false,
+  "leaked_process_group": false,
+  "process_group_shutdown": {
+    "grace_seconds": 2.0,
+    "wait_seconds": 2.0000850781798363e-05,
+    "poll_count": 1,
+    "group_disappeared": true,
+    "initial": {
+      "monotonic_ns": 1842092394034975,
+      "pgid": 2536426,
+      "exists": false,
+      "members": [],
+      "inspection_errors": []
+    },
+    "final": {
+      "monotonic_ns": 1842092394034975,
+      "pgid": 2536426,
+      "exists": false,
+      "members": [],
+      "inspection_errors": []
+    }
+  },
+  "pgid": 2536426,
+  "process_launch_monotonic_ns": 1841864355294735,
+  "device_guard": {
+    "samples": 108,
+    "unexpected_contexts": [],
+    "allowed_aux_contexts": [
+      {
+        "pid": 2536446,
+        "gpu_uuid": "GPU-0059f32f-0c76-b67a-ddd1-f3b2c3bb1508",
+        "type": "G",
+        "used_memory": "6 MiB"
+      }
+    ],
+    "seen_primary_uuids": [
+      "GPU-a5477f57-58a6-4f89-6e7a-338d8fcfc6f1",
+      "GPU-afe5dd63-2838-06db-b0fa-5d98d4b1eec5"
+    ]
+  }
+}
