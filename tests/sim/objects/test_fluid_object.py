@@ -149,3 +149,56 @@ def test_fluid_write_respects_render_frame_cache_scope(inside_frame):
     SimulationManager._ensure_render_state(sim)
     assert len(calls) == (1 if inside_frame else 2)
     assert sim._render_state_published is (True if inside_frame else None)
+
+
+def test_rigid_trajectory_samples_solver_substeps_and_rewinds():
+    from embodichain.lab.sim._runtime_controls import _KinematicRigidTrajectoryControl
+
+    poses = np.array([[0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 1]], dtype=np.float32)
+    samples, velocities = [], []
+    actor = SimpleNamespace(
+        set_world_pose=lambda value: samples.append(value.copy()),
+        set_linear_velocity=lambda value: velocities.append(value.copy()),
+        set_angular_velocity=lambda value: None,
+    )
+    control = _KinematicRigidTrajectoryControl("arena_0/cup", poses, fps=1.0)
+    control.initialize(
+        SimpleNamespace(result=SimpleNamespace(get_actor=lambda _: actor))
+    )
+    for index in range(3):
+        control(None, index, 3, 0.1)
+    np.testing.assert_allclose([p[0, 3] for p in samples], [0, 0.1, 0.2])
+    np.testing.assert_allclose(velocities[1], [1, 0, 0])
+    control.reset()
+    control(None, 0, 1, 0.1)
+    np.testing.assert_array_equal(samples[-1], samples[0])
+    control.close()
+    assert control._actor is None
+
+
+def test_rigid_trajectory_rotation_hold_across_outer_steps():
+    from scipy.spatial.transform import Rotation
+    from embodichain.lab.sim._runtime_controls import _KinematicRigidTrajectoryControl
+
+    axis = np.array([1.0, 2.0, 3.0])
+    axis /= np.linalg.norm(axis)
+    end = Rotation.from_rotvec(0.6 * axis).as_quat()
+    poses = np.array([[0, 0, 0, 0, 0, 0, 1], [1, 2, 3, *end]])
+    captured = []
+    actor = SimpleNamespace(
+        set_world_pose=lambda value: captured.append({"pose": value.copy()}),
+        set_linear_velocity=lambda value: captured[-1].update(linear=value.copy()),
+        set_angular_velocity=lambda value: captured[-1].update(angular=value.copy()),
+    )
+    control = _KinematicRigidTrajectoryControl("arena_0/cup", poses, fps=1)
+    control.initialize(
+        SimpleNamespace(result=SimpleNamespace(get_actor=lambda _: actor))
+    )
+    for outer in range(3):
+        for substep in range(2):
+            control(None, substep, 2, 0.25)
+    np.testing.assert_allclose(captured[3]["pose"][:3, 3], [0.75, 1.5, 2.25])
+    np.testing.assert_allclose(captured[3]["angular"], axis * 0.6, atol=1e-6)
+    np.testing.assert_allclose(captured[4]["pose"], captured[5]["pose"])
+    np.testing.assert_allclose(captured[5]["linear"], 0, atol=1e-6)
+    np.testing.assert_allclose(captured[5]["angular"], 0, atol=1e-6)

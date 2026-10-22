@@ -27,6 +27,8 @@ Lightweight RL environments have a separate owner in
 
 Read [configuration and registration](configuration.md) for task-first layout,
 component ownership, path resolution, config-owned IDs, and task listing.
+Read [fluid Gym integration](fluid-replay.md) for online Task Program execution
+with rigid/SPH dynamics, fluid configuration and coordinate conventions.
 Read [execution](execution.md) for hooks, bridge acceptance, reset ordering,
 wrappers, and replay. Read [profiling](profiling.md) only for instrumentation.
 

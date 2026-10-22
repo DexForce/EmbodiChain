@@ -2340,3 +2340,51 @@ def test_rigid_descriptor_rejects_orientation_without_principal_moments() -> Non
     )
     with pytest.raises(ValueError, match="requires explicit principal inertia"):
         rigid_desc_from_cfg(cfg)
+
+
+@pytest.mark.parametrize("solver", ["sph", "mujoco_warp"])
+def test_particle_boundary_shares_body_without_replacing_rigid_contact(solver):
+    from embodichain.lab.sim.cfg import RigidObjectCfg
+    from embodichain.lab.sim.shapes import MeshCollisionCfg
+    from embodichain.lab.sim.spawn.descriptors import rigid_desc_from_cfg
+
+    cfg = RigidObjectCfg(
+        uid="cup",
+        shape=MeshCfg(
+            fpath="/assets/cup.glb",
+            collision=MeshCollisionCfg(
+                approximation="convex_decomposition", max_hulls=32
+            ),
+        ),
+        particle_collision_shape=MeshCfg(
+            fpath="/assets/cavity.obj",
+            collision=MeshCollisionCfg(approximation="sdf", sdf_resolution=192),
+        ),
+    )
+    desc, _ = rigid_desc_from_cfg(cfg, newton_solver_type=solver)
+    assert len(desc.collisions) == 2
+    contact, boundary = desc.collisions
+    assert contact.approximation == CollisionApproximation.CONVEX_DECOMPOSITION
+    assert contact.newton.has_particle_collision is False
+    assert boundary.approximation == CollisionApproximation.SDF
+    assert boundary.enable_collision is False
+    assert boundary.newton.has_particle_collision is True
+    assert boundary.newton.contributes_to_mass is False
+    assert boundary.newton.sdf_max_resolution == 192
+    assert desc.renders[0].file_path == "/assets/cup.glb"
+    assert cfg.shape.collision.approximation == "convex_decomposition"
+
+
+def test_particle_boundary_requires_newton_and_sdf():
+    from embodichain.lab.sim.cfg import RigidObjectCfg
+    from embodichain.lab.sim.spawn.descriptors import rigid_desc_from_cfg
+
+    cfg = RigidObjectCfg(
+        uid="cup",
+        shape=MeshCfg(fpath="/assets/cup.glb"),
+        particle_collision_shape=MeshCfg(fpath="/assets/cavity.obj"),
+    )
+    with pytest.raises(ValueError, match="Newton"):
+        rigid_desc_from_cfg(cfg)
+    with pytest.raises(ValueError, match="sdf"):
+        rigid_desc_from_cfg(cfg, newton_solver_type="sph")

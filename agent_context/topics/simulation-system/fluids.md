@@ -67,3 +67,37 @@ Focused checks are `tests/compute/test_particles.py`,
 `tests/sim/objects/test_fluid_runtime.py`; `test_fluid_visibility.py` checks
 camera pixels after stepping and direct state writes. Tutorial checks remain
 syntax/CLI smoke checks rather than tutorial import tests.
+
+## Online task and replay layer
+
+Online pouring is built on the foundation above. `SPHSolverCfg.rigid_solver_cfg`
+composes MuJoCo rigid dynamics with SPH on one model and clock; microsteps refine
+contact integration without advancing a second clock. This requires the DexSim
+implementation from MR !1473 (`codex/fluid-sph-worlds`), including world isolation,
+selected reset and live MuJoCo/SPH composition. `dexsim_engine==0.5.1rc1` and an
+unqualified `dev` checkout are insufficient. The DexUni tutorial additionally
+needs MR !1475 (`feat/dexuni-dfsph-prototype`) and its `sph_cfg` prototype options;
+that path remains single-world. Coupling is one-way rigid-to-fluid, with no fluid
+reaction force on the cup or robot.
+
+`RigidObjectCfg.particle_collision_shape` places a particle-only SDF boundary on
+the same body as the grasp/contact hulls, contributing neither mass nor rigid
+contacts. Native support for `NewtonCollisionDesc.contributes_to_mass` is part
+of that development dependency. Independent `visual_shape` and optical material
+settings preserve the render mesh. `MeshCollisionCfg.force_sdf=False` requests
+an eagerly baked texture SDF when explicit grid settings are needed.
+
+Replay may write `RigidObject.set_kinematic_state()` or register a manager-owned
+kinematic rigid trajectory before preparation. These host controls disable graph
+replay and rewind selected clocks on object reset; they do not qualify online
+grasping. Normal Gym reset restores or refills selected fluid rows without
+stepping peer worlds. Online action execution supplies physical settling.
+
+The two robot tutorials, task assets, Gym declarations, observations, recording,
+Task Program runner and replay live with the pouring task layer. See
+[fluid Gym integration](../env-framework/fluid-replay.md) and the task's
+`embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/README.md`.
+Relevant development-runtime checks are `test_fluid_batch_runtime.py` and
+`test_fluid_online_runtime.py` under `tests/sim/objects/`, alongside the Gym
+integration/replay tests. Earlier pouring qualification is historical evidence;
+the split preserves the implementation rather than rerunning a full pour.

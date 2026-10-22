@@ -63,6 +63,11 @@ class TestFluidRuntime:
                     uid="boundary", body_type="kinematic", shape=CubeCfg(size=[0.1] * 3)
                 )
             )
+            sim.register_kinematic_rigid_trajectory(
+                "boundary",
+                torch.tensor([[[0.0, 0, 0, 0, 0, 0, 1], [1.0, 0, 0, 0, 0, 0, 1]]]),
+                fps=10,
+            )
             fluid = sim.add_fluid_object(
                 FluidObjectCfg(
                     uid="water",
@@ -80,6 +85,7 @@ class TestFluidRuntime:
             assert fluid.num_particles == 64
             original = fluid.data.default_particle_state_w
             sim.update(step=3, render_final_step=False)
+            assert rigid.get_local_pose()[0, 0].item() == pytest.approx(0.025, abs=1e-6)
             first = fluid.data.particle_state_w
             assert torch.isfinite(first).all()
             assert first[..., 2].mean() < original[..., 2].mean()
@@ -89,6 +95,9 @@ class TestFluidRuntime:
             torch.testing.assert_close(
                 fluid.data.particle_state_w, first, rtol=1e-5, atol=1e-6
             )
+            assert rigid.get_local_pose()[0, 0].item() == pytest.approx(0.025, abs=1e-6)
+            sim.update(step=105, render_final_step=False)
+            assert rigid.get_local_pose()[0, 0].item() == pytest.approx(1.0, abs=1e-6)
             with pytest.raises(NotImplementedError, match="before prepare"):
                 sim.add_fluid_object(FluidObjectCfg(uid="late"))
         finally:

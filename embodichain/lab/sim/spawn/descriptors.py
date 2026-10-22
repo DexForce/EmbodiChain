@@ -303,8 +303,14 @@ def rigid_desc_from_cfg(
         )
     )
     geometry, approximation, max_hulls, acd_method = _compile_geometry(cfg)
+    render_shape = cfg.visual_shape or cfg.shape
+    render_geometry = geometry
+    if cfg.visual_shape is not None:
+        render_cfg = cfg.copy()
+        render_cfg.shape = cfg.visual_shape
+        render_geometry = _compile_geometry(render_cfg)[0]
     material_ref, material_entry = _compile_visual_material(
-        uid, cfg.shape.visual_material
+        uid, render_shape.visual_material
     )
     collision = CollisionDesc.from_geometry(
         geometry,
@@ -325,19 +331,58 @@ def rigid_desc_from_cfg(
             cfg.shape.collision if isinstance(cfg.shape, MeshCfg) else None
         ),
     )
-    collision.render_source_index = 0
+    collision.render_source_index = (
+        0 if cfg.visual_shape is None and cfg.render_enabled else None
+    )
+
+    collisions = [collision]
+    if cfg.particle_collision_shape is not None:
+        boundary_shape = cfg.particle_collision_shape
+        if newton_solver_type is None:
+            raise ValueError("particle_collision_shape requires Newton physics.")
+        if (
+            not isinstance(boundary_shape, MeshCfg)
+            or boundary_shape.collision is None
+            or boundary_shape.collision.approximation != "sdf"
+        ):
+            raise ValueError(
+                "particle_collision_shape requires a MeshCfg with sdf collision."
+            )
+        boundary_cfg = cfg.copy()
+        boundary_cfg.shape = boundary_shape
+        boundary_geometry = _compile_geometry(boundary_cfg)[0]
+        boundary = CollisionDesc.from_geometry(
+            boundary_geometry, approximation=CollisionApproximation.SDF
+        )
+        boundary.enable_collision = False
+        boundary.newton = replace(
+            _compile_newton_collision(
+                physics,
+                newton_solver_type=newton_solver_type,
+                author_shape_defaults=True,
+                mesh_collision=boundary_shape.collision,
+            ),
+            has_particle_collision=True,
+            contributes_to_mass=False,
+        )
+        collision.newton = replace(collision.newton, has_particle_collision=False)
+        collisions.append(boundary)
 
     descriptor = ObjectDesc(
         name=uid,
         pose=_pose_from_cfg(cfg),
-        renders=[
-            RenderDesc.from_geometry(
-                geometry,
-                load_option=_compile_load_option(cfg.shape),
-                material_ref=material_ref,
-            )
-        ],
-        collisions=[collision],
+        renders=(
+            [
+                RenderDesc.from_geometry(
+                    render_geometry,
+                    load_option=_compile_load_option(render_shape),
+                    material_ref=material_ref,
+                )
+            ]
+            if cfg.render_enabled
+            else []
+        ),
+        collisions=collisions,
         physics=_compile_rigid_physics(physics, cfg.body_type),
         per_env=per_env,
         body_scale=_vector3(cfg.body_scale, field_name="body_scale"),
@@ -1549,7 +1594,9 @@ def _compile_newton_collision(
             values["gap"] = gap
     values.update(physics.newton_collision_props)
     if mesh_collision is not None and mesh_collision.approximation == "sdf":
-        values["force_sdf"] = True
+        values["force_sdf"] = (
+            True if mesh_collision.force_sdf is None else mesh_collision.force_sdf
+        )
         for field_name in (
             "is_hydroelastic",
             "sdf_narrow_band_range",
@@ -1690,6 +1737,7 @@ def _compile_visual_material(
         metallic_map=cfg.metallic_texture,
         ao_map=cfg.ao_texture,
         ior=float(cfg.ior),
+        transmission=cfg.transmission,
     )
     return key, (key, desc)
 
