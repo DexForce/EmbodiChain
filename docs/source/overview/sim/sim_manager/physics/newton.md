@@ -126,3 +126,11 @@ and [solver tuning reference](https://newton-physics.github.io/newton/stable/con
 newton/dexuni
 newton/runtime_qualification
 ```
+
+## Mesh query acceleration
+
+`NewtonPhysicsCfg.mesh_bvh_constructor` selects the mesh BVH constructor used
+for mesh and heightfield ray queries. Its default `None` preserves the engine
+configuration. Large CUDA terrain scans can use `"cubql"` with a DexSim build
+supporting this field. This setting changes the acceleration structure, while
+preserving mesh geometry and physical contact parameters.
