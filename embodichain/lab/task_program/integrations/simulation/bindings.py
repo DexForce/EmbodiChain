@@ -532,7 +532,7 @@ class ContainerAffordanceBinding:
     aliases: tuple[str, ...] = ()
     object_target_pose: tuple[float, ...] = _IDENTITY_POSE
     minimum_confidence: float = 0.0
-    release_clearance: float = 0.0
+    release_clearance: float = field(default=0.0, kw_only=True)
     is_default: bool = False
     object_target_frame: str = "parent"
 

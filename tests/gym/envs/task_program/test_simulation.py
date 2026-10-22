@@ -783,6 +783,18 @@ def test_placement_rejects_unknown_target_frame(binding_type: type) -> None:
         )
 
 
+@pytest.mark.parametrize("frame", ["parent", "world_axes"])
+def test_container_preserves_legacy_positional_parameters(frame: str) -> None:
+    pose = tuple(torch.eye(4).reshape(-1).tolist())
+    binding = ContainerAffordanceBinding(
+        "inside", "bin", "native", (), pose, 0.0, True, frame, release_clearance=0.12
+    )
+    assert binding.is_default is True
+    assert binding.object_target_frame == frame
+    assert binding.release_clearance == pytest.approx(0.12)
+    assert replace(binding, release_clearance=0.0).release_clearance == 0.0
+
+
 def test_scene_binding_fails_closed_on_missing_native_entity() -> None:
     binding = _scene_binding()
     missing = replace(
