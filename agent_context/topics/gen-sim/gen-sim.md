@@ -60,7 +60,8 @@ limits or validator declarations require bundle regeneration and new identity;
 the bundle projection does not erase these differences to reuse older receipts.
 Generated bundles explicitly seal `motion_contract=gen_sim.sampled_velocity/v1`
 for fixed-time interpolation and preceding-waypoint IK seeds. The GenSim hooks
-reuse the shared generator and numerical utilities, keep the existing URDF speed,
+own the sequential-seed solver in `CheckedMotionGenerator`, reuse the shared
+generator and numerical utilities, and keep the existing URDF speed,
 collision, release and stability gates, and do not claim the newer acceleration
 budget. Explicit authored motion limits require `lab.motion_limits/v1`; bundles
 without the contract keep that shared path. Native runs save `motion_contract.json`.
