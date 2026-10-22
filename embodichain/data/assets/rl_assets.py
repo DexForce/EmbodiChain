@@ -57,7 +57,7 @@ class _RLAsset(EmbodiChainDataset):
 class UnitreeG1Rough(_RLAsset):
     """Bundled model inputs for UnitreeG1Rough."""
 
-    archive_md5 = "9353ed3cd8888a2d38df32196a8322a5"
+    archive_md5 = "7c221d16a0c0f684264a78906acd5a96"
 
 
 class G1RoughTerrains(_RLAsset):
@@ -82,4 +82,4 @@ class LeapHandCubeFaceTurn(_RLAsset):
 class LeapHandCube(_RLAsset):
     """Bundled model inputs for LeapHandCube."""
 
-    archive_md5 = "1fa070d259d36c5d8b1f45a11187bfa8"
+    archive_md5 = "05d4c95a9a55de427ff48b1a9ea47089"
