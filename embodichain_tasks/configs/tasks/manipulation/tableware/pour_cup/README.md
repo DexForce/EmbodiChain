@@ -4,6 +4,31 @@ Sim demo 和带水 Gym 部署均在同一个 World 中在线推进：MuJoCo-Warp
 重力和杯把抓持接触，DFSPH 读取当前刚体位姿和速度。当前是单向耦合，水没有反作用力。
 初始填充由参数采样，不需要预录关节/杯子轨迹或粒子文件。
 
+## 依赖与 PR 分层
+
+基础流体能力和不依赖任务资产的 `scripts/tutorials/sim/create_fluid.py` 属于
+[PR #777](https://github.com/DexForce/EmbodiChain/pull/777)，支持
+`dexsim_engine==0.5.1rc1` 的单环境 SPH/DFSPH。
+本任务、机器人倒水示例、Gym/Task Program 和诊断回放统一在
+[PR #790](https://github.com/DexForce/EmbodiChain/pull/790) 中维护。
+
+本页的在线 SPH + MuJoCo 路径不能使用原版 rc1：它需要包含
+[DexSim MR !1473](http://192.168.3.16/Engine/dexsim/-/merge_requests/1473)
+（`codex/fluid-sph-worlds`）的构建，提供 `rigid_solver_cfg`、
+`rigid_solver_substeps`、粒子边界质量排除和多环境隔离/选择性重置。
+不能仅凭版本名为 `dev` 判断这些能力已存在。
+
+另一个 DexUni + DFSPH 原型需要
+[DexSim MR !1475](http://192.168.3.16/Engine/dexsim/-/merge_requests/1475)
+（`feat/dexuni-dfsph-prototype`）中的 `DexUniSolverCfg.sph_cfg` 等原型选项。
+该路径目前仅支持单环境，仍为单向耦合：
+
+```bash
+python scripts/tutorials/sim/franka_dexuni_pour_demo.py --headless
+```
+
+下列多环境命令针对包含 MR !1473 的 SPH + MuJoCo 构建，不适用于 DexUni 原型。
+
 ## 运行
 
 Gym 使用普通 `EmbodiedEnv`，通过 Task Program 的 `Pick → MoveHeldObject → Pour → Place`

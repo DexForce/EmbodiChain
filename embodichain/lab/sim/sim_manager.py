@@ -2773,10 +2773,7 @@ class SimulationManager:
             raise NotImplementedError(
                 "Batch fluids require a DexSim SPH build with world isolation and selected-world reset."
             )
-        if (
-            not self._newton_solves_fluids
-            or self.sim_config.physics_cfg.requires_grad
-        ):
+        if not self._newton_solves_fluids or self.sim_config.physics_cfg.requires_grad:
             raise NotImplementedError(
                 "Fluid objects require non-differentiable SPH or DexUni with sph_cfg."
             )

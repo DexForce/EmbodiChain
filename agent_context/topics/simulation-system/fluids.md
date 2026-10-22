@@ -1,78 +1,103 @@
 # Initial-fill fluids
 
-`cfg/fluid.py` owns source, object and render configuration. Numerical solver
-configuration remains DexSim `SPHSolverCfg`, accepted directly or through the
-existing `NewtonPhysicsCfg.solver_cfg` mapping with `solver_type: sph`.
+`cfg/fluid.py` owns source, object and render configuration. Numerical settings
+remain DexSim `SPHSolverCfg`, accepted directly or through
+`NewtonPhysicsCfg.solver_cfg` with `solver_type: sph`.
 `SimulationManager.add_fluid_object()` declares through SpawnScene and binds
 `objects/fluid.py` in place at `prepare()`.
 
-Fluids require Newton CUDA without gradients. Multiple environments require the
-native SPH world-isolation and selected-reset capability flags; older runtimes
-remain restricted to one environment. Fixed particle counts and shared
-density/spacing are required.
-The prepared particle scene has fixed topology: adding, replacing or removing
-rigid assets also requires a new scene. Arena spacing does not prove isolation:
-native kernels filter neighbors and boundaries by world and keep convergence
-statistics per world. State writes clear only selected solver caches through
-canonical reset masks, preserving shared boundary history.
+## Runtime requirements
+
+The foundation supports the published `dexsim_engine==0.5.1rc1` artifact
+(`56c12415053617cb0ffad6881ed57a45541a6da6`) with Newton CUDA, no gradients,
+one environment and fixed particle topology. Its SPH solver has no world
+isolation or selected-world solver reset. Requests for multiple environments
+fail before declaration unless the loaded solver explicitly advertises both
+capabilities. Arena spacing alone does not establish isolation.
+
+The release provides SPH/DFSPH and particle/surface rendering. It does not
+provide `SPHSolverCfg.rigid_solver_cfg`, `rigid_solver_substeps`, or DexUni's
+`sph_cfg` prototype. Online robot pouring, batch fluid tasks, Gym declarations
+and replay belong to the dependent task layer and require their respective
+DexSim development implementations. Basic fluid use does not require them.
+
+## State and sampling
 
 Fluid state uses world-frame `(instances, particles, 3|6)` Torch snapshots.
-Writes update Scene particle batches; resetting transforms a saved local
-particle template or restores the immutable initial state. Render topology is
-reconstructed and is not inherited from volume/surface deformables.
+Writes use Scene particle batches, invalidate captured graphs and reset
+supported solver history. The legacy single-world solver rebaselines optional
+SDF boundary pose history. Reset restores the immutable initial state or
+transforms a saved local template without stepping the world. Explicit state
+writes do not refresh density diagnostics until the next SPH step.
 
-An opt-in `SPHSolverCfg.rigid_solver_cfg` composes the existing MuJoCo solver
-with SPH using Newton-owned views on one model/clock. MuJoCo owns rigid bodies
-and joints; SPH owns particles and reads live body proxies. Rigid microsteps
-refine contact integration without adding simulation time. This is online
-one-way coupling; there is no fluid reaction feedback. `RigidObjectCfg` may
-provide `particle_collision_shape`, an SDF mesh on the same body, so rigid
-contact hulls and a hollow fluid boundary coexist without extra mass or a
-pose follower. The native adapter owns particle-only SDF cooking and mass
-exclusion. Selected fluid state writes invalidate SPH caches without clearing
-the rigid solver history.
-
-Kinematic rigid boundaries can be written with `set_kinematic_state()` or
-driven before each solver substep using `register_kinematic_rigid_trajectory()`.
-Registered host controls disable graph replay and rewind selected clocks on
-object reset.
-
-A spawn reference is a declared rigid body's initial pose, not a persistent
-attachment. The source may be an explicit point import, a primitive, a capped
-Z-axis revolved profile, or a closed fill-volume mesh. Profiles contain ordered
-`(local Z, radius)` pairs. `fill_level` clips the source's full Z extent before
-sampling; solid-wall clearance does not inset that free-surface plane. Mesh
-volume sources must describe closed cavities, not cup walls.
+A spawn reference resolves a declared rigid body's initial pose once; it is
+not a persistent attachment. Sources include explicit points/NPZ, primitives,
+capped Z-axis revolved profiles and closed fill-volume meshes. Profile points
+are ordered `(local Z, radius)` pairs. `fill_level` clips the full source Z
+extent before sampling; clearance does not inset that free surface. Mesh
+sources describe closed cavities, rather than container walls. Point imports
+reject volume-only profile/fill-level controls.
 
 Sampling math belongs to `compute/geometry/particles.py`, independent of lab.
-The manager samples once at declaration and retains the local template in
-memory; replica binding and selected reset never reopen or regenerate a source.
-Changing spacing or fill level before construction regenerates the point count;
-prepared topology remains fixed. Points/NPZ imports already contain fixed
-sampling and reject volume-only profile/fill-level controls. The default pour
-scene uses a profile source with no particle file or disk cache. Gym reset restores/refills selected rows without advancing the shared world;
-normal approach actions provide physical settling. The standalone Sim host
-resets configured robot/object state before a short initialization warmup.
+The manager samples once at declaration and retains the local template;
+binding and reset do not reopen source files. Particle count is fixed after
+preparation, and all fluids share density and spacing. Adding, replacing or
+removing rigid assets after preparing a particle scene requires a new scene.
 
-Native fluid geometry requires FastRT (`fast-rt`) or OfflineRT (`rt`). The
-manager rejects Hybrid in both the resolved configuration and the initialized
-process renderer before sampling, material creation or declaration. The gate
-covers every fluid render mode: requesting FastRT in an existing Hybrid process
-cannot bypass it. Start a fresh process to change the initialized renderer;
-pure physics runs use NoRender. The current bridge creates OptiX-only instances,
-absent from Hybrid's Vulkan primary surface.
-Validate camera pixels with visible and hidden fluid, not only particle counts.
-Native rendering is published through the existing Newton render bridge.
-Display clipping acts only on copied positions; Viser consumes detached point
-clouds. NoRender fluid mode does not require optical materials. Ordinary rigid
-objects may supply a separate `visual_shape`; SDF cooking stays on the collision
-shape or the separate particle boundary. Explicit `force_sdf=False` permits pre-baked mesh SDFs.
+## Rendering and validation
 
-Focused checks are `tests/sim/test_fluid_cfg.py`,
-`tests/sim/objects/test_fluid_object.py` and the serial CUDA lifecycle test
-`tests/sim/objects/test_fluid_runtime.py` and `test_fluid_batch_runtime.py`.
-`tests/sim/objects/test_fluid_visibility.py` checks real camera pixels after
-stepping and direct state writes, including display clipping.
-For YAML declarations, refill observations and online Task Program execution, see
-[fluid Gym integration](../env-framework/fluid-replay.md). The pouring tutorial is an end-to-end
-qualification workload, not a unit-test import target.
+Native fluids require FastRT (`fast-rt`) or OfflineRT (`rt`). Hybrid's Vulkan
+primary surface lacks the OptiX liquid geometry, so the manager rejects Hybrid
+before sampling or declaration, including an already initialized Hybrid
+process. Use `no-render` for physics only; fluid mode `none` requires it.
+Display clipping changes only a render copy. Viser consumes detached particle
+point clouds. NoRender needs no optical material.
+
+`scripts/tutorials/sim/create_fluid.py` demonstrates procedural box sampling,
+five primitive container walls, prepare, step, state reads and reset with one
+environment. It needs no robot, task configuration or downloaded assets:
+
+```bash
+python scripts/tutorials/sim/create_fluid.py --headless --renderer no-render
+```
+
+Focused checks are `tests/compute/test_particles.py`,
+`tests/sim/test_fluid_cfg.py`, `tests/sim/objects/test_fluid_object.py` and
+`tests/visualization/test_scene_exporter.py`. Serial CUDA lifecycle coverage is
+`tests/sim/objects/test_fluid_runtime.py`; `test_fluid_visibility.py` checks
+camera pixels after stepping and direct state writes. Tutorial checks remain
+syntax/CLI smoke checks rather than tutorial import tests.
+
+## Online task and replay layer
+
+Online pouring is built on the foundation above. `SPHSolverCfg.rigid_solver_cfg`
+composes MuJoCo rigid dynamics with SPH on one model and clock; microsteps refine
+contact integration without advancing a second clock. This requires the DexSim
+implementation from MR !1473 (`codex/fluid-sph-worlds`), including world isolation,
+selected reset and live MuJoCo/SPH composition. `dexsim_engine==0.5.1rc1` and an
+unqualified `dev` checkout are insufficient. The DexUni tutorial additionally
+needs MR !1475 (`feat/dexuni-dfsph-prototype`) and its `sph_cfg` prototype options;
+that path remains single-world. Coupling is one-way rigid-to-fluid, with no fluid
+reaction force on the cup or robot.
+
+`RigidObjectCfg.particle_collision_shape` places a particle-only SDF boundary on
+the same body as the grasp/contact hulls, contributing neither mass nor rigid
+contacts. Native support for `NewtonCollisionDesc.contributes_to_mass` is part
+of that development dependency. Independent `visual_shape` and optical material
+settings preserve the render mesh. `MeshCollisionCfg.force_sdf=False` requests
+an eagerly baked texture SDF when explicit grid settings are needed.
+
+Replay may write `RigidObject.set_kinematic_state()` or register a manager-owned
+kinematic rigid trajectory before preparation. These host controls disable graph
+replay and rewind selected clocks on object reset; they do not qualify online
+grasping. Normal Gym reset restores or refills selected fluid rows without
+stepping peer worlds. Online action execution supplies physical settling.
+
+The two robot tutorials, task assets, Gym declarations, observations, recording,
+Task Program runner and replay live with the pouring task layer. See
+[fluid Gym integration](../env-framework/fluid-replay.md) and the task's
+`embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/README.md`.
+Relevant development-runtime checks are `test_fluid_batch_runtime.py` and
+`test_fluid_online_runtime.py` under `tests/sim/objects/`, alongside the Gym
+integration/replay tests. Earlier pouring qualification is historical evidence;
+the split preserves the implementation rather than rerunning a full pour.
