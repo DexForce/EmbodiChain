@@ -14,13 +14,16 @@ The released DexSim pin in EmbodiChain does not yet provide that API. Normal
 EmbodiChain installations remain supported; this optional example requires the
 integration SDK. The older callback revision of !1483 is also insufficient.
 
-In a prepared EmbodiChain development environment, install this checkout and
-then the matching SDK wheel. `--no-deps` intentionally preserves that prepared
-environment rather than reinstalling the released SDK pin:
+In a dedicated EmbodiChain development environment, install this checkout and
+then the matching SDK wheel. Use `--no-deps` only for the EmbodiChain checkout,
+so it does not reinstall the released SDK pin. Let the SDK wheel resolve its
+own dependencies; the qualified build requires Newton 1.7.0 and Warp 1.17.0.
+This integration environment intentionally overrides EmbodiChain's released
+SDK pin:
 
 ```bash
 python -m pip install --no-deps --no-build-isolation -e .
-python -m pip install --no-deps /path/to/compatible/dexsim_engine.whl
+python -m pip install /path/to/compatible/dexsim_engine.whl
 python examples/simple_newton_solver/demo.py --device cpu
 # Optional, on a supported CUDA installation:
 python examples/simple_newton_solver/demo.py --device cuda:0
