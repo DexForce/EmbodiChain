@@ -596,6 +596,23 @@ def execute_bundle(
             f"[Task Engine] Recovery summary unavailable: {evidence_error}",
             file=sys.stderr,
         )
+    if task_spec_contract is not None:
+        from .semantic_graph_html import write_semantic_task_graph_html
+
+        try:
+            write_semantic_task_graph_html(
+                graph,
+                output / "semantic_graph.html",
+                report,
+                task_spec=_read_json(root / "task_spec.json"),
+                validation=task_spec_contract,
+                bundle_root=root,
+            )
+        except (OSError, TypeError, ValueError) as presentation_error:
+            print(
+                f"[Task Engine] Semantic graph presentation unavailable: {presentation_error}",
+                file=sys.stderr,
+            )
     # The parent CLI prints the run summary; the full report stays on disk.
     return 0 if report["status"] == "succeeded" else 2
 

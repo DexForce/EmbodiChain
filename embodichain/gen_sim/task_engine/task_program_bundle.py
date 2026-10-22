@@ -1031,6 +1031,15 @@ def generate_task_program_bundle(
             root, selected_graph, task_spec, task_candidate, role_bindings, step_lineage
         )
 
+    from .semantic_graph_html import write_semantic_task_graph_html
+
+    write_semantic_task_graph_html(
+        selected_graph,
+        root / "semantic_graph.html",
+        task_spec=task_spec,
+        validation=validation,
+        bundle_root=root,
+    )
     if frozen is not None:
         frozen.assert_unchanged()
         verify_physical_input_manifest(root)

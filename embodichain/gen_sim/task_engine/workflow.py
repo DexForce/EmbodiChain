@@ -1324,6 +1324,22 @@ class TaskEngineWorkflow:
         )
         published = transaction.commit()
 
+        from .semantic_graph_html import _finalize_run_html
+
+        _finalize_run_html(
+            published,
+            bundle=None if final_bundle is None else published / "final" / "bundle",
+            summary={
+                "task_id": request["task_id"],
+                "run_id": run_metadata["run_id"],
+                "created_at": run_metadata["created_at"],
+                "status": status,
+                "elapsed_seconds": round(
+                    perf_counter() - run_metadata["_started_at"], 3
+                ),
+                "elapsed_scope": "Workflow wall time through publication, excluding HTML refresh",
+            },
+        )
         return TaskEngineRunResult(
             status=status,
             output_dir=published,

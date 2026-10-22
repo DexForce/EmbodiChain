@@ -215,6 +215,10 @@ Workflow and CLI completion write scoped monotonic wall time to `run_summary.jso
 and refresh only the current run's selected viewer. This display-only sidecar
 does not alter sealed companions, execution outcomes or TaskSpec qualification;
 missing images and timing remain unavailable, without network or renderer calls.
+CLI and HTML links discover committed videos in both legacy `videos/` and
+per-environment `videos/env_*/` directories, excluding partial files and links
+outside the current recording root. The viewer distinguishes program completion
+from strict TaskSpec acceptance; an experimental success is not a task certificate.
 Runtime captures supported final geometry before reset, separately from measured
 milestone events. New-contract success requires a satisfied TaskSpec evaluation;
 raw program success remains in `runtime_result.program_success`. Unsupported

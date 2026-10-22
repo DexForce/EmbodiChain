@@ -92,3 +92,18 @@ def test_unified_cli_rejects_lower_layer_execution_options(
                 *lower_layer_option,
             ]
         )
+
+
+@pytest.mark.parametrize(
+    "prefix", ["", "attempts/scene_0001/action_attempts/action_0001"]
+)
+def test_cli_reports_only_committed_local_videos(tmp_path, prefix):
+    root = tmp_path / prefix / "videos"
+    (root / "env_000").mkdir(parents=True)
+    expected = [root / "legacy.mp4", root / "env_000/episode.mp4"]
+    for path in [*expected, root / "env_000/failed.partial.mp4"]:
+        path.touch()
+    foreign = tmp_path.parent / f"{tmp_path.name}-foreign.mp4"
+    foreign.touch()
+    (root / "env_000/foreign.mp4").symlink_to(foreign)
+    assert cli._report_saved_videos(tmp_path) == sorted(str(p) for p in expected)

@@ -264,6 +264,8 @@ def test_nested_publication_keeps_full_contract_identity(
         == (root / "mesh_assets/normalized/a.glb").as_posix()
     )
     assert ".staging-" not in json.dumps(envelope)
+    assert (root / "semantic_graph.html").is_file()
+    assert ".staging-" not in (root / "semantic_graph.html").read_text()
     scene["simulation"]["rigid_object"][0]["init_pos"][2] = 5.0
     save_config(root / "components/scene.yaml", scene)
     with pytest.raises(ValueError, match="identity"):
@@ -293,3 +295,46 @@ def test_publication_cannot_reseal_tampered_contract(
         with pytest.raises(ValueError, match="identity|incomplete"):
             transaction.commit()
     assert not destination.exists()
+
+
+def test_html_escape_and_foreign_identity_rejection(tmp_path):
+    from embodichain.gen_sim.task_engine.semantic_graph_html import (
+        render_semantic_task_graph_html,
+    )
+
+    plan = _contract(tmp_path)
+    graph = deepcopy(plan.graph)
+    graph["instruction"] = "</script><script>bad()</script>"
+    content = render_semantic_task_graph_html(graph)
+    assert graph["instruction"] not in content
+    assert "\\u003c/script\\u003e" in content and "connect-src 'none'" in content
+    with pytest.raises(ValueError, match="identity"):
+        render_semantic_task_graph_html(
+            plan.graph, task_spec=replace(plan.task_spec, task_id="foreign")
+        )
+
+
+def test_finalizer_links_selected_env_video_and_preserves_contract(tmp_path):
+    from embodichain.gen_sim.task_engine.semantic_graph_html import _finalize_run_html
+
+    bundle = tmp_path / "final/bundle"
+    plan = _relocatable_contract(bundle)
+    contract = bundle / "semantic_graph_validation.json"
+    before = contract.read_bytes()
+    action = tmp_path / "attempts/scene_0001/action_attempts/action_0001"
+    video = action / "videos/env_000/episode.mp4"
+    video.parent.mkdir(parents=True)
+    video.touch()
+    save_config(
+        tmp_path / "final/selection.json", {"scene_attempt": 1, "action_attempt": 1}
+    )
+    path = _finalize_run_html(
+        tmp_path,
+        bundle=bundle,
+        summary={"task_id": plan.graph["task_id"], "elapsed_seconds": 0},
+    )
+    assert path == action / "semantic_graph.html"
+    assert '"video_href":"videos/env_000/episode.mp4"' in path.read_text()
+    assert contract.read_bytes() == before
+    save_config(tmp_path / "final/selection.json", [])
+    assert _finalize_run_html(tmp_path, bundle=bundle, summary={}) is None

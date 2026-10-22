@@ -276,6 +276,7 @@ def _relocate_artifact_paths(staging: Path, destination: Path) -> None:
             write_graph_contract,
         )
         from embodichain.gen_sim.task_spec import TaskSpec
+        from ..semantic_graph_html import write_semantic_task_graph_html
 
         # Only this checked, controlled relocation may reseal generated identities.
         for root in contract_roots:
@@ -325,6 +326,13 @@ def _relocate_artifact_paths(staging: Path, destination: Path) -> None:
             envelope["coverage"]["lineage"],
         )
         verify_graph_contract(root, graph)
+        write_semantic_task_graph_html(
+            graph,
+            root / "semantic_graph.html",
+            task_spec=spec,
+            validation=envelope,
+            bundle_root=root,
+        )
 
 
 def _remove_path(path: Path) -> None:
