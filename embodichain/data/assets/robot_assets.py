@@ -278,6 +278,9 @@ class Fanuc(EmbodiChainDataset):
 class UniversalRobots(EmbodiChainDataset):
     """Dataset class for the Universal Robots.
 
+    V4 corrects the legacy UR3/UR3e material palette without changing robot
+    geometry, collision meshes, kinematics or inertial properties.
+
     Reference:
         https://www.universal-robots.com/products/ur-series/
 
@@ -304,13 +307,19 @@ class UniversalRobots(EmbodiChainDataset):
     """
 
     def __init__(self, data_root: str = None):
-        data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(
-                EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "UniversalRobots_v3.zip"
-            ),
-            "08af8f2d80f1c3c4280e9747082a5a2b",
+        filename = f"{robot_assets}/UniversalRobots_v4.zip"
+        hub_prefix = (
+            "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/main/"
         )
-        prefix = type(self).__name__
+        urls = [f"{EMBODICHAIN_DOWNLOAD_PREFIX}{filename}"]
+        if EMBODICHAIN_DOWNLOAD_PREFIX != hub_prefix:
+            urls.append(f"{hub_prefix}{filename}")
+        data_descriptor = o3d.data.DataDescriptor(
+            urls, "a92eda28a1d2f9034252cdb2936ceffc"
+        )
+        # Assembly signatures include URDF paths, not referenced mesh contents.
+        # A versioned source directory also invalidates old assembled materials.
+        prefix = f"{type(self).__name__}V4"
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
