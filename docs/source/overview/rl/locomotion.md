@@ -98,3 +98,9 @@ in the shared schema-v2 checkpoint and validated before learning state changes.
 Restore requires the original terrain map and per-rank environment count.
 The local G1 validation uses a single training process. Older checkpoints without
 environment state warn that terrain assignments cannot be restored.
+
+The G1 rough deployments set `env.episode_context_in_info: false` to avoid
+building per-row provenance dictionaries on every control step. Episode state,
+curriculum restoration and recorder metadata remain active. Set the option to
+`true` when a consumer needs the context snapshot in step/reset info; this is
+the shared environment default.
