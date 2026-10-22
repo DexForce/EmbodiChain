@@ -68,6 +68,8 @@ from embodichain.lab.sim._inertia import _principal_inertia_matrix
 from embodichain.lab.sim.cfg import (
     _normalize_joint_target_mode,
     ArticulationCfg,
+    CableObjectCfg,
+    CablePhysicsCfg,
     CollisionPropertiesCfg,
     DefaultCollisionPropertiesCfg,
     DefaultRigidBodyPropertiesCfg,
@@ -80,7 +82,12 @@ from embodichain.lab.sim.cfg import (
     SurfaceDeformableObjectCfg,
     VolumeDeformableObjectCfg,
 )
-from embodichain.lab.sim.shapes import CubeCfg, MeshCfg, MeshCollisionCfg, SphereCfg
+from embodichain.lab.sim.shapes import (
+    CubeCfg,
+    MeshCfg,
+    MeshCollisionCfg,
+    SphereCfg,
+)
 from embodichain.utils import logger
 from embodichain.utils.string import (
     resolve_matching_names,
@@ -88,6 +95,7 @@ from embodichain.utils.string import (
 )
 
 if TYPE_CHECKING:
+    from dexsim.spawn import CableAttachmentDesc, CableDesc, CablePhysicsDesc
     from embodichain.lab.sim.material import VisualMaterialCfg
     from embodichain.lab.sim.cfg import VisualObjectCfg
 
@@ -96,6 +104,7 @@ __all__ = [
     "configure_articulation_desc",
     "rigid_desc_from_cfg",
     "visual_desc_from_cfg",
+    "cable_desc_from_cfg",
     "surface_deformable_desc_from_cfg",
     "volume_deformable_desc_from_cfg",
 ]
@@ -499,6 +508,119 @@ def _mesh_geometry_from_cfg(shape: MeshCfg, *, segment_name: str) -> GeometryDes
         uv_coords=uv_coords,
         segment_name=segment_name,
     )
+
+
+def cable_desc_from_cfg(
+    cfg: CableObjectCfg,
+    *,
+    per_env: bool = True,
+) -> tuple[CableDesc, dict[str, MaterialDesc]]:
+    """Lower cable authoring through existing pose/material/contact compilers.
+
+    Args:
+        cfg: Cable configuration in EmbodiChain's xyzw convention.
+        per_env: Whether Spawn replicates this asset per environment.
+
+    Returns:
+        The typed descriptor and material entries for the shared Spawn builder.
+
+    Raises:
+        NotImplementedError: The installed DexSim build lacks cable descriptors.
+    """
+    try:
+        from dexsim.spawn import CableAttachmentDesc, CableDesc, CablePhysicsDesc
+    except ImportError as exc:
+        raise NotImplementedError(
+            "Cable creation requires a DexSim build exposing CableDesc, "
+            "CablePhysicsDesc and CableAttachmentDesc."
+        ) from exc
+    cfg.validate()
+    uid = _required_uid(cfg.uid, "Cable object")
+    if not isinstance(cfg.attrs, CablePhysicsCfg):
+        raise TypeError("Cable attrs must be CablePhysicsCfg.")
+    if isinstance(cfg.attrs.collision_props, DefaultCollisionPropertiesCfg):
+        raise NotImplementedError(
+            "Cable contact properties require common or Newton configuration."
+        )
+    contact = _resolve_rigid_physics(
+        RigidBodyPhysicsCfg(
+            collision_props=cfg.attrs.collision_props,
+            material_props=cfg.attrs.material_props,
+        ),
+        newton_solver_type="dexuni",
+    )
+    if contact.collision_enabled is not None:
+        raise NotImplementedError(
+            "CableDesc does not expose collision_enabled; omit that override."
+        )
+    collision = _compile_newton_collision(
+        contact, newton_solver_type="dexuni", author_shape_defaults=True
+    )
+    quaternions = None
+    if cfg.segment_quaternions is not None:
+        values = np.asarray(cfg.segment_quaternions)
+        if values.ndim != 2 or values.shape[1] != 4:
+            raise ValueError("segment_quaternions must have shape (N - 1, 4).")
+        quaternions = values[:, [3, 0, 1, 2]].copy()  # xyzw -> DexSim authoring wxyz
+    if cfg.visual_shape is not None and cfg.visual_material is not None:
+        raise ValueError("A custom visual_shape owns its visual_material.")
+    visual = cfg.visual_shape
+    if visual is not None and not isinstance(visual, MeshCfg):
+        raise TypeError("Cable visual_shape must be MeshCfg.")
+    if visual is not None and visual.compute_uv:
+        raise NotImplementedError(
+            "Cable handles do not expose projective UV writes; provide authored UVs."
+        )
+    material_ref, material_entry = _compile_visual_material(
+        uid, cfg.visual_material if visual is None else visual.visual_material
+    )
+    renders = []
+    if visual is not None:
+        renders.append(
+            RenderDesc.from_geometry(
+                _mesh_geometry_from_cfg(visual, segment_name=uid),
+                load_option=_compile_load_option(visual),
+                material_ref=material_ref,
+            )
+        )
+    attachments = {}
+    for name in ("start_attachment", "end_attachment"):
+        value = getattr(cfg, name)
+        attachments[name] = (
+            None
+            if value is None
+            else CableAttachmentDesc(
+                target=value.target,
+                position=np.asarray(value.position).copy(),
+                link_name=value.link_name,
+            )
+        )
+    descriptor = CableDesc(
+        name=uid,
+        points=np.asarray(cfg.points).copy(),
+        radius=cfg.radius,
+        pose=_pose_from_cfg(cfg),
+        segment_quaternions=quaternions,
+        closed=cfg.closed,
+        fixed_segments=tuple(cfg.fixed_segments),
+        physics=CablePhysicsDesc(
+            **{
+                item.name: getattr(cfg.attrs, item.name)
+                for item in fields(CablePhysicsDesc)
+            }
+        ),
+        collision=collision,
+        collision_filter_span=cfg.collision_filter_span,
+        renders=renders,
+        render_mode=cfg.render_mode,
+        render_material=(
+            None if material_entry is None or renders else material_entry[1]
+        ),
+        per_env=per_env,
+        **attachments,
+    )
+    materials = {} if material_entry is None else {material_entry[0]: material_entry[1]}
+    return descriptor, materials
 
 
 def volume_deformable_desc_from_cfg(

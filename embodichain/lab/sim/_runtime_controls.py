@@ -18,9 +18,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
+import torch
 
 from dexsim.engine.newton_physics.runtime_control import RuntimeControl
 
@@ -122,3 +124,74 @@ class _KinematicNodalTrajectoryControl(RuntimeControl):
         """Release runtime particle references retained after initialization."""
         self._particle_set = None
         self._initial_positions = None
+
+
+class _InitialJointState(RuntimeControl):
+    """Seed creation defaults through engine public initialization hooks only.
+
+    Unlike a realtime controller this never writes targets during stepping.
+    Scene.reset_arenas restores the engine-owned immutable defaults thereafter.
+    """
+
+    graph_safe = True
+
+    @staticmethod
+    def normalize_positions(positions: Any) -> np.ndarray:
+        """Copy a finite source-order vector at the one-time host boundary."""
+        if isinstance(positions, torch.Tensor):
+            if positions.is_complex() or positions.dtype == torch.bool:
+                raise ValueError("init_qpos must be a finite real vector.")
+            positions = positions.detach().to(device="cpu", dtype=torch.float32).numpy()
+        values = np.asarray(positions)
+        if values.ndim != 1 or values.dtype.kind not in "iuf":
+            raise ValueError("init_qpos must be a finite real one-dimensional vector.")
+        with np.errstate(over="ignore", invalid="ignore"):
+            values = values.astype(np.float32, copy=True)
+        if not np.isfinite(values).all():
+            raise ValueError("init_qpos must contain finite float32 values.")
+        return values
+
+    def __init__(self, target: str, positions: Any) -> None:
+        self.target = target
+        self.positions = self.normalize_positions(positions)[None, :]
+        self._initializer: Any | None = None
+        self._public_positions: np.ndarray | None = None
+
+    def initialize_model(self, model: Any, result: Any) -> None:
+        from dexsim.engine.newton_physics import KinematicJointTrajectoryControl
+        from embodichain.lab.sim.objects.backends.articulation_state import (
+            map_source_qpos_to_state_order,
+        )
+
+        handle = result.get_articulation(self.target)
+        self._public_positions = map_source_qpos_to_state_order(
+            handle, torch.as_tensor(self.positions), is_spawn_bound=True
+        ).numpy()
+        self._initializer = KinematicJointTrajectoryControl(
+            self.target, self._public_positions, initialize_model_pose=True
+        )
+        self._initializer.initialize_model(model, result)
+
+    def initialize(self, context: Any) -> None:
+        # The backend creates both states and runs FK from the seeded model
+        # before this hook. Seed drive targets separately through the public
+        # batch API; no MuJoCo-specific realtime controller is required.
+        if self._public_positions is None:
+            raise RuntimeError("Initial joint model state has not been seeded.")
+        articulation = context.result.get_articulation(self.target)
+        batch = context.result.create_articulation_batch([articulation])
+        batch.apply_state(joint_target_position=self._public_positions)
+
+    def __call__(
+        self, context: Any, substep_index: int, substep_count: int, substep_dt: float
+    ) -> None:
+        pass
+
+    def prepare_episode_reset(
+        self, arena_indices: tuple[int, ...]
+    ) -> Callable[[], None]:
+        return lambda: None
+
+    def close(self) -> None:
+        if self._initializer is not None:
+            self._initializer.close()

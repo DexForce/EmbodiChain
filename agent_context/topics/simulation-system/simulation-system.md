@@ -115,6 +115,9 @@ tests need non-symmetric rotations to expose component-order mistakes.
   reset only selected environments and honor supported exclusions.
 - Declare deformables and Newton controls before finalization. Deformables
   require Newton, CUDA and a supported particle solver without gradient mode.
+- Cables require explicit DexUni on CUDA without gradient mode. Declare them
+  before preparation. Cable episodes reset through the owning Scene; finalized
+  physical topology remains fixed. See [cable objects](deformables.md#cable-objects).
 - Flush deferred cleanup after caller-owned scene locals unwind when using
   `destroy(exit_process=False)`; release child views before native parents.
 
@@ -126,6 +129,7 @@ tests need non-symmetric rotations to expose component-order mistakes.
 | Backend/device selection, source overlays, collision/mass policy | [Physics configuration](physics-configuration.md); `cfg/`, `spawn/descriptors.py` |
 | Joint state order, drive lowering, mimic coupling, native adaptation | [Articulation and batch adapters](articulation-adapters.md); `objects/backends/`, `objects/articulation.py` |
 | Volume/surface state, topology and kinematic nodes | [Deformables](deformables.md); `cfg/deformable.py`, `objects/deformable/` |
+| Cable declaration, segment state and external loads | [Cable objects](deformables.md#cable-objects); `cfg/cable.py`, `objects/cable/` |
 | Camera synchronization, native window/offscreen denoising, startup readiness | [Rendering and diagnostics](rendering.md); manager, `cfg/simulation.py`, `_startup_summary.py` |
 | Robot definition, control parts, robot presets | [Robot system](../robot-system/robot-system.md) |
 | Camera attachment resolution or contact sensors | [Sensor system](../sensor-system/sensor-system.md) |

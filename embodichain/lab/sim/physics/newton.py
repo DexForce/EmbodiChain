@@ -18,10 +18,12 @@
 from __future__ import annotations
 
 import importlib
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 import weakref
 
 import warp as wp
+import numpy as np
 
 from .base import PhysicsBackend
 
@@ -58,6 +60,7 @@ class NewtonPhysicsBackend(PhysicsBackend):
         self._differentiable_runtime = None
         self._runtime_device: str | None = None
         self._configured_solver_type: str | None = None
+        self._initial_joint_state_targets: set[str] = set()
 
     @property
     def solver_type(self) -> str | None:
@@ -99,6 +102,80 @@ class NewtonPhysicsBackend(PhysicsBackend):
         # WorldConfig.newton_cfg registers the World-owned NewtonBackend.
         # SceneBuilder.finalize() completes its model; no second manager-level
         # activation or rebuild domain participates.
+
+    def _prepare_scene_build(self) -> None:
+        """Preflight cable anchors and freeze episode joint defaults once."""
+        manager = self._manager
+        cables = getattr(manager, "_cable_objects", {})
+        if not cables:
+            return
+        from embodichain.lab.sim._runtime_controls import _InitialJointState
+
+        articulations = {**manager._robots, **manager._articulations}
+        # Normalize the entire input before registration so an invalid config
+        # cannot leave an incomplete set of initialization controls behind.
+        positions = {
+            uid: _InitialJointState.normalize_positions(obj.cfg.init_qpos)
+            for uid, obj in articulations.items()
+            if obj.cfg.init_qpos is not None
+        }
+        for cable in cables.values():
+            for anchor in (cable.cfg.start_attachment, cable.cfg.end_attachment):
+                if anchor is not None and anchor.target in positions:
+                    if np.any(positions[anchor.target] != 0):
+                        raise NotImplementedError(
+                            f"Cable {cable.uid!r} attachment to {anchor.target!r} "
+                            "with nonzero init_qpos requires a DexSim authoring "
+                            "API that applies initial joint poses before attachment "
+                            "construction; the current model-initialization hook "
+                            "runs too late. No scene has been committed."
+                        )
+        scene = manager._spawn_scene
+        registered = self._initial_joint_state_targets
+        for uid, values in positions.items():
+            if not values.size:
+                continue
+            for arena_name in scene.arena_names:
+                target = f"{arena_name}/{uid}"
+                if target not in registered:
+                    scene.builder.add_runtime_control(
+                        _InitialJointState(target, values)
+                    )
+                    registered.add(target)
+
+    def _reset_scene_state(
+        self, env_ids: Sequence[int] | None, excluded_uids: set[str]
+    ) -> list[int] | None:
+        """Restore cable worlds through the public engine episode boundary."""
+        manager = self._manager
+        cables = getattr(manager, "_cable_objects", {})
+        if not cables:
+            return None
+        physical_uids = (
+            set(manager._robots)
+            | set(manager._articulations)
+            | set(manager._rigid_objects)
+            | set(manager._rigid_object_groups)
+            | set(manager._deformable_objects)
+            | set(cables)
+        )
+        if physical_uids.intersection(excluded_uids):
+            raise NotImplementedError(
+                "Cable episode reset requires every physical asset in selected "
+                "environments; no objects have been reset."
+            )
+        cable = next(iter(cables.values()))
+        cable._require_bound()
+        ids = cable._resolve_env_ids(env_ids)
+        if ids:
+            result = manager.spawn_result
+            if result is None:
+                raise RuntimeError("Cable reset requires a prepared Spawn scene.")
+            arenas = [
+                result.arenas.index(manager._spawn_scene.arena_names[i]) for i in ids
+            ]
+            result.reset_arenas(arenas)
+        return ids
 
     def sync_render_state(self, result: "dexsim.scene.Scene") -> None:
         """Publish Newton state through DexSim's render bridge without stepping."""
@@ -179,6 +256,11 @@ class NewtonPhysicsBackend(PhysicsBackend):
         )
 
     # -- capabilities --------------------------------------------------- #
+    @property
+    def supports_cables(self) -> bool:
+        """Newton supports cables with explicit DexUni on CUDA."""
+        return True
+
     @property
     def supports_volume_deformables(self) -> bool:
         return True

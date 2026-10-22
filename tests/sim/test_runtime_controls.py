@@ -23,6 +23,7 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+import torch
 
 from embodichain.lab.sim._runtime_controls import (
     _KinematicNodalTrajectoryControl,
@@ -135,3 +136,88 @@ def test_kinematic_nodal_control_holds_last_unrated_sample() -> None:
         control(context, substep_index=0, substep_count=1, substep_dt=0.01)
 
     np.testing.assert_allclose(particle_set.positions[1], [3.0, 0.0, 0.0])
+
+
+def test_initial_joint_seed_uses_source_order_and_never_drives_runtime(monkeypatch):
+    from embodichain.lab.sim._runtime_controls import _InitialJointState
+
+    initializer = MagicMock()
+    factory = MagicMock(return_value=initializer)
+    monkeypatch.setattr(
+        "dexsim.engine.newton_physics.KinematicJointTrajectoryControl", factory
+    )
+    handle = SimpleNamespace(
+        get_actived_joint_names=lambda: ["source_a", "source_b"],
+        joint_dof_layout=[
+            SimpleNamespace(name="source_b"),
+            SimpleNamespace(name="source_a"),
+        ],
+    )
+    batch = MagicMock()
+    result = SimpleNamespace(
+        get_articulation=lambda target: handle,
+        create_articulation_batch=MagicMock(return_value=batch),
+    )
+    control = _InitialJointState("arena/tool", np.array([0.1, 0.2]))
+    control.initialize_model(object(), result)
+    np.testing.assert_allclose(factory.call_args.args[1], [[0.2, 0.1]])
+    assert factory.call_args.kwargs["initialize_model_pose"] is True
+    control.initialize(SimpleNamespace(result=result))
+    np.testing.assert_allclose(
+        batch.apply_state.call_args.kwargs["joint_target_position"], [[0.2, 0.1]]
+    )
+    batch.reset_mock()
+    control(None, 0, 4, 1 / 240)
+    control.prepare_episode_reset((0,))()
+    batch.apply_state.assert_not_called()
+    control.close()
+    initializer.close.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "value",
+    [[0.1, 0.2], np.array([0.1, 0.2]), torch.tensor([0.1, 0.2], requires_grad=True)],
+)
+def test_initial_joint_seed_copies_supported_inputs(value):
+    from embodichain.lab.sim._runtime_controls import _InitialJointState
+
+    control = _InitialJointState("arena/tool", value)
+    np.testing.assert_allclose(control.positions, [[0.1, 0.2]])
+    assert control.positions.dtype == np.float32
+    if isinstance(value, torch.Tensor):
+        with torch.no_grad():
+            value.zero_()
+    elif isinstance(value, np.ndarray):
+        value[:] = 0
+    else:
+        value[:] = [0, 0]
+    np.testing.assert_allclose(control.positions, [[0.1, 0.2]])
+
+
+@pytest.mark.parametrize(
+    "value", [[[0.1]], [float("nan")], [float("inf")], [1e100], [True], ["0.1"]]
+)
+def test_initial_joint_seed_rejects_invalid_vectors(value):
+    from embodichain.lab.sim._runtime_controls import _InitialJointState
+
+    with pytest.raises(ValueError, match="init_qpos"):
+        _InitialJointState("arena/tool", value)
+
+
+def test_initial_joint_seed_accepts_bfloat16_tensor():
+    from embodichain.lab.sim._runtime_controls import _InitialJointState
+
+    control = _InitialJointState(
+        "arena/tool", torch.tensor([0.125, 0.25], dtype=torch.bfloat16)
+    )
+    np.testing.assert_array_equal(control.positions, [[0.125, 0.25]])
+
+
+@pytest.mark.gpu
+def test_initial_joint_seed_accepts_cuda_tensor():
+    from embodichain.lab.sim._runtime_controls import _InitialJointState
+
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA is unavailable")
+    control = _InitialJointState("arena/tool", torch.tensor([0.025], device="cuda"))
+    np.testing.assert_allclose(control.positions, [[0.025]])

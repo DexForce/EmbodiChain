@@ -71,3 +71,55 @@ Focused coverage: `tests/sim/test_deformable_cfg.py`,
 `tests/sim/objects/test_deformable_object.py`, `test_soft_object.py`,
 `test_cloth_object.py`, `tests/sim/spawn/test_descriptors.py`, and
 `tests/sim/test_runtime_controls.py`.
+
+## Cable objects
+
+`CableObjectCfg` and `CableObject(BatchEntity)` are independent of particle-set
+deformables. `SimulationManager.add_cable_object()` lowers through
+`spawn/descriptors.py` into `CableDesc`, declares in the existing `SpawnScene`,
+and binds the same facade in place during `prepare()`. Backend capabilities
+reject Default, CPU, AutoSolver and gradient mode; use explicit DexUni on CUDA.
+
+`CableObjectData` uses `Scene.create_cable_batch()` and exposes independent
+world snapshots for equal-topology replicated segments. Public poses are
+`xyz + xyzw`; the adapter permutes DexSim's quaternion-first batch output
+without adding Arena offsets again. Authoring material quaternions are likewise
+xyzw and convert once to CableDesc's wxyz. Defaults come from the engine's
+immutable creation state, not a live observation at binding.
+
+External force/torque and pending-load clearing use public `SpawnedCable`
+methods. `write_segment_state_to_sim()` accepts world states in the same public
+layout and uses `CableBatch.apply_state()` for both engine buffers. This teleport
+clears history for each owning world, including other cables, while preserving
+controls and loads. Object reset restores that cable's defaults and clears its
+loads. It is not a complete episode reset or a solver-history checkpoint.
+
+`EmbodiedEnvCfg.cable_object` declares Gym cables before preparation and belongs
+to the physical environment component. Cable recordings and replay restrictions
+are owned by [Gym execution](../env-framework/execution.md).
+
+Newton's pre-build backend hook preflights cable attachment compatibility and
+registers nonempty `init_qpos` through public model-initialization and batch-target
+hooks before engine creation defaults are frozen. Input vectors are copied to
+finite host float32 values, including CUDA tensors. The initializer does not
+overwrite runtime commands; episode reset restores nonzero poses and targets.
+Permanent attachment to an articulation with nonzero `init_qpos` is rejected
+before commit: the current engine resolves attachments before model-initialization
+hooks. Supporting that combination requires an engine authoring API that applies
+initial joint poses before attachment construction.
+
+Newton's scene-reset backend hook uses one public `Scene.reset_arenas()` call for all physical assets,
+targets, loads and supported controls in selected environments. The manager then
+resets selected lights and sensors once. Resolve Arena
+indices by name: the Scene's default Arena means environment IDs are not Arena
+indices. Physical exclusions are rejected before mutation. Runtime property edits
+are outside this reset contract. Engine preflight rejects unsupported controls,
+selected particles and unsupported solver modes. Global time remains monotonic;
+contact queries need another update. For seeded initialization, reset the manager
+then write caller-owned perturbed default segment states, preserving attachment
+anchors. Finalized physical topology and individual removal remain unsupported.
+Do not access backend arrays to implement missing engine operations.
+
+Focused coverage: `tests/sim/test_cable_cfg.py`,
+`tests/sim/objects/test_cable_object.py`, and
+`tests/sim/objects/test_cable_object_cuda.py` (explicit serial CUDA run).

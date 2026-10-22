@@ -9,7 +9,8 @@ Return to the [simulation overview](simulation-system.md) for ownership.
 readiness; `spawn/scene.py` owns declaration coordination. The ordering is:
 
 1. If unfinalized or dirty, detach parented cameras before rebuilding their
-   native parents. Resolve/configure sources and commit Spawn topology.
+   native parents. Run the backend pre-build validation/initialization hook,
+   then resolve/configure sources and commit Spawn topology.
 2. Apply Default articulation root properties before Direct GPU buffers capture
    them. Delegate runtime setup to `PhysicsBackend.prepare_spawn_runtime()`.
 3. Bind declared facades in place; publish their state through
@@ -60,6 +61,11 @@ external wrenches. MuJoCo-Warp cannot safely clear a selected world's solver
 state with only some of its articulations; excluding a subset is rejected.
 Other resource exclusions and environment selections remain honored.
 
+The backend may handle physical reset atomically before the per-object path.
+Newton scenes containing cables use a complete `Scene.reset_arenas()` boundary;
+the manager retains light and sensor reset ownership. Physical exclusions and runtime property restoration are
+unsupported in this path; see [cable state and reset](deformables.md#cable-objects).
+
 `destroy(exit_process=False)` queues native cleanup. Flush with
 `SimulationManager.flush_cleanup_queue()` after caller scene/object locals
 unwind. Constructor failure before World allocation removes only the failed
@@ -97,10 +103,10 @@ indexing rules are in [deformables](deformables.md).
 
 Use `sim_manager.py` for lifecycle sequencing, `spawn/scene.py` for commit/bind
 coordination, `physics/base.py` and backend implementations for runtime hooks,
-and `_runtime_controls.py` for nodal controls. `BaseEnv` owns Gym ordering.
+and `_runtime_controls.py` for nodal controls and creation joint-state seeding. `BaseEnv` owns Gym ordering.
 
 `tests/sim/test_sim_manager.py` covers retry without recommit, render sync,
 camera attachment, replacement, control registration, reset and teardown.
 `tests/sim/spawn/test_scene.py` covers declaration/source/binding state;
-`tests/sim/test_runtime_controls.py` covers nodal runtime behavior. Physical
+`tests/sim/test_runtime_controls.py` covers nodal behavior and one-shot joint seeding. Physical
 baseline tests live with the corresponding objects under `tests/sim/objects/`.
