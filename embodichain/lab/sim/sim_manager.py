@@ -4163,6 +4163,7 @@ class SimulationManager:
         if (
             self.sim_config.visualization.backend != "viser"
             and self._native_markers is None
+            and self.has_native_renderer
         ):
             self._native_markers = NativeMarkerRenderer(
                 self._spawn_scene.builder.result

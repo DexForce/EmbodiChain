@@ -453,6 +453,7 @@ def _make_visualization_sim_manager() -> (
         physics_dt=0.01,
         physics_cfg=DefaultPhysicsCfg(),
         visualization=SimpleNamespace(backend="viser"),
+        render_cfg=SimpleNamespace(renderer="hybrid"),
     )
     sim.device = SimpleNamespace(type="cpu")
     sim.profiler = Profiler(None, torch.device("cpu"))
@@ -2988,13 +2989,21 @@ def test_replace_rigid_objects_prevalidates_and_prepares_once(monkeypatch, inval
         assert operations == []
 
 
-def test_marker_group_lifecycle_and_environment_offsets_do_not_step_physics():
+@pytest.mark.parametrize(
+    ("renderer", "backend"),
+    [("hybrid", "viser"), ("no-render", "none"), ("no-render", "viser")],
+)
+def test_marker_group_lifecycle_and_environment_offsets_do_not_step_physics(
+    renderer, backend
+):
     from embodichain.lab.visualization.markers import MarkerGroupCfg, MarkerPrototypeCfg
 
     sim, runtime = _make_visualization_sim_manager()
     sim._marker_groups = {}
     sim._native_markers = None
     sim._markers = {}
+    sim.sim_config.visualization.backend = backend
+    sim.sim_config.render_cfg = SimpleNamespace(renderer=renderer)
     sim.sim_config.num_envs = 1
     sim.arena_offsets = torch.tensor([[10.0, 20.0, 30.0]])
     group = sim.add_marker_group(
@@ -3004,6 +3013,7 @@ def test_marker_group_lifecycle_and_environment_offsets_do_not_step_physics():
         )
     )
     assert sim.get_marker_group("goal") is group
+    assert sim._native_markers is None
     group.update(translations=[[1, 2, 3]])
     np.testing.assert_allclose(sim.get_marker_overlays()[0].position, [11, 22, 33])
     assert sim._world.physics_updates == []
