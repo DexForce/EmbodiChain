@@ -391,3 +391,65 @@ def test_in_place_adapter_changes_cannot_modify_canonical_cases(fake_runtime, tm
     assert case["start_qpos"] == [[0.0, 0.0]]
     assert "mutated" not in case["case_parameters"]
     assert case["target_waypoints"][0][0] == torch.eye(4).tolist()
+
+
+def test_frozen_manifest_replays_without_generating_new_inputs(
+    fake_runtime, tmp_path, monkeypatch
+):
+    suite = load_suite()
+    suite.protocol.warmup_trials = 0
+    suite.protocol.measured_trials = 1
+    spec = PlannerSpecCfg(id="external", adapter="external")
+    kwargs = dict(
+        planners=[spec],
+        adapters={"external": ExternalAdapter},
+        device="cpu",
+        output_root=tmp_path,
+    )
+    first = run_benchmark(suite, **kwargs)
+    path = first.run_dir / "case_manifest.json"
+    monkeypatch.setattr(
+        fake_runtime[2],
+        "generate_cases",
+        lambda *a, **k: pytest.fail("regenerated frozen inputs"),
+    )
+    second = run_benchmark(suite, case_manifest=path, **kwargs)
+    before = json.loads(path.read_text())
+    after = json.loads((second.run_dir / "case_manifest.json").read_text())
+    assert before["cases_sha256"] == after["cases_sha256"]
+    assert before["cases"] == after["cases"]
+    before["cases"][0]["start_qpos"][0][0] = 1.0
+    path.write_text(json.dumps(before))
+    with pytest.raises(ValueError, match="hash mismatch"):
+        run_benchmark(suite, case_manifest=path, **kwargs)
+
+
+@pytest.mark.parametrize("change", ["robot_config", "binding_hash", "missing_binding"])
+def test_frozen_manifest_rejects_changed_embodiment_before_simulation(
+    fake_runtime, tmp_path: Path, change: str
+) -> None:
+    suite = load_suite()
+    suite.protocol.warmup_trials = 0
+    suite.protocol.measured_trials = 1
+    kwargs = dict(
+        planners=[PlannerSpecCfg(id="external", adapter="external")],
+        adapters={"external": ExternalAdapter},
+        device="cpu",
+        output_root=tmp_path,
+    )
+    first = run_benchmark(suite, **kwargs)
+    path = first.run_dir / "case_manifest.json"
+    if change == "robot_config":
+        # The same robot ID and DOF can represent a changed TCP or control-part order.
+        suite.robot.config["tcp_offset"] = [0, 0, 0.1]
+    else:
+        payload = json.loads(path.read_text())
+        if change == "binding_hash":
+            payload["resolved_embodiment"]["config_hash"] = "different-geometry"
+        else:
+            payload.pop("resolved_embodiment")
+        path.write_text(json.dumps(payload))
+    fake_runtime[0].reset_mock()
+    with pytest.raises(ValueError, match="embodiment"):
+        run_benchmark(suite, case_manifest=path, **kwargs)
+    fake_runtime[0].assert_not_called()

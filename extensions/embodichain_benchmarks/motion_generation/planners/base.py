@@ -41,6 +41,7 @@ __all__ = ["PlannerAdapter", "PlannerContext"]
 _MOTION_VALIDITY_CAPABILITIES = {
     "ordered_cartesian_waypoints": "eef_waypoint",
     "ordered_joint_waypoints": "joint_waypoint",
+    "ordered_constraint_waypoints": "masked_constraints",
 }
 
 

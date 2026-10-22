@@ -703,6 +703,28 @@ def compute_case_outcomes(
         name=control_part,
         to_matrix=True,
     )
+    constraint_qpos_batch = None
+    constraint_pose_batch = None
+    if "constraint_modalities" in case.case_parameters:
+        # Every native state survives; deterministic linear joint subdivisions
+        # supply at least validation_samples states for sparse planner outputs.
+        count = safe_positions.shape[1]
+        subdivisions = max(1, math.ceil((validation_samples - 1) / max(1, count - 1)))
+        if count > 1:
+            parameter = (
+                torch.arange((count - 1) * subdivisions + 1, device=positions.device)
+                / subdivisions
+            )
+            left = parameter.long().clamp(max=count - 2)
+            fraction = (parameter - left)[None, :, None]
+            constraint_qpos_batch = torch.lerp(
+                safe_positions[:, left], safe_positions[:, left + 1], fraction
+            )
+        else:
+            constraint_qpos_batch = safe_positions
+        constraint_pose_batch = robot.compute_batch_fk(
+            qpos=constraint_qpos_batch, name=control_part, to_matrix=True
+        )
     native_pose_batch = robot.compute_batch_fk(
         qpos=positions,
         name=control_part,
@@ -784,7 +806,24 @@ def compute_case_outcomes(
         validity_space = case.case_parameters.get(
             "motion_validity", "ordered_cartesian_waypoints"
         )
-        if validity_space == "ordered_joint_waypoints":
+        if case.case_parameters.get("joint_error_norm", "linf") != "linf":
+            raise ValueError(
+                "case joint_error_norm conflicts with the linf scoring protocol"
+            )
+        if "constraint_modalities" in case.case_parameters:
+            from ._constraints import match_constraints
+
+            semantic_matching = match_constraints(
+                constraint_qpos_batch[env_index] if finite else native_qpos[:0],
+                constraint_pose_batch[env_index] if finite else native_poses,
+                case.reference_qpos[env_index],
+                waypoints,
+                case.case_parameters["constraint_modalities"],
+                position_threshold_m=position_threshold_m,
+                rotation_threshold_rad=rotation_threshold_rad,
+                joint_threshold_rad=float(case.case_parameters["joint_threshold_rad"]),
+            )
+        elif validity_space == "ordered_joint_waypoints":
             threshold = case.case_parameters.get("joint_threshold_rad")
             if not isinstance(threshold, (int, float)):
                 raise TypeError(
@@ -799,6 +838,17 @@ def compute_case_outcomes(
             semantic_matching = cartesian_matching
         else:
             raise ValueError(f"Unknown motion_validity mode {validity_space!r}.")
+        if "constraint_modalities" in case.case_parameters:
+            semantic_matching["sample_grid"] = "native_with_linear_subdivision"
+            arrivals = semantic_matching["arrival_errors"]
+            pos_errors_mm = [
+                item["position_m"] * 1000.0 for item in arrivals if "position_m" in item
+            ]
+            rot_errors_deg = [
+                item["rotation_rad"] * 180.0 / math.pi
+                for item in arrivals
+                if "rotation_rad" in item
+            ]
         ordered = bool(semantic_matching["ordered_waypoints_reached"])
         deviation_mean = deviation_max = None
         if (
@@ -883,6 +933,12 @@ def compute_case_outcomes(
             joint_length = cartesian_length = efficiency = None
             trajectory_moved = False
 
+        if "constraint_modalities" in case.case_parameters:
+            last_modality = case.case_parameters["constraint_modalities"][-1]
+            if last_modality not in {"position", "pose"}:
+                final_pos_m = min_pos_m = None
+            if last_modality not in {"orientation", "pose"}:
+                final_rot_rad = min_rot_rad = None
         if not finite:
             failure_code = "non_finite_trajectory"
         elif not start_valid:
@@ -901,6 +957,11 @@ def compute_case_outcomes(
             CaseOutcome(
                 env_index=env_index,
                 planning_success=planner_ok,
+                constraint_metrics=(
+                    semantic_matching
+                    if "constraint_modalities" in case.case_parameters
+                    else {}
+                ),
                 start_state_valid=start_valid,
                 reference_path_deviation_mm_mean=deviation_mean,
                 reference_path_deviation_mm_max=deviation_max,

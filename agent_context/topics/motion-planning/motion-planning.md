@@ -196,8 +196,18 @@ Canonical case tensors and nested parameters stay independent of adapter
 mutations through untimed copies at capacity, preparation and plan boundaries.
 Free-space Cartesian populations, bounded FK-only numerical reachability screening,
 measured difficulty and batch semantics live in
-`scenarios/_free_space_sampling.py`; configuration retains explicit legacy joint
-templates. Reports preserve workload strata and provide seed-cluster intervals at both
+`scenarios/_free_space_sampling.py`. Optional mask projections reuse screened
+Cartesian bases, retain `base_case_id`, and share independent maximum-joint/constrained
+matching in `metrics/_constraints.py`. Homogeneous Joint/FullPose cases keep
+classical input contracts; partial/mixed cases require `masked_constraints`.
+Validation preserves native samples with deterministic joint subdivisions.
+`NeuralPlanOptions.waypoint_modalities` supplies explicit meanings, and
+position-only goals require coincident runtime/policy TCP origins. The public
+API accepts a hashed `case_manifest` to replay fixed inputs without regeneration;
+scenario `bind_cases()` restores runtime bindings for both generated and loaded
+inputs, including Atomic skill providers and grasp resources. Experiment owners
+keep repeated timing subsets out of quality denominators. The
+configuration retains explicit legacy joint templates. Reports preserve workload strata and provide seed-cluster intervals at both
 condition and workload levels; balanced geometry allocations must not hide the
 independent seed count. Measured difficulty partitions batch rows by conditioning
 and joint margin separately. The screener's solver and selection condition stay

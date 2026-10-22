@@ -93,6 +93,14 @@ class ScenarioProvider(ABC):
     def close_runtime(self) -> None:
         """Release references to scenario-owned simulation entities."""
 
+    def bind_cases(self, cases: list["BenchmarkCase"]) -> None:
+        """Bind runtime resources for generated or loaded immutable cases.
+
+        Args:
+            cases: Canonical cases for the current track and simulator batch.
+                Bindings must not mutate their tensors or nested parameters.
+        """
+
     def prepare_planner(
         self, adapter: "PlannerAdapter", first_case: "BenchmarkCase"
     ) -> None:

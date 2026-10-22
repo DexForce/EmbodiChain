@@ -2676,3 +2676,22 @@ def test_atomic_reset_restores_frozen_robot_state_after_settling() -> None:
         ("clear_dynamics",),
     ]
     assert ("settle", 2) in events
+
+
+def test_loaded_cases_bind_atomic_providers_without_regeneration(monkeypatch):
+    scenario = AtomicSkillScenario()
+    case = _atomic_case()
+    provider = Mock()
+    factory = Mock(return_value=provider)
+    monkeypatch.setattr(
+        "embodichain_benchmarks.motion_generation.scenarios.atomic_skill.create_atomic_skill_provider",
+        factory,
+    )
+    monkeypatch.setattr(scenario, "restore_base_robot", Mock())
+    scenario.bind_cases([case])
+    factory.assert_called_once_with(case.skill_id)
+    assert scenario._case_providers == {case.case_id: provider}
+    assert scenario._cases_by_id == {case.case_id: case}
+    provider.generate_case.assert_not_called()
+    scenario.bind_cases([case])
+    factory.assert_called_once()

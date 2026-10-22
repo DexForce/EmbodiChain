@@ -396,6 +396,24 @@ class AtomicSkillScenario(ScenarioProvider):
             handle.park(len(self._objects) + index)
         return cases
 
+    def bind_cases(self, cases: list[BenchmarkCase]) -> None:
+        """Restore skill providers and scene bindings without resampling inputs.
+
+        Args:
+            cases: Generated or replayed cases for this configured runtime.
+        """
+        self._case_providers = {
+            case.case_id: self._case_providers.get(case.case_id)
+            or create_atomic_skill_provider(case.skill_id)
+            for case in cases
+        }
+        self._cases_by_id = {case.case_id: case for case in cases}
+        self.restore_base_robot()
+        for index, handle in enumerate(self._objects.values()):
+            handle.park(index)
+        for index, handle in enumerate(self._articulations.values()):
+            handle.park(len(self._objects) + index)
+
     @staticmethod
     def _prepare_pose_batch_config(
         config: dict[str, object],

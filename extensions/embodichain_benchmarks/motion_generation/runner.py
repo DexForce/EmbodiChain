@@ -34,6 +34,7 @@ from . import scenarios as _builtin_scenarios  # noqa: F401 - registry side effe
 from .aggregation import aggregate_results
 from .artifacts import (
     TrialJsonlWriter,
+    _read_case_manifest,
     create_run_directory,
     environment_metadata,
     write_case_manifest,
@@ -123,6 +124,7 @@ class BenchmarkRunner:
         output_root: str | Path = "outputs/benchmarks",
         video: VideoRecordCfg | None = None,
         adapters: Mapping[str, type[PlannerAdapter]] | None = None,
+        case_manifest: str | Path | None = None,
     ) -> None:
         self.adapters = dict(adapters or {})
         for name, adapter in self.adapters.items():
@@ -142,6 +144,23 @@ class BenchmarkRunner:
             suite.robot,
             base_dir=Path.cwd(),
         )
+        self.replay_cases = (
+            None
+            if case_manifest is None
+            else _read_case_manifest(
+                case_manifest,
+                self.device,
+                expected_embodiment=self.embodiment_resolution,
+            )
+        )
+        if self.replay_cases is not None:
+            tracks = {track.id for track in suite.evaluation_tracks()}
+            if {case.track for case in self.replay_cases} != tracks or any(
+                case.suite_version != suite.suite_version for case in self.replay_cases
+            ):
+                raise ValueError(
+                    "Replay population conflicts with suite tracks or version."
+                )
         if suite.embodiment is None:
             self.robot_provider = create_robot_provider(suite.robot)
         else:
@@ -731,7 +750,18 @@ class BenchmarkRunner:
 
         for track in enabled_tracks:
             provider = create_scenario_provider(track.scenario)
-            for batch_size in provider.batch_sizes(self.suite, track):
+            batch_sizes = (
+                provider.batch_sizes(self.suite, track)
+                if self.replay_cases is None
+                else sorted(
+                    {
+                        case.batch_size
+                        for case in self.replay_cases
+                        if case.track == track.id
+                    }
+                )
+            )
+            for batch_size in batch_sizes:
                 sim: SimulationManager | None = None
                 runtime_configured = False
                 try:
@@ -748,8 +778,16 @@ class BenchmarkRunner:
                         track,
                         self.control_part,
                     )
-                    cases = provider.generate_cases(
-                        self.suite, track, robot, self.control_part, batch_size
+                    cases = (
+                        provider.generate_cases(
+                            self.suite, track, robot, self.control_part, batch_size
+                        )
+                        if self.replay_cases is None
+                        else [
+                            deepcopy(case)
+                            for case in self.replay_cases
+                            if case.track == track.id and case.batch_size == batch_size
+                        ]
                     )
                     domain = (
                         track.domain.to_identity() if track.domain is not None else None
@@ -784,6 +822,7 @@ class BenchmarkRunner:
                             )
                         )
                     cases = resolved_cases
+                    provider.bind_cases(cases)
                     self.cases.extend(cases)
                     # Persist each frozen population before evaluating candidates.
                     write_case_manifest(
@@ -860,6 +899,16 @@ class BenchmarkRunner:
                     "task_completion_time_s is simulated replay time through the "
                     "stability hold for successful tasks.",
                 ]
+            )
+        if self.cases and all(
+            case.case_parameters.get("measurement_purpose") == "performance_replay"
+            for case in self.cases
+        ):
+            track_notes.append(
+                "This artifact replays frozen cases for performance measurement. "
+                "Success values describe those inputs; batch rows and timing repeats "
+                "do not add independent quality evidence. Seed-cluster quality "
+                "intervals are omitted for these repacked inputs."
             )
         track_notes.extend(summarize_video_recording(self.video, self._video_paths))
         report_path = write_markdown_report(

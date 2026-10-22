@@ -473,6 +473,7 @@ def test_explicit_scenario_mapping_separates_scopes_and_mixed_reports(tmp_path) 
         "motion_planning_time_and_memory",
         "motion_planning_success_and_metrics",
         "motion_planning_leaderboard",
+        "motion_planning_common_leaderboard",
         "motion_planning_workload_summary",
         "motion_planning_measured_difficulty",
         "atomic_skills_time_and_memory",
@@ -500,7 +501,8 @@ def test_explicit_scenario_mapping_separates_scopes_and_mixed_reports(tmp_path) 
         tmp_path / "report.md", SuiteCfg(), result
     ).read_text()
     assert "## Motion Planning" in report and "## Atomic Skills" in report
-    assert report.count("\n| ---") == 8
+    assert report.count("\n| ---") == 9
+    assert "### Common Joint / FullPose comparison" in report
     assert "nominal" in report.lower()
 
 
@@ -766,3 +768,22 @@ def test_workloads_keep_resolved_physical_distance_ranges_separate():
     assert len(rows) == 2
     assert {row["translation_range_m"] for row in rows} == {(0.01, 0.02), (0.2, 0.3)}
     assert all(row["seed_clusters"] == 1 for row in rows)
+
+
+def test_performance_replay_does_not_claim_independent_quality_uncertainty():
+    first = replace(
+        _case(), case_parameters={"measurement_purpose": "performance_replay"}
+    )
+    second = replace(first, case_id="second", seed=19)
+    result = aggregate_results(
+        [_record(first), _record(second)],
+        [_metadata("solved")],
+        [first, second],
+        1,
+        track_scenarios={first.track: "free_space"},
+    )
+    row = result["motion_planning_success_and_metrics"][0]
+    assert row["measurement_purpose"] == "performance_replay"
+    assert row["seed_clusters"] is None
+    assert row["success_ci_lower"] is row["success_ci_upper"] is None
+    assert row["uncertainty_warning"] == "performance_replay_not_independent_quality"

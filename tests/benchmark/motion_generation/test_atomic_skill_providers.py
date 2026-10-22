@@ -954,3 +954,30 @@ def test_custom_gripper_provider_initializes_configured_commands(monkeypatch):
     torch.testing.assert_close(
         scenario._configured_grippers()["custom_hand"][0], expected_open
     )
+
+
+@pytest.mark.parametrize(
+    "device",
+    [
+        "cpu",
+        pytest.param(
+            "cuda:0",
+            marks=[
+                pytest.mark.gpu,
+                pytest.mark.skipif(
+                    not torch.cuda.is_available(), reason="CUDA unavailable"
+                ),
+            ],
+        ),
+    ],
+)
+def test_door_approach_uses_mesh_device_for_axis_and_origin(device):
+    affordance = SimpleNamespace(
+        mesh_vertices=torch.tensor([[1.0, 0.0, 0.0], [1.0, 0.0, 1.0]], device=device),
+        rotation_axis=torch.tensor([0.0, 0.0, 1.0]),
+        axis_origin=[0.0, 0.0, 0.0],
+        opening_direction=1,
+    )
+    actual = providers._door_approach_direction_local(affordance)
+    assert actual.device == torch.device(device)
+    assert torch.allclose(actual, torch.tensor([0.0, -1.0, 0.0], device=device))

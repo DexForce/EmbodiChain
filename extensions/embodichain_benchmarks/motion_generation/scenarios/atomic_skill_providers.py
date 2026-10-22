@@ -552,10 +552,13 @@ def _case_identity(
 
 def _door_approach_direction_local(affordance: OpenDoorAffordance) -> torch.Tensor:
     """Mirror OpenDoor: approach against the positive hinge-opening tangent."""
-    axis = affordance.rotation_axis.to(dtype=torch.float32)
+    vertices = affordance.mesh_vertices.to(dtype=torch.float32)
+    axis = affordance.rotation_axis.to(device=vertices.device, dtype=torch.float32)
     axis = axis / torch.linalg.vector_norm(axis)
-    origin = torch.tensor(affordance.axis_origin, dtype=torch.float32)
-    handle_center = affordance.mesh_vertices.to(dtype=torch.float32).mean(dim=0)
+    origin = torch.as_tensor(
+        affordance.axis_origin, dtype=torch.float32, device=vertices.device
+    )
+    handle_center = vertices.mean(dim=0)
     radial = handle_center - origin
     radial = radial - torch.dot(radial, axis) * axis
     if torch.linalg.vector_norm(radial) <= 1.0e-6:

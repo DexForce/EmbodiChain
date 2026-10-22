@@ -1365,3 +1365,86 @@ def test_native_and_retimed_rollouts_preserve_requested_first_sample(
     error = (result.positions[:, 0].double() - start).abs().amax(dim=-1)
     assert bool((error < 1e-6).all())
     assert float((result.positions[:, -1] - result.positions[:, 0]).abs().max()) > 1e-6
+
+
+@pytest.mark.parametrize("intermediate_orientation", [True, False])
+def test_explicit_modalities_preserve_all_four_masks(
+    tmp_path, monkeypatch, intermediate_orientation
+):
+    fake_sim = FakeSimulationManager()
+    monkeypatch.setattr(
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
+    )
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=_create_fake_onnx_model(tmp_path),
+            control_part="main_arm",
+            intermediate_orientation=intermediate_orientation,
+        )
+    )
+    poses = [PlanState.from_xpos(torch.eye(4)[None]) for _ in range(3)]
+    targets = [
+        PlanState.from_qpos(torch.zeros(1, 7), move_type=MoveType.JOINT_MOVE),
+        *poses,
+    ]
+    parsed = planner._parse_waypoints(
+        targets, ["joint", "position", "orientation", "pose"]
+    )
+    assert parsed[4][0, :4].tolist() == [0.0, 1.0, 0.0, 1.0]
+    assert parsed[5][0, :4].tolist() == [0.0, 0.0, 1.0, 1.0]
+    assert parsed[6][0, :4].tolist() == [1.0, 0.0, 0.0, 0.0]
+    with pytest.raises(ValueError, match="match the target count"):
+        planner._parse_waypoints(targets, ["joint"])
+    with pytest.raises(ValueError, match="move_type"):
+        planner._parse_waypoints(targets, ["pose"] * 4)
+
+
+def test_position_only_cannot_implicitly_constrain_an_offset_tcp(tmp_path, monkeypatch):
+    fake_sim = FakeSimulationManager()
+    monkeypatch.setattr(
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
+    )
+    offset = torch.eye(4)
+    offset[2, 3] = 0.1
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=_create_fake_onnx_model(tmp_path),
+            control_part="main_arm",
+            runtime_tcp_from_policy_tcp=offset.tolist(),
+        )
+    )
+    with pytest.raises(ValueError, match="origins to coincide"):
+        planner._parse_waypoints(
+            [PlanState.from_xpos(torch.eye(4)[None])], ["position"]
+        )
+
+
+@pytest.mark.parametrize(
+    "error,expected", [(0.005, True), (0.01, True), (0.0101, False)]
+)
+def test_joint_reach_uses_inclusive_maximum_error(error, expected):
+    planner = NeuralPlanner.__new__(NeuralPlanner)
+    planner.device = torch.device("cpu")
+    planner._num_waypoints = 1
+    planner._pos_eps, planner._rot_eps, planner._joint_eps = 0.01, 0.1, 0.01
+    q = torch.full((1, NUM_ARM_JOINTS), error)
+    ee = torch.tensor([[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]])
+    pose_mask = torch.zeros(1, 1)
+    reached = planner._is_active_reached(
+        q,
+        ee,
+        torch.zeros(1, 1, 3),
+        ee[:, None, 3:],
+        torch.zeros(1, 1, NUM_ARM_JOINTS),
+        pose_mask,
+        pose_mask,
+        torch.ones(1, 1),
+        torch.zeros(1, dtype=torch.long),
+    )
+    assert reached.item() is expected

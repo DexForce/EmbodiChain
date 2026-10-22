@@ -202,6 +202,9 @@ class CaseOutcome:
     timed_motion_valid: bool | None = None
     """Validity under solved timing; nominal or unknown clocks remain unavailable."""
 
+    constraint_metrics: dict[str, object] = field(default_factory=dict)
+    """Constrained-component arrival errors; unused components are absent."""
+
     geometry_valid: bool = False
     """Derived path validity, also accepted when reading serialized outcomes."""
 

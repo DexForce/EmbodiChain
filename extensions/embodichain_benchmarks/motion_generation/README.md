@@ -250,6 +250,35 @@ a quality diagnostic, not a continuous path-following certificate or a success
 gate. It is N/A for joint goals and pure rotation. EEF reference
 joint states remain diagnostic and are not supplied as EEF goals to adapters.
 
+`constraint_patterns` optionally projects semantic masks onto the same independently
+screened `sampling_method: cartesian` base cases. Patterns contain `joint`,
+`position`, `orientation`, or `pose`; they repeat to K and are eligible only when
+their length is <=K. `constraint_pattern_design: full` applies every eligible
+pattern. `balanced` applies every singleton plus one rotating pattern per other
+length, using the declared seed order. `base_case_id` retains pairing. There is
+no additional FK random-walk population. A screened witness certifies goal
+reachability, not a collision-free or dynamically feasible path.
+
+All projected cases share maximum absolute per-joint error and independent constrained-component
+matching. Validation retains native states and deterministically subdivides
+joint-space segments to supply at least `protocol.validation_samples` states;
+strictly increasing arrivals and simultaneous pose conditions remain mandatory.
+Raw `constraint_metrics` records arrivals, the `linf` success norm, sample-grid
+identity and auxiliary L2 error at Joint arrivals. L2 never gates success.
+Homogeneous Joint/FullPose projections retain the established classical adapter
+input contract. Partial or mixed projections require `masked_constraints`;
+unsupported adapters receive neither hidden joint solutions nor implicit extra
+pose constraints. `NeuralPlanOptions.waypoint_modalities` passes explicit masks
+to NMG; Position requires coincident runtime/policy TCP origins. The common
+Joint/FullPose comparison has its own canonical table. Legacy populations without
+`constraint_patterns` retain their existing scoring contract.
+
+`run_benchmark(..., case_manifest=path)` replays an existing hashed manifest
+instead of generating inputs. It validates schema, case hash, identities and
+shapes; tracks, version and robot must match the suite. Replay can select declared
+performance subsets and batch sizes without another task generator. Keep timing
+replicas separate from quality denominators in the experiment orchestrator.
+
 Omitting `sampling_method` retains the legacy `joint_templates` population.
 Its L/S/wrist templates describe joint displacements; those labels do not certify
 Cartesian geometry or measured singularity. Keep its results under their original
@@ -415,3 +444,11 @@ Python environment:
 ```bash
 python -m pytest -q tests/benchmark/motion_generation
 ```
+
+Frozen `case_manifest` replay requires the host-written `resolved_embodiment`
+identity (`embodiment_id`, `config_hash`, and provider source). A changed robot
+configuration or embodiment override is rejected before simulation, even when
+its public name and DOF are unchanged. Declared performance subsets preserve
+that same identity. Constraint patterns that expand to identical modality
+sequences at a configured K are rejected to keep case identities and quality
+populations unique.

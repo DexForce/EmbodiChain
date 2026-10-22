@@ -1465,6 +1465,8 @@ def _workload_groups(
     """Partition workloads once so batch semantics never disappear in averages."""
     fields = (
         "target_type",
+        "constraint_pattern",
+        "constraint_family",
         "batch_mode",
         "distance_bin",
         "motion_component",
@@ -1675,6 +1677,22 @@ def aggregate_results(
             view_records, metadata, view_cases, measured_trials, view=view
         )
         if view == "motion_planning":
+            common_cases = [
+                case
+                for case in view_cases
+                if (
+                    case.case_parameters.get("target_type", "eef")
+                    in {"joint", "pose", "eef"}
+                )
+            ]
+            common_ids = {case.case_id for case in common_cases}
+            result["motion_planning_common_leaderboard"] = _view_leaderboard(
+                [record for record in view_records if record.case_id in common_ids],
+                metadata,
+                common_cases,
+                measured_trials,
+                view=view,
+            )
             result["motion_planning_workload_summary"] = [
                 {**row, **labels, "view": view}
                 for labels, population, trials in workloads
@@ -1703,4 +1721,20 @@ def aggregate_results(
                 view=view,
                 timing=True,
             )
+    if cases and all(
+        case.case_parameters.get("measurement_purpose") == "performance_replay"
+        for case in cases
+    ):
+        # Repacked rows can combine evaluation seeds and timing repetitions;
+        # their synthetic case.seed is not a valid accuracy sampling cluster.
+        for rows in result.values():
+            for row in rows:
+                row["measurement_purpose"] = "performance_replay"
+                for key in ("success_ci_lower", "success_ci_upper", "seed_clusters"):
+                    if key in row:
+                        row[key] = None
+                if "uncertainty_warning" in row:
+                    row["uncertainty_warning"] = (
+                        "performance_replay_not_independent_quality"
+                    )
     return result

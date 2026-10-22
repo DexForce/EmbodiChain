@@ -48,6 +48,7 @@ class NmgOnnxAdapter(PlannerAdapter):
     capabilities = frozenset(
         {
             "eef_waypoint",
+            "masked_constraints",
             "joint_waypoint",
             "batched",
             "empty_world",
@@ -170,7 +171,22 @@ class NmgOnnxAdapter(PlannerAdapter):
         motion_validity = case.case_parameters.get(
             "motion_validity", "ordered_cartesian_waypoints"
         )
-        if motion_validity == "ordered_joint_waypoints":
+        modalities = None
+        if "constraint_modalities" in case.case_parameters:
+            modalities = list(case.case_parameters["constraint_modalities"])
+            targets = [
+                (
+                    PlanState.from_qpos(
+                        case.reference_qpos[:, index], move_type=MoveType.JOINT_MOVE
+                    )
+                    if modality == "joint"
+                    else PlanState.from_xpos(
+                        case.target_waypoints[:, index], move_type=MoveType.EEF_MOVE
+                    )
+                )
+                for index, modality in enumerate(modalities)
+            ]
+        elif motion_validity == "ordered_joint_waypoints":
             targets = [
                 PlanState.from_qpos(
                     case.reference_qpos[:, index], move_type=MoveType.JOINT_MOVE
@@ -191,7 +207,9 @@ class NmgOnnxAdapter(PlannerAdapter):
             MotionGenOptions(
                 start_qpos=case.start_qpos,
                 control_part=self.context.control_part,
-                plan_opts=NeuralPlanOptions(max_steps=self._case_max_steps(case)),
+                plan_opts=NeuralPlanOptions(
+                    max_steps=self._case_max_steps(case), waypoint_modalities=modalities
+                ),
             ),
         )
 

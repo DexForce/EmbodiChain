@@ -2763,7 +2763,8 @@ def test_report_includes_workload_and_measured_difficulty_tables(tmp_path):
     report = write_markdown_report(tmp_path / "report.md", suite, aggregates)
     text = report.read_text(encoding="utf-8")
 
-    assert text.count("\n| ---") == 5
+    assert text.count("\n| ---") == 6
+    assert "### Common Joint / FullPose comparison" in text
     assert "### Workload Success & Uncertainty" in text
     assert "### Measured Start Difficulty" in text
     assert text.count("## Time & Memory") == 1

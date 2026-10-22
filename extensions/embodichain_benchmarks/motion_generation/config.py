@@ -131,6 +131,8 @@ class ProtocolCfg:
     validation_samples: int = 128
     position_threshold_m: float = 0.01
     rotation_threshold_rad: float = 0.1
+    joint_error_norm: str = "linf"
+    """Joint arrival is the maximum absolute controlled-joint error."""
     joint_limit_tolerance_rad: float = 1.0e-5
     start_state_tolerance_rad: float = 1.0e-3
     """Maximum absolute per-joint error at the first trajectory sample."""
@@ -196,6 +198,10 @@ class FreeSpaceTrackCfg:
     """Maximum per-joint error when matching ordered joint targets."""
     sampling_method: str = "joint_templates"
     """Legacy joint templates or independently screened Cartesian requests."""
+    constraint_patterns: list[list[str]] = []
+    """Modality projections of the same screened Cartesian base requests."""
+    constraint_pattern_design: str = "full"
+    """All patterns, or all singletons plus one rotating pattern per other length."""
     batch_modes: list[str] = ["heterogeneous"]
     population_design: str = "full"
     """Full factorial geometry or a balanced rotation of shapes and waypoint counts."""
@@ -464,6 +470,8 @@ class SuiteCfg:
             raise ValueError("position_threshold_m must be > 0.")
         if self.protocol.rotation_threshold_rad <= 0.0:
             raise ValueError("rotation_threshold_rad must be > 0.")
+        if self.protocol.joint_error_norm != "linf":
+            raise ValueError("joint_error_norm must be linf; L2 is diagnostic only.")
         if self.protocol.joint_limit_tolerance_rad < 0.0:
             raise ValueError("joint_limit_tolerance_rad must be >= 0.")
         if (
@@ -583,8 +591,36 @@ def _merge_mappings(
 
 def _validate_free_space(free_space: FreeSpaceTrackCfg) -> None:
     """Validate free-space case-matrix fields."""
-    if free_space.sampling_method not in {"joint_templates", "cartesian"}:
+    if free_space.sampling_method not in {
+        "joint_templates",
+        "cartesian",
+    }:
         raise ValueError("sampling_method must be joint_templates or cartesian.")
+    if free_space.constraint_patterns:
+        if free_space.sampling_method != "cartesian":
+            raise ValueError("constraint_patterns requires Cartesian base cases.")
+        patterns = free_space.constraint_patterns
+        allowed = {"joint", "position", "orientation", "pose"}
+        if (
+            not isinstance(patterns, list)
+            or not patterns
+            or any(
+                not isinstance(pattern, list)
+                or not pattern
+                or any(
+                    not isinstance(value, str) or value not in allowed
+                    for value in pattern
+                )
+                for pattern in patterns
+            )
+        ):
+            raise ValueError(
+                "constraint_patterns must contain nonempty modality lists."
+            )
+        if len({tuple(pattern) for pattern in patterns}) != len(patterns):
+            raise ValueError("constraint_patterns must not repeat patterns.")
+    if free_space.constraint_pattern_design not in {"full", "balanced"}:
+        raise ValueError("constraint_pattern_design must be full or balanced.")
     if free_space.population_design not in {"full", "balanced"}:
         raise ValueError("population_design must be full or balanced.")
     for name, allowed in (
@@ -722,6 +758,17 @@ def _validate_free_space(free_space: FreeSpaceTrackCfg) -> None:
     ):
         if len(values) != len(set(values)):
             raise ValueError(f"{name} must not contain duplicate values.")
+
+    for count in free_space.waypoint_counts:
+        expanded_patterns = [
+            tuple(pattern[index % len(pattern)] for index in range(count))
+            for pattern in free_space.constraint_patterns
+            if len(pattern) <= count
+        ]
+        if len(expanded_patterns) != len(set(expanded_patterns)):
+            raise ValueError(
+                f"constraint_patterns contain equivalent expansions for K={count}."
+            )
 
 
 def _finite_nonnegative_vector(

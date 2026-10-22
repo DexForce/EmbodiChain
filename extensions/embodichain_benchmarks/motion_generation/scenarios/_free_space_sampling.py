@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import math
 from typing import TYPE_CHECKING
 
@@ -544,7 +546,11 @@ def generate_cartesian_cases(
                                 rotation = rotation_residual.norm(dim=-1)
                                 # Reuse one independently screened population for
                                 # both goal modalities, without leaking IK into EEF adapters.
-                                for target_type in settings.target_types:
+                                for target_type in (
+                                    ["eef"]
+                                    if settings.constraint_patterns
+                                    else settings.target_types
+                                ):
                                     identity = {
                                         "suite": suite.suite_version,
                                         "track": track.id,
@@ -645,4 +651,97 @@ def generate_cartesian_cases(
         raise ValueError(
             "Cartesian free-space configuration generated no meaningful workloads."
         )
+    return (
+        _project_constraints(cases, settings) if settings.constraint_patterns else cases
+    )
+
+
+def _project_constraints(
+    bases: list[BenchmarkCase], settings: FreeSpaceTrackCfg
+) -> list[BenchmarkCase]:
+    """Project masks without drawing new starts, poses or IK witnesses."""
+    cases = []
+    for base in bases:
+        eligible = [
+            p for p in settings.constraint_patterns if len(p) <= base.num_waypoints
+        ]
+        if settings.constraint_pattern_design == "balanced":
+            selected = [p for p in eligible if len(p) == 1]
+            offset = int(
+                stable_hash(
+                    {
+                        "start": base.start_state_bin,
+                        "shape": base.path_shape,
+                        "k": base.num_waypoints,
+                        "distance": base.case_parameters["distance_bin"],
+                        "component": base.case_parameters["motion_component"],
+                    }
+                )[:8],
+                16,
+            ) + settings.seeds.index(base.seed)
+            for length in sorted({len(p) for p in eligible if len(p) > 1}):
+                patterns = [p for p in eligible if len(p) == length]
+                selected.append(patterns[offset % len(patterns)])
+            eligible = selected
+        for pattern in eligible:
+            modalities = [pattern[i % len(pattern)] for i in range(base.num_waypoints)]
+            homogeneous = len(set(modalities)) == 1
+            modality = modalities[0] if homogeneous else "mixed"
+            # Preserve the classical planner input contract for the common subset.
+            # Their EEF goals are poses; reference_qpos remains screening evidence.
+            validity = {
+                "joint": "ordered_joint_waypoints",
+                "pose": "ordered_cartesian_waypoints",
+            }.get(modality, "ordered_constraint_waypoints")
+            fingerprints = []
+            for row in range(base.batch_size):
+                payloads = []
+                for index, kind in enumerate(modalities):
+                    pose = base.target_waypoints[row, index]
+                    value = (
+                        base.reference_qpos[row, index]
+                        if kind == "joint"
+                        else (
+                            pose[:3, 3]
+                            if kind == "position"
+                            else pose[:3, :3] if kind == "orientation" else pose
+                        )
+                    )
+                    payloads.append(torch.round(value.detach().cpu() * 1.0e5).tolist())
+                fingerprints.append(
+                    stable_hash(
+                        {
+                            "start": torch.round(
+                                base.start_qpos[row].detach().cpu() * 1.0e5
+                            ).tolist(),
+                            "modalities": modalities,
+                            "payloads": payloads,
+                        }
+                    )
+                )
+            parameters = {
+                **base.case_parameters,
+                "input_fingerprints": fingerprints,
+                "unique_input_rows": len(set(fingerprints)),
+                "base_case_id": base.case_id,
+                "constraint_pattern": ",".join(pattern),
+                "constraint_modalities": modalities,
+                "constraint_family": (
+                    modality if homogeneous else f"mixed_{len(pattern)}"
+                ),
+                "target_type": modality,
+                "motion_validity": validity,
+                "joint_error_norm": "linf",
+                "sample_grid": "native_with_linear_subdivision",
+            }
+            cases.append(
+                replace(
+                    base,
+                    case_id=f"free_space_{stable_hash((base.case_id, modalities))[:16]}",
+                    scenario_id="constraint_sequence",
+                    case_parameters=parameters,
+                )
+            )
+    if not cases:
+        raise ValueError("No constraint pattern fits the declared waypoint counts.")
     return cases

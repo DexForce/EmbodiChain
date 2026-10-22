@@ -41,6 +41,7 @@ def run_benchmark(
     headless: bool = True,
     output_root: str | Path = "outputs/benchmarks",
     video: VideoRecordCfg | None = None,
+    case_manifest: str | Path | None = None,
 ) -> BenchmarkRunResult:
     """Evaluate planners against a suite without modifying caller configuration.
 
@@ -60,6 +61,11 @@ def run_benchmark(
         headless: Whether to run without a viewer.
         output_root: Directory under which a unique run directory is created.
         video: Optional Atomic Skills replay recording configuration.
+        case_manifest: Hashed case_manifest.json to replay instead of generating
+            new inputs. Cases must match the suite's tracks, version and robot.
+            Retain the host-written resolved_embodiment identity; replay rejects
+            changed robot/embodiment configurations before creating simulation.
+            This supports fixed quality populations and declared timing subsets.
 
     Returns:
         Raw trial records, aggregate metrics and paths to persisted artifacts.
@@ -109,6 +115,7 @@ def run_benchmark(
         headless=headless,
         output_root=output_root,
         video=video,
+        case_manifest=case_manifest,
     )
     if planners is not None:
         runner.suite.planners = runner.planner_specs

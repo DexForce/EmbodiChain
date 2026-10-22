@@ -32,7 +32,8 @@ from typing import TYPE_CHECKING, Any
 import torch
 import yaml
 
-from .config import SuiteCfg, suite_to_dict
+from .config import SuiteCfg, stable_hash, suite_to_dict
+from .contracts import EvaluationDomain
 from .models import BenchmarkCase, TrialRecord
 
 if TYPE_CHECKING:
@@ -215,6 +216,7 @@ def write_case_manifest(
         "case_schema_version": 3,
         "cases": [_case_to_dict(case) for case in cases],
     }
+    payload["cases_sha256"] = stable_hash(payload["cases"])
     if suite is not None:
         payload["resolved_suite_version"] = suite.suite_version
         payload["motion_evaluation_protocol"] = {
@@ -264,3 +266,69 @@ class TrialJsonlWriter:
                 )
                 + "\n"
             )
+
+
+def _read_case_manifest(
+    path: str | Path,
+    device: torch.device,
+    *,
+    expected_embodiment: EmbodimentResolution,
+) -> list[BenchmarkCase]:
+    """Validate and reconstruct a frozen algorithm-independent population."""
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    if payload.get("case_schema_version") != 3:
+        raise ValueError("Only case_schema_version 3 manifests can be replayed.")
+    rows = payload.get("cases")
+    if not isinstance(rows, list) or not rows:
+        raise ValueError("A replay manifest must contain a nonempty cases list.")
+    if payload.get("cases_sha256") != stable_hash(rows):
+        raise ValueError("Frozen case manifest hash mismatch.")
+    frozen_embodiment = payload.get("resolved_embodiment")
+    expected = expected_embodiment.to_metadata()
+    if not isinstance(frozen_embodiment, dict) or any(
+        frozen_embodiment.get(name) != expected[name]
+        for name in ("embodiment_id", "config_hash", "source")
+    ):
+        raise ValueError(
+            "Frozen case embodiment is missing or differs from the resolved suite embodiment."
+        )
+    cases = []
+    ids = set()
+    for row in rows:
+        values = dict(row)
+        evidence = values.pop("validity_evidence")
+        values["reference_qpos"] = evidence["reference_qpos"]
+        for field in (
+            "start_qpos",
+            "full_start_qpos",
+            "target_waypoints",
+            "reference_qpos",
+        ):
+            if values[field] is not None:
+                values[field] = torch.tensor(
+                    values[field], device=device, dtype=torch.float32
+                )
+                if not torch.isfinite(values[field]).all():
+                    raise ValueError(f"Frozen {field} must be finite.")
+        if values["domain"] is not None:
+            domain = dict(values["domain"])
+            domain["required_capabilities"] = frozenset(
+                domain.get("required_capabilities", ())
+            )
+            values["domain"] = EvaluationDomain(**domain)
+        values["required_capabilities"] = frozenset(values["required_capabilities"])
+        case = BenchmarkCase(**values)
+        b, k = case.batch_size, case.num_waypoints
+        if (
+            case.case_id in ids
+            or b < 1
+            or k < 1
+            or case.start_qpos.ndim != 2
+            or case.start_qpos.shape[0] != b
+            or case.target_waypoints.shape != (b, k, 4, 4)
+            or case.reference_qpos.shape != (b, k, case.start_qpos.shape[-1])
+        ):
+            raise ValueError("Frozen case identity or tensor shape is invalid.")
+        ids.add(case.case_id)
+        cases.append(case)
+    return cases
