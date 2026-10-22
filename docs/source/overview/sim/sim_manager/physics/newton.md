@@ -18,6 +18,13 @@ then run `python -m pip check`. A local version such as `0.5.1+<revision>` satis
 the requirement. Use the paired candidate wheels until DexSim 0.5.1 is published
 to the package index.
 
+Keep Torch and TorchCodec paired when selecting an environment: Torch 2.7 uses
+TorchCodec 0.5, while the Torch 2.10 benchmark environment uses TorchCodec 0.10.
+For the latter, include `torch==2.10.0` and `torchcodec==0.10.0` in the install
+command or constraints file. The
+[TorchCodec compatibility table](https://github.com/meta-pytorch/torchcodec#installing-torchcodec)
+lists the supported pairs; `pip check` alone does not verify their binary ABI.
+
 ```{important}
 For scenes that combine an articulated robot with cloth or a volume soft body,
 start with **DexUni**. It is the DexSim coupled solver configuration for this
