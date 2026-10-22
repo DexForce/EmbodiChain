@@ -38,6 +38,25 @@ class _Sim:
 
 
 @pytest.fixture
+def usd_material_runtime():
+    from dexsim.spawn import MaterialDesc
+
+    fields = MaterialDesc.__dataclass_fields__
+    if not {"color_space", "texture_settings"} <= fields.keys():
+        pytest.skip("Runtime lacks USD color-space and texture-sampling support.")
+
+
+def test_usd_material_rejects_runtime_without_sampler_semantics():
+    from types import SimpleNamespace
+    from embodichain.lab.visualization.markers._robot_marker_assets import (
+        _validate_usd_material,
+    )
+
+    with pytest.raises(RuntimeError, match="Upgrade the visualization runtime"):
+        _validate_usd_material(SimpleNamespace(base_color=(1, 1, 1, 1)))
+
+
+@pytest.fixture
 def robot_path(tmp_path):
     path = tmp_path / "robot.urdf"
     path.write_text("""<robot name="fixture">
@@ -281,7 +300,9 @@ def test_gltf_linear_color_factor_is_encoded_for_marker_protocol():
 
 
 @pytest.mark.parametrize("packaged", [False, True])
-def test_usd_visual_origin_material_and_packaged_texture(tmp_path, packaged):
+def test_usd_visual_origin_material_and_packaged_texture(
+    tmp_path, packaged, usd_material_runtime
+):
     from PIL import Image
     from pxr import Gf, Sdf, Usd, UsdGeom, UsdShade, UsdUtils
 
@@ -347,7 +368,9 @@ def test_usd_visual_origin_material_and_packaged_texture(tmp_path, packaged):
     np.testing.assert_allclose(snapshot.material_uv_coords, [[0, 0], [1, 0], [0.5, 1]])
 
 
-def test_usd_texture_sampling_preserves_uv_transform_and_opacity(tmp_path):
+def test_usd_texture_sampling_preserves_uv_transform_and_opacity(
+    tmp_path, usd_material_runtime
+):
     from PIL import Image
     from dexsim.spawn import MaterialDesc, MaterialTextureDesc
     from embodichain.lab.visualization.markers._robot_marker_assets import _usd_texture
@@ -415,7 +438,7 @@ def test_shared_usd_source_selects_one_visual_and_rejects_ambiguous_address(tmp_
         )
 
 
-def test_usd_mesh_without_authored_uv_retains_material(tmp_path):
+def test_usd_mesh_without_authored_uv_retains_material(tmp_path, usd_material_runtime):
     from pxr import Gf, Sdf, Usd, UsdGeom, UsdShade
 
     path = tmp_path / "untextured.usda"
