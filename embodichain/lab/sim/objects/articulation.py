@@ -2845,8 +2845,11 @@ class Articulation(BatchEntity):
             # impulse when initialized away from their equality manifold.
             qpos = self._project_mimic_qpos(qpos)
         self.set_qpos(qpos, target=False, env_ids=local_env_ids)
-        # Set drive target to hold position.
-        self.set_qpos(qpos, target=True, env_ids=local_env_ids)
+        # Newton clear_dynamics synthesizes reset hold targets as bookkeeping,
+        # including the manager's coordinated clear below. Do not send a drive
+        # command here: effort-only providers correctly reject position targets.
+        if not self.body_data.is_newton_backend:
+            self.set_qpos(qpos, target=True, env_ids=local_env_ids)
 
         if clear_dynamics:
             self.clear_dynamics(env_ids=local_env_ids)

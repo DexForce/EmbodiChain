@@ -1473,6 +1473,21 @@ embodichain.lab.sim.physics.newton
 
    NewtonPhysicsBackend
 
+embodichain.lab.sim.physics.solvers.simple
+----------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.physics.solvers.simple
+
+The optional ``simple`` entry point provides a spring-slider example of native
+and functional Newton stepping. It requires a DexSim build exporting
+``FunctionalDynamics``; ordinary backend imports do not load this provider.
+See ``examples/simple_newton_solver/README.md`` for installation, supported
+models, gradients and Scene publication/reset semantics.
+
+.. autosummary::
+
+   SimpleSolverProvider
+
 embodichain.lab.sim.motion.planners.base_planner
 ------------------------------------------------
 
