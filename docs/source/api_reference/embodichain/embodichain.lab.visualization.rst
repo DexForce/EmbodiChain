@@ -130,6 +130,11 @@ Use either ``source`` or ``asset_path``/``prim_path``. URDF inputs use
 ``asset_path``. A ghost owns extracted package textures until removal; ordinary
 USD texture files are referenced directly.
 
+USD materials require runtime descriptors with explicit color-space and
+texture-sampling support. Older runtimes raise an upgrade error before material
+conversion; color spaces and sampler transforms are not guessed. URDF loading
+does not require these USD material interfaces.
+
 URDF sources also provide ``visualize_qpos`` and ``joint_names``. Callers supply
 every joint in that order, including mimic joints; FK does not expand mimic
 relations. USD sources use external link poses. Motion loading, time sampling,
@@ -168,7 +173,8 @@ the source asset. ``set_visibility`` retains instances; ``remove`` releases them
        pass
    ghost.remove()
 
-The executable example ``examples/sim/robot_markers.py`` accepts ``--asset``,
+The executable example ``examples/sim/robot_markers.py`` loads the Panda dataset
+by default. It accepts ``--asset`` to select another URDF, as well as
 ``--layers``, ``--mode``, ``--opacity`` and ``--viser``. Its generated reference
 motion does not advance physics. ``--headless --output-dir`` saves native images
 and separates creation, update/submission and camera-render timings.

@@ -177,6 +177,18 @@ def _linear_to_srgb(color: np.ndarray) -> np.ndarray:
     )
 
 
+def _validate_usd_material(material: object) -> None:
+    """Reject runtimes that cannot preserve USD color and sampler semantics."""
+    if not all(
+        hasattr(material, field) for field in ("color_space", "texture_settings")
+    ):
+        raise RuntimeError(
+            "USD robot materials require a runtime with explicit color-space "
+            "and texture-sampling support. Upgrade the visualization runtime "
+            "before loading this USD asset."
+        )
+
+
 def _usd_texture(prototype: MarkerPrototypeCfg, material: object) -> None:
     """Reuse USD texture lowering and bake its coordinates into marker UVs."""
     from dexsim.spawn import MaterialTextureDesc
@@ -356,6 +368,7 @@ def load_usd_visuals(
                     ]
                 for prototype in prototypes:
                     if material is not None:
+                        _validate_usd_material(material)
                         if material.base_color is not None:
                             color = np.array(material.base_color, dtype=float)
                             if material.color_space == "linear":
