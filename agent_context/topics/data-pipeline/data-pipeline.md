@@ -17,7 +17,7 @@ belongs to [data-assets](../data-assets/data-assets.md).
 | Bounded numeric LeRobot loading | `embodichain/data_pipeline/datasets/lerobot.py`: `LeRobotDataSource`, explicit field mapping |
 | Local Franka ChunkBC demo and offline comparisons | `examples/ods/simple_bc_demo/train.py`; local task/config/model/trainer/evaluator and evidence in the same directory |
 | Pure delivery capability and standard video decoding comparison | `examples/ods/data_stream_demo/run.py`, `suite.py`, `report.py`; no learner, real SDK/DataLoader decode and parent-owned prefetch quotas |
-| Fixed-budget visual training, diversity and total pipeline time | `examples/ods/data_stream_demo/train.py`, `training_metrics.py`, `training_report.py`; single/dual-camera BC, standard dataset recording and completed-training accounting |
+| Fixed-budget visual training, diversity and total pipeline time | `examples/ods/data_stream_demo/train.py`, `training_metrics.py`, `training_report.py`; single/dual-camera BC, standard dataset recording and completed-training accounting; `training_throughput.py` owns three-stage preflight guidance |
 | Commit/discard/finalization dispatch | `embodichain/lab/gym/envs/managers/dataset_manager.py` |
 | Synchronous LeRobot persistence | `embodichain/lab/gym/envs/managers/datasets.py`: `LeRobotRecorder` |
 | Background persistence | `embodichain/lab/gym/envs/managers/async_datasets.py`: `AsyncLeRobotRecorder` |
@@ -50,6 +50,10 @@ and trained-state diversity are outcomes. Record only completed optimizer
 updates as training coverage, and include recording/finalization and normal
 teardown in total pipeline time. Serial trace replay separately attributes
 generation/training overlap.
+Budget-aware prefetch and three-stage capacity guidance remain example-local;
+they do not change public engine/controller scheduling. The
+[visual demo README](../../../examples/ods/data_stream_demo/README.md)
+owns calibration and pilot commands, including isolated eager controls.
 All acquisition controls may overlap recording and generation within the same
 storage bounds. Worker SDK service timestamps remain separate from owner
 copy/wait spans. `training_audit.py` combines full numeric checks, source-window

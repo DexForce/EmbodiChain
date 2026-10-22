@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import signal
 import subprocess
@@ -45,6 +46,7 @@ __all__ = ["run_suite"]
 _ROOT = Path(__file__).resolve().parents[3]
 _SETTINGS = (
     "updates",
+    "prefetch_policy",
     "batch_size",
     "buffer_size",
     "producer_envs",
@@ -146,7 +148,15 @@ def _devices(args: argparse.Namespace) -> tuple[list[dict[str, Any]], dict[str, 
 def _groups(args: argparse.Namespace) -> list[list[dict[str, Any]]]:
     phase = "calibration" if args.suite == "calibrate" else args.suite
     settings = {
-        key: getattr(args, key, {"history_length": 2, "action_horizon": 16}.get(key))
+        key: getattr(
+            args,
+            key,
+            {
+                "history_length": 2,
+                "action_horizon": 16,
+                "prefetch_policy": "budget",
+            }.get(key),
+        )
         for key in _SETTINGS
     }
     if args.suite == "smoke":
@@ -159,12 +169,24 @@ def _groups(args: argparse.Namespace) -> list[list[dict[str, Any]]]:
             prediction_horizon=32,
         )
     elif args.suite == "calibrate":
-        settings.update(
-            buffer_size=8,
-            producer_envs=2,
-            updates=16,
-            batch_size=32,
-            episode_budget=128,
+        for key in ("buffer_size", "producer_envs", "batch_size", "episode_budget"):
+            if type(settings[key]) is not int or settings[key] < 1:
+                raise ValueError(f"Calibration {key} must be a positive integer")
+        updates = getattr(args, "calibration_updates", None)
+        if updates is not None and (type(updates) is not int or updates < 1):
+            raise ValueError("calibration_updates must be a positive integer")
+        settings["updates"] = (
+            updates
+            if updates is not None
+            else max(
+                16,
+                math.ceil(
+                    settings["buffer_size"]
+                    * settings["episode_budget"]
+                    / settings["batch_size"]
+                )
+                + 8,
+            )
         )
     seeds = (19001, 19002, 19003) if args.suite == "report" else (args.seed,)
     groups = []
@@ -177,26 +199,49 @@ def _groups(args: argparse.Namespace) -> list[list[dict[str, Any]]]:
             elif args.suite == "calibrate":
                 paths = [("ods_overlap", args.offline_episodes)]
             else:
-                counts = (8, 32, 128) if args.suite == "report" else (4,)
+                counts = (
+                    (8, 32, 128)
+                    if args.suite == "report"
+                    else ((32,) if args.suite == "pilot" else (4,))
+                )
                 paths = [("offline", n) for n in counts]
                 if (seed + (vision == "dual")) % 2:
                     paths.insert(0, ("ods_overlap", args.offline_episodes))
                 else:
                     paths.append(("ods_overlap", args.offline_episodes))
                 paths.append(("ods_serial", args.offline_episodes))
+            if args.suite == "pilot":
+                eager = ("ods_overlap", args.offline_episodes)
+                # Controls remain separate from primary data and alternate their
+                # position; Serial still follows its primary Overlap trace.
+                paths.insert(
+                    len(paths) if (seed + (vision == "dual")) % 2 else 0, eager
+                )
             jobs = []
-            for arm, episodes in paths:
+            for index, (arm, episodes) in enumerate(paths):
+                control = args.suite == "pilot" and index == (
+                    len(paths) - 1 if (seed + (vision == "dual")) % 2 else 0
+                )
                 label = f"offline{episodes}" if arm == "offline" else arm
                 output = (
                     args.output
                     if args.suite == "single"
-                    else args.output / label / vision / f"seed{seed}"
+                    else (
+                        args.output / "controls" / "eager" / vision / f"seed{seed}"
+                        if control
+                        else args.output
+                        / ("main" if args.suite == "pilot" else "")
+                        / label
+                        / vision
+                        / f"seed{seed}"
+                    )
                 )
                 trace = (
                     args.trace
                     if args.suite == "single"
                     else (
                         args.output
+                        / ("main" if args.suite == "pilot" else "")
                         / "ods_overlap"
                         / vision
                         / f"seed{seed}"
@@ -210,6 +255,9 @@ def _groups(args: argparse.Namespace) -> list[list[dict[str, Any]]]:
                     if args.suite == "calibrate"
                     else (2 if args.suite == "smoke" else args.evaluation_scenes)
                 )
+                job_settings = settings.copy()
+                if args.suite == "pilot":
+                    job_settings["prefetch_policy"] = "eager" if control else "budget"
                 jobs.append(
                     {
                         "arm": arm,
@@ -220,7 +268,7 @@ def _groups(args: argparse.Namespace) -> list[list[dict[str, Any]]]:
                         "offline_episodes": episodes,
                         "trace": trace,
                         "evaluation_scenes": scenes,
-                        "settings": settings.copy(),
+                        "settings": job_settings,
                     }
                 )
             groups.append(jobs)
@@ -687,65 +735,9 @@ def _finish(
 def _calibration(
     root: Path, results: list[dict[str, Any]], source_hashes: dict[str, str]
 ) -> dict[str, Any]:
-    observations = []
-    for result in results:
-        summary = json.loads((Path(result["output"]) / "summary.json").read_text())
-        metrics = summary.get("training_metrics", {})
-        events = (
-            [
-                json.loads(line)
-                for line in (Path(result["output"]) / "training-events.jsonl")
-                .read_text()
-                .splitlines()
-            ]
-            if (Path(result["output"]) / "training-events.jsonl").exists()
-            else []
-        )
-        training = [row for row in events if row.get("kind") == "update_completed"]
-        seconds = sum(
-            row["time_seconds"] - row["train_started_seconds"] for row in training
-        )
-        spans = [
-            (row["start_seconds"], row["end_seconds"])
-            for row in metrics.get("intervals", [])
-            if any(
-                name in row.get("name", "")
-                for name in ("generation", "initial_fill", "acquisition")
-            )
-        ]
-        merged = []
-        for start, end in sorted(spans):
-            if merged and start <= merged[-1][1]:
-                merged[-1][1] = max(end, merged[-1][1])
-            else:
-                merged.append([start, end])
-        generation_seconds = sum(end - start for start, end in merged)
-        observations.append(
-            {
-                "vision": summary["config"]["vision"],
-                "status": summary["status"],
-                "accepted_episode_rate": (
-                    metrics.get("published_sources", 0) / generation_seconds
-                    if generation_seconds
-                    else None
-                ),
-                "learner_updates_per_second": (
-                    len(training) / seconds if seconds else None
-                ),
-                "generation_observed_seconds": generation_seconds,
-                "training_observed_seconds": seconds,
-                "updates": len(training),
-                "output": result["output"],
-            }
-        )
-    packet = {
-        "schema": "ods-visual-training-calibration/v1",
-        "observations": observations,
-        "source_sha256": source_hashes,
-        "limits": "Preflight observations, not formal results or optimized reuse settings; host stage spans do not alone prove simultaneous GPU kernels.",
-    }
-    _write(root / "calibration.json", packet)
-    return packet
+    from .training_throughput import write_calibration
+
+    return write_calibration(root, results, source_hashes)
 
 
 def run_suite(args: argparse.Namespace) -> dict[str, Any]:
@@ -937,9 +929,20 @@ def run_suite(args: argparse.Namespace) -> dict[str, Any]:
     _write(args.output / "suite-summary.json", summary)
     if args.suite == "calibrate":
         summary["calibration"] = _calibration(args.output, results, source_hashes)
-    elif args.suite == "report":
+    elif args.suite in {"report", "pilot"}:
         from .training_report import write_report
 
-        summary["report"] = write_report(args.output, args.output / "training-report")
+        report_root = args.output / "main" if args.suite == "pilot" else args.output
+        summary["report"] = write_report(report_root, args.output / "training-report")
+        if args.suite == "pilot":
+            summary["scope"] = (
+                "Single-seed systems pilot: six main outcomes, two eager diagnostics; no three-seed or policy-learning claim"
+            )
+            summary["control_outputs"] = [
+                str(job["output"])
+                for group in _groups(args)
+                for job in group
+                if job["settings"]["prefetch_policy"] == "eager"
+            ]
     _write(args.output / "suite-summary.json", summary)
     return summary

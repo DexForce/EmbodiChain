@@ -27,6 +27,7 @@ import argparse
 from collections import Counter
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import random
@@ -41,7 +42,9 @@ def build_parser() -> argparse.ArgumentParser:
     """Expose explicit resource roles and real, fixed training-work budgets."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--suite", choices=("single", "smoke", "calibrate", "report"), default="single"
+        "--suite",
+        choices=("single", "smoke", "calibrate", "pilot", "report"),
+        default="single",
     )
     parser.add_argument(
         "--arm", choices=("offline", "ods_overlap", "ods_serial"), default="ods_overlap"
@@ -58,6 +61,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--buffer-size", type=int, default=8)
     parser.add_argument("--producer-envs", type=int, default=2)
     parser.add_argument("--episode-budget", type=int, default=128)
+    parser.add_argument(
+        "--prefetch-policy", choices=("budget", "eager"), default="budget"
+    )
+    parser.add_argument("--calibration-updates", type=int)
     parser.add_argument("--offline-episodes", type=int, default=32)
     parser.add_argument("--history-length", type=int, default=2)
     parser.add_argument("--prediction-horizon", type=int, default=32)
@@ -120,6 +127,12 @@ def _validate(args: argparse.Namespace) -> None:
         raise ValueError("A complete retained block must fund at least one batch")
     if args.offline_episodes % args.buffer_size:
         raise ValueError("Offline episode count must be a multiple of C")
+    if args.prefetch_policy not in ("budget", "eager"):
+        raise ValueError("prefetch_policy must be budget or eager")
+    if args.calibration_updates is not None and (
+        type(args.calibration_updates) is not int or args.calibration_updates < 1
+    ):
+        raise ValueError("calibration_updates must be a positive integer or None")
     if args.arm == "ods_serial" and args.trace is None:
         raise ValueError("Serial attribution requires the corresponding overlap trace")
     if (
@@ -130,6 +143,69 @@ def _validate(args: argparse.Namespace) -> None:
         raise ValueError(
             "The real experiment requires separate CUDA generation and training devices"
         )
+
+
+def _prefetch_decision(
+    *,
+    remaining_updates: int,
+    batch_size: int,
+    remaining_credits: int,
+    handoff_seconds: float | None,
+    update_seconds: float | None,
+    policy: str = "budget",
+) -> dict[str, Any]:
+    """Request necessary supply, or a refresh likely to reach a future update.
+
+    K remains a maximum reuse budget. Sufficient current credits do not prevent
+    timely refreshes when production is faster than the remaining learner work.
+    Unknown timing is conservative; quota shortages always request supply.
+    """
+    if (
+        type(remaining_updates) is not int
+        or remaining_updates < 0
+        or type(batch_size) is not int
+        or batch_size < 1
+        or type(remaining_credits) is not int
+        or remaining_credits < 0
+        or policy not in ("budget", "eager")
+    ):
+        raise ValueError(
+            "Prefetch requires nonnegative work/credits and a valid policy"
+        )
+    for value in (handoff_seconds, update_seconds):
+        if value is not None and (
+            type(value) not in (int, float) or not math.isfinite(value) or value <= 0
+        ):
+            raise ValueError("Measured prefetch timings must be finite and positive")
+    remaining_seconds = (
+        None
+        if update_seconds is None
+        else max(0, remaining_updates - 1) * update_seconds
+    )
+    if remaining_updates == 0:
+        request, reason = False, "training_complete"
+    elif remaining_credits < remaining_updates * batch_size:
+        request, reason = True, "quota_required"
+    elif remaining_updates == 1:
+        request, reason = False, "last_update_funded"
+    elif policy == "eager":
+        request, reason = True, "eager_control"
+    elif handoff_seconds is None or update_seconds is None:
+        request, reason = False, "timing_not_observed"
+    elif handoff_seconds < remaining_seconds:
+        request, reason = True, "timely_refresh"
+    else:
+        request, reason = False, "arrival_after_remaining_work"
+    return {
+        "request": request,
+        "reason": reason,
+        "policy": policy,
+        "remaining_updates": remaining_updates,
+        "remaining_credits": remaining_credits,
+        "handoff_seconds": handoff_seconds,
+        "ready_update_seconds": update_seconds,
+        "remaining_refresh_window_seconds": remaining_seconds,
+    }
 
 
 class _Experiment:
@@ -178,6 +254,10 @@ class _Experiment:
         self.resources: dict[str, Any] = {}
         self.cleanup: dict[str, Any] = {}
         self.gpu_step_ms: list[float] = []
+        self.ready_update_seconds: list[float] = []
+        self.generation_seconds: list[float] = []
+        self.snapshot_seconds: list[float] = []
+        self.last_prefetch_decision: tuple[int, str, bool] | None = None
         self.closed = False
         self.retained_probe = None
         self.retained_probe_hash: str | None = None
@@ -295,11 +375,14 @@ class _Experiment:
                 metadata={"numeric_sha256": digest},
             )
             published = max(published, timestamp)
+        copied_end = self.now()
         self.metrics.interval(
-            "snapshot_copy", copied, self.now(), generation=generation
+            "snapshot_copy", copied, copied_end, generation=generation
         )
         begin = self.generation_starts.get(generation, self.origin_ns)
         self.metrics.interval("generation", begin, published, generation=generation)
+        self.generation_seconds.append((published - begin) / 1e9)
+        self.snapshot_seconds.append((copied_end - copied) / 1e9)
         self.generation = generation
         return episodes
 
@@ -524,6 +607,7 @@ class _Experiment:
         )
         self.completed_updates += 1
         self.training_completed_ns = completed
+        self.ready_update_seconds.append((completed - requested_ns) / 1e9)
         if self.block is not None:
             self.block.mark_trained(plan)
         self.metrics.complete_update(
@@ -687,14 +771,64 @@ class _Experiment:
         self.cleanup["reader"] = self.reader.close()
         self.reader = None
 
+    def prefetch(self) -> int | None:
+        """Decide at a batch boundary, before reserving the next training batch."""
+        sampler = self.block.sampler
+        credits = sum(
+            self.args.episode_budget - sampler.delivered[key] - sampler.reserved[key]
+            for key in sampler.delivered
+        )
+        recording_wait = 0.0
+        if self.staging is not None:
+            stats = self.writer.stats
+            backlog = len(self.registry) - stats["written_episodes"]
+            must_finish = max(0, backlog - stats["queue_capacity"] - 1)
+            if must_finish:
+                recording_wait = (
+                    must_finish
+                    * stats["sdk_write_encode_seconds"]
+                    / stats["written_episodes"]
+                    if stats["written_episodes"]
+                    else None
+                )
+        handoff = (
+            max(max(self.generation_seconds[-3:]), recording_wait)
+            + max(self.snapshot_seconds[-3:])
+            if self.generation_seconds
+            and self.snapshot_seconds
+            and recording_wait is not None
+            else None
+        )
+        decision = _prefetch_decision(
+            remaining_updates=self.args.updates - self.completed_updates,
+            batch_size=self.args.batch_size,
+            remaining_credits=credits,
+            handoff_seconds=handoff,
+            update_seconds=(
+                min(self.ready_update_seconds[-8:])
+                if len(self.ready_update_seconds) >= 3
+                else None
+            ),
+            policy=self.args.prefetch_policy,
+        )
+        signature = self.generation, decision["reason"], decision["request"]
+        if signature != self.last_prefetch_decision:
+            self.metrics.event(
+                "prefetch_decision", self.now(), generation=self.generation, **decision
+            )
+            self.last_prefetch_decision = signature
+        return self.flow.request_refill() if decision["request"] else None
+
     def overlap(self) -> None:
         episodes, self.initial_episodes = self.initial_episodes, None
         self.install(episodes, record=False)
         del episodes
         in_block = 0
-        pending = self.flow.request_refill() if self.args.updates > 1 else None
+        pending = self.prefetch()
         while self.completed_updates < self.args.updates:
             self.flow.poll()
+            if pending is None:
+                pending = self.prefetch()
             ready = (
                 pending is not None
                 and self.engine.get_flow_status()["completed_generation"] >= pending
@@ -704,11 +838,7 @@ class _Experiment:
                 self.retire()
                 self.install(self.take(pending))
                 in_block = 0
-                pending = (
-                    self.flow.request_refill()
-                    if self.args.updates - self.completed_updates > 1
-                    else None
-                )
+                pending = self.prefetch()
             requested = self.now()
             try:
                 plan = self.block.next_plan(self.args.batch_size)

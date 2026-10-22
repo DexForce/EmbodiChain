@@ -490,8 +490,20 @@ learning-safe value. It is an upper bound, not a requirement to train every
 trajectory 128 times.
 
 After the initial cache is ready, retain an independently owned C-episode
-training block and request the next generation. Train the current block while
-it is generated and recorded. Each block must have at least one completed
+training block. Default budget-aware prefetch requests the next generation
+when the current block's unreserved, undelivered credits cannot fund the
+remaining optimizer updates. With sufficient credits, it requests a refresh
+only when measured arrival time leaves room for a completed future update.
+Estimate arrival as the maximum of recent generation service and old-block
+recording-staging release time, plus snapshot time; these services overlap.
+Estimate remaining training using recent fast preparation/transfer/update
+times after at least three completed updates, excluding generation/quota waits.
+Unknown estimates defer optional refreshes but never necessary supply.
+Reconsider at each batch boundary, coalesce while a request is pending, and
+preserve every accepted generation if a prediction misses the deadline.
+The explicit `eager` diagnostic keeps the original request-after-switch policy.
+Train the current block while its successor is generated and recorded.
+Each block must have at least one completed
 batch covering all its sources before replacement; validate B>=C for this
 rule. Once the next block is ready, switch at a batch boundary. While it is
 not ready, continue the current block only within K; wait when credits are
@@ -568,9 +580,20 @@ Record generation, recording, preparation/decode/transfer, synchronized actual
 training, waiting, finalization and cleanup spans. Intervals may overlap;
 their sum is not total time. Stage overlap alone is not proof of simultaneous
 GPU kernels. Keep actual device utilization and device training timings beside
-the host timeline. Before the formal matrix, measure accepted episode rate
-gamma and real update rate nu, including a concurrent check, then freeze the
-configuration and report the producer/learner imbalance. Do not add delays,
+the host timeline. Before the formal matrix, measure accepted generation rate,
+writer write/encode busy-service rate and complete ready-batch learner rate,
+including a concurrent check. Keep the pure model rate separate. The effective
+episode supply estimate is the minimum of generation and recording capacities;
+its protected update ceiling is `gamma_effective*K/B`. Compare that ceiling
+with ready batch preparation + transfer + optimizer throughput, not just
+device kernel timing. Startup, staging and cleanup remain separate costs.
+Sweep feasible P values under matched hardware/recipes and choose the smallest
+measured P within 90% of the best measured effective supply. This is a measured
+capacity rule, not a search for the best K or a learning guarantee. The implied
+K for a fully busy learner is diagnostic only; keep the reuse guard bounded.
+Preflight defaults to `max(16,ceil(C*K/B)+8)` updates and explicitly reports
+whether later generations reached training. Then freeze the configuration
+and report the producer/recorder/learner imbalance. Do not add delays,
 empty compute or unnecessary updates to create apparent savings.
 SDK recording spans come from the single writer thread and include writing,
 encoding and recording bookkeeping. Reader spans come from actual worker fetch
@@ -643,8 +666,13 @@ requires information from both views. Check save/reload, CPU/CUDA FP32
 tolerances and wrong-view rejection. Production tests own the shared encoder
 contract; actual example qualification runs own the integration evidence.
 
-Then run engineering smoke, metric fixtures, throughput preflight and the
-formal matrix. The formal protocol has four primary arms×two visual modes×
+Then run engineering smoke, metric fixtures, throughput preflight and a
+one-seed scheduling pilot before the formal matrix. The pilot holds the same
+training budget and hardware per visual condition across Offline-32,
+budget-aware overlap and its serial replay; eager overlap is an independently
+reported control. Its paired engineering estimates do not become three-seed
+formal conclusions. A zero-scene pilot records that policy evaluation was not
+requested. The formal protocol has four primary arms×two visual modes×
 three fixed seeds =24 runs, plus six serial replays =30 runs. Alternate arm
 order, regenerate primary data and preserve every attempt. Do not combine
 smoke/calibration inputs with the qualified formal report.

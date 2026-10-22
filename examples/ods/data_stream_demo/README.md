@@ -40,7 +40,15 @@ paths reuse their fixed corpora as required and disclose the resulting reuse.
 ODS switches to a ready new block at a batch boundary after at least one
 completed batch has covered every current source. It keeps training the
 current block while production runs, within K, and waits when credits are
-exhausted. It does not repeat early data without a bound. At update U it stops
+exhausted. The default `--prefetch-policy budget` requests new data when the
+remaining credits cannot fund the remaining updates, or measured generation,
+recording backpressure and snapshot times predict a refresh before training
+ends. The latter decision uses recent fast, complete batch/update times, not
+the first cold CNN step. Unknown timing permits quota-required requests only.
+K remains a maximum: a fast producer can replace a block before K is spent.
+`--prefetch-policy eager` retains the earlier request-after-every-switch rule
+as a diagnostic control; it can accept data that never reaches training.
+ODS does not repeat early data without a bound. At update U it stops
 requesting new generations, completes any in-flight generation and records
 all accepted data, including untrained final sources. Those sources do not
 increase diversity metrics.
@@ -78,6 +86,10 @@ python -m examples.ods.data_stream_demo.train \
   --suite calibrate --gpu-ids 2 3 --output outputs/ods-visual-calibration
 
 python -m examples.ods.data_stream_demo.train \
+  --suite pilot --gpu-ids 2 3 --evaluation-scenes 0 \
+  --output outputs/ods-visual-pilot
+
+python -m examples.ods.data_stream_demo.train \
   --suite report --gpu-ids 2 3 --output outputs/ods-visual-formal
 ```
 
@@ -87,6 +99,59 @@ execution has 24 primary runs: four paths×two camera modes×three fixed seeds,
 plus six matching serial replays, for 30 runs total. Primary runs regenerate
 their data, rotate path order and retain failed/slower attempts. Preflight
 measures real producer and learner throughput, not a sleep consumer.
+
+### Select a configuration from measured capacity
+
+Preflight preserves the requested C/P/B/K instead of substituting a fixed
+producer configuration. Its default update count is
+`max(16, ceil(C*K/B)+8)`, so it can observe new-generation use after the first
+block's credits run out. `--calibration-updates` overrides that diagnostic
+budget; a short run without later-generation training is explicitly marked
+insufficient for steady-supply conclusions.
+
+Measure three capacities in each visual condition: accepted generation
+`gamma_gen` (episodes/s), SDK write/encode busy-service `gamma_record`
+(episodes/s), and ready batch preparation + transfer + synchronized training
+`mu_ready` (updates/s). The pure model update rate is retained separately.
+Use `gamma_effective = min(gamma_gen, gamma_record)` as a bottleneck estimate,
+then compare `gamma_effective*K/B` with `mu_ready`. This is a service-capacity
+diagnostic, not an end-to-end speed prediction: staging, startup, shutdown and
+shared resource contention still cost time. Never add overlapping stage
+durations and call the sum pipeline time.
+
+Sweep only feasible P values that divide C, holding camera settings, hardware,
+CPU affinity, B, K and model fixed. Select the smallest measured P reaching
+90% of the best measured effective supply for that condition. Incompatible
+hardware/recipes or unqualified runs cannot enter that selection. Increasing P
+cannot solve a recorder bottleneck. The implied K for full learner utilization
+is reported as a diagnostic, **not** permission to raise the reuse guard or a
+recommended learning setting. Keep K bounded and report unavoidable waiting
+when production cannot support the actual model workload.
+
+For example, measure P=2/4/8 on the same admitted GPU pair and compare the
+saved calibration packets. Recheck device availability before each command:
+
+```bash
+python -m examples.ods.data_stream_demo.train --suite calibrate \
+  --producer-envs 2 --gpu-ids 2 3 --output outputs/ods-capacity/p2
+python -m examples.ods.data_stream_demo.train --suite calibrate \
+  --producer-envs 4 --gpu-ids 2 3 --output outputs/ods-capacity/p4
+python -m examples.ods.data_stream_demo.train --suite calibrate \
+  --producer-envs 8 --gpu-ids 2 3 --output outputs/ods-capacity/p8
+python -m examples.ods.data_stream_demo.training_throughput \
+  outputs/ods-capacity/p2 outputs/ods-capacity/p4 outputs/ods-capacity/p8 \
+  --output outputs/ods-capacity/selection
+```
+
+The one-seed `pilot` runs Offline-32, budget-aware ODS overlap and its exact
+numeric/source-anchor serial replay, plus a separately reported eager control,
+in both camera modes. Each mode keeps the same GPU pair and eight CPU cores
+across all four paths. It holds the actual training budget fixed, retains
+full-corpus audits, and writes its primary report from `main/` so the eager
+control cannot contaminate baseline aggregates. It is a scoped engineering
+comparison, not the three-seed formal study. Zero evaluation scenes explicitly
+means no new policy-quality evidence. Run the full matrix only after this
+pilot establishes the intended resource and scheduling behavior.
 
 The supervisor also owns device selection for single runs. It masks the
 selected UUID pair, assigns logical `cuda:0` to generation and `cuda:1` to

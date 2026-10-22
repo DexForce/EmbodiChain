@@ -182,6 +182,10 @@ def _load(root: Path) -> list[dict[str, Any]]:
 def _qualification(run: dict[str, Any]) -> list[str]:
     summary, metrics, config = run["summary"], run["metrics"], run["config"]
     reasons = []
+    if config.get("phase") == "pilot" and config.get("prefetch_policy") != "budget":
+        reasons.append(
+            "pilot primary comparisons require explicit budget prefetch; eager is a separate diagnostic"
+        )
     if run.get("duplicate_cell"):
         reasons.append("multiple qualified attempts for the same arm/vision/seed")
     if summary["status"] != "complete":
@@ -217,7 +221,7 @@ def _qualification(run: dict[str, Any]) -> list[str]:
         reasons.append("training cap audit absent or failed")
     actual = (
         config.get("worker") is True
-        or config.get("phase") in {"single", "smoke", "calibration", "report"}
+        or config.get("phase") in {"single", "smoke", "calibration", "report", "pilot"}
         or "device_supervision" in summary
         or "supervisor_total_seconds" in summary
         or any(
@@ -245,7 +249,7 @@ def _qualification(run: dict[str, Any]) -> list[str]:
         evaluation = summary.get("evaluation")
         if (
             (type(expected) is not int or expected < 0)
-            and config.get("phase") != "report"
+            and config.get("phase") not in {"report", "pilot"}
             and isinstance(evaluation, dict)
         ):
             # Older smoke records predate the persisted request. Their actual
@@ -364,6 +368,10 @@ def _fairness(run: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     if type(summary.get("requested_evaluation_scenes")) is int:
         evidence["requested_evaluation_scenes"] = summary["requested_evaluation_scenes"]
     reasons = []
+    if "prefetch_policy" in config:
+        if config["prefetch_policy"] not in {"budget", "eager"}:
+            reasons.append("unknown prefetch policy")
+        evidence["prefetch_policy"] = config["prefetch_policy"]
     for key in ("initial_model_sha256", "normalization_sha256"):
         value = metrics.get(key)
         if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
@@ -459,6 +467,8 @@ def _fairness(run: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
             "--vision": config.get("vision"),
             "--arm": config.get("arm"),
         }
+        if "prefetch_policy" in config:
+            expected_flags["--prefetch-policy"] = config["prefetch_policy"]
         for flag, value in expected_flags.items():
             if (
                 not isinstance(arguments, list)
@@ -563,7 +573,7 @@ def _new_formal_contract_errors(run: dict[str, Any]) -> list[str]:
     sparse-audit scope. Superseded formal inputs lack the new contract and may
     be inspected as diagnostics, but cannot enter the refreshed formal claims.
     """
-    if run["config"].get("phase") != "report":
+    if run["config"].get("phase") not in {"report", "pilot"}:
         return []
     metrics, summary = run["metrics"], run["summary"]
     errors = []
@@ -729,9 +739,15 @@ def _new_formal_contract_errors(run: dict[str, Any]) -> list[str]:
 
 def _paired(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows = []
+    pilot = all(run["config"].get("phase") == "pilot" for run in runs)
+    baselines = (
+        ("offline32", "ods_serial")
+        if pilot
+        else ("offline8", "offline32", "offline128", "ods_serial")
+    )
     for vision in _VISIONS:
         overlap = _group(runs, "ods_overlap", vision)
-        for arm in ("offline8", "offline32", "offline128", "ods_serial"):
+        for arm in baselines:
             baseline = _group(runs, arm, vision)
             seeds = sorted(
                 {str(run["config"].get("seed")) for run in overlap + baseline}
@@ -745,6 +761,18 @@ def _paired(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 ]
                 reasons: list[str] = []
                 evidence = {}
+                if (
+                    pilot
+                    and len(
+                        {
+                            str(run["config"].get("seed"))
+                            for run in runs
+                            if run["config"]["vision"] == vision
+                        }
+                    )
+                    != 1
+                ):
+                    reasons.append("pilot scope requires exactly one seed per vision")
                 if len(left) != 1 or len(right) != 1:
                     reasons.append(
                         "requires exactly one qualified run per arm and seed"
@@ -754,9 +782,9 @@ def _paired(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
                         facts, errors = _fairness(run)
                         evidence[role] = facts
                         reasons.extend(f"{role}: {error}" for error in errors)
-                        if run["config"].get("phase") != "report":
+                        if run["config"].get("phase") not in {"report", "pilot"}:
                             reasons.append(
-                                f"{role}: comparative speedup requires phase=report, observed {run['config'].get('phase')!r}"
+                                f"{role}: comparative speedup requires phase=report or pilot, observed {run['config'].get('phase')!r}"
                             )
                         audit = run["summary"].get("post_audit")
                         if (
@@ -767,6 +795,14 @@ def _paired(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
                             reasons.append(
                                 f"{role}: missing successful post-timing corpus audit"
                             )
+                    if left[0]["config"].get("phase") != right[0]["config"].get(
+                        "phase"
+                    ):
+                        reasons.append("pilot and formal phases cannot be paired")
+                    if evidence["baseline"].get("prefetch_policy") != evidence[
+                        "overlap"
+                    ].get("prefetch_policy"):
+                        reasons.append("paired prefetch_policy differs")
                     for key in (
                         "training_budget",
                         "initial_model_sha256",
@@ -789,6 +825,10 @@ def _paired(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "excluded_reasons": reasons,
                     "fairness_evidence": evidence,
                 }
+                if pilot:
+                    row["scope"] = (
+                        "single-seed pilot; not a three-seed formal comparison"
+                    )
                 if not reasons:
                     offline = float(left[0]["metrics"]["total_seconds"])
                     ods = float(right[0]["metrics"]["total_seconds"])
@@ -1123,10 +1163,18 @@ def write_report(root: Path, output: Path | None = None) -> dict[str, Any]:
     """
     root = Path(root)
     output = Path(output) if output is not None else root / "training-report"
+    if (
+        (root / "main").is_dir()
+        and (root / "suite-summary.json").is_file()
+        and _json(root / "suite-summary.json").get("phase") == "pilot"
+    ):
+        root = root / "main"
     output.mkdir(parents=True, exist_ok=True)
     runs = _load(root)
     aggregates = _aggregate(runs)
     pairs = _paired(runs)
+    pilot = all(run["config"].get("phase") == "pilot" for run in runs)
+    display_arms = ("offline32", "ods_overlap", "ods_serial") if pilot else _ARMS
     report = {
         "schema": "ods-training-report/v1",
         "input": str(root.resolve()),
@@ -1152,6 +1200,10 @@ def write_report(root: Path, output: Path | None = None) -> dict[str, Any]:
             for run in runs
         ],
     }
+    if pilot:
+        report["experiment_scope"] = (
+            "single-seed systems pilot; eager diagnostics excluded; no policy-learning claim"
+        )
     (output / "report.json").write_text(
         json.dumps(report, indent=2, allow_nan=False) + "\n", encoding="utf-8"
     )
@@ -1165,11 +1217,16 @@ def write_report(root: Path, output: Path | None = None) -> dict[str, Any]:
     lines = [
         "# ODS visual training: fixed-work time and diversity",
         "",
-        f"Qualified runs: **{report['qualified_runs']}/{len(runs)}**; qualified formal pairs: **{report['qualified_paired_comparisons']}**. Failed, unsupported and unqualified runs remain in report.json and are excluded from aggregate values and paired time ratios.",
+        f"Qualified runs: **{report['qualified_runs']}/{len(runs)}**; qualified {'pilot' if pilot else 'formal'} pairs: **{report['qualified_paired_comparisons']}**. Failed, unsupported and unqualified runs remain in report.json and are excluded from aggregate values and paired time ratios.",
         "",
         "Each result completes the declared optimizer-update, batch and valid-target budget. Data amount and final coverage may differ. Ratios compare total pipeline time, including acquisition, recording, decode, actual training, checkpoint and normal teardown; they do not establish equal policy quality or a universal ODS speedup.",
         "",
     ]
+    if pilot:
+        lines += [
+            "Single-seed systems pilot. Eager controls remain outside main data and primary ratios. Zero-scene evaluation is systems-only and provides no policy-quality evidence.",
+            "",
+        ]
     for vision in _VISIONS:
         lines += [
             f"## {vision}",
@@ -1179,7 +1236,7 @@ def write_report(root: Path, output: Path | None = None) -> dict[str, Any]:
             "| Path | n | Total s | Trained sources | Effective sources | XY cells / 64 | Unique targets |",
             "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
         ]
-        for arm in _ARMS:
+        for arm in display_arms:
             group = aggregates[vision][arm]
             lines.append(
                 f"| {_LABELS[arm]} | {group['total_seconds']['n']} | {_formatted(group['total_seconds'])} | {_formatted(group['trained_sources'])} | {_formatted(group['effective_sources'])} | {_formatted(group['initial_xy_occupied_cells'])} | {_formatted(group['unique_target_frames'])} |"
@@ -1189,7 +1246,11 @@ def write_report(root: Path, output: Path | None = None) -> dict[str, Any]:
             "| Baseline / ODS overlap | Paired seeds | Total-time ratio median [min, max] |",
             "| --- | ---: | ---: |",
         ]
-        for arm in ("offline8", "offline32", "offline128", "ods_serial"):
+        for arm in (
+            ("offline32", "ods_serial")
+            if pilot
+            else ("offline8", "offline32", "offline128", "ods_serial")
+        ):
             values = [
                 row["baseline_over_overlap"]
                 for row in pairs
@@ -1205,7 +1266,7 @@ def write_report(root: Path, output: Path | None = None) -> dict[str, Any]:
             "| Path | CPU mean / assigned capacity % | Simulation GPU board mean % | Training GPU board mean % |",
             "| --- | ---: | ---: | ---: |",
         ]
-        for arm in _ARMS:
+        for arm in display_arms:
             resource = report["resource_aggregates"][vision][arm]
             lines.append(
                 f"| {_LABELS[arm]} | {_formatted(resource['cpu_assigned_percent'])} | {_formatted(resource['simulation_gpu_board_percent'])} | {_formatted(resource['training_gpu_board_percent'])} |"
@@ -1217,7 +1278,7 @@ def write_report(root: Path, output: Path | None = None) -> dict[str, Any]:
             "| Path | Sampled PSS max GiB | Sampled owned GPU max GiB | Dataset MiB | Checkpoints MiB |",
             "| --- | ---: | ---: | ---: | ---: |",
         ]
-        for arm in _ARMS:
+        for arm in display_arms:
             resource = report["resource_aggregates"][vision][arm]
             lines.append(
                 f"| {_LABELS[arm]} | {_formatted(resource['sampled_pss_gib'])} | {_formatted(resource['sampled_owned_gpu_gib'])} | {_formatted(resource['dataset_mib'])} | {_formatted(resource['checkpoint_mib'])} |"
