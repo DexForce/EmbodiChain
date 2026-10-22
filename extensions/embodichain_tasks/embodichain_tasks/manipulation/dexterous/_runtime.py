@@ -186,7 +186,9 @@ class DexSimManipulationEnv:
             "tolerance": float(self.source.opt.tolerance),
             "ls_tolerance": float(self.source.opt.ls_tolerance),
             "ccd_tolerance": float(self.source.opt.ccd_tolerance),
-            "njmax": 512,
+            # Face-turn contacts and joint constraints exceed 512 rows in
+            # large batches. Keep headroom for the 256-contact allocation.
+            "njmax": 2048 if task_id == "M3" else 512,
             "nconmax": 256,
         }
         self.backend_option_overrides = {}

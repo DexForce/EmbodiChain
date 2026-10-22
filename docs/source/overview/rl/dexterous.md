@@ -64,3 +64,9 @@ actuators, tendons and collision masks before stepping. These adapters need
 engine-owned public interfaces before this task collection can be treated as
 a backend-independent release. The local validation versions and publication
 status must accompany a release; short-run checkpoints are not converged policies.
+
+The face-turn task reserves 2048 constraint rows per world. A 512-row budget
+can truncate constraints during large-batch training. Solver iteration limits
+remain distinct from capacity limits: source defaults for LEAP tasks use
+5 solver iterations and 8 line-search iterations on MJWarp; increase the
+iteration budget explicitly when validating convergence.
