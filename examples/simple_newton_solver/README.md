@@ -8,11 +8,12 @@ the live Scene, and partial functional/native reset in two environments.
 ## Prerequisite
 
 Use Python 3.10 or 3.11 with Torch and a DexSim build containing the
-`FunctionalDynamics` service revision of
+`FunctionalDynamics` service and `Scene.dynamics_capabilities()` revision of
 [DexSim MR !1483](http://192.168.3.16/Engine/dexverse/-/merge_requests/1483).
 The released DexSim pin in EmbodiChain does not yet provide that API. Normal
 EmbodiChain installations remain supported; this optional example requires the
-integration SDK. The older callback revision of !1483 is also insufficient.
+integration SDK. The older callback and early service revisions without the
+capability query are also insufficient.
 
 In a dedicated EmbodiChain development environment, install this checkout and
 then the matching SDK wheel. Use `--no-deps` only for the EmbodiChain checkout,
@@ -38,7 +39,11 @@ tests. Ordinary CI using the released SDK skips this optional test module; that
 skip is not validation of the solver:
 
 ```bash
-python -c 'from dexsim.engine.newton_physics import FunctionalDynamics'
+python - <<'PY'
+from dexsim.engine.newton_physics import FunctionalDynamics
+from dexsim.scene import Scene
+assert callable(getattr(Scene, "dynamics_capabilities", None))
+PY
 python -m pytest tests/sim/physics/test_simple_solver.py -q --run-gpu
 ```
 

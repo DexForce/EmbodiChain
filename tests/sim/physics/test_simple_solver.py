@@ -179,7 +179,10 @@ def test_fixed_loop_cannot_be_treated_as_an_independent_slider():
 
 @pytest.mark.requires_sim
 @pytest.mark.parametrize("owner", ["articulation", "manager"])
-def test_effort_only_reset_restores_selected_environment(tmp_path, owner):
+@pytest.mark.parametrize("requires_grad", [False, True])
+def test_effort_only_reset_restores_selected_environment(
+    tmp_path, owner, requires_grad
+):
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
     from embodichain.lab.sim.cfg import ArticulationCfg
 
@@ -198,7 +201,7 @@ def test_effort_only_reset_restores_selected_environment(tmp_path, owner):
             physics_cfg=NewtonPhysicsCfg(
                 device="cpu",
                 gravity=(0, 0, 0),
-                requires_grad=True,
+                requires_grad=requires_grad,
                 collision_cfg=None,
                 solver_cfg={"solver_type": "simple"},
             ),
@@ -207,8 +210,12 @@ def test_effort_only_reset_restores_selected_environment(tmp_path, owner):
     )
     art = None
     try:
-        art = sim.add_articulation(ArticulationCfg(uid="slider", fpath=str(asset)))
+        initial = 0.0 if requires_grad else 0.1
+        art = sim.add_articulation(
+            ArticulationCfg(uid="slider", fpath=str(asset), init_qpos=[initial])
+        )
         sim.prepare()
+        torch.testing.assert_close(art.get_qpos(), torch.full((2, 1), initial))
         art.set_qpos(torch.tensor([[0.2], [0.4]]), target=False)
         art.set_qvel(torch.tensor([[0.3], [0.5]]), target=False)
         with pytest.raises(NotImplementedError, match="joint_target_q"):
@@ -217,9 +224,11 @@ def test_effort_only_reset_restores_selected_environment(tmp_path, owner):
             art.reset(env_ids=[0])
         else:
             sim.reset_objects_state(env_ids=[0])
-        torch.testing.assert_close(art.get_qpos(), torch.tensor([[0.0], [0.4]]))
+        torch.testing.assert_close(art.get_qpos(), torch.tensor([[initial], [0.4]]))
         torch.testing.assert_close(art.get_qvel(), torch.tensor([[0.0], [0.5]]))
-        torch.testing.assert_close(art.get_qpos(target=True)[0], torch.zeros(1))
+        torch.testing.assert_close(
+            art.get_qpos(target=True)[0], torch.tensor([initial])
+        )
     finally:
         art = None
         sim.destroy(exit_process=False)

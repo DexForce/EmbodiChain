@@ -42,6 +42,14 @@ rollout uses `publish=False`; publishing advances the live clock once and must
 not be paired with a manager update for the same transition. Scene functional
 reset selects arena names, including the separate global `default` arena.
 
+Articulation initialization also calls `reset(clear_dynamics=False)` without a
+later coordinated clear. Preserve its position hold targets and mimic target
+propagation when the solver accepts them. Query the finalized public
+`Scene.dynamics_capabilities().supported_control_fields`; only an explicit
+exclusion of `joint_target_q` suppresses that command. Released SDKs predating
+extensions retain their unrestricted target behavior. Extension SDKs missing
+the query require an upgrade instead of guessing support from solver names.
+
 `collision_cfg` owns the external Newton contact pipeline. Its
 `update_interval=None` updates at the first local solver substep; positive `k`
 updates at `0, k, 2k, ...`, reusing contacts between updates. `collision_cfg=None`
