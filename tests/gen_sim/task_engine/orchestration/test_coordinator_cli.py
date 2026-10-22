@@ -18,12 +18,31 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+import sys
 import pytest
 from embodichain.gen_sim.task_engine import cli
 from embodichain.gen_sim.task_engine.orchestration.artifacts import ArtifactTransaction
 from embodichain.gen_sim.task_engine.orchestration.coordinator import (
     TaskEngineCoordinator,
 )
+from embodichain.gen_sim.task_engine.robot_profiles import _require_robot_assets
+from embodichain.gen_sim.task_engine.workflow import _error_record
+
+
+def test_workflow_preserves_original_exception():
+    assert _error_record(ModuleNotFoundError("missing robot package")) == {
+        "type": "ModuleNotFoundError",
+        "failure_type": "terminal",
+        "message": "missing robot package",
+    }
+
+
+@pytest.mark.parametrize("profile", ["dual_franka", "dual_ur10", "dual_tianji"])
+@pytest.mark.parametrize("missing", ["embodichain_robots", "embodichain_tasks"])
+def test_robot_preflight_rejects_missing_packages(monkeypatch, profile, missing):
+    monkeypatch.setitem(sys.modules, missing, None)
+    with pytest.raises(ValueError, match="Python environment"):
+        _require_robot_assets(profile)
 
 
 def test_artifact_transaction_rolls_back_and_preserves_existing_output(

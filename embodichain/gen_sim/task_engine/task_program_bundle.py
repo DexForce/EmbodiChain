@@ -2415,9 +2415,6 @@ def _integration_payload(
             affordances.append(grasp_affordance)
         occupied_landings: list[tuple[list[float], dict[str, Any]]] = []
         occupied_rotations: dict[str, np.ndarray | None] = {}
-        inside_count = sum(
-            1 for _, container_id, *_ in inside_routes if container_id == entity_id
-        )
         for (
             affordance_id,
             container_id,
@@ -2427,7 +2424,6 @@ def _integration_payload(
         ) in inside_routes:
             if container_id != entity_id:
                 continue
-            lateral = 0.06 if "apple" in object_id else -0.06
             target = _container_target_pose(
                 source,
                 scene_objects[object_id],
@@ -2437,24 +2433,19 @@ def _integration_payload(
                 child_rotation=rotations.get(object_id),
                 planned_rotations=occupied_rotations,
             )
-            if target is None and inside_count > 1:
+            if target is None:
                 raise ValueError(
-                    f"Multiple objects require a measured container floor: {entity_id!r}."
+                    f"Placement requires a measured container floor: {entity_id!r}."
                 )
-            if target is not None:
-                occupied_landings.append((target, scene_objects[object_id]))
-                # A reservation keeps its release-time footprint after later alignment.
-                occupied_rotations.setdefault(object_id, rotations.get(object_id))
+            occupied_landings.append((target, scene_objects[object_id]))
+            # A reservation keeps its release-time footprint after later alignment.
+            occupied_rotations.setdefault(object_id, rotations.get(object_id))
             affordances.append(
                 {
                     "entity_id": affordance_id,
                     "kind": "container",
                     "native_name": affordance_id,
-                    "object_target_pose": (
-                        target
-                        if target is not None
-                        else _translation_pose(lateral, 0.0, 0.008)
-                    ),
+                    "object_target_pose": target,
                     "release_clearance": 0.12,
                 }
             )

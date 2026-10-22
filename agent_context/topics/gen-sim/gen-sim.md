@@ -48,7 +48,8 @@ arm links, fixed siblings, the other arm and scene obstacles remain checked.
 The Marvin/Robotiq deployment adds 0.01 kg m^2 armature to each arm joint for
 simulation tracking stability with its low-inertia source links. Hand armature
 stays zero; this is not a factory calibration or a shared Lab robot default.
-Source-asset preflight precedes provider calls, while an explicit
+Bundled robot/task package imports, source assets and selected robot config
+preflight precede provider calls, while an explicit
 physical reference owns its frozen model and arm anchors. Robot switching
 requires a new bundle; `run --bundle` never replaces its embodiment. New-profile
 TaskSpec envelopes seal robot assets as well as component declarations. Static

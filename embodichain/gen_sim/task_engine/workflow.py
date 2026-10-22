@@ -1640,9 +1640,7 @@ def _revision_record(revision: SceneRevision) -> dict[str, Any]:
 def _error_record(error: Exception) -> dict[str, str]:
     return {
         "type": type(error).__name__,
-        "failure_type": (
-            "scene_remediable" if _is_scene_remediable_error(error) else "terminal"
-        ),
+        "failure_type": "terminal",
         "message": str(error),
     }
 

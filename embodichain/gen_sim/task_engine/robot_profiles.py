@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import hashlib
+from importlib import import_module
 from typing import Any
 import xml.etree.ElementTree as ET
 
@@ -74,15 +75,33 @@ def _validate_robot_profile(profile: str) -> None:
 
 
 def _require_robot_assets(profile: str) -> None:
-    """Fail before generation/provider calls when a new robot's inputs are unavailable."""
-    if profile not in _NEW_PROFILES:
-        return
-    from embodichain.data import get_data_path
+    """Check bundled packages, source assets and robot configs before provider calls."""
+    _validate_robot_profile(profile)
+    try:
+        robots = import_module("embodichain_robots")
+        import_module("embodichain_tasks")
+        from embodichain.data import get_data_path
+
+        robot_type = (
+            (robots.URRobotCfg if profile == "dual_ur10" else robots.TianjiMarvinCfg)
+            if profile in _NEW_PROFILES
+            else None
+        )
+    except (ImportError, AttributeError) as exc:
+        raise ValueError(
+            f"robot_profile={profile!r} cannot load bundled robot/task packages; "
+            "reinstall the current repository in this Python environment "
+            "with --no-deps --no-build-isolation."
+        ) from exc
 
     arm = (
         "UniversalRobots/UR10/UR10.urdf"
         if profile == "dual_ur10"
-        else "TianjiMarvin/robot_acd.urdf"
+        else (
+            "TianjiMarvin/robot_acd.urdf"
+            if profile in _MARVIN_PROFILES
+            else "Franka/Panda/Panda.urdf"
+        )
     )
     for asset in (arm, "Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf"):
         try:
@@ -94,6 +113,19 @@ def _require_robot_assets(profile: str) -> None:
                 f"robot_profile={profile!r} requires the registered asset {asset!r}; "
                 "resolve/download it before preparing this robot deployment."
             ) from exc
+    try:
+        load_config(_FRANKA_COMPONENT)
+        if robot_type is not None:
+            cfg = robot_type.from_dict(
+                {"robot_type": "ur10"}
+                if profile == "dual_ur10"
+                else {"with_gripper": False, "fpath": str(get_data_path(arm))}
+            )
+            cfg.validate()
+    except (ImportError, TypeError, ValueError, RuntimeError, OSError) as exc:
+        raise ValueError(
+            f"robot_profile={profile!r} configuration preflight failed: {exc}"
+        ) from exc
 
 
 def _load_robotiq_embodiment(profile: str, output_dir: Path) -> dict[str, Any]:
