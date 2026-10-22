@@ -23,6 +23,7 @@ from importlib.util import find_spec
 from pathlib import Path
 import pytest
 
+from embodichain.lab.gym.utils._component_composition import _resolve_gym_components
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 from embodichain.lab.gym.utils.registration import (
     REGISTERED_ENVS,
@@ -251,6 +252,7 @@ def test_task_program_deployments_configure_overall_instructions(
 def test_task_instruction_rejects_invalid_configuration(instruction) -> None:
     path = TASK_CONFIG_ROOT / "manipulation/tableware/stack_cups/env.json"
     payload = load_config(path)
+    payload = _resolve_gym_components(payload, base_dir=path.parent).config
     payload["env"]["task_instruction"] = instruction
     with pytest.raises(ValueError, match="env.task_instruction"):
         config_to_cfg(payload, source_path=path)

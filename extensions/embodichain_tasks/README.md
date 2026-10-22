@@ -86,6 +86,60 @@ IDs; changing the `embodiment.component` reference is sufficient when another
 embodiment satisfies the same contract. These files intentionally have no
 compatibility `version` field.
 
+## Dual-arm task deployments
+
+The following tasks provide `dual_ur5_dh_pgi_140_80` and
+`tianji_marvin` catalog deployments:
+
+| Task under `configs/tasks/manipulation/` | Execution |
+| --- | --- |
+| `hand_over` | Verified two-arm Task Program |
+| `repeated_pick_place` | Verified Task Program using the left arm |
+| `tableware/pour_water` | Right-arm Task Program with measured segment checks |
+| `tableware/blocks_ranking_rgb` | Two-arm Task Program with measured lift/placement checks |
+| `tableware/stack_blocks_two` | Single-arm Task Program with measured lift/stack checks |
+| `tableware/blocks_ranking_size` | Environment and success checks |
+| `tableware/match_object_container` | Environment and success checks |
+| `tableware/place_object_drawer` | Environment and success checks |
+| `tableware/stack_cups` | Environment and success checks |
+
+Select the file named by the catalog deployment. Most use
+`task.<catalog-deployment>.yaml`; the shared-tabletop UR5 hand-over variant uses
+`task.dual_ur5.yaml` and the original `task.dual_ur5_dh_pgi_140_80.yaml` keeps its
+legacy scene and ID. Existing
+CobotMagic deployments, legacy baseline `env.json` paths, and single-arm UR5
+pick/place deployments remain available. The baseline JSON files select shared
+physical `env.yaml` components; adding a robot variant does not add an expert
+to an environment-only task. `ScoopIce-v1` remains retired.
+
+Both embodiments provide `cam_high`; Marvin additionally provides its two
+wrist RGB-D cameras. UR5 deployments have one camera, so downstream datasets
+must use the selected embodiment's sensor and action layout. Shared tableware
+observations normalize named end-effector control parts instead of fixed joint
+indices. Robot-specific installation poses live in deployment overrides.
+
+Programs and measured acceptance thresholds are shared across embodiments.
+Task integrations retain gripper-specific grasp transforms and arm selections, while the
+embodiments own open/grasp commands and grasp generators. The generic
+primary/secondary manipulator resources alias the right/left physical resource
+leaves; they do not introduce independent arms. Static preflight proves
+composition, not physical completion; use the task's measured validators when
+qualifying trajectories, seeds, or backend settings.
+
+Verified tabletop policies request explicit planning speed and acceleration
+budgets, still capped by robot joint limits. The tabletop verified policy uses
+a 0.5 rad/s speed budget with 0.5 rad/s² acceleration. Native trajectory timing is
+preserved. The legacy UR5 hand-over keeps its original policy. Verified actions
+allow 120 seconds, and the shared hand-over scene
+allows 3200 control steps for the full transfer and measured-effect gates.
+
+Example:
+
+```bash
+python -m embodichain run-task --gym_config \
+  extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.dual_ur5_dh_pgi_140_80.yaml
+```
+
 ## Migrating from the solution-first layout
 
 Gym IDs are unchanged, but direct module imports and repository-style config
@@ -215,3 +269,14 @@ through the `embodichain.tasks` entry-point group. Install the package in the
 worker environment and point the adapter at a runnable Gym deployment. See the
 [RLinf integration guide](../../docs/source/guides/rlinf.md) for the integration
 boundary and current compatibility notes.
+
+## Dual-arm qualification scope
+
+Local checks use the Default physics backend, one CPU simulation environment,
+and seed 0 with the configured reset randomization. The Task Program
+combinations use measured program checks. The eight baseline
+combinations were constructed, reset and stepped; they do not gain expert
+programs. PourWater uses Hybrid for its glTF asset loader. Other motion checks
+run headlessly without sensors; an additional Hybrid check verified the shared
+UR5 top camera at 960 by 540 pixels. These checks do not qualify every random
+seed, physics backend or sensor configuration.

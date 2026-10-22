@@ -189,12 +189,15 @@ def custom_post_init(obj):
             continue
         if _is_class_var_annotation(annotations.get(key)):
             continue
+        # Inspect the descriptor before reading it: a property getter may do
+        # expensive work or depend on configuration that is not assembled yet.
+        # Static lookup also honors properties inherited from a base class.
+        if isinstance(inspect.getattr_static(type(obj), key, None), property):
+            continue
         # get data member
         value = getattr(obj, key)
-        # check annotation
-        ann = obj.__class__.__dict__.get(key)
         # duplicate data members that are mutable
-        if not callable(value) and not isinstance(ann, property):
+        if not callable(value):
             try:
                 # MISSING is a sentinel singleton — preserve its identity so that
                 # ``is MISSING`` / ``is not MISSING`` checks work on configclass

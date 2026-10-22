@@ -1239,6 +1239,35 @@ def test_place_holds_fully_open_before_retracting_when_configured() -> None:
     )
 
 
+def test_place_restores_grasp_pressure_only_for_held_rows() -> None:
+    """Measured contact positions must not replace a closing grasp target."""
+    action = _bind_action(_motion_generator(), Place())
+    task = TaskState(
+        batch_size=NUM_ENVS,
+        device="cpu",
+        held_objects={"arm": _held(env_mask=torch.tensor([True, False]))},
+    )
+    context = _context(task)
+    observed = torch.tensor([[0.35, 0.45], [0.55, 0.65]])
+    context.robot.qpos[:, ARM_DOF:] = observed
+    plan = _plan_action(
+        action,
+        _invocation(action, PlaceGoal(torch.eye(4))),
+        context,
+    )
+    hand = _joint_command_positions(plan, "hand")
+    release = plan.segment("release")
+    torch.testing.assert_close(hand[0, 0], torch.ones(HAND_DOF))
+    torch.testing.assert_close(hand[1, 0], observed[1])
+    # The test profile's closing command is 1.0 for both fingers.
+    torch.testing.assert_close(hand[0, release.start - 1], torch.ones(HAND_DOF))
+    torch.testing.assert_close(
+        hand[1, : release.start], observed[1].expand(release.start, -1)
+    )
+    torch.testing.assert_close(hand[:, -1], torch.zeros(NUM_ENVS, HAND_DOF))
+    torch.testing.assert_close(context.robot.qpos[:, ARM_DOF:], observed)
+
+
 def test_pick_holds_fully_closed_before_lifting_when_configured() -> None:
     generator = _motion_generator()
     generator.generate = Mock(wraps=generator.generate)
@@ -1410,6 +1439,11 @@ def test_move_held_object_uses_exact_projected_attachment_target() -> None:
     target_states = generator.generate.call_args.args[0]
     assert len(target_states) == 1
     assert torch.allclose(target_states[0].xpos, held.object_to_eef)
+    trajectory = _joint_trajectory(plan)
+    torch.testing.assert_close(
+        trajectory.positions[:, :, ARM_DOF:],
+        torch.ones(NUM_ENVS, trajectory.waypoint_count, HAND_DOF),
+    )
 
 
 def test_move_held_object_preserves_ordered_object_waypoints() -> None:
@@ -1451,9 +1485,7 @@ def test_move_held_object_preserves_ordered_object_waypoints() -> None:
     trajectory = _joint_trajectory(plan)
     torch.testing.assert_close(
         trajectory.positions[..., ARM_DOF:],
-        context.robot.qpos[:, ARM_DOF:]
-        .unsqueeze(1)
-        .expand(-1, trajectory.waypoint_count, -1),
+        torch.ones(NUM_ENVS, trajectory.waypoint_count, HAND_DOF),
     )
 
 
@@ -1603,6 +1635,7 @@ def test_pour_rotates_held_object_about_internal_axis_and_returns() -> None:
         held_objects={"arm": _held(semantics)},
     )
     context = _context(task)
+    context.robot.qpos[:, ARM_DOF:] = torch.tensor([[0.3], [0.6]])
 
     plan = _plan_action(
         action,
@@ -1655,9 +1688,7 @@ def test_pour_rotates_held_object_about_internal_axis_and_returns() -> None:
     assert torch.allclose(solved_poses[1], current_eef_pose, atol=1.0e-6)
     torch.testing.assert_close(
         trajectory.positions[:, :, ARM_DOF:],
-        context.robot.qpos[:, ARM_DOF:]
-        .unsqueeze(1)
-        .expand(-1, trajectory.waypoint_count, -1),
+        torch.ones(NUM_ENVS, trajectory.waypoint_count, HAND_DOF),
     )
     assert plan.expected_effects.is_empty
     assert context.task is task
@@ -1861,7 +1892,7 @@ def test_move_held_object_moves_only_exclusively_held_rows() -> None:
     assert not torch.allclose(trajectory.positions[1], context.robot.qpos[1])
     torch.testing.assert_close(
         trajectory.positions[1, :, ARM_DOF:],
-        context.robot.qpos[1, ARM_DOF:].expand(trajectory.waypoint_count, -1),
+        torch.ones(trajectory.waypoint_count, HAND_DOF),
     )
 
 

@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -32,6 +33,110 @@ _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 def _load_workflow(name: str) -> dict:
     workflow_path = _REPOSITORY_ROOT / ".github" / "workflows" / name
     return yaml.load(workflow_path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+
+
+def _eligible_jobs(
+    name: str,
+    event_name: str,
+    *,
+    draft: bool = False,
+    ref: str = "refs/heads/main",
+) -> set[str]:
+    """Evaluate the workflows' boolean job conditions with successful dependencies."""
+    workflow = _load_workflow(name)
+    conditions = {
+        name: job.get("if", "true").removeprefix("${{").removesuffix("}}")
+        for name, job in workflow["jobs"].items()
+    }
+    # JavaScript shares the operators used by these GitHub Actions conditions.
+    # Translate the hyphenated job identifier to JavaScript bracket notation.
+    conditions = {
+        name: condition.replace("needs.docs-changes", "needs['docs-changes']")
+        for name, condition in conditions.items()
+    }
+    context = {
+        "github": {
+            "event_name": event_name,
+            "event": (
+                {"pull_request": {"draft": draft}}
+                if event_name == "pull_request"
+                else {}
+            ),
+            "ref": ref,
+        },
+        "needs": {
+            name: {
+                "result": "success",
+                "outputs": {
+                    "required": "true",
+                    "needs_tests": "true",
+                    "needs_docs": "true",
+                },
+            }
+            for name in workflow["jobs"]
+        },
+        "conditions": conditions,
+    }
+    script = """
+const {github, needs, conditions} = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+const always = () => true;
+const startsWith = (value, prefix) => value.startsWith(prefix);
+const eligible = Object.entries(conditions).filter(([, condition]) =>
+  new Function('github', 'needs', 'always', 'startsWith', `return (${condition});`)(
+    github, needs, always, startsWith));
+process.stdout.write(JSON.stringify(eligible.map(([name]) => name)));
+"""
+    result = subprocess.run(
+        ["node", "-e", script],
+        input=json.dumps(context),
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=10,
+    )
+    return set(json.loads(result.stdout))
+
+
+@pytest.mark.parametrize("workflow_name", ["main.yml", "dataset-tooling.yml"])
+def test_draft_pr_skips_every_ci_job(workflow_name: str) -> None:
+    assert _eligible_jobs(workflow_name, "pull_request", draft=True) == set()
+
+
+@pytest.mark.parametrize("workflow_name", ["main.yml", "dataset-tooling.yml"])
+def test_ready_pr_triggers_and_runs_ci(workflow_name: str) -> None:
+    workflow = _load_workflow(workflow_name)
+    assert {"opened", "synchronize", "reopened", "ready_for_review"} <= set(
+        workflow["on"]["pull_request"]["types"]
+    )
+    assert _eligible_jobs(workflow_name, "pull_request") == set(workflow["jobs"]) - {
+        "release-build"
+    }
+
+
+@pytest.mark.parametrize("event_name", ["schedule", "workflow_dispatch"])
+def test_non_pr_test_runs_do_not_require_a_pull_request(event_name: str) -> None:
+    assert _eligible_jobs("main.yml", event_name) == set(
+        _load_workflow("main.yml")["jobs"]
+    ) - {"release-build"}
+
+
+def test_main_push_preserves_lint_and_docs_build() -> None:
+    assert _eligible_jobs("main.yml", "push") == {"lint", "docs-changes", "build"}
+
+
+def test_release_tag_preserves_distribution_build() -> None:
+    assert _eligible_jobs("main.yml", "push", ref="refs/tags/v0.3.1") == {
+        "lint",
+        "docs-changes",
+        "release-build",
+    }
+
+
+def test_dataset_tools_can_still_run_manually() -> None:
+    assert _eligible_jobs("dataset-tooling.yml", "workflow_dispatch") == {
+        "offline-tools",
+        "lerobot-export",
+    }
 
 
 def test_automatic_pages_deployment_requires_existing_docs_artifact() -> None:

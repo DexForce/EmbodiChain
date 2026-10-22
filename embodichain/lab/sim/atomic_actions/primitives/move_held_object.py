@@ -216,6 +216,14 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
         success = result.success & eligible
 
         base_qpos = state.last_qpos.clone()
+        # Preserve the configured closing effort, not the contact-blocked
+        # measured position, throughout held-object transport.
+        base_qpos[:, hand_joint_ids] = grasp.joint_positions(
+            GRASP_COMMAND,
+            num_envs=context.batch_size,
+            device=self.device,
+            dtype=context.robot.qpos.dtype,
+        )
         _, timed = to_full_robot_trajectory(
             result,
             base_qpos=base_qpos,

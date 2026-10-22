@@ -11,3 +11,5 @@ deployments:
     config: task.cobotmagic.yaml
   tianji_marvin:
     config: task.tianji_marvin.yaml
+  dual_ur5_dh_pgi_140_80:
+    config: task.dual_ur5_dh_pgi_140_80.yaml

@@ -1292,11 +1292,23 @@ def test_specified_robots_use_portable_joint_drive_semantics(
     assert cfg.joint_drive_props._resolve_modes() == ("position_velocity", "force")
 
 
-def test_franka_panda_owns_newton_fingertip_contact_defaults() -> None:
-    cfg = FrankaPandaCfg.from_dict({})
+_PGI_FINGER_LINKS = {"gripper_finger1_link_1", "gripper_finger2_link_1"}
+
+
+@pytest.mark.parametrize(
+    ("cfg_type", "expected_links"),
+    [
+        (FrankaPandaCfg, {"fr3_leftfinger|fr3_rightfinger"}),
+        (FrankaPandaPgiCfg, _PGI_FINGER_LINKS),
+    ],
+)
+def test_franka_variants_own_newton_gripper_contact_defaults(
+    cfg_type: type[RobotCfg], expected_links: set[str]
+) -> None:
+    cfg = cfg_type.from_dict({})
 
     group = cfg.link_attrs["newton_gripper_contacts"]
-    assert group.link_names_expr == ["fr3_leftfinger|fr3_rightfinger"]
+    assert set(group.link_names_expr) == expected_links
     assert isinstance(group.attrs.collision_props, NewtonCollisionPropertiesCfg)
     assert group.attrs.collision_props.condim == 4
     assert isinstance(group.attrs.material_props, NewtonRigidBodyMaterialCfg)
@@ -1304,9 +1316,6 @@ def test_franka_panda_owns_newton_fingertip_contact_defaults() -> None:
     assert group.attrs.material_props.kd == pytest.approx(400.0)
     assert group.attrs.material_props.torsional_friction == pytest.approx(0.1)
     assert group.attrs.material_props.rolling_friction == pytest.approx(0.01)
-
-
-_PGI_FINGER_LINKS = {"gripper_finger1_link_1", "gripper_finger2_link_1"}
 
 
 def _assembled_link_and_joint_names(cfg: RobotCfg) -> tuple[list[str], list[str]]:
@@ -1346,20 +1355,6 @@ def test_franka_panda_pgi_selectors_resolve_on_the_assembled_robot() -> None:
     assert {solver.root_link_name, solver.end_link_name} <= set(links)
     assert len(cfg.init_qpos) == len(joints)
     assert cfg.init_qpos[-2:] == [0.0, 0.0]
-
-
-def test_franka_panda_pgi_owns_its_gripper_contacts_before_preparation() -> None:
-    cfg = FrankaPandaPgiCfg.from_dict({})
-
-    group = cfg.link_attrs["newton_gripper_contacts"]
-    assert set(group.link_names_expr) == _PGI_FINGER_LINKS
-    assert isinstance(group.attrs.collision_props, NewtonCollisionPropertiesCfg)
-    assert group.attrs.collision_props.condim == 4
-    assert isinstance(group.attrs.material_props, NewtonRigidBodyMaterialCfg)
-    assert group.attrs.material_props.ke == pytest.approx(40000.0)
-    assert group.attrs.material_props.kd == pytest.approx(400.0)
-    assert group.attrs.material_props.torsional_friction == pytest.approx(0.1)
-    assert group.attrs.material_props.rolling_friction == pytest.approx(0.01)
 
 
 def test_franka_panda_pgi_roundtrip_keeps_the_assembly_and_other_groups() -> None:
@@ -1469,37 +1464,6 @@ def test_robot_workspace_cfg_from_dict():
 # --------------------------------------------------------------------------- #
 
 
-def _dof_of_pk_chain(chain) -> int:
-    """Number of actuated joints in a pk.SerialChain."""
-    return len(chain.get_joint_parameter_names())
-
-
-def test_dexforce_w1_pk_dof_matches_control_parts():
-    pytest.importorskip("pytorch_kinematics")
-    cfg = DexforceW1Cfg.from_dict({})
-    try:
-        chains = cfg.build_pk_serial_chain()
-    except Exception as exc:
-        pytest.skip(f"PK URDF asset unavailable: {exc}")
-    for arm in ("left_arm", "right_arm"):
-        assert _dof_of_pk_chain(chains[arm]) == len(
-            cfg.control_parts[arm]
-        ), f"{arm}: PK chain DOF drifted from control_parts"
-
-
-def test_cobotmagic_pk_dof_matches_control_parts():
-    pytest.importorskip("pytorch_kinematics")
-    cfg = CobotMagicCfg.from_dict({})
-    try:
-        chains = cfg.build_pk_serial_chain()
-    except Exception as exc:
-        pytest.skip(f"PK URDF asset unavailable: {exc}")
-    for arm in ("left_arm", "right_arm"):
-        assert _dof_of_pk_chain(chains[arm]) == len(
-            cfg.control_parts[arm]
-        ), f"{arm}: PK chain DOF drifted from control_parts"
-
-
 # --------------------------------------------------------------------------- #
 # URRobotCfg -- UR family (ur3 / ur3e / ur5 / ur5e / ur10 / ur10e)
 # --------------------------------------------------------------------------- #
@@ -1521,20 +1485,16 @@ def test_ur_robot_from_dict(robot_type):
     assert list(cfg.control_parts.keys()) == ["arm"]
     assert len(cfg.control_parts["arm"]) == 6
 
+    snapshot = cfg.to_dict()
+    assert snapshot["robot_type"] == robot_type
+    restored = URRobotCfg.from_dict(snapshot)
+    assert restored.robot_type == robot_type
+    assert isinstance(restored.solver_cfg["arm"], URSolverCfg)
+
 
 def test_ur_robot_default_type_is_ur10():
     cfg = URRobotCfg.from_dict({})
     assert cfg.robot_type == "ur10"
-
-
-@pytest.mark.parametrize("robot_type", UR_TYPES)
-def test_ur_robot_roundtrip(robot_type):
-    cfg = URRobotCfg.from_dict({"robot_type": robot_type})
-    d = cfg.to_dict()
-    assert d["robot_type"] == robot_type
-    cfg2 = URRobotCfg.from_dict(d)
-    assert cfg2.robot_type == robot_type
-    assert isinstance(cfg2.solver_cfg["arm"], URSolverCfg)
 
 
 def test_ur_robot_max_effort_scales_with_size():
@@ -1546,17 +1506,28 @@ def test_ur_robot_max_effort_scales_with_size():
     assert eff(ur3) < eff(ur5) < eff(ur10)
 
 
-@pytest.mark.parametrize("robot_type", UR_TYPES)
-def test_ur_robot_pk_dof_matches_control_parts(robot_type):
+@pytest.mark.parametrize(
+    ("cfg_type", "init_dict", "parts"),
+    [
+        pytest.param(DexforceW1Cfg, {}, ("left_arm", "right_arm"), id="w1"),
+        pytest.param(CobotMagicCfg, {}, ("left_arm", "right_arm"), id="cobotmagic"),
+        *[
+            pytest.param(URRobotCfg, {"robot_type": kind}, ("arm",), id=kind)
+            for kind in UR_TYPES
+        ],
+    ],
+)
+def test_pk_chain_dof_matches_control_parts(cfg_type, init_dict, parts) -> None:
     pytest.importorskip("pytorch_kinematics")
-    cfg = URRobotCfg.from_dict({"robot_type": robot_type})
+    cfg = cfg_type.from_dict(init_dict)
     try:
         chains = cfg.build_pk_serial_chain()
-    except Exception as exc:
+    except FileNotFoundError as exc:
         pytest.skip(f"PK URDF asset unavailable: {exc}")
-    assert _dof_of_pk_chain(chains["arm"]) == len(
-        cfg.control_parts["arm"]
-    ), "arm: PK chain DOF drifted from control_parts"
+    for part in parts:
+        assert len(chains[part].get_joint_parameter_names()) == len(
+            cfg.control_parts[part]
+        ), f"{part}: PK chain DOF drifted from control_parts"
 
 
 def test_ur_robot_unknown_type_raises():

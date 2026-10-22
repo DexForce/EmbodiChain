@@ -9,6 +9,7 @@
 | Strategy, IK preparation, result normalization | `embodichain/lab/sim/motion/motion_generator.py` → `MotionGenerator` |
 | Joint-path timing | `embodichain/lab/sim/motion/planners/toppra_planner.py`, `trapezoidal_planner.py` in that directory |
 | Cartesian geometry and scalar timing | `embodichain/lab/sim/motion/planners/se3.py`, `bezier.py`, `_scalar_time_law.py`, `_blend_constraints.py` in that directory |
+| Sampled Cartesian geometry → timing → robot IK | `embodichain/lab/sim/motion/planners/_cartesian_profiles.py` (internal adapter) |
 | Collision planning and scene conversion | `embodichain/lab/sim/motion/planners/curobo/` |
 | NMG policy rollout and export metadata | `embodichain/lab/sim/motion/planners/neural_planner.py` |
 | Pure interpolation, resampling and retiming | `embodichain/compute/trajectory/` |
@@ -68,6 +69,14 @@ warping. New consumers import it directly; `lab.sim.utility.action_utils` keeps
 solver-dependent pose/IK adaptation and compatibility re-exports. Trapezoidal/
 Double-S Warp profiles live in `compute/kinematics/_warp/trapezoidal.py`; compute
 must not import simulation objects.
+
+The internal Cartesian profile adapter accepts caller-owned endpoint poses and
+optional Bézier geometry, times distance before batched IK, and derives joint
+references using the root-frame Jacobian. Its pure derivative and joint-wrap
+calculations live in `compute/kinematics/_path_derivatives.py`; tests target those
+owners rather than tutorial functions. Tutorial geometry, CLI and plots remain
+sample-owned. This adapter is not a new planner backend or a collision/joint-limit
+compliance certificate.
 
 `retime_to_control_grid()` maps source trajectories onto a fixed command clock
 without shortening their durations and recomputes velocity references.
