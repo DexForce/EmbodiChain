@@ -49,6 +49,13 @@ binding and reset do not reopen source files. Particle count is fixed after
 preparation, and all fluids share density and spacing. Adding, replacing or
 removing rigid assets after preparing a particle scene requires a new scene.
 
+`FluidObject(cfg, device)` creates an unregistered facade without sampling or
+state allocation. The manager resolves the source recipe and reference pose,
+then privately initializes the facade's local particle template, initial
+rotation and write-invalidation hook. Spawn receives the same sampled points
+and resolved pose. Derived caches never become additional config fields;
+binding and reset reuse them while the input config remains a source recipe.
+
 ## Rendering and validation
 
 Native fluids require FastRT (`fast-rt`) or OfflineRT (`rt`). Hybrid's Vulkan

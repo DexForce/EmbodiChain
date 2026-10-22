@@ -358,3 +358,54 @@ def test_solver_nondefault_physical_values_must_match_fluid(
         with pytest.raises(ValueError, match=f"Fluid {conflict} conflicts"):
             SimulationManager.add_fluid_object(manager, cfg)
         manager._spawn_scene.declare.assert_not_called()
+
+
+def test_manager_resolves_source_once_without_rewriting_config(monkeypatch):
+    from unittest.mock import Mock
+    from types import SimpleNamespace
+    from embodichain.lab.sim import SimulationManager
+    from embodichain.lab.sim.cfg import RigidObjectCfg
+    from embodichain.lab.sim.spawn.descriptors import _pose_from_cfg
+
+    points = np.array([[0.01, 0.0, 0.0]], dtype=np.float32)
+    sampled = []
+
+    def sample(source, spacing):
+        sampled.append(spacing)
+        return points.copy()
+
+    monkeypatch.setattr(FluidSpawnCfg, "sample", sample)
+    monkeypatch.setattr(SimulationManager, "_get_process_renderer", lambda: None)
+    factory = Mock()
+    monkeypatch.setattr("embodichain.lab.sim.sim_manager.FluidObject", factory)
+    manager = _fluid_manager_for_renderer("no-render")
+    reference = RigidObjectCfg(
+        uid="cup", init_pos=(0.2, 0.3, 0.4), init_rot=(10.0, 20.0, 30.0)
+    )
+    manager._rigid_objects["cup"] = SimpleNamespace(cfg=reference)
+    cfg = FluidObjectCfg(
+        uid="water",
+        init_pos=(0.01, 0.02, 0.03),
+        init_rot=(15.0, 25.0, 35.0),
+        spawn=FluidSpawnCfg(kind="box", reference_uid="cup"),
+        render={"mode": "none"},
+    )
+    before = cfg.to_dict()
+    expected_pose = _pose_from_cfg(reference) @ _pose_from_cfg(cfg)
+
+    fluid = SimulationManager.add_fluid_object(manager, cfg)
+
+    assert sampled == [cfg.particle_spacing]
+    assert cfg.to_dict() == before
+    assert len(factory.call_args.args) == 2
+    assert isinstance(factory.call_args.args[0], FluidObjectCfg)
+    assert factory.call_args.args[1] == manager.device
+    assert factory.call_args.kwargs == {}
+    fluid._initialize_spawn_source.assert_called_once()
+    args = fluid._initialize_spawn_source.call_args
+    np.testing.assert_array_equal(args.args[0], points)
+    np.testing.assert_allclose(args.args[1], expected_pose[:3, :3])
+    assert args.kwargs["on_write"] is manager._invalidate_fluid_state
+    descriptor = manager._spawn_scene.declare.call_args.args[2]
+    np.testing.assert_array_equal(descriptor.positions, points)
+    np.testing.assert_allclose(descriptor.pose, expected_pose)

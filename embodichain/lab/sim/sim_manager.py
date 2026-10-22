@@ -2931,8 +2931,9 @@ class SimulationManager:
             render_material=material,
             per_env=True,
         )
-        fluid = FluidObject(
-            cfg, points, pose, self.device, on_write=self._invalidate_fluid_state
+        fluid = FluidObject(cfg, self.device)
+        fluid._initialize_spawn_source(
+            points, pose[:3, :3], on_write=self._invalidate_fluid_state
         )
         self._spawn_scene.declare("fluid_object", cfg.uid, descriptor, facade=fluid)
         self._fluid_objects[cfg.uid] = fluid
