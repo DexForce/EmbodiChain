@@ -26,6 +26,21 @@ from embodichain.gen_sim.task_engine import _bundle_runner
 from embodichain.gen_sim.task_engine._bundle_runner import _exception_metadata
 
 
+def test_environment_modifier_keeps_shared_full_episode_recording(tmp_path):
+    state_event = {"func": "record_joint_state"}
+    config = {"task_program": {}, "env": {"events": {"record_state": state_event}}}
+    _bundle_runner._configure_environment(config, tmp_path)
+    assert "task_program" not in config
+    events = config["env"]["events"]
+    assert set(events) == {"record_state", "record_camera"}
+    assert events["record_state"] is state_event
+    assert events["record_camera"]["func"] == "record_camera_data"
+    camera = events["record_camera"]["params"]
+    assert camera["name"] == "task_program_audience_view"
+    assert camera["resolution"] == [640, 360]
+    assert camera["save_path"] == str(tmp_path / "videos")
+
+
 @pytest.mark.parametrize("raises", [False, True])
 def test_single_cpu_runtime_thread_scope_restores_caller(monkeypatch, raises):
     from embodichain.gen_sim.task_engine._task_program.motion import _CPU_BATCH_THREADS

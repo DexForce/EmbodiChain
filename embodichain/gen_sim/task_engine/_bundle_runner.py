@@ -180,45 +180,9 @@ def execute_bundle(
             max_episode_steps=int(deployment_cfg["max_episode_steps"]),
         )
 
-        def configure_environment(value: dict[str, Any]) -> None:
-            _configure_recording(value, output)
-            routes = deployment.integration.adapter_factory.press_routes
-            twists = getattr(deployment.integration.adapter_factory, "twist_routes", ())
-            routes = twists or routes
-            if routes:
-                source = load_config(root / "components/scene.yaml")["simulation"]
-                art = next(
-                    a
-                    for a in source["articulation"]
-                    if a["uid"] == routes[0].binding.object_id
-                )
-                position = np.asarray(art["init_local_pose"], dtype=float)[:3, 3]
-                target = position + np.array([0.0, 0.0, 0.05])
-                if twists:
-                    pose = np.asarray(art["init_local_pose"], dtype=float)
-                    target = (
-                        pose[:3, :3] @ np.asarray(twists[0].binding.outer_point)
-                        + position
-                    )
-                camera = deepcopy(value["env"]["events"]["record_camera"])
-                camera["params"].update(
-                    name="e8_knob_view" if twists else "e9_button_view",
-                    resolution=[960, 540],
-                    intrinsics=[800.0, 800.0, 480.0, 270.0],
-                    eye=(target + np.array([0.30, -0.25, 0.20])).tolist(),
-                    target=target.tolist(),
-                    up=[0.0, 0.0, 1.0],
-                )
-                value["env"]["events"]["record_press_camera"] = camera
-            value.pop("task_program", None)
-
         env_cfg, gym_config, action_config = build_env_cfg_from_args(
             args,
-            gym_config_modifier=configure_environment,
-        )
-        _configure_twist_recorders(
-            env_cfg,
-            bool(getattr(deployment.integration.adapter_factory, "twist_routes", ())),
+            gym_config_modifier=lambda value: _configure_environment(value, output),
         )
         env_cfg.task_program = load_task_program(
             program_path,
@@ -1254,7 +1218,8 @@ def _runner_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _configure_recording(config: dict[str, Any], output: Path) -> None:
+def _configure_environment(config: dict[str, Any], output: Path) -> None:
+    config.pop("task_program", None)
     env_config = config.setdefault("env", {})
     events = env_config.setdefault("events", {})
     events["record_camera"] = {
@@ -1271,21 +1236,6 @@ def _configure_recording(config: dict[str, Any], output: Path) -> None:
             "save_path": (output / "videos").as_posix(),
         },
     }
-
-
-def _configure_twist_recorders(env_cfg: Any, enabled: bool) -> None:
-    """Select the private E8 recorder after the legacy short-name parser.
-
-    The Gym YAML parser resolves only names in manager modules. Keep its normal
-    recorder declaration and replace the already decoded callable locally,
-    without modifying the shared manager registry or other task recorders.
-    """
-    if not enabled:
-        return
-    from ._task_program.twist_recording import E8CameraRecorder
-
-    for name in ("record_camera", "record_press_camera"):
-        getattr(env_cfg.events, name).func = E8CameraRecorder
 
 
 def _verify_source(bundle: Path) -> None:

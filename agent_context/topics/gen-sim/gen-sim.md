@@ -1312,8 +1312,8 @@ interface. Repeated events never borrow another occurrence's evidence.
 negative/diagnostic variants only; source assets and shared robot defaults remain unchanged.
 E8 alone has a bounded episode-step cap. `orchestration/execution_resources.py` serializes ordinary
 E8 subprocesses and monitors available RAM; resource stops retain receipts and cannot be accepted
-as task success. `twist_recording.py` streams the original camera frames with unchanged encoding
-parameters, committing only verified complete movies. Other task defaults/recorders remain unchanged.
+as task success. E8/E9 use the shared full-episode audience recorder; no control-specific
+close-up camera or recorder override is installed.
 
 E9 is owned by `_task_program/press_binding.py` and `press_runtime.py`: an
 explicitly bound, fixed-root prismatic button lowers to prepare/Press/Park
