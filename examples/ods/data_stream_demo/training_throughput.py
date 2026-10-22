@@ -196,6 +196,8 @@ def analyze_run(directory: Path, source_hashes: dict[str, str]) -> dict[str, Any
         )
     }
     recipe["prefetch_policy"] = config.get("prefetch_policy", "eager")
+    recipe["handoff_mode"] = config.get("handoff_mode", "generation")
+    recipe["encoder_threads"] = config.get("encoder_threads", 1)
     contract = {"hardware": hardware, "recipe": recipe, "source_sha256": source_hashes}
     implied = (
         math.ceil(hot_rate * batch / effective)

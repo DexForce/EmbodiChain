@@ -36,6 +36,7 @@ __all__ = [
     "load_acquisition_config",
     "make_engine",
     "iter_generation_episodes",
+    "poll_generation_episodes",
 ]
 
 VisionMode = Literal["state", "single", "dual"]
@@ -214,6 +215,123 @@ def make_engine(
             shutdown_timeout=shutdown_timeout,
         )
     )
+
+
+def poll_generation_episodes(
+    engine: OnlineDataEngine,
+    generation: int,
+    next_episode_ordinal: int,
+    *,
+    max_count: int,
+) -> list[TensorDict]:
+    """Copy an available ordered prefix without waiting for a generation.
+
+    The owner advances the global ``next_episode_ordinal`` by the number
+    returned, and copies all rows before requesting another generation.
+    The producer publishes parallel episodes together, so a completed subbatch
+    is readable while it generates subsequent subbatches. A busy publication
+    lock or an unpublished next episode returns an empty list; this function
+    never waits for a writer or consumes the engine's sampling quota.
+
+    Args:
+        engine: Started owner-side manual engine with provenance enabled.
+        generation: Requested generation whose rows have not been replaced.
+        next_episode_ordinal: Next global accepted episode ordinal. Generation
+            ``g`` contains ordinals ``(g - 1) * buffer_size`` through
+            ``g * buffer_size - 1``; its end ordinal is also accepted.
+        max_count: Maximum owned episode copies to return, bounded by the
+            caller's available retention slots. Zero performs only health and
+            generation checks.
+
+    Returns:
+        Independent valid-prefix TensorDicts in consecutive slot order. Advance
+        the ordinal only after taking ownership of these returned episodes.
+
+    Raises:
+        RuntimeError: The worker failed, a later generation was requested, or
+            an expected publication has been lost.
+        ValueError: Arguments or published validity/provenance are inconsistent.
+    """
+    import torch
+
+    if type(generation) is not int or generation < 1:
+        raise ValueError("generation must be a positive integer")
+    generation_start = (generation - 1) * engine.buffer_size
+    generation_end = generation * engine.buffer_size
+    if (
+        type(next_episode_ordinal) is not int
+        or not generation_start <= next_episode_ordinal <= generation_end
+    ):
+        raise ValueError("next_episode_ordinal must belong to the requested generation")
+    if type(max_count) is not int or max_count < 0:
+        raise ValueError("max_count must be a nonnegative integer")
+    engine._require_owner_process("poll_generation_episodes")
+    status = engine.get_flow_status()
+    if status["requested_generation"] < generation:
+        raise ValueError("generation has not been requested")
+    if status["requested_generation"] != generation:
+        raise RuntimeError("Cannot acquire a generation after a newer refill request")
+    if not max_count or next_episode_ordinal == generation_end:
+        return []
+
+    publication_lock = engine._lock_index.get_lock()
+    if not publication_lock.acquire(False):
+        return []
+    episodes = []
+    try:
+        engine.check_health()
+        write_start, write_end = engine._lock_index[:]
+        next_slot = next_episode_ordinal - generation_start
+        for slot in range(next_slot, min(engine.buffer_size, next_slot + max_count)):
+            if write_start <= slot < write_end:
+                break
+            row = engine.shared_buffer[slot]
+            published_generation = row.get("ods_generation", None)
+            if published_generation is None:
+                raise ValueError("Incremental acquisition requires source provenance")
+            first_generation = int(published_generation[0])
+            if first_generation != generation:
+                if (
+                    first_generation > generation
+                    or status["completed_generation"] >= generation
+                    or 0 <= slot < write_start
+                ):
+                    raise RuntimeError(
+                        f"Expected generation {generation} slot {slot} was not retained"
+                    )
+                break
+            valid = row["valid"].bool()
+            length = int(valid.sum())
+            if length < 1 or not torch.equal(
+                valid, torch.arange(valid.numel(), device=valid.device) < length
+            ):
+                raise ValueError("Acquisition requires a nonempty valid prefix")
+            prefix = row[:length]
+            continuity = prefix.get("continuity_id", None)
+            if continuity is not None and (
+                (continuity < 0).any() or (continuity != continuity[0]).any()
+            ):
+                raise ValueError("Acquisition cannot cross continuity boundaries")
+            for key, expected in (
+                ("ods_run_id", engine.run_id),
+                ("ods_generation", generation),
+                ("ods_episode_id", generation_start + slot),
+            ):
+                if (prefix[key] != expected).any():
+                    raise ValueError(f"Episode {key} differs from publication identity")
+            if not torch.equal(
+                prefix["ods_frame_index"],
+                torch.arange(length, device=valid.device),
+            ):
+                raise ValueError("Episode frame ordering is inconsistent")
+            # Payload and identity must be copied under the same lock that
+            # publishes the next write window. The caller may retain the copy
+            # across subsequent fills without pinning shared cache slots.
+            episodes.append(prefix.clone())
+        engine.check_health()
+    finally:
+        publication_lock.release()
+    return episodes
 
 
 def iter_generation_episodes(

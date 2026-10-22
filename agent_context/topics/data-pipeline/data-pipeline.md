@@ -54,6 +54,10 @@ Budget-aware prefetch and three-stage capacity guidance remain example-local;
 they do not change public engine/controller scheduling. The
 [visual demo README](../../../examples/ods/data_stream_demo/README.md)
 owns calibration and pilot commands, including isolated eager controls.
+The visual runner can ingest complete producer subbatches before generation
+completion. Its raw training/archive/serial owners share one C-episode bound;
+serial controls still archive during generation. This example-local handoff
+and nested SDK-stage profiling preserve the public sampling contract.
 All acquisition controls may overlap recording and generation within the same
 storage bounds. Worker SDK service timestamps remain separate from owner
 copy/wait spans. `training_audit.py` combines full numeric checks, source-window

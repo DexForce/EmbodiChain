@@ -30,6 +30,7 @@ import queue
 import threading
 import time
 from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from importlib.metadata import version
 from pathlib import Path
 from typing import Any, TextIO
@@ -85,6 +86,7 @@ class StandardLeRobotWriter:
         events_path: Optional new JSONL file outside the corpus. The SDK-owner
             thread streams chronological service intervals without callbacks;
             log failures are terminal just like recording failures.
+        encoder_threads: Positive thread limit for each SDK AV1 encoder.
 
     Real video features use the pinned SDK's ordinary AV1 per-episode encoding
     path. A failed/partial corpus remains marked INCOMPLETE and is not readable
@@ -102,12 +104,17 @@ class StandardLeRobotWriter:
         queue_size: int = 2,
         operation_timeout: float = 1800.0,
         events_path: Path | str | None = None,
+        encoder_threads: int = 1,
     ) -> None:
         if episode_count is not None and (
             type(episode_count) is not int or episode_count < 1
         ):
             raise ValueError("episode_count must be a positive integer or None")
-        for name, value in (("fps", fps), ("queue_size", queue_size)):
+        for name, value in (
+            ("fps", fps),
+            ("queue_size", queue_size),
+            ("encoder_threads", encoder_threads),
+        ):
             if type(value) is not int or value < 1:
                 raise ValueError(f"{name} must be a positive integer")
         if not math.isfinite(operation_timeout) or operation_timeout <= 0:
@@ -128,6 +135,7 @@ class StandardLeRobotWriter:
         (self.root / "INCOMPLETE").write_text("Accepted episodes are not finalized.\n")
         self.metadata = copy.deepcopy(dict(metadata))
         self.episode_count, self.fps = episode_count, fps
+        self.encoder_threads = encoder_threads
         self.operation_timeout = float(operation_timeout)
         self._owner = (os.getpid(), threading.get_ident())
         self._queue: queue.Queue[dict[str, Any] | None] = queue.Queue(queue_size)
@@ -146,6 +154,15 @@ class StandardLeRobotWriter:
             "queue_wait_seconds": 0.0,
             "sdk_create_seconds": 0.0,
             "sdk_write_encode_seconds": 0.0,
+            "sdk_episode_stage_seconds": {
+                name: 0.0
+                for name in (
+                    "validation_provenance",
+                    "add_frame",
+                    "save_episode",
+                    "references_manifest",
+                )
+            },
             "sdk_finalize_seconds": 0.0,
             "finalized": False,
             "worker_joined": False,
@@ -266,6 +283,21 @@ class StandardLeRobotWriter:
         stream.write(json.dumps(row, allow_nan=False) + "\n")
         self._stats["event_log_rows"] += 1
 
+    @contextmanager
+    def _episode_stage(self, event: dict[str, Any], name: str) -> Iterator[None]:
+        """Attach disjoint substage timings without adding service-log rows."""
+        stage: dict[str, Any] = {
+            "start_ns": time.monotonic_ns(),
+            "status": "failed",
+        }
+        event["stage_intervals"][name] = stage
+        try:
+            yield
+            stage["status"] = "complete"
+        finally:
+            stage["end_ns"] = time.monotonic_ns()
+            stage["duration_ns"] = stage["end_ns"] - stage["start_ns"]
+
     def _run(self) -> None:
         dataset = None
         events = None
@@ -331,7 +363,7 @@ class StandardLeRobotWriter:
                 video_backend="torchcodec",
                 batch_encoding_size=1,
                 vcodec="libsvtav1",
-                encoder_threads=1,
+                encoder_threads=self.encoder_threads,
             )
             self._write_event(events, active_event)
             active_event = None
@@ -351,7 +383,8 @@ class StandardLeRobotWriter:
                     "pix_fmt": "yuv420p",
                     "gop": 2,
                     "crf": 30,
-                    "encoder_threads": 1,
+                    "encoder_threads": self.encoder_threads,
+                    "parallel_encoding": False,
                 },
             }
             offset = 0
@@ -369,68 +402,80 @@ class StandardLeRobotWriter:
                     "source_id": episode["frame_ids"][0, :2].tolist(),
                     "episode_ordinal": len(manifest["episodes"]),
                     "scope": "accepted-frame validation/provenance, add_frame, synchronous save_episode/AV1 encoding and raw-reference/hash/manifest bookkeeping; excludes queue wait and event-log serialization",
+                    "stage_intervals": {},
+                    "stage_scope": "disjoint substages within this interval; add_frame includes frame assembly and synchronous image writes; save_episode includes SDK validation, statistics, numeric commit and AV1 encoding; aggregate stages only across successful episodes",
                 }
-                length = len(episode["valid"])
-                if not episode["valid"].all():
-                    raise ValueError("Writer requires trimmed accepted frames")
-                provenance = torch.cat(
-                    [
-                        episode["frame_ids"],
-                        episode["generations"][:, None],
-                        episode["continuity_id"][:, None],
-                        episode["published_at_monotonic_ns"][:, None],
-                    ],
-                    -1,
-                )
-                for step in range(length):
-                    if self._abort.is_set():
-                        raise RuntimeError("LeRobot recording aborted")
-                    frame = {
-                        "observation.state": episode["state"][step],
-                        "action": episode["actions"][step],
-                        _PROVENANCE: provenance[step],
-                        "task": "Pick up the cube and place it in the fixed goal region.",
-                    }
-                    frame.update(
+                with self._episode_stage(active_event, "validation_provenance"):
+                    length = len(episode["valid"])
+                    if not episode["valid"].all():
+                        raise ValueError("Writer requires trimmed accepted frames")
+                    provenance = torch.cat(
+                        [
+                            episode["frame_ids"],
+                            episode["generations"][:, None],
+                            episode["continuity_id"][:, None],
+                            episode["published_at_monotonic_ns"][:, None],
+                        ],
+                        -1,
+                    )
+                with self._episode_stage(active_event, "add_frame"):
+                    for step in range(length):
+                        if self._abort.is_set():
+                            raise RuntimeError("LeRobot recording aborted")
+                        frame = {
+                            "observation.state": episode["state"][step],
+                            "action": episode["actions"][step],
+                            _PROVENANCE: provenance[step],
+                            "task": "Pick up the cube and place it in the fixed goal region.",
+                        }
+                        frame.update(
+                            {
+                                f"observation.images.{name}": image[step]
+                                for name, image in episode["images"].items()
+                            }
+                        )
+                        dataset.add_frame(frame)
+                with self._episode_stage(active_event, "save_episode"):
+                    # SDK camera parallelism forks subprocesses from this thread;
+                    # keep it disabled in a learner that may initialize CUDA.
+                    dataset.save_episode(parallel_encoding=False)
+                with self._episode_stage(active_event, "references_manifest"):
+                    if not manifest["episodes"]:
+                        refs = self.root / "meta" / "ods_raw_references"
+                        refs.mkdir(exist_ok=True)
+                        for name, images in episode["images"].items():
+                            for step in sorted({0, length // 2, length - 1}):
+                                filename = f"{name}-{step}.npy"
+                                np.save(
+                                    refs / filename,
+                                    images[step].numpy(),
+                                    allow_pickle=False,
+                                )
+                                manifest["references"].append(
+                                    {
+                                        "camera": name,
+                                        "index": offset + step,
+                                        "path": f"meta/ods_raw_references/{filename}",
+                                    }
+                                )
+                    manifest["episodes"].append(
                         {
-                            f"observation.images.{name}": image[step]
-                            for name, image in episode["images"].items()
+                            "index": len(manifest["episodes"]),
+                            "offset": offset,
+                            "length": length,
+                            "source_id": episode["frame_ids"][0, :2].tolist(),
+                            "generation": int(episode["generations"][0]),
+                            "numeric_sha256": numeric_episode_digest(episode),
                         }
                     )
-                    dataset.add_frame(frame)
-                dataset.save_episode(parallel_encoding=False)
-                if not manifest["episodes"]:
-                    refs = self.root / "meta" / "ods_raw_references"
-                    refs.mkdir(exist_ok=True)
-                    for name, images in episode["images"].items():
-                        for step in sorted({0, length // 2, length - 1}):
-                            filename = f"{name}-{step}.npy"
-                            np.save(
-                                refs / filename,
-                                images[step].numpy(),
-                                allow_pickle=False,
-                            )
-                            manifest["references"].append(
-                                {
-                                    "camera": name,
-                                    "index": offset + step,
-                                    "path": f"meta/ods_raw_references/{filename}",
-                                }
-                            )
-                manifest["episodes"].append(
-                    {
-                        "index": len(manifest["episodes"]),
-                        "offset": offset,
-                        "length": length,
-                        "source_id": episode["frame_ids"][0, :2].tolist(),
-                        "generation": int(episode["generations"][0]),
-                        "numeric_sha256": numeric_episode_digest(episode),
-                    }
-                )
                 offset += length
                 self._stats["written_episodes"] += 1
                 self._stats["valid_frames"] += length
                 self._stats["sdk_write_encode_seconds"] += time.monotonic() - started
+                for name, stage in active_event["stage_intervals"].items():
+                    self._stats["sdk_episode_stage_seconds"][name] += (
+                        stage["duration_ns"] / 1e9
+                    )
                 self._write_event(events, active_event)
                 active_event = None
                 del episode

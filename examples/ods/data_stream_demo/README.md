@@ -62,6 +62,31 @@ requesting new generations, completes any in-flight generation and records
 all accepted data, including untrained final sources. Those sources do not
 increase diversity metrics.
 
+The default `--handoff-mode publication` keeps the initial C-episode block for
+common normalization, then reads complete accepted producer subbatches of P
+episodes as they are published. It does not wait for the rest of that
+generation. Raw recording references are released after an independent packet
+is packed; the union of training, pending-archive and serial-replay raw owners
+stays at most C. The writer queue still has two packets, plus one active writer
+and at most one pending submission. Returned training batches remain owned.
+Publication mode requires `P*K >= B`; every retained subbatch must fund at least
+one full batch. Source quotas are never replenished by replacing a subbatch.
+
+`--handoff-mode generation` retains the full-generation handoff as a control.
+Offline acquisition uses the same chosen handoff and recorder, then waits for
+the complete dataset before standard SDK decoding/training. Publication-mode
+Serial accepts and archives subbatches during production, holds at most C raw
+episodes, and delays model updates until the generation completes. It therefore
+removes generation/training overlap without adding an archive-publication
+barrier. Trace v2 records retained-source boundaries and recorder/handoff
+settings; old v1 traces remain readable.
+
+`--encoder-threads` exposes the AV1 encoder's CPU thread limit, default 1.
+Use the same setting and CPU allocation across compared paths. The SDK writer
+remains single-owner and uses sequential camera encoding; it does not fork a
+camera encoding pool from the CUDA learner's writer thread. Encoding settings
+are recorded and checked against the finalized standard dataset.
+
 The model follows the pinned RLInf ResNet10/GroupNorm/spatial-embedding design,
 with a shared trainable CNN, eight spatial embeddings and 256-dimensional
 projection, followed by a 512/512 BC head. Both camera histories share encoder
@@ -244,6 +269,18 @@ intervals. They include writing, encoding and recording bookkeeping, while
 prefetch-worker SDK fetch spans include temporal reads, decoding and validation.
 The timeline distinguishes both from owner copying and waiting; overlapping
 worker durations are not additive pipeline time or isolated codec CPU time.
+Each episode's existing SDK service event now contains four nested stage
+intervals: provenance validation, `add_frame`, `save_episode`, and reference/
+manifest bookkeeping. Their durations are also aggregated in writer stats.
+`save_episode` includes encoding and SDK commit work; it is not a pure codec
+kernel measurement. Nested intervals must not be added again to their parent.
+`updates_before_generation_fully_published` counts completed updates before
+the last episode publication of their generation. Copying a source alone does
+not increment this metric. `peak_owned_raw_episodes` audits the C-slot owner
+union; packed writer packets, training batches and simulator/runtime memory
+are separately bounded or measured. `recording_capacity_wait` indicates lack
+of owned raw slots and can overlap ongoing production; it is not an isolated
+causal attribution of all waiting to the recorder.
 `dataset_bytes` and `checkpoint_bytes` record finalized logical file sizes,
 excluding temporary disk peaks and later audit/evaluation artifacts.
 

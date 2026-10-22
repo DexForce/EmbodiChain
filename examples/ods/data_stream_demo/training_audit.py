@@ -84,7 +84,8 @@ def _audit(output: Path, result: dict[str, Any]) -> None:
         "Training worker did not complete qualification",
     )
     _require(
-        trace.get("format") == "ods-visual-training-trace-v1",
+        trace.get("format")
+        in {"ods-visual-training-trace-v1", "ods-visual-training-trace-v2"},
         "Unknown training trace format",
     )
     _require(
@@ -96,6 +97,11 @@ def _audit(output: Path, result: dict[str, Any]) -> None:
     manifest = read_lerobot_manifest(root)
     episodes, payload = manifest["episodes"], manifest["payload"]
     writer = metrics["writer"]
+    _require(
+        manifest.get("video", {}).get("encoder_threads")
+        == config.get("encoder_threads", 1),
+        "Recorded encoder thread setting differs from the run configuration",
+    )
     _require(
         len(episodes)
         == len(registry)

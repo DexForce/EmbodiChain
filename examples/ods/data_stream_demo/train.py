@@ -62,6 +62,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--producer-envs", type=int, default=2)
     parser.add_argument("--episode-budget", type=int, default=128)
     parser.add_argument(
+        "--handoff-mode", choices=("generation", "publication"), default="publication"
+    )
+    parser.add_argument("--encoder-threads", type=int, default=1)
+    parser.add_argument(
         "--prefetch-policy", choices=("budget", "eager"), default="budget"
     )
     parser.add_argument("--calibration-updates", type=int)
@@ -113,6 +117,7 @@ def _validate(args: argparse.Namespace) -> None:
         "offline_episodes",
         "prediction_horizon",
         "max_episode_steps",
+        "encoder_threads",
     ):
         if type(getattr(args, name)) is not int or getattr(args, name) < 1:
             raise ValueError(f"{name} must be a positive integer")
@@ -129,6 +134,16 @@ def _validate(args: argparse.Namespace) -> None:
         raise ValueError("Offline episode count must be a multiple of C")
     if args.prefetch_policy not in ("budget", "eager"):
         raise ValueError("prefetch_policy must be budget or eager")
+    if args.handoff_mode not in ("generation", "publication"):
+        raise ValueError("handoff_mode must be generation or publication")
+    if (
+        args.arm == "ods_overlap"
+        and args.handoff_mode == "publication"
+        and args.producer_envs * args.episode_budget < args.batch_size
+    ):
+        raise ValueError(
+            "Publication handoff requires P*K >= B to fund a complete batch"
+        )
     if args.calibration_updates is not None and (
         type(args.calibration_updates) is not int or args.calibration_updates < 1
     ):
@@ -265,6 +280,11 @@ class _Experiment:
         self.source_run_id: int | None = None
         self.cache_bytes = 0
         self.serial_trace = json.loads(args.trace.read_text()) if args.trace else None
+        self.retained_blocks: list[dict[str, Any]] = []
+        self.peak_owned_episodes = 0
+        self.recorded_generations: set[int] = set()
+        self.ready_episodes: dict[int, Any] = {}
+        self.update_completion_ns: list[int] = []
 
     def now(self) -> int:
         return time.monotonic_ns()
@@ -284,6 +304,7 @@ class _Experiment:
         if self.packet is None and self.staging_index < len(self.staging):
             started = self.now()
             self.packet = pack_episode(self.staging[self.staging_index], self.metadata)
+            self.staging[self.staging_index] = None
             self.metrics.interval("recording_copy", started, self.now())
         if self.packet is not None and self.writer.try_submit(self.packet):
             self.packet = None
@@ -303,12 +324,29 @@ class _Experiment:
         self.metrics.interval("recording_staging_wait", started, self.now())
 
     def stage(self, episodes: list[Any]) -> None:
-        if self.staging is not None or self.packet is not None:
-            raise RuntimeError(
-                "Previous retained block has unfinished recording staging"
-            )
-        self.staging, self.staging_index = episodes, 0
+        if self.staging is None:
+            if self.packet is not None:
+                raise RuntimeError("A submission packet lost its staging owner")
+            self.staging, self.staging_index = list(episodes), 0
+        else:
+            self.staging = self.staging[self.staging_index :] + list(episodes)
+            self.staging_index = 0
+        self.check_retention()
         self.pump_recording()
+
+    def check_retention(self) -> int:
+        """Count the union of raw episode owners; archive packets are separate."""
+        owned = {id(row) for row in self.staging or [] if row is not None}
+        owned.update(id(row) for row in self.ready_episodes.values())
+        if self.block is not None:
+            owned.update(id(row["raw"]) for row in self.block.episodes.values())
+        if len(owned) > self.args.buffer_size:
+            raise RuntimeError("Owned training/recording episodes exceeded C")
+        self.peak_owned_episodes = max(self.peak_owned_episodes, len(owned))
+        return len(owned)
+
+    def staging_slots(self) -> int:
+        return sum(row is not None for row in self.staging or [])
 
     def events(self, rows: list[dict[str, Any]]) -> None:
         for row in rows:
@@ -324,8 +362,6 @@ class _Experiment:
 
     def take(self, generation: int, *, drain: bool = False) -> list[Any]:
         from . import acquisition
-        from .payload import _numeric, numeric_episode_digest
-        from .training_data import geometry_from_raw
 
         started = self.now()
         self.flow.wait_for_generation(generation)
@@ -337,6 +373,14 @@ class _Experiment:
         )
         copied = self.now()
         episodes = list(acquisition.iter_generation_episodes(self.engine, generation))
+        return self.register_episodes(generation, episodes, copied)
+
+    def register_episodes(
+        self, generation: int, episodes: list[Any], copied: int
+    ) -> list[Any]:
+        from .payload import _numeric, numeric_episode_digest
+        from .training_data import geometry_from_raw
+
         published = 0
         for episode in episodes:
             ordinal = int(episode["ods_episode_id"][0])
@@ -379,9 +423,13 @@ class _Experiment:
         self.metrics.interval(
             "snapshot_copy", copied, copied_end, generation=generation
         )
-        begin = self.generation_starts.get(generation, self.origin_ns)
-        self.metrics.interval("generation", begin, published, generation=generation)
-        self.generation_seconds.append((published - begin) / 1e9)
+        if len(self.registry) == generation * self.args.buffer_size:
+            if generation in self.recorded_generations:
+                raise RuntimeError("Generation service was recorded twice")
+            begin = self.generation_starts.get(generation, self.origin_ns)
+            self.metrics.interval("generation", begin, published, generation=generation)
+            self.generation_seconds.append((published - begin) / 1e9)
+            self.recorded_generations.add(generation)
         self.snapshot_seconds.append((copied_end - copied) / 1e9)
         self.generation = generation
         return episodes
@@ -418,6 +466,7 @@ class _Experiment:
             ),
             queue_size=2,
             events_path=self.output / "writer-sdk-events.jsonl",
+            encoder_threads=self.args.encoder_threads,
         )
         self.stage(episodes)
         write_json(
@@ -489,6 +538,7 @@ class _Experiment:
                 source_id=row.get("source_id"),
                 episode_ordinal=row.get("episode_ordinal"),
                 scope=row["scope"],
+                stage_intervals=row.get("stage_intervals"),
             )
             previous_end = row["end_ns"]
             threads.add(row["worker_thread_id"])
@@ -511,8 +561,35 @@ class _Experiment:
                 "prediction_horizon",
             )
         }
+        if trace.get("format") == "ods-visual-training-trace-v2":
+            expected.update(
+                handoff_mode=self.args.handoff_mode,
+                encoder_threads=self.args.encoder_threads,
+            )
+            blocks = trace.get("retained_blocks", [])
+            if not blocks or blocks[0].get("first_update") != 1:
+                raise ValueError("Serial v2 trace requires retained source boundaries")
+            previous_update, next_ordinal = 0, 0
+            for block in blocks:
+                ordinals, first = block.get("ordinals", []), block.get("first_update")
+                if (
+                    not ordinals
+                    or ordinals
+                    != list(range(next_ordinal, next_ordinal + len(ordinals)))
+                    or type(first) is not int
+                    or not previous_update < first <= self.args.updates
+                    or self.args.batch_size % len(ordinals)
+                    or len(ordinals) * self.args.episode_budget < self.args.batch_size
+                    or any(
+                        o // self.args.buffer_size + 1 != block.get("generation")
+                        for o in ordinals
+                    )
+                ):
+                    raise ValueError("Serial retained-block contract is invalid")
+                previous_update, next_ordinal = first, next_ordinal + len(ordinals)
         if (
-            trace.get("format") != "ods-visual-training-trace-v1"
+            trace.get("format")
+            not in {"ods-visual-training-trace-v1", "ods-visual-training-trace-v2"}
             or trace["recipe"] != expected
         ):
             raise ValueError("Serial replay recipe differs from overlap")
@@ -607,6 +684,7 @@ class _Experiment:
         )
         self.completed_updates += 1
         self.training_completed_ns = completed
+        self.update_completion_ns.append(completed)
         self.ready_update_seconds.append((completed - requested_ns) / 1e9)
         if self.block is not None:
             self.block.mark_trained(plan)
@@ -671,13 +749,108 @@ class _Experiment:
         )
         if record:
             self.stage(episodes)
+        self.check_retention()
+        self.retained_blocks.append(
+            {
+                "generation": self.generation,
+                "ordinals": [row["ordinal"] for row in self.block.records],
+                "first_update": self.completed_updates + 1,
+            }
+        )
+
+    def receive_publications(self, generation: int, count: int) -> list[Any]:
+        """Copy a complete producer subbatch only when owned slots are free."""
+        from .acquisition import poll_generation_episodes
+
+        if (
+            self.block is not None
+            or self.check_retention() + count > self.args.buffer_size
+        ):
+            return []
+        copied = self.now()
+        episodes = poll_generation_episodes(
+            self.engine, generation, len(self.registry), max_count=count
+        )
+        if not episodes:
+            return []
+        if len(episodes) != count:
+            raise RuntimeError(
+                "Producer publication was not an aligned complete subbatch"
+            )
+        self.metrics.event(
+            "publication_handoff",
+            self.now(),
+            generation=generation,
+            count=count,
+            generation_complete=self.engine.get_flow_status()["completed_generation"]
+            >= generation,
+            owned_slots_before=self.staging_slots(),
+        )
+        return self.register_episodes(generation, episodes, copied)
+
+    def wait_publications(self, generation: int, count: int) -> list[Any]:
+        """Wait for free retention slots and publication, propagating failures."""
+        started = self.now()
+        waiting_kind = "publication_wait"
+        deadline = min(
+            self.deadline_ns, started + int(self.args.generation_timeout * 1e9)
+        )
+        while self.now() < deadline:
+            self.flow.poll()
+            kind = (
+                "recording_capacity_wait"
+                if self.check_retention() + count > self.args.buffer_size
+                else "publication_wait"
+            )
+            if kind != waiting_kind:
+                self.metrics.interval(
+                    waiting_kind, started, self.now(), generation=generation
+                )
+                started, waiting_kind = self.now(), kind
+            episodes = self.receive_publications(generation, count)
+            if episodes:
+                self.metrics.interval(
+                    waiting_kind, started, self.now(), generation=generation
+                )
+                return episodes
+            time.sleep(0.005)
+        raise TimeoutError(
+            "Published episode handoff or bounded recording staging timed out"
+        )
+
+    def drain_publications(self) -> None:
+        """Persist every accepted source of the final already-started generation."""
+        target = self.engine.get_flow_status()["requested_generation"]
+        while len(self.registry) < target * self.args.buffer_size:
+            episodes = self.wait_publications(target, self.args.producer_envs)
+            self.stage(episodes)
+            del episodes
+        self.flow.wait_for_generation(target)
+        self.flush_staging()
+
+    def collect_publications(self) -> None:
+        """Stream archive submission during the cold offline acquisition phase."""
+        self.initial_episodes = None
+        while len(self.registry) < self.args.offline_episodes:
+            status = self.engine.get_flow_status()
+            target = status["requested_generation"]
+            if len(self.registry) == target * self.args.buffer_size:
+                self.flow.wait_for_generation(target)
+                target = self.flow.request_refill()
+            episodes = self.wait_publications(target, self.args.producer_envs)
+            self.stage(episodes)
+            del episodes
+        self.drain_publications()
 
     def offline(self) -> None:
         from .lerobot_io import TrainingLeRobotReader, read_lerobot_manifest
         from .training_data import build_offline_plan, unpack_geometry
 
         episodes, self.initial_episodes = self.initial_episodes, None
-        while True:
+        if self.args.handoff_mode == "publication":
+            del episodes
+            self.collect_publications()
+        while self.args.handoff_mode == "generation":
             # Old staging owns its snapshot, so recording can overlap the next
             # shared-cache fill even in the collect-then-train baseline.
             target = (
@@ -819,7 +992,91 @@ class _Experiment:
             self.last_prefetch_decision = signature
         return self.flow.request_refill() if decision["request"] else None
 
+    def overlap_publications(self) -> None:
+        """Train as producer subbatches arrive, retaining at most C raw sources."""
+        episodes, self.initial_episodes = self.initial_episodes, None
+        self.install(episodes, record=False)
+        del episodes
+        in_block = 0
+        waiting_since: int | None = None
+        waiting_origin: int | None = None
+        waiting_kind = "publication_wait"
+        while self.completed_updates < self.args.updates:
+            self.flow.poll()
+            status = self.engine.get_flow_status()
+            target = status["requested_generation"]
+            unread = target * self.args.buffer_size - len(self.registry)
+            if not unread and status["completed_generation"] >= target:
+                requested = self.prefetch()
+                if requested is not None:
+                    target = requested
+                    unread = target * self.args.buffer_size - len(self.registry)
+            count = self.args.producer_envs
+            available = status["successful_episodes"] >= len(self.registry) + count
+            if (
+                unread
+                and (self.block is None or in_block and available)
+                and self.staging_slots() + count <= self.args.buffer_size
+            ):
+                # Accepted count is only a readiness hint. The acquisition
+                # function validates actual publication and clones under lock.
+                self.retire()
+                episodes = self.receive_publications(target, count)
+                if episodes:
+                    self.install(episodes)
+                    del episodes
+                    in_block = 0
+            if self.block is not None:
+                requested_ns = self.now()
+                try:
+                    plan = self.block.next_plan(self.args.batch_size)
+                except StopIteration:
+                    plan = None
+                if plan is not None:
+                    if waiting_since is not None:
+                        self.metrics.interval(
+                            waiting_kind,
+                            waiting_since,
+                            requested_ns,
+                            generation=target,
+                        )
+                        waiting_since = None
+                        waiting_origin = None
+                    batch = self.block.materialize(plan)
+                    self.metrics.interval("batch_service", requested_ns, self.now())
+                    self.update(
+                        batch,
+                        plan,
+                        requested_ns=requested_ns,
+                        generation=self.generation,
+                    )
+                    in_block += 1
+                    del batch
+                    continue
+            kind = (
+                "recording_capacity_wait"
+                if self.staging_slots() + count > self.args.buffer_size
+                else "publication_wait"
+            )
+            if waiting_since is None:
+                waiting_since = waiting_origin = self.now()
+                waiting_kind = kind
+            elif kind != waiting_kind:
+                self.metrics.interval(
+                    waiting_kind, waiting_since, self.now(), generation=target
+                )
+                waiting_since, waiting_kind = self.now(), kind
+            if self.now() - waiting_origin > self.args.generation_timeout * 1e9:
+                raise TimeoutError(
+                    "Publication or recorder backpressure exceeded its bound"
+                )
+            time.sleep(0.005)
+        self.retire()
+        self.drain_publications()
+
     def overlap(self) -> None:
+        if self.args.handoff_mode == "publication":
+            return self.overlap_publications()
         episodes, self.initial_episodes = self.initial_episodes, None
         self.install(episodes, record=False)
         del episodes
@@ -867,6 +1124,8 @@ class _Experiment:
             del tail
 
     def serial(self) -> None:
+        if self.serial_trace.get("retained_blocks"):
+            return self.serial_blocks()
         episodes, self.initial_episodes = self.initial_episodes, None
         self.install(episodes, record=False)
         del episodes
@@ -906,6 +1165,78 @@ class _Experiment:
             raise ValueError(
                 "Serial attribution did not reproduce the overlap data/work trace"
             )
+
+    def serial_blocks(self) -> None:
+        """Replay exact retained-block boundaries with no generation during updates."""
+        episodes, self.initial_episodes = self.initial_episodes, None
+        self.install(episodes, record=False)
+        del episodes
+        blocks = {
+            row["first_update"]: row for row in self.serial_trace["retained_blocks"]
+        }
+        for row in self.serial_trace["updates"]:
+            spec = blocks.get(row["update"])
+            if spec is not None and row["update"] != 1:
+                self.retire()
+                target = spec["generation"]
+                current = self.engine.get_flow_status()["requested_generation"]
+                if target != current:
+                    if (
+                        target != current + 1
+                        or len(self.registry) != current * self.args.buffer_size
+                    ):
+                        raise ValueError("Serial blocks skip unread source data")
+                    if self.flow.request_refill() != target:
+                        raise ValueError("Serial refill target differs from trace")
+                if self.args.handoff_mode == "publication":
+                    # Archiving remains concurrent with generation. Hold only
+                    # the bounded raw sources needed for later traced updates.
+                    while len(self.registry) < target * self.args.buffer_size:
+                        accepted = self.wait_publications(
+                            target, self.args.producer_envs
+                        )
+                        for raw in accepted:
+                            ordinal = int(raw["ods_episode_id"][0])
+                            if ordinal in self.ready_episodes:
+                                raise ValueError("Duplicate serial retained source")
+                            self.ready_episodes[ordinal] = raw
+                        del raw
+                        self.stage(accepted)
+                        del accepted
+                    self.flow.wait_for_generation(target)
+                    episodes = [
+                        self.ready_episodes.pop(ordinal) for ordinal in spec["ordinals"]
+                    ]
+                    self.install(episodes, record=False)
+                else:
+                    self.flow.wait_for_generation(target)
+                    self.flush_staging()
+                    episodes = self.wait_publications(target, len(spec["ordinals"]))
+                    self.install(episodes)
+                del episodes
+            if spec is not None and self.retained_blocks[-1] != spec:
+                raise ValueError("Serial retained source boundaries differ")
+            self.flow.poll()
+            requested = self.now()
+            plan = [tuple(pair) for pair in row["pairs"]]
+            batch = self.block.materialize(plan, reserve=True)
+            self.metrics.interval("batch_service", requested, self.now())
+            self.update(
+                batch, plan, requested_ns=requested, generation=row["generation"]
+            )
+            del batch
+        self.retire()
+        self.ready_episodes.clear()
+        self.drain_publications()
+        while self.generation < self.serial_trace["generated_generations"]:
+            self.flow.request_refill()
+            self.drain_publications()
+        expected = [
+            (r["length"], r["numeric_sha256"]) for r in self.serial_trace["episodes"]
+        ]
+        actual = [(r["length"], r["numeric_sha256"]) for r in self.registry]
+        if expected != actual or self.serial_trace["updates"] != self.trace_updates:
+            raise ValueError("Serial data or update trace differs from overlap")
 
     def stop_engine(self) -> None:
         if self.engine is None:
@@ -1037,16 +1368,20 @@ class _Experiment:
                 "prediction_horizon",
             )
         }
+        recipe.update(
+            handoff_mode=args.handoff_mode, encoder_threads=args.encoder_threads
+        )
         write_json(
             self.output / "training-trace.json",
             {
-                "format": "ods-visual-training-trace-v1",
+                "format": "ods-visual-training-trace-v2",
                 "recipe": recipe,
                 "initial_model_sha256": self.initial_model_hash,
                 "normalization_sha256": self.normalization_hash,
                 "generated_generations": self.generation,
                 "episodes": self.registry,
                 "updates": self.trace_updates,
+                "retained_blocks": self.retained_blocks,
             },
         )
         ledger_rows = [
@@ -1103,6 +1438,19 @@ class _Experiment:
             / 1e9,
             ledger={"episodes": ledger_rows},
         )
+        publication_end = {
+            generation: max(
+                row["published_ns"]
+                for row in self.registry
+                if row["generation"] == generation
+            )
+            for generation in self.recorded_generations
+        }
+        early_updates = sum(
+            row["generation"] > 1
+            and completed < publication_end.get(row["generation"], 0)
+            for row, completed in zip(self.trace_updates, self.update_completion_ns)
+        )
         result.update(
             timeline_contract="sdk-worker-service/v1",
             writer_sdk_events_sha256=self.recording_log_sha256,
@@ -1117,6 +1465,9 @@ class _Experiment:
             final_model_sha256=final_hash,
             normalization_sha256=self.normalization_hash,
             cache_bytes=self.cache_bytes,
+            peak_owned_raw_episodes=self.peak_owned_episodes,
+            owned_raw_episode_limit=args.buffer_size,
+            updates_before_generation_fully_published=early_updates,
             engine_stats=self.engine_stats,
         )
         self.metrics.close()

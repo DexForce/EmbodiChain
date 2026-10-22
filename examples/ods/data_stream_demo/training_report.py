@@ -372,6 +372,15 @@ def _fairness(run: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
         if config["prefetch_policy"] not in {"budget", "eager"}:
             reasons.append("unknown prefetch policy")
         evidence["prefetch_policy"] = config["prefetch_policy"]
+    for name, allowed in (("handoff_mode", {"publication", "generation"}),):
+        if name in config:
+            if config[name] not in allowed:
+                reasons.append(f"unknown {name}")
+            evidence[name] = config[name]
+    if "encoder_threads" in config:
+        if type(config["encoder_threads"]) is not int or config["encoder_threads"] < 1:
+            reasons.append("invalid encoder thread budget")
+        evidence["encoder_threads"] = config["encoder_threads"]
     for key in ("initial_model_sha256", "normalization_sha256"):
         value = metrics.get(key)
         if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
@@ -469,6 +478,9 @@ def _fairness(run: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
         }
         if "prefetch_policy" in config:
             expected_flags["--prefetch-policy"] = config["prefetch_policy"]
+        for name in ("handoff_mode", "encoder_threads"):
+            if name in config:
+                expected_flags["--" + name.replace("_", "-")] = config[name]
         for flag, value in expected_flags.items():
             if (
                 not isinstance(arguments, list)
@@ -804,6 +816,8 @@ def _paired(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     ].get("prefetch_policy"):
                         reasons.append("paired prefetch_policy differs")
                     for key in (
+                        "handoff_mode",
+                        "encoder_threads",
                         "training_budget",
                         "initial_model_sha256",
                         "normalization_sha256",

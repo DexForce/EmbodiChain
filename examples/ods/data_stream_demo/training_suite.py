@@ -47,6 +47,8 @@ _ROOT = Path(__file__).resolve().parents[3]
 _SETTINGS = (
     "updates",
     "prefetch_policy",
+    "handoff_mode",
+    "encoder_threads",
     "batch_size",
     "buffer_size",
     "producer_envs",
@@ -155,6 +157,8 @@ def _groups(args: argparse.Namespace) -> list[list[dict[str, Any]]]:
                 "history_length": 2,
                 "action_horizon": 16,
                 "prefetch_policy": "budget",
+                "handoff_mode": "publication",
+                "encoder_threads": 1,
             }.get(key),
         )
         for key in _SETTINGS

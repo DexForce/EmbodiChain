@@ -484,6 +484,34 @@ equal work does not require identical learned weights or policy quality.
 
 ### Online scheduling, quotas and persistence
 
+The default visual runner now uses publication-granularity handoff. Initial
+normalization still uses the common full C-episode cache; subsequent complete
+P-episode producer subbatches become eligible as soon as their rows are
+published. Owner-only nonblocking acquisition validates and clones under the
+existing publication lock. Locked/unpublished rows return no data, and worker
+errors or overwritten expected identities fail explicitly. The owner copies
+every accepted source of one generation before requesting the next refill.
+
+Training, archive staging and serial replay share a C-episode raw ownership
+bound. Packing creates an independent writer packet and releases the staging
+reference. Queue capacity remains two, with one active packet and at most one
+pending submission. Actual capacity exhaustion applies backpressure. Require
+P*K >= B so a subsequent retained subbatch can fund a complete training batch.
+Keep `handoff_mode=generation` as the original whole-cache control.
+
+Offline collection uses the same acquisition/recording settings. Publication
+Serial archives subbatches while generation runs, retains their raw data within
+the same C bound, then replays model updates after generation completes. Only
+generation/model-update overlap is excluded. Versioned traces preserve the
+exact retained source boundaries; v1 input compatibility remains supported.
+
+Recorder profiling splits the existing episode SDK service into validation,
+frame writing, save/encode/commit and reference/manifest work. These nested
+spans are not extra wall time. An explicit AV1 encoder thread limit defaults
+to one and is matched across controls and audited in the persisted manifest.
+Camera encoding remains sequential to avoid SDK process-pool fork from the
+CUDA learner's writer thread.
+
 ODS uses C=8 shared episodes, P=2 producer environments and per-source lifetime
 cap K=128. K is an engineering reuse guard, not a demonstrated optimal or
 learning-safe value. It is an upper bound, not a requirement to train every
