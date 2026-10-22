@@ -16,12 +16,14 @@
 
 """Shape-feedback expert for the anchored, two-spool cable routing board.
 
-Before running the YAM deployment, prepare its robot assets from the repository
-root with ``python scripts/tools/prepare_yam_i2rt_assets.py``. The script downloads
-the pinned source files, generates and verifies the URDF/collision meshes, and
-reuses a verified cache at ``~/.cache/embodichain_data/YamI2rt/`` by default.
-Set ``EMBODICHAIN_DATA_ROOT`` before preparation and execution for another cache
-root. See the task config directory's README for dependencies and offline usage.
+The YAM deployment resolves ``YamI2rt/yam_i2rt.urdf`` through the standard data
+registry, downloading and caching the versioned robot archive when needed.
+Pre-download with ``python -m embodichain data download --name YamI2rt``.
+For source regeneration or an offline checkout, run
+``python scripts/tools/prepare_yam_i2rt_assets.py`` from the repository root;
+that script retains the original source/model hashes and MIT license.
+See the task config directory's README for the asset publication status,
+source-conversion dependencies and cache overrides.
 
 Geometry and routine adapted from robosimstudio's Apache-2.0 route_the_cable
 example at 73739abe212f963e8a9f5862b27bca370df091a7. Robot assets retain MIT.

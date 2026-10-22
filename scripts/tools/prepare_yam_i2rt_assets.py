@@ -33,6 +33,7 @@ import shutil
 import tempfile
 import urllib.request
 import xml.etree.ElementTree as ET
+import zipfile
 
 __all__ = ["main"]
 
@@ -43,6 +44,22 @@ _BASE_URL = f"https://raw.githubusercontent.com/robosimstudio/robosimstudio/{_RE
 _COACD_VERSION = "1.0.14"
 _THRESHOLD = 0.06
 _SEED = 73
+_ASSET_NOTICE = """YAM i2rt robot assets
+Copyright (c) I2RT Robotics
+
+The YAM arm and linear_4310 gripper models are distributed under the MIT
+license; retain the accompanying LICENSE when copying or distributing them.
+Upstream: https://github.com/i2rt-robotics/i2rt
+
+The source assembly is from RoboSimStudio, commit
+73739abe212f963e8a9f5862b27bca370df091a7, whose NOTICE identifies these models
+as I2RT Robotics assets under MIT.
+Source: https://github.com/robosimstudio/robosimstudio
+
+EmbodiChain converts the MJCF to URDF, adds named grasp TCP frames and
+decomposes the fingertip collision meshes. The original model copyright and
+MIT license are retained; conversion details are recorded in PROVENANCE.json.
+"""
 _SOURCE_FILES = (
     "LICENSE",
     "yam_i2rt_arms.xml",
@@ -341,6 +358,59 @@ def _prepare(output: Path, source_dir: Path | None) -> Path:
     return output / "yam_i2rt.urdf"
 
 
+def _archive(root: Path, destination: Path) -> Path:
+    """Package verified assets with stable metadata for the data registry."""
+    _verify_bundle(root)
+    if destination.is_relative_to(root):
+        raise ValueError("The archive must be outside the asset directory.")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix=".yam-archive-", dir=destination.parent
+    ) as folder:
+        staged = Path(folder) / destination.name
+        with zipfile.ZipFile(
+            staged, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
+        ) as stream:
+            # Open3D requires directory entries before their children.
+            directories = sorted(
+                {
+                    str(Path(name).parent) + "/"
+                    for name in _EXPECTED_SHA256
+                    if Path(name).parent != Path(".")
+                }
+            )
+            for name in directories:
+                info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+                info.create_system = 3
+                info.external_attr = (0o40755 << 16) | 0x10
+                stream.writestr(info, b"")
+            for name in sorted((*_EXPECTED_SHA256, "NOTICE")):
+                data = (
+                    _ASSET_NOTICE.encode()
+                    if name == "NOTICE"
+                    else (root / name).read_bytes()
+                )
+                info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+                info.create_system = 3
+                info.external_attr = 0o100644 << 16
+                info.compress_type = zipfile.ZIP_DEFLATED
+                stream.writestr(info, data, compresslevel=9)
+        if destination.exists():
+            if _sha256(destination) != _sha256(staged):
+                raise ValueError(
+                    f"Refusing to overwrite a different archive: {destination}"
+                )
+        else:
+            staged.rename(destination)
+    print(
+        f"Archive ready: {destination}; "
+        f"MD5={hashlib.md5(destination.read_bytes()).hexdigest()}; "
+        f"SHA-256={_sha256(destination)}",
+        flush=True,
+    )
+    return destination
+
+
 def main(argv: list[str] | None = None) -> int:
     """Prepare verified robot assets from the pinned upstream or a local copy.
 
@@ -362,13 +432,21 @@ def main(argv: list[str] | None = None) -> int:
         help="Asset directory (default: $EMBODICHAIN_DATA_ROOT/YamI2rt, or ~/.cache/embodichain_data/YamI2rt).",
     )
     parser.add_argument(
+        "--archive",
+        type=Path,
+        help="Also produce a deterministic asset ZIP for publication; outside --output.",
+    )
+    parser.add_argument(
         "--source-dir",
         type=Path,
         help="Offline directory containing the pinned LICENSE, XML and assets/*.stl.",
     )
     args = parser.parse_args(argv)
     try:
-        _prepare(args.output.expanduser().resolve(), args.source_dir)
+        output = args.output.expanduser().resolve()
+        _prepare(output, args.source_dir)
+        if args.archive is not None:
+            _archive(output, args.archive.expanduser().resolve())
     except (
         OSError,
         ValueError,

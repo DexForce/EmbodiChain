@@ -18,6 +18,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
+import xml.etree.ElementTree as ET
 import math
 import yaml
 import pytest
@@ -44,7 +45,47 @@ from embodichain.lab.sim.shapes import CylinderCfg
 pytestmark = pytest.mark.no_sim
 
 
-def test_route_deployment_composes_real_robot_cable_and_board():
+@pytest.fixture(autouse=True)
+def local_yam_config_asset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Keep configuration tests independent of external model publication."""
+    from embodichain_robots import yam_i2rt
+
+    robot = ET.Element("robot", name="yam_config_fixture")
+    ET.SubElement(robot, "link", name="base_link")
+    for side in ("right", "left"):
+        parent = "base_link"
+        for child, number in [
+            (f"{side}_base", None),
+            *[(f"{side}_link{i}", i) for i in range(1, 7)],
+            (f"{side}_tcp", None),
+        ]:
+            ET.SubElement(robot, "link", name=child)
+            joint = ET.SubElement(
+                robot,
+                "joint",
+                name=f"{side}_joint{number}" if number else f"{child}_fixed",
+                type="revolute" if number else "fixed",
+            )
+            ET.SubElement(joint, "parent", link=parent)
+            ET.SubElement(joint, "child", link=child)
+            if number:
+                ET.SubElement(joint, "axis", xyz="0 0 1")
+                ET.SubElement(
+                    joint, "limit", lower="-3", upper="3", effort="27", velocity="3"
+                )
+            parent = child
+    path = tmp_path / "yam_i2rt.urdf"
+    ET.ElementTree(robot).write(path, encoding="unicode")
+
+    def resolve(name: str) -> str:
+        assert name == "YamI2rt/yam_i2rt.urdf"
+        return str(path)
+
+    monkeypatch.setattr(yam_i2rt, "get_data_path", resolve)
+    return path
+
+
+def test_route_deployment_composes_registered_robot_cable_and_board():
     p = (
         Path(__file__).resolve().parents[4]
         / "extensions/embodichain_tasks/configs/tasks/manipulation/cable/route_the_cable/task.yam.yaml"
@@ -95,7 +136,8 @@ def test_route_deployment_composes_real_robot_cable_and_board():
     assert cfg.robot.joint_drive_props.damping[".*_joint[78]"] == 120.0
     assert cfg.sim_cfg.render_cfg.renderer == "no-render"
     assert not cfg.sim_cfg.visualization.allow_commands
-    assert all(Path(cfg.robot.fpath).is_file() for _ in (0,))
+    assert cfg.robot.fpath is None
+    assert Path(cfg.robot.urdf_cfg.assemble_urdf()).is_file()
     for side, chain in cfg.robot.build_pk_serial_chain().items():
         assert (
             len(chain.get_joint_parameter_names())

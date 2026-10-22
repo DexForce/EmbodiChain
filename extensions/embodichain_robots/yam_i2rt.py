@@ -20,12 +20,14 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
+import numpy as np
 import torch
-from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
+from embodichain.data import get_data_path
 from embodichain.lab.sim.cfg import (
     RobotCfg,
     JointDrivePropertiesCfg,
     RigidBodyPhysicsCfg,
+    URDFCfg,
 )
 from embodichain.lab.sim.motion.solvers import PytorchSolverCfg
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
@@ -55,13 +57,24 @@ class YamI2rtCfg(RobotCfg):
     def _build_defaults(self, init_dict: dict | None = None) -> None:
         self.uid = "yam"
         self.fpath = (init_dict or {}).get("fpath") or self.fpath
-        self.fpath = self._pk_urdf_path
-        if not Path(self.fpath).is_file():
+        urdf_path = self._pk_urdf_path
+        if self.fpath:
+            self.fpath = urdf_path
+        if not Path(urdf_path).is_file():
             raise FileNotFoundError(
-                f"YAM robot asset not found: {self.fpath}. From the EmbodiChain "
-                "checkout run `python scripts/tools/prepare_yam_i2rt_assets.py`, "
+                f"YAM robot asset not found: {urdf_path}. Run "
+                "`python -m embodichain data download --name YamI2rt`, "
                 "or set the robot's fpath to an already prepared yam_i2rt.urdf."
             )
+        self.urdf_cfg = URDFCfg(
+            components=[
+                {
+                    "component_type": "arm",
+                    "urdf_path": urdf_path,
+                    "transform": np.eye(4),
+                }
+            ]
+        )
         self.init_pos = (0.2525, 0, 0.75)
         self.asset_physics_mode = "overlay"
         self.control_parts = {
@@ -136,12 +149,11 @@ class YamI2rtCfg(RobotCfg):
 
     @property
     def _pk_urdf_path(self) -> str:
-        path = (
-            Path(self.fpath).expanduser()
-            if self.fpath
-            else Path(EMBODICHAIN_DEFAULT_DATA_ROOT) / "YamI2rt/yam_i2rt.urdf"
-        )
-        return str(path)
+        if self.fpath:
+            return str(Path(self.fpath).expanduser())
+        if self.urdf_cfg is not None and "arm" in self.urdf_cfg.components:
+            return str(self.urdf_cfg.components["arm"]["urdf_path"])
+        return get_data_path("YamI2rt/yam_i2rt.urdf")
 
     def build_pk_serial_chain(
         self, device: torch.device = torch.device("cpu"), **kwargs: Any

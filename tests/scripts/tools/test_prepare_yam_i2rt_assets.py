@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import zipfile
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -149,15 +150,87 @@ def test_robot_uses_cache_and_accepts_an_explicit_offline_urdf(
 ) -> None:
     from embodichain_robots import yam_i2rt
 
-    monkeypatch.setattr(yam_i2rt, "EMBODICHAIN_DEFAULT_DATA_ROOT", str(tmp_path))
-    with pytest.raises(FileNotFoundError, match="prepare_yam_i2rt_assets.py"):
+    cached = tmp_path / "YamI2rt/yam_i2rt.urdf"
+    requested = []
+
+    def resolve(path):
+        requested.append(path)
+        return str(cached)
+
+    monkeypatch.setattr(yam_i2rt, "get_data_path", resolve)
+    with pytest.raises(FileNotFoundError, match="data download --name YamI2rt"):
         yam_i2rt.YamI2rtCfg.from_dict({})
     custom = tmp_path / "offline.urdf"
     custom.write_text('<robot name="fixture"/>')
     cfg = yam_i2rt.YamI2rtCfg.from_dict({"fpath": str(custom)})
     assert cfg.fpath == str(custom)
     assert cfg._pk_urdf_path == str(custom)
-    cached = tmp_path / "YamI2rt/yam_i2rt.urdf"
+    assert cfg.urdf_cfg.components["arm"]["urdf_path"] == str(custom)
+    assert requested == ["YamI2rt/yam_i2rt.urdf"]
     cached.parent.mkdir()
     cached.write_text(custom.read_text())
-    assert yam_i2rt.YamI2rtCfg.from_dict({}).fpath == str(cached)
+    cfg = yam_i2rt.YamI2rtCfg.from_dict({})
+    assert cfg.fpath is None
+    assert cfg._pk_urdf_path == str(cached)
+    assert cfg.urdf_cfg.components["arm"]["urdf_path"] == str(cached)
+
+
+def test_archive_is_reproducible_and_preserves_license_and_sources(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "robot"
+    (source / "assets").mkdir(parents=True)
+    files = {
+        "LICENSE": b"MIT Copyright I2RT Robotics",
+        "yam_i2rt.urdf": b'<robot name="fixture"><link name="base"/></robot>',
+        "assets/tip.obj": b"v 0 0 0\n",
+    }
+    for name, data in files.items():
+        (source / name).write_bytes(data)
+    (source / "unrelated.log").write_text("do not publish")
+    monkeypatch.setattr(
+        preparation,
+        "_EXPECTED_SHA256",
+        {name: hashlib.sha256(data).hexdigest() for name, data in files.items()},
+    )
+    first = preparation._archive(source, tmp_path / "first.zip")
+    second = preparation._archive(source, tmp_path / "second.zip")
+    assert first.read_bytes() == second.read_bytes()
+    assert preparation._archive(source, first) == first
+    with zipfile.ZipFile(first) as stream:
+        assert stream.testzip() is None
+        assert stream.namelist().index("assets/") < stream.namelist().index(
+            "assets/tip.obj"
+        )
+        assert set(stream.namelist()) == {*files, "assets/", "NOTICE"}
+        for name, data in files.items():
+            assert stream.read(name) == data
+        assert b"I2RT Robotics" in stream.read("NOTICE")
+        assert b"MIT" in stream.read("NOTICE")
+        assert all(
+            info.date_time == (1980, 1, 1, 0, 0, 0) for info in stream.infolist()
+        )
+    (source / "LICENSE").write_text("changed")
+    with pytest.raises(ValueError, match="SHA-256 mismatch"):
+        preparation._archive(source, tmp_path / "invalid.zip")
+    assert not (tmp_path / "invalid.zip").exists()
+
+
+def test_archive_does_not_replace_an_existing_different_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "robot"
+    source.mkdir()
+    (source / "yam_i2rt.urdf").write_text('<robot name="fixture"/>')
+    monkeypatch.setattr(
+        preparation,
+        "_EXPECTED_SHA256",
+        {"yam_i2rt.urdf": preparation._sha256(source / "yam_i2rt.urdf")},
+    )
+    archive = tmp_path / "published.zip"
+    archive.write_bytes(b"already exists")
+    with pytest.raises(ValueError, match="Refusing to overwrite"):
+        preparation._archive(source, archive)
+    assert archive.read_bytes() == b"already exists"
+    with pytest.raises(ValueError, match="outside"):
+        preparation._archive(source, source / "invalid.zip")

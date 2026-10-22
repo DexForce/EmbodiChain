@@ -23,13 +23,29 @@ MuJoCo joints and two-way VBD cable contact; CLI `--physics` does not switch it.
 From the EmbodiChain repository:
 
 ```bash
-python -m pip install coacd==1.0.14 trimesh==4.12.2 scipy==1.18.1
-python scripts/tools/prepare_yam_i2rt_assets.py
+python -m embodichain data download --name YamI2rt
 python -m embodichain list-task --category manipulation/cable
 python -m embodichain run-task \
   --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/cable/route_the_cable/task.yam.yaml \
   --max_episodes 1 --seed 73 --headless --record_trajectory \
   --trajectory_save_dir ./output/route_the_cable
+```
+
+`YamI2rtCfg` resolves `get_data_path("YamI2rt/yam_i2rt.urdf")` through the same
+asset registry and cache used by Franka. The command above is optional once the
+archive is published: constructing the robot downloads and extracts the ready
+`robot_assets/YamI2rtV1.zip` bundle when needed. Downloading the bundle does not
+require CoACD. `EMBODICHAIN_DOWNLOAD_PREFIX` selects a mirror; the official
+`DexForceAI/embodichain_data` Hugging Face dataset is the fallback.
+
+**Draft publication status:** a maintainer still needs to upload
+`robot_assets/YamI2rtV1.zip` to the official dataset. Until then, prepare the
+assets from source using the commands below, reuse an existing local bundle,
+or set the robot's `fpath` to a prepared `yam_i2rt.urdf`.
+
+```bash
+python -m pip install coacd==1.0.14 trimesh==4.12.2 scipy==1.18.1
+python scripts/tools/prepare_yam_i2rt_assets.py
 ```
 
 The preparation script downloads the 9 STL meshes, source MJCF and MIT license
@@ -41,13 +57,23 @@ is installed. A valid existing bundle is verified and reused; an incomplete or
 modified bundle is rejected without being overwritten. This preparation runs
 on CPU and does not require the simulation renderer or CUDA.
 
-The default destination is `~/.cache/embodichain_data/YamI2rt/`. Set
+The download registry extracts under `<data_root>/extract/YamI2rt/`; the source
+script defaults to `<data_root>/YamI2rt/`. Both are recognized by `get_data_path`.
+The default data root is `~/.cache/embodichain_data/`. Set
 `EMBODICHAIN_DATA_ROOT` before both preparation and demo execution to use another
 cache root. For offline preparation, pass `--source-dir` pointing to the pinned
 upstream `assets/embodiments/yam_i2rt/` directory. `--output` selects an explicit
 destination; configure the robot's `fpath` to its `yam_i2rt.urdf` if this differs
 from the default cache. The raw meshes, generated URDF and collision hulls are
 local assets, excluded from Git and the Python wheel.
+
+For asset publication, `--archive /path/to/YamI2rtV1.zip` additionally builds a
+deterministic archive from the verified bundle and includes its MIT license,
+NOTICE and provenance. It retains the qualified geometry and all 52 original
+file hashes. Archive MD5: `23601ea820ff3e6260336c4962ef01a5`; SHA-256:
+`9125380a6240847f42730b79025aa61cd17b665f90a2586b3c6f061d769c503a`.
+The repository's `NOTICE` and `licenses/YamI2rt-MIT.txt` record the external
+asset attribution even though the binary assets are distributed separately.
 
 The collector accepts complete successful episodes only. A failed intermediate
 validator stops its episode. A launched expert is not evidence of task success.
@@ -104,7 +130,7 @@ avoidance, and contact response is not a substitute for a clear commanded path.
   physical validators. Its `milestone="pinch"` or `"first_spool"` options qualify
   intermediate stages through `execute_demo_episode`; they do not certify a
   complete routing episode.
-- `YamI2rtCfg` resolves the prepared robot from the data cache or an explicit
+- `YamI2rtCfg` resolves the versioned robot bundle from the data registry/cache or an explicit
   `fpath`. Its bundle retains the original MIT license and pinned provenance.
   Simulation and FK use
   the same URDF. Fingertips retain separate convex pieces instead of one hull
@@ -153,10 +179,9 @@ release and the third carry through release and retreat. Maximum measured
 grasp slip was 8.72 mm in the first-spool test and 9.60 mm during the third
 carry, with no reported robot/spool penetration during the third carry and
 retreat. This qualifies the retained 50 mm third-carry change through that
-intermediate stage only. A 2026-10-22 rerun after migration to the extension layout and stricter IK
-convergence passed both CUDA regressions: first-spool maximum slip was 10.92 mm
-and third-carry slip was 2.91 mm, with no reported robot/spool penetration
-during the third carry. A separate fresh-process full collector trial at seed
+intermediate stage only. Earlier 2026-10-22 development reruns passed both CUDA
+regressions, but final branch qualification failed both routing regressions at
+`carry_0`. A separate fresh-process full collector trial at seed
 73 rejected `carry_0` at 12.035 mm slip and 67.38 mm TCP error. Full-episode
 reliability remains unqualified, including early carrying and later channel
 insertion; these intermediate tests do not qualify the complete routing demo.
