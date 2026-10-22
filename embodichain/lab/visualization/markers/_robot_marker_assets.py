@@ -32,7 +32,7 @@ from .cfg import MarkerPrototypeCfg
 
 
 @dataclass(frozen=True)
-class GhostVisual:
+class RobotMarkerVisual:
     link_name: str
     local_pose: np.ndarray
     prototype: MarkerPrototypeCfg
@@ -196,7 +196,9 @@ def _usd_texture(prototype: MarkerPrototypeCfg, material: object) -> None:
         replace(material, texture_settings=settings)
     )["base_color_map"]
     if prototype.uv_coords is None:
-        raise ValueError("Textured USD ghost requires authored mesh UV coordinates.")
+        raise ValueError(
+            "Textured USD robot marker requires authored mesh UV coordinates."
+        )
     uv = np.asarray(prototype.uv_coords, dtype=float).copy()
     angle = np.deg2rad(sampling.uv_rotation)
     rotation = np.array(
@@ -229,7 +231,7 @@ def _usd_texture(prototype: MarkerPrototypeCfg, material: object) -> None:
 
 def load_urdf_visuals(
     path: Path, texture_directory: Path | None = None
-) -> list[GhostVisual]:
+) -> list[RobotMarkerVisual]:
     root = ET.parse(path).getroot()
     materials = {item.attrib["name"]: item for item in root.findall("material")}
     meshes = {}
@@ -292,7 +294,7 @@ def load_urdf_visuals(
                         settings = dict(prototype.material.get("texture_settings", {}))
                         settings.pop("base_color_map", None)
                         prototype.material["texture_settings"] = settings
-                result.append(GhostVisual(name, pose.copy(), prototype))
+                result.append(RobotMarkerVisual(name, pose.copy(), prototype))
     if not result:
         raise ValueError(f"No URDF visual geometry in {path}.")
     return result
@@ -300,14 +302,14 @@ def load_urdf_visuals(
 
 def load_usd_visuals(
     path: Path, prim_path: str | None, texture_directory: Path | None = None
-) -> list[GhostVisual]:
+) -> list[RobotMarkerVisual]:
     from dexsim.spawn.adapters.common import generated_mesh
     from embodichain.lab.sim.spawn._usd_assets import _UsdTextureFiles, _parse_singleton
 
     scene, obj = _parse_singleton(
         path,
         ("articulations", "mesh_objects"),
-        "ghost articulation or visual object",
+        "robot marker articulation or visual object",
         prim_path=prim_path,
     )
     links = (
@@ -371,7 +373,7 @@ def load_usd_visuals(
                             else np.array(prototype.uv_coords, copy=True)
                         )
                         _usd_texture(prototype, material)
-                    result.append(GhostVisual(link_name, np.eye(4), prototype))
+                    result.append(RobotMarkerVisual(link_name, np.eye(4), prototype))
     finally:
         files.close()
     if not result:

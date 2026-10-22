@@ -31,16 +31,16 @@ from embodichain.utils import configclass
 from embodichain.lab.sim.cfg.source import UsdSourceCfg, _usd_source_from_value
 from .._utils import to_numpy_array
 from .cfg import MarkerGroupCfg
-from ._robot_visual_assets import load_urdf_visuals, load_usd_visuals
+from ._robot_marker_assets import load_urdf_visuals, load_usd_visuals
 
 if TYPE_CHECKING:
     from embodichain.lab.sim import SimulationManager
 
-__all__ = ["RobotVisualAppearanceCfg", "RobotVisualCfg", "RobotVisual"]
+__all__ = ["RobotMarkersAppearanceCfg", "RobotMarkersCfg", "RobotMarkers"]
 
 
 @configclass
-class RobotVisualAppearanceCfg:
+class RobotMarkersAppearanceCfg:
     """Independent material appearance and opacity.
 
     ``override`` replaces the base-color factor while retaining source textures
@@ -58,33 +58,33 @@ class RobotVisualAppearanceCfg:
 
 
 @configclass
-class RobotVisualCfg:
-    """Robot visual source and reference coordinate convention."""
+class RobotMarkersCfg:
+    """Robot marker source and reference coordinate convention."""
 
     name: str = MISSING
     asset_path: str | None = None
     source: UsdSourceCfg | None = None
     """USD source selector shared with VisualObject, RigidObject and Robot."""
     prim_path: str | None = None
-    appearance: RobotVisualAppearanceCfg = RobotVisualAppearanceCfg()
+    appearance: RobotMarkersAppearanceCfg = RobotMarkersAppearanceCfg()
     coordinate_space: Literal["world", "env"] = "world"
 
 
-def _appearance(value: RobotVisualAppearanceCfg) -> RobotVisualAppearanceCfg:
+def _appearance(value: RobotMarkersAppearanceCfg) -> RobotMarkersAppearanceCfg:
     value.validate()
     if value.mode not in {"override", "asset"}:
-        raise ValueError("Ghost mode must be 'override' or 'asset'.")
+        raise ValueError("Robot marker mode must be 'override' or 'asset'.")
     color = np.asarray(value.color, dtype=float)
     if (
         color.shape != (3,)
         or not np.isfinite(color).all()
         or np.any((color < 0) | (color > 1))
     ):
-        raise ValueError("Ghost color must be RGB in [0, 1].")
+        raise ValueError("Robot marker color must be RGB in [0, 1].")
     if not np.isfinite(value.opacity) or not 0 <= value.opacity <= 1:
-        raise ValueError("Ghost opacity must be in [0, 1].")
+        raise ValueError("Robot marker opacity must be in [0, 1].")
     if not isinstance(value.unlit, bool):
-        raise ValueError("Ghost unlit must be a boolean.")
+        raise ValueError("Robot marker unlit must be a boolean.")
     return copy.deepcopy(value)
 
 
@@ -122,15 +122,19 @@ def _matrices(poses: object) -> np.ndarray:
     return value
 
 
-class RobotVisual:
-    """Render a robot reference without creating a physical articulation.
+class RobotMarkers:
+    """Display robot poses as markers without creating physical articulations.
+
+    A marker group owns the link visuals for all environments and reference
+    layers. Callers supply link poses or URDF joint positions; tasks own motion
+    generation and playback.
 
     Args:
         cfg: URDF or USD source, appearance and coordinate convention.
         sim: Owner of the marker resources. Prepare native scenes explicitly.
     """
 
-    def __init__(self, cfg: RobotVisualCfg, sim: SimulationManager) -> None:
+    def __init__(self, cfg: RobotMarkersCfg, sim: SimulationManager) -> None:
         cfg.validate()
         if cfg.coordinate_space not in {"world", "env"}:
             raise ValueError("coordinate_space must be 'world' or 'env'.")
@@ -145,13 +149,13 @@ class RobotVisual:
         else:
             asset_path, prim_path = cfg.asset_path, cfg.prim_path
         if asset_path is None:
-            raise ValueError("Robot visual requires asset_path or source.")
+            raise ValueError("Robot markers require asset_path or source.")
         path = Path(asset_path).expanduser().resolve()
         if not path.is_file():
             raise FileNotFoundError(path)
         self._urdf_path = path if path.suffix.lower() == ".urdf" else None
         self._texture_files = TemporaryDirectory(
-            prefix="embodichain-robot-visual-materials-"
+            prefix="embodichain-robot-markers-materials-"
         )
         if self._urdf_path is not None:
             self._visuals = load_urdf_visuals(path, Path(self._texture_files.name))
@@ -160,7 +164,7 @@ class RobotVisual:
                 path, prim_path, Path(self._texture_files.name)
             )
         else:
-            raise ValueError("Robot visual source must be URDF or USD.")
+            raise ValueError("Robot marker source must be URDF or USD.")
         self._link_names = tuple(
             dict.fromkeys(item.link_name for item in self._visuals)
         )
@@ -177,7 +181,7 @@ class RobotVisual:
         )
         self._chain = None
 
-    def _prototypes(self, appearance: RobotVisualAppearanceCfg) -> dict:
+    def _prototypes(self, appearance: RobotMarkersAppearanceCfg) -> dict:
         prototypes = {}
         for index, visual in enumerate(self._visuals):
             prototype = copy.copy(visual.prototype)
@@ -321,7 +325,7 @@ class RobotVisual:
             matrices = roots[..., None, :, :] @ matrices
         self.visualize_link_poses(matrices, env_ids=ids)
 
-    def set_appearance(self, appearance: RobotVisualAppearanceCfg) -> None:
+    def set_appearance(self, appearance: RobotMarkersAppearanceCfg) -> None:
         """Change color mode or opacity without changing the source asset.
 
         Args:
@@ -335,15 +339,15 @@ class RobotVisual:
         self.cfg.appearance = appearance
 
     def set_visibility(self, visible: bool, *, env_ids: object | None = None) -> None:
-        """Set selected ghosts' visibility while retaining their reference poses.
+        """Set selected robot markers' visibility while retaining their reference poses.
 
         Args:
-            visible: Whether to display the selected ghosts.
+            visible: Whether to display the selected robot markers.
             env_ids: Optional environment selection.
         """
         self._group.set_visibility(visible, env_ids=env_ids)
 
     def remove(self) -> None:
-        """Release the ghost's render resources; repeated removal is safe."""
+        """Release the robot markers' render resources; repeated removal is safe."""
         self._group.remove()
         self._texture_files.cleanup()

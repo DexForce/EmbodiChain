@@ -25,9 +25,9 @@ from scipy.spatial.transform import Rotation
 from embodichain.lab.visualization.markers import (
     MarkerGroup,
     MarkerPrototypeCfg,
-    RobotVisual,
-    RobotVisualCfg,
-    RobotVisualAppearanceCfg,
+    RobotMarkers,
+    RobotMarkersCfg,
+    RobotMarkersAppearanceCfg,
 )
 
 
@@ -55,12 +55,12 @@ def robot_path(tmp_path):
 
 def _ghost(path, mode="asset", space="env"):
     sim = _Sim()
-    ghost = RobotVisual(
-        RobotVisualCfg(
+    ghost = RobotMarkers(
+        RobotMarkersCfg(
             name="ghost",
             asset_path=str(path),
             coordinate_space=space,
-            appearance=RobotVisualAppearanceCfg(mode=mode, opacity=0.5),
+            appearance=RobotMarkersAppearanceCfg(mode=mode, opacity=0.5),
         ),
         sim,
     )
@@ -94,10 +94,10 @@ def test_appearance_toggle_preserves_source_and_geometry(robot_path):
     ghost.visualize_qpos([[0], [0]])
     original = tuple(ghost._visuals[0].prototype.color)
     ghost.set_appearance(
-        RobotVisualAppearanceCfg(mode="override", color=(0, 1, 0), opacity=0)
+        RobotMarkersAppearanceCfg(mode="override", color=(0, 1, 0), opacity=0)
     )
     np.testing.assert_allclose(group.snapshot()[0].color, [0, 1, 0, 0])
-    ghost.set_appearance(RobotVisualAppearanceCfg(mode="asset", opacity=1))
+    ghost.set_appearance(RobotMarkersAppearanceCfg(mode="asset", opacity=1))
     np.testing.assert_allclose(group.snapshot()[0].color, original)
     assert ghost._visuals[0].prototype.color == original
     ghost.set_visibility(False, env_ids=[1])
@@ -112,11 +112,11 @@ def test_ghost_lighting_survives_color_and_opacity_changes(robot_path):
     ghost, group = _ghost(robot_path)
     ghost.visualize_qpos([[0], [0]])
     assert all(not snapshot.unlit for snapshot in group.snapshot())
-    ghost.set_appearance(RobotVisualAppearanceCfg(mode="override", opacity=1))
+    ghost.set_appearance(RobotMarkersAppearanceCfg(mode="override", opacity=1))
     assert all(not snapshot.unlit for snapshot in group.snapshot())
-    ghost.set_appearance(RobotVisualAppearanceCfg(mode="asset", unlit=True))
+    ghost.set_appearance(RobotMarkersAppearanceCfg(mode="asset", unlit=True))
     assert all(snapshot.unlit for snapshot in group.snapshot())
-    ghost.set_appearance(RobotVisualAppearanceCfg(mode="asset", opacity=0.2))
+    ghost.set_appearance(RobotMarkersAppearanceCfg(mode="asset", opacity=0.2))
     assert all(not snapshot.unlit for snapshot in group.snapshot())
 
 
@@ -137,10 +137,10 @@ def test_reference_joint_fk_uses_named_link_order(robot_path):
 @pytest.mark.parametrize(
     "appearance",
     [
-        RobotVisualAppearanceCfg(mode="bad"),
-        RobotVisualAppearanceCfg(opacity=-1),
-        RobotVisualAppearanceCfg(opacity=float("nan")),
-        RobotVisualAppearanceCfg(color=(1, 2, 3)),
+        RobotMarkersAppearanceCfg(mode="bad"),
+        RobotMarkersAppearanceCfg(opacity=-1),
+        RobotMarkersAppearanceCfg(opacity=float("nan")),
+        RobotMarkersAppearanceCfg(color=(1, 2, 3)),
     ],
 )
 def test_invalid_appearance_keeps_previous_state(robot_path, appearance):
@@ -241,18 +241,18 @@ def test_urdf_texture_and_mesh_scale_survive_appearance_switch(tmp_path):
     assert before["metallic"] == pytest.approx(0.65)
     assert before["roughness"] == pytest.approx(0.27)
     assert Path(before["normal_map"]).is_file()
-    ghost.set_appearance(RobotVisualAppearanceCfg(mode="override", opacity=1))
+    ghost.set_appearance(RobotMarkersAppearanceCfg(mode="override", opacity=1))
     tinted = group.snapshot()[0]
     assert json.loads(tinted.material) == before
     np.testing.assert_allclose(tinted.normals, snapshot.normals)
     np.testing.assert_array_equal(tinted.texture, pixels)
-    ghost.set_appearance(RobotVisualAppearanceCfg(mode="asset"))
+    ghost.set_appearance(RobotMarkersAppearanceCfg(mode="asset"))
     np.testing.assert_array_equal(group.snapshot()[0].texture, pixels)
 
 
 def test_vertex_color_asset_is_preserved_as_texture(tmp_path):
     import trimesh
-    from embodichain.lab.visualization.markers._robot_visual_assets import _mesh_parts
+    from embodichain.lab.visualization.markers._robot_marker_assets import _mesh_parts
 
     mesh = trimesh.creation.box()
     mesh.visual.vertex_colors = np.tile([255, 0, 0, 255], (len(mesh.vertices), 1))
@@ -266,7 +266,7 @@ def test_vertex_color_asset_is_preserved_as_texture(tmp_path):
 
 def test_gltf_linear_color_factor_is_encoded_for_marker_protocol():
     import trimesh
-    from embodichain.lab.visualization.markers._robot_visual_assets import (
+    from embodichain.lab.visualization.markers._robot_marker_assets import (
         _mesh_prototype,
     )
 
@@ -350,7 +350,7 @@ def test_usd_visual_origin_material_and_packaged_texture(tmp_path, packaged):
 def test_usd_texture_sampling_preserves_uv_transform_and_opacity(tmp_path):
     from PIL import Image
     from dexsim.spawn import MaterialDesc, MaterialTextureDesc
-    from embodichain.lab.visualization.markers._robot_visual_assets import _usd_texture
+    from embodichain.lab.visualization.markers._robot_marker_assets import _usd_texture
 
     path = tmp_path / "sampling.png"
     Image.fromarray(np.full((2, 2, 4), [128, 128, 128, 64], np.uint8)).save(path)
@@ -403,14 +403,14 @@ def test_shared_usd_source_selects_one_visual_and_rejects_ambiguous_address(tmp_
         UsdGeom.Cube.Define(stage, f"/{name}/mesh")
     stage.GetRootLayer().Save()
     source = UsdSourceCfg(file_path=str(path), source_prim_path="/B")
-    ghost = RobotVisual(RobotVisualCfg(name="selected", source=source), _Sim())
+    ghost = RobotMarkers(RobotMarkersCfg(name="selected", source=source), _Sim())
     assert ghost.link_names == ("B",)
     ghost.remove()
     with pytest.raises(ValueError, match="exactly one"):
-        RobotVisual(RobotVisualCfg(name="ambiguous", asset_path=str(path)), _Sim())
+        RobotMarkers(RobotMarkersCfg(name="ambiguous", asset_path=str(path)), _Sim())
     with pytest.raises(ValueError, match="not both"):
-        RobotVisual(
-            RobotVisualCfg(name="duplicate", source=source, asset_path=str(path)),
+        RobotMarkers(
+            RobotMarkersCfg(name="duplicate", source=source, asset_path=str(path)),
             _Sim(),
         )
 

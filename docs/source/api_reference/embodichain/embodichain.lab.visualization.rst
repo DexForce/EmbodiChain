@@ -107,7 +107,7 @@ between native and browser visualization.
    :members:
    :undoc-members:
 
-Visualization markers and robot visuals
+Visualization markers and robot markers
 ---------------------------------------
 
 ``VisualizationMarkers`` adapts flat Isaac-style arrays to ``MarkerGroup``.
@@ -117,7 +117,7 @@ instance to an environment; omitted IDs place every instance in environment 0.
 The default coordinate space is world. Use ``coordinate_space="env"`` to add
 environment origins. The adapter never infers environment membership from count.
 
-``RobotVisual`` reads URDF visuals or one selected USD articulation/visual
+``RobotMarkers`` reads URDF visuals or one selected USD articulation/visual
 object. Multiple visuals per link, visual origins, mesh scales and material
 parts are preserved. ``visualize_link_poses`` accepts ``(E, L, 7)`` xyz+xyzw or
 ``(E, L, 4, 4)`` matrices; inserting ``K`` after ``E`` displays K references in
@@ -135,17 +135,17 @@ every joint in that order, including mimic joints; FK does not expand mimic
 relations. USD sources use external link poses. Motion loading, time sampling,
 root alignment and target selection remain in the task.
 
-``RobotVisualAppearanceCfg(mode="override")`` replaces the base-color factor while
+``RobotMarkersAppearanceCfg(mode="override")`` replaces the base-color factor while
 retaining source textures, roughness, metallic, normal maps and other imported
 material parameters. ``mode="asset"`` retains the original factor and multiplies
 source alpha by ``opacity``. Texture RGB still modulates the new factor: dark
 painted details remain dark when the factor is green.
 
-Opaque robot visuals preserve imported materials and respond to scene lighting.
+Opaque robot markers preserve imported materials and respond to scene lighting.
 Normals, material UV coordinates and extracted texture files remain available
 for the visual's lifetime. Transparency is adjustable, but translucent shading
 can be simpler than opaque shading and does not promise the same result across
-renderers. ``RobotVisualAppearanceCfg(unlit=True)`` selects a uniform color;
+renderers. ``RobotMarkersAppearanceCfg(unlit=True)`` selects a uniform color;
 general marker prototypes are unlit by default.
 
 ``set_appearance`` changes the ghost's independent material state without editing
@@ -154,21 +154,21 @@ the source asset. ``set_visibility`` retains instances; ``remove`` releases them
 .. code-block:: python
 
    from embodichain.lab.visualization.markers import (
-       RobotVisualAppearanceCfg, RobotVisual, RobotVisualCfg,
+       RobotMarkersAppearanceCfg, RobotMarkers, RobotMarkersCfg,
    )
 
    sim.prepare()
-   ghost = RobotVisual(RobotVisualCfg(
+   ghost = RobotMarkers(RobotMarkersCfg(
        name="reference", asset_path=robot_urdf,
        coordinate_space="env",
-       appearance=RobotVisualAppearanceCfg(mode="asset", opacity=0.4),
+       appearance=RobotMarkersAppearanceCfg(mode="asset", opacity=0.4),
    ), sim)
    ghost.visualize_qpos(reference_qpos, root_poses=reference_root_poses)
    with sim.render_frame():
        pass
    ghost.remove()
 
-The executable example ``examples/sim/robot_visual.py`` accepts ``--asset``,
+The executable example ``examples/sim/robot_markers.py`` accepts ``--asset``,
 ``--layers``, ``--mode``, ``--opacity`` and ``--viser``. Its generated reference
 motion does not advance physics. ``--headless --output-dir`` saves native images
 and separates creation, update/submission and camera-render timings.
@@ -183,7 +183,7 @@ for a stationary camera. Live mouse orbit adjustments are preserved while
 tracking. This follows ``PolicyViewerCameraCfg`` ground-plane tracking semantics.
 
 ``examples/sim/reference_trajectory.py`` displays recorded policy link poses
-through ``RobotVisual``. It enables ghost visuals, path markers and optional
+through ``RobotMarkers``. It enables ghost visuals, path markers and optional
 ``VisualObject`` task cubes by default. The example does not step physics; a task
 or policy evaluator owns state sampling and checkpoint execution.
 
@@ -203,8 +203,8 @@ translucent materials with ``--opacity``. ``--live`` opens a bounded native
 viewer, while the default writes H.264 video, PNG frames and capture metadata to
 ``--output``. ``--seconds`` and ``--fps`` set duration and sampling rate.
 
-Robot visuals and task objects use the existing scene ownership and pose APIs.
-Regular task objects participate in camera images; robot visuals require
+Robot markers and task objects use the existing scene ownership and pose APIs.
+Regular task objects participate in camera images; robot markers require
 explicit camera visualization opt-in.
 
 .. autoclass:: embodichain.lab.visualization.markers.VisualizationMarkersCfg
@@ -215,15 +215,15 @@ explicit camera visualization opt-in.
    :members:
    :exclude-members: __init__, copy, replace, to_dict, validate
 
-.. autoclass:: embodichain.lab.visualization.markers.RobotVisualAppearanceCfg
+.. autoclass:: embodichain.lab.visualization.markers.RobotMarkersAppearanceCfg
    :members:
    :exclude-members: __init__, copy, replace, to_dict, validate
 
-.. autoclass:: embodichain.lab.visualization.markers.RobotVisualCfg
+.. autoclass:: embodichain.lab.visualization.markers.RobotMarkersCfg
    :members:
    :exclude-members: __init__, copy, replace, to_dict, validate
 
-.. autoclass:: embodichain.lab.visualization.markers.RobotVisual
+.. autoclass:: embodichain.lab.visualization.markers.RobotMarkers
    :members:
    :exclude-members: __init__, copy, replace, to_dict, validate
 
@@ -233,9 +233,9 @@ Implementation modules expose the same contracts:
 
    markers.visualization_markers.VisualizationMarkers
    markers.visualization_markers.VisualizationMarkersCfg
-   markers.robot_visual.RobotVisualAppearanceCfg
-   markers.robot_visual.RobotVisualCfg
-   markers.robot_visual.RobotVisual
+   markers.robot_markers.RobotMarkersAppearanceCfg
+   markers.robot_markers.RobotMarkersCfg
+   markers.robot_markers.RobotMarkers
 
 Runtime
 -------
