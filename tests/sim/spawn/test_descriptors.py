@@ -1324,6 +1324,62 @@ def test_explicit_none_root_properties_preserve_usd_values() -> None:
     assert descriptor.enable_self_collision is True
 
 
+@pytest.mark.parametrize("cfg_type", [ArticulationCfg, RobotCfg])
+@pytest.mark.parametrize("mode", ["preserve", "overlay"])
+@pytest.mark.parametrize("compensation", [0.0, 0.35, 1.0])
+def test_gravity_compensation_matches_between_urdf_and_usd(
+    cfg_type: type[ArticulationCfg], mode: str, compensation: float
+) -> None:
+    """Creation intent survives both import routes and source configuration."""
+    source = _resolved_articulation_desc()
+    source.newton_gravity_compensation = 0.75  # Distinguish every explicit override.
+    for extension in ("urdf", "usd"):
+        cfg = cfg_type(
+            uid="robot",
+            fpath=f"robot.{extension}",
+            asset_physics_mode=mode,
+            newton_gravity_compensation=compensation,
+            joint_drive_props=None,
+        )
+        if extension == "usd":
+            with patch(
+                "embodichain.lab.sim.spawn.usd._parse_singleton",
+                return_value=(SimpleNamespace(materials={}), copy.deepcopy(source)),
+            ):
+                descriptor, _ = articulation_desc_from_usd(
+                    cfg, newton_solver_type="dexuni"
+                )
+        else:
+            descriptor = articulation_desc_from_cfg(cfg, newton_solver_type="dexuni")
+            descriptor.links = copy.deepcopy(source.links)
+            descriptor.joints = copy.deepcopy(source.joints)
+
+        assert descriptor.newton_gravity_compensation == pytest.approx(compensation)
+        configure_articulation_desc(descriptor, cfg, newton_solver_type="dexuni")
+        assert descriptor.newton_gravity_compensation == pytest.approx(compensation)
+
+
+@pytest.mark.parametrize("extension", ["urdf", "usd"])
+@pytest.mark.parametrize(
+    "compensation", [-0.1, 1.1, float("nan"), float("inf"), -float("inf")]
+)
+def test_gravity_compensation_rejects_invalid_values_before_source_loading(
+    extension: str, compensation: float
+) -> None:
+    cfg = ArticulationCfg(
+        uid="robot",
+        fpath=f"robot.{extension}",
+        newton_gravity_compensation=compensation,
+    )
+    with patch("embodichain.lab.sim.spawn.usd._parse_singleton") as parse:
+        with pytest.raises(ValueError, match="newton_gravity_compensation"):
+            if extension == "usd":
+                articulation_desc_from_usd(cfg, newton_solver_type="dexuni")
+            else:
+                articulation_desc_from_cfg(cfg, newton_solver_type="dexuni")
+        parse.assert_not_called()
+
+
 def test_articulation_descriptor_rejects_newton_acceleration_drive() -> None:
     cfg = ArticulationCfg(
         uid="robot",

@@ -22,6 +22,20 @@ decoding and compiling the constrained Task Program schema surface.
    compile_mllm_task_program
    decode_mllm_task_program
 
+embodichain.compute.geometry.cable
+----------------------------------
+
+Observe stable cable material coordinates, capsule endpoints and tool-frame slip.
+These tensor functions have no simulator dependency.
+
+.. currentmodule:: embodichain.compute.geometry.cable
+
+.. autosummary::
+
+   sample_cable_material
+   cable_endpoints
+   cable_grasp_slip
+
 embodichain.data.assets.demo_assets
 -----------------------------------
 
@@ -1171,6 +1185,20 @@ embodichain.lab.sim.atomic_actions.requirements
    SkillBindingContract
    SkillEndpointRequirement
    SkillResourceSlot
+
+embodichain.lab.sim.atomic_actions.primitives.grasp_cable
+---------------------------------------------------------
+
+Plan a contact-only pinch, close and lift. The caller measures actual lift and
+slip after execution; the plan creates no rigid attachment.
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.primitives.grasp_cable
+
+.. autosummary::
+
+   CableGraspGoal
+   GraspCableOptions
+   GraspCable
 
 embodichain.lab.sim.atomic_actions.runner
 -----------------------------------------
@@ -2594,6 +2622,29 @@ Differentiable lightweight point-mass task and learning-environment registration
 
    PointMassEnv
 
+embodichain_robots
+-----------------
+
+Official robot configurations are loaded lazily from the bundled catalog.
+The YAM preset uses a prepared external asset cache for simulation and FK.
+
+.. currentmodule:: embodichain_robots
+
+.. autosummary::
+
+   YamI2rtCfg
+
+embodichain_robots.yam_i2rt
+-------------------------
+
+YAM dual-arm defaults, including independent finger drives and local FK chains.
+
+.. currentmodule:: embodichain_robots.yam_i2rt
+
+.. autosummary::
+
+   YamI2rtCfg
+
 embodichain_tasks.configs
 -------------------------
 
@@ -2602,6 +2653,19 @@ embodichain_tasks.configs
 .. autosummary::
 
    get_config_path
+
+embodichain_tasks.manipulation.cable.route_the_cable
+----------------------------------------------------
+
+Two-spool routing task with lazy expert stages and measured cable geometry.
+Intermediate grasp validators reject excessive slip before continuing.
+
+.. currentmodule:: embodichain_tasks.manipulation.cable.route_the_cable
+
+.. autosummary::
+
+   RouteTheCableEnv
+   measure_route
 
 embodichain_tasks.manipulation.push_cube
 ----------------------------------------

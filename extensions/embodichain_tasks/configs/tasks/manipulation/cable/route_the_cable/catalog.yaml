@@ -1,0 +1,8 @@
+task_key: route_the_cable
+title: Route the Cable
+summary: Frictional, shape-feedback cable routing around two spools and into a port.
+tags: [cable, deformable, manipulation, handwritten_expert]
+default_deployment: yam
+deployments:
+  yam:
+    config: task.yam.yaml

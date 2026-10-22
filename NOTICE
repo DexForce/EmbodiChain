@@ -1,0 +1,17 @@
+EmbodiChain
+Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+
+The cable routing application includes geometry and routines adapted from
+RoboSimStudio, Copyright 2026 Kaiyuan Chen, licensed under Apache-2.0.
+Source: https://github.com/robosimstudio/robosimstudio
+Revision: 73739abe212f963e8a9f5862b27bca370df091a7
+
+The external YAM i2rt model contains the YAM arm and linear_4310 gripper,
+Copyright (c) I2RT Robotics, under the MIT license. The source model directory
+and RoboSimStudio NOTICE identify this attribution and license.
+Upstream: https://github.com/i2rt-robotics/i2rt
+Source directory: assets/embodiments/yam_i2rt/ in the RoboSimStudio revision above.
+
+Original robot meshes and generated models are distributed separately from
+this source repository. Their archive retains LICENSE, NOTICE and
+PROVENANCE.json. The MIT license is also reproduced in licenses/YamI2rt-MIT.txt.

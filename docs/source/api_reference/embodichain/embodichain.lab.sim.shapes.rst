@@ -8,8 +8,9 @@ Overview
 
 Geometry configuration objects used to build collision, visual, and deformable
 simulation shapes. :class:`ShapeCfg` is the common base; :class:`MeshCfg`,
-:class:`CubeCfg`, and :class:`SphereCfg` describe triangle-mesh, box, and
-sphere primitives respectively. :class:`MeshCollisionCfg` explicitly selects
+:class:`CubeCfg`, :class:`SphereCfg`, and :class:`CylinderCfg` describe meshes,
+boxes, spheres, and cylinders respectively. Cylinders use full height along
+local Z and native cylinder collision geometry. :class:`MeshCollisionCfg` explicitly selects
 the collision representation and its cooking settings, while
 :class:`LoadOption` controls mesh loading.
 
@@ -29,6 +30,7 @@ tetrahedral simulation mesh during voxelization.
 .. autosummary::
 
    CubeCfg
+   CylinderCfg
    LoadOption
    MeshCollisionCfg
    MeshCfg
@@ -65,6 +67,10 @@ tetrahedral simulation mesh during voxelization.
    :members:
    :undoc-members:
    :show-inheritance:
+   :exclude-members: __init__, copy, replace, to_dict, validate
+
+.. autoclass:: CylinderCfg
+   :members:
    :exclude-members: __init__, copy, replace, to_dict, validate
 
 .. autoclass:: LoadOption

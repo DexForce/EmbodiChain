@@ -13,6 +13,8 @@ Online sampling and demonstration persistence belong to
 | Locked download and ZIP integrity | `embodichain/data/dataset.py`: `EmbodiChainDataset`, `_dataset_download_lock()` |
 | CLI list/download | `embodichain/data/download.py`: `CATEGORY_MODULES`, `get_registry()`, `download_asset()` |
 | Dataset class visibility | `embodichain/data/__init__.py`, `embodichain/data/assets/__init__.py` |
+| YAM versioned asset archive | `embodichain/data/assets/robot_assets.py`: `YamI2rt` |
+| YAM source conversion and archive packaging | `scripts/tools/prepare_yam_i2rt_assets.py` |
 | Pretrained policy bundles | `embodichain/data/assets/policy_assets.py`: `download_pretrained_policy()` |
 | Unified CLI registration | `embodichain/cli/main.py`: `embodichain data` |
 
@@ -37,6 +39,23 @@ can trigger download/extraction and still name a nonexistent nested file.
 Inspect `get_data_class()` and package imports when a newly added class is invisible.
 
 ## Download and registry boundaries
+
+YAM is a robot dataset resolved through `get_data_path("YamI2rt/yam_i2rt.urdf")`.
+`YamI2rt` downloads `robot_assets/YamI2rtV1.zip` through the configured source,
+with the official Hugging Face dataset as fallback, and verifies its MD5 through
+the shared download/extraction protocol. `YamI2rtCfg` uses the same source URDF
+for its simulation component and local FK/IK chains. An explicit `fpath`
+bypasses automatic asset resolution.
+
+The preparation script remains the source-regeneration/offline path: it downloads
+a pinned upstream revision, converts and verifies the qualified model, and can
+package a versioned ZIP with stable metadata using `--archive`. Its default
+directory is `<data_root>/YamI2rt`, which `get_data_path()` reuses without a
+download. The archive retains MIT `LICENSE`, `NOTICE` and `PROVENANCE.json`;
+model files and release archives are excluded from Git and the wheel.
+The versioned archive must be published on the selected data host before relying
+on a network-only installation. Task usage and publication requirements are in
+`extensions/embodichain_tasks/configs/tasks/manipulation/cable/route_the_cable/README.md`.
 
 `EmbodiChainDataset` locks `<data_root>/download/.locks/<prefix>.lock` around
 both ZIP integrity repair and the Open3D constructor's download/extraction.

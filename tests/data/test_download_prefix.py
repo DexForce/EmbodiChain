@@ -36,7 +36,7 @@ MIRROR = "https://mirror.example.com/embodichain_data/resolve/main/"
 _COLLECT_URLS = """
 import json
 from embodichain.data import dataset
-from embodichain.data.assets import CobotMagicArm, UnitreeGo2Locomotion
+from embodichain.data.assets import CobotMagicArm, UnitreeGo2Locomotion, YamI2rt
 
 urls = {}
 
@@ -48,7 +48,7 @@ def capture(self, prefix, descriptor, path):
     raise Captured  # stop before anything is downloaded
 
 dataset.EmbodiChainDataset.__init__ = capture
-for cls in (CobotMagicArm, UnitreeGo2Locomotion):
+for cls in (CobotMagicArm, UnitreeGo2Locomotion, YamI2rt):
     try:
         cls()
     except Captured:
@@ -112,6 +112,10 @@ def test_assets_download_from_the_configured_prefix(prefix: str) -> None:
         f"{MIRROR}robot_assets/UnitreeGo2Locomotion.zip",
         f"{HF_PREFIX}robot_assets/UnitreeGo2Locomotion.zip",
     ]
+    assert urls["YamI2rt"] == [
+        f"{MIRROR}robot_assets/YamI2rtV1.zip",
+        f"{HF_PREFIX}robot_assets/YamI2rtV1.zip",
+    ]
 
 
 @pytest.mark.no_sim
@@ -120,3 +124,4 @@ def test_locomotion_does_not_repeat_the_hub_url() -> None:
     assert urls["UnitreeGo2Locomotion"] == [
         f"{HF_PREFIX}robot_assets/UnitreeGo2Locomotion.zip"
     ]
+    assert urls["YamI2rt"] == [f"{HF_PREFIX}robot_assets/YamI2rtV1.zip"]

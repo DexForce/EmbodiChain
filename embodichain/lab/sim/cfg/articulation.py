@@ -443,6 +443,15 @@ class ArticulationCfg(ObjectBaseCfg):
     then use the established fixed-base, self-collision-off defaults.
     """
 
+    newton_gravity_compensation: float = 0.0
+    """MuJoCo-backed Newton link-weight compensation fraction in [0, 1].
+
+    Independent of drive gains and payload/contact reactions. Other Newton
+    ownership modes reject a nonzero fraction; Default does not consume it.
+    Applied at creation for both URDF and USD in either asset physics mode;
+    zero explicitly disables compensation, including any USD-authored value.
+    """
+
     joint_drive_props: JointDrivePropertiesCfg | None = None
     """Optional joint-drive and joint-dynamics overrides.
 

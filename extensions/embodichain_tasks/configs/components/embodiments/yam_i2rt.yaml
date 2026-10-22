@@ -1,0 +1,33 @@
+embodiment_id: yam_i2rt
+simulation:
+  class_type: YamI2rt
+  uid: yam
+  joint_drive_props:
+    stiffness:
+      right_joint[1-6]: 300.0
+      left_joint[1-6]: 2000.0
+      .*_joint[78]: 6000.0
+    damping:
+      right_joint[1-6]: 30.0
+      left_joint[1-6]: 90.0
+      .*_joint[78]: 120.0
+  link_attrs:
+    pads:
+      link_names_expr:
+      - (right|left)_tip_(left|right)
+      attrs:
+        material_props:
+          backend: newton
+          dynamic_friction: 60.0
+          ke: 10000.0
+          kd: 0.1
+  attrs:
+    collision_props:
+      contact_offset: 0.01
+      rest_offset: 0.0
+    material_props:
+      backend: newton
+      dynamic_friction: 2.0
+      ke: 10000.0
+      kd: 0.1
+sensor: []
