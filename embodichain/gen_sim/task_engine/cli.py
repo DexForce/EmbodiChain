@@ -46,7 +46,7 @@ __all__ = ["build_parser", "main"]
 
 
 _ROBOT_PROFILES = _CLI_PROFILES
-_MODES: Final = ("image", "image-edit", "scene", "scene-edit")
+_MODES: Final = ("scene",)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -76,26 +76,6 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--dataset-saving", action="store_true")
     _add_open_window_argument(run_parser)
     _add_failure_policy_argument(run_parser)
-    annotate_parser = subparsers.add_parser(
-        "annotate-endpoints",
-        help="Audit or apply reviewed prismatic endpoint metadata offline.",
-    )
-    annotate_parser.add_argument("--asset-root", required=True)
-    annotate_parser.add_argument("--manifest", required=True)
-    annotate_parser.add_argument("--report", required=True)
-    annotate_parser.add_argument("--apply", action="store_true")
-    annotate_parser.add_argument("--backup-root", default=None)
-    visualize_parser = subparsers.add_parser(
-        "visualize", help="Render a semantic graph as offline HTML or PNG."
-    )
-    visualize_parser.add_argument("--graph", required=True)
-    visualize_parser.add_argument("--report", default=None)
-    visualize_parser.add_argument("--output", required=True)
-    visualize_parser.add_argument("--task-spec", default=None)
-    visualize_parser.add_argument("--validation", default=None)
-    visualize_parser.add_argument(
-        "--view", choices=("groups", "calls"), default="groups"
-    )
     validate_parser = subparsers.add_parser(
         "validate-graph", help="Strictly audit an existing bundle without simulation."
     )
@@ -109,12 +89,7 @@ def _add_workflow_arguments(parser: argparse.ArgumentParser) -> None:
     instruction = parser.add_mutually_exclusive_group(required=True)
     instruction.add_argument("--instruction")
     instruction.add_argument("--task-file", "--task_file")
-    parser.add_argument("--image")
-    parser.add_argument(
-        "--reference-image", help="Audit an existing scene against its reference image."
-    )
-    parser.add_argument("--scene")
-    parser.add_argument("--scene-edit", "--scene_edit", default=None)
+    parser.add_argument("--scene", required=True)
     parser.add_argument("--output-root", required=True)
     parser.add_argument("--config", default=None)
     parser.add_argument("--model", default=None)
@@ -170,18 +145,12 @@ def main(argv: Sequence[str] | None = None, *, started_at: float | None = None) 
         "prepare",
         "run",
         "run-all",
-        "annotate-endpoints",
-        "visualize",
         "validate-graph",
         "-h",
         "--help",
     }:
         arguments.insert(0, "run-all")
     args = parser.parse_args(arguments)
-    if args.command == "annotate-endpoints":
-        return _run_endpoint_annotations(args)
-    if args.command == "visualize":
-        return _run_visualize(args, parser)
     if args.command == "validate-graph":
         return _run_validate_graph(args, parser)
     if args.command == "run":
@@ -192,67 +161,6 @@ def main(argv: Sequence[str] | None = None, *, started_at: float | None = None) 
         parser=parser,
         started_at=started_at,
     )
-
-
-def _run_visualize(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
-    """Render one semantic graph without constructing a simulator."""
-    try:
-        graph = json.loads(Path(args.graph).expanduser().read_text(encoding="utf-8"))
-        report = (
-            None
-            if args.report is None
-            else json.loads(Path(args.report).expanduser().read_text(encoding="utf-8"))
-        )
-        if Path(args.output).suffix.lower() == ".html":
-            from .semantic_graph_html import write_semantic_task_graph_html
-
-            root = Path(args.graph).expanduser().parent
-            spec_path = (
-                Path(args.task_spec).expanduser()
-                if args.task_spec
-                else root / "task_spec.json"
-            )
-            validation_path = (
-                Path(args.validation).expanduser()
-                if args.validation
-                else root / "semantic_graph_validation.json"
-            )
-            for explicit, path in (
-                (args.task_spec, spec_path),
-                (args.validation, validation_path),
-            ):
-                if explicit and not path.is_file():
-                    raise ValueError(f"Explicit companion file is missing: {path}.")
-            spec = (
-                json.loads(spec_path.read_text(encoding="utf-8"))
-                if spec_path.is_file()
-                else None
-            )
-            validation = (
-                json.loads(validation_path.read_text(encoding="utf-8"))
-                if validation_path.is_file()
-                else None
-            )
-            output = write_semantic_task_graph_html(
-                graph,
-                args.output,
-                report,
-                task_spec=spec,
-                validation=validation,
-                bundle_root=root,
-            )
-        else:
-            if Path(args.output).suffix.lower() != ".png":
-                raise ValueError("Visualization output must end in .html or .png.")
-            from .semantic_graph_visualization import write_semantic_task_graph_png
-
-            output = write_semantic_task_graph_png(
-                graph, args.output, report, view=args.view
-            )
-    except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
-        parser.error(str(exc))
-    print(json.dumps({"output": output.as_posix(), "view": args.view}))
-    return 0
 
 
 def _run_validate_graph(
@@ -311,9 +219,6 @@ def _run_workflow(
     if scene is not None:
         validate_scene_history_root(scene, args.output_root)
     instruction = _instruction(args)
-    reference_image = getattr(args, "reference_image", None)
-    if reference_image and args.mode != "scene":
-        parser.error("--reference-image requires --mode scene.")
     workflow_cfg, planning_cfg, execution_cfg = load_task_engine_config(args.config)
     if planning_cfg.physical_reference is None:
         try:
@@ -322,36 +227,9 @@ def _run_workflow(
             parser.error(str(exc))
     adapter = SceneAdapter(model=args.model, robot_profile=args.robot_profile)
     workflow = TaskEngineWorkflow(scene_adapter=adapter)
-    if reference_image and planning_cfg.physical_reference is not None:
-        parser.error(
-            "--reference-image cannot qualify a different physical_reference model."
-        )
     with reserve_run_directory(args.output_root) as allocation:
         if scene is not None:
             validate_scene_output_separation(scene, allocation.path)
-        if reference_image:
-            from .scene.visual_consistency import review_scene_image
-
-            try:
-                audit = review_scene_image(scene, reference_image, instruction)
-            except Exception as exc:
-                audit = {
-                    "accepted": False,
-                    "error": {"type": type(exc).__name__, "message": str(exc)},
-                }
-            if not audit["accepted"]:
-                allocation.path.mkdir(parents=True, exist_ok=True)
-                (allocation.path / "visual_consistency.json").write_text(
-                    json.dumps(audit, ensure_ascii=False, indent=2), encoding="utf-8"
-                )
-                payload = {
-                    "status": "input_conflict",
-                    "failure_class": "visual_consistency",
-                    "elapsed_seconds": round(perf_counter() - started_at, 3),
-                    "output_dir": str(allocation.path),
-                }
-                _print_json(payload)
-                return 2
         result = workflow.run(
             {
                 "schema_version": TASK_RUN_REQUEST_SCHEMA,
@@ -375,10 +253,6 @@ def _run_workflow(
             created_at=allocation.created_at,
             execute=execute,
         )
-        if reference_image:
-            (allocation.path / "visual_consistency.json").write_text(
-                json.dumps(audit, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
     payload = {
         "run_id": allocation.run_id,
         "status": result.status,
@@ -390,48 +264,12 @@ def _run_workflow(
             None if result.final_bundle is None else result.final_bundle.as_posix()
         ),
         "video_paths": _report_saved_videos(result.output_dir) if execute else [],
-        "semantic_graph_html": _report_semantic_graph_html(
-            result.output_dir, bundle=result.final_bundle, announce=execute
-        ),
+        "semantic_graph_html": None,
     }
     payload["elapsed_seconds"] = round(perf_counter() - started_at, 3)
-    from .semantic_graph_html import _finalize_run_html
-
-    _finalize_run_html(
-        result.output_dir,
-        bundle=result.final_bundle,
-        html_path=payload["semantic_graph_html"],
-        summary={
-            "task_id": args.task_id,
-            "run_id": allocation.run_id,
-            "created_at": allocation.created_at.isoformat(),
-            "status": result.status,
-            "elapsed_seconds": payload["elapsed_seconds"],
-            "elapsed_scope": "CLI 墙钟：启动至运行、发布与产物发现完成；不含报告后处理",
-        },
-    )
     _print_json(payload)
     accepted = result.succeeded if execute else result.status == "prepared"
     return 0 if accepted else 2
-
-
-def _run_endpoint_annotations(args: argparse.Namespace) -> int:
-    """Run the offline endpoint migrator without constructing a simulator."""
-    from .endpoint_annotations import (
-        load_endpoint_manifest,
-        migrate_endpoint_manifest,
-        write_endpoint_report,
-    )
-
-    report = migrate_endpoint_manifest(
-        asset_root=args.asset_root,
-        manifest=load_endpoint_manifest(args.manifest),
-        apply=bool(args.apply),
-        backup_root=args.backup_root,
-    )
-    report_path = write_endpoint_report(args.report, report)
-    _print_json({**report, "report": report_path.as_posix()})
-    return 0
 
 
 def _run_prepared_bundle(args: argparse.Namespace, *, started_at: float) -> int:
@@ -481,26 +319,9 @@ def _run_prepared_bundle(args: argparse.Namespace, *, started_at: float) -> int:
         "output_dir": allocation.path.as_posix(),
         "execution_report": report,
         "video_paths": _report_saved_videos(allocation.path),
-        "semantic_graph_html": _report_semantic_graph_html(
-            allocation.path, bundle=Path(args.bundle).expanduser()
-        ),
+        "semantic_graph_html": None,
     }
     payload["elapsed_seconds"] = round(perf_counter() - started_at, 3)
-    from .semantic_graph_html import _finalize_run_html
-
-    _finalize_run_html(
-        allocation.path,
-        bundle=Path(args.bundle).expanduser(),
-        html_path=payload["semantic_graph_html"],
-        summary={
-            "task_id": report.get("task_id"),
-            "run_id": allocation.run_id,
-            "created_at": allocation.created_at.isoformat(),
-            "status": payload["status"],
-            "elapsed_seconds": payload["elapsed_seconds"],
-            "elapsed_scope": "CLI 墙钟：启动至运行、发布与产物发现完成；不含报告后处理",
-        },
-    )
     _print_json(payload)
     return 0 if accepted else 2
 
@@ -529,64 +350,6 @@ def _report_saved_videos(output_dir: Path) -> list[str]:
     return paths
 
 
-def _report_semantic_graph_html(
-    output_dir: Path, *, bundle: Path | None = None, announce: bool = True
-) -> str | None:
-    """Report an existing current-run viewer, preferring selected execution evidence."""
-    candidates = [output_dir / "semantic_graph.html"]
-    selection_path = output_dir / "final" / "selection.json"
-    try:
-        if selection_path.is_file():
-            selection = json.loads(selection_path.read_text(encoding="utf-8"))
-            if isinstance(selection, dict):
-                scene, action = (
-                    selection.get("scene_attempt"),
-                    selection.get("action_attempt"),
-                )
-                if all(type(value) is int and value > 0 for value in (scene, action)):
-                    candidates.append(
-                        output_dir
-                        / "attempts"
-                        / f"scene_{scene:04d}"
-                        / "action_attempts"
-                        / f"action_{action:04d}"
-                        / "semantic_graph.html"
-                    )
-        if bundle is not None:
-            candidates.append(bundle / "semantic_graph.html")
-        else:
-            for pattern in (
-                "attempts/scene_*/action_attempts/action_*/semantic_graph.html",
-                "attempts/scene_*/bundle/semantic_graph.html",
-            ):
-                candidates.extend(sorted(output_dir.glob(pattern), reverse=True))
-        path = next(
-            (
-                candidate.resolve().as_posix()
-                for candidate in candidates
-                if candidate.is_file()
-            ),
-            None,
-        )
-    except (OSError, ValueError) as exc:
-        if announce:
-            print(
-                f"[Task Engine] Unable to locate semantic graph HTML: {exc}",
-                file=sys.stderr,
-            )
-        return None
-    if announce:
-        print(
-            (
-                f"[Task Engine] Semantic graph HTML: {path}"
-                if path is not None
-                else "[Task Engine] No semantic graph HTML generated for this run."
-            ),
-            file=sys.stderr,
-        )
-    return path
-
-
 def _instruction(args: argparse.Namespace) -> str:
     instruction = (
         str(args.instruction).strip()
@@ -599,21 +362,9 @@ def _instruction(args: argparse.Namespace) -> str:
 
 
 def _mode_inputs(args: argparse.Namespace) -> tuple[str | None, str | None, str | None]:
-    image = None if args.image is None else str(args.image).strip()
-    scene = None if args.scene is None else str(args.scene).strip()
-    edit = None if args.scene_edit is None else str(args.scene_edit).strip()
-    expected = {
-        "image": (True, False, False),
-        "image-edit": (True, False, True),
-        "scene": (False, True, False),
-        "scene-edit": (False, True, True),
-    }[args.mode]
-    actual = (bool(image), bool(scene), bool(edit))
-    if actual != expected:
-        raise ValueError(
-            f"mode={args.mode!r} requires image/scene/edit={expected}, got {actual}."
-        )
-    return image, scene, edit
+    if args.mode != "scene" or not str(args.scene).strip():
+        raise ValueError("Task Engine requires --mode scene and an existing --scene.")
+    return None, str(args.scene).strip(), None
 
 
 def _print_json(value: Any) -> None:

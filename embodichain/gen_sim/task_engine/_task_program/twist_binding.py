@@ -31,7 +31,7 @@ from .twist_semantics import MissingTwistSemanticsError, resolve_twist_semantics
 __all__: list[str] = []
 PREPARE_CALL = "gen_sim.twist_prepare"
 TWIST_CALL = "gen_sim.twist"
-TWIST_REVISION = "15"
+TWIST_REVISION = "17"
 TWIST_CHUNK_COUNT = 8
 TWIST_CHUNK_ANGLE = math.radians(5.0)
 TWIST_SETTLE_STEPS = 5
@@ -137,6 +137,10 @@ class TwistRoute:
             raise ValueError("E8 fixed_roll must be finite and within [-pi, pi].")
         if type(self.feedback_enabled) is not bool:
             raise ValueError("E8 feedback_enabled must be an explicit boolean.")
+        if self.feedback_enabled or self.grip_extra_m != 0:
+            raise ValueError(
+                "E8 feedback correction is unsupported; regenerate a basic Twist deployment."
+            )
         if (
             type(self.grip_extra_m) not in (int, float)
             or not math.isfinite(self.grip_extra_m)

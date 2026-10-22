@@ -74,9 +74,7 @@ class PreparationResult:
     artifacts: TaskEngineArtifactPaths
     semantic_task_graph: SemanticTaskGraph | None = None
     generated_paths: TaskProgramBundlePaths | None = None
-    feasibility_report: dict[str, Any] | None = None
     planning_attempts: tuple[dict[str, Any], ...] = ()
-    unbound_action_plan: dict[str, Any] | None = None
 
     @property
     def bound(self) -> bool:
@@ -114,9 +112,6 @@ class TaskEngineCoordinator:
         candidate_count: int = 3,
         overwrite: bool = False,
         planning_mode: str = "offline",
-        gripper_model: str = "pgi",
-        ik_solver: str = "auto",
-        vlm_model: str | None = None,
         max_episodes: int | None = None,
         max_episode_steps: int | None = None,
         fit_grasp_assets: bool = False,
@@ -124,30 +119,16 @@ class TaskEngineCoordinator:
         runtime_profile: str = "default",
         experimental_open_release: bool | None = None,
         press_extra_distance: float | None = None,
-        planner_policy: Mapping[str, Any] | None = None,
-        randomize_scene: bool = False,
-        randomize_table_material: bool = False,
         candidate_set: TaskCandidateSet | Mapping[str, Any] | None = None,
         force_most_likely: bool = False,
         final_inspection: Mapping[str, Any] | None = None,
-        unbound_action_plan: Mapping[str, Any] | None = None,
         physical_input: FrozenPhysicalInput | None = None,
     ) -> PreparationResult:
         """Publish a graph and configured Task Program as one transaction.
 
         Robot part routing, action options, grounding, physical effects, and
         command execution remain owned by the selected Task Program integration.
-        Legacy CLI keywords are accepted for one migration window but cannot
-        alter those lower-layer contracts.
         """
-        del (
-            gripper_model,
-            ik_solver,
-            vlm_model,
-            planner_policy,
-            randomize_scene,
-            randomize_table_material,
-        )
         from ..experiment_policy import validate_profile
 
         validate_profile(runtime_profile)
@@ -290,94 +271,68 @@ class TaskEngineCoordinator:
                     planner_route=planning_mode,
                 )
                 graph = plan.graph
-                from .._task_program.twist_support import TwistSupportPenetrationError
 
                 is_twist = any(node["task_type"] == "E8" for node in graph["nodes"])
-                height_candidates = (
-                    (0.001, 0.002, 0.003, 0.004)
-                    if is_twist and adaptation.physical_input is None
-                    else (None,)
+                height = (
+                    0.001 if is_twist and adaptation.physical_input is None else None
                 )
-                for height in height_candidates:
-                    try:
-                        extra = (
-                            {"twist_support_lift_m": height}
-                            if height is not None
-                            else {}
+                extra = {"twist_support_lift_m": height} if height is not None else {}
+                if runtime_profile != "default":
+                    extra["runtime_profile"] = runtime_profile
+                if experimental_open_release is not None:
+                    extra["experimental_open_release"] = experimental_open_release
+                if press_extra_distance is not None:
+                    extra["press_extra_distance"] = press_extra_distance
+                if twist_mass_source:
+                    extra["twist_mass_source"] = True
+                if str(adaptation.scene_manifest["robot_profile"]) in {
+                    "dual_franka",
+                    "dual_franka_robotiq_arg2f_140",
+                }:
+                    selection = select_manipulation_policy(
+                        graph, plan.candidate, adaptation.prepared_scene
+                    )
+                    extra.update(selection)
+                    (staging / "manipulation_policy_selection.json").write_text(
+                        json.dumps(
+                            {
+                                "schema_version": "gen_sim.manipulation-policy-selection/v1",
+                                "source": "typed_unconstrained_rigid_inside_recipe",
+                                "selected_calls": selection,
+                                "physical_input_modified": False,
+                            },
+                            indent=2,
+                            ensure_ascii=False,
+                        )
+                        + "\n",
+                        encoding="utf-8",
+                    )
+                if any(n["task_type"] == "E3" for n in graph["nodes"]):
+                    from .._task_program.pour_continuation import (
+                        supports_ordinary_pour,
+                    )
+
+                    if supports_ordinary_pour(graph, plan.candidate):
+                        extra["pour_geometry_revision"] = (
+                            2 if runtime_profile != "default" else 1
                         )
                         if runtime_profile != "default":
-                            extra["runtime_profile"] = runtime_profile
-                        if experimental_open_release is not None:
-                            extra["experimental_open_release"] = (
-                                experimental_open_release
-                            )
-                        if press_extra_distance is not None:
-                            extra["press_extra_distance"] = press_extra_distance
-                        if twist_mass_source:
-                            extra["twist_mass_source"] = True
-                        if str(adaptation.scene_manifest["robot_profile"]) in {
-                            "dual_franka",
-                            "dual_franka_robotiq_arg2f_140",
-                        }:
-                            selection = select_manipulation_policy(
-                                graph, plan.candidate, adaptation.prepared_scene
-                            )
-                            extra.update(selection)
-                            (staging / "manipulation_policy_selection.json").write_text(
-                                json.dumps(
-                                    {
-                                        "schema_version": "gen_sim.manipulation-policy-selection/v1",
-                                        "source": "typed_unconstrained_rigid_inside_recipe",
-                                        "selected_calls": selection,
-                                        "physical_input_modified": False,
-                                    },
-                                    indent=2,
-                                    ensure_ascii=False,
-                                )
-                                + "\n",
-                                encoding="utf-8",
-                            )
-                        if any(n["task_type"] == "E3" for n in graph["nodes"]):
-                            from .._task_program.pour_continuation import (
-                                supports_ordinary_pour,
-                            )
-
-                            if supports_ordinary_pour(graph, plan.candidate):
-                                extra["pour_geometry_revision"] = (
-                                    2 if runtime_profile != "default" else 1
-                                )
-                                if runtime_profile != "default":
-                                    extra["pour_proxy_position_tolerance_m"] = 0.02
-                        graph, generated = generate_task_program_bundle(
-                            graph,
-                            adaptation.physical_input or adaptation.prepared_scene,
-                            staging,
-                            robot_profile=str(
-                                adaptation.scene_manifest["robot_profile"]
-                            ),
-                            max_episodes=max_episodes,
-                            max_episode_steps=max_episode_steps,
-                            fit_grasp_assets=fit_grasp_assets,
-                            verify_pick_phases=True,
-                            task_spec=plan.task_spec,
-                            task_candidate=plan.candidate,
-                            role_bindings=plan.role_bindings,
-                            step_lineage=plan.lineage,
-                            **extra,
-                        )
-                        break
-                    except TwistSupportPenetrationError as error:
-                        planning_attempt.setdefault(
-                            "support_preflight_attempts", []
-                        ).append(
-                            {
-                                "height_m": height,
-                                "status": "geometric_penetration",
-                                "error": str(error),
-                            }
-                        )
-                        if height == height_candidates[-1]:
-                            raise
+                            extra["pour_proxy_position_tolerance_m"] = 0.02
+                graph, generated = generate_task_program_bundle(
+                    graph,
+                    adaptation.physical_input or adaptation.prepared_scene,
+                    staging,
+                    robot_profile=str(adaptation.scene_manifest["robot_profile"]),
+                    max_episodes=max_episodes,
+                    max_episode_steps=max_episode_steps,
+                    fit_grasp_assets=fit_grasp_assets,
+                    verify_pick_phases=True,
+                    task_spec=plan.task_spec,
+                    task_candidate=plan.candidate,
+                    role_bindings=plan.role_bindings,
+                    step_lineage=plan.lineage,
+                    **extra,
+                )
             except (TypeError, ValueError, UnsupportedSemanticCapabilityError) as exc:
                 planning_attempt["status"] = "failed"
                 planning_attempt["error"] = _error_record(exc)
@@ -409,7 +364,6 @@ class TaskEngineCoordinator:
                     "integration_fingerprint": graph["integration_fingerprint"],
                     "task_spec_semantic_hash": plan.task_spec.semantic_hash,
                     "semantic_graph_validation": "semantic_graph_validation.json",
-                    "semantic_graph_html": "semantic_graph.html",
                 }
             )
             _write_json(staging / "planner_report.json", planning_attempt)
@@ -424,11 +378,6 @@ class TaskEngineCoordinator:
                 semantic_task_graph=deepcopy(graph),
                 generated_paths=_published_paths(generated, published),
                 planning_attempts=(deepcopy(planning_attempt),),
-                unbound_action_plan=(
-                    None
-                    if unbound_action_plan is None
-                    else deepcopy(dict(unbound_action_plan))
-                ),
             )
 
     def _coerce_source(self, source: SceneSourceRef | str | Path) -> SceneSourceRef:

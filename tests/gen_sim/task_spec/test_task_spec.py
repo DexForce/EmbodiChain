@@ -253,30 +253,10 @@ def test_task_spec_rejects_cyclic_milestones() -> None:
         )
 
 
-def test_compat_certificate_cannot_hide_failed_predicate() -> None:
-    from embodichain.gen_sim.task_spec import PredicateEvaluation
-    from embodichain.gen_sim.task_spec.compat import ValidationCertificate
-
-    failed = PredicateEvaluation(
-        "goal_001", "exists", EvaluationStatus.FAILED, False, True, "missing"
-    )
-    with pytest.raises(ValueError, match="aggregate predicate status"):
-        ValidationCertificate(
-            certificate_id="certificate",
-            task_template_hash="0" * 64,
-            scene_instance_hash="0" * 64,
-            witness_id=None,
-            checker="test",
-            status="satisfied",
-            predicate_results=(failed,),
-        )
-
-
 @pytest.mark.parametrize("observation", [False, None])
 def test_required_milestone_never_certifies_failed_or_missing_evidence(
     observation,
 ) -> None:
-    from embodichain.gen_sim.task_spec.compat import build_validation_certificate
 
     spec = TaskSpec(
         roles=(RoleSpec("object"),),
@@ -291,16 +271,8 @@ def test_required_milestone_never_certifies_failed_or_missing_evidence(
     trajectory = None if observation is None else [{"pressed": observation}]
     report = evaluate_task_spec(spec, {"final": True}, trajectory=trajectory)
     assert not report.certificate_ready
-    certificate = build_validation_certificate(
-        report,
-        certificate_id="test",
-        task_template_hash=spec.semantic_hash,
-        scene_instance_hash="0" * 64,
-    )
-    assert certificate.status != "satisfied"
-    assert any(
-        item.predicate_id == "milestone:press" for item in certificate.predicate_results
-    )
+    assert report.status != EvaluationStatus.SATISFIED
+    assert any(item.predicate_id == "milestone:press" for item in report.milestones)
 
 
 @pytest.mark.parametrize(

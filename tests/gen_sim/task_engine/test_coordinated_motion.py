@@ -14,18 +14,14 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Continuation plans preserve the two verified grasps until intentional release."""
-
 from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
 import runpy
 from unittest.mock import Mock
-
 import pytest
 import torch
-
 from embodichain.gen_sim.task_engine._task_program.coordinated_motion import (
     GenSimCoordinatedPickment,
 )
@@ -33,7 +29,6 @@ from embodichain.lab.sim.atomic_actions import (
     ActionInvocation,
     AntipodalAffordance,
     CoordinatedPickGoal,
-    CoordinatedPickment,
     CoordinatedPickmentOptions,
     EntityState,
     HeldObjectState,
@@ -43,19 +38,31 @@ from embodichain.lab.sim.atomic_actions import (
     TaskState,
 )
 
-# Reuse the shared CPU engine fixtures without turning tests/ into a package.
 _shared = runpy.run_path(
     str(Path(__file__).parents[2] / "sim/atomic_actions/test_actions.py")
 )
+
+
 _bind_action = _shared["_bind_action"]
+
+
 _dual_binding = _shared["_dual_binding"]
+
+
 _dual_context = _shared["_dual_context"]
+
+
 _dual_motion_generator = _shared["_dual_motion_generator"]
-_stub_dual_arm_grasp_poses = _shared["_stub_dual_arm_grasp_poses"]
 
 
 def setup_case(*, release=True, held=True, right_entity="tray", masks=None):
     generator = _dual_motion_generator()
+
+    def continuous_ik(*, joint_seed=None, qpos_seed=None, **_kwargs):
+        seed = joint_seed if joint_seed is not None else qpos_seed
+        return torch.ones(seed.shape[0], dtype=torch.bool), seed + 0.001
+
+    generator.robot.compute_ik.side_effect = continuous_ik
     action = _bind_action(generator, GenSimCoordinatedPickment())
     semantics = ObjectSemantics(AntipodalAffordance(), {}, entity_id="tray")
     pose = torch.eye(4).repeat(2, 1, 1)
@@ -105,6 +112,17 @@ def setup_case(*, release=True, held=True, right_entity="tray", masks=None):
     return action, context, action.resolve_request(invocation), generator
 
 
+def test_held_continuation_rejects_velocity_invalid_ik():
+    action, context, request, generator = setup_case()
+    generator.robot.compute_ik.side_effect = (
+        lambda *, joint_seed=None, qpos_seed=None, **_kwargs: (
+            torch.ones(2, dtype=torch.bool),
+            (joint_seed if joint_seed is not None else qpos_seed) + 0.2,
+        )
+    )
+    assert not action.plan(request, context).plan_success.any()
+
+
 @pytest.mark.parametrize("release", [False, True])
 def test_held_continuation_never_opens_or_resamples_before_release(release):
     action, context, request, generator = setup_case(release=release)
@@ -137,15 +155,6 @@ def test_held_continuation_never_opens_or_resamples_before_release(release):
             torch.testing.assert_close(
                 projected.object_to_eef, context.task.get_held_object(key).object_to_eef
             )
-
-
-def test_no_grasp_uses_unchanged_pickup_pipeline():
-    action, context, request, _ = setup_case(held=False)
-    _stub_dual_arm_grasp_poses(action)
-    plan = action.plan(request, context)
-    assert plan.plan_success.all()
-    assert [s.name for s in plan.segments][:3] == ["approach", "close", "lift"]
-    assert GenSimCoordinatedPickment.descriptor() == CoordinatedPickment.descriptor()
 
 
 def test_wrong_object_does_not_fall_back_to_opening_hands():

@@ -66,7 +66,7 @@ from .invocation_policy import (
     bind_articulation_followups,
 )
 
-ADAPTER_CONTRACT = "gen_sim.task_program/2620929c/v13"
+ADAPTER_CONTRACT = "gen_sim.task_program/2620929c/v15"
 
 
 def _press_scene_identity(base_dir: str | Path) -> dict[str, Any]:
@@ -112,7 +112,6 @@ class _TaskFactory(SimulationTaskProgramFactory):
         drawer_routes: tuple = (),
         adaptive_pick: bool = False,
         pick_purposes: tuple[tuple[str, str], ...] = (),
-        upright_container_picks: tuple = (),
         coordinated_motion: bool = False,
         handover_scene_clearance: bool = False,
         motion_samples: tuple[tuple[str, int], ...] = (),
@@ -140,7 +139,6 @@ class _TaskFactory(SimulationTaskProgramFactory):
         self._pour_receivers = dict(pour_receivers or {})
         self._adaptive_pick = adaptive_pick
         self._pick_purposes = pick_purposes
-        self._upright_container_picks = dict(upright_container_picks)
         self._coordinated_motion = coordinated_motion
         self._handover_scene_clearance = handover_scene_clearance
         self._motion_samples = motion_samples
@@ -312,13 +310,6 @@ class _TaskFactory(SimulationTaskProgramFactory):
                     revision=revision,
                     **opening,
                 )
-                quality = self._upright_container_picks.get(request.invocation_id)
-                if quality is not None:
-                    if screen is None:
-                        raise ValueError(
-                            "Upright quality requires native pad closing geometry."
-                        )
-                    screen.closure_quality = quality
                 return screen
 
             pick.closing_geometry_factory = closing_geometry
@@ -414,17 +405,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
                 action._operation_states[operation] = getattr(
                     port, "_candidate_state", None
                 )
-                if getattr(route, "feedback_enabled", False):
-                    from .twist_feedback import TwistFeedbackState
-
-                    feedback = TwistFeedbackState(
-                        route, self._simulation, self._robot, port.sensor, guard
-                    )
-                    port.sensor._feedback_state = feedback
-                    action._operation_feedback[operation] = feedback
             engine.register(action, replace=True)
-            for feedback in action._operation_feedback.values():
-                engine.configure_twist_feedback(feedback)
         self.task_program_registration.validate_engine(engine)
         if (
             self._clearance_routes
@@ -563,7 +544,6 @@ class TaskAdapterFactory:
     idle_invocations: tuple[tuple[str, str], ...] = ()
     pour_return_calls: tuple[str, ...] = ()
     held_command_sources: tuple = ()
-    upright_container_picks: tuple = ()
     motion_contract: str = SHARED_MOTION_CONTRACT
 
     def create_adapter(self, environment: Any) -> TaskProgramEnvironmentAdapter:
@@ -792,7 +772,6 @@ class TaskAdapterFactory:
             drawer_routes=self.drawer_routes,
             adaptive_pick=self.adaptive_pick,
             pick_purposes=self.pick_purposes,
-            upright_container_picks=self.upright_container_picks,
             coordinated_motion=self.coordinated_grasp,
             handover_scene_clearance=self.handover_scene_clearance,
             motion_samples=self.motion_samples,
@@ -891,6 +870,9 @@ def load_deployment(
         raise ValueError(
             "Unsupported GenSim task constraint format; regenerate the bundle."
         )
+    legacy_quality = payload.get("upright_container_picks", {})
+    if not isinstance(legacy_quality, dict) or legacy_quality:
+        raise ValueError("upright_container_picks is unsupported in this deployment.")
     presets = payload["presets"]
     motion_contract = validate_motion_contract(
         payload.get("motion_contract", SHARED_MOTION_CONTRACT)
@@ -1171,24 +1153,6 @@ def load_deployment(
             raise ValueError(
                 "Measured preshape requires the qualified revision4 closing contract."
             )
-    from .pick_closure_quality import bind_policies
-
-    upright_container_picks = bind_policies(
-        payload.get("upright_container_picks", {}), compiled, dict(pick_purposes)
-    )
-    if upright_container_picks and payload.get("pick_contact_revision") not in (
-        1,
-        2,
-        3,
-        4,
-        5,
-        6,
-        7,
-        8,
-    ):
-        raise ValueError(
-            "Upright quality requires an explicit native Pick contact revision."
-        )
     motion_samples = bind_motion_samples(payload["motion_samples"], compiled)
     cartesian_calls = bind_cartesian_calls(payload["cartesian_calls"], compiled)
     pour_return_calls = bind_pour_return_calls(
@@ -1397,7 +1361,6 @@ def load_deployment(
         drawer_routes=drawers,
         adaptive_pick=adaptive_pick,
         pick_purposes=pick_purposes,
-        upright_container_picks=upright_container_picks,
         coordinated_grasp=coordinated,
         handover_scene_clearance=handover_scene_clearance,
         motion_samples=motion_samples,

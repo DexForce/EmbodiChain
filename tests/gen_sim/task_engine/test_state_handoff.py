@@ -18,13 +18,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from types import SimpleNamespace
-
 import pytest
 import torch
-
 from embodichain.gen_sim.task_engine._task_program.state_handoff import (
     GenSimStateHandoff,
-    articulation_effect,
     require_release_effect,
 )
 from embodichain.lab.sim.atomic_actions import (
@@ -104,12 +101,26 @@ def test_release_contract_is_checked_at_the_action_boundary() -> None:
     assert rejected.diagnostics.failure.code == "place_release_contract_missing"
 
 
-def test_articulation_effect_is_explicit_and_verified_later() -> None:
-    delta = articulation_effect(
-        "drawer",
-        "slide_joint",
-        torch.tensor([[0.2]], dtype=torch.float32),
+@pytest.mark.parametrize("foreign", [False, True])
+def test_pick_rejects_missing_or_foreign_attachment(monkeypatch, foreign):
+    from embodichain.gen_sim.task_engine._task_program import actions
+
+    monkeypatch.setattr(actions, "_owns_constrained_pick", lambda *args: True)
+    request = SimpleNamespace(
+        goal=SimpleNamespace(semantics=_held().semantics),
+        skill_options=None,
+        binding=_binding(),
     )
-    assert delta.articulation_joint_updates[
-        ("drawer", "slide_joint")
-    ].position.item() == pytest.approx(0.2)
+    first = _Plan(
+        torch.tensor([True]),
+        StateDelta(held_object_updates={"right": _held("foreign")} if foreign else {}),
+        PlannerDiagnostics(backend="test"),
+    )
+    result = actions.GenSimPickUp._recover_constrained_pick_roll(
+        SimpleNamespace(motion_generator=object()),
+        request,
+        _context(TaskState(1, "cpu")),
+        first,
+    )
+    assert not result.plan_success.any()
+    assert result.diagnostics.failure.code == "pick_attachment_unavailable"

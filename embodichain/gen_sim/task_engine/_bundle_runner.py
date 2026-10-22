@@ -154,7 +154,6 @@ def execute_bundle(
     row_success = [False] * int(args.num_envs)
     terminal_reasons = ["runtime_not_started"] * int(args.num_envs)
     failure: dict[str, Any] | None = None
-    feedback_evidence: dict[str, Any] = {}
     control_evidence: list[dict[str, Any]] = []
     grip_evidence: dict[str, Any] | None = None
     env: Any = None
@@ -382,7 +381,6 @@ def execute_bundle(
                     if not accepted and row_success[index]:
                         row_success[index] = False
                         terminal_reasons[index] = "cargo_envelope_failed"
-            feedback_evidence = _snapshot_twist_feedback_audit(env, deployment)
             control_evidence = _snapshot_control_evidence(env, deployment)
             grip_evidence = _snapshot_grip_contact_evidence(env, deployment)
             if result.completed and all(row_success):
@@ -397,8 +395,6 @@ def execute_bundle(
         if env is not None:
             if grip_evidence is None:
                 grip_evidence = _snapshot_grip_contact_evidence(env, deployment)
-            if not feedback_evidence:
-                feedback_evidence = _snapshot_twist_feedback_audit(env, deployment)
             try:
                 if not control_evidence:
                     control_evidence = _snapshot_control_evidence(env, deployment)
@@ -591,35 +587,6 @@ def execute_bundle(
         encoding="utf-8",
     )
     try:
-        from ._task_group_results import task_group_results
-
-        groups = task_group_results(graph, result_metadata, num_envs=len(row_success))
-        for env_id, values in enumerate(groups):
-            for group_id, group in values.items():
-                if (
-                    group["execution_status"] == "passed"
-                    and report["environments"][env_id]["semantic_success"].get(group_id)
-                    is False
-                ):
-                    group.update(status="failed", reason="group_postcondition_failed")
-        (output / "task_group_results.json").write_text(
-            json.dumps(
-                {
-                    "schema_version": "gen_sim_task_group_results/v1",
-                    "source": "execution_report.json",
-                    "environments": groups,
-                },
-                indent=2,
-                allow_nan=False,
-            ),
-            encoding="utf-8",
-        )
-    except (OSError, TypeError, ValueError) as evidence_error:
-        print(
-            f"[Task Engine] E-group summary unavailable: {evidence_error}",
-            file=sys.stderr,
-        )
-    try:
         (output / "recovery_summary.json").write_text(
             json.dumps(_recovery_summary(report), indent=2, allow_nan=False) + "\n",
             encoding="utf-8",
@@ -628,17 +595,6 @@ def execute_bundle(
         print(
             f"[Task Engine] Recovery summary unavailable: {evidence_error}",
             file=sys.stderr,
-        )
-    if task_spec_contract is not None:
-        from .semantic_graph_html import write_semantic_task_graph_html
-
-        write_semantic_task_graph_html(
-            graph,
-            output / "semantic_graph.html",
-            report,
-            task_spec=_read_json(root / "task_spec.json"),
-            validation=task_spec_contract,
-            bundle_root=root,
         )
     # The parent CLI prints the run summary; the full report stays on disk.
     return 0 if report["status"] == "succeeded" else 2
@@ -1018,43 +974,8 @@ def _snapshot_control_evidence(env: Any, deployment: Any) -> list[dict[str, Any]
                     startup_evidence=sensor.startup_evidence(),
                     geometry_evidence=sensor.geometry_evidence(),
                 )
-                feedback = getattr(sensor, "_feedback_state", None)
-                if feedback is not None:
-                    try:
-                        record["feedback_audit"] = deepcopy(list(feedback.audit))
-                    except Exception as error:
-                        record["feedback_audit_error"] = {
-                            "type": type(error).__name__,
-                            "message": str(error),
-                        }
             records.append(record)
     return records
-
-
-def _snapshot_twist_feedback_audit(env: Any, deployment: Any) -> dict[str, Any]:
-    """Own optional diagnostics before reset clears the episode ledger."""
-    try:
-        routes = getattr(deployment.integration.adapter_factory, "twist_routes", ())
-        audits = {}
-        for route in routes:
-            if getattr(route, "feedback_enabled", False) is not True:
-                continue
-            sensor = getattr(env, "unwrapped", env).sim.get_sensor(route.sensor_uid)
-            feedback = getattr(sensor, "_feedback_state", None)
-            if feedback is not None:
-                audits[route.operation_id] = deepcopy(list(feedback.audit))
-        return (
-            {"feedback_audit": next(iter(audits.values()))}
-            if len(audits) == 1
-            else {"feedback_audits": audits} if audits else {}
-        )
-    except Exception as error:
-        return {
-            "feedback_audit_error": {
-                "type": type(error).__name__,
-                "message": str(error),
-            }
-        }
 
 
 def _exception_metadata(exc: BaseException) -> dict[str, Any]:
@@ -1150,7 +1071,7 @@ def _verify_integration_fingerprint(
     ):
         raise ValueError(
             "Incompatible GenSim bundle contract; regenerate the bundle against "
-            "the public 2620929c baseline."
+            "the current GenSim adapter contract."
         )
 
     deployment_cfg = load_config(deployment_path)

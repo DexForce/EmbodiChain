@@ -137,20 +137,15 @@ Simulation-factory internals used during assembly are isolated compatibility
 dependencies; no Session or Bridge method is replaced.
 
 The fingerprint manifest uses `semantic_integration_fingerprint/v2` with the
-explicit `gen_sim.task_program/2620929c/v8` adapter contract. Generation and
-verification use the same v38 declaration identity through `identity.py`.
-Compatible existing bundles keep their original graph, program, components
-and recorded hashes; loading does not rewrite them or accept hash aliases.
+explicit `gen_sim.task_program/2620929c/v14` adapter contract. Generation and
+verification hash the same complete validated registration through `identity.py`.
+The historical v38 default-field projection has been removed. Older executable
+bundles must be regenerated; loading never rewrites old files or accepts hash
+aliases. This does not remove their separate physical-reference input support.
 
-The shared registration still owns its full runtime fingerprint and validates
-declaration drift. Its `fingerprint_payload()` provides a checked, independently
-owned canonical snapshot. The GenSim protocol projection omits only
-`HandOverOptions.source_hold_mode="grasp_command"` and empty GenSim relative
-route `stage_id` fields at their actual typed option/route slots. Other fields,
-factory revisions and arbitrary metadata are not recursively stripped.
-Explicit `observed`, nonempty stage selectors, program, constraints and policy
-changes remain part of identity. A different adapter or actual behavior
-revision is still rejected before simulation rather than normalized away.
+The shared registration owns its full runtime fingerprint and drift checks.
+Its `fingerprint_payload()` supplies the independently owned canonical snapshot;
+default options, route fields, revisions and metadata all participate in identity.
 
 New singleton routes and default HandOver configurations retain the old raw
 declaration shape. Repeated placements or graph-authored stage selectors keep

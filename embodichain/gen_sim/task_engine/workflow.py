@@ -21,9 +21,8 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from copy import copy, deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime
-import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -39,7 +38,6 @@ from embodichain.gen_sim.task_engine.reporting import (
     EXECUTION_REPORT_FILENAME,
     validate_execution_report,
 )
-from embodichain.gen_sim.scene_engine.errors import SceneServiceError
 from embodichain.utils.utility import load_config
 
 from .agent import TaskAgent
@@ -53,7 +51,6 @@ from .contracts import canonical_hash
 from .orchestration.artifacts import ArtifactTransaction
 from .orchestration.coordinator import PreparationResult, TaskEngineCoordinator
 from .orchestration.scene_adapter import (
-    CandidateSelection,
     SceneAdapter,
     SceneAdapterProtocolError,
 )
@@ -62,7 +59,6 @@ from .semantic_planner import UnsupportedSemanticCapabilityError
 from .scene_backend import (
     SceneAnalysis,
     SceneEngineBackend,
-    SceneRemediableError,
     SceneRevision,
 )
 from .state_machine import (
@@ -140,10 +136,10 @@ class SubprocessActionExecutor:
         acceptance_options = (
             {"acceptance_mode": acceptance_mode} if acceptance_mode != "strict" else {}
         )
-        from ._task_program.twist_attempts import is_twist_bundle
+        from .orchestration.execution_resources import _is_twist_bundle
 
         bundle_root = Path(bundle).expanduser().resolve()
-        if not is_twist_bundle(bundle_root):
+        if not _is_twist_bundle(bundle_root):
             return self._execute(
                 bundle,
                 output_root,
@@ -293,9 +289,9 @@ class SubprocessActionExecutor:
             f"failure_policy={failure_policy}",
             flush=True,
         )
-        from ._task_program.twist_attempts import is_twist_bundle
+        from .orchestration.execution_resources import _is_twist_bundle
 
-        if is_twist_bundle(bundle_root):
+        if _is_twist_bundle(bundle_root):
             from .orchestration.execution_resources import run_e8_process
 
             completed = run_e8_process(command, log_path, emit=_write_terminal_chunk)
@@ -697,196 +693,40 @@ class TaskEngineWorkflow:
                     status="failed",
                     failure_class="internal_error",
                 )
-            source_hash = (
-                analysis.source_fingerprint.config_sha256
-                if analysis.source_fingerprint is not None
-                else None
-            )
-            spot_check = (
-                selection.selected_candidate is not None
-                and source_hash is not None
-                and int(
-                    hashlib.sha256(
-                        f"{normalized['task_id']}:{source_hash}".encode()
-                    ).hexdigest()[:8],
-                    16,
-                )
-                % 10
-                == 0
-            )
-            if physical_input is not None:
-                _write_json(
-                    staging / "visual_grounding_status.json",
-                    {
-                        "status": "skipped_physical_reference",
-                        "reason": "Original-source images cannot qualify the selected physical model.",
-                    },
-                )
-            if (
-                physical_input is None
-                and (selection.selected_candidate is None or spot_check)
-                and analysis.input_kind == "gym_project"
-                and normalized["scene_edit_prompt"] is None
-            ):
-                from .orchestration.visual_grounding import (
-                    make_visual_grounding_caller,
-                    visual_grounding_available,
-                )
-
-                has_articulation_route = any(
-                    step["task_type"] in {"E6", "E7", "E8", "E9"}
-                    for candidate in candidate_set["candidates"]
-                    for step in candidate["draft"]["steps"]
-                )
-                visual_status_path = staging / "visual_grounding_status.json"
-                if has_articulation_route or not visual_grounding_available():
-                    _write_json(
-                        visual_status_path,
-                        {
-                            "status": "skipped",
-                            "reason": (
-                                "native_joint_state_or_part_required"
-                                if has_articulation_route
-                                else "visual_model_unavailable"
-                            ),
-                        },
-                    )
-                else:
-                    from .orchestration.visual_evidence import (
-                        render_scene_visual_evidence,
-                    )
-
-                    try:
-                        visual_root = staging / "visual_grounding"
-                        evidence = render_scene_visual_evidence(
-                            analysis.source, visual_root
-                        )
-                        visual_caller = make_visual_grounding_caller(
-                            evidence, visual_root / "calls"
-                        )
-                        visual_selection = self.scene_backend.select(
-                            analysis,
-                            candidate_set,
-                            scene_adapter,
-                            force_most_likely=False,
-                            grounding_caller=visual_caller,
-                        )
-                        _write_json(
-                            staging / "text_binding_report.json",
-                            selection.binding_report,
-                        )
-                        agreement = (
-                            visual_selection.selected_candidate
-                            == selection.selected_candidate
-                            and visual_selection.role_bindings
-                            == selection.role_bindings
-                        )
-                        if spot_check:
-                            _write_json(
-                                staging / "visual_binding_report.json",
-                                visual_selection.binding_report,
-                            )
-                        else:
-                            selection = visual_selection
-                        _write_json(
-                            visual_status_path,
-                            {
-                                "status": "completed",
-                                "mode": "spot_check" if spot_check else "fallback",
-                                "binding_status": visual_selection.binding_report[
-                                    "status"
-                                ],
-                                "agreement": agreement,
-                                "source_config_sha256": evidence[
-                                    "source_config_sha256"
-                                ],
-                            },
-                        )
-                    except Exception as exc:
-                        _write_json(
-                            visual_status_path,
-                            {
-                                "status": "failed",
-                                "error_type": type(exc).__name__,
-                                "message": str(exc),
-                            },
-                        )
-                        if not spot_check:
-                            state = fail_stage(
-                                state,
-                                WorkflowStage.CANDIDATE_SELECTION,
-                                reason=f"Visual grounding failed: {type(exc).__name__}: {exc}",
-                            )
-                            return self._publish(
-                                transaction,
-                                staging,
-                                normalized,
-                                workflow_cfg,
-                                planning_cfg,
-                                execution_cfg,
-                                run_metadata,
-                                state,
-                                attempts,
-                                status="failed",
-                                failure_class="visual_grounding",
-                            )
             _write_json(
                 staging / "initial_binding_report.json", selection.binding_report
             )
             if selection.selected_candidate is None:
-                if normalized["scene_edit_prompt"] is None:
-                    state = fail_stage(
-                        state,
-                        WorkflowStage.CANDIDATE_SELECTION,
-                        reason=str(selection.binding_report["selection_reason"]),
-                    )
-                    return self._publish(
-                        transaction,
-                        staging,
-                        normalized,
-                        workflow_cfg,
-                        planning_cfg,
-                        execution_cfg,
-                        run_metadata,
-                        state,
-                        attempts,
-                        status="input_conflict",
-                        failure_class="unbound_scene_reference",
-                    )
-                provisional = _highest_vote_candidate(candidate_set)
-                selection = replace(
-                    selection,
-                    selected_candidate=deepcopy(provisional),
+                state = fail_stage(
+                    state,
+                    WorkflowStage.CANDIDATE_SELECTION,
+                    reason=str(selection.binding_report["selection_reason"]),
                 )
-                _write_json(
-                    staging / "provisional_candidate.json",
-                    {
-                        "candidate_id": provisional["candidate_id"],
-                        "reason": "explicit_scene_edit_may_materialize_missing_reference",
-                        "binding_status": selection.binding_report["status"],
-                    },
+                return self._publish(
+                    transaction,
+                    staging,
+                    normalized,
+                    workflow_cfg,
+                    planning_cfg,
+                    execution_cfg,
+                    run_metadata,
+                    state,
+                    attempts,
+                    status="input_conflict",
+                    failure_class="unbound_scene_reference",
                 )
             state = complete_stage(state, WorkflowStage.CANDIDATE_SELECTION)
 
             state = start_stage(state, WorkflowStage.UNBOUND_ACTION)
-            if normalized["scene_edit_prompt"] is not None:
-                state = start_stage(state, WorkflowStage.SCENE_EDIT)
-            else:
-                state = start_stage(state, WorkflowStage.SCENE_FINALIZATION)
+            state = start_stage(state, WorkflowStage.SCENE_FINALIZATION)
 
             unbound_plan: Mapping[str, Any] | None = None
-            unbound_failures: list[dict[str, Any]] = []
             unbound_error: Exception | None = None
             scene_error: Exception | None = None
             inspection_error = False
             preparation_error: Exception | None = None
             preparation: PreparationResult | None = None
-            scene_attempt_limit = (
-                1
-                if analysis.input_kind == "gym_project"
-                and normalized["scene_edit_prompt"] is None
-                else workflow_cfg.max_scene_attempts
-            )
+            scene_attempt_limit = 1
             for scene_index in range(1, scene_attempt_limit + 1):
                 inspection_error = False
                 scene_seed = int(base_seed) + scene_index - 1
@@ -901,7 +741,6 @@ class TaskEngineWorkflow:
                     "unbound_action_plan": None,
                     "final_unbound_action_plan": None,
                     "unbound_transition": None,
-                    "unbound_failures": [],
                     "preparation": None,
                     "planning_attempts": [],
                     "action_attempts": [],
@@ -912,44 +751,26 @@ class TaskEngineWorkflow:
                 revision: SceneRevision | None = None
                 try:
                     if unbound_plan is None:
-                        with ThreadPoolExecutor(
-                            max_workers=workflow_cfg.max_parallel_workers,
-                            thread_name_prefix="task-engine-parallel",
-                        ) as executor:
-                            scene_future = executor.submit(
-                                self.scene_backend.materialize,
-                                analysis,
-                                normalized,
-                                attempt_root / "scene_revision",
-                                seed=scene_seed,
-                            )
-                            draft_future = executor.submit(
-                                self._draft_with_fallback,
-                                candidate_set,
-                                selection,
-                            )
-                            try:
-                                revision = scene_future.result()
-                            except Exception as exc:
-                                scene_error = exc
-                                revision = None
-                            try:
-                                unbound_plan, unbound_failures = draft_future.result()
-                            except Exception as exc:
-                                unbound_error = exc
-                            if unbound_error is not None:
-                                raise unbound_error
-                            state = complete_stage(state, WorkflowStage.UNBOUND_ACTION)
-                            if scene_error is not None:
-                                raise scene_error
-                            assert revision is not None
-                    else:
+                        try:
+                            unbound_plan = _semantic_draft(selection.selected_candidate)
+                        except (TypeError, ValueError) as exc:
+                            unbound_error = exc
+                    try:
+                        scene_error = None
                         revision = self.scene_backend.materialize(
                             analysis,
                             normalized,
                             attempt_root / "scene_revision",
                             seed=scene_seed,
                         )
+                    except Exception as exc:
+                        scene_error = exc
+                    if unbound_error is not None:
+                        raise unbound_error
+                    if state.stages[WorkflowStage.UNBOUND_ACTION].value == "running":
+                        state = complete_stage(state, WorkflowStage.UNBOUND_ACTION)
+                    if scene_error is not None:
+                        raise scene_error
                     scene_error = None
                 except Exception as exc:
                     if revision is not None:
@@ -973,23 +794,16 @@ class TaskEngineWorkflow:
                     scene_error = exc
                     if unbound_plan is not None:
                         attempt["unbound_action_plan"] = deepcopy(dict(unbound_plan))
-                        attempt["unbound_failures"] = deepcopy(unbound_failures)
                         _write_json(
                             attempt_root / "unbound_action_plan.json", unbound_plan
                         )
                     attempt["status"] = "scene_failed"
                     attempt["error"] = _error_record(exc)
                     _write_json(attempt_root / "attempt.json", attempt)
-                    if (
-                        scene_index < scene_attempt_limit
-                        and _is_scene_remediable_error(exc)
-                    ):
-                        continue
                     break
 
                 attempt["scene_revision"] = _revision_record(revision)
                 attempt["unbound_action_plan"] = deepcopy(dict(unbound_plan))
-                attempt["unbound_failures"] = deepcopy(unbound_failures)
                 _write_json(attempt_root / "unbound_action_plan.json", unbound_plan)
                 state = _complete_materialized_scene(
                     state,
@@ -1021,11 +835,6 @@ class TaskEngineWorkflow:
                     attempt["status"] = "scene_inspection_failed"
                     attempt["error"] = _error_record(exc)
                     _write_json(attempt_root / "attempt.json", attempt)
-                    if (
-                        scene_index < scene_attempt_limit
-                        and _is_scene_remediable_error(exc)
-                    ):
-                        continue
                     break
                 attempt["final_inspection"] = deepcopy(dict(final_inspection))
                 if state.stages[WorkflowStage.FINAL_INSPECTION].value == "running":
@@ -1077,7 +886,6 @@ class TaskEngineWorkflow:
                         ),
                         force_most_likely=False,
                         final_inspection=final_inspection,
-                        unbound_action_plan=unbound_plan,
                     )
                 except Exception as exc:
                     preparation_error = exc
@@ -1099,12 +907,6 @@ class TaskEngineWorkflow:
                     "message": preparation.status,
                 }
                 _write_json(attempt_root / "attempt.json", attempt)
-                if not _scene_remediable(
-                    preparation,
-                    analysis=analysis,
-                    request=normalized,
-                ):
-                    break
 
             if preparation is None or preparation.status != "bound":
                 failure_class = (
@@ -1199,24 +1001,7 @@ class TaskEngineWorkflow:
             else:
                 _write_json(staging / "task_spec.json", _read_json(prepared_spec_path))
             selected_attempt = attempts[-1]
-            final_unbound = getattr(preparation, "unbound_action_plan", None)
-            if (
-                final_unbound is None
-                or str(final_unbound.get("candidate_id")) != final_candidate_id
-            ):
-                if final_candidate_id == unbound_plan["candidate_id"]:
-                    final_unbound = unbound_plan
-                else:
-                    final_candidate = next(
-                        item
-                        for item in candidate_set["candidates"]
-                        if item["candidate_id"] == final_candidate_id
-                    )
-                    final_unbound = _semantic_draft(final_candidate)
-            if str(final_unbound.get("candidate_id")) != final_candidate_id:
-                raise ValueError(
-                    "Final UnboundActionPlan candidate does not match preparation."
-                )
+            final_unbound = _semantic_draft(final_candidate)
             selected_attempt["final_unbound_action_plan"] = deepcopy(
                 dict(final_unbound)
             )
@@ -1312,23 +1097,13 @@ class TaskEngineWorkflow:
                         )
                     if open_window:
                         execution_options["open_window"] = True
-                    from ._task_program.twist_attempts import execute_support_candidates
-
-                    report, executed_preparation, executed_root, support_attempts = (
-                        execute_support_candidates(
-                            preparation,
-                            action_root,
-                            self.action_executor,
-                            execution_options,
-                            planning_cfg,
-                        )
+                    report = self.action_executor(
+                        preparation.output_dir, action_root, **execution_options
                     )
-                    if support_attempts:
-                        action_record["support_attempts"] = support_attempts
                     successes = _environment_successes(
                         report,
                         required_semantic_steps=success_terms,
-                        bundle=executed_preparation.output_dir,
+                        bundle=preparation.output_dir,
                         acceptance_mode=execution_cfg.acceptance_mode,
                     )
                     if len(successes) != execution_cfg.num_envs:
@@ -1345,9 +1120,8 @@ class TaskEngineWorkflow:
                     _write_json(action_root / "task_engine_attempt.json", action_record)
                     selected_attempt["action_attempts"].append(deepcopy(action_record))
                     if accepted:
-                        preparation = executed_preparation
                         successful_report = deepcopy(dict(report))
-                        successful_action_root = executed_root
+                        successful_action_root = action_root
                         successful_action_index = action_index
                         break
                 except Exception as exc:
@@ -1433,47 +1207,6 @@ class TaskEngineWorkflow:
                 final_bundle=final_bundle,
             )
 
-    def _draft_with_fallback(
-        self,
-        candidate_set: Mapping[str, Any],
-        selection: CandidateSelection,
-    ) -> tuple[Mapping[str, Any], list[dict[str, Any]]]:
-        selected_id = selection.selected_candidate_id
-        resolved_ids = {
-            str(item["candidate_id"])
-            for item in selection.binding_report["candidates"]
-            if item["status"] == "resolved"
-        }
-        ordered = [selected_id] + [
-            str(item["candidate_id"])
-            for item in candidate_set["candidates"]
-            if item["candidate_id"] != selected_id
-            and item["candidate_id"] in resolved_ids
-        ]
-        failures = []
-        for candidate_id in ordered:
-            candidate = next(
-                item
-                for item in candidate_set["candidates"]
-                if item["candidate_id"] == candidate_id
-            )
-            try:
-                return _semantic_draft(candidate), failures
-            except UnsupportedSemanticCapabilityError:
-                raise
-            except (TypeError, ValueError) as exc:
-                failures.append(
-                    {
-                        "candidate_id": candidate_id,
-                        "stage": "unbound_action",
-                        "draft": deepcopy(candidate["draft"]),
-                        "error": _error_record(exc),
-                    }
-                )
-        raise ValueError(
-            "No selected task candidate can be represented by Semantic Skill."
-        )
-
     @staticmethod
     def _publish(
         transaction: ArtifactTransaction,
@@ -1534,7 +1267,6 @@ class TaskEngineWorkflow:
                 "configuration": {
                     "workflow": {
                         "max_parallel_workers": workflow_cfg.max_parallel_workers,
-                        "max_scene_attempts": workflow_cfg.max_scene_attempts,
                         "max_action_attempts": workflow_cfg.max_action_attempts,
                     },
                     "planning": {
@@ -1591,22 +1323,7 @@ class TaskEngineWorkflow:
             },
         )
         published = transaction.commit()
-        from .semantic_graph_html import _finalize_run_html
 
-        _finalize_run_html(
-            published,
-            bundle=None if final_bundle is None else published / "final" / "bundle",
-            summary={
-                "task_id": request["task_id"],
-                "run_id": run_metadata["run_id"],
-                "created_at": run_metadata["created_at"],
-                "status": status,
-                "elapsed_seconds": round(
-                    perf_counter() - run_metadata["_started_at"], 3
-                ),
-                "elapsed_scope": "工作流墙钟：进入 run 至事务发布完成；不含报告后处理",
-            },
-        )
         return TaskEngineRunResult(
             status=status,
             output_dir=published,
@@ -1698,29 +1415,6 @@ def _load_physical_reference(
     }
 
 
-def _scene_remediable(
-    preparation: PreparationResult,
-    *,
-    analysis: SceneAnalysis,
-    request: Mapping[str, Any],
-) -> bool:
-    if preparation.status != "infeasible":
-        return False
-    report = preparation.feasibility_report
-    if not isinstance(report, Mapping) or report.get("remediation_class") != (
-        "scene_remediable"
-    ):
-        return False
-    if analysis.input_kind == "image":
-        return True
-    return request["scene_edit_prompt"] is not None
-
-
-def _is_scene_remediable_error(error: Exception) -> bool:
-    """Return whether one typed Scene failure may create a new attempt."""
-    return isinstance(error, (SceneRemediableError, SceneServiceError))
-
-
 def _preparation_failure_class(
     preparation: PreparationResult | None,
     *,
@@ -1736,25 +1430,6 @@ def _preparation_failure_class(
         return "action_capability"
     if preparation.status in {"ambiguous", "unsatisfied"}:
         return "input_conflict"
-    if preparation.status == "infeasible":
-        report = preparation.feasibility_report
-        remediation = (
-            str(report.get("remediation_class"))
-            if isinstance(report, Mapping)
-            else "terminal"
-        )
-        if remediation == "action_capability":
-            return "action_capability"
-        if remediation == "input_conflict":
-            return "input_conflict"
-        if remediation != "scene_remediable":
-            return "terminal_feasibility"
-        if (
-            analysis.input_kind == "gym_project"
-            and request["scene_edit_prompt"] is None
-        ):
-            return "read_only_scene_infeasible"
-        return "scene_infeasible"
     return "preparation"
 
 
@@ -1913,22 +1588,6 @@ def _semantic_draft(candidate: Mapping[str, Any]) -> dict[str, Any]:
             if isinstance(step, Mapping)
         ],
     }
-
-
-def _highest_vote_candidate(candidate_set: Mapping[str, Any]) -> Mapping[str, Any]:
-    candidates = candidate_set.get("candidates")
-    if not isinstance(candidates, Sequence) or isinstance(candidates, (str, bytes)):
-        raise TypeError("TaskCandidateSet.candidates must be a sequence.")
-    values = [item for item in candidates if isinstance(item, Mapping)]
-    if not values:
-        raise ValueError("TaskCandidateSet requires at least one candidate.")
-    return max(
-        values,
-        key=lambda item: (
-            int(item.get("vote_count", 0)),
-            str(item.get("candidate_id", "")),
-        ),
-    )
 
 
 def _copy_trajectory_record(report: Mapping[str, Any], output_root: Path) -> str | None:

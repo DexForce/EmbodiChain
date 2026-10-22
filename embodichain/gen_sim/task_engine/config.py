@@ -94,13 +94,11 @@ class TaskEngineWorkflowCfg:
     """
 
     max_parallel_workers: int = 2
-    max_scene_attempts: int = 2
     max_action_attempts: int = 3
 
     def __post_init__(self) -> None:
         for field_name in (
             "max_parallel_workers",
-            "max_scene_attempts",
             "max_action_attempts",
         ):
             value = getattr(self, field_name)
@@ -198,7 +196,6 @@ def load_task_engine_config(
     execution = _mapping(raw.get("execution"), "execution")
     if set(workflow) != {
         "max_parallel_workers",
-        "max_scene_attempts",
         "max_action_attempts",
     }:
         raise ValueError("Task Engine workflow configuration fields are invalid.")

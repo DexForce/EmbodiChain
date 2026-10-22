@@ -37,7 +37,6 @@ __all__ = [
     "BINDING_REPORT_FILENAME",
     "CONSERVATIVE_SCENE_GRAPH_FILENAME",
     "EXECUTION_REPORT_FILENAME",
-    "FEASIBILITY_REPORT_FILENAME",
     "FINAL_SCENE_INSPECTION_FILENAME",
     "PREPARATION_FAILURE_FILENAME",
     "ROLE_BINDINGS_FILENAME",
@@ -65,7 +64,6 @@ STATIC_SCENE_MANIFEST_FILENAME = "static_scene_manifest.json"
 CONSERVATIVE_SCENE_GRAPH_FILENAME = "conservative_scene_graph.json"
 ROLE_BINDINGS_FILENAME = "role_bindings.json"
 BINDING_REPORT_FILENAME = "binding_report.json"
-FEASIBILITY_REPORT_FILENAME = "feasibility_report.json"
 FINAL_SCENE_INSPECTION_FILENAME = "final_scene_inspection.json"
 PREPARATION_FAILURE_FILENAME = "preparation_failure.json"
 
@@ -84,7 +82,6 @@ class TaskEngineArtifactPaths:
     conservative_scene_graph: Path
     role_bindings: Path
     binding_report: Path
-    feasibility_report: Path
     final_scene_inspection: Path
     preparation_failure: Path
     execution_report: Path
@@ -106,7 +103,6 @@ def task_engine_artifact_paths(
         conservative_scene_graph=root / CONSERVATIVE_SCENE_GRAPH_FILENAME,
         role_bindings=root / ROLE_BINDINGS_FILENAME,
         binding_report=root / BINDING_REPORT_FILENAME,
-        feasibility_report=root / FEASIBILITY_REPORT_FILENAME,
         final_scene_inspection=root / FINAL_SCENE_INSPECTION_FILENAME,
         preparation_failure=root / PREPARATION_FAILURE_FILENAME,
         execution_report=root / EXECUTION_REPORT_FILENAME,
@@ -194,7 +190,6 @@ def write_task_engine_artifacts(
     binding_report: Mapping[str, Any],
     static_scene_manifest: Mapping[str, Any] | None = None,
     conservative_scene_graph: Mapping[str, Any] | None = None,
-    feasibility_report: Mapping[str, Any] | None = None,
     final_scene_inspection: Mapping[str, Any] | None = None,
 ) -> TaskEngineArtifactPaths:
     """Write Task Engine protocols into an unpublished staging directory.
@@ -215,8 +210,6 @@ def write_task_engine_artifacts(
     if role_bindings is not None:
         _write_json(paths.role_bindings, role_bindings)
     _write_json(paths.binding_report, binding_report)
-    if feasibility_report is not None:
-        _write_json(paths.feasibility_report, feasibility_report)
     if final_scene_inspection is not None:
         _write_json(paths.final_scene_inspection, final_scene_inspection)
 
@@ -282,7 +275,6 @@ def _relocate_artifact_paths(staging: Path, destination: Path) -> None:
             verify_graph_contract,
             write_graph_contract,
         )
-        from ..semantic_graph_html import write_semantic_task_graph_html
         from embodichain.gen_sim.task_spec import TaskSpec
 
         # Only this checked, controlled relocation may reseal generated identities.
@@ -333,9 +325,6 @@ def _relocate_artifact_paths(staging: Path, destination: Path) -> None:
             envelope["coverage"]["lineage"],
         )
         verify_graph_contract(root, graph)
-        write_semantic_task_graph_html(
-            graph, root / "semantic_graph.html", task_spec=spec, validation=envelope
-        )
 
 
 def _remove_path(path: Path) -> None:

@@ -26,29 +26,6 @@ from .canonicalization import json_snapshot
 
 __all__ = ["RoleSpec"]
 
-_LEGACY_EXPORTS = {
-    "ACTION_WITNESS_SCHEMA",
-    "EXPANSION_MANIFEST_SCHEMA",
-    "SCENE_INSTANCE_SCHEMA",
-    "TASK_TEMPLATE_SCHEMA",
-    "VALIDATION_CERTIFICATE_SCHEMA",
-    "ActionWitness",
-    "ExpansionManifest",
-    "RequirementSpec",
-    "SceneInstance",
-    "TaskTemplate",
-    "ValidationCertificate",
-}
-
-
-def __getattr__(name: str) -> Any:
-    """Keep explicit legacy contract imports working for one transition release."""
-    if name in _LEGACY_EXPORTS or name == "TaskSpec":
-        from . import compat
-
-        return getattr(compat, "TaskTemplate" if name == "TaskSpec" else name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
 
 _ROLE_KINDS: Final = frozenset(
     {

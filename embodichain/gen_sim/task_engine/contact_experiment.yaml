@@ -17,7 +17,6 @@
 schema_version: embodichain.task-engine-defaults/v1
 workflow:
   max_parallel_workers: 1
-  max_scene_attempts: 1
   max_action_attempts: 1
 planning:
   candidate_count: 3

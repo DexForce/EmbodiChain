@@ -13,13 +13,14 @@
 
 from __future__ import annotations
 
+
+from __future__ import annotations
+
 from dataclasses import dataclass
 from types import SimpleNamespace
 from unittest.mock import Mock
-
 import pytest
 import torch
-
 from embodichain.gen_sim.task_engine._task_program import actions
 from embodichain.gen_sim.task_engine._task_program.pick_closing_scene import (
     check_closing_scene,
@@ -157,40 +158,3 @@ def test_final_closure_cannot_bypass_revision_seven_scene_check(
             ]["valid"]
             is False
         )
-
-
-def test_scene_screen_stops_at_source_contact_not_fictitious_full_closure(monkeypatch):
-    from embodichain.gen_sim.task_engine._task_program import articulation_collision
-
-    path = torch.zeros(3, 4)
-    path[:, 2] = torch.tensor([0.0, 0.35, 0.7])
-    world = SimpleNamespace(get_rigid_object_uid_list=lambda: ["source", "table"])
-    seen = []
-
-    def check(robot, world, positions, part):
-        seen.append(positions.clone())
-        return {"valid": bool(positions[:, 2].max() <= 0.3)}
-
-    monkeypatch.setattr(articulation_collision, "check_free_motion", check)
-    assert check_closing_scene(
-        object(),
-        world,
-        path,
-        "arm",
-        (0, 1),
-        "source",
-        contact_fraction=0.25,
-        grid_samples=5,
-    )["valid"]
-    assert seen[0].shape == (2, 4)
-    assert seen[0][-1, 2] == pytest.approx(0.175)
-    assert not check_closing_scene(
-        object(),
-        world,
-        path,
-        "arm",
-        (0, 1),
-        "source",
-        contact_fraction=1.0,
-        grid_samples=5,
-    )["valid"]

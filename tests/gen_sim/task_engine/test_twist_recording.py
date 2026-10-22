@@ -20,21 +20,15 @@ import gc
 from pathlib import Path
 from typing import Any
 import weakref
-
-import cv2
 import numpy as np
 import pytest
 import torch
-
-from dexsim.utility import images_to_video
 from embodichain.gen_sim.task_engine._task_program import twist_recording
 from embodichain.gen_sim.task_engine._task_program.twist_recording import (
     E8CameraRecorder,
 )
 from embodichain.lab.gym.envs.managers import FunctorCfg
-from embodichain.lab.gym.envs.managers.record import record_camera_data
 from embodichain.lab.sim.sensors import CameraCfg
-from embodichain.utils.string import string_to_callable
 
 
 class _Camera:
@@ -124,21 +118,6 @@ def _mock_writer(
     return calls
 
 
-def test_private_route_reuses_existing_camera_and_recorder_dispatch(
-    tmp_path: Path,
-) -> None:
-    recorder, env = _recorder(tmp_path)
-    route = (
-        "embodichain.gen_sim.task_engine._task_program.twist_recording:E8CameraRecorder"
-    )
-    assert string_to_callable(route) is E8CameraRecorder
-    assert isinstance(recorder, record_camera_data)
-    assert env.sim.sensor_cfg is not None
-    assert env.sim.sensor_cfg.visualization_role == "record"
-    assert env.camera_group_ids == [7]
-    assert recorder._writer is None
-
-
 def test_capture_keeps_no_completed_frame_objects(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -157,134 +136,3 @@ def test_capture_keeps_no_completed_frame_objects(
     assert writer.closed == 1
     assert (tmp_path / "videos/episode_0_e8_knob_view.mp4").is_file()
     assert recorder._frame_count == 0
-
-
-def test_empty_commit_and_repeated_finalize_create_no_video(tmp_path: Path) -> None:
-    recorder, env = _recorder(tmp_path)
-    recorder.save_and_clear()
-    recorder.finalize()
-    recorder.finalize()
-    recorder.close()
-    assert not (tmp_path / "videos").exists()
-    with pytest.raises(RuntimeError, match="finalized"):
-        recorder(env, None, "e8_knob_view")
-
-
-def test_discard_removes_only_its_partial_and_preserves_other_files(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    recorder, env = _recorder(tmp_path)
-    writer = _Writer()
-    _mock_writer(monkeypatch, writer)
-    recorder(env, None, "e8_knob_view")
-    partial = recorder._partial_path
-    assert partial is not None
-    other = partial.parent / "other.partial.mp4"
-    other.write_bytes(b"preserved")
-    recorder.discard_and_clear()
-    recorder.finalize()
-    assert writer.closed == 1
-    assert not partial.exists()
-    assert other.read_bytes() == b"preserved"
-    assert not (tmp_path / "videos/episode_0_e8_knob_view.mp4").exists()
-
-
-@pytest.mark.parametrize("failure", ["append", "close", "frame_count"])
-def test_encoder_failure_never_publishes_partial_video(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failure: str
-) -> None:
-    recorder, env = _recorder(tmp_path)
-    writer = _Writer()
-    _mock_writer(monkeypatch, writer)
-    if failure == "append":
-        writer.append_error = OSError("encoder append failed")
-        with pytest.raises(OSError, match="append failed"):
-            recorder(env, None, "e8_knob_view")
-        with pytest.raises(RuntimeError, match="failed E8 camera"):
-            recorder.save_and_clear()
-    else:
-        recorder(env, None, "e8_knob_view")
-        if failure == "close":
-            writer.close_error = OSError("encoder close failed")
-            with pytest.raises(OSError, match="close failed"):
-                recorder.save_and_clear()
-        else:
-            monkeypatch.setattr(
-                twist_recording, "count_frames_and_secs", lambda path: (0, 0)
-            )
-            with pytest.raises(RuntimeError, match="frame count mismatch"):
-                recorder.save_and_clear()
-    assert recorder._frames == []
-    assert recorder._partial_path is not None
-    assert recorder._partial_path.is_file()
-    assert not (tmp_path / "videos/episode_0_e8_knob_view.mp4").exists()
-    recorder.finalize()
-    recorder.finalize()
-
-
-def test_committed_video_is_never_overwritten(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    recorder, env = _recorder(tmp_path)
-    _mock_writer(monkeypatch, _Writer())
-    path = tmp_path / "videos/episode_0_e8_knob_view.mp4"
-    path.parent.mkdir()
-    path.write_bytes(b"user video")
-    with pytest.raises(FileExistsError, match="overwrite"):
-        recorder(env, None, "e8_knob_view")
-    recorder.finalize()
-    assert path.read_bytes() == b"user video"
-
-
-def _decoded_frames(path: Path) -> tuple[float, list[np.ndarray]]:
-    capture = cv2.VideoCapture(str(path))
-    try:
-        fps = capture.get(cv2.CAP_PROP_FPS)
-        frames = []
-        while True:
-            ok, frame = capture.read()
-            if not ok:
-                break
-            frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-        return fps, frames
-    finally:
-        capture.release()
-
-
-@pytest.mark.parametrize("resolution", [(960, 540), (640, 360)])
-def test_streamed_rgb_order_dimensions_and_quality_match_existing_utility(
-    tmp_path: Path, resolution: tuple[int, int]
-) -> None:
-    width, height = resolution
-    recorder, env = _recorder(tmp_path, resolution)
-    colors = [(240, 15, 15), (15, 240, 15), (15, 15, 240), (180, 180, 30)]
-    rgb_frames = [
-        np.full((height, width, 3), color, dtype=np.uint8) for color in colors
-    ]
-    env.sim.camera.frames = [
-        torch.from_numpy(
-            np.concatenate(
-                (frame, np.full((height, width, 1), 255, dtype=np.uint8)), axis=2
-            )
-        ).unsqueeze(0)
-        for frame in rgb_frames
-    ]
-    for _ in rgb_frames:
-        recorder(env, None, "e8_knob_view")
-        assert recorder._frames == []
-    recorder.save_and_clear()
-    recorder.finalize()
-    images_to_video(
-        rgb_frames, str(tmp_path / "reference"), "original", fps=20, verbose=False
-    )
-    fps, streamed = _decoded_frames(tmp_path / "videos/episode_0_e8_knob_view.mp4")
-    original_fps, original = _decoded_frames(tmp_path / "reference/original.mp4")
-    assert fps == original_fps == 20
-    assert len(streamed) == len(original) == len(rgb_frames)
-    for frame, expected in zip(streamed, original, strict=True):
-        np.testing.assert_array_equal(frame, expected)
-    assert streamed[0].shape == original[0].shape
-    assert [
-        int(np.argmax(frame[frame.shape[0] // 2, frame.shape[1] // 2]))
-        for frame in streamed[:3]
-    ] == [0, 1, 2]

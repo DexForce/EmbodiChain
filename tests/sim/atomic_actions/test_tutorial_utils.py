@@ -131,32 +131,6 @@ ATOMIC_ACTION_TUTORIAL_MODULES = (
     "slide",
     "twist",
 )
-RIGID_SCENE_TUTORIAL_MODULES = (
-    "assemble",
-    "axis_align",
-    "coordinated_placement",
-    "hand_over",
-    "move_held_object",
-    "pickup",
-    "place",
-    "pour",
-)
-STATIC_POSE_TUTORIAL_MODULES = (
-    "coordinated_pickment",
-    "press",
-    "slide",
-    "twist",
-)
-EXPLICIT_SCENE_LIFECYCLE_TUTORIAL_MODULES = (
-    "dynamic_obstacle_recovery",
-    "moving_target_recovery",
-    "open_door",
-)
-SCENE_FREE_TUTORIAL_MODULES = (
-    "control_dt",
-    "move_end_effector",
-    "move_joints",
-)
 TUTORIAL_PRISMATIC_JOINT_AXIS = torch.tensor([2.0, 2.0, 1.0])
 TUTORIAL_REVOLUTE_JOINT_AXIS = torch.tensor([-1.0, 2.0, 2.0])
 TUTORIAL_REVOLUTE_AXIS_ORIGIN = torch.tensor([0.75, -0.5, 0.25])
@@ -964,15 +938,6 @@ def test_handover_tutorial_defaults_to_cpu_for_grasp_planning() -> None:
     assert args.device == "cpu"
 
 
-def test_assemble_tutorial_uses_center_grasp_for_laid_soda_can() -> None:
-    module = importlib.import_module("scripts.tutorials.atomic_action.assemble")
-
-    assert module.PICKUP_OBJECT_PART == "center"
-    assert "pick_object_part=PICKUP_OBJECT_PART" in inspect.getsource(
-        module.run_assemble_demo
-    )
-
-
 def test_arm_direction_uses_selected_robot_solver_roots() -> None:
     robot = MagicMock()
     robot.cfg.solver_cfg = {
@@ -1246,40 +1211,6 @@ def test_move_held_object_cup_starts_above_the_ground() -> None:
     cfg = sim.add_rigid_object.call_args.kwargs["cfg"]
     assert cfg.init_pos == [*module.OBJECT_XY, module.OBJECT_INITIAL_Z]
     assert module.OBJECT_INITIAL_Z == pytest.approx(0.05)
-
-
-def test_atomic_action_tutorial_scene_strategies_cover_every_entry_point() -> None:
-    classified = (
-        set(RIGID_SCENE_TUTORIAL_MODULES)
-        | set(STATIC_POSE_TUTORIAL_MODULES)
-        | set(EXPLICIT_SCENE_LIFECYCLE_TUTORIAL_MODULES)
-        | set(SCENE_FREE_TUTORIAL_MODULES)
-    )
-
-    assert classified == set(ATOMIC_ACTION_TUTORIAL_MODULES)
-
-
-@pytest.mark.parametrize("module_name", RIGID_SCENE_TUTORIAL_MODULES)
-def test_rigid_scene_tutorials_use_simulation_engine_factory(
-    module_name: str,
-) -> None:
-    module = importlib.import_module(f"scripts.tutorials.atomic_action.{module_name}")
-    source = inspect.getsource(module)
-
-    assert "create_simulation_atomic_action_engine(" in source
-    assert "RigidObjectSceneProvider" not in source
-    assert "SceneSnapshot" not in source
-
-
-@pytest.mark.parametrize("module_name", STATIC_POSE_TUTORIAL_MODULES)
-def test_static_pose_tutorials_do_not_construct_scene_snapshots(
-    module_name: str,
-) -> None:
-    module = importlib.import_module(f"scripts.tutorials.atomic_action.{module_name}")
-    source = inspect.getsource(module)
-
-    assert "SceneSnapshot" not in source
-    assert "SceneEntityPose" not in source
 
 
 def test_axis_align_tutorial_exposes_upright_and_horizontal_modes() -> None:

@@ -77,12 +77,7 @@ class SupportContactSensor(ContactSensor):
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         super().reset(env_ids)
         if hasattr(self, "support_reader"):
-            reader = self.support_reader
-            if hasattr(reader, "_reset_rows"):
-                reader._reset_rows(env_ids)
-            else:
-                for row in range(len(reader.witnesses)) if env_ids is None else env_ids:
-                    reader.witnesses[row].value = None
+            self.support_reader._reset_rows(env_ids)
 
     @property
     def requires_substep_update(self) -> bool:

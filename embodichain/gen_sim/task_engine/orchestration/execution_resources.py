@@ -35,6 +35,24 @@ from typing import Any, Iterator
 __all__: list[str] = []
 
 _GIB = 1024**3
+
+
+def _is_twist_bundle(bundle: Path) -> bool:
+    """Keep E8 resource admission independent of renderer or optional retries."""
+    from embodichain.utils.utility import load_config
+
+    path = bundle / "task_program/program.yaml"
+    if not path.is_file():
+        return False
+    program = load_config(path)
+    return any(
+        (call := item.get("steps", {}).get("call", {}).get("call_id", ""))
+        == "gen_sim.twist"
+        or call.startswith("gen_sim.twist.")
+        for item in program.get("program", {}).get("items", ())
+    )
+
+
 _SAMPLE_SECONDS = 2.0
 _LAUNCH_AVAILABLE_BYTES = 8 * _GIB
 _LOW_AVAILABLE_BYTES = 5 * _GIB

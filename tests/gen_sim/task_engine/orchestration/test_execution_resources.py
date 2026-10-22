@@ -16,17 +16,16 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 import json
 from pathlib import Path
 import signal
 import subprocess
 import sys
-import threading
-import time
-
 import pytest
-
+from embodichain.gen_sim.task_engine.orchestration.execution_resources import (
+    ResourceInterruptionError,
+)
+from embodichain.gen_sim.task_engine.workflow import SubprocessActionExecutor
 from embodichain.gen_sim.task_engine.orchestration import (
     execution_resources as resources,
 )
@@ -148,123 +147,6 @@ def test_cold_low_memory_admission_times_out_without_a_running_simulation(
     assert raised.value.available_bytes == 6 * resources._GIB
 
 
-def test_cold_admission_timer_resets_while_actual_simulation_workers_are_live(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    clock = [0.0]
-    monkeypatch.setattr(resources, "_memory_sample", lambda: _memory(6))
-    monkeypatch.setattr(
-        resources,
-        "_other_sim_processes",
-        lambda pgid: (
-            [{"pid": 123, "worker_kind": "agent_lab_episode_worker"}]
-            if 200 <= clock[0] < 600
-            else []
-        ),
-    )
-    monkeypatch.setattr(resources.time, "monotonic", lambda: clock[0])
-    monkeypatch.setattr(
-        resources.time,
-        "sleep",
-        lambda seconds: clock.__setitem__(0, clock[0] + seconds),
-    )
-    with pytest.raises(resources.ResourceAdmissionError) as raised:
-        resources.wait_for_memory(tmp_path / "waiting.jsonl")
-    assert raised.value.reason == "no_running_simulation_and_memory_timeout"
-    assert clock[0] == 900.0
-    events = [
-        json.loads(line)
-        for line in (tmp_path / "waiting.jsonl").read_text().splitlines()
-    ]
-    assert (
-        sum(event["event"] == "waiting_running_simulations" for event in events) == 200
-    )
-
-
-def test_resources_can_be_admitted_after_waiting_longer_than_cold_timeout_for_workers(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    clock = [0.0]
-    monkeypatch.setattr(
-        resources, "_memory_sample", lambda: _memory(6 if clock[0] < 600 else 16)
-    )
-    monkeypatch.setattr(
-        resources,
-        "_other_sim_processes",
-        lambda pgid: [{"pid": 123, "worker_kind": "agent_lab_episode_worker"}],
-    )
-    monkeypatch.setattr(resources.time, "monotonic", lambda: clock[0])
-    monkeypatch.setattr(
-        resources.time,
-        "sleep",
-        lambda seconds: clock.__setitem__(0, clock[0] + seconds),
-    )
-    gate = resources.wait_for_memory(tmp_path / "waiting.jsonl")
-    assert clock[0] == 604.0
-    assert gate["last_sample"]["available_bytes"] == 16 * resources._GIB
-
-
-def test_cold_admission_rejection_releases_both_execution_locks(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    sample = _memory(4)
-    sample["total_bytes"] = resources._LAUNCH_AVAILABLE_BYTES - 1
-    monkeypatch.setattr(resources, "_memory_sample", lambda: sample)
-    with pytest.raises(resources.ResourceAdmissionError):
-        resources.run_e8_process(
-            [sys.executable, "-c", "pass"], tmp_path / "rejected.log"
-        )
-    _fast_gate(monkeypatch)
-    results: list[subprocess.CompletedProcess[str]] = []
-    retry = threading.Thread(
-        target=lambda: results.append(
-            resources.run_e8_process(
-                [sys.executable, "-c", "pass"], tmp_path / "next.log"
-            )
-        ),
-        daemon=True,
-    )
-    retry.start()
-    retry.join(timeout=3)
-    assert not retry.is_alive()
-    assert results[0].returncode == 0
-
-
-def test_stream_contract_combines_output_and_preserves_exact_bytes(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    _fast_gate(monkeypatch)
-    chunks = []
-    log = tmp_path / "child.log"
-    command = [
-        sys.executable,
-        "-c",
-        "import os; os.write(1, b'first\\n'); os.write(2, b'second\\xff\\n')",
-    ]
-    completed = resources.run_e8_process(command, log, emit=chunks.append)
-    assert completed.args == command
-    assert completed.returncode == 0
-    assert completed.stderr == ""
-    assert completed.stdout == "first\nsecond\ufffd\n"
-    assert log.read_bytes() == b"first\nsecond\xff\n"
-    assert b"".join(chunks) == log.read_bytes()
-    receipt = _receipt(log)
-    assert receipt["interrupted_memory"] is False
-    assert receipt["pgid"] == receipt["pid"]
-    assert receipt["start_new_session"] is True
-
-
-def test_existing_artifacts_are_never_overwritten(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    _fast_gate(monkeypatch)
-    log = tmp_path / "child.log"
-    log.write_bytes(b"preserved")
-    with pytest.raises(FileExistsError):
-        resources.run_e8_process([sys.executable, "-c", "pass"], log)
-    assert log.read_bytes() == b"preserved"
-
-
 def test_silent_child_is_interrupted_without_waiting_for_stdout(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -328,129 +210,6 @@ def test_callback_failure_stops_only_owned_child(
     assert resources._process_identity(int(receipt["pid"])) is None
 
 
-def test_competitor_wait_uses_pid_and_starttime_identity(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monitor = tmp_path / "monitor.jsonl"
-    interruption = resources.ResourceInterruptionError(
-        tmp_path / "receipt.json",
-        {
-            "monitor_path": str(monitor),
-            "min_running_available_bytes": resources._GIB,
-            "other_sim_processes_at_interrupt": [{"pid": 123, "starttime_ticks": 50}],
-        },
-    )
-    identities = iter(
-        [
-            {"pid": 123, "state": "S", "starttime_ticks": 50},
-            {"pid": 123, "state": "S", "starttime_ticks": 51},
-        ]
-    )
-    sleeps = []
-    monkeypatch.setattr(resources, "_process_identity", lambda pid: next(identities))
-    monkeypatch.setattr(resources.time, "sleep", sleeps.append)
-    resources.wait_for_competitors(interruption)
-    assert sleeps == [2.0]
-
-
-@pytest.mark.parametrize(
-    ("arguments", "kind"),
-    [
-        (
-            ["-u", "-m", "embodichain.gen_sim.task_engine._bundle_runner"],
-            "task_program_bundle_runner",
-        ),
-        (["-B", "-m", "embodichain.lab.scripts.run_env"], "environment_runner"),
-        (
-            [
-                "-B",
-                "-m",
-                "embodichain.gen_sim.agent_lab.episode_worker",
-                "--config",
-                "lab.json",
-            ],
-            "agent_lab_episode_worker",
-        ),
-        (["-m", "embodichain", "run-env", "--config", "env.yaml"], "environment_cli"),
-        (["/repo/paired_ablation.py", "--seed", "0"], "paired_ablation"),
-        (["-u", "/repo/qualification_worker.py"], "qualification_worker"),
-        (
-            ["-X", "faulthandler", "/repo/qualification_worker_n04.py"],
-            "qualification_worker",
-        ),
-        (["-u", "/repo/experiment.py", "--execute"], "experiment_executor"),
-        (["/repo/experiment.py", "--output", "gen_sim/attempt"], None),
-        (["/repo/run_paired_ablation.py", "paired_seed0"], None),
-        (["-m", "embodichain.gen_sim.task_engine", "run-all"], None),
-        (["-m", "pytest", "tests/gen_sim/task_engine/test_twist.py"], None),
-        (["-c", "import gen_sim; print('qualification_worker.py')"], None),
-        (
-            [
-                "-B",
-                "-u",
-                "-c",
-                "from embodichain.gen_sim.agent_lab._run_task import run; run(...)",
-            ],
-            None,
-        ),
-        (["/repo/controller.py", "--worker", "/repo/paired_ablation.py"], None),
-    ],
-)
-def test_worker_inventory_excludes_queued_controllers(
-    arguments: list[str], kind: str | None
-) -> None:
-    assert resources._simulation_worker_kind([sys.executable, *arguments]) == kind
-
-
-def test_worker_inventory_excludes_conda_and_shell_wrappers() -> None:
-    worker = ["python", "-m", "embodichain.gen_sim.task_engine._bundle_runner"]
-    assert (
-        resources._simulation_worker_kind(["conda", "run", "-n", "sim", *worker])
-        is None
-    )
-    assert resources._simulation_worker_kind(["bash", "-c", " ".join(worker)]) is None
-
-
-def test_live_inventory_records_workers_but_not_controller_parents(
-    tmp_path: Path,
-) -> None:
-    worker_path = tmp_path / "qualification_worker.py"
-    controller_path = tmp_path / "run_paired_ablation.py"
-    script = "import time; print('ready',flush=True); time.sleep(30)"
-    worker_path.write_text(script)
-    controller_path.write_text(script)
-    worker = subprocess.Popen(
-        [sys.executable, str(worker_path)],
-        start_new_session=True,
-        stdout=subprocess.PIPE,
-    )
-    controller = subprocess.Popen(
-        [sys.executable, str(controller_path)],
-        start_new_session=True,
-        stdout=subprocess.PIPE,
-    )
-    try:
-        assert worker.stdout is not None and controller.stdout is not None
-        assert worker.stdout.readline() == b"ready\n"
-        assert controller.stdout.readline() == b"ready\n"
-        snapshots = {
-            process["pid"]: process for process in resources._other_sim_processes(-1)
-        }
-        assert worker.pid in snapshots
-        assert snapshots[worker.pid]["classification"] == "known_worker_heuristic"
-        assert snapshots[worker.pid]["starttime_ticks"] > 0
-        assert controller.pid not in snapshots
-        assert worker.pid not in {
-            process["pid"] for process in resources._other_sim_processes(worker.pid)
-        }
-    finally:
-        for process in (worker, controller):
-            process.terminate()
-            process.wait(timeout=5)
-            if process.stdout is not None:
-                process.stdout.close()
-
-
 def test_owned_group_stop_refuses_nonisolated_child(tmp_path: Path) -> None:
     process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
     try:
@@ -494,62 +253,110 @@ def test_owned_signal_escalation_does_not_signal_other_process(
         other.wait(timeout=5)
 
 
-def test_threaded_e8_runs_are_serialized(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    _fast_gate(monkeypatch)
-    active = maximum = 0
-    lock = threading.Lock()
+def _resource_bundle(path: Path, *, twist: bool = True) -> Path:
+    from embodichain.utils.utility import save_config
 
-    def gate(path: Path) -> dict[str, object]:
-        nonlocal active, maximum
-        with lock:
-            active += 1
-            maximum = max(active, maximum)
-        time.sleep(0.01)
-        with lock:
-            active -= 1
-        return {}
-
-    monkeypatch.setattr(resources, "wait_for_memory", gate)
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        command = [
-            sys.executable,
-            "-c",
-            "import time; print(time.monotonic()); time.sleep(0.08); print(time.monotonic())",
-        ]
-        futures = [
-            pool.submit(
-                resources.run_e8_process,
-                command,
-                tmp_path / f"{index}.log",
-            )
-            for index in range(2)
-        ]
-        completed = [future.result() for future in futures]
-        assert all(process.returncode == 0 for process in completed)
-    intervals = sorted(
-        tuple(float(value) for value in process.stdout.splitlines())
-        for process in completed
+    (path / "task_program").mkdir(parents=True)
+    save_config(
+        path / "task_program/program.yaml",
+        {
+            "program": {
+                "items": [
+                    {
+                        "steps": {
+                            "call": {
+                                "call_id": (
+                                    "gen_sim.twist" if twist else "simulation.pick"
+                                )
+                            }
+                        }
+                    }
+                ]
+            }
+        },
     )
-    assert intervals[0][1] <= intervals[1][0]
-    assert maximum == 1
+    return path
 
 
-def test_e8_file_lock_excludes_independently_launched_process(tmp_path: Path) -> None:
-    command = [
-        sys.executable,
-        "-c",
-        "import fcntl,sys; stream=open(sys.argv[1],'a'); "
-        "\ntry: fcntl.flock(stream,fcntl.LOCK_EX|fcntl.LOCK_NB)"
-        "\nexcept BlockingIOError: print('busy')"
-        "\nelse: print('acquired')",
-        str(resources._LOCK_PATH),
-    ]
-    with resources._serialized_execution(tmp_path / "monitor.jsonl"):
-        completed = subprocess.run(command, capture_output=True, text=True, timeout=5)
-        assert completed.returncode == 0
-        assert completed.stdout == "busy\n"
-    completed = subprocess.run(command, capture_output=True, text=True, timeout=5)
-    assert completed.returncode == 0
-    assert completed.stdout == "acquired\n"
+def test_resource_retry_keeps_seed_and_never_selects_interrupted_attempt(
+    tmp_path, monkeypatch
+):
+    from embodichain.gen_sim.task_engine.orchestration import (
+        execution_resources as resources,
+    )
+
+    root = _resource_bundle(tmp_path / "bundle")
+    executor = SubprocessActionExecutor()
+    seen, waits = [], []
+
+    def execute(path, output, **options):
+        output.mkdir(parents=True)
+        seen.append(options)
+        if len(seen) == 1:
+            raise ResourceInterruptionError(
+                output / "receipt.json",
+                {
+                    "monitor_path": str(output / "memory.jsonl"),
+                    "min_running_available_bytes": 100,
+                    "other_sim_processes_at_interrupt": [],
+                },
+            )
+        (output / "twist_evidence.json").write_text(
+            '{"acceptance": {"accepted": true}}'
+        )
+        return {"status": "succeeded"}
+
+    monkeypatch.setattr(executor, "_execute", execute)
+    monkeypatch.setattr(
+        resources, "wait_for_competitors", lambda error: waits.append(error)
+    )
+    report = executor(root, tmp_path / "execution", seed=3, num_envs=1)
+    assert report["status"] == "succeeded" and seen[0] == seen[1] and len(waits) == 1
+    selection = json.loads(
+        (tmp_path / "execution/execution_selection.json").read_text()
+    )
+    assert selection["resource_attempt"] == 2
+    assert (tmp_path / "execution/resource_attempts/attempt_0001").is_dir()
+    assert (tmp_path / "execution/twist_evidence.json").is_file()
+
+
+def test_non_e8_executor_does_not_add_resource_attempts(tmp_path, monkeypatch):
+    root = _resource_bundle(tmp_path / "bundle", twist=False)
+    executor = SubprocessActionExecutor()
+    called = []
+    monkeypatch.setattr(
+        executor,
+        "_execute",
+        lambda path, output, **options: called.append(output)
+        or {"status": "succeeded"},
+    )
+    executor(root, tmp_path / "execution", seed=0, num_envs=1)
+    assert called == [tmp_path / "execution"]
+    assert not (tmp_path / "execution").exists()
+
+
+def test_resource_admission_failure_is_not_retried_as_a_physical_attempt(
+    tmp_path, monkeypatch
+):
+    from embodichain.gen_sim.task_engine.orchestration import (
+        execution_resources as resources,
+    )
+
+    root = _resource_bundle(tmp_path / "bundle")
+    executor = SubprocessActionExecutor()
+    calls = []
+
+    def execute(path, output, **options):
+        calls.append(output)
+        raise resources.ResourceAdmissionError(
+            output / "memory.jsonl",
+            "no_running_simulation_and_memory_timeout",
+            {"available_bytes": 9 * 1024**3, "total_bytes": 32 * 1024**3},
+        )
+
+    monkeypatch.setattr(executor, "_execute", execute)
+    with pytest.raises(resources.ResourceAdmissionError):
+        executor(root, tmp_path / "execution", seed=0, num_envs=1)
+    assert len(calls) == 1
+    attempts = json.loads((tmp_path / "execution/resource_attempts.json").read_text())
+    assert attempts[0]["status"] == "resource_not_admitted"

@@ -66,28 +66,19 @@ from .validation import (
 )
 
 __all__ = [
-    "ACTION_WITNESS_SCHEMA",
     "CANONICALIZATION_VERSION",
     "EVALUATION_STATUSES",
-    "EXPANSION_MANIFEST_SCHEMA",
     "KNOWN_PREDICATES",
     "MILESTONE_SCHEMA",
     "PREDICATE_OPERATORS",
-    "SCENE_INSTANCE_SCHEMA",
     "TASK_SPEC_SCHEMA",
-    "TASK_TEMPLATE_SCHEMA",
-    "VALIDATION_CERTIFICATE_SCHEMA",
-    "ActionWitness",
     "EvaluationReport",
     "EvaluationStatus",
-    "ExpansionManifest",
     "MilestoneSpec",
     "Predicate",
     "PredicateEvaluation",
     "PredicateSpec",
-    "RequirementSpec",
     "RoleSpec",
-    "SceneInstance",
     "TaskRequirement",
     "TaskSpec",
     "TaskSpecCache",
@@ -97,8 +88,6 @@ __all__ = [
     "TaskTemplate",
     "TemporalCondition",
     "TemporalSpec",
-    "ValidationCertificate",
-    "build_validation_certificate",
     "canonical_hash",
     "canonical_json",
     "canonicalize",
@@ -108,37 +97,6 @@ __all__ = [
     "evaluate_temporal_condition",
     "json_snapshot",
     "lookup_observation",
-    "validate_action_witness",
-    "validate_expansion_manifest",
-    "validate_scene_instance",
     "validate_task_spec",
     "validate_task_template",
-    "validate_validation_certificate",
 ]
-
-_COMPAT_EXPORTS = {
-    "ACTION_WITNESS_SCHEMA",
-    "EXPANSION_MANIFEST_SCHEMA",
-    "SCENE_INSTANCE_SCHEMA",
-    "TASK_TEMPLATE_SCHEMA",
-    "VALIDATION_CERTIFICATE_SCHEMA",
-    "ActionWitness",
-    "ExpansionManifest",
-    "RequirementSpec",
-    "SceneInstance",
-    "ValidationCertificate",
-    "build_validation_certificate",
-    "validate_action_witness",
-    "validate_expansion_manifest",
-    "validate_scene_instance",
-    "validate_validation_certificate",
-}
-
-
-def __getattr__(name: str) -> Any:
-    """Resolve deprecated artifact exports without loading them in core code."""
-    if name in _COMPAT_EXPORTS:
-        from . import compat
-
-        return getattr(compat, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

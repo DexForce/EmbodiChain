@@ -201,7 +201,7 @@ Task Engine preparation derives the normative specification before binding,
 then `SemanticTaskPlanner.plan_spec()` retains the original witness and emits
 explicit expansion lineage. `semantic_graph_validation.py` checks every source
 member, required resource, milestone dependency and surviving terminal clause.
-The existing v38 graph/reader/executor and fingerprint rules remain unchanged;
+The existing graph/reader/executor remains the only execution path;
 new bundles add root-level `task_spec.json`, `semantic_graph_validation.json`
 and offline `semantic_graph.html`. Transaction publication verifies companions
 before relocating private paths, then rebuilds their full digests and root HTML;
@@ -585,15 +585,14 @@ the command-planning reference, not a native pose witness. Direction-free tilt
 uses the ordered pad axis; receiver-bearing drift is diagnostic, not permission
 to reverse the qualified arc. The new Pour lowerer
 declares existing acquisition/retention verification, with no new executor or
-path fallback. Adapter v13 requires regenerated consumers after the current
+path fallback. Adapter v14 requires regenerated consumers after the current
 Pick qualification changes; historical bundles and receipts remain unchanged.
 The independent
 recipe does not own already-held E3 continuations; normal preparation
 keeps those compositions on their legacy declaration rather than opting them
-into a five-call contract they do not have. The Default/B1
-source-only sweep proposal is not hand/cavity/collision qualification, and
-`pour_evidence.py` evaluates a separately named native pose proxy, never liquid
-transfer. An unmodeled `poured` TaskSpec remains unavailable; geometric motion
+into a five-call contract they do not have. Native pose proxies do not establish
+hand/cavity/collision qualification or liquid transfer. An unmodeled `poured`
+TaskSpec remains unavailable; geometric motion
 must not silently become its certificate.
 Explicit revision 2 requires `pour_proxy_position_tolerance_m` and a distinct
 `pour_region_transport` factory. Its runtime-only native vertices/triangles
@@ -983,13 +982,9 @@ Run-local binding audits retain prompts, schemas, responses and model identity,
 including early failures; candidates and source fingerprints survive failed
 selection. Visual evidence also records scene revision and image hashes; the
 VLM may select only visible inventory UIDs, while native semantic compatibility
-remains authoritative. `task_engine/binding_evaluation.py` provides frozen
-positive/rejection controls and per-reference/paraphrase metrics; provider calls
-require `--run-model`. These text-only metrics do not certify visual or physical
-success. Articulation
-proxy GLBs do not represent live joint state, so E6-E9 binding does not use
-this visual path. Without usable Task Engine LLM configuration, text-only
-binding and its existing conflict behavior remain unchanged.
+remains authoritative. Articulation proxy GLBs do not represent live joint state,
+so E6-E9 binding does not use this visual path. Without usable Task Engine LLM
+configuration, text-only binding and its existing conflict behavior remain unchanged.
 E4 may defer unnamed transfer/receiver arms as `auto`; the planner binds the
 source from the held state or nearest scene side and the other arm as receiver,
 while preserving explicitly named arms. GenSim declares `pick_purposes` per
@@ -1102,14 +1097,13 @@ milestone. Observer revision 7 records those two boundaries in execution order;
 final geometry cannot fill a missing transfer or historical placement. Explicit
 support revision 1 applies the same native support contract to these E4 placements
 without weakening legacy E1 or terminal E4-hold behavior.
-`task_engine/_task_program/identity.py` owns v38 bundle identity for both
-generation and verification. It projects only equivalent default HandOver and
-empty relative-route stage fields at validated declaration slots; explicit new
-behavior, parameters, revisions, program and constraints remain fingerprinted.
-The shared registration retains its full runtime fingerprint and drift checks.
-Compatible old files are neither rewritten nor regenerated. Actual contract
-changes still fail closed; do not bypass their fingerprint checks or extend
-the shared Pick/AxisAlign configuration schema.
+`task_engine/_task_program/identity.py` hashes complete validated registration
+declarations for both generation and verification. Adapter v14 removes the
+historical default-field projection; older executable bundles require explicit
+regeneration, without rewriting old files or accepting hash aliases. Physical
+reference inputs remain separately supported. Shared registration drift checks,
+program and constraint identities remain mandatory; do not extend the shared
+Pick/AxisAlign schema to bypass those checks.
 Multiple children
 placed inside the same measured container reserve each prior landing footprint
 and margin; insufficient space or an unmeasured shared floor fails preflight
@@ -1288,6 +1282,8 @@ gate or held-guard results fail closed rather than entering a revised plan with 
 `twist_continuation.py` plans only a bounded local suffix, screened through the same geometry
 guard before installation. Its joint angle comes from the same-timestamp live SceneSnapshot,
 not TaskState's verified symbolic joint accessor or a lowering-time geometry measurement.
+E8 revision 16 passes the configured twist waypoint count to the shared segment allocator;
+insufficient sample budgets fail before IK without retiming or extending deadlines.
 Opted-in initial approach/reach retain endpoint alignment holds before checking native feedback;
 the holds consume the original deadline and undergo the final velocity/geometry checks.
 Closure uses one paired aperture/tip-offset calculation; no native
@@ -1296,8 +1292,8 @@ experiments remain unintegrated; this opt-in does not certify dual-pad grasp or 
 convergence. Grasp-axis recovery discards only the old grasp bias and recent correction
 samples; pending revisions prohibit switching. Episode counters, per-call deadlines and
 audit history remain intact rather than using the episode reset method.
-The adapter remains on the v38 contract; only E8/E9 lowerer declarations
-change identity. Non-control routes retain their behavior. E8/E9 support multiple serial
+The adapter identity uses the complete current declarations described above.
+Non-control routes retain their behavior. E8/E9 support multiple serial
 occurrences, including repeat operations on one object and interleaved E1-E6 steps.
 Each occurrence owns its call alias, sensor, post-policy presets, candidate/feedback state
 and sampling epoch. Startup observes its own stable, in-limit initial angle, not a forced zero.

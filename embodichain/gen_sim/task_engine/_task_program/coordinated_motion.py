@@ -37,7 +37,7 @@ from embodichain.lab.sim.atomic_actions.trajectory_ops import translate_pose_wor
 
 __all__: list[str] = []
 
-COORDINATED_MOTION_REVISION = 1
+COORDINATED_MOTION_REVISION = 2
 
 
 class GenSimCoordinatedPickment(
@@ -140,6 +140,8 @@ class GenSimCoordinatedPickment(
             success,
             resources,
             options,
+            velocity_limit=request.motion_policy.velocity_limit,
+            step_dt=context.require_control_dt(),
         )
         left_final, right_final = left_move[:, -1], right_move[:, -1]
         pieces = [

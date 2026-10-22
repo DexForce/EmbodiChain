@@ -40,23 +40,6 @@ __all__ = [
     "validate_task_template",
 ]
 
-_LEGACY_EXPORTS = {
-    "build_validation_certificate",
-    "validate_action_witness",
-    "validate_expansion_manifest",
-    "validate_scene_instance",
-    "validate_validation_certificate",
-}
-
-
-def __getattr__(name: str) -> Any:
-    """Resolve moved evidence validators only for explicit legacy imports."""
-    if name in _LEGACY_EXPORTS:
-        from . import compat
-
-        return getattr(compat, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
 
 class TaskSpecValidationError(ValueError):
     """Raised when a TaskSpec violates its versioned protocol contract."""

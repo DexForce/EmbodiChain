@@ -145,9 +145,6 @@ class ClosingContactScreen:
         self.identity: dict[str, Any] = {}
         self.build_seconds = 0.0
         self.opening_screen = None
-        self.closure_quality = None
-        self._pad_closing_axes = None
-        self._last_closure_quality = None
 
     def _separated_parts(self, pose: np.ndarray) -> np.ndarray:
         """Cull only parts whose enclosing boxes exceed every applicable offset."""
@@ -284,25 +281,10 @@ class ClosingContactScreen:
             raise ValueError("Closing screen requires finite B1 TCP/object poses")
         relative = np.linalg.inv(object_poses[0].detach().cpu().double().numpy())
         output = []
-        quality = []
-        if self.closure_quality is not None and self._pad_closing_axes is None:
-            from .pick_closure_quality import pad_closing_axes
-
-            self._pad_closing_axes = pad_closing_axes(self.parts)
         for pose in tcp_poses.detach().cpu().double().reshape(-1, 4, 4).numpy():
             grasp = relative @ pose
             source = self.inspect(grasp)
             valid = source["valid"]
-            if self.closure_quality is not None:
-                from .pick_closure_quality import inspect_tilt
-
-                record = inspect_tilt(
-                    pose,
-                    self._pad_closing_axes[: source["checked_samples"]],
-                    self.closure_quality,
-                )
-                quality.append(record)
-                valid = valid and record["valid"]
             if (
                 valid
                 and self.revision in (3, 4, 5, 6, 7, 8)
@@ -310,26 +292,6 @@ class ClosingContactScreen:
             ):
                 valid = self.opening_screen.inspect(grasp, source)["valid"]
             output.append(valid)
-        if self.closure_quality is not None:
-            if not quality:
-                raise ValueError("Closure quality requires a nonempty pose query.")
-            self._last_closure_quality = {
-                "revision": 1,
-                "scope": "declared_upright_container_nominal_precontact_pad_axis",
-                "max_tilt_degrees": self.closure_quality.max_tilt_degrees,
-                "up_world": list(self.closure_quality.up_world),
-                "pad_links": [p.name for p in self.parts if p.pad],
-                "valid": all(q["valid"] for q in quality),
-                "reason": (
-                    "closure_tilt_within_limit"
-                    if all(q["valid"] for q in quality)
-                    else "closure_axis_too_vertical"
-                ),
-                "rejected_poses": sum(not q["valid"] for q in quality),
-                "maximum_closure_tilt_degrees": max(
-                    q["maximum_closure_tilt_degrees"] for q in quality
-                ),
-            }
         return torch.tensor(output, dtype=torch.bool, device=tcp_poses.device).reshape(
             tcp_poses.shape[:-2]
         )
@@ -385,8 +347,6 @@ class ClosingContactScreen:
             result["opening"] = (
                 None if self.opening_screen is None else self.opening_screen.report()
             )
-        if self.closure_quality is not None:
-            result["grasp_quality"] = self._last_closure_quality
         if self.revision == 8:
             result["proposal_source_proxy_deferred"] = (
                 self.deferred_source_proposal_calls > 0

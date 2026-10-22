@@ -14,11 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""GenSim bundle identity at the v38 declaration boundary."""
+"""GenSim bundle identity from complete validated runtime declarations."""
 
 from __future__ import annotations
 
-from typing import Any, TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from ..contracts import canonical_hash
 
@@ -29,52 +29,9 @@ if TYPE_CHECKING:
 
 __all__: list[str] = []
 
-_PRESET_TYPE = "embodichain.lab.task_program.semantics.profiles.SkillPolicyPreset"
-_HANDOVER_TYPE = (
-    "embodichain.lab.sim.atomic_actions.primitives.hand_over.HandOverOptions"
-)
-_PLACE_ROUTE_TYPE = (
-    "embodichain.gen_sim.task_engine._task_program.services._RelativePlaceRoute"
-)
-_PLACE_FACTORY_TYPES = frozenset(
-    {
-        "embodichain.gen_sim.task_engine._task_program.services._RelativePlaceLowererFactory",
-        "embodichain.gen_sim.task_engine._task_program.services._UprightPlaceLowererFactory",
-        "embodichain.gen_sim.task_engine._task_program.stack_place._StackPlaceFactory",
-    }
-)
-
 
 def bundle_registration_fingerprint(
     registration: SimulationTaskProgramRegistration,
 ) -> str:
-    """Project only v38-equivalent defaults at their validated declaration slots.
-
-    Full runtime identity is validated before projection. Other fields, explicit
-    new behaviors, factory revisions and arbitrary metadata remain hashed.
-    """
-    payload = cast(dict[str, Any], registration.fingerprint_payload())
-    # Never recursively strip type-shaped metadata: only real option slots qualify.
-    for profile_key in ("robot_profile", "robot_profile_binding"):
-        presets = payload[profile_key]["fields"]["presets"]
-        for preset in (presets.values() if isinstance(presets, dict) else presets):
-            if preset["type"] != _PRESET_TYPE:
-                continue
-            for option in preset["fields"]["_action_option_templates"].values():
-                if option["type"] == _HANDOVER_TYPE:
-                    fields = option["fields"]
-                    if fields.get("source_hold_mode") == "grasp_command":
-                        del fields["source_hold_mode"]
-    for item in payload["registered_semantic_lowerer_factories"]:
-        provider = item["provider"]
-        if provider.get("type") not in _PLACE_FACTORY_TYPES:
-            continue
-        for route in provider["fields"]["routes"]:
-            if route["type"] == _PLACE_ROUTE_TYPE:
-                fields = route["fields"]
-                if fields.get("stage_id") == "":
-                    del fields["stage_id"]
-                for name in ("reference_link_id", "reference_part"):
-                    if fields.get(name) is None:
-                        fields.pop(name, None)
-    return canonical_hash(payload)
+    """Validate declaration drift and hash the complete canonical snapshot."""
+    return canonical_hash(registration.fingerprint_payload())

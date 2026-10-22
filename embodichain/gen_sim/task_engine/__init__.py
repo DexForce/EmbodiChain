@@ -153,7 +153,6 @@ __all__ = [
     "task_success_type",
     "scene_input_kind",
     "validate_scene_history_root",
-    "scene_blueprint_objects",
     "skip_stage",
     "start_stage",
     "validate_instruction_intent",
@@ -170,7 +169,6 @@ _SCENE_BACKEND_EXPORTS = {
     "SceneAnalysis",
     "SceneEngineBackend",
     "SceneRevision",
-    "scene_blueprint_objects",
 }
 _WORKFLOW_EXPORTS = {
     "TASK_ENGINE_RUN_MANIFEST_SCHEMA",

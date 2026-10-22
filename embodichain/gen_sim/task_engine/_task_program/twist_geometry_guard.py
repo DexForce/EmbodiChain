@@ -501,26 +501,6 @@ class E8GeometryGuard:
         """Reject unsafe free-motion candidates before their existing ranking."""
         return self._filter_table(action, plan, request, context, _FREE_PHASES)
 
-    def filter_continuation(
-        self, action: Any, plan: Any, request: Any, context: Any
-    ) -> Any:
-        """Screen every command in an owned suffix, including closing/turning."""
-        phases = tuple(segment.name for segment in plan.segments)
-        expected = {
-            "reach": ("approach", "reach", "close", "twist", "open", "retract"),
-            "close": ("reach", "close", "twist", "open", "retract"),
-            "grip": ("close", "twist", "open", "retract"),
-        }.get(request.goal.semantics.geometry.get("gen_sim_twist_resume_phase"))
-        if expected is None or phases != expected:
-            return action.failed_plan(
-                request,
-                context,
-                message="E8 continuation suffix is incomplete.",
-                failure_code="e8_continuation_scope_rejected",
-                retryable=False,
-            )
-        return self._filter_table(action, plan, request, context, phases)
-
     def _filter_table(
         self,
         action: Any,

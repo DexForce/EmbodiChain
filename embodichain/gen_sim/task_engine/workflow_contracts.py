@@ -36,7 +36,7 @@ __all__ = [
 
 TASK_RUN_REQUEST_SCHEMA: Final = "embodichain.task-engine-run-request/v1"
 TaskRunRequest: TypeAlias = dict[str, Any]
-SceneInputKind = Literal["image", "gym_project"]
+SceneInputKind = Literal["gym_project"]
 
 _REQUEST_KEYS = frozenset(
     {
@@ -54,9 +54,7 @@ _REQUEST_KEYS = frozenset(
 def validate_task_run_request(value: Mapping[str, Any]) -> TaskRunRequest:
     """Validate and detach one Task Engine run request.
 
-    Version 1 deliberately has no ``scene_generation_prompt``. Image workflows
-    use the image-only Scene Engine generation behavior and may apply one
-    optional edit after that initial scene has been generated.
+    Image generation and editing belong to the independent Scene Engine.
     """
     if not isinstance(value, Mapping):
         raise TypeError("TaskRunRequest must be a mapping.")
@@ -76,6 +74,14 @@ def validate_task_run_request(value: Mapping[str, Any]) -> TaskRunRequest:
         result.get("task_instruction"), "task_instruction"
     )
     result["output_dir"] = _path(result.get("output_dir"), "output_dir")
+
+    if (
+        result.get("image_path") is not None
+        or result.get("scene_edit_prompt") is not None
+    ):
+        raise ValueError(
+            "Task Engine accepts existing scenes only; image/edit inputs are unsupported."
+        )
 
     image_path = _optional_path(result.get("image_path"), "image_path")
     gym_project = _optional_path(result.get("gym_project"), "gym_project")
@@ -98,8 +104,8 @@ def validate_task_run_request(value: Mapping[str, Any]) -> TaskRunRequest:
 
 def scene_input_kind(request: Mapping[str, Any]) -> SceneInputKind:
     """Return the selected scene input kind after validating ``request``."""
-    normalized = validate_task_run_request(request)
-    return "image" if normalized["image_path"] is not None else "gym_project"
+    validate_task_run_request(request)
+    return "gym_project"
 
 
 def validate_scene_output_separation(

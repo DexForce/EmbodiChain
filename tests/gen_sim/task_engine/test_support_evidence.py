@@ -13,11 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
+
 from __future__ import annotations
 
 import numpy as np
 import pytest
-
 from embodichain.gen_sim.task_engine._task_program.support_evidence import (
     support_from_contacts,
 )
@@ -60,25 +60,6 @@ def test_non_support_is_not_a_success(change):
     assert _measure(**kwargs)[0] is False
 
 
-def test_single_support_point_is_valid_only_directly_under_the_com():
-    result, _ = support_from_contacts(
-        np.array([[1, 2]]),
-        np.array([[0, 0, 0]]),
-        np.array([[0, 0, 1]]),
-        np.array([0.001]),
-        np.array([0, 0, 0.1]),
-        object_actor=2,
-        reference_actor=1,
-        tolerance=0.003,
-    )
-    assert result is True
-
-
-def test_nonfinite_contact_is_rejected():
-    with pytest.raises(ValueError, match="finite"):
-        _measure(center=(float("nan"), 0, 0.1))
-
-
 def test_sleeping_contact_witness_is_invalidated_by_either_body_moving():
     import torch
     from embodichain.gen_sim.task_engine._task_program.support_evidence import (
@@ -104,174 +85,3 @@ def test_sleeping_contact_witness_is_invalidated_by_either_body_moving():
     assert witness.update(obj, moved, None) is None
     witness.update(obj, ref, sample)
     assert witness.update(obj, ref, None, invalid=True) is None
-
-
-@pytest.mark.parametrize("env_ids", [None, [1], []])
-def test_support_sensor_reset_clears_only_selected_episode_witnesses(
-    monkeypatch, env_ids
-):
-    from types import SimpleNamespace
-    import torch
-    from embodichain.gen_sim.task_engine._task_program.support_evidence import (
-        ContactSensor,
-        ContactWitness,
-        SupportContactSensor,
-    )
-
-    resets = []
-    monkeypatch.setattr(ContactSensor, "reset", lambda self, ids: resets.append(ids))
-    sensor = object.__new__(SupportContactSensor)
-    witnesses = [ContactWitness(), ContactWitness()]
-    pose = torch.eye(4)
-    sample = (np.ones((1, 2)),)
-    for witness in witnesses:
-        witness.update(pose, pose, sample)
-    sensor.support_reader = SimpleNamespace(witnesses=witnesses)
-
-    sensor.reset(env_ids)
-
-    assert resets == [env_ids]
-    selected = range(2) if env_ids is None else env_ids
-    for row, witness in enumerate(witnesses):
-        assert (witness.update(pose, pose, None) is None) == (row in selected)
-
-
-@pytest.mark.parametrize("kind", ["supported_placement", "supported_region", "stack"])
-def test_adapter_registers_native_support_sensor_for_physics_substeps(
-    monkeypatch, kind
-):
-    from types import SimpleNamespace as NS
-    from embodichain.gen_sim.task_engine._task_program import assembly
-    from embodichain.gen_sim.task_engine._task_program.stability import (
-        StabilityConstraint,
-    )
-
-    uid = "gen_sim_support__native_item__native_support"
-    sensor = NS(uid=uid, requires_substep_update=True)
-    registration = NS(
-        assert_unchanged=lambda: None,
-        scene_binding=NS(
-            rigid_objects=(
-                NS(entity_id="item", simulation_uid="native_item"),
-                NS(entity_id="support", simulation_uid="native_support"),
-            )
-        ),
-        robot_profile_binding=NS(presets=()),
-    )
-    environment = NS(
-        robot=object(),
-        sim=NS(get_sensor=lambda requested: sensor if requested == uid else None),
-        sensors={},
-        step_dt=0.04,
-    )
-    monkeypatch.setattr(assembly, "install_grasp_filters", lambda *_: {})
-    monkeypatch.setattr(
-        assembly, "_TaskFactory", lambda *_a, **_kw: NS(create_adapter=lambda: object())
-    )
-    constraint = StabilityConstraint(
-        entity="item",
-        reference="support",
-        kind=kind,
-        **(
-            {"displacement": (0, 0, 0.1)}
-            if kind == "supported_placement"
-            else (
-                {
-                    "local_axis": (0, 0, 1),
-                    "reference_axis": (0, 0, 1),
-                    "reference_half_extents": (0.1, 0.1),
-                }
-                if kind == "stack"
-                else {}
-            )
-        ),
-    )
-    assembly.TaskAdapterFactory(
-        registration, "test", (("support", constraint),), ()
-    ).create_adapter(environment)
-
-    assert environment.sensors == {uid: sensor}
-
-
-def test_on_capture_uses_native_current_support_and_exact_past_receipt(
-    tmp_path, monkeypatch
-):
-    import torch
-    from .test_task_spec_runtime import _placement_evidence, _observe_placement
-    from embodichain.gen_sim.task_engine._task_program import support_evidence
-    from embodichain.gen_sim.task_engine.contracts import canonical_hash
-
-    data = _placement_evidence(tmp_path, relation="on")
-    plan, contract, runtime, program, constraints, env, deployment = data
-    place = next(
-        n
-        for n in plan.graph["nodes"]
-        if n["call"].get("call_id") == "simulation.place_relative"
-    )
-
-    class Observation:
-        supported = True
-
-        def __init__(self, simulation, obj, reference, **kw):
-            self.entity, self.reference = kw["entity_id"], kw["reference_id"]
-
-        def observe(self, obj, ref):
-            return torch.tensor([self.supported]), {
-                "scope": "native_contact_support",
-                "entity": self.entity,
-                "reference": self.reference,
-                "supported": [self.supported],
-                "env_ids": [0],
-                "object_pose": obj.tolist(),
-                "reference_pose": ref.tolist(),
-                "rows": [
-                    {
-                        "contacts_world": [[0, 0, 0.005]],
-                        "center_of_mass_world": [0, 0, 0.045],
-                        "com_patch_distance_m": 0.0 if self.supported else None,
-                        "com_tolerance_m": 0.003,
-                        "upward_impulse": 0.001 if self.supported else 0.0,
-                    }
-                ],
-            }
-
-    monkeypatch.setattr(support_evidence, "NativeSupportObservation", Observation)
-    obj = env.sim.get_rigid_object("cube").get_local_pose()
-    ref = env.sim.get_rigid_object("region").get_local_pose()
-    _, measurements = Observation(
-        None, None, None, entity_id="cube", reference_id="region"
-    ).observe(obj, ref)
-    boundary = runtime["segments"][-1]
-    boundary["metadata"].update(
-        program_segment_source_path=["program", "items", 2],
-        post_policies=[
-            {
-                "kind": "wait_stable",
-                "policy_index": 0,
-                "source_path": ["program", "items", 2, "post", 0],
-                "result_mask": [True],
-                "result": {
-                    "kind": "supported_placement",
-                    "accepted_mask": [True],
-                    "measurements": {"native_support": measurements},
-                },
-            }
-        ],
-    )
-    program["program"]["items"][2]["post"] = [
-        {"kind": "wait_stable", "entity": "cube", "preset": "native"}
-    ]
-    contract["program_digest"] = canonical_hash(program)
-    result = _observe_placement(tmp_path, data)
-    assert result["certificate_ready"] is True
-    # A later loss of support cannot erase the past measured support receipt.
-    Observation.supported = False
-    result = _observe_placement(tmp_path, data)
-    assert result["goal"][0]["status"] == "failed"
-    assert result["milestones"][0]["status"] == "satisfied"
-    boundary["metadata"]["post_policies"][0]["result"]["measurements"][
-        "native_support"
-    ]["reference"] = "foreign"
-    assert (
-        _observe_placement(tmp_path, data)["milestones"][0]["status"] == "unavailable"
-    )

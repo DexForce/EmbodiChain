@@ -291,13 +291,10 @@ class GenSimTwist(Twist):
         default_options: TwistOptions | None = None,
         *,
         geometry_guard: E8GeometryGuard | None = None,
-        feedback_state: Any = None,
     ) -> None:
         super().__init__(default_options)
         self._geometry_guard = geometry_guard
-        self._feedback_state = feedback_state
         self._operation_guards: dict[str, Any] = {}
-        self._operation_feedback: dict[str, Any] = {}
         self._operation_states: dict[str, Any] = {}
 
     def _guard_dependency(self, plan: Any, request: Any, context: Any) -> Any:
@@ -457,47 +454,21 @@ class GenSimTwist(Twist):
             return GenSimTwist._plan_scoped(self, request, context)
         if operation not in self._operation_states:
             raise ValueError("Twist invocation has no owned control operation.")
-        guard, feedback = self._geometry_guard, self._feedback_state
+        guard = self._geometry_guard
         token = _CANDIDATE_STATE.set(self._operation_states[operation])
         self._geometry_guard = self._operation_guards[operation]
-        self._feedback_state = self._operation_feedback.get(operation)
         try:
             return GenSimTwist._plan_scoped(self, request, context)
         finally:
-            self._geometry_guard, self._feedback_state = guard, feedback
+            self._geometry_guard = guard
             _CANDIDATE_STATE.reset(token)
 
     def _plan_scoped(self, request: Any, context: Any) -> Any:
         from .motion import _joint_velocity_limits, _velocity_validity
 
         geometry = request.goal.semantics.geometry
-        feedback = getattr(self, "_feedback_state", None)
         if geometry.get("gen_sim_twist_continuation") is True:
-            if feedback is None:
-                raise ValueError(
-                    "E8 continuation requires its owned feedback controller."
-                )
-            plan = feedback.plan_continuation(self, request, context)
-            measured = plan.diagnostics.metadata.get("continuation_measured_qpos")
-            if type(measured) is not float or not math.isfinite(measured):
-                raise ValueError("E8 continuation requires a fresh joint observation.")
-            request = replace(
-                request,
-                goal=replace(
-                    request.goal,
-                    semantics=replace(
-                        request.goal.semantics,
-                        geometry={**geometry, "gen_sim_twist_measured_qpos": measured},
-                    ),
-                ),
-            )
-            guard = getattr(self, "_geometry_guard", None)
-            if guard is not None:
-                plan = guard.filter_continuation(self, plan, request, context)
-            plan = GenSimTwist._guard_dependency(self, plan, request, context)
-            if plan.plan_success.all():
-                feedback.record_plan(self, request, context, plan)
-            return plan
+            raise ValueError("E8 feedback continuation is unsupported.")
         angle = geometry["gen_sim_twist_angle"]
         current_qpos = self._current_qpos(request, context)
         if current_qpos is not None:
@@ -514,8 +485,6 @@ class GenSimTwist(Twist):
         base_request = replace(
             request, skill_options=replace(request.skill_options, twist_angle=angle)
         )
-        if feedback is not None:
-            base_request = feedback.apply_bias(base_request, context)
         state = _candidate_state()
         if state.goal_complete:
             if current_qpos is not None and math.isfinite(current_qpos):
@@ -537,11 +506,6 @@ class GenSimTwist(Twist):
                 if getattr(self, "_geometry_guard", None) is None:
                     return plan
                 plan = GenSimTwist._guard_dependency(self, plan, request, context)
-                if (
-                    getattr(feedback, "enabled", False) is True
-                    and plan.plan_success.all()
-                ):
-                    feedback.record_plan(self, request, context, plan)
                 return plan
             state.goal_complete = False
         bite = geometry["gen_sim_twist_bite_depth"]
@@ -631,14 +595,7 @@ class GenSimTwist(Twist):
             logger.log_warning(f"E8 public Twist planning rejected: {plan.diagnostics}")
         if plan.plan_success.any():
             settle = request.goal.semantics.geometry["gen_sim_twist_settle_steps"]
-            alignment_hold = 0
-            if getattr(feedback, "enabled", False) is True and any(
-                segment.name == "close" for segment in plan.segments
-            ):
-                from .twist_continuation import _ALIGNMENT_HOLD_STEPS
-
-                alignment_hold = _ALIGNMENT_HOLD_STEPS
-            if settle or alignment_hold:
+            if settle:
                 trajectory = plan.joint_trajectory
                 pieces, lengths = [], {}
                 for segment in plan.segments:
@@ -646,8 +603,6 @@ class GenSimTwist(Twist):
                     hold = 0
                     if segment.name in {"close", "twist"}:
                         hold = settle
-                    elif segment.name in {"approach", "reach"}:
-                        hold = alignment_hold
                     if hold:
                         piece = torch.cat(
                             (piece, piece[:, -1:].expand(-1, hold, -1)), dim=1
@@ -688,13 +643,7 @@ class GenSimTwist(Twist):
             # rotation. The next chunk lowers from a fresh physical observation.
             if plan.scene_dependencies:
                 plan = replace(plan, scene_dependency_end_segment="reach")
-            if alignment_hold:
-                guard = getattr(self, "_geometry_guard", None)
-                if guard is not None:
-                    plan = guard.filter_candidate(self, plan, request, context)
         plan = GenSimTwist._guard_dependency(self, plan, request, context)
-        if feedback is not None and plan.plan_success.all():
-            feedback.record_plan(self, request, context, plan)
         return plan
 
 
@@ -1207,9 +1156,6 @@ class TwistContactSensor(PressContactSensor):
 
     def reset(self, env_ids: Any = None) -> None:
         super().reset(env_ids)
-        feedback = getattr(self, "_feedback_state", None)
-        if feedback is not None:
-            feedback.reset()
         if hasattr(self, "route"):
             if self._startup_recording and len(self.startup_trace) > 1:
                 self._finalized_startup = self._startup_record(complete=False)
@@ -1224,9 +1170,6 @@ class TwistContactSensor(PressContactSensor):
             self.trace[-1]["hand_target"] = self.robot.get_qpos(
                 part, target=True
             ).tolist()
-        feedback = getattr(self, "_feedback_state", None)
-        if feedback is not None:
-            feedback.capture_native()
         return sample
 
 
@@ -1619,12 +1562,6 @@ class TwistAcceptancePort:
                         next_roll, self._candidate_state.selected_roll
                     )
                 )
-                feedback = getattr(s, "_feedback_state", None)
-                if axis_switch and feedback is not None:
-                    feedback.invalidate_grasp(
-                        previous_index=self._candidate_state.selected_index,
-                        next_index=self._candidate_state.forced_index,
-                    )
             self._candidate_state.contact_path = contact_path
             self._candidate_state.goal_complete = goal_check["accepted"]
             result = {

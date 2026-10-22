@@ -223,8 +223,7 @@ def generate_task_program_bundle(
             Live startup checks must qualify this dimensional candidate.
         twist_grip_depth_m: Explicit E8 whole-assembly depth candidate selected
             after a typed runtime mismatch. None preserves ordinary source sizing.
-        twist_contact_feedback: Enable bounded precontact feedback only after
-            a qualified exhausted no-contact attempt. Defaults to disabled.
+        twist_contact_feedback: Retired option; True is rejected before generation.
         twist_mass_source: Opt in to the Default-only deployment MassAPI copy
             instead of the Lab mass conversion. This is also selected when the
             unmodified Lab loader does not expose the mass policy capability.
@@ -265,9 +264,7 @@ def generate_task_program_bundle(
             failure-only goal-conditioned recovery. Targets and grasp stay fixed.
         idle_clearance_routes: Explicit empty-arm joint offsets and paired Park
             segments. No helper is inserted or enabled when omitted.
-        upright_container_picks: Explicit E3 Pick node IDs mapped to maximum pad-axis
-            tilt above the Z-up horizontal plane, in degrees. Omitted preserves
-            legacy behavior. The caller declares these as upright-container Picks.
+        upright_container_picks: Retired option; nonempty values are rejected.
         measured_rigid_calls: Explicit ordinary Pick and rigid-inside Place node
             IDs opting into measured preshape, carry and occupied-floor proposals.
             Omitted preserves legacy behavior and shared executor defaults.
@@ -286,6 +283,14 @@ def generate_task_program_bundle(
         ValueError: If the robot profile is unsupported or graph/scene
             integration cannot be composed and preflighted.
     """
+    if type(twist_contact_feedback) is not bool or twist_contact_feedback:
+        raise ValueError(
+            "E8 contact feedback is unsupported; use a basic Twist deployment."
+        )
+    if upright_container_picks is not None and (
+        not isinstance(upright_container_picks, Mapping) or upright_container_picks
+    ):
+        raise ValueError("upright_container_picks is unsupported in this deployment.")
     selected_graph = validate_semantic_task_graph(graph)
     from .experiment_policy import (
         resolve_profile,
@@ -386,10 +391,6 @@ def generate_task_program_bundle(
     from ._task_program.twist_binding import graph_routes as twist_graph_routes
 
     source_twist_routes = twist_graph_routes(selected_graph, prepared_scene)
-    if type(twist_contact_feedback) is not bool:
-        raise ValueError("E8 contact feedback must be an explicit boolean.")
-    if twist_contact_feedback and not source_twist_routes:
-        raise ValueError("Contact feedback requires a standalone E8 deployment.")
     if type(twist_mass_source) is not bool:
         raise ValueError("E8 deployment mass source must be an explicit boolean.")
     if twist_mass_source and not source_twist_routes:
@@ -651,11 +652,6 @@ def generate_task_program_bundle(
                 raise ValueError(
                     "E8 derived mass source changed its numeric binding or roles."
                 )
-    if twist_contact_feedback:
-        twist_routes = tuple(
-            replace(route, feedback_enabled=True, grip_extra_m=0.002)
-            for route in twist_routes
-        )
     if press_adaptation:
         _write_json(
             root / "press_adaptation.json",
@@ -877,7 +873,6 @@ def generate_task_program_bundle(
         scene_contract=scene_contract,
         collision_world=policy_payload["motion"]["strategy"] == "motion_gen",
         embodiment=embodiment_payload,
-        twist_contact_feedback=twist_contact_feedback,
         verify_pick_phases=verify_pick_phases,
         pour_geometry_revision=pour_geometry_revision,
         pour_proxy_position_tolerance_m=pour_proxy_position_tolerance_m,
@@ -1035,14 +1030,7 @@ def generate_task_program_bundle(
         validation = write_graph_contract(
             root, selected_graph, task_spec, task_candidate, role_bindings, step_lineage
         )
-    from .semantic_graph_html import write_semantic_task_graph_html
 
-    write_semantic_task_graph_html(
-        selected_graph,
-        root / "semantic_graph.html",
-        task_spec=task_spec,
-        validation=validation,
-    )
     if frozen is not None:
         frozen.assert_unchanged()
         verify_physical_input_manifest(root)
@@ -1485,28 +1473,6 @@ def _task_stability_payload(
         names = handover_place_declarations(post_handover_places)
         if names:
             result["post_handover_places"] = list(names)
-    if upright_container_picks is not None:
-        from ._task_program.pick_closure_quality import declarations
-
-        if not isinstance(upright_container_picks, Mapping):
-            raise ValueError("upright_container_picks must be an explicit mapping.")
-        quality = declarations(dict(upright_container_picks))
-        nodes = {n["id"]: n for n in graph["nodes"]}
-        if quality and pick_contact_revision is None:
-            raise ValueError(
-                "Upright quality requires an explicit native Pick contact revision."
-            )
-        if any(
-            name not in nodes
-            or nodes[name]["call"]["kind"] != "pick"
-            or nodes[name]["task_type"] != "E3"
-            for name in quality
-        ):
-            raise ValueError("Upright quality must name explicit E3 Pick nodes.")
-        if quality:
-            result["upright_container_picks"] = {
-                name: policy.max_tilt_degrees for name, policy in quality.items()
-            }
     return result
 
 
@@ -1985,7 +1951,6 @@ def _integration_payload(
     scene_contract: str,
     collision_world: bool = False,
     embodiment: dict[str, Any] | None = None,
-    twist_contact_feedback: bool = False,
     verify_pick_phases: bool = False,
     pour_geometry_revision: int | None = None,
     pour_proxy_position_tolerance_m: float | None = None,
@@ -2019,11 +1984,6 @@ def _integration_payload(
     )
 
     twist_routes = twist_graph_routes(graph, scene)
-    if twist_contact_feedback:
-        twist_routes = tuple(
-            replace(route, feedback_enabled=True, grip_extra_m=0.002)
-            for route in twist_routes
-        )
     from ._task_program.drawer_binding import drawer_routes, inside_parts
 
     drawers = {route.affordance: route for route in drawer_routes(graph, scene)}

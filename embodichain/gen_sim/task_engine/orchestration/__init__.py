@@ -24,7 +24,6 @@ from .artifacts import (
     ArtifactTransaction,
     CONSERVATIVE_SCENE_GRAPH_FILENAME,
     TaskEngineArtifactPaths,
-    FEASIBILITY_REPORT_FILENAME,
     PREPARATION_FAILURE_FILENAME,
     STATIC_SCENE_MANIFEST_FILENAME,
     task_engine_artifact_paths,
@@ -51,12 +50,6 @@ from .scene_source import (
     fingerprint_scene_source,
     verify_scene_source_fingerprint,
 )
-from .legacy_scene import (
-    LEGACY_SCENE_CONVERSION_SCHEMA,
-    LegacySceneRevision,
-    convert_legacy_gym_project,
-    restore_locked_scene_entities,
-)
 
 __all__ = [
     "ArtifactTransaction",
@@ -65,7 +58,6 @@ __all__ = [
     "BindingReport",
     "TaskEngineArtifactPaths",
     "TaskEngineCoordinator",
-    "FEASIBILITY_REPORT_FILENAME",
     "PREPARATION_FAILURE_FILENAME",
     "PreparationResult",
     "ROLE_BINDINGS_SCHEMA",
@@ -81,10 +73,6 @@ __all__ = [
     "SceneSourceRef",
     "task_engine_artifact_paths",
     "fingerprint_scene_source",
-    "LEGACY_SCENE_CONVERSION_SCHEMA",
-    "LegacySceneRevision",
-    "convert_legacy_gym_project",
-    "restore_locked_scene_entities",
     "verify_scene_source_fingerprint",
     "write_execution_report",
     "write_preparation_failure",

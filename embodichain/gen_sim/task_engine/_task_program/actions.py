@@ -806,7 +806,7 @@ class GenSimPickUp(PickUp):
                         rebuild(self, request, context, first, selection)
                     )
                     if qualified.plan_success.all():
-                        return finish(qualified)
+                        return qualified
                     self._expand_native_pick_candidates(selection)
                     first = self._retry_ordinary_pick_candidates(
                         request, context, qualified, selection

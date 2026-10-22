@@ -25,27 +25,16 @@ import math
 from typing import Any, TypeAlias
 
 __all__ = [
-    "ASSESSMENT_STATUSES",
-    "FEASIBILITY_REPORT_SCHEMA",
-    "REMEDIATION_CLASSES",
     "STATIC_SCENE_MANIFEST_SCHEMA",
-    "FeasibilityReport",
     "StaticSceneManifest",
-    "validate_feasibility_report",
     "validate_static_scene_manifest",
 ]
 
 
 STATIC_SCENE_MANIFEST_SCHEMA = "embodichain.static-scene-manifest/v1"
-FEASIBILITY_REPORT_SCHEMA = "embodichain.scene-action-feasibility/v2"
-ASSESSMENT_STATUSES = frozenset({"proven", "runtime_probe", "unknown", "contradicted"})
-REMEDIATION_CLASSES = frozenset(
-    {"none", "scene_remediable", "action_capability", "input_conflict", "terminal"}
-)
 _EVIDENCE_STATUSES = frozenset({"declared", "inferred", "verified", "contradicted"})
 
 StaticSceneManifest: TypeAlias = dict[str, Any]
-FeasibilityReport: TypeAlias = dict[str, Any]
 
 
 def validate_static_scene_manifest(value: Mapping[str, Any]) -> StaticSceneManifest:
@@ -132,79 +121,6 @@ def validate_static_scene_manifest(value: Mapping[str, Any]) -> StaticSceneManif
     return result
 
 
-def validate_feasibility_report(value: Mapping[str, Any]) -> FeasibilityReport:
-    """Validate and detach one scene/action feasibility report."""
-    result = _mapping(value, "FeasibilityReport")
-    _exact_keys(
-        result,
-        {
-            "schema_version",
-            "task_id",
-            "candidate_id",
-            "scene_id",
-            "status",
-            "remediation_class",
-            "checks",
-            "blockers",
-            "summary",
-        },
-        "FeasibilityReport",
-    )
-    _schema(result, FEASIBILITY_REPORT_SCHEMA, "FeasibilityReport")
-    for key in ("task_id", "candidate_id", "scene_id"):
-        result[key] = _nonempty(result.get(key), f"FeasibilityReport.{key}")
-    result["status"] = _status(result.get("status"), "FeasibilityReport.status")
-    remediation_class = result.get("remediation_class")
-    if remediation_class not in REMEDIATION_CLASSES:
-        raise ValueError(
-            "FeasibilityReport.remediation_class must be one of "
-            f"{sorted(REMEDIATION_CLASSES)}."
-        )
-    result["remediation_class"] = str(remediation_class)
-    if result["status"] != "contradicted" and remediation_class != "none":
-        raise ValueError(
-            "A non-contradicted FeasibilityReport requires remediation_class=none."
-        )
-    checks: list[dict[str, Any]] = []
-    for index, raw in enumerate(_sequence(result.get("checks"), "checks")):
-        context = f"FeasibilityReport.checks[{index}]"
-        item = _mapping(raw, context)
-        _exact_keys(
-            item,
-            {"kind", "subject", "status", "reason", "evidence"},
-            context,
-        )
-        item["kind"] = _nonempty(item.get("kind"), f"{context}.kind")
-        item["subject"] = _nonempty(item.get("subject"), f"{context}.subject")
-        item["status"] = _status(item.get("status"), f"{context}.status")
-        item["reason"] = _nonempty(item.get("reason"), f"{context}.reason")
-        item["evidence"] = _mapping(item.get("evidence"), f"{context}.evidence")
-        checks.append(item)
-    result["checks"] = checks
-    blockers = _sequence(result.get("blockers"), "FeasibilityReport.blockers")
-    if any(not isinstance(item, str) or not item for item in blockers):
-        raise ValueError("FeasibilityReport.blockers must contain non-empty strings.")
-    result["blockers"] = list(blockers)
-    summary = _mapping(result.get("summary"), "FeasibilityReport.summary")
-    expected = set(ASSESSMENT_STATUSES)
-    if set(summary) != expected:
-        raise ValueError(
-            "FeasibilityReport.summary must count every assessment status."
-        )
-    if any(
-        isinstance(value, bool) or not isinstance(value, int) or value < 0
-        for value in summary.values()
-    ):
-        raise ValueError(
-            "FeasibilityReport.summary counts must be non-negative integers."
-        )
-    if sum(summary.values()) != len(checks):
-        raise ValueError("FeasibilityReport.summary must match the check count.")
-    result["summary"] = dict(summary)
-    _json_safe(result, "FeasibilityReport")
-    return result
-
-
 def _validate_affordance(value: Any, context: str) -> dict[str, Any]:
     item = _mapping(value, context)
     _exact_keys(
@@ -279,12 +195,6 @@ def _string(value: Any, context: str) -> str:
     if not isinstance(value, str):
         raise TypeError(f"{context} must be a string.")
     return value
-
-
-def _status(value: Any, context: str) -> str:
-    if value not in ASSESSMENT_STATUSES:
-        raise ValueError(f"{context} must be one of {sorted(ASSESSMENT_STATUSES)}.")
-    return str(value)
 
 
 def _bool_mapping(value: Any, context: str) -> dict[str, bool]:

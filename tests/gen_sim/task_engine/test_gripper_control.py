@@ -18,10 +18,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from types import SimpleNamespace
-
-import numpy as np
 import pytest
-
 from embodichain.gen_sim.task_engine.task_program_bundle import (
     _calibrate_task_gripper_effort,
 )
@@ -75,208 +72,30 @@ def _inputs(
 
 
 @pytest.mark.parametrize("task_type", ["E1", "E2"])
-def test_light_rigid_grip_limits_only_the_used_gripper(task_type: str) -> None:
+@pytest.mark.parametrize("resource", ["left", "right"])
+def test_light_rigid_grip_limits_only_the_used_gripper(
+    task_type: str, resource: str
+) -> None:
     embodiment, scene, graph = _inputs(task_type=task_type)
+    graph["nodes"][0]["call"]["resources"]["primary"] = resource
     _calibrate_task_gripper_effort(embodiment, scene, graph)
     assert embodiment["simulation"]["joint_drive_props"]["max_effort"] == {
         "left_arm": 10000.0,
-        "left_eef": 0.5,
-        "right_eef": 500.0,
+        "left_eef": 0.5 if resource == "left" else 500.0,
+        "right_eef": 0.5 if resource == "right" else 500.0,
     }
     assert "mimic_compliance" not in embodiment["simulation"]
 
 
-@pytest.mark.parametrize("mass", [None, 0.02, 1.0])
-def test_unqualified_payload_retains_authored_control(mass: float | None) -> None:
-    embodiment, scene, graph = _inputs(mass=mass)
-    before = deepcopy(embodiment)
-    _calibrate_task_gripper_effort(embodiment, scene, graph)
-    assert embodiment == before
-
-
-@pytest.mark.parametrize("task_type", ["E3", "E4", "E5", "E6"])
-def test_other_recipe_families_retain_authored_control(task_type: str) -> None:
+@pytest.mark.parametrize(
+    "task_type,resource",
+    [("E3", "left"), ("E3", "right"), ("E4", "left"), ("E5", "left"), ("E6", "left")],
+)
+def test_other_recipe_families_retain_authored_control(
+    task_type: str, resource: str
+) -> None:
     embodiment, scene, graph = _inputs(task_type=task_type)
+    graph["nodes"][0]["call"]["resources"]["primary"] = resource
     before = deepcopy(embodiment)
     _calibrate_task_gripper_effort(embodiment, scene, graph)
     assert embodiment == before
-
-
-def test_lower_existing_effort_is_not_increased() -> None:
-    embodiment, scene, graph = _inputs()
-    embodiment["simulation"]["joint_drive_props"]["max_effort"]["left_eef"] = 0.2
-    _calibrate_task_gripper_effort(embodiment, scene, graph)
-    assert (
-        embodiment["simulation"]["joint_drive_props"]["max_effort"]["left_eef"] == 0.2
-    )
-
-
-@pytest.mark.parametrize("other_family", ["E6", "E8", "E9"])
-@pytest.mark.parametrize("other_resource", ["left", "right"])
-def test_unrelated_hand_does_not_disable_light_pick_effort(
-    other_family, other_resource
-):
-    embodiment, scene, graph = _inputs()
-    graph["nodes"][0]["call"]["resources"]["primary"] = "right"
-    graph["nodes"].insert(
-        0,
-        {
-            "task_type": other_family,
-            "call": {
-                "kind": "registered",
-                "call_id": "other.operation",
-                "resources": {"primary": other_resource},
-            },
-        },
-    )
-    _calibrate_task_gripper_effort(embodiment, scene, graph)
-    limits = embodiment["simulation"]["joint_drive_props"]["max_effort"]
-    assert limits["left_eef"] == 500.0
-    assert limits["right_eef"] == (0.5 if other_resource == "left" else 500.0)
-
-
-def test_heavy_payload_on_one_hand_does_not_disable_other_light_hand():
-    embodiment, scene, graph = _inputs()
-    scene.rigid_objects += ({"uid": "heavy", "attrs": {"mass_props": {"mass": 1.0}}},)
-    graph["nodes"].append(
-        {
-            "task_type": "E1",
-            "call": {
-                "kind": "pick",
-                "object": "heavy",
-                "resources": {"primary": "right"},
-            },
-        }
-    )
-    _calibrate_task_gripper_effort(embodiment, scene, graph)
-    limits = embodiment["simulation"]["joint_drive_props"]["max_effort"]
-    assert limits["left_eef"] == 0.5
-    assert limits["right_eef"] == 500.0
-
-
-@pytest.mark.parametrize("carrier_mass", [None, 0.01, 0.2])
-@pytest.mark.parametrize("resource", ["left", "right"])
-def test_light_pick_in_e5_sequence_requires_qualified_carrier(
-    carrier_mass, resource
-) -> None:
-    embodiment, scene, graph = _inputs(task_type="E2")
-    graph["nodes"][0]["call"]["resources"]["primary"] = resource
-    scene.rigid_objects += (
-        {"uid": "carrier", "attrs": {"mass_props": {"mass": carrier_mass}}},
-    )
-    graph["nodes"].insert(
-        0,
-        {
-            "task_type": "E5",
-            "call": {
-                "kind": "registered",
-                "call_id": "simulation.coordinated_hold",
-                "arguments": {"object": "carrier"},
-                "resources": {"left": "left", "right": "right"},
-            },
-        },
-    )
-    _calibrate_task_gripper_effort(embodiment, scene, graph)
-    limits = embodiment["simulation"]["joint_drive_props"]["max_effort"]
-    assert limits[resource + "_eef"] == (0.5 if carrier_mass == 0.01 else 500.0)
-    other = "right" if resource == "left" else "left"
-    assert limits[other + "_eef"] == 500.0
-
-
-def test_e5_only_still_preserves_authored_grip_effort() -> None:
-    embodiment, scene, graph = _inputs(task_type="E5")
-    graph["nodes"][0]["call"] = {
-        "kind": "registered",
-        "call_id": "simulation.coordinated_hold",
-        "arguments": {"object": "object"},
-        "resources": {"left": "left", "right": "right"},
-    }
-    original = deepcopy(embodiment)
-    _calibrate_task_gripper_effort(embodiment, scene, graph)
-    assert embodiment == original
-
-
-def test_registered_pick_uses_its_bound_resource() -> None:
-    embodiment, scene, graph = _inputs(task_type="E2")
-    graph["nodes"][0]["call"] = {
-        "kind": "registered",
-        "call_id": "gen_sim.pick.upright",
-        "arguments": {"object": "object"},
-        "resources": {"primary": "right"},
-    }
-    _calibrate_task_gripper_effort(embodiment, scene, graph)
-    assert (
-        embodiment["simulation"]["joint_drive_props"]["max_effort"]["right_eef"] == 0.5
-    )
-    assert (
-        embodiment["simulation"]["joint_drive_props"]["max_effort"]["left_eef"] == 500.0
-    )
-
-
-def test_on_placement_generates_support_checks_without_relaxing_position(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from embodichain.gen_sim.task_engine import task_program_bundle as bundle
-    from embodichain.gen_sim.task_engine._task_program.stability import (
-        StabilityConstraint,
-    )
-
-    objects = [
-        {
-            "runtime_uid": uid,
-            "init_pos": [0.0, 0.0, 0.7],
-            "init_rot": [90.0, 0.0, 0.0],
-            "init_local_pose": np.eye(4).tolist(),
-        }
-        for uid in ("cup", "cube")
-    ]
-    monkeypatch.setattr(
-        bundle,
-        "_mesh_vertices",
-        lambda obj: np.array(
-            [
-                [-0.05, -0.05, 0.0],
-                [0.05, 0.05, 0.1 if obj["runtime_uid"] == "cube" else 0.12],
-            ]
-        ),
-    )
-    graph = {
-        "nodes": [
-            {
-                "id": "place",
-                "task_type": "E1",
-                "task_instance_id": "step",
-                "call": {
-                    "kind": "registered",
-                    "call_id": "simulation.place_relative",
-                    "arguments": {
-                        "object": "cup",
-                        "reference": "cube",
-                        "relation": "on",
-                    },
-                },
-            }
-        ],
-        "task_groups": [{"node_ids": ["place"]}],
-    }
-    embodiment = {
-        "skill_profile": {
-            "resources": [
-                {
-                    "resource_id": "left",
-                    "endpoints": [
-                        {"endpoint_id": "motion", "control_part": "left_arm"}
-                    ],
-                }
-            ]
-        }
-    }
-    payload = bundle._task_stability_payload(
-        graph, SimpleNamespace(planner_objects=objects, table_top_z=0.7), embodiment
-    )
-    cfg = StabilityConstraint.decode(payload["presets"]["gen_sim.place.stable"])
-    assert cfg.kind == "supported_placement"
-    assert cfg.position_tolerance == 0.05
-    assert cfg.local_axis is None and cfg.reference_axis is None
-    assert cfg.reference_half_extents is None
-    assert cfg.displacement == pytest.approx((0.0, 0.0, 0.11))

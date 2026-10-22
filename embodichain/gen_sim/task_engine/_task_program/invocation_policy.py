@@ -261,8 +261,6 @@ class GenSimActionEngine(AtomicActionEngine):
     ) -> None:
         self._motion_samples = dict(motion_samples)
         self._measured_rigid_policy = None
-        self._twist_session_controller = None
-        self._twist_session_controllers: dict[str, Any] = {}
         if any(type(value) is not str or not value for value in cartesian_calls):
             raise ValueError("Cartesian planning scopes require invocation IDs.")
         self._cartesian_calls = frozenset(cartesian_calls)
@@ -355,30 +353,6 @@ class GenSimActionEngine(AtomicActionEngine):
             )
         self._alignment_continuations = dict(previews)
 
-    def configure_twist_feedback(self, controller: Any) -> None:
-        """Bind one E8 policy to this engine's public-session extension."""
-        from .twist_feedback import TwistFeedbackState
-        from .twist_runtime import GenSimTwist
-
-        operation = getattr(getattr(controller, "route", None), "operation_id", "")
-        action = self.actions.get("twist")
-        if (
-            not isinstance(controller, TwistFeedbackState)
-            or not controller.enabled
-            or controller.robot is not self.robot
-            or not isinstance(action, GenSimTwist)
-            or (
-                getattr(action, "_operation_feedback", {}).get(operation)
-                is not controller
-                and action._feedback_state is not controller
-            )
-            or operation in self._twist_session_controllers
-        ):
-            raise ValueError("E8 session feedback must own the exact action and robot.")
-        self._twist_session_controllers[operation] = controller
-        if not operation:
-            self._twist_session_controller = controller
-
     def start(
         self,
         invocations: Iterable[ActionInvocation],
@@ -387,50 +361,19 @@ class GenSimActionEngine(AtomicActionEngine):
         eligible_mask: Any = None,
         plan_transform: PlanTransform | None = None,
     ) -> Any:
-        """Retain the public runner while extending effectless E8 sessions only."""
+        """Use the shared session and retain observed drawer withdrawal lineage."""
         selected = tuple(invocations)
-        controller = self._twist_session_controller
-        if (
-            self._twist_session_controllers
-            and len(selected) == 1
-            and selected[0].skill_id == "twist"
-        ):
-            operation = getattr(
-                getattr(selected[0].goal, "semantics", None), "geometry", {}
-            ).get("gen_sim_twist_operation_id", "")
-            controller = self._twist_session_controllers.get(operation, controller)
-        if (
-            controller is None
-            or not any(item.skill_id == "twist" for item in selected)
-            or (eligible_mask is not None and not bool(eligible_mask.any()))
-        ):
-            session = super().start(
-                selected,
-                context,
-                eligible_mask=eligible_mask,
-                plan_transform=plan_transform,
-            )
-            for item in selected:
-                following = getattr(self, "_articulation_followups", {}).get(
-                    item.invocation_id
-                )
-                if following is not None:
-                    self._articulation_sessions[following] = (
-                        item.invocation_id,
-                        session,
-                    )
-            return session
-        from .twist_session import TwistFeedbackSession
-
-        initial = self.initial_context() if context is None else context
-        return TwistFeedbackSession(
-            self,
+        session = super().start(
             selected,
-            initial,
-            revision_controller=controller,
+            context,
             eligible_mask=eligible_mask,
             plan_transform=plan_transform,
         )
+        for item in selected:
+            following = self._articulation_followups.get(item.invocation_id)
+            if following is not None:
+                self._articulation_sessions[following] = (item.invocation_id, session)
+        return session
 
     def _withdrawal_was_reselected(self, invocation_id: str) -> bool:
         """Inspect installed plans, never speculative or rejected revisions."""

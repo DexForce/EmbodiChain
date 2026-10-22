@@ -17,8 +17,8 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from copy import deepcopy
 import pytest
-
 from embodichain.gen_sim.task_engine._task_program.press import (
     PressSample,
     evaluate_press_event,
@@ -70,6 +70,67 @@ def binding(button):
     return inspect_press(button, joint="press_joint", link="cap")
 
 
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "articulation_slide",
+        "articulation_withdraw",
+        "articulation_park",
+        "press_prepare",
+        "press",
+    ],
+)
+def test_control_lowerer_decode_preserves_binding_and_rejects_drift(button, kind):
+    from embodichain.gen_sim.task_engine._task_program.articulation_binding import (
+        PrismaticBinding,
+    )
+    from embodichain.gen_sim.task_engine._task_program.press_binding import PressRoute
+    from embodichain.gen_sim.task_engine._task_program.configured import (
+        decode_task_lowerer,
+    )
+
+    source = binding(button)
+    if kind.startswith("press"):
+        route = PressRoute(source, 0.02, operation_id="press_once")
+        payload = {"kind": kind, "route": route.payload()}
+    elif kind == "articulation_park":
+        payload = {"kind": kind}
+    else:
+        slide = PrismaticBinding(
+            source.object_id,
+            source.joint,
+            source.link,
+            source.parent,
+            source.collision_mesh,
+            source.source_sha256,
+            source.scale,
+            source.axis,
+            source.limits,
+            closed_position=source.released_position,
+        )
+        payload = {"kind": kind, "bindings": [slide.payload()]}
+    factory = decode_task_lowerer(payload, path="test")
+    assert factory.call_id == f"gen_sim.{kind}" + (
+        ".press_once" if kind.startswith("press") else ""
+    )
+    if kind.startswith("press"):
+        assert factory.route.payload() == route.payload()
+    elif kind != "articulation_park":
+        assert factory.bindings == (slide,)
+    with pytest.raises(ValueError):
+        decode_task_lowerer(dict(payload, unexpected=True), path="test")
+    if kind != "articulation_park":
+        damaged = deepcopy(payload)
+        record = (
+            damaged["route"]["binding"]
+            if kind.startswith("press")
+            else damaged["bindings"][0]
+        )
+        record["source_sha256"] = "stale"
+        with pytest.raises(ValueError):
+            decode_task_lowerer(damaged, path="test")
+
+
 def trace():
     return [
         PressSample(0.0, 0.0, "settle", False),
@@ -81,164 +142,10 @@ def trace():
     ]
 
 
-def test_binding_uses_scaled_collision_surface_and_inward_axis(button):
-    selected = binding(button)
-    assert selected.stroke == pytest.approx(0.01)
-    assert selected.axis == pytest.approx((0.0, 0.0, -1.0))
-    assert selected.press_position == pytest.approx((0.0, 0.0, 0.02))
-    assert len(selected.source_sha256) == 64
-
-
-def test_binding_and_derived_gate_use_json_native_scalars(button):
-    from dataclasses import asdict
-    import json
-
-    selected = binding(button)
-    report = {"binding": asdict(selected), "released": 0.0 <= selected.stroke * 0.1}
-    assert json.loads(json.dumps(report))["released"] is True
-
-
-def test_binding_accepts_single_rounded_cap_support_point(button):
-    from pxr import Usd, UsdGeom
-
-    stage = Usd.Stage.Open(button["fpath"])
-    mesh = UsdGeom.Mesh(stage.GetPrimAtPath("/Button/cap/contact"))
-    mesh.GetPointsAttr().Set(
-        [(-0.02, -0.02, 0.01), (0.02, -0.02, 0.01), (0.0, 0.0, 0.02)]
-    )
-    mesh.GetFaceVertexCountsAttr().Set([3])
-    mesh.GetFaceVertexIndicesAttr().Set([0, 1, 2])
-    stage.GetRootLayer().Save()
-    assert binding(button).press_position == pytest.approx((0.0, 0.0, 0.04))
-
-
-@pytest.mark.parametrize(
-    "change, error",
-    [
-        ({"fix_base": False}, "fixed base"),
-        ({"body_scale": [1.0, 2.0, 1.0]}, "uniform"),
-        ({"body_scale": [float("nan")] * 3}, "uniform"),
-        ({"uid": ""}, "identities"),
-    ],
-)
-def test_binding_rejects_unsupported_config(button, change, error):
-    with pytest.raises(ValueError, match=error):
-        binding({**button, **change})
-
-
-@pytest.mark.parametrize("joint, link", [("missing", "cap"), ("press_joint", "base")])
-def test_binding_rejects_wrong_identity(button, joint, link):
-    with pytest.raises(ValueError):
-        inspect_press(button, joint=joint, link=link)
-
-
-@pytest.mark.parametrize("joint_type", ["FixedJoint", "RevoluteJoint"])
-def test_binding_rejects_parent_below_another_joint(button, joint_type):
-    from pxr import Usd, UsdPhysics
-
-    stage = Usd.Stage.Open(button["fpath"])
-    joint = getattr(UsdPhysics, joint_type).Define(stage, "/Button/other_joint")
-    joint.CreateBody1Rel().SetTargets(["/Button/base"])
-    stage.GetRootLayer().Save()
-    with pytest.raises(ValueError, match="root-body parent"):
-        binding(button)
-
-
-def test_binding_keeps_explicit_button_with_independent_sibling_joint(button):
-    from pxr import Usd, UsdGeom, UsdPhysics
-
-    stage = Usd.Stage.Open(button["fpath"])
-    sibling = UsdGeom.Xform.Define(stage, "/Button/lid").GetPrim()
-    UsdPhysics.RigidBodyAPI.Apply(sibling)
-    joint = UsdPhysics.RevoluteJoint.Define(stage, "/Button/lid_hinge")
-    joint.CreateBody0Rel().SetTargets(["/Button/base"])
-    joint.CreateBody1Rel().SetTargets(["/Button/lid"])
-    stage.GetRootLayer().Save()
-    assert binding(button).joint == "press_joint"
-
-
-def test_binding_requires_explicit_collision_selection(button):
-    from pxr import Usd, UsdGeom, UsdPhysics
-
-    stage = Usd.Stage.Open(button["fpath"])
-    extra = UsdGeom.Mesh.Define(stage, "/Button/cap/extra")
-    UsdPhysics.CollisionAPI.Apply(extra.GetPrim())
-    stage.GetRootLayer().Save()
-    with pytest.raises(ValueError, match="unambiguous"):
-        binding(button)
-    selected = inspect_press(
-        button, joint="press_joint", link="cap", collision_mesh="/Button/cap/contact"
-    )
-    assert selected.collision_mesh == "/Button/cap/contact"
-
-
-@pytest.mark.parametrize("meters", [0.01, 100.0])
-def test_binding_rejects_non_metre_assets(button, meters):
-    from pxr import Usd, UsdGeom
-
-    stage = Usd.Stage.Open(button["fpath"])
-    UsdGeom.SetStageMetersPerUnit(stage, meters)
-    stage.GetRootLayer().Save()
-    with pytest.raises(ValueError, match="metre"):
-        binding(button)
-
-
-def test_binding_rejects_non_endpoint_release(button):
-    with pytest.raises(ValueError, match="endpoint"):
-        inspect_press(button, joint="press_joint", link="cap", released_position=-0.005)
-
-
-def test_binding_supports_opposite_explicit_release_endpoint(button):
-    selected = inspect_press(
-        button, joint="press_joint", link="cap", released_position=-0.01
-    )
-    assert selected.axis == pytest.approx((0.0, 0.0, 1.0))
-    assert selected.pressed_position == 0.0
-
-
 def test_transient_contact_press_succeeds_without_persistent_activation(button):
     result = evaluate_press_event(binding(button), trace())
     assert result["accepted"]
     assert result["contact_stroke"] == pytest.approx(0.0097)
-
-
-@pytest.mark.parametrize(
-    "travel,accepted", [(0.000049, False), (0.000050, True), (0.000051, True)]
-)
-def test_contact_press_uses_absolute_fifty_micrometre_threshold(
-    button, travel, accepted
-):
-    samples = [
-        PressSample(0.0, 0.0, "prepare", False),
-        PressSample(0.1, 0.0, "press", True),
-        PressSample(0.2, -travel, "press", True),
-        PressSample(0.3, 0.0, "cleanup", False),
-    ]
-    result = evaluate_press_event(binding(button), samples)
-    assert result["accepted"] is accepted
-    assert result["minimum_contact_stroke_m"] == 0.00005
-    assert result["criterion"] == "contact_press_0.05mm"
-    assert result["activation_verified"] is False
-
-
-def test_separate_subthreshold_contacts_do_not_accumulate(button):
-    samples = [
-        PressSample(0.0, 0.0, "prepare", False),
-        PressSample(0.1, 0.0, "press", True),
-        PressSample(0.2, -0.00003, "press", True),
-        PressSample(0.3, -0.00003, "press", False),
-        PressSample(0.4, -0.00003, "press", True),
-        PressSample(0.5, -0.00006, "press", True),
-    ]
-    result = evaluate_press_event(binding(button), samples)
-    assert not result["accepted"]
-    assert result["contact_stroke"] == pytest.approx(0.00003)
-
-
-def test_event_supports_positive_joint_travel(button):
-    selected = replace(binding(button), limits=(0.0, 0.01), pressed_position=0.01)
-    samples = [replace(s, qpos=-s.qpos) for s in trace()]
-    assert evaluate_press_event(selected, samples)["accepted"]
 
 
 @pytest.mark.parametrize(

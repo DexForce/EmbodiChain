@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Final
+from typing import Any, Final
 
 from .canonicalization import (
     CANONICALIZATION_VERSION,
@@ -47,8 +47,6 @@ __all__ = [
     "TaskTemplate",
 ]
 
-if TYPE_CHECKING:
-    from .compat import RequirementSpec
 
 TASK_SPEC_SCHEMA: Final = "task_spec/v0.1"
 # Kept for readers of the pre-simplification schema.
@@ -226,16 +224,10 @@ class TaskRequirement:
         object.__setattr__(self, "value", json_snapshot(self.value))
 
     @classmethod
-    def from_value(
-        cls, value: TaskRequirement | RequirementSpec | Mapping[str, Any]
-    ) -> TaskRequirement:
+    def from_value(cls, value: TaskRequirement | Mapping[str, Any]) -> TaskRequirement:
         if isinstance(value, cls):
             return value
         if not isinstance(value, Mapping):
-            from .compat import RequirementSpec
-
-            if isinstance(value, RequirementSpec):
-                return cls.from_value(value.to_dict())
             raise TypeError("TaskSpec requirements must be mappings.")
         raw = dict(value)
         if "consumer" not in raw:
@@ -351,7 +343,7 @@ class TaskSpec:
     invariants: tuple[Predicate | Mapping[str, Any], ...] = ()
     temporal: tuple[TemporalCondition | Mapping[str, Any], ...] = ()
     milestones: tuple[MilestoneSpec | Mapping[str, Any], ...] = ()
-    requirements: tuple[TaskRequirement | RequirementSpec | Mapping[str, Any], ...] = ()
+    requirements: tuple[TaskRequirement | Mapping[str, Any], ...] = ()
     metadata: Mapping[str, Any] = field(default_factory=dict)
     schema_version: str = TASK_SPEC_SCHEMA
     canonicalization_version: str = CANONICALIZATION_VERSION
