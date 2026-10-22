@@ -1004,6 +1004,7 @@ def test_backend_joint_and_articulation_configs_round_trip() -> None:
         "sleep_threshold": None,
         "min_position_iters": None,
         "min_velocity_iters": None,
+        "newton_gravity_compensation": None,
     }
     assert type(restored_root) is ArticulationRootPropertiesCfg
 
@@ -1078,6 +1079,7 @@ def test_newton_physics_inherits_common_gravity_and_collision_config(
     contact_distance: float,
 ) -> None:
     cfg = NewtonPhysicsCfg(
+        solver_cfg=None,
         gravity=[0.0, 0.0, -1.5],
         collision_cfg=NewtonCollisionPipelineCfg(
             broad_phase="sap",
@@ -1543,3 +1545,37 @@ def test_nrd_rejects_invalid_settings(field_name: str, invalid_value: object) ->
     """Malformed NRD values fail before entering the native renderer."""
     with pytest.raises(ValueError, match=field_name):
         sim_cfg.NRDCfg(**{field_name: invalid_value})
+
+
+@configclass
+class _DexUniRobotPresetCfg(RobotPresetCfg):
+    default: RobotCfg = RobotCfg(uid="portable", control_parts={"arm": ["joint"]})
+    newton_dexuni: RobotCfg | None = RobotCfg(
+        uid="dexuni", control_parts={"arm": ["joint"]}
+    )
+    newton_mujoco_warp: RobotCfg | None = RobotCfg(
+        uid="mujoco", control_parts={"arm": ["joint"]}
+    )
+    newton_mjwarp: RobotCfg | None = RobotCfg(
+        uid="mjwarp", control_parts={"arm": ["joint"]}
+    )
+
+
+@pytest.mark.parametrize(
+    "missing,expected",
+    [
+        ((), "dexuni"),
+        (("newton_dexuni",), "mujoco"),
+        (("newton_dexuni", "newton_mujoco_warp"), "mjwarp"),
+        (("newton_dexuni", "newton_mujoco_warp", "newton_mjwarp"), "portable"),
+    ],
+)
+def test_dexuni_preset_priority_and_isolation(missing, expected) -> None:
+    preset = _DexUniRobotPresetCfg()
+    for field in missing:
+        setattr(preset, field, None)
+    physics = NewtonPhysicsCfg(solver_cfg={"solver_type": "dexuni"})
+    resolved = preset.resolve(physics)
+    assert resolved.uid == expected
+    resolved.control_parts["probe"] = ["joint"]
+    assert "probe" not in preset.resolve(physics).control_parts

@@ -151,3 +151,69 @@ def test_volume_elasticity_uses_short_names() -> None:
 def test_only_current_config_keywords_are_accepted(cfg_type, values) -> None:
     with pytest.raises(TypeError):
         cfg_type(**values)
+
+
+@pytest.mark.parametrize("topology", ["volume", "surface"])
+@pytest.mark.usefixtures("requires_particle_contact_material")
+def test_particle_contact_material_round_trip_and_lowering(topology) -> None:
+    values = {"stiffness": 5e4, "damping": 0.05, "dynamic_friction": 0.7}
+    cls = (
+        VolumeDeformableObjectCfg
+        if topology == "volume"
+        else SurfaceDeformableObjectCfg
+    )
+    cfg = cls.from_dict(
+        {
+            "uid": "particles",
+            "shape": {
+                "shape_type": "Mesh",
+                "fpath": "particles.obj",
+            },
+            "attrs": {"contact_material": values},
+        }
+    )
+    restored = cls.from_dict(cfg.to_dict())
+    assert restored.attrs.contact_material == values
+    lower = (
+        volume_deformable_desc_from_cfg
+        if topology == "volume"
+        else surface_deformable_desc_from_cfg
+    )
+    desc, _ = lower(restored)
+    assert desc.physics.contact_material.stiffness == values["stiffness"]
+    assert desc.physics.contact_material.damping == values["damping"]
+    assert desc.physics.contact_material.dynamic_friction == values["dynamic_friction"]
+
+
+@pytest.mark.parametrize("property_name", ["stiffness", "damping", "dynamic_friction"])
+@pytest.mark.parametrize("value", [-1.0, float("nan"), float("inf"), True])
+@pytest.mark.usefixtures("requires_particle_contact_material")
+def test_invalid_particle_contact_material_values_fail_at_lowering(
+    property_name, value
+) -> None:
+    cfg = SurfaceDeformableObjectCfg.from_dict(
+        {
+            "uid": "cloth",
+            "shape": {"shape_type": "Mesh", "fpath": "cloth.obj"},
+            "attrs": {"contact_material": {property_name: value}},
+        }
+    )
+    with pytest.raises(ValueError, match=property_name):
+        surface_deformable_desc_from_cfg(cfg)
+
+
+def test_explicit_particle_material_rejects_unsupported_engine(monkeypatch) -> None:
+    import dexsim.spawn
+
+    monkeypatch.delattr(
+        dexsim.spawn, "NewtonParticleContactMaterialDesc", raising=False
+    )
+    cfg = SurfaceDeformableObjectCfg.from_dict(
+        {
+            "uid": "cloth",
+            "shape": {"shape_type": "Mesh", "fpath": "cloth.obj"},
+            "attrs": {"contact_material": {"stiffness": 1e3}},
+        }
+    )
+    with pytest.raises(RuntimeError, match="per-object particle materials"):
+        surface_deformable_desc_from_cfg(cfg)

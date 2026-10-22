@@ -1511,26 +1511,31 @@ class SimulationManager:
     def register_particle_contact_material_schedule(
         self,
         keyframes: Mapping[str, Sequence[Sequence[float]]],
+        *,
+        uid: str | None = None,
     ) -> None:
         """Register time-varying Newton particle contact properties.
 
         Supported tracks are ``dynamic_friction``, ``stiffness``, and
-        ``damping``. Values apply scene-wide to particle-versus-rigid contacts
-        and are sampled piecewise-constantly in simulation time.
+        ``damping``. Values are sampled piecewise-constantly in simulation
+        time. Supply ``uid`` for a DexUni cloth/soft-body material; otherwise
+        register the legacy scene-wide control for other Newton solvers.
 
         .. attention::
-            Register this control before :meth:`prepare`. This host-side
-            control requires direct Newton stepping and therefore disables
-            CUDA Graph replay for the finalized simulation.
+            Register before :meth:`prepare`. Targeted DexUni controls support
+            CUDA Graph replay. The legacy scene-wide host control requires
+            direct Newton stepping and disables graph replay.
 
         Args:
             keyframes: Particle contact-property tracks containing ``(time,
                 value)`` pairs.
+            uid: Optional declared deformable UID for DexUni object materials.
 
         Raises:
             RuntimeError: If the backend is not Newton or the scene is already
                 finalized.
             ValueError: If the keyframes are invalid.
+            KeyError: If ``uid`` is not a declared deformable.
         """
         if not self.is_newton_backend:
             raise RuntimeError(
@@ -1542,6 +1547,31 @@ class SimulationManager:
                 "Particle contact material schedules must be registered before "
                 "SimulationManager.prepare()."
             )
+
+        if uid is not None:
+            if uid not in self._deformable_objects:
+                raise KeyError(f"Deformable object {uid!r} is not declared.")
+            arena_names = scene.arena_names
+            if len(arena_names) != self.num_envs:
+                raise RuntimeError(
+                    "Spawn arena count does not match SimulationManager.num_envs."
+                )
+            from dexsim.engine import newton_physics
+
+            control_type = getattr(
+                newton_physics, "DexUniParticleContactMaterialSchedule", None
+            )
+            if control_type is None:
+                raise RuntimeError(
+                    "Targeted particle materials require a supporting DexSim build."
+                )
+            controls = tuple(
+                control_type(keyframes, target=f"{arena_name}/{uid}")
+                for arena_name in arena_names
+            )
+            for control in controls:
+                scene.builder.add_runtime_control(control)
+            return
 
         from dexsim.engine.newton_physics import ParticleContactMaterialSchedule
 
@@ -4873,6 +4903,7 @@ class SimulationManager:
             None,
             "auto",
             "mujoco_warp",
+            "dexuni",
         }
         if (
             use_coordinated_newton_clear
@@ -4980,6 +5011,9 @@ class SimulationManager:
             bool: True if export is successful, False otherwise.
         """
         try:
+            # The optional USD kit registers the export methods on DexSim Env.
+            import dexsim.kit.usd
+
             self._env.export_to_usd_file(fpath)
             logger.log_info(f"Simulation scene exported to USD file: {fpath}")
             return True
@@ -5099,6 +5133,14 @@ class SimulationManager:
                 for asset in getattr(self, registry_name, {}).values():
                     if isinstance(asset, VisualObject):
                         asset._release_spawn_references()
+                    # Parsed material wrappers must die before their native renderer.
+                    for material_attr in (
+                        "_visual_material",
+                        "_original_visual_material",
+                        "_original_visual_material_inst",
+                    ):
+                        if hasattr(asset, material_attr):
+                            setattr(asset, material_attr, [])
                     if hasattr(asset, "_data"):
                         asset._data = None
                     if hasattr(asset, "_spawn_result"):

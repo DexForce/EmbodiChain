@@ -16,7 +16,13 @@ process valid contact rows, using precomputed sorted environment/actor indices;
 no environment-by-contact-by-body tensor is allocated. Per-body force, contact
 flags and timing buffers persist between samples. `current_air_time` measures
 an unfinished flight; `last_air_time` retains its completed duration on landing.
-Selective reset clears only the selected rows.
+Selective reset clears only the selected rows. Force reduction uses only
+components marked available by the sample's normal/friction validity flags.
+Geometry-only rows can count as contact when no force threshold is requested;
+they do not create measured force or satisfy a positive force threshold.
+Native friction is the tangential impulse on actor 0, while the normal points
+toward actor 1: actor-0 force is `(-normal * impulse + friction) / dt` and
+actor 1 receives the opposite force.
 
 `dropped_contacts` reports query loss plus separately counted scatter overflow
 across the control interval. Query counts stay on the device until this diagnostic

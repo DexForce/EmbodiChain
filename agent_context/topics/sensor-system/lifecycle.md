@@ -35,10 +35,17 @@ Spawn handles and creates one query. Preserve these query/buffer contracts:
 - Only validity/counts reset each update. Data outside valid rows is undefined.
 
 `contact_capabilities` distinguishes geometry from normal/friction impulse
-support. Do not infer force support from sensor construction alone. Inspect
+support for the whole query. Current DexSim DexUni reports may mix geometry-only
+and measured-force rows; `impulse_valid` and `friction_valid` preserve their
+per-row quantity availability through sensor scatter, filtering and reset.
+Unavailable values are placeholders, not measured zeros. Older buffers without
+per-row flags use the query capabilities; DexUni queries require the newer
+validity contract. Do not infer force support from sensor construction alone. Inspect
 `supports_contact_sensor` in `embodichain/lab/sim/physics/` for the current
 backend/solver/device matrix: Newton AutoSolver may change the answer during
 preparation, so the manager checks again afterwards.
+
+Particle-shape contacts do not enter this rigid ContactQuery.
 
 The sensor retains backend-emitted rows rather than reducing an actor pair to
 one contact. Force-reporting paths apply the query's positive-impulse filtering;

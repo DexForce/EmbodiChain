@@ -33,18 +33,20 @@ from embodichain.lab.sim.atomic_actions import (
     PourOptions,
 )
 from embodichain.lab.sim.motion.planners import (
-    TrapezoidalPlanOptions,
     ToppraPlanOptions,
     TrajectorySampleMethod,
 )
 from embodichain.utils import logger
 from embodichain.lab.scripts._atomic_action.axis_align import (
+    OBJECT_SIZE,
     create_align_object,
     create_axis_align_semantics,
 )
 from embodichain.lab.scripts._atomic_action.support import (
+    DEFAULT_GRIPPER_CLOSE_QPOS,
+    DEXUNI_CUBE_CLOSE_QPOS,
     create_affordance_sampling_context,
-    add_ur5_gripper_robot,
+    add_tutorial_robot,
     create_parallel_jaw_grasp_pose_generator,
     create_toppra_motion_generator,
     create_tutorial_argument_parser,
@@ -66,7 +68,7 @@ POUR_SAMPLE_INTERVAL = 80
 HAND_INTERP_STEPS = 12
 POST_TRAJECTORY_STEPS = 240
 PICK_MOTION_SAMPLE_COUNT = PICK_SAMPLE_INTERVAL - HAND_INTERP_STEPS
-OBJ_POSITION = (-0.5, 0.0, 0.0)
+OBJ_POSITION = (-0.5, 0.0, 0.5 * OBJECT_SIZE[2])
 RECORD_LOOK_AT = (
     (-1.5, 0.2, 1.2),
     (-0.4, 0.0, 0.4),
@@ -104,14 +106,8 @@ def _create_pick_motion_policy(
             sample_method=TrajectorySampleMethod.QUANTITY,
             sample_interval=PICK_MOTION_SAMPLE_COUNT,
         )
-    elif planner == "trapezoidal":
-        plan_opts = TrapezoidalPlanOptions(
-            sample_method=TrajectorySampleMethod.QUANTITY,
-            sample_interval=PICK_MOTION_SAMPLE_COUNT,
-        )
-    elif planner == "curobo":
-        # cuRobo owns its native sampling and does not use the joint-space
-        # sample-count options above.
+    elif planner in ("trapezoidal", "curobo"):
+        # Retain native waypoints before PickUp resamples its motion segments.
         plan_opts = None
     else:
         raise ValueError(f"Unsupported tutorial planner {planner!r}.")
@@ -128,13 +124,34 @@ def run(args: argparse.Namespace) -> None:
     Args:
         args: Resolved standalone or configured host arguments.
     """
-    sim = create_tutorial_simulation(args)
-    robot = add_ur5_gripper_robot(sim, tcp_point="grasp")
-    obj = create_align_object(
-        sim,
-        obj_position=OBJ_POSITION,
+    sim = create_tutorial_simulation(
+        args,
+        newton_solver_options=(
+            {
+                "vbd_options": {"rigid_contact_history": True},
+                "collision_options": {"contact_matching": "latest"},
+            }
+            if args.physics == "newton"
+            else None
+        ),
     )
-    hand_open, hand_close = get_hand_open_close_qpos(robot)
+    use_vbd_grasp = sim.physics.solver_type == "dexuni"
+    robot = add_tutorial_robot(
+        sim,
+        "ur5",
+        tcp_point="grasp",
+        newton_gripper_friction=4.0 if use_vbd_grasp else None,
+    )
+    obj_position = list(OBJ_POSITION)
+    if use_vbd_grasp:
+        obj_position[2] += 0.001
+    obj = create_align_object(sim, obj_position=obj_position)
+    hand_open, hand_close = get_hand_open_close_qpos(
+        robot,
+        close_qpos=(
+            DEXUNI_CUBE_CLOSE_QPOS if use_vbd_grasp else DEFAULT_GRIPPER_CLOSE_QPOS
+        ),
+    )
     initialize_pre_pick_robot_pose(robot, obj, hand_open)
     planner = getattr(args, "planner", "trapezoidal")
     motion_gen = create_toppra_motion_generator(robot, planner=planner)
