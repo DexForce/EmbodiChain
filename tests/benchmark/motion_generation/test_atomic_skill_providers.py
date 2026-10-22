@@ -41,35 +41,35 @@ from embodichain.lab.sim.atomic_actions.primitives._helpers import (
 from embodichain.lab.sim.motion.planners import MoveType, ToppraPlanOptions
 from embodichain.lab.sim.motion.planners.utils import TrajectorySampleMethod
 from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
-from embodichain.benchmarks.motion_generation.config import PlannerSpecCfg, load_suite
-from embodichain.benchmarks.motion_generation.contracts import (
+from embodichain_benchmarks.motion_generation.config import PlannerSpecCfg, load_suite
+from embodichain_benchmarks.motion_generation.contracts import (
     ReplayObservationTrace,
     ReplayObservationWindow,
 )
-from embodichain.benchmarks.motion_generation.models import (
+from embodichain_benchmarks.motion_generation.models import (
     AlgorithmRole,
     BenchmarkCase,
     CaseOutcome,
 )
-from embodichain.benchmarks.motion_generation.planners.base import PlannerContext
-from embodichain.benchmarks.motion_generation.planners.toppra import ToppraAdapter
-from embodichain.benchmarks.motion_generation.scenarios import (
+from embodichain_benchmarks.motion_generation.planners.base import PlannerContext
+from embodichain_benchmarks.motion_generation.planners.toppra import ToppraAdapter
+from embodichain_benchmarks.motion_generation.scenarios import (
     atomic_skill_providers as providers,
 )
-from embodichain.benchmarks.motion_generation.scenarios.atomic_skill import (
+from embodichain_benchmarks.motion_generation.scenarios.atomic_skill import (
     AtomicSkillScenario,
 )
-from embodichain.benchmarks.motion_generation.scenarios.atomic_grasps import (
+from embodichain_benchmarks.motion_generation.scenarios.atomic_grasps import (
     ActiveCaseGraspPoseGenerator,
 )
-from embodichain.benchmarks.motion_generation.contracts import ExecutionObservation
-from embodichain.benchmarks.motion_generation.scenarios.atomic_evaluation import (
+from embodichain_benchmarks.motion_generation.contracts import ExecutionObservation
+from embodichain_benchmarks.motion_generation.scenarios.atomic_evaluation import (
     signed_rotation_about_axis,
 )
-from embodichain.benchmarks.motion_generation.scenarios.atomic_policy import (
+from embodichain_benchmarks.motion_generation.scenarios.atomic_policy import (
     with_plan_options,
 )
-from embodichain.benchmarks.motion_generation.atomic_skill import (
+from embodichain_benchmarks.motion_generation.atomic_skill import (
     create_atomic_skill_provider,
 )
 
@@ -517,7 +517,7 @@ def test_axis_align_geometry_matches_the_axis_align_primitive() -> None:
     reference = grasp.clone()
     reference[:, :3, :3] = torch.diag(torch.tensor([-1.0, 1.0, -1.0]))
     assert torch.allclose(
-        providers._symmetric_nearest(grasp, reference),
+        providers.nearest_half_turn_pose(grasp, reference),
         find_symmetric_nearest_xpos(grasp, reference),
     )
 
@@ -914,9 +914,9 @@ def test_push_succeeds_when_contact_starts_during_planar_motion() -> None:
 
 
 def test_custom_gripper_provider_initializes_configured_commands(monkeypatch):
-    from embodichain.benchmarks.motion_generation import atomic_skill as registry
-    from embodichain.benchmarks.motion_generation.config import SuiteCfg, TrackCfg
-    from embodichain.benchmarks.motion_generation.scenarios.atomic_skill import (
+    from embodichain_benchmarks.motion_generation import atomic_skill as registry
+    from embodichain_benchmarks.motion_generation.config import SuiteCfg, TrackCfg
+    from embodichain_benchmarks.motion_generation.scenarios.atomic_skill import (
         AtomicSkillScenario,
     )
 

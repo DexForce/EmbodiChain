@@ -22,11 +22,11 @@ from pathlib import Path
 
 import pytest
 
-from embodichain.benchmarks.motion_generation.config import (
+from embodichain_benchmarks.motion_generation.config import (
     EmbodimentSpecCfg,
     RobotSpecCfg,
 )
-from embodichain.benchmarks.motion_generation.embodiments import (
+from embodichain_benchmarks.motion_generation.embodiments import (
     EmbodimentResolution,
     YamlEmbodimentProvider,
     check_embodiment_capabilities,

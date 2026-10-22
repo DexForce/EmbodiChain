@@ -1322,3 +1322,46 @@ def test_neural_planner_rejects_pytorch_checkpoint(tmp_path, monkeypatch):
                 onnx_model_path=str(pytorch_checkpoint_path),
             )
         )
+
+
+@pytest.mark.parametrize("batch_size", [1, 8, 64])
+@pytest.mark.parametrize("retimed", [False, True])
+def test_native_and_retimed_rollouts_preserve_requested_first_sample(
+    tmp_path, monkeypatch, batch_size, retimed
+):
+    fake_sim = FakeSimulationManager()
+    monkeypatch.setattr(
+        FakeOnnxPolicy,
+        "__call__",
+        lambda self, obs: torch.full(
+            (obs.shape[0], NUM_ARM_JOINTS), 0.5, device=obs.device
+        ),
+    )
+    fake_sim.robot.num_instances = batch_size
+    monkeypatch.setattr(
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
+    )
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=_create_fake_onnx_model(tmp_path),
+            control_part="main_arm",
+            max_steps=3,
+            constraints={"velocity": 1.0, "acceleration": 2.0} if retimed else None,
+        )
+    )
+    # Float64 callers exercise the native float32 conversion as well as retiming.
+    start = torch.linspace(
+        -0.2, 0.2, batch_size * NUM_ARM_JOINTS, dtype=torch.float64
+    ).reshape(batch_size, NUM_ARM_JOINTS)
+    target = start.float() + 0.3
+    result = planner.plan(
+        [PlanState.from_qpos(target, move_type=MoveType.JOINT_MOVE)],
+        NeuralPlanOptions(control_part="main_arm", start_qpos=start),
+    )
+    assert result.positions is not None
+    error = (result.positions[:, 0].double() - start).abs().amax(dim=-1)
+    assert bool((error < 1e-6).all())
+    assert float((result.positions[:, -1] - result.positions[:, 0]).abs().max()) > 1e-6

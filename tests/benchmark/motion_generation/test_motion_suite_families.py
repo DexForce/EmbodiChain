@@ -25,18 +25,18 @@ import pytest
 import torch
 import yaml
 
-from embodichain.benchmarks.motion_generation.config import (
+from embodichain_benchmarks.motion_generation.config import (
     BENCHMARK_ROOT,
     DomainCfg,
     SuiteCfg,
     load_suite,
 )
-from embodichain.benchmarks.motion_generation.models import BenchmarkCase
-from embodichain.benchmarks.motion_generation.planners.base import (
+from embodichain_benchmarks.motion_generation.models import BenchmarkCase
+from embodichain_benchmarks.motion_generation.planners.base import (
     PlannerAdapter,
     PlannerContext,
 )
-from embodichain.benchmarks.motion_generation.scenarios.free_space import (
+from embodichain_benchmarks.motion_generation.scenarios.free_space import (
     FreeSpaceScenario,
 )
 
@@ -69,14 +69,20 @@ def _load_test_suite(tmp_path: Path, **matrix: Any) -> SuiteCfg:
         "suite_version": "legacy_v1",
         "planners": [{"id": "joint", "adapter": "joint", "enabled": True}],
         "protocol": {"report_schema_version": "3"},
-        "free_space": {
-            "batch_sizes": [2],
-            "waypoint_counts": [3],
-            "path_shapes": ["direct"],
-            "start_state_bins": ["nominal"],
-            "seeds": [11],
-            **matrix,
-        },
+        "tracks": [
+            {
+                "id": "free-space-common",
+                "scenario": "free_space",
+                "config": {
+                    "batch_sizes": [2],
+                    "waypoint_counts": [3],
+                    "path_shapes": ["direct"],
+                    "start_state_bins": ["nominal"],
+                    "seeds": [11],
+                    **matrix,
+                },
+            }
+        ],
     }
     path = tmp_path / "suite.yaml"
     path.write_text(yaml.safe_dump(values), encoding="utf-8")
@@ -91,12 +97,12 @@ def _cases(suite: SuiteCfg) -> list[BenchmarkCase]:
     )
 
 
-def test_legacy_suite_retains_cartesian_population_and_case_identity(tmp_path):
+def test_joint_template_suite_retains_cartesian_population_and_case_identity(tmp_path):
     suite = _load_test_suite(tmp_path)
     cases = _cases(suite)
 
     assert suite.protocol.report_schema_version == "3"
-    assert suite.free_space.target_types == ["eef"]
+    assert suite.tracks[0].config["target_types"] == ["eef"]
     assert len(cases) == 1
     assert cases[0].case_id == "free_space_60ef64d856839cbc"
     assert cases[0].scenario_id == "waypoint_path"
@@ -117,7 +123,7 @@ def test_joint_and_cartesian_cases_share_inputs_but_not_identity(tmp_path):
     assert torch.equal(eef.start_qpos, joint.start_qpos)
     assert torch.equal(eef.reference_qpos, joint.reference_qpos)
     assert torch.equal(eef.target_waypoints, joint.target_waypoints)
-    suite.free_space.target_types.reverse()
+    suite.tracks[0].config["target_types"].reverse()
     repeated = _cases(suite)
     assert [case.case_id for case in repeated] == [joint.case_id, eef.case_id]
     assert torch.equal(repeated[0].reference_qpos, joint.reference_qpos)
@@ -192,12 +198,13 @@ def test_motion_suites_cover_both_targets_with_shared_baselines(suite_name):
     suite = load_suite(suite_name)
     planners = {spec.id: spec for spec in suite.planners}
 
-    assert suite.suite_version.endswith("_v3")
-    assert suite.free_space.sampling_method == "cartesian"
-    assert suite.free_space.batch_modes == ["homogeneous", "heterogeneous"]
+    assert suite.suite_version.endswith("_v4")
+    assert suite.tracks[0].config["reachability_solver"] == "finite_difference_dls"
+    assert suite.tracks[0].config["sampling_method"] == "cartesian"
+    assert suite.tracks[0].config["batch_modes"] == ["homogeneous", "heterogeneous"]
     assert suite.protocol.report_schema_version == "3"
-    assert suite.free_space.target_types == ["eef", "joint"]
-    assert suite.free_space.joint_threshold_rad == 0.02
+    assert suite.tracks[0].config["target_types"] == ["eef", "joint"]
+    assert suite.tracks[0].config["joint_threshold_rad"] == 0.02
     assert {spec.id for spec in suite.planners if spec.enabled} == {
         "curobo",
         "toppra",
@@ -274,3 +281,31 @@ def test_old_report_schema_requires_explicit_migration(tmp_path):
     suite.protocol.report_schema_version = "2"
     with pytest.raises(ValueError, match="migrate the suite"):
         suite.validate_benchmark()
+
+
+def test_franka_pose_batch_uses_the_same_policy_frames_as_its_robot_assembly():
+    smoke = load_suite("atomic_franka_pgi_smoke")
+    pose_batch = load_suite("atomic_franka_pgi_pose_batch")
+    assert smoke.robot.to_dict() == pose_batch.robot.to_dict()
+    reference = next(spec for spec in smoke.planners if spec.id == "nmg")
+    candidate = next(spec for spec in pose_batch.planners if spec.id == "nmg")
+    for key in ("policy_frame_from_world", "runtime_tcp_from_policy_tcp"):
+        assert candidate.config[key] == reference.config[key]
+
+
+def test_component_ur5_policy_tcp_is_inverse_of_the_component_solver_tcp():
+    from embodichain_benchmarks.motion_generation.embodiments import resolve_embodiment
+
+    suite = load_suite("atomic_ur5_embodiment")
+    resolution = resolve_embodiment(suite.embodiment, suite.robot)
+    runtime_tcp = torch.tensor(resolution.simulation["solver_cfg"]["arm"]["tcp"])
+    candidate = next(spec for spec in suite.planners if spec.id == "nmg")
+    policy_tcp = torch.tensor(candidate.config["runtime_tcp_from_policy_tcp"])
+    torch.testing.assert_close(runtime_tcp @ policy_tcp, torch.eye(4))
+    assert candidate.config["num_arm_joints"] == 6
+    assert candidate.enabled is False
+
+
+def test_ur5_randomized_declares_a_shared_budget_for_optional_timed_planners():
+    suite = load_suite("atomic_ur5_pgi_randomized")
+    assert suite.protocol.joint_acceleration_limit_rad_s2 > 0

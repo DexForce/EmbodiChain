@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from embodichain.benchmarks.motion_generation.cli import (
+from embodichain_benchmarks.motion_generation.cli import (
     add_parser_arguments,
     main,
     run_all_benchmarks,

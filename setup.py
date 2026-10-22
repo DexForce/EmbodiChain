@@ -35,6 +35,7 @@ EXTENSIONS_DIR = THIS_DIR / "extensions"
 TASKS_PROJECT_DIR = EXTENSIONS_DIR / "embodichain_tasks"
 TASKS_PACKAGE_PATTERNS = ["embodichain_tasks", "embodichain_tasks.*"]
 ROBOTS_PACKAGE_PATTERNS = ["embodichain_robots", "embodichain_robots.*"]
+BENCHMARKS_PACKAGE_PATTERNS = ["embodichain_benchmarks", "embodichain_benchmarks.*"]
 
 # Defer importing torch until it's actually needed (when building extensions).
 # This prevents `setup.py` from failing at import time in environments where
@@ -84,7 +85,7 @@ class CleanCommand(Command):
 
 
 def get_packages() -> list[str]:
-    """Return core, task, and robot packages shipped in the main wheel."""
+    """Return core and bundled extension packages shipped in the main wheel."""
     core_packages = find_namespace_packages(
         where=str(THIS_DIR), include=CORE_PACKAGE_PATTERNS
     )
@@ -94,12 +95,16 @@ def get_packages() -> list[str]:
     robot_packages = find_namespace_packages(
         where=str(EXTENSIONS_DIR), include=ROBOTS_PACKAGE_PATTERNS
     )
+    benchmark_packages = find_namespace_packages(
+        where=str(EXTENSIONS_DIR), include=BENCHMARKS_PACKAGE_PATTERNS
+    )
     return sorted(
         set(
             [
                 *core_packages,
                 *task_packages,
                 *robot_packages,
+                *benchmark_packages,
                 "embodichain_tasks.configs",
             ]
         )
@@ -112,6 +117,7 @@ def get_package_dir() -> dict[str, str]:
         "embodichain_tasks": "extensions/embodichain_tasks/embodichain_tasks",
         "embodichain_tasks.configs": "extensions/embodichain_tasks/configs",
         "embodichain_robots": "extensions/embodichain_robots",
+        "embodichain_benchmarks": "extensions/embodichain_benchmarks",
     }
 
 
@@ -146,7 +152,7 @@ def main():
         package_dir=get_package_dir(),
         package_data={
             "embodichain": ["VERSION"],
-            "embodichain.benchmarks.motion_generation": ["suites/*.yaml"],
+            "embodichain_benchmarks.motion_generation": ["suites/*.yaml"],
             "embodichain.gen_sim.simready_pipeline.configs": ["*.json"],
             "embodichain.lab.scripts._atomic_action": ["README.md"],
             "embodichain_tasks.configs": [

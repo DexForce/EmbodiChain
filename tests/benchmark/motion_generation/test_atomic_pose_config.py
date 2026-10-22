@@ -23,30 +23,31 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from embodichain.benchmarks.motion_generation.config import (
+from embodichain_benchmarks.motion_generation.config import (
+    AtomicPoseRandomizationCfg,
     TrackCfg,
     load_suite,
     resolve_atomic_batch_sizes,
     resolve_atomic_pose_randomization,
 )
-from embodichain.benchmarks.motion_generation.scenarios.atomic_skill import (
+from embodichain_benchmarks.motion_generation.scenarios.atomic_skill import (
     AtomicSkillScenario,
 )
-from embodichain.benchmarks.motion_generation.scenarios._atomic_pose_sampling import (
+from embodichain_benchmarks.motion_generation.scenarios._atomic_pose_sampling import (
     _pose_settings,
 )
-from embodichain.benchmarks.motion_generation.scenarios.atomic_case_utils import (
+from embodichain_benchmarks.motion_generation.scenarios.atomic_case_utils import (
     apply_target_rotation_randomization,
     randomization_parameters,
     randomized_vector_batch,
     seeded_jitter,
     workspace_shell_profile,
 )
-from embodichain.benchmarks.motion_generation.atomic_skill import (
+from embodichain_benchmarks.motion_generation.atomic_skill import (
     atomic_skill_provider_names,
     create_atomic_skill_provider,
 )
-from embodichain.benchmarks.motion_generation.scenarios.atomic_dual_arm_providers import (
+from embodichain_benchmarks.motion_generation.scenarios.atomic_dual_arm_providers import (
     _support_randomization_config,
 )
 
@@ -57,7 +58,7 @@ def test_pose_batch_suite_declares_translation_only_batched_trials() -> None:
     track = suite.enabled_tracks()[0]
 
     settings = resolve_atomic_pose_randomization(track)
-    assert suite.suite_version == "atomic_franka_pgi_pose_batch_v5"
+    assert suite.suite_version == "atomic_franka_pgi_pose_batch_v6"
     assert settings.enabled is True
     assert settings.mode == "translation"
     assert settings.pose_batch_size == 8
@@ -1009,10 +1010,7 @@ def test_b1_offset_manifest_keeps_legacy_waypoint_shape() -> None:
     assert not isinstance(offsets[0][0], list)
 
 
-@pytest.mark.parametrize("context_form", ["legacy", "typed"])
-def test_pose_batch_moveeef_shares_translation_across_waypoints(
-    context_form: str,
-) -> None:
+def test_pose_batch_moveeef_shares_translation_across_waypoints() -> None:
     """One pose sample translates a whole MoveEEF waypoint path together."""
     batch_size = 4
     robot = Mock(device=torch.device("cpu"))
@@ -1029,30 +1027,25 @@ def test_pose_batch_moveeef_shares_translation_across_waypoints(
         "name": "shared_target",
         "target_offsets_m": [[0.1, 0.0, 0.0], [0.0, 0.1, 0.0]],
         "target_offset_jitter_m": [0.02, 0.02, 0.02],
-        "_pose_batch_enabled": True,
-        "_pose_batch_seed_stride": 1,
     }
 
-    if context_form == "typed":
-        config.pop("_pose_batch_enabled")
-        config.pop("_pose_batch_seed_stride")
-        config = AtomicSkillScenario._prepare_pose_batch_config(
-            config,
-            TrackCfg(
-                id="typed",
-                scenario="atomic_skill",
-                config={
-                    "randomization": {
-                        "enabled": True,
-                        "pose_batch_size": batch_size,
-                        "target_translation_jitter_m": [0.02, 0.02, 0.02],
-                    },
+    config = AtomicSkillScenario._prepare_pose_batch_config(
+        config,
+        TrackCfg(
+            id="typed",
+            scenario="atomic_skill",
+            config={
+                "randomization": {
+                    "enabled": True,
+                    "pose_batch_size": batch_size,
+                    "target_translation_jitter_m": [0.02, 0.02, 0.02],
                 },
-            ),
-            batch_size=batch_size,
-        )
-        assert "_pose_batch" in config
-        assert not any(key.startswith("_pose_batch_") for key in config)
+            },
+        ),
+        batch_size=batch_size,
+    )
+    assert "_pose_batch" in config
+    assert not any(key.startswith("_pose_batch_") for key in config)
 
     case = create_atomic_skill_provider("move_end_effector").generate_case(
         scenario,
@@ -1105,8 +1098,9 @@ def test_track_level_object_yaw_is_batched_and_deterministic() -> None:
     handle = Mock(initial_pose=initial_pose, entity=Mock())
     scenario = AtomicSkillScenario()
     config = {
-        "_pose_batch_object_yaw_jitter_rad": 0.5,
-        "_pose_batch_seed_stride": 1,
+        "_pose_batch": AtomicPoseRandomizationCfg(
+            object_yaw_jitter_rad=0.5, seed_stride=1
+        )
     }
 
     first = scenario.randomize_object_pose(handle, config, seed=11, stream=201)
@@ -1125,9 +1119,14 @@ def test_target_spatial_rotation_is_batched_without_translating_the_goal() -> No
     target = torch.eye(4).repeat(batch_size, 1, 1)
     target[:, :3, 3] = torch.tensor([0.4, -0.2, 0.7])
     config = {
-        "_pose_batch_target_yaw_jitter_rad": 0.5,
-        "_pose_batch_target_roll_pitch_jitter_rad": [0.2, 0.3],
-        "_pose_batch_seed_stride": 1,
+        "_pose_batch": AtomicPoseRandomizationCfg(
+            target_yaw_jitter_rad=0.5,
+            target_roll_pitch_jitter_rad=(
+                0.2,
+                0.3,
+            ),
+            seed_stride=1,
+        )
     }
 
     first = target.clone()
@@ -1153,10 +1152,19 @@ def test_task_frame_transform_is_shared_by_scene_objects() -> None:
     second_handle = Mock(initial_pose=second_pose, entity=Mock())
     scenario = AtomicSkillScenario()
     config = {
-        "_pose_batch_task_frame_translation_jitter_m": [0.03, 0.03, 0.0],
-        "_pose_batch_task_frame_yaw_jitter_rad": 0.2,
-        "_pose_batch_task_frame_roll_pitch_jitter_rad": [0.1, 0.1],
-        "_pose_batch_seed_stride": 1,
+        "_pose_batch": AtomicPoseRandomizationCfg(
+            task_frame_translation_jitter_m=(
+                0.03,
+                0.03,
+                0.0,
+            ),
+            task_frame_yaw_jitter_rad=0.2,
+            task_frame_roll_pitch_jitter_rad=(
+                0.1,
+                0.1,
+            ),
+            seed_stride=1,
+        )
     }
 
     first = scenario.randomize_object_pose(first_handle, config, seed=11, stream=901)
@@ -1175,29 +1183,41 @@ def test_task_frame_transform_is_shared_by_scene_objects() -> None:
 def test_support_object_ranges_do_not_inherit_primary_object_ranges() -> None:
     """Primary, support, and shared-frame perturbations remain independent."""
     config = {
-        "_pose_batch_object_translation_jitter_m": [0.03, 0.03, 0.0],
-        "_pose_batch_object_yaw_jitter_rad": 0.5,
-        "_pose_batch_support_object_translation_jitter_m": [0.02, 0.01, 0.0],
-        "_pose_batch_support_object_yaw_jitter_rad": 0.3,
-        "_pose_batch_support_object_roll_pitch_jitter_rad": [0.2, 0.15],
-        "_pose_batch_task_frame_translation_jitter_m": [0.01, 0.01, 0.0],
-        "_pose_batch_task_frame_yaw_jitter_rad": 0.1,
+        "_pose_batch": AtomicPoseRandomizationCfg(
+            object_translation_jitter_m=(
+                0.03,
+                0.03,
+                0.0,
+            ),
+            object_yaw_jitter_rad=0.5,
+            support_object_translation_jitter_m=(
+                0.02,
+                0.01,
+                0.0,
+            ),
+            support_object_yaw_jitter_rad=0.3,
+            support_object_roll_pitch_jitter_rad=(
+                0.2,
+                0.15,
+            ),
+            task_frame_translation_jitter_m=(
+                0.01,
+                0.01,
+                0.0,
+            ),
+            task_frame_yaw_jitter_rad=0.1,
+        )
     }
 
     support = _support_randomization_config(config)
 
-    assert support["object_position_jitter_m"] == [0.02, 0.01, 0.0]
-    assert support["object_yaw_jitter_rad"] == pytest.approx(0.3)
-    assert support["object_roll_pitch_jitter_rad"] == [0.2, 0.15]
-    assert "_pose_batch_object_translation_jitter_m" not in support
-    assert "_pose_batch_object_yaw_jitter_rad" not in support
-    assert "_pose_batch_object_roll_pitch_jitter_rad" not in support
-    assert support["_pose_batch_task_frame_translation_jitter_m"] == [
-        0.01,
-        0.01,
-        0.0,
-    ]
-    assert support["_pose_batch_task_frame_yaw_jitter_rad"] == pytest.approx(0.1)
+    settings = support["_pose_batch"]
+    assert settings.object_translation_jitter_m == (0.02, 0.01, 0.0)
+    assert settings.object_yaw_jitter_rad == pytest.approx(0.3)
+    assert settings.object_roll_pitch_jitter_rad == (0.2, 0.15)
+    assert settings.task_frame_translation_jitter_m == (0.01, 0.01, 0.0)
+    assert settings.task_frame_yaw_jitter_rad == pytest.approx(0.1)
+    assert config["_pose_batch"].object_translation_jitter_m == (0.03, 0.03, 0.0)
 
 
 def test_randomize_articulation_root_pose_is_deterministic() -> None:
@@ -1225,9 +1245,14 @@ def test_randomize_articulation_root_pose_is_deterministic() -> None:
     scenario.simulation = Mock()
     config = {
         "articulation_position_jitter_m": [0.03, 0.02, 0.01],
-        "_pose_batch_object_yaw_jitter_rad": 0.4,
-        "_pose_batch_object_roll_pitch_jitter_rad": [0.1, 0.2],
-        "_pose_batch_seed_stride": 1,
+        "_pose_batch": AtomicPoseRandomizationCfg(
+            object_yaw_jitter_rad=0.4,
+            object_roll_pitch_jitter_rad=(
+                0.1,
+                0.2,
+            ),
+            seed_stride=1,
+        ),
     }
 
     first = scenario.randomize_articulation_pose(
@@ -1439,9 +1464,19 @@ def test_reset_case_restores_batched_articulation_root_and_joint_state() -> None
 def test_pose_fallback_does_not_leak_into_local_grasp_offsets() -> None:
     """Track pose ranges apply only to target/object pose jitter keys."""
     config = {
-        "_pose_batch_translation_jitter_m": [0.25, 0.25, 0.25],
-        "_pose_batch_object_translation_jitter_m": [0.25, 0.25, 0.25],
-        "_pose_batch_seed_stride": 1,
+        "_pose_batch": AtomicPoseRandomizationCfg(
+            target_translation_jitter_m=(
+                0.25,
+                0.25,
+                0.25,
+            ),
+            object_translation_jitter_m=(
+                0.25,
+                0.25,
+                0.25,
+            ),
+            seed_stride=1,
+        )
     }
     target = randomized_vector_batch(
         [0.0, 0.0, 0.0],
@@ -1471,22 +1506,52 @@ def test_pose_batch_internal_ranges_are_not_exposed_as_legacy_jitter() -> None:
     """Manifest ranges retain user keys while dedicated pose metadata is explicit."""
     parameters = randomization_parameters(
         {
-            "_pose_batch_enabled": True,
-            "_pose_batch_seed_stride": 1,
-            "_pose_batch_sampling_pattern": "stratified",
-            "_pose_batch_translation_jitter_m": [0.1, 0.1, 0.0],
-            "_pose_batch_object_translation_jitter_m": [0.2, 0.2, 0.0],
-            "_pose_batch_object_yaw_jitter_rad": 0.5,
-            "_pose_batch_object_roll_pitch_jitter_rad": [0.1, 0.2],
-            "_pose_batch_target_yaw_jitter_rad": 0.4,
-            "_pose_batch_target_roll_pitch_jitter_rad": [0.2, 0.3],
-            "_pose_batch_support_object_translation_jitter_m": [0.03, 0.03, 0.0],
-            "_pose_batch_support_object_yaw_jitter_rad": 0.3,
-            "_pose_batch_support_object_roll_pitch_jitter_rad": [0.3, 0.4],
-            "_pose_batch_task_frame_translation_jitter_m": [0.01, 0.01, 0.0],
-            "_pose_batch_task_frame_yaw_jitter_rad": 0.2,
-            "_pose_batch_task_frame_roll_pitch_jitter_rad": [0.4, 0.5],
             "target_offset_jitter_m": [0.1, 0.1, 0.0],
+            "_pose_batch": AtomicPoseRandomizationCfg(
+                enabled=True,
+                seed_stride=1,
+                sampling_pattern="stratified",
+                target_translation_jitter_m=(
+                    0.1,
+                    0.1,
+                    0.0,
+                ),
+                object_translation_jitter_m=(
+                    0.2,
+                    0.2,
+                    0.0,
+                ),
+                object_yaw_jitter_rad=0.5,
+                object_roll_pitch_jitter_rad=(
+                    0.1,
+                    0.2,
+                ),
+                target_yaw_jitter_rad=0.4,
+                target_roll_pitch_jitter_rad=(
+                    0.2,
+                    0.3,
+                ),
+                support_object_translation_jitter_m=(
+                    0.03,
+                    0.03,
+                    0.0,
+                ),
+                support_object_yaw_jitter_rad=0.3,
+                support_object_roll_pitch_jitter_rad=(
+                    0.3,
+                    0.4,
+                ),
+                task_frame_translation_jitter_m=(
+                    0.01,
+                    0.01,
+                    0.0,
+                ),
+                task_frame_yaw_jitter_rad=0.2,
+                task_frame_roll_pitch_jitter_rad=(
+                    0.4,
+                    0.5,
+                ),
+            ),
         },
         seed=11,
     )
@@ -1521,10 +1586,12 @@ def test_workspace_shell_manifest_records_row_buckets() -> None:
     """Case metadata maps every shell row to its normalized radial bucket."""
     parameters = randomization_parameters(
         {
-            "_pose_batch_enabled": True,
-            "_pose_batch_size": 8,
-            "_pose_batch_seed_stride": 1,
-            "_pose_batch_sampling_pattern": "workspace_shell",
+            "_pose_batch": AtomicPoseRandomizationCfg(
+                enabled=True,
+                pose_batch_size=8,
+                seed_stride=1,
+                sampling_pattern="workspace_shell",
+            )
         },
         seed=23,
     )
@@ -1544,3 +1611,8 @@ def test_workspace_shell_manifest_records_row_buckets() -> None:
     assert parameters["spatial_bucket_radii"] == pytest.approx(
         [0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0]
     )
+
+
+def test_private_pose_context_rejects_retired_mapping_keys() -> None:
+    with pytest.raises(ValueError, match="not supported"):
+        _pose_settings({"_pose_batch_seed_stride": 1})

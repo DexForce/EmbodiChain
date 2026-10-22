@@ -26,26 +26,63 @@ import pytest
 import torch
 import yaml
 
-from embodichain.benchmarks.motion_generation import (
+from embodichain_benchmarks.motion_generation import (
     BenchmarkCase,
     PlannerAdapter,
     PlannerSpecCfg,
+    SuiteCfg,
     load_suite,
     run_benchmark,
 )
-from embodichain.benchmarks.motion_generation import runner as runner_module
-from embodichain.benchmarks.motion_generation.config import suite_to_dict
-from embodichain.benchmarks.motion_generation.metrics.trajectory import (
+from embodichain_benchmarks.motion_generation import runner as runner_module
+from embodichain_benchmarks.motion_generation.config import TrackCfg, suite_to_dict
+from embodichain_benchmarks.motion_generation.metrics.trajectory import (
     make_failure_outcomes,
 )
-from embodichain.benchmarks.motion_generation.registry import planner_adapter_names
-from embodichain.benchmarks.motion_generation.scenarios.base import (
+from embodichain_benchmarks.motion_generation.registry import planner_adapter_names
+from embodichain_benchmarks.motion_generation.scenarios.base import (
     ScenarioEvaluation,
     ScenarioProvider,
 )
 from embodichain.lab.sim.motion.planners.utils import PlanResult
 
 pytestmark = pytest.mark.no_sim
+
+
+def test_suite_rejects_retired_top_level_free_space_configuration() -> None:
+    with pytest.raises(ValueError, match=r"tracks\[\]\.config"):
+        SuiteCfg.from_dict({"free_space": {"batch_sizes": [8]}})
+
+
+@pytest.mark.parametrize("batch_sizes", [[8], [1, 8]])
+def test_direct_suite_preserves_explicit_track_population(
+    monkeypatch: pytest.MonkeyPatch, batch_sizes: list[int]
+) -> None:
+    requested = {
+        "batch_sizes": batch_sizes,
+        "seeds": [37],
+        "path_shapes": ["direct"],
+        "waypoint_counts": [1],
+    }
+    suite = SuiteCfg(
+        planners=[
+            PlannerSpecCfg(id="baseline", adapter="ik_interpolate", enabled=True)
+        ],
+        tracks=[TrackCfg(id="custom", scenario="free_space", config=requested)],
+    )
+    monkeypatch.setattr(
+        runner_module.BenchmarkRunner, "run", lambda runner: runner.suite
+    )
+
+    resolved = run_benchmark(suite, device="cpu")
+
+    for field, value in requested.items():
+        assert resolved.tracks[0].config[field] == value
+    # Later per-track edits also survive API validation.
+    suite.tracks[0].config["seeds"] = [43]
+    assert run_benchmark(suite, device="cpu").tracks[0].config["seeds"] == [43]
+    assert suite.tracks[0].config["seeds"] == [43]
+    assert requested["seeds"] == [37]
 
 
 @pytest.fixture
@@ -222,7 +259,7 @@ def test_suite_with_no_enabled_planners_fails_before_simulation(fake_runtime) ->
 def test_framework_revision_is_independent_of_caller_directory(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from embodichain.benchmarks.motion_generation.artifacts import _git_commit
+    from embodichain_benchmarks.motion_generation.artifacts import _git_commit
 
     framework_revision = _git_commit()
     assert framework_revision is not None

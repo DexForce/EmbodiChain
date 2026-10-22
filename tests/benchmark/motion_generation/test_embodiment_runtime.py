@@ -28,16 +28,16 @@ import pytest
 import torch
 import yaml
 
-from embodichain.benchmarks.motion_generation.config import (
+from embodichain_benchmarks.motion_generation.config import (
     EmbodimentSpecCfg,
     RobotSpecCfg,
     SuiteCfg,
     load_suite,
     suite_to_dict,
 )
-from embodichain.benchmarks.motion_generation.embodiments import resolve_embodiment
-from embodichain.benchmarks.motion_generation.robots.base import EmbodimentRobotProvider
-from embodichain.benchmarks.motion_generation.runner import BenchmarkRunner
+from embodichain_benchmarks.motion_generation.embodiments import resolve_embodiment
+from embodichain_benchmarks.motion_generation.robots.base import EmbodimentRobotProvider
+from embodichain_benchmarks.motion_generation.runner import BenchmarkRunner
 
 pytestmark = pytest.mark.no_sim
 
@@ -206,7 +206,7 @@ def test_multiple_resources_need_explicit_selection(component: Path) -> None:
 def test_runner_uses_component_robot_and_preserves_input_suite(
     component: Path, monkeypatch
 ) -> None:
-    from embodichain.benchmarks.motion_generation import runner as runner_module
+    from embodichain_benchmarks.motion_generation import runner as runner_module
 
     suite = SuiteCfg.from_dict(_suite_data(str(component)))
     runner = BenchmarkRunner(suite, suite.planners, device="cpu")
@@ -231,7 +231,7 @@ def test_runner_uses_component_robot_and_preserves_input_suite(
 def test_gripper_and_domain_overrides_cannot_change_component_commands(
     component: Path,
 ) -> None:
-    from embodichain.benchmarks.motion_generation.config import DomainCfg
+    from embodichain_benchmarks.motion_generation.config import DomainCfg
 
     suite = SuiteCfg.from_dict(_suite_data(str(component)))
     suite.tracks[0].config["gripper"] = {"control_part": "wrong"}
@@ -290,13 +290,13 @@ def test_suite_validates_case_identity_before_planning_and_persistence(
     component_owned: bool,
     case_identity: str,
 ) -> None:
-    from embodichain.benchmarks.motion_generation import runner as runner_module
-    from embodichain.benchmarks.motion_generation.metrics.trajectory import (
+    from embodichain_benchmarks.motion_generation import runner as runner_module
+    from embodichain_benchmarks.motion_generation.metrics.trajectory import (
         make_failure_outcomes,
     )
-    from embodichain.benchmarks.motion_generation.models import BenchmarkCase
-    from embodichain.benchmarks.motion_generation.planners.base import PlannerAdapter
-    from embodichain.benchmarks.motion_generation.scenarios.base import (
+    from embodichain_benchmarks.motion_generation.models import BenchmarkCase
+    from embodichain_benchmarks.motion_generation.planners.base import PlannerAdapter
+    from embodichain_benchmarks.motion_generation.scenarios.base import (
         ScenarioEvaluation,
         ScenarioProvider,
     )
@@ -433,7 +433,7 @@ def test_suite_validates_case_identity_before_planning_and_persistence(
 
 
 def test_example_has_nominal_and_position_domains() -> None:
-    from embodichain.benchmarks.motion_generation.config import (
+    from embodichain_benchmarks.motion_generation.config import (
         resolve_atomic_batch_sizes,
     )
 

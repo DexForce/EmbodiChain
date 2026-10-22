@@ -83,7 +83,7 @@ from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     resolve_pose_target,
     translate_pose_world,
 )
-from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
+from embodichain.compute.geometry import rotate_rigid_grasp
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -830,32 +830,13 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
         fractions: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Sample the rigid handle path at normalized hinge-angle fractions."""
-        axis = rotation_axis.to(device=self.device, dtype=torch.float32)
-        axis = axis / torch.linalg.vector_norm(axis)
-        fractions = fractions.to(device=self.device, dtype=torch.float32)
-        angles = hinge_rotation.to(device=self.device, dtype=torch.float32)[:, None]
-        angles = angles * fractions[None]
-        rotations = (
-            torch.eye(4, dtype=torch.float32, device=self.device)
-            .reshape(1, 1, 4, 4)
-            .repeat(link_pose.shape[0], fractions.numel(), 1, 1)
+        angles = (
+            hinge_rotation.to(device=self.device, dtype=torch.float32)[:, None]
+            * fractions.to(device=self.device, dtype=torch.float32)[None]
         )
-        rotations[:, :, :3, :3] = axis_angle_to_rotation_matrix(
-            angles[:, :, None] * axis
+        return rotate_rigid_grasp(
+            link_pose, grasp_xpos, rotation_axis, axis_origin, angles
         )
-        origin = torch.tensor(axis_origin, dtype=torch.float32, device=self.device)
-        to_origin = torch.eye(4, dtype=torch.float32, device=self.device)
-        from_origin = torch.eye(4, dtype=torch.float32, device=self.device)
-        to_origin[:3, 3] = origin
-        from_origin[:3, 3] = -origin
-        local_rotations = torch.matmul(
-            torch.matmul(to_origin.reshape(1, 1, 4, 4), rotations),
-            from_origin.reshape(1, 1, 4, 4),
-        )
-        opened_link_poses = torch.matmul(link_pose[:, None], local_rotations)
-        link_to_eef = torch.bmm(pose_inv(link_pose), grasp_xpos)
-        opened_eef_poses = torch.matmul(opened_link_poses, link_to_eef[:, None])
-        return opened_link_poses, opened_eef_poses
 
 
 __all__ = ["OpenDoor", "OpenDoorGoal", "OpenDoorOptions"]

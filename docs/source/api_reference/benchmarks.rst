@@ -1,17 +1,19 @@
 Motion generation benchmarks
 ============================
 
-The installed ``embodichain.benchmarks.motion_generation`` package evaluates
+The bundled ``embodichain_benchmarks.motion_generation`` extension evaluates
 Motion Planning and Atomic Skills suites from another Python project. The
 benchmark owns case generation, simulation, lifecycle timing, evaluation and
-artifact persistence. Callers select a suite and provide planner configuration.
+artifact persistence. It consumes the simulation, planning and Atomic Action
+APIs in ``embodichain`` and ships in the main wheel with the same version and
+dependencies. Callers select a suite and provide planner configuration.
 
 Calling from another project
 ----------------------------
 
 .. code-block:: python
 
-   from embodichain.benchmarks.motion_generation import (
+   from embodichain_benchmarks.motion_generation import (
        PlannerSpecCfg,
        load_suite,
        run_benchmark,
@@ -46,12 +48,12 @@ Calls own their simulation and return structured results after teardown. Run
 calls serially within a process. Install the selected backend and resolve its
 robot assets as for ordinary EmbodiChain use. The installed command is
 ``embodichain benchmark motion-generation``; the module form is
-``python -m embodichain.benchmarks.motion_generation``.
+``python -m embodichain_benchmarks.motion_generation``.
 
 Public entry points
 -------------------
 
-.. currentmodule:: embodichain.benchmarks.motion_generation
+.. currentmodule:: embodichain_benchmarks.motion_generation
 
 .. autosummary::
 
@@ -65,13 +67,13 @@ Public entry points
    run_all_benchmarks
    run_benchmark
 
-.. autofunction:: embodichain.benchmarks.motion_generation.run_benchmark
+.. autofunction:: embodichain_benchmarks.motion_generation.run_benchmark
 
-.. autofunction:: embodichain.benchmarks.motion_generation.load_suite
+.. autofunction:: embodichain_benchmarks.motion_generation.load_suite
 
-.. autoclass:: embodichain.benchmarks.motion_generation.BenchmarkRunResult
+.. autoclass:: embodichain_benchmarks.motion_generation.BenchmarkRunResult
 
-.. autoclass:: embodichain.benchmarks.motion_generation.PlannerAdapter
+.. autoclass:: embodichain_benchmarks.motion_generation.PlannerAdapter
    :members:
 
 Implementation reference
@@ -85,118 +87,118 @@ the frozen case manifest, resolved suite, environment metadata and aggregate
 schema are persisted together with each report.
 
 
-embodichain.benchmarks.motion_generation.aggregation
+embodichain_benchmarks.motion_generation.aggregation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.aggregation
+.. automodule:: embodichain_benchmarks.motion_generation.aggregation
    :members:
    :undoc-members:
    :exclude-members: aggregate_generalization
 
-.. currentmodule:: embodichain.benchmarks.motion_generation.aggregation
+.. currentmodule:: embodichain_benchmarks.motion_generation.aggregation
 
 .. autosummary::
 
    aggregate_generalization
 
 
-embodichain.benchmarks.motion_generation.api
+embodichain_benchmarks.motion_generation.api
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.api
+.. automodule:: embodichain_benchmarks.motion_generation.api
 
-.. currentmodule:: embodichain.benchmarks.motion_generation.api
+.. currentmodule:: embodichain_benchmarks.motion_generation.api
 
 .. autosummary::
 
    run_benchmark
 
 
-embodichain.benchmarks.motion_generation.artifacts
+embodichain_benchmarks.motion_generation.artifacts
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.artifacts
+.. automodule:: embodichain_benchmarks.motion_generation.artifacts
    :members:
    :undoc-members:
 
 
-embodichain.benchmarks.motion_generation.atomic_skill
+embodichain_benchmarks.motion_generation.atomic_skill
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.atomic_skill
+.. automodule:: embodichain_benchmarks.motion_generation.atomic_skill
    :members:
    :undoc-members:
 
 
-embodichain.benchmarks.motion_generation.cli
+embodichain_benchmarks.motion_generation.cli
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.cli
+.. automodule:: embodichain_benchmarks.motion_generation.cli
    :members:
    :undoc-members:
 
 
-embodichain.benchmarks.motion_generation.config
+embodichain_benchmarks.motion_generation.config
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.config
+.. automodule:: embodichain_benchmarks.motion_generation.config
    :members:
    :undoc-members:
    :exclude-members: load_suite
 
-.. currentmodule:: embodichain.benchmarks.motion_generation.config
+.. currentmodule:: embodichain_benchmarks.motion_generation.config
 
 .. autosummary::
 
    load_suite
 
 
-embodichain.benchmarks.motion_generation.contracts
+embodichain_benchmarks.motion_generation.contracts
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.contracts
+.. automodule:: embodichain_benchmarks.motion_generation.contracts
    :members:
    :undoc-members:
 
 
-embodichain.benchmarks.motion_generation.embodiments
+embodichain_benchmarks.motion_generation.embodiments
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.embodiments
+.. automodule:: embodichain_benchmarks.motion_generation.embodiments
    :members:
    :undoc-members:
 
 
-embodichain.benchmarks.motion_generation.evaluation
+embodichain_benchmarks.motion_generation.evaluation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.evaluation
+.. automodule:: embodichain_benchmarks.motion_generation.evaluation
    :members:
    :undoc-members:
 
 
-embodichain.benchmarks.motion_generation.generalization
+embodichain_benchmarks.motion_generation.generalization
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.generalization
+.. automodule:: embodichain_benchmarks.motion_generation.generalization
    :members:
    :undoc-members:
 
 
-embodichain.benchmarks.motion_generation.limits
+embodichain_benchmarks.motion_generation.limits
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.limits
+.. automodule:: embodichain_benchmarks.motion_generation.limits
    :members:
    :undoc-members:
 
 
-embodichain.benchmarks.motion_generation.metrics
+embodichain_benchmarks.motion_generation.metrics
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.metrics
+.. automodule:: embodichain_benchmarks.motion_generation.metrics
 
-.. currentmodule:: embodichain.benchmarks.motion_generation.metrics
+.. currentmodule:: embodichain_benchmarks.motion_generation.metrics
 
 .. autosummary::
 
@@ -209,31 +211,31 @@ embodichain.benchmarks.motion_generation.metrics
    timed_call
 
 
-embodichain.benchmarks.motion_generation.metrics.performance
+embodichain_benchmarks.motion_generation.metrics.performance
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.metrics.performance
+.. automodule:: embodichain_benchmarks.motion_generation.metrics.performance
    :members:
    :undoc-members:
 
 
-embodichain.benchmarks.motion_generation.metrics.stats
+embodichain_benchmarks.motion_generation.metrics.stats
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.metrics.stats
+.. automodule:: embodichain_benchmarks.motion_generation.metrics.stats
    :members:
    :undoc-members:
 
 
-embodichain.benchmarks.motion_generation.metrics.trajectory
+embodichain_benchmarks.motion_generation.metrics.trajectory
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.metrics.trajectory
+.. automodule:: embodichain_benchmarks.motion_generation.metrics.trajectory
    :members:
    :undoc-members:
    :exclude-members: resolve_dynamic_limit, resolve_velocity_limits
 
-.. currentmodule:: embodichain.benchmarks.motion_generation.metrics.trajectory
+.. currentmodule:: embodichain_benchmarks.motion_generation.metrics.trajectory
 
 .. autosummary::
 
@@ -241,20 +243,20 @@ embodichain.benchmarks.motion_generation.metrics.trajectory
    resolve_velocity_limits
 
 
-embodichain.benchmarks.motion_generation.models
+embodichain_benchmarks.motion_generation.models
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.models
+.. automodule:: embodichain_benchmarks.motion_generation.models
    :members:
    :undoc-members:
 
 
-embodichain.benchmarks.motion_generation.planners
+embodichain_benchmarks.motion_generation.planners
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.planners
+.. automodule:: embodichain_benchmarks.motion_generation.planners
 
-.. currentmodule:: embodichain.benchmarks.motion_generation.planners
+.. currentmodule:: embodichain_benchmarks.motion_generation.planners
 
 .. autosummary::
 
@@ -266,75 +268,75 @@ embodichain.benchmarks.motion_generation.planners
    ToppraAdapter
 
 
-embodichain.benchmarks.motion_generation.planners.base
+embodichain_benchmarks.motion_generation.planners.base
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.planners.base
+.. automodule:: embodichain_benchmarks.motion_generation.planners.base
    :members:
    :undoc-members:
    :exclude-members: PlannerAdapter
 
-.. currentmodule:: embodichain.benchmarks.motion_generation.planners.base
+.. currentmodule:: embodichain_benchmarks.motion_generation.planners.base
 
 .. autosummary::
 
    PlannerAdapter
 
 
-embodichain.benchmarks.motion_generation.planners.curobo
+embodichain_benchmarks.motion_generation.planners.curobo
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.planners.curobo
+.. automodule:: embodichain_benchmarks.motion_generation.planners.curobo
    :members:
    :undoc-members:
 
 
-embodichain.benchmarks.motion_generation.planners.ik_interpolate
+embodichain_benchmarks.motion_generation.planners.ik_interpolate
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.planners.ik_interpolate
+.. automodule:: embodichain_benchmarks.motion_generation.planners.ik_interpolate
    :members:
    :undoc-members:
 
 
-embodichain.benchmarks.motion_generation.planners.nmg_onnx
+embodichain_benchmarks.motion_generation.planners.nmg_onnx
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.planners.nmg_onnx
+.. automodule:: embodichain_benchmarks.motion_generation.planners.nmg_onnx
    :members:
    :undoc-members:
 
 
-embodichain.benchmarks.motion_generation.planners.toppra
+embodichain_benchmarks.motion_generation.planners.toppra
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.planners.toppra
+.. automodule:: embodichain_benchmarks.motion_generation.planners.toppra
    :members:
    :undoc-members:
 
 
-embodichain.benchmarks.motion_generation.registry
+embodichain_benchmarks.motion_generation.registry
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.registry
+.. automodule:: embodichain_benchmarks.motion_generation.registry
    :members:
    :undoc-members:
 
 
-embodichain.benchmarks.motion_generation.reporting
+embodichain_benchmarks.motion_generation.reporting
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.reporting
+.. automodule:: embodichain_benchmarks.motion_generation.reporting
    :members:
    :undoc-members:
 
 
-embodichain.benchmarks.motion_generation.robots
+embodichain_benchmarks.motion_generation.robots
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.robots
+.. automodule:: embodichain_benchmarks.motion_generation.robots
 
-.. currentmodule:: embodichain.benchmarks.motion_generation.robots
+.. currentmodule:: embodichain_benchmarks.motion_generation.robots
 
 .. autosummary::
 
@@ -346,59 +348,59 @@ embodichain.benchmarks.motion_generation.robots
    UR5Provider
 
 
-embodichain.benchmarks.motion_generation.robots.base
+embodichain_benchmarks.motion_generation.robots.base
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.robots.base
+.. automodule:: embodichain_benchmarks.motion_generation.robots.base
    :members:
    :undoc-members:
 
 
-embodichain.benchmarks.motion_generation.robots.dual_arm
+embodichain_benchmarks.motion_generation.robots.dual_arm
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.robots.dual_arm
+.. automodule:: embodichain_benchmarks.motion_generation.robots.dual_arm
    :members:
    :undoc-members:
 
 
-embodichain.benchmarks.motion_generation.robots.franka
+embodichain_benchmarks.motion_generation.robots.franka
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.robots.franka
+.. automodule:: embodichain_benchmarks.motion_generation.robots.franka
    :members:
    :undoc-members:
 
 
-embodichain.benchmarks.motion_generation.robots.ur5
+embodichain_benchmarks.motion_generation.robots.ur5
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.robots.ur5
+.. automodule:: embodichain_benchmarks.motion_generation.robots.ur5
    :members:
    :undoc-members:
 
 
-embodichain.benchmarks.motion_generation.runner
+embodichain_benchmarks.motion_generation.runner
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.runner
+.. automodule:: embodichain_benchmarks.motion_generation.runner
    :members:
    :undoc-members:
    :exclude-members: BenchmarkRunResult
 
-.. currentmodule:: embodichain.benchmarks.motion_generation.runner
+.. currentmodule:: embodichain_benchmarks.motion_generation.runner
 
 .. autosummary::
 
    BenchmarkRunResult
 
 
-embodichain.benchmarks.motion_generation.scenarios
+embodichain_benchmarks.motion_generation.scenarios
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.scenarios
+.. automodule:: embodichain_benchmarks.motion_generation.scenarios
 
-.. currentmodule:: embodichain.benchmarks.motion_generation.scenarios
+.. currentmodule:: embodichain_benchmarks.motion_generation.scenarios
 
 .. autosummary::
 
@@ -416,106 +418,106 @@ embodichain.benchmarks.motion_generation.scenarios
    ScenarioProvider
 
 
-embodichain.benchmarks.motion_generation.scenarios.atomic_case_utils
+embodichain_benchmarks.motion_generation.scenarios.atomic_case_utils
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.scenarios.atomic_case_utils
+.. automodule:: embodichain_benchmarks.motion_generation.scenarios.atomic_case_utils
    :members:
    :undoc-members:
 
 
-embodichain.benchmarks.motion_generation.scenarios.atomic_contact_cases
+embodichain_benchmarks.motion_generation.scenarios.atomic_contact_cases
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.scenarios.atomic_contact_cases
+.. automodule:: embodichain_benchmarks.motion_generation.scenarios.atomic_contact_cases
    :members:
    :undoc-members:
 
 
-embodichain.benchmarks.motion_generation.scenarios.atomic_evaluation
+embodichain_benchmarks.motion_generation.scenarios.atomic_evaluation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.scenarios.atomic_evaluation
+.. automodule:: embodichain_benchmarks.motion_generation.scenarios.atomic_evaluation
    :members:
    :undoc-members:
 
 
-embodichain.benchmarks.motion_generation.scenarios.atomic_grasps
+embodichain_benchmarks.motion_generation.scenarios.atomic_grasps
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.scenarios.atomic_grasps
+.. automodule:: embodichain_benchmarks.motion_generation.scenarios.atomic_grasps
    :members:
    :undoc-members:
 
 
-embodichain.benchmarks.motion_generation.scenarios.atomic_manipulation_cases
+embodichain_benchmarks.motion_generation.scenarios.atomic_manipulation_cases
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.scenarios.atomic_manipulation_cases
+.. automodule:: embodichain_benchmarks.motion_generation.scenarios.atomic_manipulation_cases
    :members:
    :undoc-members:
 
 
-embodichain.benchmarks.motion_generation.scenarios.atomic_motion_cases
+embodichain_benchmarks.motion_generation.scenarios.atomic_motion_cases
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.scenarios.atomic_motion_cases
+.. automodule:: embodichain_benchmarks.motion_generation.scenarios.atomic_motion_cases
    :members:
    :undoc-members:
 
 
-embodichain.benchmarks.motion_generation.scenarios.atomic_objects
+embodichain_benchmarks.motion_generation.scenarios.atomic_objects
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.scenarios.atomic_objects
+.. automodule:: embodichain_benchmarks.motion_generation.scenarios.atomic_objects
    :members:
    :undoc-members:
 
 
-embodichain.benchmarks.motion_generation.scenarios.atomic_policy
+embodichain_benchmarks.motion_generation.scenarios.atomic_policy
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.scenarios.atomic_policy
+.. automodule:: embodichain_benchmarks.motion_generation.scenarios.atomic_policy
    :members:
    :undoc-members:
 
 
-embodichain.benchmarks.motion_generation.scenarios.atomic_replay
+embodichain_benchmarks.motion_generation.scenarios.atomic_replay
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.scenarios.atomic_replay
+.. automodule:: embodichain_benchmarks.motion_generation.scenarios.atomic_replay
    :members:
    :undoc-members:
 
 
-embodichain.benchmarks.motion_generation.scenarios.atomic_skill
+embodichain_benchmarks.motion_generation.scenarios.atomic_skill
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.scenarios.atomic_skill
+.. automodule:: embodichain_benchmarks.motion_generation.scenarios.atomic_skill
    :members:
    :undoc-members:
 
 
-embodichain.benchmarks.motion_generation.scenarios.base
+embodichain_benchmarks.motion_generation.scenarios.base
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.scenarios.base
+.. automodule:: embodichain_benchmarks.motion_generation.scenarios.base
    :members:
    :undoc-members:
 
 
-embodichain.benchmarks.motion_generation.scenarios.free_space
+embodichain_benchmarks.motion_generation.scenarios.free_space
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.scenarios.free_space
+.. automodule:: embodichain_benchmarks.motion_generation.scenarios.free_space
    :members:
    :undoc-members:
 
 
-embodichain.benchmarks.motion_generation.video
+embodichain_benchmarks.motion_generation.video
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: embodichain.benchmarks.motion_generation.video
+.. automodule:: embodichain_benchmarks.motion_generation.video
    :members:
    :undoc-members:
 

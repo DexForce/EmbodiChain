@@ -26,20 +26,20 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from embodichain.benchmarks.motion_generation.config import PlannerSpecCfg, load_suite
-from embodichain.benchmarks.motion_generation.limits import (
+from embodichain_benchmarks.motion_generation.config import PlannerSpecCfg, load_suite
+from embodichain_benchmarks.motion_generation.limits import (
     resolve_dynamic_limit,
     resolve_robot_velocity_limits,
     resolve_velocity_limits,
 )
-from embodichain.benchmarks.motion_generation.models import BenchmarkCase
-from embodichain.benchmarks.motion_generation.planners.base import PlannerContext
-from embodichain.benchmarks.motion_generation.planners.curobo import CuroboAdapter
-from embodichain.benchmarks.motion_generation.planners.ik_interpolate import (
+from embodichain_benchmarks.motion_generation.models import BenchmarkCase
+from embodichain_benchmarks.motion_generation.planners.base import PlannerContext
+from embodichain_benchmarks.motion_generation.planners.curobo import CuroboAdapter
+from embodichain_benchmarks.motion_generation.planners.ik_interpolate import (
     IkInterpolateAdapter,
 )
-from embodichain.benchmarks.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
-from embodichain.benchmarks.motion_generation.planners.toppra import ToppraAdapter
+from embodichain_benchmarks.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+from embodichain_benchmarks.motion_generation.planners.toppra import ToppraAdapter
 
 
 def _robot() -> SimpleNamespace:
@@ -219,7 +219,11 @@ def test_explicit_zero_speed_cap_is_preserved_and_moving_path_fails() -> None:
 
 @pytest.mark.parametrize(
     "path",
-    sorted(Path("embodichain/benchmarks/motion_generation/suites").glob("*.yaml")),
+    sorted(
+        Path("extensions/embodichain_benchmarks/motion_generation/suites").glob(
+            "*.yaml"
+        )
+    ),
     ids=lambda path: path.stem,
 )
 def test_shipped_suites_share_explicit_timed_planning_budgets(path: Path) -> None:
@@ -240,7 +244,7 @@ def test_shipped_suites_share_explicit_timed_planning_budgets(path: Path) -> Non
 
 def test_atomic_migration_preserves_existing_toppra_budgets() -> None:
     """Moving budgets to protocol must not accelerate existing Atomic tasks."""
-    for path in Path("embodichain/benchmarks/motion_generation/suites").glob(
+    for path in Path("extensions/embodichain_benchmarks/motion_generation/suites").glob(
         "atomic*.yaml"
     ):
         suite = load_suite(path)

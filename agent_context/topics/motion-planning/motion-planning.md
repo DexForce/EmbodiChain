@@ -12,7 +12,7 @@
 | Sampled Cartesian geometry → timing → robot IK | `embodichain/lab/sim/motion/planners/_cartesian_profiles.py` (internal adapter) |
 | Collision planning and scene conversion | `embodichain/lab/sim/motion/planners/curobo/` |
 | NMG policy rollout and export metadata | `embodichain/lab/sim/motion/planners/neural_planner.py` |
-| Installable evaluation suites and external planner adapters | `embodichain/benchmarks/motion_generation/api.py`, `planners/base.py` in that package |
+| Installable evaluation suites and external planner adapters | `extensions/embodichain_benchmarks/motion_generation/api.py`, `planners/base.py` in that package |
 | Pure interpolation, resampling and retiming | `embodichain/compute/trajectory/` |
 | Standalone playback and B=1 expansion host lifecycle | `embodichain/lab/sim/motion/execution.py` |
 | Expansion Profile loading, source adapters, candidate coordination and coverage | `embodichain/lab/sim/motion/expansion/` |
@@ -185,7 +185,7 @@ postures only: path, dynamic and task validation stay separate.
 
 ## Focused validation
 
-The installed benchmark host lives in `embodichain.benchmarks.motion_generation`.
+The installed benchmark host lives in `embodichain_benchmarks.motion_generation`.
 `run_benchmark()` accepts a packaged suite, external YAML or assembled `SuiteCfg`,
 optional explicit planner specs and a run-local adapter mapping. It copies caller
 configuration; explicit planners replace the suite list and are enabled.
@@ -194,10 +194,17 @@ free-space evaluation; Atomic Skills also require an exposed `MotionGenerator`.
 The host owns simulation lifetime, seeded cases, evaluation, and artifacts.
 Canonical case tensors and nested parameters stay independent of adapter
 mutations through untimed copies at capacity, preparation and plan boundaries.
-Free-space Cartesian populations, bounded independent reachability screening,
+Free-space Cartesian populations, bounded FK-only numerical reachability screening,
 measured difficulty and batch semantics live in
 `scenarios/_free_space_sampling.py`; configuration retains explicit legacy joint
-templates. Reports preserve workload strata and seed-cluster uncertainty.
+templates. Reports preserve workload strata and provide seed-cluster intervals at both
+condition and workload levels; balanced geometry allocations must not hide the
+independent seed count. Measured difficulty partitions batch rows by conditioning
+and joint margin separately. The screener's solver and selection condition stay
+explicit; decoupling runtime IK does not remove solver-conditioned sampling.
+Distances can use an explicit robot-reach reference. Waypoint layouts do not
+promise path following; sampled polyline deviations and native start-error
+quantiles remain diagnostics.
 Geometry validation includes the requested initial joint state. Atomic providers
 declare gripper requirements; typed pose settings flow through generation rather
 than being expanded into private configuration keys. Built-in Atomic suites

@@ -286,7 +286,7 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/benchmarks/motion_generation/__init__.py",
+          "path": "extensions/embodichain_benchmarks/motion_generation/__init__.py",
           "symbol": "<module>",
           "start_line": 17,
           "end_line": 21,
@@ -5660,7 +5660,7 @@
           "symbol": "_run_motion_generation_cli",
           "start_line": 57,
           "end_line": 59,
-          "excerpt": "    from embodichain.benchmarks.motion_generation.cli import run_from_args\n\n    run_from_args(args)"
+          "excerpt": "    from embodichain_benchmarks.motion_generation.cli import run_from_args\n\n    run_from_args(args)"
         }
       ]
     },
@@ -5674,7 +5674,7 @@
       "scope": "BenchmarkRunner._create_simulation.",
       "evidence": [
         {
-          "path": "embodichain/benchmarks/motion_generation/runner.py",
+          "path": "extensions/embodichain_benchmarks/motion_generation/runner.py",
           "symbol": "BenchmarkRunner._create_simulation",
           "start_line": 166,
           "end_line": 173,

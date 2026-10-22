@@ -23,14 +23,15 @@ from dataclasses import replace
 import pytest
 import torch
 
-from embodichain.benchmarks.motion_generation.config import SuiteCfg
-from embodichain.benchmarks.motion_generation.scenarios.free_space import (
+from embodichain_benchmarks.motion_generation.config import SuiteCfg
+from embodichain_benchmarks.motion_generation.scenarios.free_space import (
     FreeSpaceScenario,
 )
-from embodichain.benchmarks.motion_generation.metrics.trajectory import (
+from embodichain_benchmarks.motion_generation.metrics.trajectory import (
     compute_case_outcomes,
 )
 from embodichain.lab.sim.motion.planners.utils import PlanResult
+from embodichain.compute.kinematics import pose_error
 from embodichain.utils.math import (
     axis_angle_to_rotation_matrix,
     axis_angle_from_quat,
@@ -49,13 +50,13 @@ class CartesianRobot:
     def get_qvel_limits(self, name):
         return torch.full((1, 7), 100.0)
 
-    def compute_fk(self, qpos, name, to_matrix):
+    def compute_fk(self, qpos, name, to_matrix, env_ids=None):
         poses = torch.eye(4).expand(*qpos.shape[:-1], 4, 4).clone()
         poses[..., :3, 3] = qpos[..., :3]
         poses[..., :3, :3] = axis_angle_to_rotation_matrix(qpos[..., 3:6])
         return poses
 
-    def compute_batch_fk(self, qpos, name, to_matrix):
+    def compute_batch_fk(self, qpos, name, to_matrix, env_ids=None):
         return self.compute_fk(qpos, name, to_matrix)
 
     def compute_ik(self, pose, joint_seed, name):
@@ -149,7 +150,9 @@ def test_requested_motion_and_distance_match_measured_tcp(
             ((angle >= rotation[0] - 1e-5) & (angle <= rotation[1] + 1e-5)).all()
         )
     measured = robot.compute_batch_fk(case.reference_qpos, "arm", True)
-    torch.testing.assert_close(measured, case.target_waypoints, atol=1e-5, rtol=1e-5)
+    position_error, rotation_error = pose_error(measured, case.target_waypoints)
+    assert bool((position_error.norm(dim=-1) <= 0.001).all())
+    assert bool((rotation_error.norm(dim=-1) <= 0.01).all())
 
 
 def test_single_target_and_pure_rotation_do_not_claim_cartesian_turns():
@@ -213,7 +216,9 @@ def test_conditioning_and_joint_margin_are_measured():
 
 
 def test_unreachable_generation_is_bounded_and_does_not_shrink_population(monkeypatch):
-    suite = suite_for_sampling(max_generation_attempts=2)
+    suite = suite_for_sampling(
+        max_generation_attempts=2, reachability_solver="robot_ik"
+    )
     calls = []
 
     def fail(self, pose, joint_seed, name):
@@ -277,7 +282,9 @@ def test_screening_uses_stricter_suite_thresholds(monkeypatch):
         return success, solved
 
     monkeypatch.setattr(CartesianRobot, "compute_ik", biased)
-    suite = suite_for_sampling(max_generation_attempts=2)
+    suite = suite_for_sampling(
+        max_generation_attempts=2, reachability_solver="robot_ik"
+    )
     suite.protocol.position_threshold_m = 0.0001
     with pytest.raises(ValueError, match="invalid_case"):
         generate(suite)
@@ -305,18 +312,21 @@ def test_reference_rotation_is_valid_under_strict_angular_threshold():
         joint_limit_tolerance_rad=1e-5,
     )
     assert all(outcome.geometry_valid for outcome in outcomes)
-    assert max(outcome.final_rotation_err_deg for outcome in outcomes) < 0.001
+    assert (
+        max(outcome.final_rotation_err_deg for outcome in outcomes)
+        < suite.protocol.rotation_threshold_rad * 180 / torch.pi * 0.25
+    )
 
 
 def test_workload_tables_preserve_modality_batch_semantics_and_uncertainty():
-    from embodichain.benchmarks.motion_generation.aggregation import aggregate_results
-    from embodichain.benchmarks.motion_generation.models import (
+    from embodichain_benchmarks.motion_generation.aggregation import aggregate_results
+    from embodichain_benchmarks.motion_generation.models import (
         AlgorithmRole,
         PlannerMetadata,
         TrialPhase,
         TrialRecord,
     )
-    from embodichain.benchmarks.motion_generation.metrics.trajectory import (
+    from embodichain_benchmarks.motion_generation.metrics.trajectory import (
         make_failure_outcomes,
     )
 
@@ -402,3 +412,170 @@ def test_balanced_design_bounds_geometry_matrix_without_losing_workload_axes():
         "combined",
     }
     assert len({case.case_id for case in balanced}) == len(balanced)
+
+
+def test_default_screening_is_independent_of_configured_robot_ik(monkeypatch):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Generation must not call the IK used by the baseline")
+
+    monkeypatch.setattr(CartesianRobot, "compute_ik", forbidden)
+    cases = generate(suite_for_sampling(seeds=[11]))
+    assert cases
+    assert all(
+        case.case_parameters["reachability_solver"] == "finite_difference_dls"
+        for case in cases
+    )
+    assert all(
+        case.case_parameters["selection_condition"]
+        == "reachable_by_declared_screening_solver"
+        for case in cases
+    )
+
+
+def test_fk_only_screening_rejects_unreachable_targets_with_a_bounded_budget(
+    monkeypatch,
+):
+    def fixed_fk(self, qpos, name, to_matrix, env_ids=None):
+        return torch.eye(4).expand(*qpos.shape[:-1], 4, 4).clone()
+
+    monkeypatch.setattr(CartesianRobot, "compute_fk", fixed_fk)
+    with pytest.raises(ValueError, match="invalid_case.*after 2 attempts"):
+        generate(suite_for_sampling(max_generation_attempts=2, screening_iterations=2))
+
+
+@pytest.mark.parametrize("reach", [0.4, 1.6])
+def test_distance_bins_scale_with_declared_robot_reach(reach):
+    case = generate(
+        suite_for_sampling(
+            seeds=[11],
+            distance_unit="reach_fraction",
+            robot_reach_m=reach,
+            translation_ranges={"near": [0.05, 0.1]},
+        )
+    )[0]
+    displacement = torch.tensor(case.case_parameters["tcp_translation_m"])
+    assert bool(
+        (
+            (displacement >= 0.05 * reach - 1e-6) & (displacement <= 0.1 * reach + 1e-6)
+        ).all()
+    )
+    assert case.case_parameters["translation_range_m"] == pytest.approx(
+        [0.05 * reach, 0.1 * reach]
+    )
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"distance_unit": "reach_fraction"},
+        {"robot_reach_m": 0},
+        {"distance_unit": "cm"},
+        {"translation_ranges": {"near": [1, 0.1]}},
+        {"translation_ranges": {"unknown": [0.1, 0.2]}},
+        {"screening_iterations": True},
+        {"near_singular_threshold": 0},
+        {"near_limit_threshold": float("nan")},
+        {"reachability_solver": "adapter"},
+    ],
+)
+def test_invalid_scale_and_screening_settings_fail_during_decode(overrides):
+    with pytest.raises((TypeError, ValueError)):
+        suite_for_sampling(**overrides)
+
+
+@pytest.mark.parametrize("target_type", ["eef", "joint"])
+def test_reference_path_deviation_is_diagnostic_for_cartesian_waypoint_layouts(
+    target_type,
+):
+    case = generate(
+        suite_for_sampling(seeds=[11], waypoint_counts=[1], target_types=[target_type])
+    )[0]
+    goal = case.reference_qpos[:, 0]
+    detour = (case.start_qpos + goal) * 0.5
+    detour[:, 2] += 0.3
+    positions = torch.stack((case.start_qpos, detour, goal), dim=1)
+    dt = torch.tensor([[0.0, 1.0, 1.0]]).expand(case.batch_size, -1)
+    outcomes = compute_case_outcomes(
+        PlanResult(success=True, positions=positions, dt=dt),
+        case,
+        CartesianRobot(),
+        "arm",
+        validation_samples=3,
+        position_threshold_m=0.01,
+        rotation_threshold_rad=0.1,
+        joint_limit_tolerance_rad=1e-5,
+    )
+    assert all(outcome.geometry_valid for outcome in outcomes)
+    if target_type == "eef":
+        assert all(outcome.reference_path_deviation_mm_max > 50 for outcome in outcomes)
+    else:
+        assert all(
+            outcome.reference_path_deviation_mm_max is None for outcome in outcomes
+        )
+
+
+def test_polyline_deviation_handles_long_degenerate_and_noncontiguous_inputs():
+    from embodichain_benchmarks.motion_generation.metrics.trajectory import (
+        _reference_path_deviation,
+    )
+
+    # A duplicated straight reference and a parallel line exactly one metre away.
+    anchors = torch.zeros(260, 3)
+    anchors[130:, 0] = 1
+    backing = torch.zeros(1000, 6)
+    points = backing[:, ::2]
+    points[:, 0] = torch.linspace(0, 1, 1000)
+    points[:, 1] = 1
+    mean, maximum = _reference_path_deviation(points, anchors)
+    assert mean == pytest.approx(1000)
+    assert maximum == pytest.approx(1000)
+
+
+def test_compact_screening_preserves_arena_frames_and_per_environment_limits():
+    from embodichain_benchmarks.motion_generation.scenarios._free_space_sampling import (
+        _RowKinematics,
+        _screen_path,
+    )
+
+    class ShiftedRobot(CartesianRobot):
+        def get_qpos_limits(self, name):
+            return super().get_qpos_limits(name).expand(4, -1, -1).clone()
+
+        def compute_fk(self, qpos, name, to_matrix, env_ids=None):
+            result = super().compute_fk(qpos, name, to_matrix)
+            indices = torch.arange(len(qpos)) if env_ids is None else env_ids
+            result[..., 0, 3] += indices.reshape(-1, *([1] * (qpos.ndim - 2)))
+            return result
+
+        def compute_batch_fk(self, qpos, name, to_matrix, env_ids=None):
+            return self.compute_fk(qpos, name, to_matrix, env_ids)
+
+    robot = ShiftedRobot()
+    rows = torch.tensor([3, 1])
+    start = torch.zeros(4, 7)
+    target_qpos = start.clone()
+    target_qpos[:, 0] = 0.03
+    targets = robot.compute_fk(target_qpos, "arm", True)[:, None]
+    view = _RowKinematics(robot, rows)
+    valid, references = _screen_path(
+        view, "arm", start[rows], targets[rows], "heterogeneous", 0.001, 0.01, 1e-5
+    )
+    assert bool(valid.all())
+    measured = view.compute_batch_fk(references, "arm", True)
+    position, rotation = pose_error(measured, targets[rows])
+    assert bool((position.norm(dim=-1) < 0.001).all())
+    assert bool((rotation.norm(dim=-1) < 0.01).all())
+    assert view.get_qpos_limits("arm").shape == (2, 7, 2)
+
+
+def test_screening_can_select_a_finite_restart_when_another_candidate_is_nonfinite():
+    from embodichain_benchmarks.motion_generation.scenarios._free_space_sampling import (
+        _reference_ik,
+    )
+
+    robot = CartesianRobot()
+    target = torch.eye(4)[None]
+    seed = torch.full((1, 7), float("nan"))
+    valid, solved = _reference_ik(robot, "arm", seed, target, 2, 0.001, 0.01, 2)
+    assert valid.tolist() == [True]
+    assert bool(torch.isfinite(solved).all())

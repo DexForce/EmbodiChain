@@ -54,7 +54,7 @@ def _run_rl_cli(_: argparse.Namespace) -> None:
 
 def _run_motion_generation_cli(args: argparse.Namespace) -> None:
     """Run the shared Motion Planning and Atomic Skills benchmark."""
-    from embodichain.benchmarks.motion_generation.cli import run_from_args
+    from embodichain_benchmarks.motion_generation.cli import run_from_args
 
     run_from_args(args)
 
@@ -91,6 +91,7 @@ def _run_rendering_cli(_: argparse.Namespace) -> None:
 
 def main(argv: Sequence[str] | None = None) -> None:
     """Dispatch to the appropriate benchmark sub-command CLI."""
+    arguments = list(sys.argv[1:] if argv is None else argv)
     parser = argparse.ArgumentParser(
         prog="embodichain benchmark",
         description="EmbodiChain benchmark command-line interface.",
@@ -121,10 +122,6 @@ def main(argv: Sequence[str] | None = None) -> None:
     robotics_ks_parser.set_defaults(func=_run_robotics_kinematic_solver_cli)
 
     # -- motion-generation ---------------------------------------------------
-    from embodichain.benchmarks.motion_generation.cli import (
-        add_parser_arguments,
-    )
-
     motion_generation_parser = subparsers.add_parser(
         "motion-generation",
         help="Compare planners with Motion Planning or Atomic Skills suites.",
@@ -133,7 +130,10 @@ def main(argv: Sequence[str] | None = None) -> None:
             "Use --suite to select the cases and robot."
         ),
     )
-    add_parser_arguments(motion_generation_parser)
+    if arguments and arguments[0] == "motion-generation":
+        from embodichain_benchmarks.motion_generation.cli import add_parser_arguments
+
+        add_parser_arguments(motion_generation_parser)
     motion_generation_parser.set_defaults(func=_run_motion_generation_cli)
 
     # -- atomic-action-profile -----------------------------------------------
@@ -169,7 +169,6 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     # -- Parse ---------------------------------------------------------------
     # If no sub-command is given, print help and exit.
-    arguments = list(sys.argv[1:] if argv is None else argv)
     if not arguments or arguments[0] in ("-h", "--help"):
         parser.print_help()
         return

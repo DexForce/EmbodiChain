@@ -51,6 +51,7 @@ def installed_benchmark(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path,
         "embodichain",
         "extensions/embodichain_robots",
         "extensions/embodichain_tasks",
+        "extensions/embodichain_benchmarks",
     ):
         shutil.copytree(root / name, source / name, ignore=ignore)
     built = subprocess.run(
@@ -71,21 +72,24 @@ def installed_benchmark(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path,
     wheel = next((workspace / "dist").glob("*.whl"))
     with zipfile.ZipFile(wheel) as archive:
         entries = archive.namelist()
-        assert "embodichain/benchmarks/motion_generation/api.py" in entries
+        assert "embodichain_benchmarks/__init__.py" in entries
+        assert "embodichain_benchmarks/motion_generation/api.py" in entries
         assert "embodichain/cli/benchmark.py" in entries
         suites = {
             Path(name).name
             for name in entries
-            if name.startswith("embodichain/benchmarks/motion_generation/suites/")
+            if name.startswith("embodichain_benchmarks/motion_generation/suites/")
             and name.endswith(".yaml")
         }
         assert suites == {
             path.name
-            for path in (root / "embodichain/benchmarks/motion_generation/suites").glob(
-                "*.yaml"
-            )
+            for path in (
+                root / "extensions/embodichain_benchmarks/motion_generation/suites"
+            ).glob("*.yaml")
         }
         assert not any(name.startswith("scripts/") for name in entries)
+        assert not any(name.startswith("embodichain/benchmarks/") for name in entries)
+        assert not any(name.startswith("extensions/") for name in entries)
     target = workspace / "consumer_env"
     created = subprocess.run(
         [sys.executable, "-I", "-m", "venv", "--system-site-packages", str(target)],
@@ -153,8 +157,11 @@ class RejectScripts(importlib.abc.MetaPathFinder):
             raise AssertionError("installed benchmark imported source-checkout scripts")
 
 sys.meta_path.insert(0, RejectScripts())
-import embodichain.benchmarks.motion_generation as benchmark
-from embodichain.benchmarks.motion_generation import load_suite, run_benchmark
+from embodichain.cli.benchmark import main as benchmark_cli
+benchmark_cli(["--help"])
+assert not any(name == "embodichain_benchmarks" or name.startswith("embodichain_benchmarks.") for name in sys.modules)
+import embodichain_benchmarks.motion_generation as benchmark
+from embodichain_benchmarks.motion_generation import load_suite, run_benchmark
 assert Path(benchmark.__file__).is_relative_to(target)
 assert "embodichain.lab.sim" not in sys.modules
 for source in Path(benchmark.__file__).parent.rglob("*.py"):
@@ -168,13 +175,13 @@ for name in suite_names:
     suite = load_suite(name)
     assert suite.name
 assert load_suite().name == "motion_panda_free_space_smoke"
-from embodichain.benchmarks.motion_generation import PlannerAdapter
-from embodichain.benchmarks.motion_generation.scenarios.atomic_grasps import parallel_jaw_sampler
+from embodichain_benchmarks.motion_generation import PlannerAdapter
+from embodichain_benchmarks.motion_generation.scenarios.atomic_grasps import parallel_jaw_sampler
 assert parallel_jaw_sampler(2)
 from embodichain.lab.scripts._atomic_action.placement_geometry import build_support_object_target_pose
 import torch
 assert build_support_object_target_pose(torch.eye(4), torch.device("cpu")).shape == (4, 4)
-from embodichain.benchmarks.motion_generation.artifacts import environment_metadata
+from embodichain_benchmarks.motion_generation.artifacts import environment_metadata
 assert environment_metadata()["git_commit"] is None
 from embodichain.cli.main import main
 try:

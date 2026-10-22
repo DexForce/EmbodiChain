@@ -36,17 +36,17 @@ from embodichain.lab.sim.atomic_actions import (
 from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory, TimedTrajectory
 from embodichain.lab.sim.motion.planners.utils import PlanResult
 from embodichain.utils.math import axis_angle_to_rotation_matrix
-from embodichain.benchmarks.motion_generation.aggregation import aggregate_results
-from embodichain.benchmarks.motion_generation.artifacts import (
+from embodichain_benchmarks.motion_generation.aggregation import aggregate_results
+from embodichain_benchmarks.motion_generation.artifacts import (
     TrialJsonlWriter,
     write_case_manifest,
 )
-from embodichain.benchmarks.motion_generation.config import load_suite
-from embodichain.benchmarks.motion_generation.contracts import ReplayObservationTrace
-from embodichain.benchmarks.motion_generation.metrics.trajectory import (
+from embodichain_benchmarks.motion_generation.config import load_suite
+from embodichain_benchmarks.motion_generation.contracts import ReplayObservationTrace
+from embodichain_benchmarks.motion_generation.metrics.trajectory import (
     compute_case_outcomes,
 )
-from embodichain.benchmarks.motion_generation.models import (
+from embodichain_benchmarks.motion_generation.models import (
     AlgorithmRole,
     BenchmarkCase,
     CaseOutcome,
@@ -54,21 +54,21 @@ from embodichain.benchmarks.motion_generation.models import (
     TrialPhase,
     TrialRecord,
 )
-from embodichain.benchmarks.motion_generation.registry import create_robot_provider
-from embodichain.benchmarks.motion_generation.runner import BenchmarkRunner
-from embodichain.benchmarks.motion_generation import robots as _robots  # noqa: F401
-from embodichain.benchmarks.motion_generation.scenarios.atomic_objects import (
+from embodichain_benchmarks.motion_generation.registry import create_robot_provider
+from embodichain_benchmarks.motion_generation.runner import BenchmarkRunner
+from embodichain_benchmarks.motion_generation import robots as _robots  # noqa: F401
+from embodichain_benchmarks.motion_generation.scenarios.atomic_objects import (
     atomic_object_kind_names,
     create_atomic_object,
 )
-from embodichain.benchmarks.motion_generation.scenarios.atomic_skill import (
+from embodichain_benchmarks.motion_generation.scenarios.atomic_skill import (
     AtomicSkillScenario,
 )
-from embodichain.benchmarks.motion_generation.scenarios.atomic_replay import (
+from embodichain_benchmarks.motion_generation.scenarios.atomic_replay import (
     AtomicReplayRuntime,
 )
-from embodichain.benchmarks.motion_generation.contracts import ExecutionObservation
-from embodichain.benchmarks.motion_generation.scenarios.atomic_case_utils import (
+from embodichain_benchmarks.motion_generation.contracts import ExecutionObservation
+from embodichain_benchmarks.motion_generation.scenarios.atomic_case_utils import (
     atomic_case_id,
     canonical_case_qpos,
     case_generation_seed,
@@ -76,19 +76,19 @@ from embodichain.benchmarks.motion_generation.scenarios.atomic_case_utils import
     seeded_jitter,
     snapshot_case_qpos,
 )
-from embodichain.benchmarks.motion_generation.scenarios.atomic_policy import (
+from embodichain_benchmarks.motion_generation.scenarios.atomic_policy import (
     benchmark_motion_attribution,
     benchmark_motion_policy_strategy,
 )
-from embodichain.benchmarks.motion_generation.atomic_skill import (
+from embodichain_benchmarks.motion_generation.atomic_skill import (
     atomic_skill_provider_names,
     create_atomic_skill_provider,
 )
-from embodichain.benchmarks.motion_generation.scenarios.base import ScenarioProvider
-from embodichain.benchmarks.motion_generation.scenarios.free_space import (
+from embodichain_benchmarks.motion_generation.scenarios.base import ScenarioProvider
+from embodichain_benchmarks.motion_generation.scenarios.free_space import (
     FreeSpaceScenario,
 )
-from embodichain.benchmarks.motion_generation.video import (
+from embodichain_benchmarks.motion_generation.video import (
     VideoRecordCfg,
     build_video_path,
     record_with_window,
@@ -2084,8 +2084,8 @@ def test_physical_evaluator_dispatch_preserves_row_results_and_execution_gates(
     monkeypatch, execution_ok: bool, motion_ok: bool
 ) -> None:
     """Physical evidence stays row-local and cannot override failed execution."""
-    from embodichain.benchmarks.motion_generation import contracts
-    from embodichain.benchmarks.motion_generation.scenarios import atomic_skill
+    from embodichain_benchmarks.motion_generation import contracts
+    from embodichain_benchmarks.motion_generation.scenarios import atomic_skill
 
     case = replace(
         _atomic_case(), batch_size=2, target_waypoints=torch.eye(4).repeat(2, 1, 1, 1)
@@ -2171,8 +2171,8 @@ def test_runner_freezes_domain_manifest_before_each_planner(
     monkeypatch, tmp_path
 ) -> None:
     """The same case population and provenance reach all candidate records."""
-    from embodichain.benchmarks.motion_generation import runner as runner_module
-    from embodichain.benchmarks.motion_generation.config import DomainCfg
+    from embodichain_benchmarks.motion_generation import runner as runner_module
+    from embodichain_benchmarks.motion_generation.config import DomainCfg
 
     suite = load_suite("atomic_franka_pgi_smoke")
     suite.tracks = [suite.enabled_tracks()[0]]
@@ -2541,7 +2541,7 @@ def test_nonfinite_press_joint_evidence_does_not_count_as_contact_failure(
 
 
 def test_compiled_replay_clock_preserves_intervals_and_zero_time_boundaries():
-    from embodichain.benchmarks.motion_generation.scenarios.atomic_replay import (
+    from embodichain_benchmarks.motion_generation.scenarios.atomic_replay import (
         _PhysicsReplaySettings,
     )
 
@@ -2613,7 +2613,7 @@ def test_compiled_replay_uses_scheduled_ticks_for_completion_time():
 
 
 def test_compiled_clock_synchronizes_unequal_row_intervals():
-    from embodichain.benchmarks.motion_generation.scenarios.atomic_replay import (
+    from embodichain_benchmarks.motion_generation.scenarios.atomic_replay import (
         _PhysicsReplaySettings,
     )
 

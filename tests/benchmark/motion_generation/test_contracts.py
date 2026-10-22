@@ -26,17 +26,17 @@ import pytest
 import torch
 import yaml
 
-from embodichain.benchmarks.motion_generation import contracts
-from embodichain.benchmarks.motion_generation.artifacts import (
+from embodichain_benchmarks.motion_generation import contracts
+from embodichain_benchmarks.motion_generation.artifacts import (
     TrialJsonlWriter,
     write_case_manifest,
 )
-from embodichain.benchmarks.motion_generation.config import (
+from embodichain_benchmarks.motion_generation.config import (
     SuiteCfg,
     load_suite,
     suite_to_dict,
 )
-from embodichain.benchmarks.motion_generation.models import (
+from embodichain_benchmarks.motion_generation.models import (
     AlgorithmRole,
     BenchmarkCase,
     CaseOutcome,
@@ -356,7 +356,7 @@ def test_replay_observation_trace_requires_synchronized_batch_axes() -> None:
 
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
 def test_default_fixed_grasp_is_a_proper_rotation(dtype: torch.dtype) -> None:
-    from embodichain.benchmarks.motion_generation.scenarios.atomic_case_utils import (
+    from embodichain_benchmarks.motion_generation.scenarios.atomic_case_utils import (
         TOP_DOWN_ROTATION,
     )
 
