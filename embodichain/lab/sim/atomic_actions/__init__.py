@@ -74,7 +74,7 @@ from .evidence import (
     PhysicalEvidenceProvider,
     PhysicalEvidenceRequest,
 )
-from .engine import AtomicActionEngine, PlanTransform
+from .engine import AtomicActionEngine, PlanTransform, NominalPlanProvider
 from .execution import (
     ExecutionEvent,
     ExecutionEventKind,
@@ -136,6 +136,12 @@ from .runtime_commands import (
 )
 from .transports import EndpointCommandRouter, EndpointCommandTransport
 from .trajectory_adapter import ActionPlanTemplateAdapter
+from .trajectory_assembly import (
+    SkillPlanSemantics,
+    SkillTrajectoryContract,
+    SkillTrajectoryGeometry,
+    SkillTrajectoryInput,
+)
 from .tracking import (
     BASE_POSE_CHANNEL,
     JOINT_POSITION_CHANNEL,
@@ -296,6 +302,7 @@ __all__ = [
     "AtomicAction",
     "AtomicActionEngine",
     "PlanTransform",
+    "NominalPlanProvider",
     "BUILTIN_ACTION_TYPES",
     "BATCH_INVERSE_KINEMATICS_CAPABILITY",
     "CARTESIAN_POSE_CAPABILITY",
@@ -442,6 +449,10 @@ __all__ = [
     "SceneSnapshotSupplier",
     "SceneEntityPose",
     "SkillDescriptor",
+    "SkillPlanSemantics",
+    "SkillTrajectoryContract",
+    "SkillTrajectoryGeometry",
+    "SkillTrajectoryInput",
     "SkillBindingContract",
     "SkillEndpointRequirement",
     "SkillResourceSlot",

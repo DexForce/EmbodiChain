@@ -12,6 +12,8 @@
 | Sampled Cartesian geometry → timing → robot IK | `embodichain/lab/sim/motion/planners/_cartesian_profiles.py` (internal adapter) |
 | Collision planning and scene conversion | `embodichain/lab/sim/motion/planners/curobo/` |
 | NMG policy rollout and export metadata | `embodichain/lab/sim/motion/planners/neural_planner.py` |
+| Anchored source-time resampling and audit maps | `embodichain/compute/trajectory/anchored.py` |
+| Real2sim qpos source adaptation | `embodichain/lab/sim/motion/expansion/real2sim.py`; raw contracts belong to [data pipeline](../data-pipeline/data-pipeline.md) |
 | Pure interpolation, resampling and retiming | `embodichain/compute/trajectory/` |
 | Standalone playback and B=1 expansion host lifecycle | `embodichain/lab/sim/motion/execution.py` |
 | Expansion Profile loading, source adapters, candidate coordination and coverage | `embodichain/lab/sim/motion/expansion/` |
@@ -65,7 +67,14 @@ do not establish continuous collision freedom or derivative compliance.
 ## Compute and execution ownership
 
 `compute.trajectory` owns pure interpolation, differentiation, resampling and
-warping. New consumers import it directly; `lab.sim.utility.action_utils` keeps
+warping. `anchored_batch.py` adds ragged tensor batches with explicit source and
+anchor counts. CPU float64 mapping preparation shares the single-path algorithm;
+`AnchoredBatchPlan.apply` reuses device maps through Torch or explicit Warp
+CPU/CUDA kernels. Anchors stay exact, padding holds the last valid state, and
+valid counts/masks exclude it from downstream evaluation. Allocation limits
+cover the padded grid and output elements. The NumPy single-path API and the
+B=1 registered source integration remain unchanged. New consumers import compute
+directly; `lab.sim.utility.action_utils` keeps
 solver-dependent pose/IK adaptation and compatibility re-exports. Trapezoidal/
 Double-S Warp profiles live in `compute/kinematics/_warp/trapezoidal.py`; compute
 must not import simulation objects.

@@ -32,6 +32,7 @@ Semantic Calls and their scene/profile/effect contracts live inside
 | Compiled program model and AST expansion | `embodichain/lab/task_program/compiler/program.py` |
 | Semantic Call analysis and lowering | `embodichain/lab/task_program/compiler/lowering.py` |
 | Semantic Call execution | `embodichain/lab/task_program/runtime/executor.py`, `results.py` |
+| Trusted nominal plan source hook | `runtime/expansion.py`: `TaskProgramNominalPlanFactory`; `integrations/environment.py`: runtime/bridge assembly |
 | Grounded call plan-transform request | `embodichain/lab/task_program/runtime/expansion.py` |
 | Parallel scheduling and safety boundary | `embodichain/lab/task_program/runtime/parallel.py`, `parallel_executor.py` |
 | Semantic Calls, scene, profile, effects, evidence | `embodichain/lab/task_program/semantics/` |
@@ -79,6 +80,29 @@ grounded, the runtime asks `TaskProgramPlanTransformFactory` for that call's
 Atomic plan transform; the bridge exposes immutable
 `TaskProgramExpansionRecord` provenance. Nonmatching calls and episodes
 without a profile keep the ordinary path.
+
+A trusted `TaskProgramNominalPlanFactory` can provide a complete call-scoped
+plan before ordinary Atomic planning. The engine snapshots and validates that
+plan, then applies any existing plan transform. Execution sessions retain the
+source during recovery and invocation revisions; source errors do not fall back
+to another planner. `integrations/expert_sources.py` owns immutable versioned
+factories, exact expanded call selections and capability preflight. The simulation
+catalog fingerprints those declarations; configured task integrations select
+`runtime_services.expert_source_providers` by stable IDs and content-pinned source
+bundles. Bundle paths resolve from the integration file. Runtime assembly creates
+fresh providers sharing the existing planning scene and embodiment profile.
+Identity checks use weak references, so completed calls do not retain their
+recordings; provider implementations must support weak references. Fixed-qpos
+admission checks interval speeds as well as differentiated velocity references.
+
+The first registered source is B=1 fixed-qpos Pick replay. It uses the
+[source-independent Skill trajectory assembler](../atomic-actions/execution.md#trajectory-backed-plan-assembly),
+with the Skill owning semantic stages and pending effects. Skill trajectory
+schemas are included in registration fingerprints.
+Unverified input bundles, automatic replanning/retry policies, parallel segments
+and configured combined expansion fail closed. Physical qualification and
+receipt-backed source attachments remain separate host work. Do not insert
+executable provider syntax into program YAML.
 
 The configured combined transform supports batches and Pick Affordance
 expansion; timing expansion is not connected to this transform. Batch expansion

@@ -197,3 +197,25 @@ of choosing the maximum. Simulation control periods and sleeps must be integer
 multiples of `physics_dt`; the adapter never rounds a motion-command request
 upward. Passive runner polling, including physical-effect waits, rounds the
 configured minimum cycle up to an advertised clock quantum before sleeping.
+
+## Trajectory-backed plan assembly
+
+`trajectory_assembly.py` owns immutable Skill schemas, timed inputs and semantic
+assembly results. A concrete Skill opts in through `trajectory_contract` and
+implements `_trajectory_semantics`; it does not override the public assembler.
+The schema participates in the existing semantic catalog fingerprint. Registration
+rejects a declared contract without an assembler, and unsupported Skills fail
+before ordinary planning rather than falling back.
+
+The engine checks imported motion against restored initial state, position and
+sampled/interval velocity limits, and bound endpoint claims. Sources retain
+calibration, model identity, joint mapping and collision/physical qualification.
+Stages are half-open; landmarks index actual samples. Shared stage layouts can
+batch with ordered `env_ids`, but source admission may still require B=1.
+
+Same-grid rebuilding uses the plan's owned assembly input and current provenance
+to regenerate commands, tracking, effects and monitor bounds. Supplied geometry
+cannot survive a changed event pose without an explicit new input. Existing
+non-joint plans and Skills without a contract retain their previous rebuild
+path. Changed-grid execution, extra source recovery capabilities and phase
+expansion permissions are separate contracts.

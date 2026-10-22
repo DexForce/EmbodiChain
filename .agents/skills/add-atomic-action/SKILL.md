@@ -230,6 +230,16 @@ Follow these invariants:
 
 ## 4. Emit generic runtime commands when needed
 
+For a joint-backed Skill that must also consume external or augmented motion,
+declare a versioned `SkillTrajectoryContract` and implement
+`_trajectory_semantics(request, context, motion) -> SkillPlanSemantics`. Call the
+framework-owned `assemble_trajectory_plan()` from ordinary `_plan()` after
+generating a `SkillTrajectoryInput`; external callers use the engine's
+`build_plan_from_trajectory()`. Reuse the same semantic hook instead of adding
+recording-specific methods. Keep file decoding/calibration in source adapters
+and expansion permissions in the motion-expansion layer. See PickUp and
+MoveJoints for typed geometry, event landmarks and goal checks.
+
 Use `build_command_plan()` when a skill targets a mobile base, whole-body
 controller, tool, or another non-joint transport. Build immutable endpoint
 commands; keep live controller and device handles in the transport:

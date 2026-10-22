@@ -77,7 +77,21 @@ from .simulation.policies import (
     default_simulation_settle_presets,
 )
 
+from .expert_sources import (
+    ExpertSourceProvider,
+    ExpertSourceProviderFactory,
+    ExpertSourceSelection,
+    ExpertSourceRegistry,
+)
+from .real2sim import Real2SimExpertSourceProvider, Real2SimExpertSourceProviderFactory
+
 __all__ = [
+    "ExpertSourceProvider",
+    "ExpertSourceProviderFactory",
+    "ExpertSourceSelection",
+    "ExpertSourceRegistry",
+    "Real2SimExpertSourceProvider",
+    "Real2SimExpertSourceProviderFactory",
     "AntipodalGraspAffordanceBinding",
     "ContainerAffordanceBinding",
     "ControlPartCommandPreset",

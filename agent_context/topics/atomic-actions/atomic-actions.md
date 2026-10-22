@@ -43,6 +43,13 @@ ActionInvocation                       semantic program
         EndpointCommandRouter + transports + clock
 ```
 
+`NominalPlanProvider` is an optional trusted complete-plan source on engine
+planning/start calls. It bypasses ordinary action planning without bypassing
+plan validation, and remains attached to the execution session for replans and
+invocation revisions. Existing transforms run after nominal validation. A
+replay-only source must return a non-replannable plan; the hook does not itself
+supply Skill-specific semantic assembly or certify source capabilities.
+
 Planning never steps simulation and never treats command completion as proof of
 a physical effect. Runtime hosts may collect versioned physical evidence after
 each fresh observation and pass it to an evidence-aware effect verifier, phase
@@ -76,6 +83,7 @@ contact or physical goal satisfaction.
 | Robot/task/scene state | `state.py`, `scene.py` |
 | Runtime physical evidence | `evidence.py`, `scene.py`, `runner.py` |
 | Plans and runtime commands | `plans.py`, `runtime_commands.py` |
+| Source-neutral trajectory inputs, schema and Skill semantic assembly | `trajectory_assembly.py`, `core.py` |
 | Session state machine | `execution.py` |
 | Verification request/result values | `verification.py` |
 | Runner and transports | `runner.py`, `transports.py`, `tracking.py` |
@@ -171,3 +179,15 @@ python docs/scripts/check_api_docs.py
 For public API changes also run the docs checker tests and Sphinx dummy build.
 For simulator adapters add an environment-level test that exercises normal
 `env.step()` consumption and safe cancellation.
+
+`AtomicActionEngine.build_plan_from_trajectory` admits full-joint motion through
+an explicit versioned `SkillDescriptor.trajectory_contract`, then delegates to
+the framework-owned `AtomicAction.assemble_trajectory_plan`. PickUp and
+MoveJoints share their `_trajectory_semantics` hook between ordinary planning
+and external motion; other Skills opt in explicitly. Skill code owns effects
+and geometric facts, while the public builder owns commands and tracking.
+`ActionPlan.trajectory_input` retains an owned input for same-grid rebuilding;
+rebuilding reassembles semantics and rejects stale geometric-event facts.
+Semantic stages/events do not grant expansion permissions. Input source/model
+review remains provider-owned, and fixed replay remains non-replannable.
+See [trajectory assembly details](execution.md#trajectory-backed-plan-assembly).

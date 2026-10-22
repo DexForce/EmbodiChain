@@ -35,6 +35,7 @@ from ._configured_services import (
     _PourLowererFactory,
     _PushObjectLowererFactory,
 )
+from .expert_sources import ExpertSourceRegistry, ExpertSourceSelection
 from .catalog import (
     SimulationTaskProgramRegistration,
 )
@@ -2112,6 +2113,7 @@ class _DecodedRuntimeServices:
         ...,
     ] = ()
     control_part_evidence: _JointPositionConstraintEvidenceProviderFactory | None = None
+    expert_sources: ExpertSourceRegistry = ExpertSourceRegistry()
 
 
 def _decode_runtime_services(value: object) -> _DecodedRuntimeServices:
@@ -2127,6 +2129,7 @@ def _decode_runtime_services(value: object) -> _DecodedRuntimeServices:
                 "handover_pose_providers",
                 "registered_semantic_lowerers",
                 "control_part_evidence",
+                "expert_source_providers",
             }
         ),
     )
@@ -2182,7 +2185,78 @@ def _decode_runtime_services(value: object) -> _DecodedRuntimeServices:
             path=f"{path}.control_part_evidence",
         )
     )
+    source_factories = []
+    source_selections = []
+    for index, item in enumerate(
+        _sequence(
+            config.get("expert_source_providers", ()),
+            path=f"{path}.expert_source_providers",
+        )
+    ):
+        source_path = f"{path}.expert_source_providers[{index}]"
+        selected = _mapping(
+            item,
+            path=source_path,
+            required=frozenset(
+                {
+                    "call_id",
+                    "provider_id",
+                    "revision",
+                    "call_index",
+                    "bundle_path",
+                    "bundle_sha256",
+                    "target_profile_id",
+                    "target_asset_sha256",
+                }
+            ),
+            optional=frozenset({"required_capabilities"}),
+        )
+        if selected["call_id"] != "pick":
+            raise ValueError(f"{source_path}: real2sim_qpos v1 supports only pick")
+        if (selected["provider_id"], selected["revision"]) != ("real2sim_qpos", "1"):
+            raise ValueError(
+                f"{source_path}: unregistered configured expert source version"
+            )
+        from .real2sim import Real2SimExpertSourceProviderFactory
+
+        source_factories.append(
+            Real2SimExpertSourceProviderFactory(
+                bundle_path=_identifier(
+                    selected["bundle_path"], path=f"{source_path}.bundle_path"
+                ),
+                bundle_sha256=_identifier(
+                    selected["bundle_sha256"], path=f"{source_path}.bundle_sha256"
+                ),
+                target_profile_id=_identifier(
+                    selected["target_profile_id"],
+                    path=f"{source_path}.target_profile_id",
+                ),
+                target_asset_sha256=_identifier(
+                    selected["target_asset_sha256"],
+                    path=f"{source_path}.target_asset_sha256",
+                ),
+            )
+        )
+        source_selections.append(
+            ExpertSourceSelection(
+                call_id=selected["call_id"],
+                provider_id=selected["provider_id"],
+                revision=selected["revision"],
+                call_index=selected["call_index"],
+                required_capabilities=tuple(
+                    _sequence(
+                        selected.get(
+                            "required_capabilities", ("replay", "phase_annotation")
+                        ),
+                        path=f"{source_path}.required_capabilities",
+                    )
+                ),
+            )
+        )
     return _DecodedRuntimeServices(
+        expert_sources=ExpertSourceRegistry(
+            tuple(source_factories), tuple(source_selections)
+        ),
         grasp_pose_generators=generators,
         handover_pose_providers=handover,
         registered_semantic_lowerers=lowerers,
@@ -2259,6 +2333,7 @@ def _decode_configured_task_program_integration(
         handover_pose_providers=services.handover_pose_providers,
         control_part_evidence_factory=services.control_part_evidence,
         registered_semantic_lowerer_factories=(services.registered_semantic_lowerers),
+        expert_sources=services.expert_sources,
     )
     grasp_fingerprint = tuple(
         {

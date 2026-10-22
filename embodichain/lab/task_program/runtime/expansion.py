@@ -25,10 +25,15 @@ from embodichain.lab.sim.atomic_actions import (
     ActionInvocation,
     AtomicActionEngine,
     PlanTransform,
+    NominalPlanProvider,
 )
 from embodichain.lab.task_program.semantics.calls import SemanticCallSpec
 
-__all__ = ["TaskProgramPlanRequest", "TaskProgramPlanTransformFactory"]
+__all__ = [
+    "TaskProgramPlanRequest",
+    "TaskProgramPlanTransformFactory",
+    "TaskProgramNominalPlanFactory",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,3 +80,31 @@ class TaskProgramPlanTransformFactory(Protocol):
         engine: AtomicActionEngine,
     ) -> PlanTransform | None:
         """Return one session-scoped transform or ``None`` for no change."""
+
+
+@runtime_checkable
+class TaskProgramNominalPlanFactory(Protocol):
+    """Create a source-specific complete-plan provider for one grounded call.
+
+    Trusted integrations own registration and capability preflight. Factories
+    must select exact workflow/call occurrences and return fresh call-local
+    providers. None means this call has no external source binding; a selected
+    provider must raise on failure rather than falling back to ordinary planning.
+    Providers own neither candidate IDs, simulator stepping nor persistence.
+    """
+
+    def create_nominal_plan_provider(
+        self,
+        request: TaskProgramPlanRequest,
+        *,
+        engine: AtomicActionEngine,
+    ) -> NominalPlanProvider | None:
+        """Select the nominal source without invoking ordinary motion planning.
+
+        Args:
+            request: Stable identity and grounded invocation of the current call.
+            engine: Owning engine, used for existing skill plan construction.
+
+        Returns:
+            A call-scoped plan provider, or None for an unbound call.
+        """
