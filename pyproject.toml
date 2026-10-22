@@ -25,7 +25,7 @@ dynamic = ["version"]
 
 # Core install dependencies (kept from requirements.txt).
 dependencies = [
-  "dexsim_engine==0.5.1rc1",
+  "dexsim_engine>=0.5.1,<0.6",
   # DexSim and LeRobot require different OpenCV distributions sharing cv2.
   # Keep their bindings on the same release to avoid mixed Python/native APIs.
   "opencv-python==4.12.0.88; python_version < '3.12'",
