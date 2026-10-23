@@ -329,8 +329,8 @@ class NeuralPlannerCfg(BasePlannerCfg):
     rot_eps: float = 0.1
     """Waypoint rotation threshold in radians."""
 
-    joint_eps: float = 0.02
-    """Waypoint joint-position threshold in radians."""
+    joint_eps: float = 0.01
+    """Maximum absolute per-joint arrival error in radians (L-infinity)."""
 
     onnx_providers: list[str] | None = None
     """Optional ONNX Runtime execution-provider priority list."""
@@ -378,6 +378,8 @@ class NeuralPlanOptions(PlanOptions):
     control_part: str | None = None
     start_qpos: torch.Tensor | None = None
     max_steps: int | None = None
+    waypoint_modalities: list[str] | None = None
+    """Optional explicit joint/position/orientation/pose semantics per waypoint."""
 
 
 class NeuralPlanner(BasePlanner):
@@ -564,7 +566,7 @@ class NeuralPlanner(BasePlanner):
             rot_mask,
             joint_mask,
             episode_k,
-        ) = self._parse_waypoints(target_states)
+        ) = self._parse_waypoints(target_states, options.waypoint_modalities)
         qpos = self._initial_qpos(control_part, options.start_qpos)
         b = qpos.shape[0]
         limits = self.robot.get_qpos_limits(name=control_part)[0].to(self.device)
@@ -827,7 +829,9 @@ class NeuralPlanner(BasePlanner):
             ).amin(dim=-1)
         return reached_at < samples
 
-    def _parse_waypoints(self, target_states: list[PlanState]) -> tuple[
+    def _parse_waypoints(
+        self, target_states: list[PlanState], modalities: list[str] | None = None
+    ) -> tuple[
         torch.Tensor,
         torch.Tensor,
         torch.Tensor,
@@ -843,6 +847,26 @@ class NeuralPlanner(BasePlanner):
                 f"at most {self._num_waypoints}.",
                 ValueError,
             )
+        if modalities is not None:
+            if len(modalities) != len(target_states):
+                raise ValueError("waypoint_modalities must match the target count.")
+            for target, modality in zip(target_states, modalities):
+                expected = (
+                    MoveType.JOINT_MOVE if modality == "joint" else MoveType.EEF_MOVE
+                )
+                if (
+                    modality not in {"joint", "position", "orientation", "pose"}
+                    or target.move_type != expected
+                ):
+                    raise ValueError(
+                        "waypoint_modalities must agree with each target's move_type."
+                    )
+        if modalities is not None and "position" in modalities:
+            offset = self._runtime_tcp_from_policy_tcp[:3, 3]
+            if bool(torch.any(offset.abs() > 1.0e-8)):
+                raise ValueError(
+                    "Position-only constraints require the runtime and policy TCP origins to coincide."
+                )
         b = _infer_batch_size(target_states) or 1
         waypoint_pos = torch.zeros(b, self._num_waypoints, 3, device=self.device)
         waypoint_quat = torch.zeros(b, self._num_waypoints, 4, device=self.device)
@@ -896,7 +920,11 @@ class NeuralPlanner(BasePlanner):
                     ValueError,
                 )
             valid_mask[:, idx] = 1.0
-        if not self._intermediate_orientation:
+        if modalities is not None:
+            for idx, modality in enumerate(modalities):
+                pos_mask[:, idx] = float(modality in {"position", "pose"})
+                rot_mask[:, idx] = float(modality in {"orientation", "pose"})
+        if modalities is None and not self._intermediate_orientation:
             final_mask = torch.zeros_like(rot_mask)
             final_mask[:, len(target_states) - 1] = 1.0
             rot_mask *= final_mask
@@ -1075,7 +1103,7 @@ class NeuralPlanner(BasePlanner):
         joint_dist = torch.amax(torch.abs(joint_pos - active_joint), dim=-1)
         joint_ok = torch.where(
             active_joint_mask,
-            joint_dist < self._joint_eps,
+            joint_dist <= self._joint_eps,
             torch.ones_like(joint_dist, dtype=torch.bool),
         )
         reached = pos_ok & rot_ok & joint_ok

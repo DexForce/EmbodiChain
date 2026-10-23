@@ -42,19 +42,19 @@ from embodichain.lab.sim.atomic_actions import (
 from embodichain.lab.sim.motion.planners.curobo.curobo_planner import CuroboPlanner
 from embodichain.lab.sim.motion.planners.utils import MoveType, PlanResult
 from embodichain.toolkits.graspkit import GraspPoseGenerator
-from scripts.benchmark.motion_generation.aggregation import aggregate_results
-from scripts.benchmark.motion_generation.config import DomainCfg, load_suite
-from scripts.benchmark.motion_generation.metrics.trajectory import (
+from embodichain_benchmarks.motion_generation.aggregation import aggregate_results
+from embodichain_benchmarks.motion_generation.config import DomainCfg, load_suite
+from embodichain_benchmarks.motion_generation.metrics.trajectory import (
     _trajectory_derivatives,
     compute_case_outcomes,
     compute_waypoint_errors,
     match_ordered_joint_waypoints,
     match_ordered_waypoints,
 )
-from scripts.benchmark.motion_generation import (
+from embodichain_benchmarks.motion_generation import (
     scenarios as _scenarios,
 )  # noqa: F401
-from scripts.benchmark.motion_generation.models import (
+from embodichain_benchmarks.motion_generation.models import (
     AlgorithmRole,
     BenchmarkCase,
     CaseOutcome,
@@ -62,26 +62,26 @@ from scripts.benchmark.motion_generation.models import (
     TrialPhase,
     TrialRecord,
 )
-from scripts.benchmark.motion_generation.registry import (
+from embodichain_benchmarks.motion_generation.registry import (
     create_scenario_provider,
     scenario_provider_names,
 )
-from scripts.benchmark.motion_generation.reporting import (
+from embodichain_benchmarks.motion_generation.reporting import (
     write_markdown_report,
 )
-from scripts.benchmark.motion_generation.run_benchmark import (
+from embodichain_benchmarks.motion_generation.cli import (
     _apply_overrides,
 )
-from scripts.benchmark.motion_generation.scenarios.atomic_skill import (
+from embodichain_benchmarks.motion_generation.scenarios.atomic_skill import (
     AtomicSkillScenario,
 )
-from scripts.benchmark.motion_generation.scenarios.atomic_grasps import (
+from embodichain_benchmarks.motion_generation.scenarios.atomic_grasps import (
     FrozenArticulationGraspPoseGenerator,
 )
-from scripts.benchmark.motion_generation.scenarios.atomic_evaluation import (
+from embodichain_benchmarks.motion_generation.scenarios.atomic_evaluation import (
     executed_final_pose_errors,
 )
-from scripts.benchmark.motion_generation.atomic_skill import (
+from embodichain_benchmarks.motion_generation.atomic_skill import (
     create_atomic_skill_provider,
 )
 
@@ -493,7 +493,7 @@ def _json_round_tripped_outcomes(trial: TrialRecord) -> tuple[CaseOutcome, ...]:
 
 
 def test_motion_across_a_zero_interval_is_an_unbounded_velocity_violation(tmp_path):
-    from scripts.benchmark.motion_generation.artifacts import (
+    from embodichain_benchmarks.motion_generation.artifacts import (
         TrialJsonlWriter,
         write_json,
     )
@@ -610,9 +610,11 @@ def test_suite_stated_velocity_limit_overrides_a_placeholder_asset():
 
 def _nmg_adapter(**config):
     """Build an NMG adapter against a stub context, without loading a policy."""
-    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
-    from scripts.benchmark.motion_generation.planners.base import PlannerContext
-    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+    from embodichain_benchmarks.motion_generation.config import PlannerSpecCfg
+    from embodichain_benchmarks.motion_generation.planners.base import PlannerContext
+    from embodichain_benchmarks.motion_generation.planners.nmg_onnx import (
+        NmgOnnxAdapter,
+    )
 
     robot = Mock(device=torch.device("cpu"))
     robot.get_qvel_limits = Mock(
@@ -694,7 +696,7 @@ def test_nmg_cli_overrides_reach_every_nmg_row():
     # A checkpoint supplied on the command line must reach the paired row too;
     # otherwise its availability check skips it and no comparison runs.
     suite = load_suite(
-        "scripts/benchmark/motion_generation/suites/motion_panda_free_space_smoke.yaml"
+        "extensions/embodichain_benchmarks/motion_generation/suites/motion_panda_free_space_smoke.yaml"
     )
     _apply_overrides(suite, nmg_onnx_path="/tmp/policy.onnx", nmg_pos_eps=0.02)
     rows = {
@@ -710,7 +712,9 @@ def test_nmg_cli_overrides_reach_every_nmg_row():
     "suite_name", ["motion_panda_free_space_coverage", "motion_panda_free_space_smoke"]
 )
 def test_free_space_suites_pair_a_nominal_and_a_retimed_nmg_row(suite_name):
-    suite = load_suite(f"scripts/benchmark/motion_generation/suites/{suite_name}.yaml")
+    suite = load_suite(
+        f"extensions/embodichain_benchmarks/motion_generation/suites/{suite_name}.yaml"
+    )
     rows = {
         spec.id: bool(spec.config.get("retime", False))
         for spec in suite.planners
@@ -923,12 +927,12 @@ def test_dynamic_limit_tolerance_must_be_finite_and_non_negative(tolerance):
 
 
 def test_only_planners_that_solve_timing_declare_it():
-    from scripts.benchmark.motion_generation.planners.base import PlannerAdapter
-    from scripts.benchmark.motion_generation.planners.curobo import CuroboAdapter
-    from scripts.benchmark.motion_generation.planners.ik_interpolate import (
+    from embodichain_benchmarks.motion_generation.planners.base import PlannerAdapter
+    from embodichain_benchmarks.motion_generation.planners.curobo import CuroboAdapter
+    from embodichain_benchmarks.motion_generation.planners.ik_interpolate import (
         IkInterpolateAdapter,
     )
-    from scripts.benchmark.motion_generation.planners.toppra import ToppraAdapter
+    from embodichain_benchmarks.motion_generation.planners.toppra import ToppraAdapter
 
     # An adapter that declares nothing is not judged on an unsolved clock.
     assert PlannerAdapter.timing_is_solved is False
@@ -1047,7 +1051,7 @@ def test_missing_positions_and_joint_limit_violation_fail_motion_valid():
     # Reach the waypoint at x=2 while joint 0 is outside [-1, 1].
     case.target_waypoints[0, 0, 0, 3] = 2.0
     positions = torch.zeros(1, 2, 7)
-    positions[0, :, 0] = 2.0
+    positions[0, -1, 0] = 2.0
     violated = compute_case_outcomes(
         _timed_plan_result(positions, success=True),
         case,
@@ -1062,6 +1066,39 @@ def test_missing_positions_and_joint_limit_violation_fail_motion_valid():
     assert violated[0].joint_limit_violation is True
     assert violated[0].motion_valid is False
     assert violated[0].failure_code == "joint_limit_violation"
+
+
+@pytest.mark.parametrize("point_count", [1, 2])
+@pytest.mark.parametrize("invalid", [math.nan, math.inf])
+def test_validation_resampling_isolates_non_finite_batch_rows(
+    point_count: int, invalid: float
+) -> None:
+    case = replace(
+        _case(),
+        batch_size=2,
+        start_qpos=torch.zeros(2, 7),
+        target_waypoints=torch.eye(4).repeat(2, 1, 1, 1),
+        reference_qpos=torch.zeros(2, 1, 7),
+    )
+    positions = torch.zeros(2, point_count, 7, dtype=torch.float64)
+    positions[1, -1, 0] = invalid
+    original = positions.clone()
+
+    outcomes = compute_case_outcomes(
+        _timed_plan_result(positions, success=True),
+        case,
+        _MetricRobot(),
+        "arm",
+        validation_samples=8,
+        position_threshold_m=1.0e-4,
+        rotation_threshold_rad=1.0e-4,
+        joint_limit_tolerance_rad=1.0e-5,
+    )
+
+    assert outcomes[0].geometry_valid is True
+    assert outcomes[1].finite is False
+    assert outcomes[1].failure_code == "non_finite_trajectory"
+    torch.testing.assert_close(positions, original, equal_nan=True)
 
 
 def test_non_finite_trajectory_skips_joint_limit_metrics():
@@ -1104,9 +1141,11 @@ def test_nmg_precision_and_external_accuracy_are_independently_configurable():
 
 
 def test_nmg_model_revision_is_derived_from_runtime_model_path():
-    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
-    from scripts.benchmark.motion_generation.planners.base import PlannerContext
-    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+    from embodichain_benchmarks.motion_generation.config import PlannerSpecCfg
+    from embodichain_benchmarks.motion_generation.planners.base import PlannerContext
+    from embodichain_benchmarks.motion_generation.planners.nmg_onnx import (
+        NmgOnnxAdapter,
+    )
 
     adapter = NmgOnnxAdapter(
         PlannerSpecCfg(
@@ -1127,9 +1166,11 @@ def test_nmg_model_revision_is_derived_from_runtime_model_path():
 
 
 def test_nmg_over_capacity_case_is_explicitly_unsupported_without_truncation():
-    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
-    from scripts.benchmark.motion_generation.planners.base import PlannerContext
-    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+    from embodichain_benchmarks.motion_generation.config import PlannerSpecCfg
+    from embodichain_benchmarks.motion_generation.planners.base import PlannerContext
+    from embodichain_benchmarks.motion_generation.planners.nmg_onnx import (
+        NmgOnnxAdapter,
+    )
 
     adapter = NmgOnnxAdapter(
         PlannerSpecCfg(
@@ -1160,10 +1201,59 @@ def test_nmg_over_capacity_case_is_explicitly_unsupported_without_truncation():
     assert "not truncated or split" in reason
 
 
+@pytest.mark.parametrize(
+    "modalities,translation,supported",
+    [
+        (["position"], None, True),
+        (["position"], (0.0, 0.0, 0.0), True),
+        (["position"], (0.0, 0.0, 1.0e-8), True),
+        (["position"], (0.0, 0.0, 0.1), False),
+        (["joint", "position"], (-0.1, 0.0, 0.0), False),
+        (["pose", "position"], (0.0, 0.1, 0.0), False),
+        (["joint", "orientation", "pose"], (0.1, 0.0, 0.0), True),
+    ],
+)
+def test_nmg_case_support_respects_position_only_tcp_origin_requirement(
+    modalities: list[str],
+    translation: tuple[float, float, float] | None,
+    supported: bool,
+) -> None:
+    transform = None
+    if translation is not None:
+        tcp_pose = torch.eye(4)
+        # A rotation between coincident TCP origins remains representable.
+        tcp_pose[:2, :2] = torch.tensor([[0.0, -1.0], [1.0, 0.0]])
+        tcp_pose[:3, 3] = torch.tensor(translation)
+        transform = tcp_pose.tolist()
+    adapter = _nmg_adapter(runtime_tcp_from_policy_tcp=transform)
+    waypoint_count = len(modalities)
+    case = replace(
+        _case(),
+        num_waypoints=waypoint_count,
+        target_waypoints=torch.eye(4).repeat(1, waypoint_count, 1, 1),
+        reference_qpos=torch.zeros(1, waypoint_count, 7),
+        case_parameters={
+            "motion_validity": "ordered_constraint_waypoints",
+            "constraint_modalities": modalities,
+        },
+    )
+
+    actual_supported, reason = adapter.supports_case(case)
+
+    assert actual_supported is supported
+    if supported:
+        assert reason is None
+    else:
+        assert reason is not None
+        assert "TCP origins" in reason
+
+
 def test_nmg_case_budget_is_thirty_steps_per_waypoint():
-    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
-    from scripts.benchmark.motion_generation.planners.base import PlannerContext
-    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+    from embodichain_benchmarks.motion_generation.config import PlannerSpecCfg
+    from embodichain_benchmarks.motion_generation.planners.base import PlannerContext
+    from embodichain_benchmarks.motion_generation.planners.nmg_onnx import (
+        NmgOnnxAdapter,
+    )
 
     adapter = NmgOnnxAdapter(
         PlannerSpecCfg(
@@ -1186,9 +1276,11 @@ def test_nmg_case_budget_is_thirty_steps_per_waypoint():
 
 
 def test_nmg_joint_case_uses_joint_constraint_waypoints():
-    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
-    from scripts.benchmark.motion_generation.planners.base import PlannerContext
-    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+    from embodichain_benchmarks.motion_generation.config import PlannerSpecCfg
+    from embodichain_benchmarks.motion_generation.planners.base import PlannerContext
+    from embodichain_benchmarks.motion_generation.planners.nmg_onnx import (
+        NmgOnnxAdapter,
+    )
 
     adapter = NmgOnnxAdapter(
         PlannerSpecCfg(
@@ -1236,9 +1328,9 @@ def test_nmg_joint_case_uses_joint_constraint_waypoints():
 
 
 def _curobo_adapter():
-    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
-    from scripts.benchmark.motion_generation.planners.base import PlannerContext
-    from scripts.benchmark.motion_generation.planners.curobo import CuroboAdapter
+    from embodichain_benchmarks.motion_generation.config import PlannerSpecCfg
+    from embodichain_benchmarks.motion_generation.planners.base import PlannerContext
+    from embodichain_benchmarks.motion_generation.planners.curobo import CuroboAdapter
 
     adapter = CuroboAdapter(
         PlannerSpecCfg(
@@ -1330,9 +1422,11 @@ def test_curobo_joint_case_uses_reference_joint_waypoints():
 
 
 def test_nmg_rejects_unknown_motion_validity():
-    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
-    from scripts.benchmark.motion_generation.planners.base import PlannerContext
-    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+    from embodichain_benchmarks.motion_generation.config import PlannerSpecCfg
+    from embodichain_benchmarks.motion_generation.planners.base import PlannerContext
+    from embodichain_benchmarks.motion_generation.planners.nmg_onnx import (
+        NmgOnnxAdapter,
+    )
 
     adapter = NmgOnnxAdapter(
         PlannerSpecCfg(
@@ -1367,7 +1461,7 @@ def test_seed_override_applies_to_atomic_tracks():
 
     _apply_overrides(suite, seeds=[104])
 
-    assert suite.free_space.seeds == [104]
+    assert suite.tracks[0].config["seeds"] == [104]
     assert suite.enabled_tracks()[0].config["seeds"] == [104]
 
 
@@ -1382,7 +1476,7 @@ def test_seed_override_adds_missing_atomic_track_seeds():
 
 
 def test_free_space_overrides_reach_each_configured_track():
-    from scripts.benchmark.motion_generation.config import SuiteCfg
+    from embodichain_benchmarks.motion_generation.config import SuiteCfg
 
     suite = SuiteCfg.from_dict(
         {
@@ -1419,7 +1513,7 @@ def test_free_space_overrides_reach_each_configured_track():
 
 
 def test_atomic_skill_antipodal_grasp_uses_standalone_generator(monkeypatch):
-    from scripts.tutorials.atomic_action import tutorial_utils
+    from embodichain_benchmarks.motion_generation import _atomic_fixtures
 
     vertices = torch.tensor(
         [[-0.025, -0.025, -0.025], [0.025, 0.025, 0.025]],
@@ -1440,7 +1534,7 @@ def test_atomic_skill_antipodal_grasp_uses_standalone_generator(monkeypatch):
     ]
     generator_factory = Mock(return_value=generator)
     monkeypatch.setattr(
-        tutorial_utils,
+        _atomic_fixtures,
         "create_parallel_jaw_grasp_pose_generator",
         generator_factory,
     )
@@ -1997,7 +2091,7 @@ class _FrankaLimitRobot(_MetricRobot):
         return torch.stack([lower, upper], dim=-1).unsqueeze(0)
 
 
-def test_suite_loads_tracks_and_keeps_mutable_free_space_config():
+def test_suite_loads_tracks_and_keeps_mutable_track_config():
     suite = load_suite("motion_panda_free_space_smoke")
 
     assert [track.id for track in suite.enabled_tracks()] == ["free-space-common"]
@@ -2006,14 +2100,17 @@ def test_suite_loads_tracks_and_keeps_mutable_free_space_config():
     provider = create_scenario_provider("free_space")
     assert provider.batch_sizes(suite, suite.enabled_tracks()[0]) == [1]
 
-    suite.free_space.batch_sizes = [1, 8]
+    suite.tracks[0].config["batch_sizes"] = [1, 8]
     suite.validate_benchmark()
     assert suite.enabled_tracks()[0].config["batch_sizes"] == [1, 8]
 
 
 def test_free_space_domain_overrides_change_the_generated_case_matrix():
     suite = load_suite("motion_panda_free_space_smoke")
-    suite.free_space.target_types = ["eef"]
+    suite.tracks[0].config[
+        "sampling_method"
+    ] = "joint_templates"  # legacy template contract
+    suite.tracks[0].config["target_types"] = ["eef"]
     suite.enabled_tracks()[0].domains = [
         DomainCfg(
             id="shifted",
@@ -2052,11 +2149,14 @@ class _Ur5LimitRobot(_MetricRobot):
 
 def test_motion_ur5_free_space_coverage_suite_generates_six_joint_cases():
     suite = load_suite("motion_ur5_free_space_coverage")
+    suite.tracks[0].config[
+        "sampling_method"
+    ] = "joint_templates"  # legacy template contract
     assert suite.robot.id == "ur5"
-    assert suite.free_space.batch_sizes == [1, 8, 64]
-    suite.free_space.seeds = [11]
-    suite.free_space.path_shapes = ["direct"]
-    suite.free_space.waypoint_counts = [1]
+    assert suite.tracks[0].config["batch_sizes"] == [1, 8, 64]
+    suite.tracks[0].config["seeds"] = [11]
+    suite.tracks[0].config["path_shapes"] = ["direct"]
+    suite.tracks[0].config["waypoint_counts"] = [1]
     track = suite.enabled_tracks()[0]
     cases = create_scenario_provider("free_space").generate_cases(
         suite, track, _Ur5LimitRobot(), "arm", batch_size=8
@@ -2073,6 +2173,9 @@ def test_motion_ur5_free_space_coverage_suite_generates_six_joint_cases():
 
 def test_free_space_manifest_is_seed_stable_and_algorithm_independent():
     suite = load_suite("motion_panda_free_space_smoke")
+    suite.tracks[0].config[
+        "sampling_method"
+    ] = "joint_templates"  # legacy template contract
     robot = _FrankaLimitRobot()
     provider = create_scenario_provider("free_space")
     track = suite.enabled_tracks()[0]
@@ -2088,12 +2191,15 @@ def test_free_space_manifest_is_seed_stable_and_algorithm_independent():
 
 def test_free_space_cases_use_one_start_state_bin_each():
     suite = load_suite("motion_panda_free_space_coverage")
-    suite.free_space.target_types = ["eef"]
-    suite.free_space.batch_sizes = [2]
-    suite.free_space.waypoint_counts = [1]
-    suite.free_space.path_shapes = ["direct"]
-    suite.free_space.seeds = [11]
-    suite.free_space.start_state_bins = ["nominal", "near_limit"]
+    suite.tracks[0].config[
+        "sampling_method"
+    ] = "joint_templates"  # legacy template contract
+    suite.tracks[0].config["target_types"] = ["eef"]
+    suite.tracks[0].config["batch_sizes"] = [2]
+    suite.tracks[0].config["waypoint_counts"] = [1]
+    suite.tracks[0].config["path_shapes"] = ["direct"]
+    suite.tracks[0].config["seeds"] = [11]
+    suite.tracks[0].config["start_state_bins"] = ["nominal", "near_limit"]
     track = suite.enabled_tracks()[0]
     cases = create_scenario_provider("free_space").generate_cases(
         suite, track, _FrankaLimitRobot(), "arm", batch_size=2
@@ -2106,12 +2212,15 @@ def test_free_space_cases_use_one_start_state_bin_each():
 def test_free_space_starts_align_across_path_shape_and_waypoint_count():
     """random_reachable starts must be shared across shapes/W for fair compares."""
     suite = load_suite("motion_panda_free_space_smoke")
-    suite.free_space.target_types = ["eef"]
-    suite.free_space.batch_sizes = [2]
-    suite.free_space.waypoint_counts = [1, 5]
-    suite.free_space.path_shapes = ["direct", "s_curve"]
-    suite.free_space.seeds = [11]
-    suite.free_space.start_state_bins = ["random_reachable"]
+    suite.tracks[0].config[
+        "sampling_method"
+    ] = "joint_templates"  # legacy template contract
+    suite.tracks[0].config["target_types"] = ["eef"]
+    suite.tracks[0].config["batch_sizes"] = [2]
+    suite.tracks[0].config["waypoint_counts"] = [1, 5]
+    suite.tracks[0].config["path_shapes"] = ["direct", "s_curve"]
+    suite.tracks[0].config["seeds"] = [11]
+    suite.tracks[0].config["start_state_bins"] = ["random_reachable"]
     track = suite.enabled_tracks()[0]
     cases = create_scenario_provider("free_space").generate_cases(
         suite, track, _FrankaLimitRobot(), "arm", batch_size=2
@@ -2674,7 +2783,7 @@ def test_cold_plan_ms_only_attaches_to_matching_waypoint_row():
     assert by_waypoints[5]["planner_construct_ms"] == pytest.approx(50.0)
 
 
-def test_report_contains_exactly_three_markdown_tables(tmp_path):
+def test_report_includes_workload_and_measured_difficulty_tables(tmp_path):
     suite = load_suite("motion_panda_free_space_smoke")
     aggregates = {
         "report_views": [{"view": "motion_planning", "title": "Motion Planning"}],
@@ -2701,7 +2810,10 @@ def test_report_contains_exactly_three_markdown_tables(tmp_path):
     report = write_markdown_report(tmp_path / "report.md", suite, aggregates)
     text = report.read_text(encoding="utf-8")
 
-    assert text.count("\n| ---") == 3
+    assert text.count("\n| ---") == 6
+    assert "### Common Joint / FullPose comparison" in text
+    assert "### Workload Success & Uncertainty" in text
+    assert "### Measured Start Difficulty" in text
     assert text.count("## Time & Memory") == 1
     assert text.count("## Success & Other Metrics") == 1
     assert text.count("## Leaderboard") == 1
@@ -2734,9 +2846,9 @@ def test_curobo_prepare_backend_exposes_actual_graph_mode():
 
 
 def test_toppra_adapter_close_releases_planner():
-    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
-    from scripts.benchmark.motion_generation.planners.base import PlannerContext
-    from scripts.benchmark.motion_generation.planners.toppra import ToppraAdapter
+    from embodichain_benchmarks.motion_generation.config import PlannerSpecCfg
+    from embodichain_benchmarks.motion_generation.planners.base import PlannerContext
+    from embodichain_benchmarks.motion_generation.planners.toppra import ToppraAdapter
 
     planner = Mock()
     adapter = ToppraAdapter(
@@ -2855,7 +2967,7 @@ def test_success_table_uses_case_macro_and_counts_cases_not_env_slots():
 
 
 def test_timed_call_reports_null_peak_gpu_without_cuda(monkeypatch):
-    from scripts.benchmark.motion_generation.metrics import performance
+    from embodichain_benchmarks.motion_generation.metrics import performance
 
     monkeypatch.setattr(performance.torch.cuda, "is_available", lambda: False)
     measured = performance.timed_call(lambda: 42)
@@ -2865,18 +2977,18 @@ def test_timed_call_reports_null_peak_gpu_without_cuda(monkeypatch):
 
 def test_runner_capability_gate_and_fake_adapter_lifecycle(tmp_path):
     """Exercise AVAILABILITY gating and MEASURED aggregation without DexSim."""
-    from scripts.benchmark.motion_generation.artifacts import TrialJsonlWriter
-    from scripts.benchmark.motion_generation.config import (
+    from embodichain_benchmarks.motion_generation.artifacts import TrialJsonlWriter
+    from embodichain_benchmarks.motion_generation.config import (
         PlannerSpecCfg,
         ProtocolCfg,
         SuiteCfg,
     )
-    from scripts.benchmark.motion_generation.planners.base import PlannerAdapter
-    from scripts.benchmark.motion_generation.registry import (
+    from embodichain_benchmarks.motion_generation.planners.base import PlannerAdapter
+    from embodichain_benchmarks.motion_generation.registry import (
         register_planner_adapter,
         unregister_planner_adapter,
     )
-    from scripts.benchmark.motion_generation.runner import BenchmarkRunner
+    from embodichain_benchmarks.motion_generation.runner import BenchmarkRunner
 
     prepared_case_sets: list[tuple[str, ...]] = []
 
@@ -3117,18 +3229,18 @@ def test_runner_preserves_case_attribution_across_lifecycle_failures(
     tmp_path, failure_mode, failure_phase, failure_code
 ):
     """Every early exit preserves planner attribution for every case."""
-    from scripts.benchmark.motion_generation.artifacts import TrialJsonlWriter
-    from scripts.benchmark.motion_generation.config import (
+    from embodichain_benchmarks.motion_generation.artifacts import TrialJsonlWriter
+    from embodichain_benchmarks.motion_generation.config import (
         PlannerSpecCfg,
         ProtocolCfg,
         SuiteCfg,
     )
-    from scripts.benchmark.motion_generation.planners.base import PlannerAdapter
-    from scripts.benchmark.motion_generation.registry import (
+    from embodichain_benchmarks.motion_generation.planners.base import PlannerAdapter
+    from embodichain_benchmarks.motion_generation.registry import (
         register_planner_adapter,
         unregister_planner_adapter,
     )
-    from scripts.benchmark.motion_generation.runner import BenchmarkRunner
+    from embodichain_benchmarks.motion_generation.runner import BenchmarkRunner
 
     adapter_name = "fake_lifecycle_failure"
 
@@ -3228,7 +3340,7 @@ def test_scenario_reset_publishes_frozen_start_without_stepping(
     full_state: bool,
 ) -> None:
     from types import SimpleNamespace
-    from scripts.benchmark.motion_generation.scenarios.base import ScenarioProvider
+    from embodichain_benchmarks.motion_generation.scenarios.base import ScenarioProvider
 
     class Provider(ScenarioProvider):
         def batch_sizes(self, *args):

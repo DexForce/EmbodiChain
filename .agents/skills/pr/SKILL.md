@@ -45,7 +45,21 @@ Write a description that includes:
 - **Motivation and context**: Why this change is needed
 - **Dependencies**: List any dependencies required for this change
 
-### 4. Select Proportional Validation
+### 4. Review Test Necessity and Select Proportional Validation
+
+Before validation and publication, apply the shared
+[test necessity review](../add-test/SKILL.md#test-necessity-review). Inspect the
+full proposed PR delta from the merge base with its intended target branch,
+plus staged, unstaged, and untracked changes to be included. `git diff HEAD`
+alone misses committed additions. Include new or extended cases and supporting
+fixtures in existing files, not only newly added test files.
+
+Within the task's authorized scope, remove or merge confirmed redundant
+additions and simplify unjustified implementation coupling. Limit cleanup to
+this change and preserve explicitly requested scenarios. Run the affected tests
+after any edits. Briefly state the coverage basis and any meaningful cleanup in
+the PR's validation summary, including existing coverage when no new tests are
+needed; do not create a per-test justification ledger.
 
 Inspect the changed files and validate only the affected behavior. Do not run the
 full test suite automatically.
@@ -193,9 +207,9 @@ gh stack add feat/ui
 gh stack view
 ```
 
-Run the proportional validation selected in step 4 for every affected layer.
-Keep the commits and working tree for each layer complete before adding the next
-branch.
+Apply the test necessity review and proportional validation in step 4 to every
+affected layer, using that layer's own target branch as its base. Keep the
+commits and working tree for each layer complete before adding the next branch.
 
 #### 4. Publish or Update the Stack
 
@@ -337,7 +351,7 @@ Fixes #<issue-number>
 - [x] I have run the `black .` command to format the code base.
 - [ ] I reviewed affected documentation and agent context, updated it where needed, or explained why no update was needed.
 - [ ] Public API changes are reflected in the API docs (`python docs/scripts/check_api_docs.py`), if applicable
-- [ ] I have added tests that prove my fix is effective or that my feature works
+- [ ] I verified appropriate behavioral coverage, reviewed the necessity of added or extended tests, and explained when no new tests were needed.
 - [ ] Dependencies have been updated, if applicable.
 ```
 

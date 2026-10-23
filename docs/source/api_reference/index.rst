@@ -15,7 +15,7 @@ The pages are organized from high-level package namespaces to concrete submodule
 Core Framework
 --------------
 
-The core ``embodichain`` framework is split into six top-level packages:
+The core ``embodichain`` framework includes these top-level packages:
 
 ``compute``
     Shared numerical computations: analytical kinematics, trajectory
@@ -85,6 +85,7 @@ documentation. CI runs this same checker after style checks and before tests.
 
    embodichain/embodichain.gen_sim.task_engine
    public_api
+   benchmarks
    locomotion_tasks
 
 

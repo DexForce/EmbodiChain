@@ -24,14 +24,14 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from scripts.benchmark.motion_generation.aggregation import aggregate_results
-from scripts.benchmark.motion_generation.config import SuiteCfg
-from scripts.benchmark.motion_generation.contracts import EvaluationDomain
-from scripts.benchmark.motion_generation.metrics.trajectory import (
+from embodichain_benchmarks.motion_generation.aggregation import aggregate_results
+from embodichain_benchmarks.motion_generation.config import SuiteCfg
+from embodichain_benchmarks.motion_generation.contracts import EvaluationDomain
+from embodichain_benchmarks.motion_generation.metrics.trajectory import (
     compute_case_outcomes,
     make_failure_outcomes,
 )
-from scripts.benchmark.motion_generation.models import (
+from embodichain_benchmarks.motion_generation.models import (
     AlgorithmRole,
     BenchmarkCase,
     CaseOutcome,
@@ -39,7 +39,7 @@ from scripts.benchmark.motion_generation.models import (
     TrialPhase,
     TrialRecord,
 )
-from scripts.benchmark.motion_generation.reporting import write_markdown_report
+from embodichain_benchmarks.motion_generation.reporting import write_markdown_report
 
 
 def _case(track: str = "neutral", *, atomic: bool = False) -> BenchmarkCase:
@@ -230,6 +230,60 @@ def test_geometry_error_population_includes_a_dynamic_failure() -> None:
     assert row["timed_motion_valid_rate"] == 0.0
 
 
+@pytest.mark.parametrize("scenario", ["free_space", "atomic_skill"])
+@pytest.mark.parametrize("measured_trials", [1, 2])
+def test_success_interval_matches_displayed_rate_for_custom_motion_primary(
+    scenario: str, measured_trials: int
+) -> None:
+    """A speed violation affects motion success while leaving geometry valid."""
+    cases = [
+        replace(
+            _case(atomic=scenario == "atomic_skill"),
+            case_id=f"custom-primary-{seed}",
+            seed=seed,
+            primary_success="motion_valid",
+        )
+        for seed in (11, 23)
+    ]
+    records = []
+    for case in cases:
+        outcome = compute_case_outcomes(
+            SimpleNamespace(
+                positions=torch.tensor([[[0.0], [0.1]]]),
+                dt=torch.tensor([[0.0, 0.1]]),
+                success=True,
+            ),
+            case,
+            _Robot(),
+            "arm",
+            validation_samples=2,
+            position_threshold_m=0.001,
+            rotation_threshold_rad=0.001,
+            joint_limit_tolerance_rad=0.001,
+        )[0]
+        assert outcome.geometry_valid is True
+        assert outcome.velocity_limit_violation is True
+        assert outcome.motion_valid is False
+        records.append(_record(case, outcome=outcome))
+
+    result = aggregate_results(
+        records,
+        [_metadata("solved")],
+        cases,
+        measured_trials,
+        track_scenarios={cases[0].track: scenario},
+    )
+    view = "motion_planning" if scenario == "free_space" else "atomic_skills"
+    row = result[f"{view}_success_and_metrics"][0]
+    expected = 1.0 / measured_trials if scenario == "free_space" else 0.0
+    assert row["seed_clusters"] == 2
+    assert row["geometry_valid_rate"] == pytest.approx(1.0 / measured_trials)
+    assert row["motion_valid_rate"] == 0.0
+    assert row["success_rate"] == pytest.approx(expected)
+    assert row["success_ci_lower"] == pytest.approx(expected)
+    assert row["success_ci_upper"] == pytest.approx(expected)
+
+
 @pytest.mark.parametrize("unsupported", [False, True])
 def test_effective_algorithm_preserves_each_source_population(
     unsupported: bool,
@@ -354,7 +408,7 @@ def test_unsupported_algorithm_has_no_rates_or_rank_and_renders_na(
                 assert rendered["geometry_valid_rate"] == "N/A"
                 assert rendered["coverage_rate"] == "0.00%"
                 checked_tables += 1
-    assert checked_tables == 1
+    assert checked_tables == (1 if atomic else 2)
 
 
 @pytest.mark.parametrize(
@@ -419,6 +473,9 @@ def test_explicit_scenario_mapping_separates_scopes_and_mixed_reports(tmp_path) 
         "motion_planning_time_and_memory",
         "motion_planning_success_and_metrics",
         "motion_planning_leaderboard",
+        "motion_planning_common_leaderboard",
+        "motion_planning_workload_summary",
+        "motion_planning_measured_difficulty",
         "atomic_skills_time_and_memory",
         "atomic_skills_success_and_metrics",
         "atomic_skills_leaderboard",
@@ -444,7 +501,8 @@ def test_explicit_scenario_mapping_separates_scopes_and_mixed_reports(tmp_path) 
         tmp_path / "report.md", SuiteCfg(), result
     ).read_text()
     assert "## Motion Planning" in report and "## Atomic Skills" in report
-    assert report.count("\n| ---") == 6
+    assert report.count("\n| ---") == 9
+    assert "### Common Joint / FullPose comparison" in report
     assert "nominal" in report.lower()
 
 
@@ -565,3 +623,167 @@ def test_effective_motion_cost_does_not_include_selected_backend_lifecycle() -> 
     assert row["planner_construct_ms"] is None
     assert row["backend_prepare_ms"] is None
     assert row["compile_time_ms"] == 4.0
+
+
+def test_workload_interval_pools_balanced_layouts_and_penalizes_missing_repeats():
+    cases = [
+        replace(
+            _case(),
+            case_id=f"seed-{seed}",
+            seed=seed,
+            scenario_id="reach" if index == 0 else "waypoint_path",
+            num_waypoints=1 if index == 0 else 3,
+            path_shape=shape,
+            start_state_bin=start,
+        )
+        for index, (seed, shape, start) in enumerate(
+            zip(
+                [11, 23, 37],
+                ["direct", "l_turn", "s_curve"],
+                ["nominal", "near_limit", "near_singularity"],
+            )
+        )
+    ]
+    records = [
+        replace(
+            _record(case),
+            scenario_id=case.scenario_id,
+            waypoint_count=case.num_waypoints,
+            outcomes=(
+                _outcome() if index == 0 else make_failure_outcomes(1, "failed")[0],
+            ),
+        )
+        for index, case in enumerate(cases[:2])
+    ]
+    result = aggregate_results(
+        records,
+        [_metadata("solved")],
+        cases,
+        2,
+        track_scenarios={"neutral": "free_space"},
+    )
+    assert all(
+        row["success_ci_lower"] is None
+        for row in result["motion_planning_success_and_metrics"]
+    )
+    (summary,) = result["motion_planning_workload_summary"]
+    assert summary["success_rate"] == pytest.approx(1 / 6)
+    assert summary["coverage_rate"] == pytest.approx(1 / 3)
+    assert summary["seed_clusters"] == 3
+    assert summary["success_ci_lower"] == 0
+    assert summary["success_ci_upper"] == 0.5
+    assert summary["uncertainty_warning"] == "few_seed_clusters"
+    assert summary["waypoint_count"] is None
+    assert summary["start_state_bin"] is None
+
+
+def test_measured_difficulty_splits_heterogeneous_rows_with_overlapping_axes():
+    cases = [
+        replace(
+            _case(),
+            case_id=f"mixed-{seed}",
+            seed=seed,
+            batch_size=2,
+            start_state_bin="near_limit",
+            case_parameters={
+                "conditioning_class": ["near_singular", "regular"],
+                "joint_limit_class": ["near_limit", "near_limit"],
+            },
+        )
+        for seed in [11, 23]
+    ]
+    failure = replace(
+        _outcome(), env_index=0, ordered_waypoints_reached=False, motion_valid=False
+    )
+    success = replace(_outcome(), env_index=1)
+    records = [
+        replace(_record(case), batch_size=2, outcomes=(failure, success))
+        for case in cases
+    ]
+    result = aggregate_results(
+        records,
+        [_metadata("solved")],
+        cases,
+        2,
+        track_scenarios={"neutral": "free_space"},
+    )
+    rows = {
+        row["conditioning_class"]: row
+        for row in result["motion_planning_measured_difficulty"]
+    }
+    assert set(rows) == {"near_singular", "regular"}
+    assert rows["near_singular"]["success_rate"] == 0
+    assert rows["regular"]["success_rate"] == 0.5
+    assert all(
+        row["joint_limit_class"] == "near_limit" and row["batch_size"] == 2
+        for row in rows.values()
+    )
+    assert all(
+        row["coverage_rate"] == 0.5 and row["seed_clusters"] == 2
+        for row in rows.values()
+    )
+    assert sum(row["population_rows"] for row in rows.values()) == 4
+
+
+def test_start_error_quantiles_include_rejected_native_outputs():
+    case = _case()
+    outcome = replace(_outcome(), start_state_valid=False, start_joint_error_rad=0.01)
+    result = aggregate_results(
+        [_record(case, outcome=outcome)],
+        [_metadata("solved")],
+        [case],
+        1,
+        track_scenarios={"neutral": "free_space"},
+    )
+    (row,) = result["motion_planning_workload_summary"]
+    assert row["n_valid"] == 0
+    assert row["start_error_measured_rows"] == 1
+    assert row["start_joint_error_rad_p95"] == 0.01
+    assert row["start_joint_error_rad_max"] == 0.01
+    assert row["start_state_valid_rate"] == 0
+
+
+def test_workloads_keep_resolved_physical_distance_ranges_separate():
+    cases = [
+        replace(
+            _case(),
+            case_id=f"length-{index}",
+            seed=index,
+            case_parameters={
+                "distance_bin": "near",
+                "distance_unit": "m",
+                "translation_range_m": bounds,
+            },
+        )
+        for index, bounds in enumerate([[0.01, 0.02], [0.2, 0.3]])
+    ]
+    result = aggregate_results(
+        [_record(case) for case in cases],
+        [_metadata("solved")],
+        cases,
+        1,
+        track_scenarios={"neutral": "free_space"},
+    )
+    rows = result["motion_planning_workload_summary"]
+    assert len(rows) == 2
+    assert {row["translation_range_m"] for row in rows} == {(0.01, 0.02), (0.2, 0.3)}
+    assert all(row["seed_clusters"] == 1 for row in rows)
+
+
+def test_performance_replay_does_not_claim_independent_quality_uncertainty():
+    first = replace(
+        _case(), case_parameters={"measurement_purpose": "performance_replay"}
+    )
+    second = replace(first, case_id="second", seed=19)
+    result = aggregate_results(
+        [_record(first), _record(second)],
+        [_metadata("solved")],
+        [first, second],
+        1,
+        track_scenarios={first.track: "free_space"},
+    )
+    row = result["motion_planning_success_and_metrics"][0]
+    assert row["measurement_purpose"] == "performance_replay"
+    assert row["seed_clusters"] is None
+    assert row["success_ci_lower"] is row["success_ci_upper"] is None
+    assert row["uncertainty_warning"] == "performance_replay_not_independent_quality"

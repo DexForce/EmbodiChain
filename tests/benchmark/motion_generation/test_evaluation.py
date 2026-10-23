@@ -25,15 +25,15 @@ from pathlib import Path
 import pytest
 import torch
 
-from scripts.benchmark.motion_generation.aggregation import aggregate_results
-from scripts.benchmark.motion_generation.artifacts import TrialJsonlWriter
-from scripts.benchmark.motion_generation.config import SuiteCfg, TrackCfg
-from scripts.benchmark.motion_generation.contracts import (
+from embodichain_benchmarks.motion_generation.aggregation import aggregate_results
+from embodichain_benchmarks.motion_generation.artifacts import TrialJsonlWriter
+from embodichain_benchmarks.motion_generation.config import SuiteCfg, TrackCfg
+from embodichain_benchmarks.motion_generation.contracts import (
     PhysicalEvaluation,
     StageOutcome,
     validate_physical_evaluations,
 )
-from scripts.benchmark.motion_generation.evaluation import (
+from embodichain_benchmarks.motion_generation.evaluation import (
     STANDARD_VERSION,
     SKILL_CRITERIA,
     StageEvidence,
@@ -41,7 +41,7 @@ from scripts.benchmark.motion_generation.evaluation import (
     evaluate_skill_stages,
     validate_standard_evaluation,
 )
-from scripts.benchmark.motion_generation.models import (
+from embodichain_benchmarks.motion_generation.models import (
     AlgorithmRole,
     BenchmarkCase,
     CaseOutcome,
@@ -50,7 +50,7 @@ from scripts.benchmark.motion_generation.models import (
     TrialRecord,
     with_physical_evaluation,
 )
-from scripts.benchmark.motion_generation.reporting import write_markdown_report
+from embodichain_benchmarks.motion_generation.reporting import write_markdown_report
 
 
 def _evidence(window: str, **measurements: float | bool) -> StageEvidence:
@@ -551,3 +551,27 @@ def test_suite_can_explicitly_rank_physical_success() -> None:
     assert metrics["physical_skill_success_rate"] == 1.0
     assert metrics["end_to_end_success_rate"] == 0.0
     assert aggregates["atomic_skills_leaderboard"][0]["overall_success_rate"] == 1.0
+
+
+@pytest.mark.parametrize(
+    "attribute,ranking,expected",
+    [
+        ("task_success", "end_to_end", 0.0),
+        ("physical_skill_success", "physical_skill", 1.0),
+    ],
+)
+def test_atomic_ranking_label_matches_actual_success_metric(
+    attribute, ranking, expected
+):
+    case = replace(_case(), primary_success=attribute)
+    outcome = with_physical_evaluation(
+        replace(_outcome(), motion_valid=False),
+        _primitive(0.002),
+        skill_id=case.skill_id,
+    )
+    row = _aggregates([case], [_record(case, (outcome,))])["atomic_skills_leaderboard"][
+        0
+    ]
+    assert row["ranking"] == ranking
+    assert row["overall_success_rate"] == expected
+    assert row["physical_skill_success_rate"] == 1.0

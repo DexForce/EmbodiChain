@@ -174,12 +174,18 @@ Thin `.claude/skills/` and `.github/copilot/` adapters should point back to
 the canonical `.agents/skills/<skill>/SKILL.md`; do not duplicate the full
 instructions in adapters.
 
-### 11. Check Test Coverage
+### 11. Check Test Coverage and Necessity
 
-For any new public module or function:
-- A corresponding test must exist at `tests/<subpackage>/test_<module>.py`
-- Test file must also have the Apache 2.0 header
-- Report if tests are missing
+Apply the shared
+[test necessity review](../add-test/SKILL.md#test-necessity-review) to the changed
+behavior and any added or extended cases. Confirm that observable behavior and
+real regressions have meaningful coverage; reuse sufficient existing tests
+without requiring a new test file for every public module or function.
+
+Report an actual unverified contract or regression when coverage is missing.
+Review additions for redundancy and verification value, and briefly identify
+the existing coverage relied upon or why runtime tests are unnecessary. Check
+test file headers with the other changed Python files in step 4.
 
 ### 12. Summary Report
 
@@ -198,7 +204,7 @@ Pre-Commit Check Results
 [PASS] @configclass usage
 [PASS] Targeted tests — tests/foo/test_bar.py
 [N/A] Full test suite — isolated change covered by targeted tests
-[WARN] Missing tests for: bar.py
+[PASS] Coverage and test necessity — existing coverage reused; no redundant additions
 
 Fix the above issues before committing.
 ```

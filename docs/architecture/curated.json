@@ -307,6 +307,35 @@
       "details": "Atomic Skills form the typed boundary between semantic intent and executable action plans. The engine owns planning resources and creates execution sessions. A runner and command sink dispatch commands; the engine itself does not advance the environment."
     },
     {
+      "id": "motion-benchmarks",
+      "label": "Motion benchmarks",
+      "kind": "package",
+      "topic_ids": [
+        "motion-planning",
+        "atomic-actions"
+      ],
+      "summary": "Evaluates motion planners and Atomic Skills using installed suites and external adapters.",
+      "details": "Call run_benchmark from another Python project, or use the motion-generation CLI, to select a packaged suite and planner adapters. The benchmark owns seeded case generation, simulation lifetime, evaluation, and report artifacts. Motion Planning and Atomic Skills retain separate evaluation criteria.",
+      "boundaries": [
+        "Loading a suite does not construct a simulator. Run evaluations serially within a process."
+      ],
+      "evidence": [
+        {
+          "path": "extensions/embodichain_benchmarks/motion_generation/__init__.py",
+          "symbol": "<module>",
+          "start_line": 17,
+          "end_line": 21,
+          "excerpt": "\"\"\"Evaluate motion planners using installed suites and external adapters.\n\nConfiguration and evaluation contracts load on access. Importing the package\nor loading a suite does not construct a simulator.\n\"\"\""
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/benchmarks",
+          "label": "Benchmark API and external adapters"
+        }
+      ]
+    },
+    {
       "id": "motion-generator",
       "label": "MotionGenerator",
       "kind": "class",
@@ -5651,6 +5680,42 @@
           "excerpt": "from .expansion import ScenePoseChange, SceneVariant"
         }
       ]
+    },
+    {
+      "id": "cli-calls-motion-benchmarks",
+      "source": "cli",
+      "target": "motion-benchmarks",
+      "relation": "calls",
+      "description": "Dispatch motion-generation evaluation to the installed benchmark package.",
+      "provenance": "source-reviewed",
+      "scope": "The motion-generation subcommand uses _run_motion_generation_cli; other benchmark subcommands have separate handlers.",
+      "evidence": [
+        {
+          "path": "embodichain/cli/benchmark.py",
+          "symbol": "_run_motion_generation_cli",
+          "start_line": 57,
+          "end_line": 59,
+          "excerpt": "    from embodichain_benchmarks.motion_generation.cli import run_from_args\n\n    run_from_args(args)"
+        }
+      ]
+    },
+    {
+      "id": "motion-benchmarks-constructs-simulation",
+      "source": "motion-benchmarks",
+      "target": "simulation-manager",
+      "relation": "constructs",
+      "description": "Create a simulation manager for a fixed benchmark scenario batch.",
+      "provenance": "source-reviewed",
+      "scope": "BenchmarkRunner._create_simulation.",
+      "evidence": [
+        {
+          "path": "extensions/embodichain_benchmarks/motion_generation/runner.py",
+          "symbol": "BenchmarkRunner._create_simulation",
+          "start_line": 166,
+          "end_line": 173,
+          "excerpt": "        sim = SimulationManager(\n            SimulationManagerCfg(\n                headless=self.headless,\n                sim_device=str(self.device),\n                num_envs=batch_size,\n                arena_space=2.0,\n            )\n        )"
+        }
+      ]
     }
   ],
   "views": [
@@ -5680,6 +5745,7 @@
         "scene-expansion-integration",
         "mllm",
         "atomic-engine",
+        "motion-benchmarks",
         "motion-generator",
         "planners",
         "solvers",
@@ -5828,7 +5894,9 @@
         "scene-services-calls-compute-layout",
         "scene-services-declares-manager-entities",
         "scene-services-references-manager",
-        "scene-recipes-import-expansion-contracts"
+        "scene-recipes-import-expansion-contracts",
+        "cli-calls-motion-benchmarks",
+        "motion-benchmarks-constructs-simulation"
       ],
       "groups": [
         {
@@ -5868,6 +5936,7 @@
           "label": "Motion capabilities",
           "node_ids": [
             "atomic-engine",
+            "motion-benchmarks",
             "motion-generator",
             "planners",
             "solvers",
@@ -6131,6 +6200,7 @@
         "batch-entity",
         "object-backends",
         "atomic-engine",
+        "motion-benchmarks",
         "motion-generator",
         "planners",
         "solvers",
@@ -6185,7 +6255,8 @@
         "scene-services-calls-compute-layout",
         "scene-services-declares-manager-entities",
         "scene-services-references-manager",
-        "scene-recipes-import-expansion-contracts"
+        "scene-recipes-import-expansion-contracts",
+        "motion-benchmarks-constructs-simulation"
       ],
       "groups": [
         {
@@ -6229,6 +6300,7 @@
           "label": "Motion & reachability",
           "node_ids": [
             "atomic-engine",
+            "motion-benchmarks",
             "motion-generator",
             "planners",
             "solvers",

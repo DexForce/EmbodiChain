@@ -1,0 +1,173 @@
+{
+  "asset_archive": "UniversalRobots_v4.zip",
+  "asset_md5": "a92eda28a1d2f9034252cdb2936ceffc",
+  "asset_revision": "07048cb12b89fe93eb3d2f3d22ea62493d3ab3e6",
+  "render_cfg": {
+    "renderer": "rt",
+    "spp": 1,
+    "denoising": {
+      "window": "dlss",
+      "offscreen": "dlss"
+    },
+    "dlss": {
+      "dlss_quality": 2,
+      "upsample_ratio": null,
+      "render_width": 0,
+      "render_height": 0,
+      "target_width": 0,
+      "target_height": 0,
+      "tiled_enabled": true,
+      "exposure_compensation": 1.0
+    },
+    "nrd": {
+      "max_indirect_bounces": 1,
+      "denoising_range": 500000.0,
+      "disocclusion_threshold": 0.01,
+      "disocclusion_threshold_alternate": 0.05,
+      "disocclusion_threshold_mix_enabled": true,
+      "history_confidence_enabled": true,
+      "history_confidence_probe_stride": 5,
+      "history_confidence_sigma_scale": 2.0,
+      "history_confidence_sensitivity": 1.0,
+      "max_accumulated_frame_num": 30,
+      "max_fast_accumulated_frame_num": 6,
+      "history_fix_frame_num": 3,
+      "diffuse_prepass_blur_radius": 30.0,
+      "specular_prepass_blur_radius": 50.0,
+      "anti_firefly_enabled": false,
+      "sh_mode_enabled": false,
+      "validation_enabled": false,
+      "max_stabilized_frame_num": 63,
+      "min_blur_radius": 1.0,
+      "max_blur_radius": 30.0,
+      "antilag_luminance_sigma_scale": 2.0,
+      "antilag_luminance_sensitivity": 3.0,
+      "taa_min_current_weight": 0.0625,
+      "taa_sigma_scale": 2.0,
+      "taa_depth_rejection_enabled": true,
+      "taa_tone_mapping_enabled": false
+    },
+    "tone_mapping_enabled": false,
+    "tone_mapping_exposure": 1.0,
+    "min_bounces": 4,
+    "max_bounces": 8
+  },
+  "scene": {
+    "presentation": "SimulationManager defaults",
+    "direct_lights": [],
+    "emission_color": [
+      0.92,
+      0.95,
+      1.0
+    ],
+    "emission_intensity": 80.0
+  },
+  "camera": {
+    "width": 1200,
+    "height": 960,
+    "intrinsics": [
+      1720.0,
+      1720.0,
+      600.0,
+      480.0
+    ],
+    "up": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "near": 0.02,
+    "far": 60.0,
+    "framing": "Shared view direction and intrinsics; distance scaled to link-position bounds."
+  },
+  "display_joint_angles_degrees": [
+    0,
+    -90,
+    90,
+    -90,
+    -90,
+    0
+  ],
+  "physics_stepped": false,
+  "warmup_frames": 48,
+  "images": {
+    "ur3.png": {
+      "variant": "ur3",
+      "camera_eye": [
+        0.5037342473053111,
+        -1.0645680833958007,
+        0.8508093965839915
+      ],
+      "camera_target": [
+        -0.1493000088739791,
+        -0.05989999696612358,
+        0.19777514040470123
+      ]
+    },
+    "ur3e.png": {
+      "variant": "ur3e",
+      "camera_eye": [
+        0.5047770905062695,
+        -1.0713111578704602,
+        0.8517774211896555
+      ],
+      "camera_target": [
+        -0.14900016784349646,
+        -0.06549999117851257,
+        0.19800016283988953
+      ]
+    },
+    "ur5.png": {
+      "variant": "ur5",
+      "camera_eye": [
+        0.6054015064259426,
+        -1.373850264460621,
+        1.1059308999796764
+      ],
+      "camera_target": [
+        -0.24344991147518158,
+        -0.06792500615119934,
+        0.25707948207855225
+      ]
+    },
+    "ur5e.png": {
+      "variant": "ur5e",
+      "camera_eye": [
+        0.7247597532450866,
+        -1.5624767275543872,
+        1.2647600131213377
+      ],
+      "camera_target": [
+        -0.24600011110305786,
+        -0.0690000131726265,
+        0.29400014877319336
+      ]
+    },
+    "ur10.png": {
+      "variant": "ur10",
+      "camera_eye": [
+        0.8765489171099321,
+        -1.9882382960117213,
+        1.5901992315697302
+      ],
+      "camera_target": [
+        -0.3440000995492909,
+        -0.11047057807445526,
+        0.3696502149105072
+      ]
+    },
+    "ur10e.png": {
+      "variant": "ur10e",
+      "camera_eye": [
+        0.9653564589536838,
+        -2.1047021093258156,
+        1.707856689623659
+      ],
+      "camera_target": [
+        -0.3454999178647995,
+        -0.08799999114353335,
+        0.3970003128051758
+      ]
+    }
+  }
+}
