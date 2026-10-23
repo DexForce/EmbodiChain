@@ -57,6 +57,11 @@ own any conversion.
 leading batch axes. FK returns `(..., 4, 4)`; nearest IK returns boolean success
 `(...)` and qpos `(..., dof)` without a candidate axis. Robot broadcasts root
 transforms over those axes without materializing per-target copies.
+`BaseSolver.get_fk()` falls back to the same eager PK computation if the optional
+compiled FK fails at warmup or later encounters a Dynamo compilation/cache limit.
+That fallback preserves TCP application and gradients; ordinary input/runtime
+errors still propagate. Do not raise global compiler-cache limits to make a
+multi-robot benchmark complete.
 
 Concrete `get_ik()` APIs retain their own candidate and failure shapes. Pink
 returns `(N, 1, dof)`. Pytorch's normal nearest path retains a singleton

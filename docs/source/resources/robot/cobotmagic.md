@@ -1,12 +1,26 @@
 # CobotMagic
 
-CobotMagic is a versatile dual-arm collaborative robot developed by AgileX Robotics. It is widely used in simulation, education, industry, and service scenarios. All examples in this document are based on the latest PourWater task environment.
+CobotMagic is a fixed-base dual-arm robot from AgileX Robotics. EmbodiChain's
+default preset combines two 6-DOF arms with V100 parallel grippers.
 
-<div style="text-align: center;">
-  <img src="../../_static/robots/cobotmagic.jpg" alt="CobotMagic" style="height: 400px; width: auto;"/>
-  <p><b>CobotMagic</b></p>
-</div>
+<figure style="text-align: center; margin: 20px auto; max-width: 960px;">
+  <img src="../../_static/robots/cobotmagic.jpg" alt="CobotMagic with two V100 grippers, shown in an open-gripper display pose with both arm bases on the ground" width="1600" height="1080" style="display: block; width: 100%; height: auto;"/>
+  <figcaption><b>CobotMagic · V100 grippers · 14 independent control DOFs</b></figcaption>
+</figure>
 
+The image uses the registered `CobotMagic` preset, its default parallel arm
+mounts and a display pose with open grippers. It is rendered with
+`RenderCfg(renderer="rt")` (OfflineRT) and three soft area lights to reveal
+the dark grippers and joint housings. The illustrated bases are at ground
+level; task deployments configure their mounting height through `init_pos`.
+
+:::{dropdown} Image rendering settings
+1600 × 1080; 1 sample per pixel; DLSS offscreen reconstruction (quality 2);
+tone mapping off; exposure 1.0. The default ground and environment emission
+are supplemented by neutral key, fill and rim rectangular lights. Exact
+camera, lighting and joint settings are recorded in the
+[render manifest](../../_static/robots/cobotmagic_render.json).
+:::
 
 ## Key Features
 
@@ -27,7 +41,7 @@ CobotMagic is a versatile dual-arm collaborative robot developed by AgileX Robot
 | Independent control DOF | 14 (six arm joints and one gripper command per side) |
 | Gripper models        | V70 / V100                                                       |
 | Layout types          | NORMAL (standard) / FACE_TO_FACE / CUSTOM                        |
-| Initial base height   | 0.7775m (adjustable)                                             |
+| Example mounting height | 0.7775 m in the reusable CobotMagic embodiment; adjustable through `init_pos` |
 | Mobile base support   | **Not supported** in the current version (fixed base only)        |
 
 > **Note:** The current version of CobotMagic does **not** support a mobile base. All examples and environments assume a fixed base configuration.

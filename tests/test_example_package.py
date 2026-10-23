@@ -50,7 +50,12 @@ def test_distribution_preserves_the_ordinary_examples_tree(tmp_path: Path) -> No
         assert (output / relative).is_file(), relative
     assert all(
         name.partition(".")[0]
-        in {"embodichain", "embodichain_tasks", "embodichain_robots"}
+        in {
+            "embodichain",
+            "embodichain_tasks",
+            "embodichain_robots",
+            "embodichain_benchmarks",
+        }
         for name in get_packages()
     )
     assert "examples" not in get_package_dir()

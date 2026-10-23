@@ -30,6 +30,10 @@ import warp as wp
     [
         ("embodichain.compute", ["warp", "torch", "embodichain.lab"]),
         (
+            "embodichain.compute.geometry.rigid",
+            ["embodichain.lab", "dexsim"],
+        ),
+        (
             "embodichain.compute.geometry._warp.convex_query",
             [
                 "embodichain.lab",

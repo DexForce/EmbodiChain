@@ -36,7 +36,8 @@ MIRROR = "https://mirror.example.com/embodichain_data/resolve/main/"
 _COLLECT_URLS = """
 import json
 from embodichain.data import dataset
-from embodichain.data.assets import CobotMagicArm, UnitreeGo2Locomotion
+from embodichain.data.assets import CobotMagicArm, UnitreeGo2Locomotion, UniversalRobots
+from embodichain.data.assets.w1_assets import DexforceW1V030
 
 urls = {}
 
@@ -48,7 +49,7 @@ def capture(self, prefix, descriptor, path):
     raise Captured  # stop before anything is downloaded
 
 dataset.EmbodiChainDataset.__init__ = capture
-for cls in (CobotMagicArm, UnitreeGo2Locomotion):
+for cls in (CobotMagicArm, UnitreeGo2Locomotion, UniversalRobots, DexforceW1V030):
     try:
         cls()
     except Captured:
@@ -112,11 +113,21 @@ def test_assets_download_from_the_configured_prefix(prefix: str) -> None:
         f"{MIRROR}robot_assets/UnitreeGo2Locomotion.zip",
         f"{HF_PREFIX}robot_assets/UnitreeGo2Locomotion.zip",
     ]
+    # The corrected UR3 palette is versioned independently of older downloads.
+    assert urls["UniversalRobotsV4"] == [
+        f"{MIRROR}robot_assets/UniversalRobots_v4.zip",
+        f"{HF_PREFIX}robot_assets/UniversalRobots_v4.zip",
+    ]
+    # Corrected W1 visuals overwrite the existing V030 archive and cache.
+    assert urls["DexforceW1V030"] == [f"{MIRROR}dexforce_w1/v030/w1.zip"]
 
 
 @pytest.mark.no_sim
-def test_locomotion_does_not_repeat_the_hub_url() -> None:
+def test_assets_do_not_repeat_the_hub_url() -> None:
     urls = _consumer_urls(HF_PREFIX)
     assert urls["UnitreeGo2Locomotion"] == [
         f"{HF_PREFIX}robot_assets/UnitreeGo2Locomotion.zip"
+    ]
+    assert urls["UniversalRobotsV4"] == [
+        f"{HF_PREFIX}robot_assets/UniversalRobots_v4.zip"
     ]

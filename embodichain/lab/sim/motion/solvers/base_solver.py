@@ -21,6 +21,14 @@ from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Union
 
 import numpy as np
 import torch
+from torch._dynamo import exc as _dynamo_exc
+
+# Dynamo added separate cache-limit exceptions across supported Torch versions.
+_FK_COMPILER_ERRORS = (
+    _dynamo_exc.TorchDynamoException,
+    getattr(_dynamo_exc, "FailOnRecompileLimitHit", _dynamo_exc.TorchDynamoException),
+    getattr(_dynamo_exc, "RecompileLimitExceeded", _dynamo_exc.TorchDynamoException),
+)
 
 from embodichain.utils import configclass, logger
 from embodichain.utils.math import inv_transform
@@ -602,8 +610,18 @@ class BaseSolver(metaclass=ABCMeta):
         if self.pk_serial_chain is None:
             logger.log_error("Kinematic chain is not initialized.")
             return torch.eye(4, device=self.device)
-        # Compute forward kinematics
-        ee_link_xpos = self.compiled_fk(qpos)[-1, :, :, :]
+        # A shape or chain guard can exhaust Dynamo after successful warmup.
+        # Recover only compiler failures, keeping the same differentiable FK.
+        try:
+            transforms = self.compiled_fk(qpos)
+        except _FK_COMPILER_ERRORS as exc:
+            logger.log_warning(
+                "Compiled FK became unavailable; using eager FK for "
+                f"{self.root_link_name}->{self.end_link_name}: {str(exc).splitlines()[0]}"
+            )
+            self.compiled_fk = self.pk_serial_chain.forward_kinematics_tensor
+            transforms = self.compiled_fk(qpos)
+        ee_link_xpos = transforms[-1, :, :, :]
 
         # Ensure batch format for TCP
         batch_size = qpos.shape[0]
