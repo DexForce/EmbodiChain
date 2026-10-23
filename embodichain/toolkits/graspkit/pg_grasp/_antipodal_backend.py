@@ -31,9 +31,10 @@ import viser
 import viser.transforms as tf
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
-from embodichain.toolkits.graspkit.pose_generator import GraspRegionSelector
+if TYPE_CHECKING:
+    from .pose_generator import GraspRegionSelector
 from embodichain.utils import logger
 from embodichain.utils.nms import pose_nms
 from embodichain.toolkits.graspkit.pg_grasp.antipodal_sampler import (
@@ -62,7 +63,6 @@ class _GraspGeometry:
     centers: torch.Tensor
     pair_ids: torch.Tensor
     directions: tuple[torch.Tensor, ...]
-    reason: str
 
 
 class _AntipodalMeshBackend:
@@ -765,14 +765,13 @@ class _AntipodalMeshBackend:
         if pair_ids is None:
             pair_ids = torch.arange(len(origin_points_), device=origin_points_.device)
 
-        def empty(reason):
+        def empty():
             return _GraspGeometry(
                 origin_points_.new_empty((0, 4, 4)),
                 origin_points_.new_empty(0),
                 origin_points_.new_empty((0, 3)),
                 pair_ids[:0],
                 directions,
-                reason,
             )
 
         grasp_x = F.normalize(hit_points_ - origin_points_, dim=-1)
@@ -781,7 +780,7 @@ class _AntipodalMeshBackend:
         valid_mask = (positive_angle - torch.pi / 2).abs() <= self._max_deviation_angle
         if valid_mask.sum() == 0:
             logger.log_warning("No valid antipodal pairs after angle filtering.")
-            return empty("angle_empty")
+            return empty()
 
         centers = (origin_points_ + hit_points_) / 2
         valid_grasp_x = grasp_x[valid_mask]
@@ -835,7 +834,7 @@ class _AntipodalMeshBackend:
         )
         if is_colliding.logical_not().sum() == 0:
             logger.log_warning("No valid antipodal pairs after collision filtering.")
-            return empty("static_collision_empty")
+            return empty()
 
         return _GraspGeometry(
             valid_grasp_poses[~is_colliding],
@@ -843,7 +842,6 @@ class _AntipodalMeshBackend:
             valid_centers[~is_colliding],
             valid_pair_ids[~is_colliding],
             directions,
-            "qualified",
         )
 
     def _rank_geometry(self, geometry, approach_direction, mesh_center):
@@ -955,7 +953,6 @@ class _AntipodalMeshBackend:
             support.centers[selected],
             support.pair_ids[selected],
             support.directions,
-            "qualified",
         )
         result = self._rank_geometry(geometry, approach, center)
         return result if torch.isfinite(result[3]).any() else self._empty_grasp_result()

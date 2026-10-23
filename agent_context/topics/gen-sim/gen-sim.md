@@ -1135,7 +1135,7 @@ the same prepared pairs and approach variants may define an end from the
 angle/NMS/static-qualified support, before ranking truncation. Explicit
 top/bottom or hard task regions remain `mesh_extent`; IK, path and physical
 acquisition failures never activate this reinterpretation. GraspKit owns
-qualification and ranking; its controlled `GraspRegionSelector` extension passes
+qualification and ranking; its Antipodal `pg_grasp.GraspRegionSelector` extension passes
 only qualified rows to the GenSim strategy before top-K. The provider does not
 copy the backend, mutate its cache, or create a second sampler. The adapter
 contract requires regeneration when this policy boundary changes.

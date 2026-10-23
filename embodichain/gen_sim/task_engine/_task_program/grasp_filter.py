@@ -30,7 +30,6 @@ import torch
 
 from embodichain.toolkits.graspkit import (
     ParallelJawGraspPoseGenerator,
-    GraspRegionSelector,
 )
 from embodichain.lab.task_program.semantics import (
     GRASP_AFFORDANCE_CAPABILITY,
@@ -41,6 +40,9 @@ from embodichain.utils.math import pose_inv
 from .e6_clearance import HandClearance
 
 if TYPE_CHECKING:
+    from embodichain.toolkits.graspkit.pg_grasp.pose_generator import (
+        GraspRegionSelector,
+    )
     from .pick_contact import ClosingContactScreen
 
 __all__: list[str] = []

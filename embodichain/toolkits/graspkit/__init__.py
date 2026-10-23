@@ -20,7 +20,6 @@ from __future__ import annotations
 
 from .pose_generator import (
     GraspPoseGenerator,
-    GraspRegionSelector,
     ParallelJawGraspPoseGenerator,
     ParallelJawGripperModelCfg,
     get_parallel_jaw_gripper_model,
@@ -28,7 +27,6 @@ from .pose_generator import (
 
 __all__ = [
     "GraspPoseGenerator",
-    "GraspRegionSelector",
     "ParallelJawGraspPoseGenerator",
     "ParallelJawGripperModelCfg",
     "get_parallel_jaw_gripper_model",

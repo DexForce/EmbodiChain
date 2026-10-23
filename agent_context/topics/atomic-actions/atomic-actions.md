@@ -67,8 +67,8 @@ the original root-midpoint construction and grasp selection. A specialization
 must return a consistent pair: source transport and the receiving attachment
 are derived from that same pose; the hook never commits effects or steps physics.
 
-Grasp generation retains the original mesh-axis partition. GraspKit's optional
-`GraspRegionSelector` may select only angle/NMS/collision-qualified fallback
+Grasp generation retains the original mesh-axis partition. Antipodal's optional
+`pg_grasp.GraspRegionSelector` may select only angle/NMS/collision-qualified fallback
 rows before ranking and top-K, and only when the requested region is empty.
 The default keeps existing custom-service signatures and viable-region RNG
 behavior. Application-specific region interpretation belongs to the provider;
