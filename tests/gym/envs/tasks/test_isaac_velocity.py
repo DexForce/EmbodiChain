@@ -337,7 +337,9 @@ def test_ground_replacement_updates_declared_geometry() -> None:
         vertices=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 1]], dtype=np.float32),
         triangles=np.array([[0, 1, 2]], dtype=np.int32),
     )
-    collision = NewtonCollisionDesc(heightfield_resolution=0.1)
+    collision = NewtonCollisionDesc(
+        convert_to_heightfield=True, heightfield_resolution=0.1
+    )
     sim.configure_ground_plane_collision(newton=collision, geometry=mesh)
     assert declared.collisions[0].geometry_type == mesh.geometry_type
     assert declared.collisions[0].newton is collision

@@ -95,6 +95,7 @@ class IsaacVelocityEnv(EmbodiChainVelocityEnv):
             geometry = GeometryDesc.mesh(
                 vertices=terrain["vertices"], triangles=terrain["triangles"]
             )
+            contact.convert_to_heightfield = True
             contact.heightfield_resolution = float(terrain["resolution"])
         self.sim.configure_ground_plane_collision(newton=contact, geometry=geometry)
         self._graph_motor = None
