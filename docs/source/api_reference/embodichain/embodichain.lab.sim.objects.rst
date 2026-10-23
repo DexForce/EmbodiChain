@@ -542,3 +542,61 @@ Deformable implementation import paths
 .. autosummary::
 
     VolumeDeformableObject
+
+Cable objects
+-------------
+
+``CableObject`` derives from ``BatchEntity`` and retains one public
+``SpawnedCable`` handle per environment. Declare it through
+``SimulationManager.add_cable_object()`` and call ``prepare()`` before accessing
+``data`` or external loads. ``CableObjectData.segment_state_w`` returns one
+coherent ``(environments, segments, 13)`` snapshot in
+``[xyz, xyzw, world COM linear velocity, world angular velocity]`` order.
+Positions already include environment origins. Returned tensors are independent
+snapshots; ``default_segment_state_w`` is immutable engine creation state, not a
+solver-history checkpoint.
+
+Current operations include ``set_force()``, ``set_torque()`` and
+``clear_wrenches()`` for selected environments. Loads follow DexSim's one-outer-step
+lifetime. ``write_segment_state_to_sim()`` accepts selected environment rows in
+the same state layout. This teleport writes both engine buffers and clears
+history for each owning world, including other cables, while preserving targets
+and pending loads. ``CableObject.reset()`` restores its creation state and clears
+its loads; it preserves other bodies and targets.
+
+Use ``SimulationManager.reset_objects_state()`` for complete cable episodes.
+It restores all physical assets, targets, loads and supported runtime controls in
+selected Arenas through one ``Scene.reset_arenas()`` call. Physical asset
+exclusions are rejected before mutation. Global time is preserved. Reset covers
+state, not runtime property or topology edits. Existing contact queries require
+another update after reset or teleport. A cable has no single rigid root pose;
+individual removal and finalized-scene physical topology changes remain unsupported.
+
+.. currentmodule:: embodichain.lab.sim.objects.cable
+
+.. autosummary::
+
+    CableObject
+    CableObjectData
+
+.. autoclass:: CableObject
+    :members:
+    :show-inheritance:
+
+.. autoclass:: CableObjectData
+    :members:
+
+Cable implementation import paths
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.lab.sim.objects.cable.cable
+
+.. autosummary::
+
+    CableObject
+
+.. currentmodule:: embodichain.lab.sim.objects.cable.data
+
+.. autosummary::
+
+    CableObjectData

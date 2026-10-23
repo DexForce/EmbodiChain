@@ -13,7 +13,8 @@ topics:
     NRDCfg, DLSS, NRD, frame_time_delta_ms, explicit physics stepping, arena, DexSim, PhysicsBackendCfg,
     DefaultPhysicsCfg, NewtonPhysicsCfg, VisualObject, VisualObjectCfg, UsdSourceCfg, source_prim_path, add_visual_object, 纯渲染对象, AutoSolverCfg, DexUniSolverCfg, DexUni, runtime control, deformable, particle set,
     ArticulationJointKinematics, get_parent_joint_chain, asset_physics_mode, joint_drive_props, enable_gravity,
-    fixed-cadence playback, quaternion, xyzw]
+    fixed-cadence playback, quaternion, xyzw, cable, CableObject, CableObjectCfg,
+    CableObjectData, 线缆对象]
   paths: [topics/simulation-system/simulation-system.md]
   source_of_truth:
   - embodichain/lab/sim/motion/__init__.py
@@ -31,6 +32,7 @@ topics:
   - embodichain/lab/sim/objects/visual_object.py
   - embodichain/lab/sim/objects/backends/
   - embodichain/lab/sim/objects/deformable/
+  - embodichain/lab/sim/objects/cable/
   - embodichain/lab/sim/objects/gizmo.py
   - embodichain/lab/gym/envs/base_env.py
   watch_paths: [embodichain/lab/sim/sim_manager.py, embodichain/lab/sim/cfg/, embodichain/lab/sim/physics/,
