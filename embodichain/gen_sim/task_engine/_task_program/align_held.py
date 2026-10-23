@@ -54,6 +54,15 @@ __all__: list[str] = []
 ALIGN_HELD_CALL = "gen_sim.align_held"
 
 
+def alignment_target_axis(
+    source: torch.Tensor, *, direction_free: bool
+) -> torch.Tensor:
+    """Keep an undirected vertical axis on its nearest pole; upright remains +Z."""
+    target = torch.zeros_like(source)
+    target[:, 2] = torch.where(source[:, 2] < 0, -1.0, 1.0) if direction_free else 1.0
+    return target
+
+
 class _AlignHeldLowerer(RegisteredSemanticLowerer):
     call_id: ClassVar[str] = ALIGN_HELD_CALL
     target_descriptor = MoveHeldObject.descriptor()
@@ -61,8 +70,8 @@ class _AlignHeldLowerer(RegisteredSemanticLowerer):
 
     def __init__(self, routes: tuple[tuple[Any, ...], ...], robot: Any) -> None:
         self._routes = {
-            (obj, target, preserve): (axis, position)
-            for obj, target, preserve, axis, position in routes
+            (obj, target, preserve, direction_free): (axis, position)
+            for obj, target, preserve, direction_free, axis, position in routes
         }
         self._robot = robot
 
@@ -78,14 +87,20 @@ class _AlignHeldLowerer(RegisteredSemanticLowerer):
             raise TypeError("Held alignment requires MoveHeldObjectOptions.")
         args = dict(call.arguments)
         if (
-            set(args) != {"object", "target", "preserve_yaw"}
+            set(args) - {"axis_direction_free"} != {"object", "target", "preserve_yaw"}
             or type(args["preserve_yaw"]) is not bool
+            or type(args.get("axis_direction_free", False)) is not bool
         ):
             raise ValueError(
                 "Held alignment requires references and a declared yaw policy."
             )
         axis, position = self._routes[
-            (args["object"], args["target"], args["preserve_yaw"])
+            (
+                args["object"],
+                args["target"],
+                args["preserve_yaw"],
+                args.get("axis_direction_free", False),
+            )
         ]
         handoff = GenSimStateHandoff.from_binding(
             bound.binding.action_binding,
@@ -119,8 +134,9 @@ class _AlignHeldLowerer(RegisteredSemanticLowerer):
         source = torch.nn.functional.normalize(
             pose[:, :3, :3] @ pose.new_tensor(axis), dim=-1
         )
-        target = torch.zeros_like(source)
-        target[:, 2] = 1
+        target = alignment_target_axis(
+            source, direction_free=args.get("axis_direction_free", False)
+        )
         cross = torch.cross(source, target, dim=-1)
         sine = torch.linalg.vector_norm(cross, dim=-1)
         cosine = (source * target).sum(-1).clamp(-1, 1)
@@ -141,6 +157,16 @@ class _AlignHeldLowerer(RegisteredSemanticLowerer):
         pose[:, :3, :3] = correction @ pose[:, :3, :3]
         if position is not None:
             pose[:, :3, 3] = pose.new_tensor(position)
+            if args.get("axis_direction_free", False) and (target[:, 2] < 0).any():
+                vertices = held.semantics.affordance.mesh_vertices
+                if vertices is None:
+                    raise ValueError(
+                        "Undirected alignment requires object-local mesh geometry."
+                    )
+                heights = vertices.to(pose) @ pose.new_tensor(axis)
+                pose[:, 2, 3] += torch.where(
+                    target[:, 2] < 0, heights.amin() + heights.amax(), 0.0
+                )
             staging_pose[:, :2, 3] = pose[:, :2, 3]
             # A lower destination must not force the old heading down before
             # the yaw-free planner can select a reachable final orientation.
@@ -192,10 +218,10 @@ class _RetainedAlignHeldLowerer(_AlignHeldLowerer):
 @dataclass(frozen=True, slots=True)
 class _AlignHeldFactory:
     call_id: ClassVar[str] = ALIGN_HELD_CALL
-    revision: ClassVar[str] = "10"
+    revision: ClassVar[str] = "11"
     target_descriptor = MoveHeldObject.descriptor()
     routes: tuple[
-        tuple[str, str, bool, tuple[float, ...], tuple[float, ...] | None], ...
+        tuple[str, str, bool, bool, tuple[float, ...], tuple[float, ...] | None], ...
     ]
     verify_retention: bool = False
 
@@ -204,7 +230,7 @@ class _AlignHeldFactory:
     ) -> _AlignHeldLowerer:
         if engine.robot is not robot:
             raise ValueError("Held alignment must bind the factory's robot.")
-        for obj, _, _, _, _ in self.routes:
+        for obj, _, _, _, _, _ in self.routes:
             scene_registry.resolve(obj, expected_type=SceneObjectRef)
         lowerer = (
             _RetainedAlignHeldLowerer if self.verify_retention else _AlignHeldLowerer
@@ -233,7 +259,8 @@ def with_held_alignment(
         args = call["arguments"]
         obj, target = args["object"], args["target"]
         preserve = args.get("preserve_yaw")
-        if type(preserve) is not bool:
+        direction_free = args.get("axis_direction_free", False)
+        if type(preserve) is not bool or type(direction_free) is not bool:
             raise ValueError(
                 "Held alignment needs an explicit preserve_yaw policy; regenerate the bundle."
             )
@@ -246,10 +273,11 @@ def with_held_alignment(
             raise ValueError(
                 "Held alignment needs an exact staging target and declared axis."
             )
-        routes[(obj, target, preserve)] = (
+        routes[(obj, target, preserve, direction_free)] = (
             obj,
             target,
             preserve,
+            direction_free,
             axes[obj],
             None if values is None else tuple(values[0]["position"]),
         )

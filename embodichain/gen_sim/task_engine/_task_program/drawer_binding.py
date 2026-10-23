@@ -193,8 +193,11 @@ class DrawerRoute:
     binding: PrismaticBinding
     lower: tuple[float, float, float]
     upper: tuple[float, float, float]
+    upright: bool = False
 
     def __post_init__(self) -> None:
+        if type(self.upright) is not bool:
+            raise ValueError("Drawer upright must be a boolean.")
         container, obj, part = inside_parts(self.affordance)
         if (container, obj, part) != (
             self.binding.object_id,
@@ -214,11 +217,14 @@ class DrawerRoute:
         object.__setattr__(self, "upper", tuple(map(float, high)))
 
     def payload(self) -> dict[str, Any]:
-        return {**asdict(self), "binding": self.binding.payload()}
+        result = {**asdict(self), "binding": self.binding.payload()}
+        if not self.upright:
+            result.pop("upright")
+        return result
 
     @classmethod
     def decode(cls, value: dict[str, Any]) -> DrawerRoute:
-        if type(value) is not dict or set(value) != {
+        if type(value) is not dict or set(value) - {"upright"} != {
             "affordance",
             "object_id",
             "binding",
@@ -234,6 +240,12 @@ def drawer_routes(graph: dict[str, Any], scene: Any) -> tuple[DrawerRoute, ...]:
     if not configs:
         return ()
     bindings = graph_bindings(graph, scene)
+    upright_groups = {
+        (node["task_instance_id"], node["call"]["arguments"]["object"])
+        for node in graph["nodes"]
+        if node["call"].get("call_id") == "gen_sim.align_held"
+        and node["call"].get("arguments", {}).get("target") == "current_object_pose"
+    }
     routes = {}
     for node in graph["nodes"]:
         call = node["call"]
@@ -247,6 +259,11 @@ def drawer_routes(graph: dict[str, Any], scene: Any) -> tuple[DrawerRoute, ...]:
         binding = bindings[f"{container}::{part}"]
         low, high = drawer_region(configs[container], binding)
         routes[call["inside"]] = DrawerRoute(
-            call["inside"], obj, binding, tuple(low), tuple(high)
+            call["inside"],
+            obj,
+            binding,
+            tuple(low),
+            tuple(high),
+            upright=(node.get("task_instance_id"), obj) in upright_groups,
         )
     return tuple(routes.values())

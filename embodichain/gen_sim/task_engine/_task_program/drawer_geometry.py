@@ -217,6 +217,7 @@ def placement_pose_candidates(
     high: np.ndarray,
     *,
     margin: float = DRAWER_PLACEMENT_MARGIN,
+    preserve_vertical: bool = False,
 ) -> tuple[np.ndarray, ...]:
     """Generate a bounded set of link-local floor targets for one payload.
 
@@ -254,7 +255,7 @@ def placement_pose_candidates(
     candidates: list[np.ndarray] = []
     extents = np.ptp(vertices, axis=0)
     isotropic = float(extents.max()) <= max(float(extents.min()) * 1.25, 1e-6)
-    if isotropic:
+    if isotropic and not preserve_vertical:
         rotation_variants = (
             rotation,
             _rotation_matrix(np.pi / 2.0, link_rotation[:, 0]) @ rotation,
@@ -263,7 +264,11 @@ def placement_pose_candidates(
     else:
         rotation_variants = tuple(
             _rotation_matrix(angle, link_rotation[:, 2]) @ rotation
-            for angle in DRAWER_PLACEMENT_ROTATIONS
+            for angle in (
+                (*DRAWER_PLACEMENT_ROTATIONS, -np.pi / 2.0, np.pi)
+                if preserve_vertical
+                else DRAWER_PLACEMENT_ROTATIONS
+            )
         )
     for variant_index, world_rotation in enumerate(rotation_variants):
         local_rotation = link_rotation.T @ world_rotation
@@ -290,7 +295,9 @@ def placement_pose_candidates(
                 np.allclose(pose, existing, atol=1e-8) for existing in candidates
             ):
                 candidates.append(pose)
-                if len(candidates) >= DRAWER_PLACEMENT_MAX_CANDIDATES:
+                if len(candidates) >= (
+                    5 if preserve_vertical else DRAWER_PLACEMENT_MAX_CANDIDATES
+                ):
                     return tuple(candidates)
     return tuple(candidates)
 

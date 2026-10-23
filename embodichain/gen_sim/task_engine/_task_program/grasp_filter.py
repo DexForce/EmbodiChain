@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 
 __all__: list[str] = []
 
-GRASP_FILTER_REVISION = 6
+GRASP_FILTER_REVISION = 7
 
 
 def opening_envelope_mask(
@@ -123,7 +123,18 @@ def accepted_candidates(
             + final_grasp[:, None, :3, 3]
         )
         assert rule.plane_z is not None
-        accepted &= world[..., 2].amin(-1) > rule.plane_z + rule.margin
+        lowest = world[..., 2].amin(-1)
+        clearance = lowest > rule.plane_z + rule.margin
+        if len(poses) > 1 and not (accepted & clearance).any():
+            logger.log_info(
+                "GenSim constrained grasp rejection: "
+                f"region={int(accepted.sum())}/{len(poses)}, "
+                f"release_clear={int(clearance.sum())}/{len(poses)}, "
+                f"lowest_finger_z=[{float(lowest.amin()):.6f}, "
+                f"{float(lowest.amax()):.6f}], "
+                f"required_z={rule.plane_z + rule.margin:.6f}."
+            )
+        accepted &= clearance
     return accepted
 
 
@@ -559,6 +570,17 @@ class E6ApproachGraspPoseGenerator(ParallelJawGraspPoseGenerator):
 
     def get_dual_arm_valid_grasp_poses(self, **kwargs: Any) -> Any:
         return self._delegate.get_dual_arm_valid_grasp_poses(**kwargs)
+
+
+def resolve_pick_filter(
+    generator: Any, vertices: torch.Tensor, triangles: torch.Tensor
+) -> TaskGraspPoseGenerator | None:
+    """Resolve rigid Pick rules through the E6 wrapper only for non-handle geometry."""
+    if isinstance(generator, E6ApproachGraspPoseGenerator):
+        if geometry_key(vertices, triangles) in generator._geometry_keys:
+            return None
+        generator = generator._delegate
+    return generator if isinstance(generator, TaskGraspPoseGenerator) else None
 
 
 def install_e6_approach_filters(

@@ -132,6 +132,38 @@ def test_valid_nominal_withdrawal_preserves_exact_trajectory(monkeypatch):
     assert result.plan_success.tolist() == [True]
 
 
+@pytest.mark.parametrize("clear", [False, True])
+def test_nominal_push_requires_scene_clearance_before_contact(monkeypatch, clear):
+    scope, request, context = _scope(monkeypatch)
+    scope.calls.append(scope.calls[-1])
+    original = Plan(
+        torch.tensor([True]),
+        _trajectory(0),
+        segments=(NS(name="approach", stop=2), NS(name="push")),
+    )
+    seen = []
+
+    def inspect(robot, simulation, positions, part):
+        seen.append(positions.clone())
+        return {"valid": clear, "kind": "scene"}
+
+    monkeypatch.setattr(recovery, "check_free_motion", inspect)
+    monkeypatch.setattr(
+        recovery, "_preview_withdrawal", lambda *a, **kw: {"valid": True}
+    )
+    monkeypatch.setattr(recovery, "_tracks", lambda *a: iter(()))
+    result = recovery.recover(
+        scope,
+        request,
+        context,
+        original,
+        lambda _: pytest.fail("no recovery candidates"),
+    )
+    assert torch.equal(seen[0], original.joint_trajectory.positions[0, :2])
+    assert result.plan_success.tolist() == [clear]
+    assert original.plan_success.tolist() == [True]
+
+
 def test_nominal_preview_error_does_not_dispatch_unqualified_terminal(monkeypatch):
     scope, request, context = _scope(monkeypatch)
     original = Plan(torch.tensor([True]), _trajectory(0))

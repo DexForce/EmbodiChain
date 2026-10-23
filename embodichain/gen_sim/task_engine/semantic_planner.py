@@ -790,9 +790,10 @@ class SemanticTaskPlanner:
             ):
                 released_references[object_id] = target_id
 
-            requested_upright = (
-                task_type in {"E1", "E4"} and step.get("orientation_goal") == "upright"
-            )
+            requested_upright = task_type in {"E1", "E4"} and step.get(
+                "orientation_goal"
+            ) in {"upright", "vertical"}
+            direction_free = step.get("orientation_goal") == "vertical"
             if requested_upright:
                 orientation_resource = resource if task_type == "E1" else destination
                 position = self._upright_target_position(object_id, objects)
@@ -812,6 +813,11 @@ class SemanticTaskPlanner:
                                 "object": object_id,
                                 "target": "current_object_pose",
                                 "preserve_yaw": False,
+                                **(
+                                    {"axis_direction_free": True}
+                                    if direction_free
+                                    else {}
+                                ),
                             },
                             "resources": {"primary": source},
                         },
@@ -823,7 +829,7 @@ class SemanticTaskPlanner:
                 ):
                     if task_type == "E1":
                         for index, call in enumerate(calls):
-                            if call["kind"] == "pick":
+                            if call["kind"] == "pick" and not direction_free:
                                 calls[index] = {
                                     "kind": "registered",
                                     "call_id": _PICK_CALL_ID,
@@ -842,6 +848,11 @@ class SemanticTaskPlanner:
                                     "object": object_id,
                                     "target": staging_target,
                                     "preserve_yaw": False,
+                                    **(
+                                        {"axis_direction_free": True}
+                                        if direction_free
+                                        else {}
+                                    ),
                                 },
                                 "resources": {"primary": orientation_resource},
                             },
@@ -853,6 +864,7 @@ class SemanticTaskPlanner:
                             "object": object_id,
                             "target": "current_object_pose",
                             "preserve_yaw": True,
+                            **({"axis_direction_free": True} if direction_free else {}),
                         },
                         "resources": {"primary": orientation_resource},
                     }

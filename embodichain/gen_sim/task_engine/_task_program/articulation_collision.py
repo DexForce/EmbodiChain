@@ -76,6 +76,24 @@ def check_robot_motion(
     return _check_motion(robot, None, positions, control_part, include_scene=False)
 
 
+def articulation_motion_checker(
+    robot: Any, simulation: Any, control_part: str
+) -> Callable[[torch.Tensor], dict[str, Any]]:
+    """Snapshot robot/articulation clearance, not carried-object or rigid clearance."""
+    check = _make_checker(
+        robot, simulation, control_part, include_scene=True, include_rigids=False
+    )
+
+    def inspect(positions: torch.Tensor) -> dict[str, Any]:
+        if positions.ndim != 2 or not torch.isfinite(positions).all():
+            raise ValueError(
+                "Recovery collision samples must be finite (T, robot.dof)."
+            )
+        return {**check(positions), "scope": "discrete_robot_articulation_meshes"}
+
+    return inspect
+
+
 def _check_motion(
     robot: Any,
     simulation: Any,
@@ -101,7 +119,12 @@ def _check_motion(
 
 
 def _make_checker(
-    robot: Any, simulation: Any, control_part: str, *, include_scene: bool
+    robot: Any,
+    simulation: Any,
+    control_part: str,
+    *,
+    include_scene: bool,
+    include_rigids: bool = True,
 ) -> Callable[[torch.Tensor], dict[str, Any]]:
     """Own one read-only FK-calibrated geometry snapshot."""
     import trimesh
@@ -115,7 +138,11 @@ def _make_checker(
         load_collision_meshes=True,
     )
     world = trimesh.collision.CollisionManager()
-    for uid in simulation.get_rigid_object_uid_list() if include_scene else ():
+    for uid in (
+        simulation.get_rigid_object_uid_list()
+        if include_scene and include_rigids
+        else ()
+    ):
         obj = simulation.get_rigid_object(uid)
         pose = obj.get_local_pose(to_matrix=True)[0].detach().cpu().numpy()
         for index, shape in enumerate(obj.get_collision_shapes()):

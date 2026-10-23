@@ -50,7 +50,7 @@ TASK_TYPES = frozenset(TASK_CONTRACTS)
 
 _RELATIONS = RELATIONS
 _ARMS = frozenset({"none", "auto", "left_arm", "right_arm"})
-_ORIENTATIONS = frozenset({"none", "preserve", "upright"})
+_ORIENTATIONS = frozenset({"none", "preserve", "upright", "vertical"})
 _TARGET_STATES = frozenset({"none", "open", "closed", "activated"})
 _LAYOUTS = frozenset({"none", "line"})
 _AXES = frozenset({"none", "world_x", "world_y"})
@@ -743,6 +743,10 @@ def _validate_task_fields(step: Mapping[str, Any], context: str) -> None:
     if task_type != "E4" and step["receive_arm"] != "none":
         raise ValueError(f"{context} receive_arm is only valid for E4.")
     orientation_goal = str(step["orientation_goal"])
+    if orientation_goal == "vertical" and task_type != "E1":
+        raise ValueError(
+            f"{context} undirected vertical orientation is currently supported for E1 only."
+        )
     if task_type == "E2" and orientation_goal != "upright":
         raise ValueError(f"{context} E2 orientation_goal must be upright.")
     if task_type not in {"E1", "E2", "E4"} and orientation_goal != "none":
@@ -909,8 +913,12 @@ def _instruction_prompt(instruction: str) -> str:
         "Use orientation_goal=none unless the instruction explicitly requests "
         "upright orientation or preserving the original orientation. Spatial "
         "placement and handover alone do not imply preserve. "
-        "For E1 and E4, an explicit request to keep a vessel upright, vertical, "
-        "or mouth-up requires orientation_goal=upright, including when the "
+        "For E1 only, use orientation_goal=vertical when the user explicitly "
+        "allows either axis direction (upside-down is acceptable), with no mouth-up "
+        "or base-down requirement. This means an undirected vertical long axis and "
+        "must not require flipping an already vertical object. Otherwise an explicit "
+        "request to keep a vessel upright, vertical, or mouth-up requires "
+        "orientation_goal=upright, including when the "
         "receiver keeps holding it (terminal_behavior=hold). Do not discard "
         "this orientation requirement because the core operation is handover. "
         "If placement is a separate E1 step after a transfer, the preceding E4 "

@@ -679,6 +679,7 @@ def generate_task_program_bundle(
     selected_graph = _refine_upright_targets(selected_graph, scene)
     selected_graph = _refine_coordinated_targets(selected_graph, scene)
     scene_objects = {item["runtime_uid"]: item for item in scene.planner_objects}
+    selected_graph = _preserve_already_upright_pick(selected_graph, scene_objects)
     for node in selected_graph["nodes"]:
         if node["task_type"] == "E4" and node["call"]["kind"] == "pick":
             call = node["call"]
@@ -1408,6 +1409,20 @@ def _task_stability_payload(
                 cfg["kind"] = "supported_region"
             cfg.update(reference=ref, support_contract_revision=1)
             presets[key] = cfg
+    vertical = {
+        (n["task_instance_id"], n["call"]["arguments"]["object"])
+        for n in graph["nodes"]
+        if n["call"].get("call_id") == _ALIGN_HELD_CALL_ID
+        and n["call"]["arguments"].get("axis_direction_free") is True
+    }
+    for node in graph["nodes"]:
+        cfg = presets.get(f"gen_sim.{node['id']}.stable")
+        if (
+            cfg is not None
+            and cfg.get("local_axis") is not None
+            and (node["task_instance_id"], cfg["entity"]) in vertical
+        ):
+            cfg["axis_direction_free"] = True
     result = {
         "schema_version": "gen_sim_task_constraints/v1",
         "presets": presets,
@@ -4623,6 +4638,41 @@ def _upright_release_clearance(source: dict[str, Any]) -> float:
         if slenderness >= 2.5
         else _UPRIGHT_RELEASE_CLEARANCE
     )
+
+
+def _preserve_already_upright_pick(
+    graph: SemanticTaskGraph, objects: dict[str, Any]
+) -> SemanticTaskGraph:
+    """Do not impose an inversion grip on an untouched, already-upright E1 source."""
+    selected = deepcopy(graph)
+    aligned = {
+        (node["task_instance_id"], node["call"]["arguments"]["object"])
+        for node in graph["nodes"]
+        if node["call"].get("call_id") == _ALIGN_HELD_CALL_ID
+        and node["call"]["arguments"].get("target") == "current_object_pose"
+    }
+    moved = set()
+    for node in selected["nodes"]:
+        call = node["call"]
+        obj = call.get("object", call.get("arguments", {}).get("object"))
+        source = objects.get(obj)
+        if (
+            node["task_type"] == "E1"
+            and call.get("call_id") == _PICK_CALL_ID
+            and (node["task_instance_id"], obj) in aligned
+            and obj not in moved
+            and source is not None
+            and (_initial_rotation(source) @ np.asarray(_longest_local_axis(source)))[2]
+            >= math.cos(math.radians(10.0))
+        ):
+            node["call"] = {
+                "kind": "pick",
+                "object": obj,
+                "resources": deepcopy(call["resources"]),
+            }
+        if obj is not None:
+            moved.add(obj)
+    return validate_semantic_task_graph(selected)
 
 
 def _refine_upright_targets(

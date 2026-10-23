@@ -917,7 +917,10 @@ reach/push/open/return suffix, frame budget and control dt remain unchanged;
 longer prefixes reject rather than being accelerated. Shared Slide rebuilds
 the commands, then native joint/velocity/full-robot and fresh approach-scene
 checks qualify them. This does not bypass collision predictions or certify CCD.
-The E6 recovery fingerprint revision 12 owns these changes. A valid nominal paired
+The E6 recovery fingerprint revision 13 owns these changes. Nominal push success
+also checks its free approach against the live scene before accepting the paired
+withdrawal; a collision enters the same existing bounded recovery, not a second
+executor. A valid nominal paired
 continuation retains its exact commands; a supported but unqualified nominal
 terminal enters the same bounded branch search, without dispatching a preview.
 An ordinary rigid lateral Pick/Place pair may reuse goal-conditioned payload
@@ -1080,6 +1083,43 @@ strategy retains the diagonal fallback. E4 source lowerers try the arm-near end 
 diagonally before considering the far end, leaving the other end for reception.
 The wrapper marks only an owned goal
 snapshot; upright and stack constraints take precedence over ordinary policy.
+Constrained rigid Picks resolve their immutable task grasp filter through the
+known E6 approach wrapper only when their geometry is not a bound handle.
+Lowering, candidate selection and roll/path recovery share this resolution;
+unknown providers and handle geometry cannot bypass the E6 policy. The shared
+sampler and its rules remain unmodified, and ordinary adaptive Picks retain
+their existing provider path.
+When every nominal top-down constrained candidate is rejected geometrically,
+the same call-local filter may screen the existing arm-relative diagonal
+strategy. Shared full-Pick planning still owns the trajectory and effects;
+nonempty nominal pools, explicit directions and downstream targets are unchanged.
+Owned yaw-free staging in a drawer deployment also screens the operated robot
+against live articulation meshes while selecting its existing yaw candidates.
+This narrow screen prevents uprighting from pushing a drawer closed; it is not
+a carried-payload or ordinary-rigid scene certificate. Non-drawer staging keeps
+its original robot-proxy screen.
+Drawer routes with an explicit upright alignment in the same task group retain
+that intent in their serialized contract: placement varies yaw, not pitch/roll,
+and first tries a supported release after crossing the rim rather than a high
+drop. The rim retains 25 mm payload clearance without the extra 120 mm legacy
+lift. Before payload-aware transport, these routes rank the same finite entry,
+release and open-hand endpoint candidates; cuRobo transports in the selected
+heading. Place still replans from observed state and checks its complete path.
+This is endpoint ranking, not a full future Place replay. Ordinary drawer routes
+retain their original release order and wire form.
+Explicit E1 `orientation_goal=vertical` means an undirected long axis only
+when the user permits either pole. It keeps ordinary acquisition and serializes
+`axis_direction_free` on alignment calls and their stability presets. Alignment
+selects the nearest vertical pole; runtime and final TaskSpec observers use the
+same absolute axis projection. Existing `upright` stays directed toward +Z and
+does not inherit this relaxation; mouth-up and base-down intent remain directed.
+An untouched E1 source already within ten degrees of directed upright keeps
+ordinary acquisition rather than the inversion-specific grasp-region filter;
+its generated alignment and upright acceptance remain required. Occupied
+upright drawer landings reuse the existing planar-container selector with the
+observed contained payloads. Center and two side preferences stay bounded, and
+release heights 0/25/50/120 mm are ranked before spending at most two full Place
+plans. Empty drawers and ordinary non-upright routes retain their old policies.
 `GenSimPickUp` screens each
 candidate strategy through the shared full pickup planner and retains the exact
 successful trajectory per row; endpoint IK alone is not acceptance. Explicit

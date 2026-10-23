@@ -115,15 +115,19 @@ def geometric_variants(
     valid = (pool.valid & torch.isfinite(pool.costs))[..., None].expand(-1, -1, 2)
     rule = request.goal.semantics.affordance.get_custom_config(_PICK_GRASP_RULE)
     if rule is not None:
-        from .grasp_filter import TaskGraspPoseGenerator
+        from .grasp_filter import resolve_pick_filter
 
         hand = request.binding.endpoint("primary", "grasp").require_target(
             JointPositionTarget
         )
-        generator = action.planning_services.grasp_pose_generator(hand.target_id)
-        if not isinstance(generator, TaskGraspPoseGenerator):
-            raise ValueError("Constrained Pick requires its original geometry filter.")
         affordance = request.goal.semantics.affordance
+        generator = resolve_pick_filter(
+            action.planning_services.grasp_pose_generator(hand.target_id),
+            affordance.mesh_vertices,
+            affordance.mesh_triangles,
+        )
+        if generator is None:
+            raise ValueError("Constrained Pick requires its original geometry filter.")
         scoped = generator.for_pick(
             *rule, affordance.mesh_vertices, affordance.mesh_triangles
         )

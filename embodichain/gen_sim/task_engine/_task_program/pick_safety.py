@@ -34,7 +34,7 @@ from .held_alignment_recovery import _RandomState, _cuda_devices
 __all__: list[str] = []
 
 _PICK_GRASP_RULE = "gen_sim.pick_grasp_rule"
-PICK_OPENING_RECOVERY_REVISION = 2
+PICK_OPENING_RECOVERY_REVISION = 3
 
 
 def _owns_constrained_pick(request: Any, context: Any, generator: Any) -> bool:

@@ -112,6 +112,7 @@ class StabilityConstraint:
     reference_top: float = 0.0
     position_tolerance: float = 0.04
     minimum_alignment: float = 0.8660254037844386
+    axis_direction_free: bool = False
     support_tolerance: float = 0.01
     translation_drift: float = 0.02
     rotation_drift: float = math.pi / 18.0
@@ -121,6 +122,12 @@ class StabilityConstraint:
     com_tolerance: float | None = None
 
     def __post_init__(self) -> None:
+        if type(self.axis_direction_free) is not bool or (
+            self.axis_direction_free and self.local_axis is None
+        ):
+            raise ValueError(
+                "Axis-direction freedom requires a boolean and a declared local axis."
+            )
         if self.com_tolerance is not None and (
             type(self.com_tolerance) not in (int, float)
             or not math.isfinite(self.com_tolerance)
@@ -269,6 +276,14 @@ class StabilityConstraint:
         return cls(**value)
 
 
+def _constraint_axis_alignment(
+    cfg: StabilityConstraint, pose: torch.Tensor
+) -> torch.Tensor:
+    world = pose.new_tensor(cfg.world_axis or (0.0, 0.0, 1.0))
+    alignment = ((pose[:, :3, :3] @ pose.new_tensor(cfg.local_axis)) * world).sum(-1)
+    return alignment.abs() if cfg.axis_direction_free else alignment
+
+
 def _constraint_pose_flags(
     cfg: StabilityConstraint,
     pose: torch.Tensor,
@@ -279,10 +294,7 @@ def _constraint_pose_flags(
         reference
     ).all(dim=-1).all(dim=-1)
     if cfg.local_axis is not None:
-        axis = pose.new_tensor(cfg.world_axis or (0.0, 0.0, 1.0))
-        valid &= ((pose[:, :3, :3] @ pose.new_tensor(cfg.local_axis)) * axis).sum(
-            -1
-        ) >= cfg.minimum_alignment
+        valid &= _constraint_axis_alignment(cfg, pose) >= cfg.minimum_alignment
     target = None
     if cfg.target_position is not None:
         target = pose.new_tensor(cfg.target_position)
@@ -570,10 +582,7 @@ class TaskStabilityPort:
             valid = torch.isfinite(pose).all(dim=-1).all(dim=-1)
             measurements: dict[str, Any] = {}
             if cfg.local_axis is not None:
-                world_axis = pose.new_tensor(cfg.world_axis or (0.0, 0.0, 1.0))
-                alignment = (
-                    (pose[:, :3, :3] @ pose.new_tensor(cfg.local_axis)) * world_axis
-                ).sum(-1)
+                alignment = _constraint_axis_alignment(cfg, pose)
                 valid &= alignment >= cfg.minimum_alignment
                 measurements["alignment"] = alignment.tolist()
             reference = self._pose(cfg.reference) if cfg.reference is not None else None

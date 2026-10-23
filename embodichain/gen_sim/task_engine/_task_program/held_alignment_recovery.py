@@ -113,6 +113,7 @@ class PlanningScope:
     replay_result: PlanResult | None = None
     replay_used: bool = False
     fallback_attempted: bool = False
+    articulation_checker: Callable[[torch.Tensor], dict[str, Any]] | None = None
 
     def inspect(self, positions: torch.Tensor) -> dict[str, Any]:
         devices = _cuda_devices(
@@ -120,7 +121,11 @@ class PlanningScope:
         )
         state = _RandomState.capture(devices)
         try:
-            acceptance = check_robot_motion(self.robot, positions[0], self.part)
+            acceptance = (
+                check_robot_motion(self.robot, positions[0], self.part)
+                if self.articulation_checker is None
+                else self.articulation_checker(positions[0])
+            )
         except (
             ImportError,
             ValueError,

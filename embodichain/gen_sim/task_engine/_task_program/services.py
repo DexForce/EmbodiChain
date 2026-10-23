@@ -73,7 +73,7 @@ from embodichain.lab.task_program.integrations._configured_services import (
     _world_displacement,
 )
 
-from .grasp_filter import TaskGraspPoseGenerator
+from .grasp_filter import resolve_pick_filter
 from .adaptive_grasp import is_handover_source_call_id
 
 __all__: list[str] = []
@@ -375,8 +375,12 @@ class _PickLowerer(RegisteredSemanticLowerer):
             target = (
                 bound.binding.resources["primary"].endpoints["grasp"].runtime_target
             )
-            sampler = self._grasp_generators.get(target.target_id)
-            if not isinstance(sampler, TaskGraspPoseGenerator):
+            sampler = resolve_pick_filter(
+                self._grasp_generators.get(target.target_id),
+                semantics.affordance.mesh_vertices,
+                semantics.affordance.mesh_triangles,
+            )
+            if sampler is None:
                 raise ValueError(
                     "Constrained Pick requires the task-owned grasp filter."
                 )

@@ -52,7 +52,7 @@ from .motion import (
 )
 
 __all__: list[str] = []
-ARTICULATION_RECOVERY_REVISION = 12
+ARTICULATION_RECOVERY_REVISION = 13
 MAX_SLIDE_FRAMES = 390
 MAX_ENDPOINTS = 4
 
@@ -688,6 +688,21 @@ def recover(
             search = _Search(robot, part, context.require_control_dt())
             scope.search = search
             if original.plan_success.all():
+                approach_check = {"valid": True}
+                if push:
+                    approach = next(
+                        s for s in original.segments if s.name == "approach"
+                    )
+                    simulation = SimulationManager.get_instance(
+                        scope.generator.planner.cfg.sim_instance_id
+                    )
+                    approach_check = check_free_motion(
+                        robot,
+                        simulation,
+                        original.joint_trajectory.positions[0, : approach.stop],
+                        part,
+                    )
+                    details["nominal_free_approach"] = approach_check
                 preview = _preview_withdrawal(
                     scope,
                     request,
@@ -697,14 +712,21 @@ def recover(
                     allow_short=False,
                 )
                 details["nominal_withdrawal_preview"] = preview
-                if preview["valid"]:
+                if preview["valid"] and approach_check["valid"]:
                     return replace(
                         original,
                         diagnostics=replace(
                             original.diagnostics,
                             metadata={
                                 **original.diagnostics.metadata,
-                                "gen_sim_e6_continuation": preview,
+                                "gen_sim_e6_continuation": {
+                                    **preview,
+                                    **(
+                                        {"free_approach": approach_check}
+                                        if push
+                                        else {}
+                                    ),
+                                },
                             },
                         ),
                     )
