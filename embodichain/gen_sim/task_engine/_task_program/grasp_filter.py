@@ -24,11 +24,14 @@ from functools import partial
 from dataclasses import dataclass
 import hashlib
 import math
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 import torch
 
-from embodichain.toolkits.graspkit import ParallelJawGraspPoseGenerator
+from embodichain.toolkits.graspkit import (
+    ParallelJawGraspPoseGenerator,
+    GraspRegionSelector,
+)
 from embodichain.lab.task_program.semantics import (
     GRASP_AFFORDANCE_CAPABILITY,
     SceneObjectRef,
@@ -270,15 +273,15 @@ class TaskGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         approach_direction: torch.Tensor,
         obj_longest_axis: torch.Tensor | None = None,
         is_positive_part: bool | torch.Tensor = True,
-        axis_region_policy: Literal["mesh_extent", "supported_end"] = "mesh_extent",
+        axis_region_selector: GraspRegionSelector | None = None,
     ) -> list[tuple[torch.Tensor, torch.Tensor]]:
-        if axis_region_policy not in ("mesh_extent", "supported_end"):
-            raise ValueError("Unknown axis_region_policy.")
+        if axis_region_selector is not None and not callable(axis_region_selector):
+            raise TypeError("axis_region_selector must be callable or None.")
         native_proposals = False
         if (
             self._native_proposal_screen is not None
             and obj_longest_axis is None
-            and axis_region_policy == "mesh_extent"
+            and axis_region_selector is None
         ):
             from embodichain.toolkits.graspkit.pg_grasp import (
                 AntipodalGraspPoseGenerator,
@@ -309,8 +312,8 @@ class TaskGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                 obj_longest_axis=obj_longest_axis,
                 is_positive_part=is_positive_part,
                 **(
-                    {"axis_region_policy": axis_region_policy}
-                    if axis_region_policy != "mesh_extent"
+                    {"axis_region_selector": axis_region_selector}
+                    if axis_region_selector is not None
                     else {}
                 ),
             )
@@ -378,17 +381,17 @@ class TaskGraspPoseGenerator(ParallelJawGraspPoseGenerator):
     def get_grasp_candidates(
         self,
         *,
-        axis_region_policy: Literal["mesh_extent", "supported_end"] = "mesh_extent",
+        axis_region_selector: GraspRegionSelector | None = None,
         **kwargs: Any,
     ) -> Any:
         """Forward articulation metadata; Pick uses the filtered pose protocol."""
-        if axis_region_policy not in ("mesh_extent", "supported_end"):
-            raise ValueError("Unknown axis_region_policy.")
+        if axis_region_selector is not None and not callable(axis_region_selector):
+            raise TypeError("axis_region_selector must be callable or None.")
         return self._delegate.get_grasp_candidates(
             **kwargs,
             **(
-                {"axis_region_policy": axis_region_policy}
-                if axis_region_policy != "mesh_extent"
+                {"axis_region_selector": axis_region_selector}
+                if axis_region_selector is not None
                 else {}
             ),
         )

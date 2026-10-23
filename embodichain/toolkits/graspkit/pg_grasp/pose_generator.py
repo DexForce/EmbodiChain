@@ -26,6 +26,7 @@ import torch
 
 from embodichain.toolkits.graspkit import (
     ParallelJawGraspPoseGenerator,
+    GraspRegionSelector,
     ParallelJawGripperModelCfg,
 )
 from embodichain.utils import configclass, logger
@@ -417,13 +418,13 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         approach_direction: torch.Tensor,
         obj_longest_axis: torch.Tensor | None = None,
         is_positive_part: bool | torch.Tensor = True,
-        axis_region_policy: Literal["mesh_extent", "supported_end"] = "mesh_extent",
+        axis_region_selector: GraspRegionSelector | None = None,
     ) -> list[tuple[torch.Tensor, torch.Tensor]]:
-        """Return candidates with an explicit, invocation-local axis-end policy."""
+        """Return candidates with an optional invocation-local region selector."""
         region_options = (
             {}
-            if axis_region_policy == "mesh_extent"
-            else {"axis_region_policy": axis_region_policy}
+            if axis_region_selector is None
+            else {"axis_region_selector": axis_region_selector}
         )
         return [
             (poses, costs)
@@ -447,19 +448,19 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         approach_direction: torch.Tensor,
         obj_longest_axis: torch.Tensor | None = None,
         is_positive_part: bool | torch.Tensor = True,
-        axis_region_policy: Literal["mesh_extent", "supported_end"] = "mesh_extent",
+        axis_region_selector: GraspRegionSelector | None = None,
     ) -> list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
         """Expose aligned candidates without changing configured region defaults.
 
-        ``supported_end`` may reinterpret a geometrically empty derived end in
-        this call only. Default calls retain the original backend keyword shape.
+        The selector sees only qualified fallback geometry before top-K.
+        Default calls retain the original backend keyword shape.
         """
-        if axis_region_policy not in ("mesh_extent", "supported_end"):
-            raise ValueError("Unknown axis_region_policy.")
+        if axis_region_selector is not None and not callable(axis_region_selector):
+            raise TypeError("axis_region_selector must be callable or None.")
         region_options = (
             {}
-            if axis_region_policy == "mesh_extent"
-            else {"axis_region_policy": axis_region_policy}
+            if axis_region_selector is None
+            else {"axis_region_selector": axis_region_selector}
         )
         backend = self._backend(mesh_vertices, mesh_triangles)
         poses = self._object_poses(obj_poses, device=backend.device)

@@ -105,28 +105,26 @@ def _with_route(
     )
 
 
-@pytest.mark.parametrize("mode", [None, "grasp_command", "observed"])
-def test_handover_bundle_identity_preserves_default_and_explicit_mode(
-    monkeypatch: pytest.MonkeyPatch, mode: str | None
+def test_handover_bundle_identity_preserves_task_owned_defaults(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    default = _compose(monkeypatch, mode="grasp_command")
-    composed = _compose(monkeypatch, mode=mode)
+    default = _compose(monkeypatch)
+    composed = _compose(monkeypatch)
     identity = bundle_registration_fingerprint(composed.integration.registration)
     default_identity = bundle_registration_fingerprint(default.integration.registration)
     assert identity == composed.integration.registration.fingerprint
-    if mode == "observed":
-        assert identity != default_identity
-        assert (
-            composed.integration.integration_fingerprint
-            != default.integration.integration_fingerprint
-        )
-    else:
-        assert identity == default_identity
-        assert (
-            composed.integration.integration_fingerprint
-            == default.integration.integration_fingerprint
-        )
+    assert identity == default_identity
+    assert (
+        composed.integration.integration_fingerprint
+        == default.integration.integration_fingerprint
+    )
     composed.integration.registration.assert_unchanged()
+
+
+@pytest.mark.parametrize("mode", ["grasp_command", "observed"])
+def test_retired_handover_options_require_bundle_regeneration(monkeypatch, mode):
+    with pytest.raises(ValueError, match="source_hold_mode"):
+        _compose(monkeypatch, mode=mode)
 
 
 def test_bundle_identity_cannot_hide_post_registration_route_drift(

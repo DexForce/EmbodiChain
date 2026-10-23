@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 from unittest.mock import Mock
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -26,6 +27,10 @@ from embodichain.toolkits.graspkit.pg_grasp._antipodal_backend import (
 )
 from embodichain.toolkits.graspkit.pg_grasp.pose_generator import (
     AntipodalGraspPoseGenerator,
+)
+from embodichain.gen_sim.task_engine._task_program.supported_end import (
+    for_axis_region,
+    select_supported_end,
 )
 
 
@@ -65,7 +70,9 @@ def query(instance, policy="mesh_extent", *, positive=True, axis=True):
         torch.tensor([0.0, 0.0, -1.0]),
         obj_longest_axis=torch.tensor([0.0, 0.0, 1.0]) if axis else None,
         is_positive_part=positive,
-        axis_region_policy=policy,
+        axis_region_selector=(
+            select_supported_end if policy == "supported_end" else None
+        ),
     )
 
 
@@ -169,7 +176,7 @@ def test_unpartitioned_call_does_not_change_geometry_or_rng():
 def test_unknown_policy_fails_before_candidate_processing(policy):
     instance = backend()
     with pytest.raises(ValueError, match="axis_region_policy"):
-        query(instance, policy)
+        for_axis_region(Mock(), policy)
     instance._collision_checker.query.assert_not_called()
 
 
@@ -192,11 +199,95 @@ def test_service_policy_is_per_call_and_default_preserves_legacy_keyword_shape(
         mesh_triangles=torch.tensor([[0, 1, 2]], dtype=torch.int32),
         obj_poses=torch.eye(4)[None],
         approach_direction=torch.tensor([0.0, 0.0, -1.0]),
-        axis_region_policy=policy,
+        axis_region_selector=(
+            select_supported_end if policy == "supported_end" else None
+        ),
     )
     forwarded = prepared.get_valid_grasp_poses.call_args.kwargs
     if policy == "mesh_extent":
-        assert "axis_region_policy" not in forwarded
+        assert "axis_region_selector" not in forwarded
     else:
-        assert forwarded["axis_region_policy"] == "supported_end"
-    assert not hasattr(generator.algorithm_cfg, "axis_region_policy")
+        assert forwarded["axis_region_selector"] is select_supported_end
+    assert not hasattr(generator.algorithm_cfg, "axis_region_selector")
+
+
+def test_region_selector_sees_only_collision_qualified_candidates_before_top_k():
+    instance = backend()
+    instance._max_candidates = 1
+    observed = []
+
+    def selector(**values):
+        centers = values["centers"]
+        assert len(centers) > 1
+        assert (centers[:, 2] <= 0.6).all()
+        observed.append(centers.clone())
+        return select_supported_end(**values)
+
+    success, poses, _, _ = instance.get_valid_grasp_poses(
+        torch.eye(4),
+        torch.tensor([0.0, 0.0, -1.0]),
+        obj_longest_axis=torch.tensor([0.0, 0.0, 1.0]),
+        axis_region_selector=selector,
+    )
+    assert success and len(poses) == 1
+    assert len(observed) == 1
+
+
+@pytest.mark.parametrize("invalid", ["mask_shape", "mask_dtype", "center_nonfinite"])
+def test_region_selector_rejects_invalid_selection(invalid):
+    instance = backend()
+
+    def selector(**values):
+        mask, center = select_supported_end(**values)
+        if invalid == "mask_shape":
+            mask = mask[:-1]
+        elif invalid == "mask_dtype":
+            mask = mask.float()
+        else:
+            center = center * float("nan")
+        return mask, center
+
+    with pytest.raises(ValueError, match="Region selector"):
+        instance.get_valid_grasp_poses(
+            torch.eye(4),
+            torch.tensor([0.0, 0.0, -1.0]),
+            obj_longest_axis=torch.tensor([0.0, 0.0, 1.0]),
+            axis_region_selector=selector,
+        )
+
+
+@pytest.mark.parametrize("policy", ["mesh_extent", "supported_end"])
+def test_adaptive_sampling_preserves_region_policy_diagnostics(policy):
+    from embodichain.gen_sim.task_engine._task_program.adaptive_grasp import (
+        GraspStrategy,
+        select_grasp,
+    )
+    from embodichain.lab.sim.atomic_actions import AntipodalAffordance
+
+    prepared = backend()
+    generator = AntipodalGraspPoseGenerator(ParallelJawGripperModelCfg())
+    generator._backend = Mock(return_value=prepared)
+    affordance = AntipodalAffordance(
+        mesh_vertices=prepared.vertices,
+        mesh_triangles=torch.tensor([[0, 1, 2], [0, 2, 3]]),
+    )
+    choice = GraspStrategy(
+        torch.tensor([[0.0, 0.0, -1.0]]),
+        torch.tensor([[0.0, 0.0, 1.0]]),
+        torch.tensor([True]),
+    )
+    sample, direction = select_grasp(
+        affordance,
+        generator,
+        torch.eye(4)[None],
+        (choice,),
+        SimpleNamespace(affordance_sampling=None, env_ids=torch.tensor([0])),
+        "region-test",
+        axis_region_policy=policy,
+    )
+    assert sample.success.tolist() == [policy == "supported_end"]
+    assert (
+        sample.metadata["adaptive_grasp"].get("axis_region_policy", "mesh_extent")
+        == policy
+    )
+    assert direction.shape == (1, 3)

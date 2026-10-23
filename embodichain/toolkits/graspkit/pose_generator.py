@@ -22,7 +22,7 @@ from abc import ABC, abstractmethod
 from copy import deepcopy
 import math
 from types import MappingProxyType
-from typing import Literal
+from typing import Literal, Protocol
 
 import torch
 
@@ -30,6 +30,7 @@ from embodichain.utils import configclass
 
 __all__ = [
     "GraspPoseGenerator",
+    "GraspRegionSelector",
     "ParallelJawGraspPoseGenerator",
     "ParallelJawGripperModelCfg",
     "get_parallel_jaw_gripper_model",
@@ -202,6 +203,41 @@ def get_parallel_jaw_gripper_model(model_id: str) -> ParallelJawGripperModelCfg:
     return ParallelJawGripperModelCfg(**dict(values))
 
 
+class GraspRegionSelector(Protocol):
+    """Filter a qualified fallback region before candidate ranking and top-K.
+
+    The callback runs only when a requested mesh-axis region has no qualified
+    geometry. It may select existing rows and a ranking center, never introduce
+    poses or bypass angle, NMS, ground or collision qualification.
+    """
+
+    def __call__(
+        self,
+        *,
+        centers: torch.Tensor,
+        pair_ids: torch.Tensor,
+        pair_centers: torch.Tensor,
+        axis: torch.Tensor,
+        positive: bool,
+        center_mode: Literal["bounds", "centroid"],
+    ) -> tuple[torch.Tensor, torch.Tensor] | None:
+        """Select a subset or reject the fallback.
+
+        Args:
+            centers: Qualified candidate centers, shape (K, 3).
+            pair_ids: Original contact-pair indices for those K candidates.
+            pair_centers: Complete cached-pair centers, shape (N, 3).
+            axis: Normalized requested region axis, shape (3,).
+            positive: Requested side of that axis.
+            center_mode: Generator's existing center convention.
+
+        Returns:
+            Boolean mask (K,) and finite ranking center (3,), on the input
+            device, or None to reject. Inputs must not be modified.
+        """
+        ...
+
+
 class GraspPoseGenerator(ABC):
     """Standalone service that generates grasp poses from target geometry.
 
@@ -220,13 +256,13 @@ class GraspPoseGenerator(ABC):
         approach_direction: torch.Tensor,
         obj_longest_axis: torch.Tensor | None = None,
         is_positive_part: bool | torch.Tensor = True,
-        axis_region_policy: Literal["mesh_extent", "supported_end"] = "mesh_extent",
+        axis_region_selector: GraspRegionSelector | None = None,
     ) -> list[tuple[torch.Tensor, torch.Tensor]]:
-        """Return candidates with an explicit, call-local axis-region policy.
+        """Return candidates, optionally selecting a qualified fallback region.
 
-        ``mesh_extent`` preserves the mesh-based end restriction. An explicitly
-        requested ``supported_end`` may derive an otherwise empty end region
-        from feasible grasp support, without relaxing angle or collision checks.
+        The selector runs only for an empty requested axis region, after
+        geometry qualification and before ranking. Omit it for the original
+        mesh-extent behavior and compatibility with existing custom services.
         """
 
     @abstractmethod
@@ -265,7 +301,7 @@ class ParallelJawGraspPoseGenerator(GraspPoseGenerator, ABC):
         approach_direction: torch.Tensor,
         obj_longest_axis: torch.Tensor | None = None,
         is_positive_part: bool | torch.Tensor = True,
-        axis_region_policy: Literal["mesh_extent", "supported_end"] = "mesh_extent",
+        axis_region_selector: GraspRegionSelector | None = None,
     ) -> list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
         """Return aligned poses, opening widths and costs for each object row.
 

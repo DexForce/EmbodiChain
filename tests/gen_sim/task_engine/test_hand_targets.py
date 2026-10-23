@@ -48,10 +48,25 @@ from embodichain.lab.sim.atomic_actions import (
 )
 from embodichain.lab.sim.motion.motion_generator import MotionGenerator
 from embodichain.lab.sim.motion.planners.utils import PlanResult
+from embodichain.gen_sim.task_engine._task_program.actions import (
+    GenSimHandOver,
+    GenSimMoveHeldObject,
+)
+from embodichain.gen_sim.task_engine._task_program.held_command import (
+    bind_observed_alignment_calls,
+)
 
 
-@pytest.mark.parametrize("source", ["observed", "grasp_command"])
-@pytest.mark.parametrize("kind", ["transport", "place", "pour"])
+@pytest.mark.parametrize(
+    "kind,source",
+    [
+        ("legacy_alignment", "observed"),
+        ("transport", "grasp_command"),
+        ("gen_transport", "grasp_command"),
+        ("place", "grasp_command"),
+        ("pour", "grasp_command"),
+    ],
+)
 @pytest.mark.parametrize("partial", [False, True])
 @pytest.mark.parametrize("override", [False, True])
 def test_source_selection_reaches_real_command_payloads_without_mutating_observation(
@@ -77,6 +92,7 @@ def test_source_selection_reaches_real_command_payloads_without_mutating_observa
     generator = object.__new__(MotionGenerator)
     generator.robot, generator.device = robot, robot.device
     generator.planner = NS(cfg=NS(planner_type="stub"), collision_world_info=None)
+    generator.direct_transport_planning = True
     mask = torch.tensor([True, not partial])
     positions = torch.zeros(2, 4, 2)
     positions[:, :, 0] = torch.tensor([0.0, 0.01, 0.02, 0.0])
@@ -88,17 +104,29 @@ def test_source_selection_reaches_real_command_payloads_without_mutating_observa
     action_type, options, goal = {
         "transport": (
             MoveHeldObject,
-            MoveHeldObjectOptions(hand_source=source),
+            MoveHeldObjectOptions(),
             HeldObjectPoseGoal(torch.eye(4)),
         ),
         "place": (
             Place,
-            PlaceOptions(hand_source=source, hand_interp_steps=3),
+            PlaceOptions(hand_interp_steps=3),
             PlaceGoal(torch.eye(4)),
         ),
-        "pour": (Pour, PourOptions(hand_source=source, dwell_duration=0), PourGoal()),
+        "pour": (Pour, PourOptions(dwell_duration=0), PourGoal()),
+        "legacy_alignment": (
+            GenSimMoveHeldObject,
+            MoveHeldObjectOptions(),
+            HeldObjectPoseGoal(torch.eye(4)),
+        ),
+        "gen_transport": (
+            GenSimMoveHeldObject,
+            MoveHeldObjectOptions(),
+            HeldObjectPoseGoal(torch.eye(4)),
+        ),
     }[kind]
     action = action_type()
+    if isinstance(action, GenSimMoveHeldObject):
+        action.observed_hand_invocations = frozenset({"legacy_alignment"})
     engine = AtomicActionEngine(
         generator,
         load_builtins=False,
@@ -135,6 +163,7 @@ def test_source_selection_reaches_real_command_payloads_without_mutating_observa
     request = action.resolve_request(
         ActionInvocation(
             skill_id=action.skill_id,
+            invocation_id=kind,
             goal=goal,
             binding=binding,
             motion_policy=MotionPolicy(sample_count=8),
@@ -187,9 +216,30 @@ def test_source_selection_reaches_real_command_payloads_without_mutating_observa
     torch.testing.assert_close(path[:, :, 3], torch.full(path.shape[:2], 0.7))
 
 
-@pytest.mark.parametrize("cls", [MoveHeldObjectOptions, PlaceOptions, PourOptions])
-def test_hand_source_defaults_and_strict_enum(cls):
-    assert cls().hand_source == "grasp_command"
-    for bad in (None, True, "nominal", 7):
-        with pytest.raises(ValueError, match="hand_source"):
-            cls(hand_source=bad)
+@pytest.mark.parametrize(
+    "contract,expected",
+    [("lab.motion_limits/v1", ("p/s0:0",)), ("gen_sim.sampled_velocity/v1", ())],
+)
+def test_only_legacy_alignment_occurrences_keep_observed_hands(contract, expected):
+    from embodichain.lab.task_program.semantics import RegisteredSemanticCall
+
+    segments = [
+        NS(
+            name=f"segment{i}",
+            segment_id=f"s{i}",
+            calls=[
+                NS(segment_call_index=0, call=RegisteredSemanticCall(call_id=call_id))
+            ],
+        )
+        for i, call_id in enumerate(
+            ("gen_sim.align_held", "simulation.move_held_object")
+        )
+    ]
+    program = NS(program_id="p", iter_segments=lambda: iter(segments))
+    assert bind_observed_alignment_calls(program, contract) == expected
+
+
+def test_gensim_handover_retains_resolved_grasp_command():
+    command = torch.tensor([[0.8]])
+    resources = NS(first=NS(hand_grasp_qpos=command))
+    assert GenSimHandOver()._existing_hold_hand_qpos(None, None, resources) is command

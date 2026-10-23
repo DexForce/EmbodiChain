@@ -1276,26 +1276,23 @@ def test_configured_handover_decodes_source_retreat_clearance() -> None:
     assert options.retreat_steps == 28
 
 
-@pytest.mark.parametrize("source_hold_mode", ["observed", "grasp_command"])
-def test_configured_handover_decodes_source_hold_mode(source_hold_mode: str) -> None:
-    """Configured profiles choose how an established source grasp is driven."""
-    options = _decode_action_options(
-        {"kind": "hand_over", "source_hold_mode": source_hold_mode},
-        path="policy.action_options.hand_over",
-    )
-
-    assert type(options) is HandOverOptions
-    assert options.source_hold_mode == source_hold_mode
-
-
-@pytest.mark.parametrize("source_hold_mode", [None, False, "unsupported"])
-def test_configured_handover_rejects_invalid_source_hold_mode(
-    source_hold_mode: object,
+@pytest.mark.parametrize(
+    "kind,key",
+    [
+        ("hand_over", "source_hold_mode"),
+        ("move_held_object", "hand_source"),
+        ("place", "hand_source"),
+        ("pour", "hand_source"),
+    ],
+)
+def test_shared_action_decoders_reject_retired_hand_policy_fields(
+    kind: str,
+    key: str,
 ) -> None:
-    with pytest.raises((TypeError, ValueError), match="source_hold_mode"):
+    with pytest.raises(ValueError, match=key):
         _decode_action_options(
-            {"kind": "hand_over", "source_hold_mode": source_hold_mode},
-            path="policy.action_options.hand_over",
+            {"kind": kind, key: "grasp_command"},
+            path="policy.action_options",
         )
 
 

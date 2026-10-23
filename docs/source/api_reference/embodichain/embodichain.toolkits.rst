@@ -29,11 +29,20 @@ or installed in a higher-level planning runtime.
    :nosignatures:
 
    GraspPoseGenerator
+   GraspRegionSelector
    ParallelJawGraspPoseGenerator
    ParallelJawGripperModelCfg
    get_parallel_jaw_gripper_model
 
 .. autoclass:: GraspPoseGenerator
+   :members:
+
+The optional region selector filters an empty region's qualified fallback pool
+before cost ranking and top-K. It returns a subset and ranking center, not new
+poses, and cannot bypass collision qualification. Concrete task strategies
+remain owned by the calling application.
+
+.. autoclass:: GraspRegionSelector
    :members:
 
 .. autoclass:: ParallelJawGraspPoseGenerator
@@ -52,6 +61,7 @@ or installed in a higher-level planning runtime.
    :nosignatures:
 
    GraspPoseGenerator
+   GraspRegionSelector
    ParallelJawGraspPoseGenerator
    ParallelJawGripperModelCfg
    get_parallel_jaw_gripper_model

@@ -25,15 +25,15 @@ import torch
 import numpy as np
 import trimesh
 import hashlib
-import json
 import torch.nn.functional as F
 
 import viser
 import viser.transforms as tf
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Any, Literal, cast
+from typing import Any, cast
 
+from embodichain.toolkits.graspkit.pose_generator import GraspRegionSelector
 from embodichain.utils import logger
 from embodichain.utils.nms import pose_nms
 from embodichain.toolkits.graspkit.pg_grasp.antipodal_sampler import (
@@ -507,7 +507,7 @@ class _AntipodalMeshBackend:
         is_positive_part: bool = True,
         visualize_collision: bool = False,
         *,
-        axis_region_policy: Literal["mesh_extent", "supported_end"] = "mesh_extent",
+        axis_region_selector: GraspRegionSelector | None = None,
     ):
         """Filter valid grasps, optionally to one projected half of the object.
 
@@ -519,15 +519,15 @@ class _AntipodalMeshBackend:
             is_positive_part: When an axis is supplied, select the positive
                 projected half if true and the negative half otherwise.
             visualize_collision: Whether to visualize collision checks.
-            axis_region_policy: Keep mesh-extent ends by default. An explicit
-                ``supported_end`` may reinterpret an empty end using the same
-                call's statically qualified cached-pair support.
+            axis_region_selector: Optional selection from collision-qualified
+                fallback geometry before ranking. Existing viable regions and
+                unpartitioned calls retain their original behavior.
 
         Returns:
             Success, grasp poses, opening lengths, and grasp costs.
         """
-        if axis_region_policy not in ("mesh_extent", "supported_end"):
-            raise ValueError("Unknown axis_region_policy.")
+        if axis_region_selector is not None and not callable(axis_region_selector):
+            raise TypeError("axis_region_selector must be callable or None.")
         if self._hit_point_pairs is None:
             logger.log_warning(
                 "No antipodal point pairs available. "
@@ -604,8 +604,8 @@ class _AntipodalMeshBackend:
                 )
             origin_points_masked = origin_points_[part_mask]
             hit_points_masked = hit_points_[part_mask]
-            if axis_region_policy == "supported_end":
-                return self._supported_end_grasps(
+            if axis_region_selector is not None:
+                return self._select_fallback_region(
                     origin_points_,
                     hit_points_,
                     part_mask,
@@ -615,6 +615,7 @@ class _AntipodalMeshBackend:
                     axis,
                     is_positive_part,
                     visualize_collision,
+                    axis_region_selector,
                 )
         return self._filter_valid_grasp_poses(
             origin_points_=origin_points_masked,
@@ -886,19 +887,20 @@ class _AntipodalMeshBackend:
         # )
         return True, top_grasp_poses, top_open_lengths, top_total_cost
 
-    def _supported_end_grasps(
+    def _select_fallback_region(
         self,
-        origins,
-        hits,
-        original_mask,
-        approach,
-        original_center,
-        object_pose,
-        axis,
-        positive,
-        visualize_collision,
-    ):
-        """Reinterpret only an empty derived end, never an IK or execution failure."""
+        origins: torch.Tensor,
+        hits: torch.Tensor,
+        original_mask: torch.Tensor,
+        approach: torch.Tensor,
+        original_center: torch.Tensor,
+        object_pose: torch.Tensor,
+        axis: torch.Tensor,
+        positive: bool,
+        visualize_collision: bool,
+        selector: GraspRegionSelector,
+    ) -> tuple[bool, torch.Tensor, torch.Tensor | float, torch.Tensor]:
+        """Offer only qualified geometry to a call-owned region selector."""
         pair_ids = torch.arange(len(origins), device=origins.device)
         original = self._qualified_geometry(
             origins[original_mask],
@@ -908,32 +910,8 @@ class _AntipodalMeshBackend:
             pair_ids=pair_ids[original_mask],
             visualize_collision=visualize_collision,
         )
-        diagnostics = {
-            "policy": "supported_end",
-            "original_pairs": int(original_mask.sum()),
-            "original_geometry_candidates": len(original.poses),
-            "original_geometry_reason": original.reason,
-        }
-
-        def finish(reason, result):
-            logger.log_info(
-                "Antipodal axis region: "
-                + json.dumps(
-                    {**diagnostics, "reason": reason},
-                    allow_nan=False,
-                )
-            )
-            return result
-
         if len(original.poses):
-            return finish(
-                "original_region_qualified",
-                self._rank_geometry(
-                    original,
-                    approach,
-                    original_center,
-                ),
-            )
+            return self._rank_geometry(original, approach, original_center)
         support = self._qualified_geometry(
             origins,
             hits,
@@ -943,43 +921,35 @@ class _AntipodalMeshBackend:
             directions=original.directions,
             visualize_collision=visualize_collision,
         )
-        diagnostics.update(
-            support_geometry_candidates=len(support.poses),
-            approach_variants=len(support.directions),
-        )
         if not len(support.poses):
-            return finish("supported_geometry_empty", self._empty_grasp_result())
-        unique_ids = torch.unique(support.pair_ids, sorted=True)
-        centers = (origins + hits) / 2
-        unique_centers = centers[unique_ids]
-        projection = unique_centers @ axis
-        diagnostics["unique_support_pairs"] = len(unique_ids)
-        if not torch.isfinite(projection).all() or len(unique_ids) < 2:
-            return finish("support_interval_degenerate", self._empty_grasp_result())
-        low, high = projection.min(), projection.max()
-        span = high - low
-        if not bool(span > 0):
-            return finish("support_interval_degenerate", self._empty_grasp_result())
-        fraction = (
-            0.5 if self._center_mode == "bounds" else (0.65 if positive else 0.35)
+            return self._empty_grasp_result()
+        selection = selector(
+            centers=support.centers,
+            pair_ids=support.pair_ids,
+            pair_centers=(origins + hits) / 2,
+            axis=axis,
+            positive=positive,
+            center_mode=self._center_mode,
         )
-        threshold = low + fraction * span
-        projected = support.centers @ axis
-        selected = projected > threshold if positive else projected < threshold
-        selected_unique = projection > threshold if positive else projection < threshold
-        diagnostics.update(
-            support_axis_interval=[float(low), float(high)],
-            selected_geometry_candidates=int(selected.sum()),
-        )
+        if selection is None:
+            return self._empty_grasp_result()
+        selected, center = selection
+        if (
+            not isinstance(selected, torch.Tensor)
+            or selected.dtype != torch.bool
+            or selected.shape != support.poses.shape[:1]
+            or selected.device != support.poses.device
+            or not isinstance(center, torch.Tensor)
+            or center.shape != (3,)
+            or center.device != support.poses.device
+            or not torch.isfinite(center).all()
+        ):
+            raise ValueError(
+                "Region selector must return an aligned boolean mask and finite center."
+            )
         if not selected.any():
-            return finish("supported_end_empty", self._empty_grasp_result())
-        center = (
-            get_pc_center_box(unique_centers)
-            + (0.25 if positive else -0.25) * span * axis
-            if self._center_mode == "bounds"
-            else unique_centers[selected_unique].mean(0)
-        )
-        selected_geometry = _GraspGeometry(
+            return self._empty_grasp_result()
+        geometry = _GraspGeometry(
             support.poses[selected],
             support.widths[selected],
             support.centers[selected],
@@ -987,10 +957,8 @@ class _AntipodalMeshBackend:
             support.directions,
             "qualified",
         )
-        result = self._rank_geometry(selected_geometry, approach, center)
-        if not torch.isfinite(result[3]).any():
-            return finish("supported_end_nonfinite_cost", self._empty_grasp_result())
-        return finish("supported_end_qualified", result)
+        result = self._rank_geometry(geometry, approach, center)
+        return result if torch.isfinite(result[3]).any() else self._empty_grasp_result()
 
     def get_grasp_poses(
         self,

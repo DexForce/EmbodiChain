@@ -65,11 +65,13 @@ generator and numerical utilities, and keep the existing URDF speed,
 collision, release and stability gates, and do not claim the newer acceleration
 budget. Explicit authored motion limits require `lab.motion_limits/v1`; bundles
 without the contract keep that shared path. Native runs save `motion_contract.json`.
-Generated MoveHeldObject, Pour and Place options select
-`hand_source: grasp_command` to preserve drive authority under measured finger
-deflection. Shared defaults also retain the grasp command; final open commands and physical
-release gates are unchanged. These declarations participate in bundle identity
-and require new full-task qualification, not reuse of old receipts.
+Generated MoveHeldObject, Pour and Place use the shared bound grasp-command
+behavior. GenSim binds legacy `lab.motion_limits/v1` alignment occurrences to
+measured hand targets through `_task_program/held_command.py`; sampled-velocity
+alignment retains the grasp command. Shared options no longer carry a hand-source
+policy. Adapter identity seals this routing, and changed bundles must be
+regenerated and qualified rather than resealing old receipts. Final open
+commands and physical release gates are unchanged.
 UR10 ready/Park shoulder pan faces the table under the shared mount; its zero
 pan pose faces away. `_task_program/solver_tolerances.py` preserves iterative
 solver budgets and supplies explicit analytic-UR FK validation budgets without
@@ -1126,25 +1128,27 @@ certify target contact, robot self-collision, payload clearance, future scene
 motion or between-sample clearance. Its E4-only revision is fingerprinted;
 regenerate changed E4 bundles instead of resealing historical artifacts.
 Transfer, release, retreat and state effects remain owned by shared HandOver.
-Only derived adaptive handover ends may request the grasp service's call-local
-`supported_end` policy. An already viable mesh-end pool retains its poses,
+Only derived adaptive handover ends may select the GenSim-owned
+`_task_program/supported_end.py` provider policy. An already viable mesh-end pool retains its poses,
 costs and random draws unchanged. If that geometry pool is empty before IK,
 the same prepared pairs and approach variants may define an end from the
 angle/NMS/static-qualified support, before ranking truncation. Explicit
 top/bottom or hard task regions remain `mesh_extent`; IK, path and physical
-acquisition failures never activate this reinterpretation. The service owns
-the geometry stages, not a second GenSim sampler or deployment-wide setting.
-Its revision is fingerprinted only for generated handover deployments.
+acquisition failures never activate this reinterpretation. GraspKit owns
+qualification and ranking; its controlled `GraspRegionSelector` extension passes
+only qualified rows to the GenSim strategy before top-K. The provider does not
+copy the backend, mutate its cache, or create a second sampler. The adapter
+contract requires regeneration when this policy boundary changes.
 Generated E4 integrations include the curated Pick monitor needed by the existing bounded
 workflow recovery, even when source acquisition uses a registered alias.
 This does not change recovery budgets or qualify initial grasp stability;
 regenerate bundles to acquire the declaration rather than resealing old files.
-Generated profiles select `source_hold_mode=grasp_command` to retain the bound closing
-drive during existing-hold transfers. GenSim composition applies that default
-when the field is absent and preserves explicit modes. Missing retreat budgets
-also retain v38's default; shared composition keeps its own defaults. The mode's
-contract belongs to
-[Atomic Action execution](../atomic-actions/execution.md).
+GenSimHandOver retains the bound closing drive through the shared hand-target
+hook during existing-hold transfers. This is an application strategy, not a
+shared HandOver option; old `source_hold_mode` declarations are rejected rather
+than silently ignored. Missing retreat budgets retain the GenSim default, while
+shared composition keeps its own defaults. See
+[Atomic Action execution](../atomic-actions/execution.md) for the hook boundary.
 E5 paired grasping and E6 handle policies remain separate. These GenSim-local
 skill replacements use the shared goals and options. Unmarked calls
 delegate unchanged; drawer deployments install the same ordinary wrappers.

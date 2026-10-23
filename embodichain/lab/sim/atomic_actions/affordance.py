@@ -199,7 +199,6 @@ class AntipodalAffordance(Affordance):
         *,
         obj_longest_axis: torch.Tensor | None = None,
         is_positive_part: bool | torch.Tensor = True,
-        axis_region_policy: Literal["mesh_extent", "supported_end"] = "mesh_extent",
     ) -> AffordancePoseCandidates:
         """Generate constrained candidates using an externally owned service.
 
@@ -209,19 +208,10 @@ class AntipodalAffordance(Affordance):
             approach_direction: Shared or per-row approach direction.
             obj_longest_axis: Optional axis restricting the graspable region.
             is_positive_part: Which end of the optional axis is graspable.
-            axis_region_policy: Explicit per-call end-region interpretation.
-                The default retains the legacy generator call signature.
 
         Returns:
             Padded candidates with explicit validity.
         """
-        if axis_region_policy not in ("mesh_extent", "supported_end"):
-            raise ValueError("Unknown axis_region_policy.")
-        policy = (
-            {"axis_region_policy": axis_region_policy}
-            if axis_region_policy != "mesh_extent"
-            else {}
-        )
         rows = generator.get_valid_grasp_poses(
             mesh_vertices=self.mesh_vertices,
             mesh_triangles=self.mesh_triangles,
@@ -229,7 +219,6 @@ class AntipodalAffordance(Affordance):
             approach_direction=approach_direction,
             obj_longest_axis=obj_longest_axis,
             is_positive_part=is_positive_part,
-            **policy,
         )
         if len(rows) != object_poses.shape[0]:
             raise ValueError(

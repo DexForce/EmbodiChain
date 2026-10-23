@@ -128,7 +128,7 @@ def execute_bundle(
                 "fixed_time_sequential_ik": motion_contract
                 == "gen_sim.sampled_velocity/v1",
                 "new_acceleration_certification_claimed": False,
-                "hand_source": "See sealed action options and issued endpoint commands",
+                "hand_source": "See sealed GenSim call policies and issued endpoint commands",
                 "existing_velocity_collision_release_gates": "retained",
             },
             indent=2,

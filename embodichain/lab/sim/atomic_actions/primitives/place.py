@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import ClassVar, Literal
 
 import torch
@@ -130,11 +130,6 @@ class AssembleGoal:
 class PlaceOptions(ActionOptions):
     """Per-invocation placement behavior."""
 
-    hand_source: Literal["observed", "grasp_command"] = field(
-        default="grasp_command", kw_only=True
-    )
-    """Hand target retained until release; the final open command is unchanged."""
-
     hand_interp_steps: int = 5
     """Number of waypoints for the gripper-open interpolation segment."""
 
@@ -154,8 +149,6 @@ class PlaceOptions(ActionOptions):
     """Keep the held object's observed world orientation at the place target."""
 
     def __post_init__(self) -> None:
-        if self.hand_source not in ("observed", "grasp_command"):
-            raise ValueError("hand_source must be observed or grasp_command.")
         if self.hand_interp_steps < 1:
             raise ValueError("hand_interp_steps must be at least 1.")
         if type(self.release_settle_steps) is not int or self.release_settle_steps < 0:
@@ -333,17 +326,15 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         # A contact-blocked measured finger position does not retain the
         # closing effort of its grasp target. Continue that target for held
         # rows; free rows retain their observed hand state until release.
-        hold_hand_qpos = start_hand_qpos
-        if options.hand_source == "grasp_command":
-            hand_grasp_qpos = grasp.joint_positions(
-                GRASP_COMMAND,
-                num_envs=context.batch_size,
-                device=self.device,
-                dtype=context.robot.qpos.dtype,
-            )
-            hold_hand_qpos = torch.where(
-                held_mask.unsqueeze(1), hand_grasp_qpos, start_hand_qpos
-            )
+        hand_grasp_qpos = grasp.joint_positions(
+            GRASP_COMMAND,
+            num_envs=context.batch_size,
+            device=self.device,
+            dtype=context.robot.qpos.dtype,
+        )
+        hold_hand_qpos = torch.where(
+            held_mask.unsqueeze(1), hand_grasp_qpos, start_hand_qpos
+        )
         hand_open_path = interpolate_hand_qpos(
             hold_hand_qpos, hand_open_qpos, n_waypoints=n_open
         )

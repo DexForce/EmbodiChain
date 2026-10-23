@@ -139,14 +139,6 @@ class HandOverOptions(ActionOptions):
     explicit ``source`` and ``destination`` resource slots are authoritative.
     """
 
-    source_hold_mode: Literal["observed", "grasp_command"] = "observed"
-    """Source-hand target during a transfer from an existing hold.
-
-    ``"observed"`` retains the measured posture without tightening the grip.
-    ``"grasp_command"`` continues the bound grasp command, retaining closing
-    drive when contact prevents a position-controlled hand reaching its target.
-    """
-
     def __post_init__(self) -> None:
         for name in ("pre_grasp_distance", "lift_height", "retreat_distance"):
             value = getattr(self, name)
@@ -167,10 +159,6 @@ class HandOverOptions(ActionOptions):
             )
         if type(self.release_at_target) is not bool:
             raise TypeError("release_at_target must be a bool.")
-        if self.source_hold_mode not in ("observed", "grasp_command"):
-            raise ValueError(
-                "source_hold_mode must be exactly 'observed' or 'grasp_command'."
-            )
         if self.arm_selection not in ("nearest", "bound"):
             raise ValueError("arm_selection must be exactly 'nearest' or 'bound'.")
 
@@ -919,14 +907,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         )
         lengths["retreat"] = source_retreat.shape[1]
 
-        # Measured posture limits further squeezing; a declared grasp command
-        # retains closing drive in hands whose contact-limited posture differs
-        # from the actuator target. Keep this choice through the release start.
-        source_hand_qpos = (
-            resources.first.hand_grasp_qpos
-            if options.source_hold_mode == "grasp_command"
-            else context.last_qpos[:, list(resources.first.hand.joint_ids)]
-        )
+        source_hand_qpos = self._existing_hold_hand_qpos(request, context, resources)
         destination_hand_qpos = context.last_qpos[
             :, list(resources.second.hand.joint_ids)
         ]
@@ -1180,6 +1161,15 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             context=context,
             sample_key=(request.invocation_id or self.skill_id) + ":receive_grasp",
         )
+
+    def _existing_hold_hand_qpos(
+        self,
+        request: ResolvedActionRequest[HandOverGoal, HandOverOptions],
+        context: PlanningContext,
+        resources: _HandOverResources,
+    ) -> torch.Tensor:
+        """Keep the observed existing hold unless a specialization owns its target."""
+        return context.last_qpos[:, list(resources.first.hand.joint_ids)]
 
     @staticmethod
     def _compute_existing_hold_segment_lengths(

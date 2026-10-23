@@ -568,13 +568,12 @@ def compose_deployment(
     payload = _compose_integration_payload(
         task=task, policy=policy, skill_profile=skill_profile, scene=scene
     )
-    # Preserve v38 GenSim defaults without changing the shared decoder.
+    # Keep the GenSim retreat duration local to this composition boundary.
     for preset in payload["robot_profile"]["presets"]:
         options = preset["action_options"]
         if isinstance(options, dict):
             for option in options.values():
                 if isinstance(option, dict) and option.get("kind") == "hand_over":
-                    option.setdefault("source_hold_mode", "grasp_command")
                     option.setdefault("retreat_steps", 24)
     raw_services = deepcopy(payload.get("runtime_services", {}))
     raw_lowerers = raw_services.pop("registered_semantic_lowerers", ())

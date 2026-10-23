@@ -1955,6 +1955,13 @@ class GenSimHandOver(HandOver):
     GoalType = HandOver.GoalType
     OptionsType = HandOver.OptionsType
     binding_contract = HandOver.binding_contract
+
+    def _existing_hold_hand_qpos(
+        self, request: Any, context: PlanningContext, resources: Any
+    ) -> torch.Tensor:
+        """Keep closing drive throughout the GenSim existing-hold transfer."""
+        return resources.first.hand_grasp_qpos
+
     environment_screen_factory: Any = None
     post_place_exits: dict[str, tuple[str, str, str]] | None = None
 
@@ -2388,6 +2395,16 @@ class GenSimMoveHeldObject(MoveHeldObject):
     GoalType = MoveHeldObject.GoalType
     OptionsType = MoveHeldObject.OptionsType
     binding_contract = MoveHeldObject.binding_contract
+    observed_hand_invocations: frozenset[str] = frozenset()
+
+    def _held_hand_qpos(self, request: Any, context: PlanningContext) -> torch.Tensor:
+        """Retain measured posture only for bound legacy alignment occurrences."""
+        if request.invocation_id in self.observed_hand_invocations:
+            hand = request.binding.endpoint("primary", "grasp").require_target(
+                JointPositionTarget
+            )
+            return context.robot.qpos[:, list(hand.joint_ids)]
+        return super()._held_hand_qpos(request, context)
 
     def __init__(
         self,
