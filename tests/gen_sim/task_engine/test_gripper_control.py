@@ -113,7 +113,7 @@ def test_unqualified_payload_does_not_change_effort(mass: float | None) -> None:
 
 @pytest.mark.parametrize(
     "task_type,resource",
-    [("E3", "left"), ("E3", "right"), ("E4", "left"), ("E5", "left"), ("E6", "left")],
+    [("E4", "left"), ("E5", "left"), ("E6", "left")],
 )
 def test_other_recipe_families_retain_authored_control(
     task_type: str, resource: str
@@ -123,3 +123,99 @@ def test_other_recipe_families_retain_authored_control(
     before = deepcopy(embodiment)
     _calibrate_task_gripper_effort(embodiment, scene, graph)
     assert embodiment == before
+
+
+@pytest.mark.parametrize("resource", ["left", "right"])
+@pytest.mark.parametrize(
+    "profile", ["default", "contact_experiment", "composition_experiment"]
+)
+def test_light_pour_caps_only_its_hand_including_empty_hand_press(
+    resource: str, profile: str
+) -> None:
+    embodiment, scene, graph = _inputs(task_type="E3")
+    graph["nodes"][0]["call"]["resources"]["primary"] = resource
+    graph["nodes"].append(
+        {
+            "task_type": "E9",
+            "call": {
+                "kind": "registered",
+                "call_id": "press",
+                "resources": {"primary": resource},
+            },
+        }
+    )
+    _calibrate_task_gripper_effort(embodiment, scene, graph, runtime_profile=profile)
+    limits = embodiment["simulation"]["joint_drive_props"]["max_effort"]
+    assert limits[f"{resource}_eef"] == 5.0
+    assert limits["right_eef" if resource == "left" else "left_eef"] == 500.0
+    assert limits["left_arm"] == 10000.0
+
+
+@pytest.mark.parametrize("mass", [None, True, 0.0101, float("inf")])
+def test_unqualified_pour_keeps_canonical_effort(mass: float | None) -> None:
+    embodiment, scene, graph = _inputs(mass=mass, task_type="E3")
+    before = deepcopy(embodiment)
+    _calibrate_task_gripper_effort(
+        embodiment, scene, graph, runtime_profile="composition_experiment"
+    )
+    assert embodiment == before
+
+
+@pytest.mark.parametrize("family", ["E4", "E6", "E8", "unknown"])
+def test_pour_resource_with_unqualified_action_keeps_canonical_effort(
+    family: str,
+) -> None:
+    embodiment, scene, graph = _inputs(task_type="E3")
+    graph["nodes"].append(
+        {
+            "task_type": family,
+            "call": {"kind": "registered", "resources": {"primary": "left"}},
+        }
+    )
+    before = deepcopy(embodiment)
+    _calibrate_task_gripper_effort(
+        embodiment, scene, graph, runtime_profile="composition_experiment"
+    )
+    assert embodiment == before
+
+
+def test_composition_without_pour_keeps_previously_qualified_effort() -> None:
+    embodiment, scene, graph = _inputs()
+    before = deepcopy(embodiment)
+    _calibrate_task_gripper_effort(
+        embodiment, scene, graph, runtime_profile="composition_experiment"
+    )
+    assert embodiment == before
+
+
+@pytest.mark.parametrize("limit", [0.25, 0.5, 2.0, 5.0])
+def test_pour_cap_preserves_lower_authored_effort(limit: float) -> None:
+    embodiment, scene, graph = _inputs(task_type="E3")
+    limits = embodiment["simulation"]["joint_drive_props"]["max_effort"]
+    limits["left_eef"] = limit
+    _calibrate_task_gripper_effort(
+        embodiment, scene, graph, runtime_profile="composition_experiment"
+    )
+    assert limits["left_eef"] == limit
+
+
+@pytest.mark.parametrize("heavy_owner", ["left", "right"])
+def test_pour_cap_checks_all_payloads_on_its_own_hand(heavy_owner: str) -> None:
+    embodiment, scene, graph = _inputs(task_type="E3")
+    scene.rigid_objects += ({"uid": "heavy", "attrs": {"mass_props": {"mass": 1.0}}},)
+    graph["nodes"].append(
+        {
+            "task_type": "E1",
+            "call": {
+                "kind": "pick",
+                "object": "heavy",
+                "resources": {"primary": heavy_owner},
+            },
+        }
+    )
+    _calibrate_task_gripper_effort(
+        embodiment, scene, graph, runtime_profile="composition_experiment"
+    )
+    limits = embodiment["simulation"]["joint_drive_props"]["max_effort"]
+    assert limits["left_eef"] == (500.0 if heavy_owner == "left" else 5.0)
+    assert limits["right_eef"] == 500.0

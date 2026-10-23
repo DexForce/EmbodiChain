@@ -767,13 +767,12 @@ def generate_task_program_bundle(
             table_top_z=scene.table_top_z,
             table_bounds=table_bounds,
         )
-        if runtime_profile != COMPOSITION_PROFILE:
-            _calibrate_task_gripper_effort(
-                embodiment_payload,
-                scene,
-                selected_graph,
-                runtime_profile=runtime_profile,
-            )
+        _calibrate_task_gripper_effort(
+            embodiment_payload,
+            scene,
+            selected_graph,
+            runtime_profile=runtime_profile,
+        )
     if articulation_bindings and frozen is None:
         # Calibrate this generated E6 deployment, not shared robot defaults.
         stiffness = embodiment_payload["simulation"]["joint_drive_props"]["stiffness"]
@@ -3271,23 +3270,30 @@ def _calibrate_task_gripper_effort(
     *,
     runtime_profile: str = "default",
 ) -> None:
-    """Cap qualified <=10 g E1/E2 grips, including light E5 compositions.
+    """Cap qualified <=10 g grips without changing unrelated resources.
 
     The canonical Robotiq keeps its complete closing range. Unknown/heavier
     payloads and other recipe families retain their declared actuator limits.
-    Contact uses 5; Default retains 0.5. Lower authored limits remain intact.
+    E3 pouring and Contact use 5; other Default grips retain 0.5. Composition
+    changes only qualified pouring resources. Lower authored limits remain intact.
     This does not change the imported mechanism or any collision properties.
     """
-    from .experiment_policy import CONTACT_PROFILE
+    from .experiment_policy import COMPOSITION_PROFILE, CONTACT_PROFILE
 
     effort_limit = 5.0 if runtime_profile == CONTACT_PROFILE else 0.5
     picks = []
     blocked_resources: set[str] = set()
+    pour_resources: set[str] = set()
+    press_resources: set[str] = set()
     carriers: dict[str, set[str]] = {}
     for node in graph["nodes"]:
         call = node["call"]
         resources = set(call.get("resources", {}).values())
-        if node["task_type"] not in {"E1", "E2", "E5"}:
+        if node["task_type"] == "E9":
+            # Press requires an empty hand; it adds no carried payload.
+            press_resources.update(resources)
+            continue
+        if node["task_type"] not in {"E1", "E2", "E3", "E5"}:
             blocked_resources.update(resources)
             continue
         if node["task_type"] == "E5":
@@ -3309,9 +3315,13 @@ def _calibrate_task_gripper_effort(
             object_id = call["arguments"]["object"]
         else:
             continue
-        picks.append((object_id, call.get("resources", {}).get("primary", "left")))
+        owner = call.get("resources", {}).get("primary", "left")
+        picks.append((object_id, owner))
+        if node["task_type"] == "E3":
+            pour_resources.add(owner)
     if not picks:
         return
+    blocked_resources.update(press_resources - pour_resources)
     objects = {item["uid"]: item for item in scene.rigid_objects}
     limits = embodiment["simulation"]["joint_drive_props"].get("max_effort")
     if not isinstance(limits, dict):
@@ -3324,6 +3334,8 @@ def _calibrate_task_gripper_effort(
     }
     for resource in {resource for _, resource in picks}:
         if resource in blocked_resources:
+            continue
+        if runtime_profile == COMPOSITION_PROFILE and resource not in pour_resources:
             continue
         payloads = {uid for uid, owner in picks if owner == resource} | carriers.get(
             resource, set()
@@ -3342,7 +3354,8 @@ def _calibrate_task_gripper_effort(
             continue
         part = grasp_parts[resource]
         if part in limits:
-            limits[part] = min(float(limits[part]), effort_limit)
+            cap = 5.0 if resource in pour_resources else effort_limit
+            limits[part] = min(float(limits[part]), cap)
 
 
 def _calibrate_task_gripper_opening(embodiment: dict[str, Any]) -> None:

@@ -487,10 +487,12 @@ After an ordinary on/inside release onto an unmoved reference, later E1
 collection may prefer the arm nearest both that reference and the unmoved target
 over the earlier Pour arm. Rehandling either subject or reference invalidates the
 location hint; explicit arms, live holders and resource occupancy remain authoritative.
-Composition keeps original Pick closure and total sample counts, and retains
-canonical gripper effort limits instead of recalibrating an earlier light-object
-grip from which arm later Pour/control recipes use. Legacy/default and contact
-profiles retain their existing effort calibration.
+Composition keeps original Pick closure and total sample counts. Its effort
+calibration applies only to a resource that actually picks an E3 pouring payload,
+when all its picked bodies and E5 carriers have known masses of at most 10 g.
+That resource caps effort at 5; unrelated Composition hands retain canonical
+limits. Empty-hand E9 does not block this pour cap; E4/E6/E8 and unknown action
+families do. Other Default and Contact resources retain existing calibration.
 Contact-profile qualified light E1/E2 grips cap actuator effort at 5 rather than
 0.5; Default retains 0.5. Both preserve any lower authored limit. Unknown/heavier payloads and blocked recipe resources
 retain their original limits. This is not an acquisition or holding exemption.
@@ -963,12 +965,14 @@ E2 release preserves the observed aligned heading instead of adding another
 fixed yaw during descent; an upright instruction does not require that rotation.
 Generated E1/E2 deployments, including light E5 compositions, cap only grippers
 used by single-arm picks at `max_effort: 0.5` when every picked rigid body and
-E5 carrier has an explicitly declared mass of at most 10 g.
+E5 carrier has an explicitly declared mass of at most 10 g. Qualified E3
+pouring resources use 5 across profiles, including Composition.
 The full closing range is retained; smaller existing effort limits are not
 increased. Unknown/heavier loads, E5-only programs and other recipe families retain their declared
-controls. Qualification is per grasp resource: an E6/E8/E9 on the other hand
-does not disable the cap; a hand shared with those operations keeps its authored
-controls. Payload qualification is likewise hand-local. Imported mimic behavior
+controls. Qualification is per grasp resource: E6/E8/E9 on the other hand
+does not disable the cap; a hand shared with E6/E8 keeps its authored
+controls, while empty-hand E9 is compatible only with the qualified E3 cap.
+Payload qualification is likewise hand-local. Imported mimic behavior
 and shared robot defaults are unchanged.
 For an existing, unedited scene, `planning.physical_reference` in the ordinary
 Task Engine config explicitly selects a reference bundle's physical components
@@ -1437,7 +1441,10 @@ stability, at least 0.05 mm continuous contact-backed travel and 40 mm axial
 finger withdrawal. Park requires that episode's verified withdrawal, released
 button/housing contact, and 40 mm world mesh-AABB separation between every
 finger and target articulation link, not the same axial half-space. This is a
-conservative geometric bound, not exact collision-mesh distance. Rebound does not erase the event; full mechanical
+conservative geometric bound, not exact collision-mesh distance. Post-Press/Park
+holds retain the native terminal command target so withdrawal can finish
+converging; preparation instead holds the observed released pose.
+Rebound does not erase the event; full mechanical
 travel, device activation and self-latching are not claimed. New standalone and
 mixed E8/E9 programs use the same authored verified execution policy. Empty
 effect plans project no state claim and need no effect monitor; physical truth

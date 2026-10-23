@@ -18,12 +18,50 @@ from __future__ import annotations
 
 from dataclasses import replace
 from copy import deepcopy
+from types import SimpleNamespace
+from unittest.mock import Mock
 import pytest
+import torch
 from embodichain.gen_sim.task_engine._task_program.press import (
     PressSample,
     evaluate_press_event,
     inspect_press,
 )
+
+
+@pytest.mark.parametrize("ready", [True, False])
+def test_press_post_hold_preserves_terminal_target_but_ready_holds_observation(
+    ready: bool,
+) -> None:
+    from embodichain.gen_sim.task_engine._task_program.press_runtime import (
+        PressAcceptancePort,
+    )
+
+    observed, commanded = torch.zeros(1, 2), torch.ones(1, 2)
+    get_qpos = Mock(
+        side_effect=lambda *, target=False: commanded if target else observed
+    )
+    port = object.__new__(PressAcceptancePort)
+    port.robot = SimpleNamespace(get_qpos=get_qpos)
+    port.route = SimpleNamespace(binding=object(), preset=lambda name: name)
+    port.sensor = SimpleNamespace(
+        armed=True,
+        joint_index=0,
+        art=SimpleNamespace(get_qpos=lambda: torch.zeros(1, 1)),
+    )
+    port.dt = 0.04
+    port.validate_policy = lambda *args, **kwargs: None
+    policy = SimpleNamespace(
+        cfg=SimpleNamespace(preset="ready" if ready else "pressed")
+    )
+    actions = port.actions(policy, segment=object(), active_mask=torch.tensor([True]))
+    first = next(actions)
+    assert torch.equal(first, observed if ready else commanded)
+    first.fill_(9)
+    assert torch.equal(next(actions), observed if ready else commanded)
+    assert torch.equal(commanded, torch.ones(1, 2))
+    get_qpos.assert_called_once_with(target=not ready)
+    actions.close()
 
 
 @pytest.fixture

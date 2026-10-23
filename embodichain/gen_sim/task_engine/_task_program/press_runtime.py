@@ -571,7 +571,8 @@ class PressAcceptancePort:
             )
             return
         b, sensor = self.route.binding, self.sensor
-        hold = self.robot.get_qpos().clone()
+        # Keep withdrawal converging instead of freezing an off-target observation.
+        hold = self.robot.get_qpos(target=not ready).clone()
         if ready:
             sensor.armed = False
             values = []
