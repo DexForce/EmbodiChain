@@ -167,10 +167,10 @@
         "RIGHT_J7": 0.0
       },
       "rendered_from_catalog": true,
-      "image_sha256": "c3a5cd2d57149443c5ed311f4a95d895df1388cf13320690d66f12bd01e588ad",
+      "image_sha256": "58d18c9a35ad390576a3928a4ff755c633fb88351935c41d7582953ca7ed4f7e",
       "asset": {
         "dataset_id": "DexforceW1V030",
-        "cache_prefix": "DexforceW1V030VisualsV2",
+        "cache_prefix": "DexforceW1V030",
         "repo_id": "DexForceAI/embodichain_data",
         "repo_type": "dataset",
         "revision": "3544bad4b6f8c7bc4b3263473b4a04e18db20fff",

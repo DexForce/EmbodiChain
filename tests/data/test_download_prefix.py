@@ -118,8 +118,8 @@ def test_assets_download_from_the_configured_prefix(prefix: str) -> None:
         f"{MIRROR}robot_assets/UniversalRobots_v4.zip",
         f"{HF_PREFIX}robot_assets/UniversalRobots_v4.zip",
     ]
-    # W1's visual revision must bypass old assembled meshes at the same Hub URL.
-    assert urls["DexforceW1V030VisualsV2"] == [f"{MIRROR}dexforce_w1/v030/w1.zip"]
+    # Corrected W1 visuals overwrite the existing V030 archive and cache.
+    assert urls["DexforceW1V030"] == [f"{MIRROR}dexforce_w1/v030/w1.zip"]
 
 
 @pytest.mark.no_sim

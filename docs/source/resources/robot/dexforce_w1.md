@@ -149,6 +149,11 @@ five component URDFs, with matching visual, collision and inertial definitions.
 V030's `robot_with_ee.urdf` is a compatibility alias of its bare `robot.urdf`;
 detachable tools are separate assets.
 
+V030 visual updates replace the existing archive and cache in place. To refresh
+an existing assembled robot after a visual-only update, set
+`cfg.urdf_cfg.use_signature_check = False` for one assembly so its copied meshes
+are rebuilt.
+
 Body assets, solvers and mounting offsets are registered in
 `embodichain_robots/dexforce_w1/specs.py`; external hand assets and transforms
 are registered independently in `hand_specs.py`.
