@@ -151,6 +151,12 @@ blending. Completed rows become exact endpoint holds with zero derivatives;
 padding has zero arrival intervals. Scalar Torch/Warp samplers clamp outside
 trajectory time, but the joint planner owns completed-row hold semantics.
 
+Blending splits exact or near reversals into rest-to-rest legs. Mandatory stops
+retain exact positions and zero velocity/acceleration by integer sample
+ownership, independently of accumulated floating-point time. A minimum duration
+applies to the complete row; quantity sampling must retain every required stop.
+Rows keep independent timing and use zero-time terminal padding when batched.
+
 Straight-run compression must not accumulate small turns into an unchecked
 shortcut. Blending option compatibility is checked at construction and planning
 entry so mutated options cannot bypass it. Continuous derivative bounds belong

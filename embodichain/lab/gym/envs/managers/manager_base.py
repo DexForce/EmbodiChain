@@ -19,7 +19,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Union
 
 from embodichain.utils.string import string_to_callable, resolve_matching_names
-from embodichain.utils.utility import class_to_dict
+from embodichain.utils.configclass import class_to_dict
 from embodichain.utils import logger
 
 from .cfg import FunctorCfg, SceneEntityCfg

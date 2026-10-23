@@ -25,11 +25,7 @@ from typing import ClassVar
 
 import torch
 
-from embodichain.utils.math import (
-    axis_angle_to_rotation_matrix,
-    pose_inv,
-    get_relative_rotation,
-)
+from embodichain.compute.geometry import rotate_rigid_grasp
 
 from embodichain.lab.sim.atomic_actions.affordance import TwistAffordance
 from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
@@ -59,6 +55,7 @@ from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
     make_manipulation_slot,
 )
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+    find_symmetric_nearest_xpos,
     arm_qpos_from_state,
     hold_inactive_cartesian_rows,
     resample_planned_trajectory,
@@ -149,23 +146,6 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
         self.num_envs = self.robot.get_qpos().shape[0]
         self.robot_dof = self.robot.dof
 
-    def _find_symmetric_nearest_xpos(
-        self, target_xpos: torch.Tensor, reference_xpos: torch.Tensor
-    ) -> torch.Tensor:
-        """Find the nearest symmetric pose to the reference pose."""
-        symmetric_xpos = target_xpos.clone()
-        symmetric_xpos[:, :3, 0] = -symmetric_xpos[:, :3, 0]
-        symmetric_xpos[:, :3, 1] = -symmetric_xpos[:, :3, 1]
-        angle_a = get_relative_rotation(
-            reference_xpos[:, :3, :3], target_xpos[:, :3, :3]
-        )
-        angle_b = get_relative_rotation(
-            reference_xpos[:, :3, :3], symmetric_xpos[:, :3, :3]
-        )
-        choose_target = (angle_a < angle_b)[..., None, None]
-        target_xpos = torch.where(choose_target, target_xpos, symmetric_xpos)
-        return target_xpos
-
     def _plan(
         self,
         request: ResolvedActionRequest[TwistGoal, TwistOptions],
@@ -216,7 +196,7 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
             key=(request.invocation_id or self.skill_id) + ":grasp",
         )
         grasp_xpos = grasp_sample.poses.to(device=self.device, dtype=torch.float32)
-        grasp_xpos = self._find_symmetric_nearest_xpos(
+        grasp_xpos = find_symmetric_nearest_xpos(
             grasp_xpos,
             reference_xpos=self.robot.compute_fk(
                 qpos=start_arm_qpos, name=control_part, to_matrix=True
@@ -512,29 +492,14 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
         fractions: torch.Tensor,
     ) -> torch.Tensor:
         """Sample the rigid grasp path at normalized twist-angle fractions."""
-        axis = twist_axis.to(device=self.device, dtype=torch.float32)
-        axis = axis / torch.linalg.vector_norm(axis)
-        fractions = fractions.to(device=self.device, dtype=torch.float32)
-        angles = twist_angle * fractions
-        rotations = (
-            torch.eye(4, dtype=torch.float32, device=self.device)
-            .reshape(1, 4, 4)
-            .repeat(fractions.numel(), 1, 1)
+        _, eef_poses = rotate_rigid_grasp(
+            link_pose,
+            grasp_xpos,
+            twist_axis,
+            axis_origin,
+            twist_angle * fractions.to(device=self.device, dtype=torch.float32),
         )
-        rotations[:, :3, :3] = axis_angle_to_rotation_matrix(angles[:, None] * axis)
-        link_to_eef = torch.bmm(pose_inv(link_pose), grasp_xpos)
-        origin = torch.tensor(axis_origin, dtype=torch.float32, device=self.device)
-        to_origin = torch.eye(4, dtype=torch.float32, device=self.device)
-        from_origin = torch.eye(4, dtype=torch.float32, device=self.device)
-        to_origin[:3, 3] = origin
-        from_origin[:3, 3] = -origin
-        local_rotations = torch.matmul(
-            torch.matmul(to_origin[None], rotations), from_origin[None]
-        )
-        return torch.matmul(
-            torch.matmul(link_pose[:, None], local_rotations[None]),
-            link_to_eef[:, None],
-        )
+        return eef_poses
 
 
 __all__ = ["Twist", "TwistGoal", "TwistOptions"]

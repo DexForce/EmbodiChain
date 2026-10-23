@@ -124,6 +124,159 @@ def _make_components(
     return env, policy, algorithm
 
 
+class _ActorWithExtraState(nn.Linear):
+    def __init__(self) -> None:
+        super().__init__(1, 1, bias=False)
+        self.calibration = "initial"
+
+    def get_extra_state(self) -> dict[str, str]:
+        return {"calibration": self.calibration}
+
+    def set_extra_state(self, state: dict[str, str]) -> None:
+        self.calibration = state["calibration"]
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_resume_preserves_module_extra_state(tmp_path: Path, legacy: bool) -> None:
+    env = _QuadraticActionEnv()
+    actor = _ActorWithExtraState()
+    policy = ActorOnly(1, 1, env.device, actor=actor)
+    algorithm = APG(APGCfg(device="cpu"), policy)
+    trainer = DifferentiableTrainer(
+        DifferentiableTrainerCfg(segment_length=2), env, policy, algorithm
+    )
+    trainer.train(total_updates=1)
+    actor.calibration = "calibrated"
+    path = trainer.save_checkpoint(tmp_path / "extra-state.pt")
+    if legacy:
+        payload = torch.load(path, weights_only=True)
+        for field in ("metadata", "rng_by_rank", "normalizer_by_rank", "world_size"):
+            payload.pop(field)
+        payload["schema_version"] = 1
+        torch.save(payload, path)
+    actor.calibration = "changed"
+    if legacy:
+        with pytest.warns(UserWarning, match="Legacy checkpoint"):
+            trainer.load_checkpoint(path)
+    else:
+        trainer.load_checkpoint(path)
+    assert actor.calibration == "calibrated"
+    trainer.train(total_updates=2)
+    assert trainer.num_updates == 2
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"rollout_mode": "complete"},
+        {"segment_length": 1},
+        {"update_horizon": 4},
+        {"deterministic_actions": True},
+        {"clip_actions_to_space": True},
+        {"action_adjoint_max_norm": 1.0},
+    ],
+)
+def test_resume_rejects_changed_apg_semantics(tmp_path: Path, changes: dict) -> None:
+    env, policy, algorithm = _make_components()
+    original = DifferentiableTrainer(
+        DifferentiableTrainerCfg(segment_length=2), env, policy, algorithm
+    )
+    original.train(total_updates=1)
+    path = original.save_checkpoint(tmp_path / "original.pt")
+    env, policy, algorithm = _make_components()
+    cfg = {"segment_length": 2, **changes}
+    restored = DifferentiableTrainer(
+        DifferentiableTrainerCfg(**cfg), env, policy, algorithm
+    )
+    initial = policy.actor.weight.detach().clone()
+    with pytest.raises(ValueError, match="trainer_config"):
+        restored.load_checkpoint(path)
+    torch.testing.assert_close(policy.actor.weight, initial)
+    assert restored.num_updates == 0
+
+
+@pytest.mark.parametrize("update_horizon", [1, 8])
+def test_scheduled_resume_checks_actual_updates(
+    tmp_path: Path, update_horizon: int
+) -> None:
+    def make() -> DifferentiableTrainer:
+        env = _ScheduledCompleteRolloutEnv()
+        policy = ActorOnly(1, 1, env.device, actor=nn.Linear(1, 1, bias=False))
+        algorithm = APG(
+            APGCfg(
+                device="cpu",
+                lr_scheduler=LRSchedulerCfg(name="linear", kwargs={"total_iters": 2}),
+            ),
+            policy,
+        )
+        return DifferentiableTrainer(
+            DifferentiableTrainerCfg(
+                rollout_mode="complete",
+                update_horizon=update_horizon,
+                deterministic_actions=True,
+            ),
+            env,
+            policy,
+            algorithm,
+        )
+
+    original = make()
+    original.train(total_updates=1)
+    path = original.save_checkpoint(tmp_path / "scheduled.pt")
+    original.train(total_timesteps=12)
+    restored = make()
+    restored.load_checkpoint(path)
+    restored.train(total_timesteps=12)
+    assert restored.num_updates == original.num_updates == 2
+    assert restored.global_step == original.global_step == 12
+    for key, value in original.policy.state_dict().items():
+        torch.testing.assert_close(
+            restored.policy.state_dict()[key], value, rtol=0, atol=0
+        )
+    with pytest.raises(ValueError, match="resume-scheduler restart"):
+        restored.train(total_timesteps=20)
+    assert restored.num_updates == 2
+
+
+def test_complete_resume_rejects_changed_gradient_accumulation(tmp_path: Path) -> None:
+    env, policy, algorithm = _make_components()
+    trainer = DifferentiableTrainer(
+        DifferentiableTrainerCfg(
+            rollout_mode="complete", update_horizon=2, gradient_accumulation_steps=2
+        ),
+        env,
+        policy,
+        algorithm,
+    )
+    trainer.train(total_updates=1)
+    path = trainer.save_checkpoint(tmp_path / "complete.pt")
+    env, policy, algorithm = _make_components()
+    restored = DifferentiableTrainer(
+        DifferentiableTrainerCfg(rollout_mode="complete", update_horizon=2),
+        env,
+        policy,
+        algorithm,
+    )
+    with pytest.raises(ValueError, match="trainer_config.gradient_accumulation_steps"):
+        restored.load_checkpoint(path)
+
+
+def test_resume_accepts_older_v2_without_apg_configuration(tmp_path: Path) -> None:
+    env, policy, algorithm = _make_components()
+    trainer = DifferentiableTrainer(
+        DifferentiableTrainerCfg(segment_length=2), env, policy, algorithm
+    )
+    trainer.train(total_updates=1)
+    path = trainer.save_checkpoint(tmp_path / "older-v2.pt")
+    payload = torch.load(path, weights_only=True)
+    payload["metadata"].pop("trainer_config")
+    torch.save(payload, path)
+    with pytest.warns(UserWarning, match="APG trainer configuration"):
+        trainer.load_checkpoint(path)
+    trainer.train(total_updates=2)
+    assert trainer.num_updates == 2
+
+
 def test_trainer_updates_policy_and_detaches_each_segment() -> None:
     env, policy, algorithm = _make_components()
     trainer = DifferentiableTrainer(
@@ -415,3 +568,137 @@ def test_checkpoint_load_falls_back_for_older_torch(
     trainer.load_checkpoint(checkpoint_path)
 
     assert calls == [True, False]
+
+
+@pytest.mark.parametrize("rollout_mode", ["segmented", "complete"])
+@pytest.mark.parametrize("normalize", [False, True])
+def test_checkpoint_continues_apg_updates_and_rollout_schedule(
+    tmp_path: Path,
+    rollout_mode: str,
+    normalize: bool,
+) -> None:
+    from copy import deepcopy
+
+    def components(directory: Path) -> DifferentiableTrainer:
+        env = (
+            _ScheduledCompleteRolloutEnv()
+            if rollout_mode == "complete"
+            else _QuadraticActionEnv()
+        )
+        policy = ActorOnly(1, 1, env.device, actor=nn.Linear(1, 1, bias=False))
+        algorithm = APG(
+            APGCfg(
+                device="cpu",
+                optimizer=OptimizerCfg(learning_rate=0.05),
+                lr_scheduler=LRSchedulerCfg(name="linear", kwargs={"total_iters": 4}),
+                max_grad_norm=10.0,
+            ),
+            policy,
+        )
+        return DifferentiableTrainer(
+            DifferentiableTrainerCfg(
+                segment_length=2,
+                update_horizon=4,
+                rollout_mode=rollout_mode,
+                deterministic_actions=True,
+                gradient_accumulation_steps=2,
+                normalize_observations=normalize,
+                checkpoint_dir=str(directory),
+            ),
+            env,
+            policy,
+            algorithm,
+        )
+
+    torch.manual_seed(17)
+    original = components(tmp_path / "original")
+    original.train(total_updates=2)
+    path = original.save_checkpoint()
+    saved_index = original._rollout_index
+    original.train(total_updates=4)
+    expected_policy = deepcopy(original.policy.state_dict())
+    expected_optimizer = deepcopy(original.algorithm.optimizer.state_dict())
+
+    restored = components(tmp_path / "restored")
+    restored.load_checkpoint(path)
+    assert restored._rollout_index == saved_index
+    restored.train(total_updates=4)
+    assert restored.num_updates == 4
+    assert restored.global_step == original.global_step
+    assert restored._rollout_index == original._rollout_index
+    for key, value in expected_policy.items():
+        torch.testing.assert_close(
+            restored.policy.state_dict()[key], value, rtol=0, atol=0
+        )
+    for key, state in expected_optimizer["state"].items():
+        for name, value in state.items():
+            torch.testing.assert_close(
+                restored.algorithm.optimizer.state_dict()["state"][key][name],
+                value,
+                rtol=0,
+                atol=0,
+            )
+    assert (
+        restored.algorithm.lr_scheduler.state_dict()
+        == original.algorithm.lr_scheduler.state_dict()
+    )
+    if normalize:
+        torch.testing.assert_close(
+            restored.observation_normalizer.mean, original.observation_normalizer.mean
+        )
+        assert (
+            restored.observation_normalizer.count
+            == original.observation_normalizer.count
+        )
+    if rollout_mode == "complete":
+        assert restored.env.prepared_indices[0] == saved_index
+
+
+def test_load_existing_apg_schema_v1_and_continue(tmp_path: Path) -> None:
+    env, policy, algorithm = _make_components()
+    trainer = DifferentiableTrainer(
+        DifferentiableTrainerCfg(segment_length=2),
+        env,
+        policy,
+        algorithm,
+    )
+    trainer.train(total_updates=1)
+    path = trainer.save_checkpoint(tmp_path / "v1.pt")
+    checkpoint = torch.load(path, weights_only=True)
+    for key in (
+        "metadata",
+        "rng_by_rank",
+        "normalizer_by_rank",
+        "world_size",
+        "best_checkpoint",
+    ):
+        checkpoint.pop(key)
+    checkpoint["schema_version"] = 1
+    torch.save(checkpoint, path)
+    with pytest.warns(UserWarning, match="Legacy checkpoint"):
+        trainer.load_checkpoint(path)
+    trainer.train(total_updates=2)
+    assert trainer.num_updates == 2
+    assert trainer.global_step == 8
+
+
+def test_variable_horizon_requires_update_budget_for_implicit_lr_curve() -> None:
+    env = _ScheduledCompleteRolloutEnv()
+    policy = ActorOnly(1, 1, env.device, actor=nn.Linear(1, 1, bias=False))
+    algorithm = APG(
+        APGCfg(device="cpu", lr_scheduler=LRSchedulerCfg(name="linear")),
+        policy,
+    )
+    trainer = DifferentiableTrainer(
+        DifferentiableTrainerCfg(rollout_mode="complete", update_horizon=4),
+        env,
+        policy,
+        algorithm,
+    )
+    trainer.train(total_timesteps=0)
+    assert trainer.num_updates == 0
+    with pytest.raises(
+        ValueError, match="total_updates or an explicit scheduler horizon"
+    ):
+        trainer.train(total_timesteps=8)
+    assert trainer.num_updates == 0

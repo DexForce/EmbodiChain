@@ -214,9 +214,15 @@ class Pour(AtomicAction[PourGoal, PourOptions]):
             .clone()
         )
         full[:, :, arm_joint_ids] = arm_trajectory
-        # Preserve the measured contact-supported grasp instead of tightening
-        # the hand to a configured nominal value on the first frame.
-        full[:, :, hand_joint_ids] = context.last_qpos[:, hand_joint_ids].unsqueeze(1)
+        # A contact-blocked finger measurement is not a holding command.
+        # Retain closing effort while rotating, dwelling and returning.
+        hold_hand_qpos = grasp_endpoint.joint_positions(
+            GRASP_COMMAND,
+            num_envs=context.batch_size,
+            device=self.device,
+            dtype=context.robot.qpos.dtype,
+        )
+        full[:, :, hand_joint_ids] = hold_hand_qpos.unsqueeze(1)
         timed = TimedTrajectory.from_uniform_step(
             full,
             env_ids=context.env_ids,

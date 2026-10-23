@@ -25,6 +25,6 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from embodichain.lab.scripts._atomic_action import scenario as _implementation
+from examples.sim.atomic_action import scenario as _implementation
 
 sys.modules[__name__] = _implementation

@@ -236,14 +236,17 @@ jobs:
         run: |
           TARGET_REF="${{ github.event_name == 'release' && github.event.release.tag_name || inputs.ref != '' && inputs.ref || 'main' }}"
           pip install -e ".[gensim]" \
+            --index-url https://pypi.org/simple \
             --extra-index-url http://pyp.open3dv.site:2345/simple/ \
             --trusted-host pyp.open3dv.site \
             --extra-index-url https://download.blender.org/pypi/
-          pip install -r docs/requirements.txt
+          python -m pip --isolated install --index-url https://pypi.org/simple \
+            -r docs/requirements.txt
           python3 docs/scripts/sync_readme.py
           cd ${GITHUB_WORKSPACE}/docs
           pip uninstall pymeshlab -y
-          pip install pymeshlab==2023.12.post3
+          python -m pip --isolated install --index-url https://pypi.org/simple \
+            pymeshlab==2023.12.post3
 
           if [[ "${TARGET_REF}" == v* ]]; then
             echo "Building docs for release tag ${TARGET_REF}..."

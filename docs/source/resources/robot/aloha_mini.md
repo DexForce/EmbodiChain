@@ -3,10 +3,22 @@
 `AlohaMiniCfg` loads the complete `AlohaMini/alohamini2pro.urdf` asset without
 renaming its joints or assembling separate arms.
 
-<div style="text-align: center;">
-  <img src="../../_static/robots/aloha_mini_2_pro.png" alt="Aloha Mini 2 Pro dual-arm robot" style="height: 400px; width: auto;"/>
-  <p><b>Aloha Mini 2 Pro</b></p>
-</div>
+<figure style="text-align: center; margin: 20px auto; max-width: 540px;">
+  <img src="../../_static/robots/aloha_mini_2_pro.png" alt="Aloha Mini 2 Pro with its complete base, vertical column and two bent arms, rendered with soft studio lighting" width="960" height="1200" style="display: block; width: 100%; height: auto;"/>
+  <figcaption><b>Aloha Mini 2 Pro · 15 DOFs across five control groups</b></figcaption>
+</figure>
+
+The image uses the registered `AlohaMini` preset in a display pose, rendered
+with `RenderCfg(renderer="rt")` (OfflineRT). Three soft area lights reveal
+the dark arm details while retaining the white body's surface definition.
+
+:::{dropdown} Image rendering settings
+960 × 1200; 1 sample per pixel; DLSS offscreen reconstruction (quality 2);
+tone mapping off; exposure 1.0. The default ground and environment emission
+are supplemented by neutral key, fill and rim rectangular lights. Exact
+camera, lighting and joint settings are recorded in the
+[render manifest](../../_static/robots/aloha_mini_render.json).
+:::
 
 ```python
 from embodichain_robots import AlohaMiniCfg

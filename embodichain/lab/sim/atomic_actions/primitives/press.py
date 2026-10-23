@@ -25,7 +25,10 @@ from typing import ClassVar
 import torch
 
 from embodichain.compute.trajectory import retime_to_control_grid
-from embodichain.lab.sim.atomic_actions.primitives._helpers import arm_qpos_from_state
+from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+    arm_qpos_from_state,
+    find_symmetric_nearest_xpos,
+)
 from embodichain.lab.sim.atomic_actions.affordance import PressAffordance
 from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
 from embodichain.lab.sim.atomic_actions.control import (
@@ -55,7 +58,6 @@ from embodichain.lab.sim.atomic_actions.requirements import (
     FORWARD_KINEMATICS_CAPABILITY,
     SkillBindingContract,
 )
-from embodichain.utils.math import get_relative_rotation
 from embodichain.lab.sim.atomic_actions.state import PlanningContext
 from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     axis_translation_keyframes,
@@ -146,23 +148,6 @@ class Press(AtomicAction[PressGoal, PressOptions]):
         self.num_envs = self.robot.get_qpos().shape[0]
         self.robot_dof = self.robot.dof
 
-    def _find_symmetric_nearest_xpos(
-        self, target_xpos: torch.Tensor, reference_xpos: torch.Tensor
-    ) -> torch.Tensor:
-        """Find the nearest symmetric pose to the reference pose."""
-        symmetric_xpos = target_xpos.clone()
-        symmetric_xpos[:, :3, 0] = -symmetric_xpos[:, :3, 0]
-        symmetric_xpos[:, :3, 1] = -symmetric_xpos[:, :3, 1]
-        angle_a = get_relative_rotation(
-            reference_xpos[:, :3, :3], target_xpos[:, :3, :3]
-        )
-        angle_b = get_relative_rotation(
-            reference_xpos[:, :3, :3], symmetric_xpos[:, :3, :3]
-        )
-        choose_target = (angle_a < angle_b)[..., None, None]
-        target_xpos = torch.where(choose_target, target_xpos, symmetric_xpos)
-        return target_xpos
-
     def _plan(
         self,
         request: ResolvedActionRequest[PressGoal, PressOptions],
@@ -209,7 +194,7 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             key=(request.invocation_id or self.skill_id) + ":contact",
         )
         contact_xpos = contact_sample.poses.to(device=self.device, dtype=torch.float32)
-        contact_xpos = self._find_symmetric_nearest_xpos(
+        contact_xpos = find_symmetric_nearest_xpos(
             contact_xpos,
             reference_xpos=self.robot.compute_fk(
                 qpos=start_arm_qpos, name=control_part, to_matrix=True

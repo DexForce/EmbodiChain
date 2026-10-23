@@ -370,6 +370,7 @@ def run(args: argparse.Namespace) -> None:
     metadata = {
         "python": sys.version,
         "torch": str(torch.__version__),
+        "embodichain": version("embodichain"),
         "dexsim": version("dexsim-engine"),
         "timezone": "Asia/Shanghai",
         "cpu_affinity": psutil.Process().cpu_affinity(),
@@ -393,9 +394,32 @@ def run(args: argparse.Namespace) -> None:
         )
     except (OSError, subprocess.SubprocessError):
         metadata["allocated_gpu_hardware"] = None
-    metadata["commit"] = subprocess.check_output(
-        ["git", "rev-parse", "HEAD"], text=True
-    ).strip()
+    import embodichain
+
+    sdk_root = Path(embodichain.__file__).resolve().parent.parent
+    metadata["commit"] = None
+    metadata["working_tree_dirty"] = None
+    if (sdk_root / ".git").exists():
+        try:
+            metadata["commit"] = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"],
+                cwd=sdk_root,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=5,
+            ).strip()
+            metadata["working_tree_dirty"] = bool(
+                subprocess.check_output(
+                    ["git", "status", "--porcelain"],
+                    cwd=sdk_root,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                    timeout=5,
+                ).strip()
+            )
+        except (OSError, subprocess.SubprocessError):
+            metadata["commit"] = None
+            metadata["working_tree_dirty"] = None
     root = Path(__file__).resolve().parents[3]
     source_paths = [
         "examples/ods/simple_bc_demo/train.py",
@@ -430,12 +454,11 @@ def run(args: argparse.Namespace) -> None:
         "examples/ods/simple_bc_demo/environment.py",
     ]
     metadata["source_sha256"] = {
-        path: hashlib.sha256((root / path).read_bytes()).hexdigest()
+        path: hashlib.sha256(
+            ((root if path.startswith("examples/") else sdk_root) / path).read_bytes()
+        ).hexdigest()
         for path in source_paths
     }
-    metadata["working_tree_dirty"] = bool(
-        subprocess.check_output(["git", "status", "--porcelain"], text=True).strip()
-    )
     metadata["hf_datasets_cache"] = os.environ.get("HF_DATASETS_CACHE")
     (args.output / "environment.json").write_text(json.dumps(metadata, indent=2))
     context = mp.get_context("spawn")

@@ -1,188 +1,159 @@
+# DexForce W1
 
-# Dexforce W1
-
-Dexforce W1 is a dual-arm humanoid robot developed by DexForce Technology Co., Ltd.
+DexForce W1 is a mobile dual-arm humanoid with two 7-DOF arms, a 4-DOF torso
+and a 2-DOF head. The bare body has 20 independent control DOFs; end effectors
+are configured separately.
 
 <div style="display: flex; justify-content: center; align-items: flex-start; gap: 20px; flex-wrap: wrap;">
-  <figure style="text-align: center; margin: 10px;">
-    <img src="../../_static/robots/dexforcew1.jpg" alt="Dexforce W1" style="height: 400px; width: auto;"/>
-    <figcaption><b>Dexforce W1</b></figcaption>
+  <figure style="text-align: center; margin: 0; flex: 1 1 320px; max-width: 540px;">
+    <img src="../../_static/robots/dexforcew1_v021.jpg" alt="DexForce W1 V021 with two BrainCo V021 hands, 32 independent control DOFs" style="display: block; width: 100%; height: auto;"/>
+    <figcaption><b>W1 V021 · BrainCo V021 hands · 32 DOF</b><br/><code>v021/BrainCo</code></figcaption>
+  </figure>
+  <figure style="text-align: center; margin: 0; flex: 1 1 320px; max-width: 540px;">
+    <img src="../../_static/robots/dexforcew1_v030.jpg" alt="DexForce W1 V030 standard bare body without end effectors, 20 independent control DOFs" style="display: block; width: 100%; height: auto;"/>
+    <figcaption><b>W1 V030 · Bare body · 20 DOF</b><br/><code>v030/bare</code></figcaption>
   </figure>
 </div>
 
-## Key Features
+Both images are captured from the registered robot presets using the same
+camera, bent-elbow display pose and current `RenderCfg(renderer="rt")`
+defaults (OfflineRT), with default scene lighting.
+The display pose is for illustration; it does not change the preset home pose.
 
-- Supports dual 7-DOF arms
-- Supports version-owned asset layouts and calibration parameters
-- Configurable left/right hand brand and version
-- Flexible URDF assembly and simulation configuration
-- Compatible with SimulationManager simulation environment
+:::{dropdown} Image rendering settings
+960 × 1200; 1 sample per pixel; DLSS offscreen reconstruction (quality 2);
+tone mapping off; exposure 1.0; path depths 4–8. The scene uses the default
+ground and environment emission, with no added direct lights. Camera settings,
+joint positions and the V030 asset revision are recorded in the
+[render manifest](../../_static/robots/dexforcew1_render.json).
+:::
 
-## Configuration with `DexforceW1Cfg.from_dict`
+## Supported Body Revisions
 
-`DexforceW1Cfg.from_dict` is the single public construction entry point. A W1
-configuration always describes the complete chassis, torso, head, eyes, wrist
-cameras, and both arms for one robot version.
+| Body revision | Default arm solver | Default end effectors | Independent control DOF | Revision differences |
+|---|---|---|---|---|
+| `v021` | `SRSSolver` | BrainCo V021 hands | 32 | Separate component datasets and eyes component; identity mounting offset |
+| `v022` | `SRSSolver` | BrainCo V021 hands | 32 | Unified archive; eyes included in the head; provisional identity flange calibration |
+| `v025` | `SRSSolver` | BrainCo V021 hands | 32 | Unified archive; calibrated 12 mm mounting offset along each arm's `ee` Z axis |
+| `v030` | `FEPSolver` | None | 20 | Standard bare body; flange TCPs; no wrist-camera mounting frames |
 
-**Parameters:**
+The default remains `v021/BrainCo`. A body revision selects the chassis,
+torso, head and both arms together; mixed body/arm revisions are unsupported.
+Hand versions are independent of body versions.
 
-- `hand_types`: Dict specifying hand brand for each arm side (`LEFT`/`RIGHT`).
-- `hand_versions`: Dict specifying hand version for each arm side.
-- `with_default_eef`: Whether to install the registered default end effectors.
-- `hand_attach_xposes`: Optional hand-specific mounting transforms.
+## Configuration
+
+Select an exact catalog variant to reproduce a configuration:
+
+```python
+from embodichain.robot_registry import resolve_robot_cfg
+
+cfg = resolve_robot_cfg("DexforceW1", variant="v030/bare")
+# sim is an existing SimulationManager.
+robot = sim.add_robot(cfg=cfg)
+```
+
+Use `DexforceW1Cfg.from_dict` when customizing the end effectors:
 
 ```python
 from embodichain_robots import DexforceW1Cfg
 
 cfg = DexforceW1Cfg.from_dict(
     {
-        "uid": "dexforce_w1",
         "version": "v025",
-        "hand_types": {
-            "left": "BRAINCO_HAND",
-            "right": "BRAINCO_HAND",
-        },
+        "hand_types": {"left": "BRAINCO_HAND", "right": "BRAINCO_HAND"},
         "hand_versions": {"left": "v021", "right": "v021"},
     }
 )
 robot = sim.add_robot(cfg=cfg)
-print("DexforceW1 robot added to the simulation.")
 ```
+
+| Field | Purpose |
+|---|---|
+| `version` | Body revision: `v021`, `v022`, `v025` or `v030` |
+| `hand_types` | Per-side brand: `BRAINCO_HAND`, `DH_PGC_GRIPPER` or `DH_PGC_GRIPPER_M` |
+| `hand_versions` | Per-side hand asset revision; current registrations use `v021` |
+| `with_default_eef` | Install registered end effectors; defaults to `True` for V021/V022/V025 and `False` for V030 |
+| `hand_attach_xposes` | Per-side hand mounting transforms |
+| `solver_cfg` | Per-arm solver overrides, including tool TCPs |
+
+Side keys accept `left` / `right` or `DexforceW1ArmSide` values.
+`DexforceW1Cfg.from_dict({"version": "v030"})` selects the standard bare body.
+Optional V030 tools require their own mounting and TCP calibration.
 
 ## Catalog Variants and Control DOFs
 
-`embodichain list-robot` advertises three body releases (`v021`, `v022`, and
-`v025`) with six hand profiles each, for 18 combinations. Dual BrainCo hands
-provide 32 independent control DOFs; every pairing of DH_PGC and DH_PGC_M
-grippers provides 22; `with_default_eef=False` provides 20. The default is body
-`v021` with two BrainCo hands. Dexterous-hand/two-finger-gripper mixtures are
-omitted from the advertised profiles.
+`embodichain list-robot` lists 19 W1 variants: six profiles each for V021,
+V022 and V025, plus `v030/bare`.
 
-BrainCo PIP followers are passive joints outside the default hand control
-groups. They are listed as mimic joints while each `left_eef` / `right_eef`
-group contains six independent control joints. DH gripper groups each have
-one independent joint and one follower, displayed as `1+1m`.
+| Profile suffix | Body revisions | End effectors | Independent control DOF |
+|---|---|---|---|
+| `BrainCo` | V021/V022/V025 | Two BrainCo hands | 32 |
+| `DH_PGC` / `DH_PGC_M` | V021/V022/V025 | Two matching DH grippers | 22 |
+| `L=DH_PGC,R=DH_PGC_M` / `L=DH_PGC_M,R=DH_PGC` | V021/V022/V025 | Mixed DH grippers | 22 |
+| `bare` | V021/V022/V025/V030 | None | 20 |
 
-See {doc}`/guides/robot_catalog` for the complete hand-pairing table and
-examples of selecting these profiles through configuration fields.
+Combine a revision and suffix, for example `v022/DH_PGC_M`.
+Each BrainCo hand contributes six independent joints; its PIP followers are
+outside the default EEF control group. Each DH gripper contributes one
+independent joint and one mimic follower (`1+1m`). See
+{doc}`/guides/robot_catalog` for hand-pairing and selection details.
 
-## Arm Joint Design: Mirrored Configuration
+The bare-body control parts are `torso`, `head`, `left_arm`, `right_arm`,
+`dual_arm` and `full_body`. The last two combine existing joints; `full_body`
+excludes hands. Installed hands add `left_eef` and `right_eef`. Joint positions
+use radians and revision-specific mirrored axes; preserve the selected
+URDF's coordinates and limits when transferring poses.
 
-DexforceW1's left and right arms are designed with mirrored joint configurations. This means the joint angles for the left and right arms are symmetric but opposite in sign for certain axes, making it easier to coordinate bimanual tasks and maintain natural robot postures.
+## Solver and TCP Calibration
 
-### Example: Setting Arm Joint Positions
+V021/V022/V025 use version-owned SRS settings and legacy tool TCPs. Their
+`bare` profiles retain those TCPs; configure an explicit flange TCP when
+controlling the physical flange.
 
-```python
-import numpy as np
-# Set left arm joint positions (mirrored)
-robot.set_qpos(qpos=[0, -np.pi/4, 0.0, -np.pi/2, -np.pi/4, 0.0, 0.0], joint_ids=robot.get_joint_ids("left_arm"))
-# Set right arm joint positions (mirrored)
-robot.set_qpos(qpos=[0, np.pi/4, 0.0, np.pi/2, np.pi/4, 0.0, 0.0], joint_ids=robot.get_joint_ids("right_arm"))
-```
+V030 uses FEP, source-URDF joint limits and identity TCPs at `left_ee` /
+`right_ee`. Its left CAD wrist has a small J7 axis tilt, handled by explicit
+revision tolerances; accepted solutions are checked against source-URDF FK.
+Redundancy search scores joint distance and limit margin without a swivel-angle
+preference (`arm_angle_weight=0.0`), because the outstretched home pose has no
+defined GeoFIK swivel angle. These settings describe simulator kinematics;
+hardware and tool calibration remain separate.
 
-This mirrored design simplifies motion planning and ensures that both arms can perform coordinated or symmetric actions efficiently.
-
-## Type Descriptions
-
-| Type                    | Options / Values                                      | Description                        |
-|-------------------------|-------------------------------------------------------|------------------------------------|
-| `DexforceW1HandBrand`   | `BRAINCO_HAND`, `DH_PGC_GRIPPER`, `DH_PGC_GRIPPER_M`  | Hand brand                         |
-| `DexforceW1Version`     | `V021`, `V022`, `V025`                                | Release version                    |
-| `DexforceW1HandVersion` | `V021`                                                  | External hand/gripper asset version |
-| `DexforceW1ArmSide`     | `LEFT`, `RIGHT`                                       | Left/right hand identifier         |
-
-## Unified asset layout and version extension
-
-V022 and V025 use one unified Hugging Face archive per release:
-
-```text
-dexforce_w1/<version>/w1.zip
-└── w1/
-    ├── robot.urdf
-    ├── chassis.urdf
-    ├── torso.urdf
-    ├── head.urdf
-    ├── left_arm.urdf
-    ├── right_arm.urdf
-    ├── visual/
-    └── collision/
-```
-
-The runtime downloads each release archive once. Direct FK/IK uses `robot.urdf`
-or the arm URDFs, while configurable robot assembly reads all components from
-the same extracted directory. V022 and V025 assets are resolved through the
-registered Hugging Face dataset archives and the shared asset cache.
-
-### Version-owned end-effector offset
-
-Different arm revisions may place the physical mounting surface at different
-positions relative to the arm `ee` frame. This difference belongs to the W1
-revision, not to a BrainCo hand, DH gripper, PIKA gripper, or any other
-end-effector.
-
-`W1VersionSpec.default_eef_attach_xpos` is the single source of truth for this
-revision offset:
-
-| Version | Left arm | Right arm |
-|---------|----------|-----------|
-| V021 | Identity | Identity |
-| V022 | Identity (provisional; calibration required) | Identity (provisional; calibration required) |
-| V025 | `+0.012 m` along the `ee` frame Z axis | `+0.012 m` along the `ee` frame Z axis |
-
-The final assembly transform and solver TCP are derived as follows:
+The body revision owns the mounting correction: identity for V021, provisional
+identity for V022, **+12 mm along each `ee` Z axis for V025**, and identity at
+the physical flange for V030. Configuration assembly applies it to both the
+hand transform and solver TCP:
 
 ```python
 final_attach_xpos = version_attach_xpos @ eef_attach_xpos
 final_tcp = version_attach_xpos @ solver_tcp
 ```
 
-Therefore, the V025 offset affects both the assembled end-effector position and
-FK/IK results. The offset is also applied when callers provide a custom
-`hand_attach_xposes` value, a custom `left_hand`/`right_hand` component
-transform, or an explicit arm TCP through `DexforceW1Cfg.from_dict`.
-Serialization removes the derived offset and restores it on loading, so a
-configuration round trip does not apply the offset twice.
+Supply hand transforms and TCPs relative to the standard mounting surface;
+do not add the V025 correction manually. This also applies to custom hand
+components and explicit solver overrides. Serialization removes and restores
+the derived offset so it is applied once.
 
-Do not manually add the 12 mm correction to an end-effector transform or TCP.
-Those values must describe the end-effector relative to the standard mounting
-surface; the W1 version layer adds the robot revision correction.
+## Assets and Download Layout
 
-One `DexforceW1Version` selects the complete W1 robot release. Mixed body/arm
-versions are intentionally unsupported because their assets, kinematics, TCP,
-and camera calibration must remain consistent.
+| Body revision | Dataset ID | Full-robot asset path |
+|---|---|---|
+| `v021` | `DexforceW1V021` | `DexforceW1V021/DexforceW1_v02_1.urdf` |
+| `v022` | `DexforceW1V022` | `DexforceW1V022/w1/robot.urdf` |
+| `v025` | `DexforceW1V025` | `DexforceW1V025/w1/robot.urdf` |
+| `v030` | `DexforceW1V030` | `DexforceW1V030/w1/robot.urdf` |
 
-Robot and hand versions are independent. `DexforceW1Version` selects the W1
-body, arm assets, kinematics, and flange calibration. `DexforceW1HandVersion`
-selects an external hand or gripper asset from
-`embodichain_robots/dexforce_w1/hand_specs.py`.
+V021 assembles separate chassis, torso, head, eyes and arm datasets. Each later
+revision uses one checksum-validated archive containing the full robot and
+five component URDFs, with matching visual, collision and inertial definitions.
+V030's `robot_with_ee.urdf` is a compatibility alias of its bare `robot.urdf`;
+detachable tools are separate assets.
 
-The currently released BrainCo hand and DH gripper registrations all use
-`DexforceW1HandVersion.V021`. Therefore W1 V021, V022, and V025 select hand V021
-by default. This is an explicit default, not a compatibility alias keyed by the
-robot version. A future hand release is added by registering a new hand version
-and hand spec; it does not require adding aliases for every W1 robot version.
+V030 visual updates replace the existing archive and cache in place. To refresh
+an existing assembled robot after a visual-only update, set
+`cfg.urdf_cfg.use_signature_check = False` for one assembly so its copied meshes
+are rebuilt.
 
-To add another W1 revision:
-
-1. Register the new `DexforceW1Version` value and dataset archive.
-2. Add one `W1VersionSpec` entry in
-   `embodichain_robots/dexforce_w1/specs.py`.
-3. Register component URDF paths and the full-robot URDF path.
-4. Set the arm kinematic parameters and
-   `default_eef_attach_xpos` for both sides. Use identity only after confirming
-   that the arm `ee` frame is already at the physical mounting surface.
-5. Verify that the same version offset is present in both the assembled
-   end-effector pose and the final FK/IK TCP.
-6. Validate hand/gripper mounting, wrist cameras, FK/IK, VR teleoperation, and
-   real2sim task regression.
-
-To add another hand release:
-
-1. Add a `DexforceW1HandVersion` value.
-2. Register each supported brand and side in `hand_specs.py`, including its
-   URDF, joint names, root/end links, and mounting transform.
-3. Select it explicitly through `hand_versions`; an unregistered version fails
-   during config construction.
-
-Control parts, assembly, TCP selection, analytical parameters and FK/IK then use
-the version specification without revision-specific branches.
+Body assets, solvers and mounting offsets are registered in
+`embodichain_robots/dexforce_w1/specs.py`; external hand assets and transforms
+are registered independently in `hand_specs.py`.

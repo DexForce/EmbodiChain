@@ -27,6 +27,8 @@ __all__ = [
     "group_height_offset",
     "transform_aabbs",
     "triangle_geometry",
+    "nearest_half_turn_pose",
+    "rotate_rigid_grasp",
 ]
 
 _EXPORT_MODULES = {
@@ -35,6 +37,8 @@ _EXPORT_MODULES = {
     "group_height_offset": "aabb",
     "transform_aabbs": "transforms",
     "triangle_geometry": "mesh",
+    "nearest_half_turn_pose": "rigid",
+    "rotate_rigid_grasp": "rigid",
 }
 
 

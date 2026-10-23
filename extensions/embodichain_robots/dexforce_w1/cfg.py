@@ -183,7 +183,10 @@ class DexforceW1Cfg(RobotCfg):
         self.version = DexforceW1Version.parse(
             init_dict.get("version", DexforceW1Version.V021)
         )
-        self.with_default_eef = bool(init_dict.get("with_default_eef", True))
+        spec = get_w1_version_spec(self.version)
+        self.with_default_eef = bool(
+            init_dict.get("with_default_eef", spec.default_with_eef)
+        )
 
         (
             self.hand_types,
@@ -229,16 +232,27 @@ class DexforceW1Cfg(RobotCfg):
         self.solver_cfg = self._build_default_solver_cfg()
 
     def _build_default_solver_cfg(self):
-        """Build the version-matched default SRS solver configuration."""
-        from embodichain.lab.sim.motion.solvers import SRSSolverCfg
+        """Build version-matched solvers with URDF joint coordinates and limits."""
+        from embodichain.lab.sim.motion.solvers import SRSSolverCfg, SolverCfg
         from embodichain_robots.dexforce_w1.params import (
             W1ArmKineParams,
         )
 
         solver_cfg = {}
+        spec = get_w1_version_spec(self.version)
         for arm_side in DexforceW1ArmSide:
-            params = W1ArmKineParams(arm_side=arm_side, version=self.version)
             part_name = f"{arm_side.value}_arm"
+            if spec.arm_solver_configs is not None:
+                solver_cfg[part_name] = SolverCfg.from_dict(
+                    {
+                        **spec.arm_solver_configs[arm_side],
+                        "root_link_name": f"{arm_side.value}_arm_base",
+                        "end_link_name": f"{arm_side.value}_ee",
+                        "tcp": spec.tcp(arm_side),
+                    }
+                )
+                continue
+            params = W1ArmKineParams(arm_side=arm_side, version=self.version)
             solver_cfg[part_name] = SRSSolverCfg(
                 end_link_name=f"{arm_side.value}_ee",
                 root_link_name=f"{arm_side.value}_arm_base",

@@ -27,6 +27,8 @@ from embodichain.utils import logger
 __all__ = ["PlaceObjectDrawerEnv"]
 
 
+@register_env("PlaceObjectDrawer-DualUR5-v1", max_episode_steps=600)
+@register_env("PlaceObjectDrawer-TianjiMarvin-v1", max_episode_steps=600)
 @register_env("PlaceObjectDrawer-v1", max_episode_steps=600)
 class PlaceObjectDrawerEnv(EmbodiedEnv):
     def __init__(self, cfg: EmbodiedEnvCfg = None, **kwargs):

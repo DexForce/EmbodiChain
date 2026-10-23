@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from deformable_support import DeformableContract
+
 import os
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
@@ -31,13 +33,11 @@ from embodichain.lab.sim.objects import (
     VolumeDeformableObjectCfg,
 )
 from embodichain.data import get_data_path
-import pytest
-import torch
 
 COW_PATH = get_data_path("Cow/cow2.obj")
 
 
-class BaseSoftObjectTest:
+class BaseSoftObjectTest(DeformableContract):
     def setup_simulation(self):
         sim_cfg = SimulationManagerCfg(
             width=1920,
@@ -81,13 +81,7 @@ class BaseSoftObjectTest:
             ),
         )
         self.sim.prepare()
-
-    def test_run_simulation(self):
-        for _ in range(100):
-            self.sim.update(step=1)
-        self.cow.reset()
-        for _ in range(100):
-            self.sim.update(step=1)
+        self.deformable = self.cow
 
     def test_get_deformable_mesh_geometry(self):
         """Test current collision vertices and matching surface triangles."""
@@ -97,30 +91,6 @@ class BaseSoftObjectTest:
         assert vertices.ndim == 3 and vertices.shape[0] == self.sim.num_envs
         assert triangles.ndim == 3 and triangles.shape[0] == 1
         assert int(triangles.max()) < vertices.shape[1]
-
-    def test_set_local_pose_updates_selected_particle_batch(self):
-        """Setting one instance pose writes only its packed simulation nodes."""
-        before = self.cow.data.nodal_pos_w
-        translation = torch.tensor([0.5, 0.0, 0.0], device=self.cow.device)
-        pose = torch.eye(
-            4,
-            dtype=torch.float32,
-            device=self.cow.device,
-        ).unsqueeze(0)
-        pose[:, :3, 3] = (
-            torch.as_tensor(
-                self.cow.cfg.init_pos,
-                dtype=torch.float32,
-                device=self.cow.device,
-            )
-            + translation
-        )
-
-        self.cow.set_local_pose(pose, env_ids=[0])
-        after = self.cow.data.nodal_pos_w
-
-        torch.testing.assert_close(after[0], before[0] + translation)
-        torch.testing.assert_close(after[1:], before[1:])
 
     def test_unified_deformable_contract(self):
         assert isinstance(self.cow, DeformableObject)
@@ -142,11 +112,6 @@ class BaseSoftObjectTest:
         render_triangles = self.cow.get_surface_triangles(env_ids=[0])
         assert render_vertices.shape[0] == self.sim.num_envs
         assert int(render_triangles.max()) < render_vertices.shape[1]
-
-    def test_remove(self):
-        with pytest.raises(NotImplementedError, match="pending removal"):
-            self.sim.remove_asset(self.cow.uid)
-        assert self.sim.get_deformable_object(self.cow.uid) is self.cow
 
     def teardown_method(self):
         """Clean up resources after each test method."""

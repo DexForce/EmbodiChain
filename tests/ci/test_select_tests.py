@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -116,6 +118,47 @@ def test_repository_manifest_maps_supported_scripts(
 
     assert plan.mode == "partial"
     assert expected_selector in plan.selectors
+
+
+@pytest.mark.parametrize(
+    "source_path",
+    [
+        "examples/sim/atomic_action/defaults.py",
+        "examples/sim/atomic_action/host.py",
+        "embodichain/cli/run_example.py",
+        "embodichain/cli/_example_runner.py",
+        "examples/sim/motion/planners/curobo_planner.py",
+    ],
+)
+def test_example_changes_keep_launch_package_and_physical_smoke_coverage(
+    source_path: str,
+) -> None:
+    root = Path(__file__).resolve().parents[2]
+    plan = build_plan(
+        root,
+        [ChangedPath(source_path)],
+        load_manifest(root / ".ci/test-impact.toml"),
+        map_data={"topics": []},
+    )
+
+    assert plan.mode == "partial"
+    assert {
+        "tests/cli/test_run_example.py",
+        "tests/test_example_package.py",
+        "tests/examples/atomic_action/test_run.py",
+        "tests/examples/atomic_action/test_host.py",
+    } <= set(plan.selectors)
+    smoke = "tests/examples/atomic_action/test_smoke.py"
+    assert smoke in plan.selectors
+    # Source-only changes keep the normal non-slow PR policy. An edited slow
+    # smoke must still run in the dedicated GPU lane, as in this repair.
+    updated_smoke = build_plan(
+        root,
+        [ChangedPath(source_path), ChangedPath(smoke)],
+        load_manifest(root / ".ci/test-impact.toml"),
+        map_data={"topics": []},
+    )
+    assert smoke in updated_smoke.slow_lanes["slow-gpu"]
 
 
 def test_repository_manifest_maps_ik_tutorial_to_its_behavior_contracts() -> None:
@@ -909,14 +952,91 @@ def test_runner_rejects_unexpanded_globs() -> None:
         build_commands(plan)
 
 
+@pytest.mark.parametrize("slow", [False, True], ids=["fast", "slow-fast"])
+@pytest.mark.parametrize("override", [None, "3"], ids=["default", "override"])
+def test_runner_budgets_cpu_threads_without_changing_parent_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, slow: bool, override: str | None
+) -> None:
+    variables = (
+        "OMP_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+    )
+    for variable in variables:
+        if override is None:
+            monkeypatch.delenv(variable, raising=False)
+        else:
+            monkeypatch.setenv(variable, override)
+    monkeypatch.setenv("EMBODICHAIN_TEST_ENV_SENTINEL", "inherited")
+    parent_environment = dict(os.environ)
+    environments: list[dict[str, str] | None] = []
+
+    def run(
+        *_args: object, env: dict[str, str] | None = None, **_kwargs: object
+    ) -> SimpleNamespace:
+        environments.append(env)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(run_test_plan.subprocess, "run", run)
+    plan = {
+        "version": 1,
+        "mode": "partial",
+        "lanes": {} if slow else {"fast": ["tests/test_sample.py"]},
+        "slow_lanes": {"slow-fast": ["tests/test_sample.py"]} if slow else {},
+    }
+
+    assert run_test_plan.run_plan(plan, root=tmp_path, lanes=["fast"]) == 0
+    assert len(environments) == 1
+    assert environments[0] == {
+        **parent_environment,
+        **{
+            variable: override if override is not None else "1"
+            for variable in variables
+        },
+    }
+    assert environments[0] is not os.environ
+    assert dict(os.environ) == parent_environment
+
+
+def test_runner_preserves_environment_in_serial_resource_lanes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    environments: list[dict[str, str] | None] = []
+
+    def run(
+        command: list[str], env: dict[str, str] | None = None, **_kwargs: object
+    ) -> SimpleNamespace:
+        environments.append(env)
+        _write_collection_manifest(command, ["tests/test_sample.py"])
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(run_test_plan.subprocess, "run", run)
+    selectors = {
+        "docs": ["tests/docs/test_sample.py"],
+        "distributed": ["tests/learning/test_rl_distributed.py"],
+        "gpu": ["tests/test_sample.py"],
+        "sim": ["tests/test_sample.py"],
+    }
+    plan = {
+        "version": 1,
+        "mode": "partial",
+        "lanes": selectors,
+        "slow_lanes": {f"slow-{lane}": paths for lane, paths in selectors.items()},
+    }
+
+    assert run_test_plan.run_plan(plan, root=tmp_path) == 0
+    assert environments == [None] * 12
+
+
 def test_runner_distinguishes_empty_optional_lane_from_docs(
     tmp_path: Path, monkeypatch
 ) -> None:
-    monkeypatch.setattr(
-        run_test_plan.subprocess,
-        "run",
-        lambda *_args, **_kwargs: SimpleNamespace(returncode=5),
-    )
+    def run(command: list[str], **_kwargs: object) -> SimpleNamespace:
+        _write_collection_manifest(command, [])
+        return SimpleNamespace(returncode=5)
+
+    monkeypatch.setattr(run_test_plan.subprocess, "run", run)
     plan = {
         "version": 1,
         "mode": "partial",
@@ -944,3 +1064,170 @@ def test_runner_distinguishes_empty_optional_lane_from_docs(
         "slow_lanes": {"slow-docs": ["tests/docs/test_sample.py"]},
     }
     assert run_test_plan.run_plan(slow_docs_plan, root=tmp_path, lanes=["docs"]) == 5
+
+
+def _write_collection_manifest(command: list[str], files: list[str]) -> Path | None:
+    option = next(
+        (arg for arg in command if arg.startswith("--ci-collect-manifest=")), None
+    )
+    if option is None:
+        return None
+    path = Path(option.split("=", 1)[1])
+    nodes = [f"{file}::TestContract::test_selected" for file in files]
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "files": files,
+                "nodeids": nodes,
+                "markers": {node: ["requires_sim"] for node in nodes},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+@pytest.mark.parametrize(
+    "lane",
+    ["gpu", "sim", "slow-gpu", "slow-sim"],
+    ids=["accelerator", "simulation", "slow-accelerator", "slow-simulation"],
+)
+def test_runner_narrows_native_resource_nodes_and_preserves_original_options(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lane: str
+) -> None:
+    original_selectors = [
+        "tests/empty.py",
+        "tests/resources",
+        "tests/selected.py::TestContract::test_selected",
+    ]
+    files = [
+        "tests/resources/test_first.py",
+        "tests/resources/test_second.py",
+        "tests/selected.py",
+    ]
+    calls = []
+
+    def run(command: list[str], **kwargs: object) -> SimpleNamespace:
+        calls.append((command, kwargs))
+        manifest = _write_collection_manifest(command, files)
+        if manifest is None:
+            expected = next(
+                arg for arg in command if arg.startswith("--ci-expected-collection=")
+            )
+            assert (
+                json.loads(Path(expected.split("=", 1)[1]).read_text())["files"]
+                == files
+            )
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(run_test_plan.subprocess, "run", run)
+    slow = lane.startswith("slow-")
+    base_lane = lane.removeprefix("slow-")
+    plan = {
+        "version": 1,
+        "mode": "partial" if slow else "full",
+        "lanes": {} if slow else {lane: original_selectors},
+        "slow_lanes": {lane: original_selectors} if slow else {},
+    }
+    original = dict(build_commands(plan, lanes=[base_lane]))[lane]
+
+    assert run_test_plan.run_plan(plan, root=tmp_path, lanes=[base_lane]) == 0
+
+    assert len(calls) == 2
+    discovery, execution = calls[0][0], calls[1][0]
+    assert discovery[: len(original)] == original
+    assert "--collect-only" in discovery and "--collect-only" not in execution
+    marker_index = execution.index("-m", 3)
+    assert execution[4:marker_index] == [
+        f"{file}::TestContract::test_selected" for file in files
+    ]
+    assert execution[marker_index:-1] == original[original.index("-m", 3) :]
+    assert all(
+        kwargs["env"] is None and kwargs["cwd"] == tmp_path for _, kwargs in calls
+    )
+
+
+@pytest.mark.parametrize("exit_code", [1, 2, 4])
+def test_runner_stops_before_execution_when_resource_discovery_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exit_code: int
+) -> None:
+    calls = []
+
+    def run(command: list[str], **_kwargs: object) -> SimpleNamespace:
+        calls.append(command)
+        return SimpleNamespace(returncode=exit_code)
+
+    monkeypatch.setattr(run_test_plan.subprocess, "run", run)
+    plan = {"version": 1, "mode": "full", "lanes": {"sim": ["tests"]}}
+
+    assert run_test_plan.run_plan(plan, root=tmp_path) == exit_code
+    assert len(calls) == 1 and "--collect-only" in calls[0]
+
+
+@pytest.mark.parametrize(
+    "problem", ["missing", "version", "unsafe", "order", "markers"]
+)
+def test_runner_rejects_invalid_resource_collection_before_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, problem: str
+) -> None:
+    calls = []
+
+    def run(command: list[str], **_kwargs: object) -> SimpleNamespace:
+        calls.append(command)
+        path = _write_collection_manifest(command, ["tests/test_sample.py"])
+        assert path is not None
+        if problem == "missing":
+            path.unlink()
+        else:
+            data = json.loads(path.read_text())
+            if problem == "version":
+                data["version"] = 99
+            elif problem == "unsafe":
+                data["files"] = ["/tmp/outside.py"]
+            elif problem == "order":
+                data["files"] = ["tests/other.py"]
+            else:
+                data["markers"] = {}
+            path.write_text(json.dumps(data))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(run_test_plan.subprocess, "run", run)
+    plan = {"version": 1, "mode": "full", "lanes": {"sim": ["tests"]}}
+
+    with pytest.raises(RuntimeError):
+        run_test_plan.run_plan(plan, root=tmp_path)
+    assert len(calls) == 1
+
+
+def test_runner_counts_resource_discovery_and_fresh_execution_in_lane_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    clock = [0.0]
+    calls = []
+
+    def run(command: list[str], **_kwargs: object) -> SimpleNamespace:
+        calls.append(command)
+        discovery = _write_collection_manifest(command, ["tests/test_sample.py"])
+        clock[0] += 2 if discovery is not None else 5
+        return SimpleNamespace(returncode=0 if discovery is not None else 1)
+
+    monkeypatch.setattr(run_test_plan.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(run_test_plan.subprocess, "run", run)
+    plan = {"version": 1, "mode": "full", "lanes": {"sim": ["tests"]}}
+
+    assert run_test_plan.run_plan(plan, root=tmp_path) == 1
+    assert len(calls) == 2
+    assert "completed in 7.0s (exit 1)" in capsys.readouterr().out
+
+
+def test_runner_dry_run_does_not_discover_or_execute_resource_tests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def run(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("dry-run must not start pytest")
+
+    monkeypatch.setattr(run_test_plan.subprocess, "run", run)
+    plan = {"version": 1, "mode": "full", "lanes": {"sim": ["tests"]}}
+
+    assert run_test_plan.run_plan(plan, root=tmp_path, dry_run=True) == 0

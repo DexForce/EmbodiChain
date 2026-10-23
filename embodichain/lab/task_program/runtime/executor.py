@@ -43,7 +43,6 @@ from embodichain.lab.sim.atomic_actions.verification import (
     PhaseEffectGateRequest,
     PhaseEffectGateResult,
 )
-from embodichain.lab.sim.atomic_actions.plans import ActionPlan
 from embodichain.lab.sim.atomic_actions.requirements import (
     FORWARD_KINEMATICS_CAPABILITY,
 )
@@ -1259,7 +1258,8 @@ class SemanticCallExecutor:
             env_mask=request.env_mask,
             expected_effects=self._phase_effect_gate_expected_effects(
                 gate,
-                session.active_plan,
+                session.active_expected_effects,
+                session.active_effect_candidates,
             ),
         )
         self._next_gate_verification_id += 1
@@ -1296,7 +1296,8 @@ class SemanticCallExecutor:
     @staticmethod
     def _phase_effect_gate_expected_effects(
         gate: GroundedPhaseEffectGate,
-        action_plan: ActionPlan,
+        expected_effects: StateDelta,
+        effect_candidates: StateDelta,
     ) -> StateDelta:
         """Project the action-owned held relation required by one gate."""
         expectation = gate.effect_spec.state_expectations[0]
@@ -1304,20 +1305,20 @@ class SemanticCallExecutor:
             raise TypeError("Built-in phase-effect gates require held-object state.")
         key = expectation.task_state_key
         if expectation.relation is HeldObjectRelation.ATTACHED:
-            candidate = action_plan.effect_candidates.held_object_updates.get(key)
+            candidate = effect_candidates.held_object_updates.get(key)
             if candidate is None:
-                candidate = action_plan.expected_effects.held_object_updates.get(key)
+                candidate = expected_effects.held_object_updates.get(key)
             if not isinstance(candidate, HeldObjectState):
                 raise ValueError(
                     f"Attached gate {gate.gate_id!r} requires an action-owned "
                     "HeldObjectState candidate."
                 )
         else:
-            if key not in action_plan.expected_effects.held_object_updates:
+            if key not in expected_effects.held_object_updates:
                 raise ValueError(
                     f"Active action does not declare gate state key {key!r}."
                 )
-            candidate = action_plan.expected_effects.held_object_updates[key]
+            candidate = expected_effects.held_object_updates[key]
             if candidate is not None:
                 raise ValueError(
                     f"Detached gate {gate.gate_id!r} requires an action-owned "
@@ -1360,14 +1361,12 @@ class SemanticCallExecutor:
         if guard.baseline is HeldObjectGuardBaseline.VERIFIED_TASK_STATE:
             candidate = session.task_state.get_held_object(guard.task_state_key)
         else:
-            candidate = session.active_plan.effect_candidates.held_object_updates.get(
+            candidate = session.active_effect_candidates.held_object_updates.get(
                 guard.task_state_key
             )
             if candidate is None:
-                candidate = (
-                    session.active_plan.expected_effects.held_object_updates.get(
-                        guard.task_state_key
-                    )
+                candidate = session.active_expected_effects.held_object_updates.get(
+                    guard.task_state_key
                 )
         covered = torch.zeros_like(request.env_mask)
         if isinstance(candidate, HeldObjectState):

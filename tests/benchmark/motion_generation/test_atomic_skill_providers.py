@@ -35,38 +35,41 @@ from embodichain.lab.sim.atomic_actions import (
     OpenDoor,
     OpenDoorAffordance,
 )
+from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+    find_symmetric_nearest_xpos,
+)
 from embodichain.lab.sim.motion.planners import MoveType, ToppraPlanOptions
 from embodichain.lab.sim.motion.planners.utils import TrajectorySampleMethod
 from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
-from scripts.benchmark.motion_generation.config import PlannerSpecCfg, load_suite
-from scripts.benchmark.motion_generation.contracts import (
+from embodichain_benchmarks.motion_generation.config import PlannerSpecCfg, load_suite
+from embodichain_benchmarks.motion_generation.contracts import (
     ReplayObservationTrace,
     ReplayObservationWindow,
 )
-from scripts.benchmark.motion_generation.models import (
+from embodichain_benchmarks.motion_generation.models import (
     AlgorithmRole,
     BenchmarkCase,
     CaseOutcome,
 )
-from scripts.benchmark.motion_generation.planners.base import PlannerContext
-from scripts.benchmark.motion_generation.planners.toppra import ToppraAdapter
-from scripts.benchmark.motion_generation.scenarios import (
+from embodichain_benchmarks.motion_generation.planners.base import PlannerContext
+from embodichain_benchmarks.motion_generation.planners.toppra import ToppraAdapter
+from embodichain_benchmarks.motion_generation.scenarios import (
     atomic_skill_providers as providers,
 )
-from scripts.benchmark.motion_generation.scenarios.atomic_skill import (
+from embodichain_benchmarks.motion_generation.scenarios.atomic_skill import (
     AtomicSkillScenario,
 )
-from scripts.benchmark.motion_generation.scenarios.atomic_grasps import (
+from embodichain_benchmarks.motion_generation.scenarios.atomic_grasps import (
     ActiveCaseGraspPoseGenerator,
 )
-from scripts.benchmark.motion_generation.contracts import ExecutionObservation
-from scripts.benchmark.motion_generation.scenarios.atomic_evaluation import (
+from embodichain_benchmarks.motion_generation.contracts import ExecutionObservation
+from embodichain_benchmarks.motion_generation.scenarios.atomic_evaluation import (
     signed_rotation_about_axis,
 )
-from scripts.benchmark.motion_generation.scenarios.atomic_policy import (
+from embodichain_benchmarks.motion_generation.scenarios.atomic_policy import (
     with_plan_options,
 )
-from scripts.benchmark.motion_generation.atomic_skill import (
+from embodichain_benchmarks.motion_generation.atomic_skill import (
     create_atomic_skill_provider,
 )
 
@@ -514,8 +517,8 @@ def test_axis_align_geometry_matches_the_axis_align_primitive() -> None:
     reference = grasp.clone()
     reference[:, :3, :3] = torch.diag(torch.tensor([-1.0, 1.0, -1.0]))
     assert torch.allclose(
-        providers._symmetric_nearest(grasp, reference),
-        AxisAlign._find_symmetric_nearest_xpos(action, grasp, reference),
+        providers.nearest_half_turn_pose(grasp, reference),
+        find_symmetric_nearest_xpos(grasp, reference),
     )
 
     upright = torch.tensor([0.0, 0.0, 1.0])
@@ -908,3 +911,73 @@ def test_push_succeeds_when_contact_starts_during_planar_motion() -> None:
         .evaluate(case, observation, ())[0]
     )
     assert result.task_success
+
+
+def test_custom_gripper_provider_initializes_configured_commands(monkeypatch):
+    from embodichain_benchmarks.motion_generation import atomic_skill as registry
+    from embodichain_benchmarks.motion_generation.config import SuiteCfg, TrackCfg
+    from embodichain_benchmarks.motion_generation.scenarios.atomic_skill import (
+        AtomicSkillScenario,
+    )
+
+    class Custom(registry.AtomicSkillCaseProvider):
+        skill_id = "custom_gripper_regression"
+        requires_gripper = True
+
+        def generate_case(self, *args, **kwargs):
+            raise NotImplementedError
+
+        def build_invocation(self, *args, **kwargs):
+            raise NotImplementedError
+
+    monkeypatch.setitem(registry._ATOMIC_SKILL_PROVIDERS, Custom.skill_id, Custom)
+    scenario = AtomicSkillScenario()
+    simulation = Mock()
+    robot = Mock()
+    robot.get_qpos.return_value = torch.zeros(1, 9)
+    scenario.simulation = simulation
+    scenario._runtime_entities_created = True
+    expected_open, expected_grasp = torch.zeros(1, 2), torch.ones(1, 2)
+    resolve = Mock(return_value=("custom_hand", expected_open, expected_grasp))
+    monkeypatch.setattr(scenario, "_resolve_gripper", resolve)
+    track = TrackCfg(
+        id="custom",
+        scenario="atomic_skill",
+        config={
+            "skills": [{"id": Custom.skill_id}],
+            "gripper": {"control_part": "custom_hand"},
+        },
+    )
+    scenario.configure_runtime(simulation, robot, SuiteCfg(), track, "arm")
+    resolve.assert_called_once()
+    assert scenario.end_effector_part == "custom_hand"
+    torch.testing.assert_close(
+        scenario._configured_grippers()["custom_hand"][0], expected_open
+    )
+
+
+@pytest.mark.parametrize(
+    "device",
+    [
+        "cpu",
+        pytest.param(
+            "cuda:0",
+            marks=[
+                pytest.mark.gpu,
+                pytest.mark.skipif(
+                    not torch.cuda.is_available(), reason="CUDA unavailable"
+                ),
+            ],
+        ),
+    ],
+)
+def test_door_approach_uses_mesh_device_for_axis_and_origin(device):
+    affordance = SimpleNamespace(
+        mesh_vertices=torch.tensor([[1.0, 0.0, 0.0], [1.0, 0.0, 1.0]], device=device),
+        rotation_axis=torch.tensor([0.0, 0.0, 1.0]),
+        axis_origin=[0.0, 0.0, 0.0],
+        opening_direction=1,
+    )
+    actual = providers._door_approach_direction_local(affordance)
+    assert actual.device == torch.device(device)
+    assert torch.allclose(actual, torch.tensor([0.0, -1.0, 0.0], device=device))

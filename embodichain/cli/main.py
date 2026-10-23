@@ -78,9 +78,14 @@ COMMANDS = (
         help="Run a task for data generation or preview.",
     ),
     Command(
+        name="run-example",
+        target="embodichain.cli.run_example:main",
+        help="List and run Python scripts from the examples directory.",
+    ),
+    Command(
         name="run-atomic-action",
-        target="embodichain.lab.scripts.run_atomic_action:cli",
-        help="Replay Atomic Skill scenes with grasp and trajectory expansion.",
+        target="embodichain.cli.run_example:atomic_action_cli",
+        help="Alias for run-example sim/atomic_action.",
     ),
     Command(
         name="list-task",
@@ -129,7 +134,7 @@ COMMANDS = (
     ),
     Command(
         name="benchmark",
-        target="scripts.benchmark.__main__:main",
+        target="embodichain.cli.benchmark:main",
         help="Run EmbodiChain performance benchmarks.",
     ),
     Command(

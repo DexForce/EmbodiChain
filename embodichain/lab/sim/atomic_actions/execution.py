@@ -674,6 +674,26 @@ class ExecutionSession:
         return self._plan.commands.snapshot()
 
     @property
+    def active_expected_effects(self) -> StateDelta:
+        """Return owned active effects without copying trajectory commands.
+
+        Returns:
+            Independently owned expected symbolic updates for the current plan.
+        """
+        assert self._plan is not None
+        return self._plan.expected_effects.snapshot()
+
+    @property
+    def active_effect_candidates(self) -> StateDelta:
+        """Return owned effect candidates for frequent physical monitoring.
+
+        Returns:
+            Independently owned candidate updates for the current plan.
+        """
+        assert self._plan is not None
+        return self._plan.effect_candidates.snapshot()
+
+    @property
     def active_plan(self) -> ActionPlan:
         """Return an independently owned snapshot of the active action plan.
 

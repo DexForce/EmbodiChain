@@ -2,7 +2,7 @@
 
 These benchmarks measure **skills**, not trajectories. Whether a plan is finite,
 stays inside the joint limits, avoids collisions, or is tracked faithfully by
-the drive belongs to `scripts/benchmark/motion_generation/`. Those properties
+the drive belongs to `extensions/embodichain_benchmarks/motion_generation/`. Those properties
 are reported here as diagnostic columns only; none of them fails a skill.
 
 A skill is measured along three dimensions. `robustness` and `adaptability` are

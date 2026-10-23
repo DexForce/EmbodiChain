@@ -77,6 +77,7 @@ class TrapezoidalPlanOptions(PlanOptions):
             duration. Slower trajectories retain the same path and limits.
         stop_at_waypoints: Whether every supplied waypoint is a rest point. When
             false, redundant points on straight, same-direction runs are removed.
+            Blended reversals still retain their exact waypoint and rest state.
         collinearity_tolerance: Cosine tolerance relative to the first edge of
             each retained straight run during waypoint compression.
         blend_tolerance: Non-negative corner deviation used for quintic blends.
@@ -317,10 +318,10 @@ def _sample_times_from_intervals(
     return torch.where(last_sample > 0, times, torch.zeros_like(times))
 
 
-def _make_sample_times(
+def _allocate_sample_intervals(
     segment_duration: torch.Tensor, options: TrapezoidalPlanOptions
-) -> torch.Tensor:
-    """Create samples per segment so every retained boundary is represented."""
+) -> tuple[torch.Tensor, int]:
+    """Allocate interval counts while retaining exact mandatory-boundary indices."""
     active = segment_duration > 1e-12
     if options.sample_method is TrajectorySampleMethod.QUANTITY:
         count = int(options.sample_interval)
@@ -350,7 +351,7 @@ def _make_sample_times(
         )
         allocated_extra += (rank < remainder_count[:, None]).to(torch.long)
         intervals = base + allocated_extra
-        return _sample_times_from_intervals(segment_duration, intervals, count)
+        return intervals, count
 
     intervals = torch.where(
         active,
@@ -366,13 +367,22 @@ def _make_sample_times(
             device=segment_duration.device,
         ),
     )
-    return _sample_times_from_intervals(
-        segment_duration, intervals, int(counts.max().item())
-    )
+    return intervals, int(counts.max().item())
+
+
+def _make_sample_times(
+    segment_duration: torch.Tensor, options: TrapezoidalPlanOptions
+) -> torch.Tensor:
+    """Create samples per segment so every retained boundary is represented."""
+    intervals, count = _allocate_sample_intervals(segment_duration, options)
+    return _sample_times_from_intervals(segment_duration, intervals, count)
 
 
 def _plan_blended_profiles(
-    waypoints: torch.Tensor, options: TrapezoidalPlanOptions
+    waypoints: torch.Tensor,
+    options: TrapezoidalPlanOptions,
+    *,
+    sample_times: torch.Tensor | None = None,
 ) -> PlanResult:
     """Plan batched quintic-blended paths with a scalar time profile."""
     velocity_joint = _limit_tensor(options.constraints["velocity"], waypoints)
@@ -431,7 +441,11 @@ def _plan_blended_profiles(
     orders = waypoints.new_tensor([1.0, 2.0, 3.0])
     upper_bounds = upper_bounds / scale[:, None, None].pow(orders[None, :, None])
     segment_duration = profile.durations.sum(dim=-1)
-    times = _make_sample_times(segment_duration, options)
+    times = (
+        _make_sample_times(segment_duration, options)
+        if sample_times is None
+        else sample_times
+    )
     scalar = profile.evaluate(times)
     states = [
         compose_quintic_blend_state(
@@ -524,6 +538,143 @@ def _plan_blended_profiles(
     )
 
 
+def _pad_plan_rows(rows: list[PlanResult]) -> PlanResult:
+    """Batch independent rows using zero-time terminal padding."""
+    output_count = max(row.positions.shape[1] for row in rows)
+
+    def pad(value: torch.Tensor, *, repeat_final: bool) -> torch.Tensor:
+        missing = output_count - value.shape[1]
+        if missing == 0:
+            return value
+        tail = (
+            value[:, -1:].expand(-1, missing, *value.shape[2:])
+            if repeat_final
+            else value.new_zeros((1, missing, *value.shape[2:]))
+        )
+        return torch.cat((value, tail), dim=1)
+
+    report_keys = set.intersection(*(set(row.constraint_report or {}) for row in rows))
+    return PlanResult(
+        success=torch.cat([row.success for row in rows]),
+        positions=torch.cat([pad(row.positions, repeat_final=True) for row in rows]),
+        velocities=torch.cat([pad(row.velocities, repeat_final=False) for row in rows]),
+        accelerations=torch.cat(
+            [pad(row.accelerations, repeat_final=False) for row in rows]
+        ),
+        dt=torch.cat([pad(row.dt, repeat_final=False) for row in rows]),
+        constraint_report={
+            key: torch.cat([row.constraint_report[key] for row in rows])
+            for key in report_keys
+        },
+    )
+
+
+def _reversal_mask(waypoints: torch.Tensor, tolerance: float) -> torch.Tensor:
+    """Find corners whose tangents require a rest before reversing direction."""
+    edges = waypoints[:, 1:] - waypoints[:, :-1]
+    norms = torch.linalg.vector_norm(edges, dim=-1, keepdim=True)
+    directions = edges / norms.clamp_min(1e-12)
+    cosine = (directions[:, 1:] * directions[:, :-1]).sum(dim=-1)
+    return cosine <= -1.0 + max(tolerance, 1e-6)
+
+
+def _plan_blended_reversals(
+    waypoints: torch.Tensor, options: TrapezoidalPlanOptions
+) -> PlanResult:
+    """Blend between mandatory reversal stops without rounding off turnarounds."""
+    rows = []
+    for row in waypoints:
+        keep = torch.cat(
+            (
+                row.new_ones(1, dtype=torch.bool),
+                (row[1:] - row[:-1]).norm(dim=-1) > 1e-8,
+            )
+        )
+        path = row[keep][None]
+        turns = _reversal_mask(path, options.collinearity_tolerance)[0]
+        boundaries = [0, *(turns.nonzero().flatten() + 1).tolist(), path.shape[1] - 1]
+        if len(boundaries) == 2:
+            rows.append(_plan_blended_profiles(path, options))
+            continue
+        legs = [
+            path[:, start : end + 1] for start, end in zip(boundaries, boundaries[1:])
+        ]
+        leg_options = deepcopy(options)
+        leg_options.minimum_duration = None
+        # Resolve each rest-to-rest leg before allocating the shared sampling
+        # grid, so every turnaround remains an exact arrival, including TIME.
+        durations = torch.stack(
+            [_plan_blended_profiles(leg, leg_options).duration[0] for leg in legs]
+        )[None]
+        if options.minimum_duration is not None:
+            durations = durations * (
+                durations.new_tensor(options.minimum_duration) / durations.sum()
+            ).clamp_min(1.0)
+        intervals, count = _allocate_sample_intervals(durations, options)
+        times = _sample_times_from_intervals(durations, intervals, count)
+        ends = durations.cumsum(dim=1)
+        starts = ends - durations
+        active_leg = torch.searchsorted(
+            ends.contiguous(), times.contiguous()
+        ).clamp_max(len(legs) - 1)
+        evaluated = []
+        for index, leg in enumerate(legs):
+            leg_options.minimum_duration = float(durations[0, index])
+            local_times = (times - starts[:, index : index + 1]).clamp(
+                min=0.0, max=float(durations[0, index])
+            )
+            evaluated.append(
+                _plan_blended_profiles(leg, leg_options, sample_times=local_times)
+            )
+
+        def combine(name: str) -> torch.Tensor:
+            values = torch.stack([getattr(result, name) for result in evaluated], dim=1)
+            return values.gather(
+                1, active_leg[:, None, :, None].expand(-1, 1, -1, values.shape[-1])
+            )[:, 0]
+
+        report = {}
+        for key in evaluated[0].constraint_report:
+            values = torch.stack(
+                [result.constraint_report[key] for result in evaluated]
+            )
+            report[key] = (
+                values.all(dim=0) if values.dtype == torch.bool else values.amax(dim=0)
+            )
+        positions = combine("positions")
+        velocities = combine("velocities")
+        accelerations = combine("accelerations")
+        # Subtracting cumulative times can miss a leg's exact end by an ULP.
+        # Restore required stops by integer sample ownership, never a float mask.
+        stop_indices = intervals.cumsum(dim=1)[0, :-1]
+        positions[:, stop_indices] = path[:, boundaries[1:-1]]
+        velocities[:, stop_indices] = 0
+        accelerations[:, stop_indices] = 0
+        for name, values, constraint in (
+            ("velocity", velocities, "velocity"),
+            ("acceleration", accelerations, "acceleration"),
+        ):
+            peak = values.abs().amax(dim=1)
+            report[f"peak_{name}"] = peak.amax(dim=1)
+            report[f"peak_{name}_per_joint"] = peak
+            report[f"{name}_utilization"] = peak / _limit_tensor(
+                options.constraints[constraint], path
+            )
+        rows.append(
+            PlanResult(
+                success=torch.stack([result.success for result in evaluated]).all(
+                    dim=0
+                ),
+                positions=positions,
+                velocities=velocities,
+                accelerations=accelerations,
+                dt=torch.diff(times, dim=1, prepend=torch.zeros_like(times[:, :1])),
+                constraint_report=report,
+            )
+        )
+    return _pad_plan_rows(rows)
+
+
 def _plan_linear_profiles(
     waypoints: torch.Tensor,
     options: TrapezoidalPlanOptions,
@@ -595,46 +746,16 @@ def _plan_linear_profiles(
         )
 
     if options.blend_tolerance > 0.0 and bool(stationary_path.any().item()):
-        rows = [
-            _plan_linear_profiles(waypoints[index : index + 1], options)
-            for index in range(batch_size)
-        ]
-        output_count = max(row.positions.shape[1] for row in rows)
-
-        def pad(value: torch.Tensor, *, repeat_final: bool) -> torch.Tensor:
-            missing = output_count - value.shape[1]
-            if missing == 0:
-                return value
-            tail = (
-                value[:, -1:].expand(-1, missing, *value.shape[2:])
-                if repeat_final
-                else value.new_zeros((1, missing, *value.shape[2:]))
-            )
-            return torch.cat((value, tail), dim=1)
-
-        report_keys = set.intersection(
-            *(set(row.constraint_report or {}) for row in rows)
-        )
-        report = {
-            key: torch.cat([row.constraint_report[key] for row in rows], dim=0)
-            for key in report_keys
-        }
-        return PlanResult(
-            success=torch.cat([row.success for row in rows]),
-            positions=torch.cat(
-                [pad(row.positions, repeat_final=True) for row in rows]
-            ),
-            velocities=torch.cat(
-                [pad(row.velocities, repeat_final=False) for row in rows]
-            ),
-            accelerations=torch.cat(
-                [pad(row.accelerations, repeat_final=False) for row in rows]
-            ),
-            dt=torch.cat([pad(row.dt, repeat_final=False) for row in rows]),
-            constraint_report=report,
+        return _pad_plan_rows(
+            [
+                _plan_linear_profiles(waypoints[index : index + 1], options)
+                for index in range(batch_size)
+            ]
         )
 
     if options.blend_tolerance > 0.0:
+        if bool(_reversal_mask(waypoints, options.collinearity_tolerance).any().item()):
+            return _plan_blended_reversals(waypoints, options)
         return _plan_blended_profiles(waypoints, options)
 
     velocity_limit, acceleration_limit, jerk_limit = _scalar_path_limits(

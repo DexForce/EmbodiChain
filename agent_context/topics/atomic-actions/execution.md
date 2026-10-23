@@ -151,15 +151,30 @@ selecting rows, which preserves handover boundaries when one assignment needs
 more retimed samples. It holds both closed hands for `hold_steps` before source
 release. Pour
 splits rotation and return at the poured pose and inserts a physical-time dwell.
-Actions preserving an existing grasp command the observed hand state until an
-explicit release; free-hand approaches interpolate from the observed state.
+Free-hand approaches interpolate from the observed state. Place continues the
+bound closing command for held rows until explicit release: a contact-blocked
+measured finger position does not retain grasp pressure. Free rows keep their
+observed hand state until the release segment.
+
+Physical monitors read `ExecutionSession.active_expected_effects` and
+`active_effect_candidates`, which return owned effect snapshots independently
+of trajectory length. `active_plan` remains a full diagnostics snapshot; using
+it in every command-cycle guard copies the complete command stream repeatedly.
 
 Tracking recovery is separate from task-level semantic recovery:
 
 - Atomic Actions owns planning failure, target/collision revision, transport
   acknowledgement, tracking error, timeout, retry, and safe stop.
 - Task Program may perform bounded workflow recovery after the action reaches
-  a semantic effect boundary.
+a semantic effect boundary.
+
+`MotionPolicy.velocity_limit` and `acceleration_limit` forward finite positive
+scalar budgets to `MotionGenOptions` for both strategies. Omitted velocity
+preserves Robot caps; the default acceleration budget is 0.5. Typed `plan_opts`
+require `motion_gen`; each backend owns how they consume scalar budgets.
+Configured execution policies expose the same fields under `motion`, and
+requested budgets are retained in execution metadata. Use these fields when a
+physically qualified task needs a lower speed than the selected robot's limits.
 
 ## Velocity target contract
 

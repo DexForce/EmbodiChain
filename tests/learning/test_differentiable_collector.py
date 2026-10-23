@@ -18,64 +18,16 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from differentiable_env_support import LinearDifferentiableEnv
+
 
 import pytest
 import torch
 import torch.nn as nn
-from gymnasium.spaces import Box
 from tensordict import TensorDict
 
 from embodichain.learning.rl.collector import DifferentiableCollector
 from embodichain.learning.rl.policies import ActorOnly
-
-
-class _LinearDifferentiableEnv:
-    """CPU environment whose state follows ``next_state = state + action``."""
-
-    def __init__(self, num_envs: int = 2) -> None:
-        self.num_envs = num_envs
-        self.device = torch.device("cpu")
-        self.single_observation_space = Box(
-            low=-float("inf"),
-            high=float("inf"),
-            shape=(1,),
-            dtype=float,
-        )
-        self.single_action_space = Box(
-            low=-1.0,
-            high=1.0,
-            shape=(1,),
-            dtype=float,
-        )
-        self._state = torch.ones((num_envs, 1), device=self.device)
-
-    def reset(
-        self,
-        *,
-        seed: int | None = None,
-        options: Mapping[str, Any] | None = None,
-    ) -> tuple[torch.Tensor, dict[str, Any]]:
-        del seed, options
-        self._state = torch.ones((self.num_envs, 1), device=self.device)
-        return self._state, {}
-
-    def step(self, action: torch.Tensor) -> tuple[
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        dict[str, Any],
-    ]:
-        self._state = self._state + action
-        reward = -self._state.square().sum(dim=-1)
-        terminated = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
-        truncated = torch.zeros_like(terminated)
-        return self._state, reward, terminated, truncated, {}
-
-    def detach_state(self) -> torch.Tensor:
-        self._state = self._state.detach()
-        return self._state
 
 
 def _make_policy(device: torch.device) -> ActorOnly:
@@ -90,7 +42,7 @@ def _make_policy(device: torch.device) -> ActorOnly:
 
 
 def test_collector_preserves_reward_gradient_to_policy() -> None:
-    env = _LinearDifferentiableEnv()
+    env = LinearDifferentiableEnv()
     policy = _make_policy(env.device)
     collector = DifferentiableCollector(env=env, policy=policy, device=env.device)
 
@@ -105,7 +57,7 @@ def test_collector_preserves_reward_gradient_to_policy() -> None:
 
 
 def test_stochastic_action_uses_reparameterized_sample() -> None:
-    env = _LinearDifferentiableEnv()
+    env = LinearDifferentiableEnv()
     policy = _make_policy(env.device)
     collector = DifferentiableCollector(env=env, policy=policy, device=env.device)
 
@@ -131,7 +83,7 @@ def test_standard_policy_action_remains_detached() -> None:
 
 
 def test_collector_rejects_empty_rollout() -> None:
-    env = _LinearDifferentiableEnv()
+    env = LinearDifferentiableEnv()
     policy = _make_policy(env.device)
     collector = DifferentiableCollector(env=env, policy=policy, device=env.device)
 
@@ -141,7 +93,7 @@ def test_collector_rejects_empty_rollout() -> None:
 
 @pytest.mark.parametrize("training", [True, False])
 def test_collector_preserves_caller_selected_policy_mode(training: bool) -> None:
-    env = _LinearDifferentiableEnv()
+    env = LinearDifferentiableEnv()
     policy = _make_policy(env.device)
     policy.train(training)
     collector = DifferentiableCollector(env=env, policy=policy, device=env.device)

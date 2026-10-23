@@ -98,8 +98,11 @@ not switch it. Use a separate environment config for each backend.
   Preserve numerical correctness and public contracts; validate material
   performance claims with representative measurements using `/benchmark`.
 - Run **`black==26.3.1`**, using `black .`, before every commit.
-- Use `/pre-commit-check` for proportional checks. New production fixes/features
-  need focused tests that prove their behavior; use `/add-test` for project patterns.
+- Use `/pre-commit-check` for proportional checks. Production fixes/features
+  need focused behavioral coverage; existing tests may suffice. Before and after
+  adding or extending tests, apply the
+  [test necessity review](.agents/skills/add-test/SKILL.md#test-necessity-review).
+  Add only cases that close meaningful coverage gaps.
 - Treat `scripts/tutorials/**` as examples, not production API test targets. Do
   not create or expand tests whose primary subject is a tutorial, and do not
   import tutorial scripts into new tests, unless the user explicitly requests

@@ -33,7 +33,7 @@ def test_toppra_adapter_is_available_without_external_package(
         return None if name == "toppra" else original(name, *args, **kwargs)
 
     monkeypatch.setattr(importlib.util, "find_spec", without_external)
-    from scripts.benchmark.motion_generation.planners.toppra import ToppraAdapter
+    from embodichain_benchmarks.motion_generation.planners.toppra import ToppraAdapter
 
     adapter = object.__new__(ToppraAdapter)
     assert adapter.availability() == (True, None)

@@ -57,6 +57,11 @@ own any conversion.
 leading batch axes. FK returns `(..., 4, 4)`; nearest IK returns boolean success
 `(...)` and qpos `(..., dof)` without a candidate axis. Robot broadcasts root
 transforms over those axes without materializing per-target copies.
+`BaseSolver.get_fk()` falls back to the same eager PK computation if the optional
+compiled FK fails at warmup or later encounters a Dynamo compilation/cache limit.
+That fallback preserves TCP application and gradients; ordinary input/runtime
+errors still propagate. Do not raise global compiler-cache limits to make a
+multi-robot benchmark complete.
 
 Concrete `get_ik()` APIs retain their own candidate and failure shapes. Pink
 returns `(N, 1, dof)`. Pytorch's normal nearest path retains a singleton
@@ -93,7 +98,11 @@ Analytical scratch reuse must not let later calls mutate earlier public results.
 See [buffer lifecycle](solver-details.md#analytical-buffers-and-selection) before
 changing allocation, stream behavior or nearest/all-solutions dispatch.
 
-FEP validates Franka-compatible URDF geometry and shares one CPU/CUDA kernel.
+FEP validates Franka-compatible URDF geometry at its configured `reference_qpos`
+and shares one CPU/CUDA kernel. The optional reference posture rebases geometric
+reconstruction; joint inputs, outputs, seeds, limits and final FK acceptance keep
+the original URDF coordinates. `axis_alignment_tolerance` permits explicitly
+calibrated CAD-axis deviations without relaxing the separate FK tolerances.
 The seed fixes q7 unless `redundancy_search` is enabled; finite search failure
 does not prove global unreachability. Arm-angle preferences are soft, while
 FK acceptance, joint limits and `max_joint_step` remain hard constraints.
