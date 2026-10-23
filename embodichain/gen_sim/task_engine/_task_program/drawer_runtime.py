@@ -46,7 +46,7 @@ from .invocation_policy import GenSimActionEngine
 __all__: list[str] = []
 
 DRAWER_MAX_FULL_PLAN_CANDIDATES = 2
-DRAWER_RELEASE_RECOVERY_REVISION = 11
+DRAWER_RELEASE_RECOVERY_REVISION = 13
 _DRAWER_PREFILTER_STAGES = ("outside", "rim", "release")
 
 
@@ -415,7 +415,9 @@ class DrawerObservation:
             for target in self._target_poses()
         )
 
-    def containment_report(self) -> dict[str, object]:
+    def containment_report(
+        self, *, lateral_margin: float | None = None
+    ) -> dict[str, object]:
         """Read a live link-local mesh containment report for the payload."""
         obj, link = self.poses()
         report = drawer_containment_report(
@@ -424,6 +426,7 @@ class DrawerObservation:
             link[0].detach().cpu().numpy(),
             np.asarray(self.route.lower),
             np.asarray(self.route.upper),
+            lateral_margin=lateral_margin,
         )
         return report
 
@@ -562,7 +565,7 @@ class DrawerPlacementEngine(GenSimActionEngine):
                     and abs(target.position - binding.target("closed"))
                     <= max(target.tolerance, 0.01)
                 ):
-                    report = observation.containment_report()
+                    report = observation.containment_report(lateral_margin=0.0)
                     if not report["accepted"]:
                         raise ValueError(
                             "Drawer close rejected: payload containment failed; "
@@ -709,7 +712,7 @@ class DrawerPlacementEngine(GenSimActionEngine):
             checker = articulation_motion_checker(
                 self.robot, self.motion_generator._simulation, arm.control_part
             )
-        release_lifts = (0.0, 0.025, 0.05, 0.12) if upright else (0.12, 0.0)
+        release_lifts = (0.0, 0.025, 0.05, 0.12) if upright else (0.0, 0.12)
         for release_lift in release_lifts:
             if len(plans) >= DRAWER_MAX_FULL_PLAN_CANDIDATES or any(
                 bool(p.plan_success.all()) for p in plans

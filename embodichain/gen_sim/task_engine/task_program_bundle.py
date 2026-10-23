@@ -25,6 +25,7 @@ from dataclasses import dataclass, replace
 import json
 import math
 from pathlib import Path
+import re
 from typing import Any, Final
 
 import numpy as np
@@ -172,6 +173,23 @@ class TaskProgramBundlePaths:
     execution_policy: Path
     semantic_task_graph: Path
     integration_fingerprint: Path
+
+
+def _merge_passive_prismatic_drive(
+    drive: dict[str, Any], joints: Sequence[str]
+) -> None:
+    """Compose generated passive drawer properties with existing drive rules."""
+    if drive.get("drive_type", "none") == "none":
+        modes = drive.get("target_mode")
+        if modes is None:
+            drive.setdefault("drive_type", "none")
+        elif isinstance(modes, dict) and "drive_type" not in drive:
+            # A global NONE would disable calibrated buttons in the same asset.
+            for joint in joints:
+                if not any(re.fullmatch(pattern, joint) for pattern in modes):
+                    modes[re.escape(joint)] = "none"
+        if "friction" not in drive:
+            drive["friction"] = {joint: PASSIVE_FRICTION for joint in joints}
 
 
 def generate_task_program_bundle(
@@ -933,10 +951,7 @@ def generate_task_program_bundle(
                 "attrs": {"mass_props": {"mass": PRISMATIC_LINK_MASS}},
             }
             drive = articulation.setdefault("joint_drive_props", {})
-            if drive.get("drive_type", "none") == "none":
-                drive.setdefault("drive_type", "none")
-                if "friction" not in drive:
-                    drive["friction"] = {part.joint: PASSIVE_FRICTION for part in parts}
+            _merge_passive_prismatic_drive(drive, [part.joint for part in parts])
     save_config(paths.scene, scene_payload)
     episode_steps = int(max_episode_steps or TaskEnginePlanningCfg().max_episode_steps)
     if twist_routes and len(selected_graph["task_groups"]) == 1 and frozen is None:

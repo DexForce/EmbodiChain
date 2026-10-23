@@ -1193,10 +1193,10 @@ Constrained E2 Pick lowerers
 snapshot their object/target rule selector into the goal; only that Pick uses
 an immutable filtered-generator view. Unscoped sampling, including HandOver,
 checks opening clearance without applying another stage's region/release rules.
-Drawer transport and release remain drawer-owned. Drawer release recovery keeps
-the original rim route and extra 120 mm release lift first. On failure it may
-omit only that extra lift, retaining the outside/rim poses and payload floor
-target. Both modes share the original two-full-plan budget, final velocity gate,
+Drawer transport and release remain drawer-owned. Ordinary drawer release first
+uses the existing rim route without the extra 120 mm release lift; that higher
+release remains the fallback. Outside/rim poses and the payload floor target
+are unchanged. Both modes share the original two-full-plan budget, final velocity gate,
 physical release and containment checks. A conditional drawer release revision
 requires regenerating affected bundles; this is not permission to ignore walls
 or close around an uncontained payload. Relative placement geometry and
@@ -1495,6 +1495,16 @@ One environment and unambiguous source-qualified controls are supported. Multipl
 press events, mixed recipes and repeat objects retain independent contact/release receipts.
 The old standalone press probe was removed; qualification uses
 the normal Task Engine route. Regenerate E9 bundles after lowerer revisions.
+For one environment, a failed Press phase may reuse the bounded previous-waypoint
+IK resolver with the same Cartesian targets and requested control period.
+Successful nominal phases are unchanged. Shared control-grid retiming and final
+full-arm/hand velocity checks still apply; a kinematic recovery is not contact
+or collision evidence, and native press/release/withdrawal acceptance remains.
+If the complete nominal Press still fails, a single quarter-turn wrist-roll
+alternative retains the calibrated contact point, forward axis and resource.
+The same Press planner builds every phase again, capped at two complete plans
+including the nominal one. This is failure-only; successful nominal plans and
+explicit custom affordance subclasses do not acquire this alternative.
 E9 preserves the declared/native button, housing and finger contact envelopes;
 it does not override contact or rest offsets. Normal E9 generation sets only
 the selected button assembly to unit body scale, preserving XY, rotation and
@@ -1537,6 +1547,10 @@ prismatic moving links. Fixed cabinet/root links retain source-authored mass,
 while contact offsets and materials remain asset-owned; this preserves the
 Slide grasp response across the legacy loader and Spawn without restoring the
 old global articulation-physics override.
+For an asset shared by E6 and E9, existing explicit button target modes and
+calibrated gains remain intact. Passive drawer defaults are merged by joint;
+the generator must not add a global disabled drive alongside active button modes.
+Authored drive types, matching target-mode rules and friction remain authoritative.
 
 E6-open / E1-inside / E6-close composition is owned by
 `_task_program/drawer_binding.py`, `drawer_geometry.py`, `drawer_runtime.py`,
@@ -1571,6 +1585,11 @@ motion sample budget rather than raising joint velocity limits. Ordinary command
 planning, effect verification and E6 joint-state acceptance remain.
 Execution completion does not prove an object is contained.
 Evaluate actual placement/closing from the recorded physical outcome.
+Drawer target generation retains its 5 mm lateral planning inset. The pre-close
+full-payload check instead uses the measured lateral cavity bounds: a settled
+payload need not retain that extra planning inset. Real boundary overflow still
+rejects; the existing floor tolerance, upper clearance and complete close-motion
+checks remain unchanged. Reports record the separate lateral margin explicitly.
 
 ## Focused validation
 

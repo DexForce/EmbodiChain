@@ -64,12 +64,12 @@ class Plan:
 @pytest.mark.parametrize(
     "nominal_success,nominal_count,expected_lifts",
     [
-        (True, 1, [0.12]),
-        (False, 1, [0.12, 0.0]),
-        (False, 2, [0.12]),
+        (True, 1, [0.0]),
+        (False, 1, [0.0, 0.12]),
+        (False, 2, [0.0]),
     ],
 )
-def test_drawer_release_fallback_preserves_nominal_and_total_full_plan_budget(
+def test_drawer_release_prefers_lower_height_with_same_total_full_plan_budget(
     monkeypatch,
     nominal_success,
     nominal_count,
@@ -106,7 +106,7 @@ def test_drawer_release_fallback_preserves_nominal_and_total_full_plan_budget(
         lift = float(request.goal.xpos[0, 0, 0, 0])
         planned.append(lift)
         return Plan(
-            torch.tensor([nominal_success or lift == 0.0]),
+            torch.tensor([nominal_success or lift > 0.0]),
             PlannerDiagnostics(backend="test"),
         )
 
@@ -120,7 +120,7 @@ def test_drawer_release_fallback_preserves_nominal_and_total_full_plan_budget(
     result = Engine()._plan_request(request, NS(batch_size=1))
     assert generated == expected_lifts
     assert len(planned) <= drawer.DRAWER_MAX_FULL_PLAN_CANDIDATES
-    assert result.plan_success.tolist() == [nominal_success or 0.0 in expected_lifts]
+    assert result.plan_success.tolist() == [nominal_success or 0.12 in expected_lifts]
     assert isinstance(request.goal.xpos, SceneEntityPose)
 
 
