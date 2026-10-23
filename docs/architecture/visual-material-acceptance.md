@@ -75,6 +75,11 @@ python examples/sim/rendering/default_materials.py --all --compare-native --rend
 # Optionally add --model /path/to/skin_face.glb for SkinHumanLight.
 ```
 
+The OfflineRT overview below was generated from the packaged preset previews;
+the skin sample uses the optional segmented face mesh.
+
+![Default material OfflineRT previews](../source/_static/visual_materials/default-materials-rc1.webp)
+
 The preview writes candidate/native/repeat images and `results.json`. Its center
 crop RMSE tolerance is max(3/255, three times native-repeat RMSE plus 0.5/255).
 Inspect the images as well as the metric: similar dark or empty frames alone do
