@@ -1,722 +1,195 @@
 # ODS visual training and data-stream showcase
 
-The primary experiment in [Section 6](#6-fixed-training-budget-visual-comparison)
-asks how data-generation overlap changes **trained-state diversity and total
-pipeline time under a fixed actual training budget**. It uses only single-
-and dual-camera policies. Data volume and final coverage are measured outcomes,
-not matching constraints. Every path saves a standard LeRobot dataset.
+This example measures how asynchronous generation changes **trained-state
+coverage and complete pipeline time under a fixed actual training budget**.
+It reuses the Franka PickPlace environment and physical expert from
+`examples/ods/simple_bc_demo`. The experiment, BC head, recorder and scheduling
+remain example-local; public sampling contracts belong to ODS.
 
-Sections 1–5 preserve the delivery-only experiment and its measurement scope.
-That experiment completed 27 main runs and nine appendix diagnostics on
-2026-10-21. The [recorded study](../../examples/ods/data_stream_demo/results/2026-10-21/RESULTS.md)
-contains the original measurements and limitations: no model, optimizer or
-student evaluation was involved. Those results diagnose availability,
-conversion, decoding and protected reuse; they do not measure training
-acceleration or trained-state diversity. Existing numeric LeRobot loading
-remains independent of the example's decoded-video reader.
+Use the [example README](../../examples/ods/data_stream_demo/README.md) for
+commands, configuration guidance and output interpretation. Historical studies,
+including failed attempts and negative results, are linked from the compact
+[experiment evidence index](../../examples/ods/data_stream_demo/EXPERIMENTS.md).
+Generated plots, logs, source snapshots and machine-specific inventories are
+kept outside the source change.
 
-```mermaid
-flowchart LR
-    Expert[Real expert acquisition] --> Live[ODS shared cache C]
-    Expert --> Files[LeRobot Parquet and MP4 corpus N]
-    Live --> Batch[Common RGB float32 batch]
-    Files --> Reader[SDK and DataLoader decoding]
-    Reader --> Batch
-    Batch --> Consumer[Controlled consumer and audits]
-```
+## Fixed-training-budget visual comparison
 
-The branches represent separate runs with the same acquisition recipe, not a
-shared timed producer that also pays an unreported recording cost for ODS.
+The main question is: with identical actual training work and assigned
+hardware, how much distinct physical data reaches completed optimizer updates,
+and how long does the whole pipeline take? Data volume and final coverage are
+outcomes rather than matching constraints.
 
-## 1. Questions and comparison groups
-
-The main questions are when data becomes usable, how much data a consumer can
-receive, what resources each path needs, and whether per-episode delivery
-limits remain correct during asynchronous replacement. Reuse the existing
-Franka single-cycle PickPlace environment and physical expert from the
-[BC demo](../../examples/ods/simple_bc_demo/README.md). Keep its physics,
-randomization, actions and physical acceptance criteria unchanged.
-
-The main report contains nine configurations, each run with seeds 19001,
-19002 and 19003: **27 main runs**.
-
-| Data path | State only | Third-person camera | Third-person + wrist cameras |
-| --- | --- | --- | --- |
-| Standard decoded LeRobot, matched K | L-State | L-Single | L-Dual |
-| ODS streaming, no delivery limit | S-State | S-Single | S-Dual |
-| ODS protected streaming, matched K | P-State | P-Single | P-Dual |
-
-The LeRobot main row uses the official Dataset/DataLoader and decoder. Its
-parent-side sampler enforces the common experiment's episode weighting and K;
-this exposure guard is experiment code, not a claimed LeRobot SDK feature.
-The reader and decoder themselves remain unmodified.
-
-Include three appendix diagnostics for each visual condition, using seed
-19001 and identifying them as one-seed diagnostics:
-
-- Standard decoded LeRobot with no K, using the same full corpus and reader
-  settings. Retain this conventional baseline even if it performs better.
-- Frozen ODS: initial C episodes, no refill, K enabled.
-- Standard decoded LeRobot restricted to the first C logical episodes, with
-  K enabled. This makes the static-source diagnostic cardinality explicit.
-
-There are nine appendix runs. Reader variants reuse finalized main datasets;
-they do not require another full acquisition. Frozen remains a diagnostic,
-not the main offline baseline. No dataset iterator may reset a source's K.
-
-Compare P with S to isolate delivery protection. Compare P with matched-K L
-to assess the complete pipelines under equal source limits; their availability
-and retirement differ, so this is not a pure shared-memory-versus-disk test.
-Use the C-sized static diagnostics to investigate that difference. The
-unrestricted LeRobot appendix shows the practical cost of omitting protection.
-
-## 2. Common task, data and visual workload
-
-Use `physics: default`, physics/control frequencies 240/30 Hz, C=8 cached
-episodes, P=2 producer environments, at most 600 steps per episode, B=32
-chunks, history H=2 and prediction horizon F=32. Thus each chunk covers
-L=H+F-1=33 frames. Enable provenance and lifecycle logging for ODS.
-
-For the main comparison, both acquisition paths have an accepted-data budget
-N=4C=32 episodes. Offline LeRobot stores all N before consumption starts;
-ODS starts consumption after the initial C and replaces rows over four
-generations. Equal C is a resident-capacity comparison, not equal total data.
-Record N, C, valid frame counts and actual consumed-source counts separately.
-
-K is 128 delivered chunks per immutable source episode, with the same hard
-limit. This is an engineering demonstration value, not a recommended or
-scientifically qualified learning-reuse setting. One chunk costs one credit,
-regardless of its frame count or number of cameras. Eviction retires unused
-credits; publishing a new identity cannot replenish an old identity's credits.
-
-Use the same expert recipe and seed schedule for every main arm. Independently
-generated trajectories are not presumed byte-identical. Record ordered
-state/action manifests and hashes; claim exact pairing only when the payloads
-actually match. Compare non-image manifests within each visual condition;
-do not require independently rendered or lossy-decoded pixels to hash equally.
-
-### Camera and image contract
-
-| Condition | Acquisition | Renderer |
-| --- | --- | --- |
-| State | No camera observations or hidden recording camera | `no-render` |
-| Single | One fixed third-person camera | `fast-rt`, SPP=1 |
-| Dual | The same third-person camera plus a wrist-mounted camera | Same visual renderer/settings |
-
-Use 256x256 color images, no depth/mask/normal outputs, no augmentation or
-super-resolution. The qualified camera profile v3 uses SPP=1 with offscreen
-OptiX spatial denoising and window denoising disabled. Capture every simulation control step: 30 Hz
-in simulation time, with wall-clock throughput measured independently.
-Headless operation remains enabled in all arms. UI, display recording and
-report-video encoding are excluded from timed consumption; camera rendering
-needed to generate data is included in acquisition time.
-
-The third-person camera uses the existing eye (-0.50,-0.90,0.88), target
-(-0.50,0.10,0.20) and Z-up convention. The wrist camera attaches to
-`FrankaPanda/fr3_hand_tcp`; in that parent frame use eye (0.10,0,-0.10),
-target (0,0,0.03) and up (0,1,0). Both use a 60-degree field of view, centered
-principal point and near/far 0.005/3 m. Verify view coverage and parent
-attachment before freezing this profile. A failed view qualification stops
-the run; camera changes require a new protocol/profile version, not automatic
-target tracking during episodes. Preserve the existing BC demo's sensor-off
-defaults by giving the new example its own acquisition configuration.
-
-Preflight rejected v1's self-occluded wrist view and noisy raw rendering;
-v2 qualified the fixed side mount and spatial denoising. V3 additionally gives
-the inherited cube and goal distinct material UIDs, preserving their original
-orange/green colors and all physics. Earlier failures and calibration samples
-are retained; no formal result may mix these profile versions.
-
-ODS stores its native RGBA uint8 observations in CPU shared memory. Standard
-LeRobot videos store RGB and the SDK decoder returns channel-first RGB
-float32 in [0,1]. The final consumer contract is therefore:
-
-- The same named float32 state/action features and source identities.
-- Per-camera RGB float32 tensors `[B,33,3,256,256]` in [0,1].
-- Common validity, continuity and loss masks, with zero numeric/image padding
-  and -1 padded source IDs. Current pre-action index is H-1.
-
-ODS must drop alpha, rearrange channels, convert/scale and produce the owned
-consumer tensors inside its measured delivery path. LeRobot's corresponding
-decoding, conversion, collation and common padding are measured too. Do not
-compare ODS uint8 output with LeRobot float32 output as equivalent batches.
-
-This is explicitly a **full-context visual data-delivery workload**: both
-backends return all 33 image frames, not only historical observations. It
-does not estimate the throughput of a VLA configuration that requests only
-two historical images; future frames are never presented as causal model
-inputs because this example has no model.
-
-At the default size, image storage alone is approximately:
-
-| Cameras | ODS image cache, native RGBA | One native image batch | One final RGB float32 batch |
-| --- | ---: | ---: | ---: |
-| 1 | 1.17 GiB | 264 MiB | 792 MiB |
-| 2 | 2.34 GiB | 528 MiB | 1,584 MiB |
-
-These are tensor-payload sizes, not total or peak process memory. Account for
-decoder staging, normalization temporaries, worker queues and retained outputs.
-Preflight shared memory, RAM and VRAM; never silently reduce resolution,
-cameras, C, B or context length in a failing arm.
-
-## 3. Standard LeRobot path and timing protocol
-
-### File acquisition and real decoding
-
-Pin the first protocol to the existing py311-compatible stack: LeRobot 0.4.4
-and TorchCodec 0.5, recording the resolved package versions and source hashes.
-The [official v3 layout](https://huggingface.co/docs/lerobot/lerobot-dataset-v3)
-uses Parquet state/action data, per-camera MP4 video and episode metadata.
-
-Create datasets with the official SDK. Visual arms use real `video` features
-and `use_videos=True`, FPS=30, SDK codec `libsvtav1`, yuv420p, GOP=2 and CRF=30.
-Use the pinned SDK's ordinary per-episode encoding path with one encoder
-thread. Only physically accepted episodes are committed. Bound raw-episode
-staging to two queued episodes plus active producer/writer work. Failed
-attempts, encoding, metadata finalization and temporary files remain in cold
-pipeline cost and resource accounting. The state-only arm uses standard
-Parquet fields without a fabricated video stream.
-
-Read using public `LeRobotDataset.__getitem__` through
-`torch.utils.data.DataLoader`, with CPU TorchCodec decoding. Default to four
-workers, `prefetch_factor=1`, persistent workers, ordered delivery, no pinned
-memory and one Torch thread per worker. Reserve the same eight-CPU affinity
-budget for each whole pipeline; record native decoder thread behavior rather
-than patching the decoder. Worker processes use spawn and initialize their
-own Dataset/decoder; never decode in the parent and then inherit that decoder
-into workers.
-
-Use `delta_timestamps` for offsets [-1,0,...,31]/30 on all delivered temporal
-fields, including each camera. Keep SDK episode-boundary checks and timestamp
-tolerance 1e-4. Convert the SDK's boundary padding indicators into the common
-zero-padding and loss-mask contract; do not train or count repeated boundary
-frames as additional valid targets.
-
-The following are not permitted in the main LeRobot baseline:
-
-- Loading an entire decoded corpus into resident TensorDicts or NumPy arrays.
-- Using the current numeric `LeRobotDataSource`/BC numeric loader as the visual
-  reader, reading backing columns to bypass image access, or stripping images.
-- Pretending pre-extracted frames, cached decoded chunks or `.pt` tensors are
-  standard video decoding.
-- Silent fallback to another codec, decoder, fewer workers or a smaller batch.
-
-Normal SDK decoder-instance caching, OS file caching and bounded DataLoader
-prefetch are retained and disclosed. Cache state is process-cold and
-software/filesystem-cache-warm unless a separately isolated storage experiment
-proves otherwise. Do not purge system-wide caches on the shared host.
-
-### Sampling protection and data equivalence
-
-All main arms use episode-uniform selection followed by a uniform eligible
-anchor, with replacement. The LeRobot sampler changes selection, not file
-access or decoding. The parent process alone owns the optional K ledger:
-reserve credits before dispatching indices to workers, commit them after the
-complete batch has been decoded, normalized and returned, and keep delivered
-plus outstanding reservations within K. Report unconsumed prefetch separately.
-Decode failures terminate explicitly; they cannot refund and silently retry
-the same batch. Creating a new DataLoader iterator cannot create new credits.
-
-Record matching action order/semantics, step duration, valid frame lengths,
-camera order and physical episode IDs. Video compression is lossy: preserve
-small fixed raw RGB reference samples and report decoded PSNR/MAE separately.
-Require exact numeric/provenance integrity for a stored trajectory, but do not
-claim pixel-identical tensors or equal video/raw storage quality.
-
-### Time boundaries and offered load
-
-Measure two views of each run without adding their overlapping durations:
-
-1. **Acquisition-inclusive:** from process launch through accepted expert
-   generation to first usable batch and onward. LeRobot includes writing,
-   video encoding, finalization, reader startup and decoding; ODS includes
-   initial C-episode fill and delivery. Both pay their actual failures/retries.
-2. **Source-ready consumption:** from starting a fresh reader/consumer on
-   available data. LeRobot still reads and decodes requested windows; ready
-   never means an already decoded resident corpus. No historical collection
-   cost is charged to an already existing dataset in this view.
-
-The cold first-batch comparison includes the chosen collect-N-before-consume
-barrier versus ODS's initial-C barrier. It cannot attribute that entire
-difference to the memory transport. This baseline is the local finalized
-`LeRobotDataset` path, not `StreamingLeRobotDataset`, and does not establish
-that the LeRobot ecosystem cannot stream data.
-
-Use preflight ODS accepted-acquisition rates gamma_v, ODS immediate sampling
-service estimates under concurrent production, and ready-source delivery
-capacities for the standard decoded LeRobot reader in each visual condition.
-These measure different components and are labeled separately. Freeze one common nominal demand
-R=4K*max(gamma_v) and one consumption window
-T=max(180 seconds, max(4C/gamma_v)), with a 900-second ceiling. Do not reduce
-R to the slowest decoder's capacity: inability to serve offered load is a
-result. Each path records its target and achieved rate, with no accumulated
-catch-up queue after a wait. Preflight rates predict neither concurrent
-capacity nor a guaranteed speedup.
-
-Rotate run order with fixed order seed 47001. Use generation seed `seed` and
-independent sampling seed `seed+10000`; freeze hardware, CPU budget, profile
-and rates before the three main seeds. Record warmup/calibration separately.
-ODS manual refills start after initial fill, then follow each completed
-generation up to N. Waiting must drain events and propagate worker errors.
-Use 120-second data/reader waits and 1800-second initial/generation waits,
-shortened by applicable absolute run deadlines. Exhaustion without pending
-production is normal; temporary unavailability, failure and deadline expiry
-have distinct outcomes.
-
-## 4. Metrics and report artifacts
-
-| Metric | Definition and scope |
+| Path | Behavior |
 | --- | --- |
-| First usable batch | Process-launch-to-first-delivery and reader-start-to-first-delivery, separately |
-| Acquisition | Accepted episodes/s and accepted valid observation images/s, with failures counted separately |
-| Consumer throughput | Delivered chunks/s versus nominal demand, including normalizer/collation cost |
-| Final batch latency | Consumer-visible p50/p95; includes waiting, reads/decoding and output conversion |
-| Component service | ODS immediate sample/copy versus LeRobot fetch/decode service, labeled separately from prefetched `next()` latency |
-| Data freshness | ODS publication-to-first-delivery p50/p95, consumed generations and never-consumed evictions |
-| Reuse | Per-identity delivered chunks, reservations/prefetch, cap violations and retired unused credits |
-| Logical image bandwidth | Returned image samples/s and final batch MiB/s, including duplication/padding as labeled; not physical bus/disk bandwidth |
-| Memory and storage | Exact tensor/cache bytes, sampled owner/worker PSS and VRAM, final and observed temporary disk bytes, codec/quality settings |
+| Offline-8 / 32 / 128 | Generate, record and finalize the full corpus, then train through standard LeRobot decoding |
+| ODS overlap | Train after initial fill while later generations and recording continue |
+| ODS serial | Regenerate the overlap sources and replay its ordered training manifest with generation/model updates serialized |
 
-The offline corpus is already finalized at reader start; its file/load time is
-not an ODS publication delay. Keep freshness definitions source-specific.
-Count a chunk once by its anchor source, not once per camera or future frame.
-Reconcile delivered counters with engine/parent-ledger audits. Unsupported
-resource peaks remain unknown. All main throughput includes fixed common
-accounting; expensive pixel checks and image encoding run in the separate
-correctness/report path rather than being hidden from one backend's timing.
-Reader-worker service durations wrap public SDK item access; they are not
-summed and presented as consumer wall time or pure decoder-kernel latency.
-Completed batches returned after the fixed observation deadline remain in the
-lifetime K ledger and raw logs, but never enter window throughput, latency
-quantiles or generation-coverage qualification. Native reads/decodes cannot
-always be cancelled mid-call; trailing completion/cleanup time is disclosed.
-The ownership audit retains views of one original returned batch, including
-its full image backing allocation, and includes that cost in sampled memory.
-Consumer wait counters use only their overlap with the measurement window;
-cold-generation waits are retained in a separate lifetime counter. Report
-request-rate throttling and exhausted-source idle time separately. Controller
-recovery intervals include the final successful retry service and therefore
-must not be added to sampling service as mutually exclusive phases.
-
-Standard-reader shutdown stops new prefetch dispatch, drains the finite pending
-reads without counting them as delivery, then requires every worker to exit
-normally. Cancellation preserves the delivered K ledger. Aborted or forcibly
-terminated workers fail the run even when they have joined; cleanup and quality
-audits use the same strict exit check. Drain time is disclosed after the fixed
-observation window.
-
-Device qualification observes both compute and graphics contexts by owned PID
-tree/process group. A CUDA mask alone does not prove graphics isolation. On the
-current host, a standalone program linking only Vulkan reproduced a 6 MiB
-graphics context on physical GPU7 after instance creation, before explicit
-device enumeration; destruction released it. This is a driver-initialization
-footprint, not evidence that ODS executed on that device. The optional
-`--aux-graphics-gpu-id` suite setting explicitly reserves a separately qualified
-idle GPU and excludes it from primary assignments. Only known pure-graphics
-contexts up to 8 MiB per owned PID are accepted there; compute contexts, larger
-or unknown allocations and other GPUs still fail. Default supervision remains
-strict. Freeze this resource scope during calibration and use it for both
-backends, include all owned GPU allocations, and report these runs as primary
-plus reserved auxiliary GPU measurements. The small footprint does not prove
-zero performance impact or establish a single-GPU result.
-
-Produce four main figures: data availability/cache-consumption timelines;
-per-source reuse distributions with the K line; first-batch/final-batch latency
-and achieved demand; and visual-load throughput/memory/storage panels. Report
-individual seeds plus median/range. Show lossless numeric integrity and lossy
-image quality alongside speed, without claiming an algorithm leaderboard.
-
-Save resolved config/schema, environment and decoder/codec versions, corpus
-manifests, event/counter logs, failures and cleanup, machine-readable results,
-one Markdown report, PNG/SVG/PDF figures and small synchronized camera samples.
-Generate the short data-flow animation after timing from those same logs.
-
-## 5. Implementation milestones and acceptance
-
-The entry point is `examples/ods/data_stream_demo/`, separate from
-the BC learner. Reuse the physical task and expert; add local visual profiles,
-an SDK-backed decoded batch adapter, experiment orchestration and report tools.
-The current public numeric loader keeps its documented behavior. Shared
-production contracts belong to data_pipeline; a future general-purpose
-decoded reader requires its own API/tests, not an accidental expansion of the
-numeric loader in this example. No new generic trainer or hidden Dataset
-refill/epoch behavior is introduced.
-
-Implement and qualify in this order:
-
-1. Validate state/single/dual acquisition, real wrist attachment and raw image
-   recording without changing the physical expert or acceptance test.
-2. Round-trip accepted episodes through standard LeRobot files, public SDK
-   temporal access and actual TorchCodec decoding. Verify no resident shortcut.
-3. Add common output conversion, parent-side quota/reservation accounting,
-   bounded queues, metrics and complete lifecycle handling.
-4. Run tiny engineering cases for all nine main configurations, then freeze
-   calibration and execute the report and appendix suites.
-
-Required checks cover image-inclusive batch ownership after refill; exact
-numeric/provenance round-trip; camera UID/shape/dtype and valid zero padding;
-episode/continuity boundaries; matched frame indices across cameras and state;
-and cap correctness with duplicate selections and prefetched worker batches.
-Verify actual decoder calls for both camera tracks and timestamp/frame
-alignment, not merely the presence of image keys. Use synthetic frame-ID
-images for exact decoder alignment tests and real-scene reference samples for
-quality/motion checks. A static scene may legitimately contain identical
-pixels; image inequality alone does not establish freshness.
-
-Every main streaming run must consume at least three generations and observe
-delivery of some new-generation data before that whole generation completes.
-Every protected source must stay within K. Also check exhaustion/iterator
-recreation, read/worker failures, finite waits, cancelled prefetch and joined
-processes. A run that misses the intended overload or generation coverage
-reports that outcome; do not change seeds, K, images or success definitions
-to turn it into a pass. Resource prerequisites may mark an arm unsupported,
-never synthesize measurements for it.
-
-Add production-contract tests only where production code changes; use runnable
-engineering experiments for the example and retain their artifacts. The report
-may conclude about measured data availability, decoding/transport cost,
-resource tradeoffs and delivery protection. It cannot establish better state
-coverage from new IDs alone, count delivered chunks as completed training,
-or claim policy quality, universal ODS speedup or exact cache recovery.
-
-Implementation references: the
-[existing numeric loading contract](dataset-loading-design.md),
-[official pinned Dataset](https://github.com/huggingface/lerobot/blob/v0.4.4/src/lerobot/datasets/lerobot_dataset.py)
-and [video decoder/encoder](https://github.com/huggingface/lerobot/blob/v0.4.4/src/lerobot/datasets/video_utils.py).
-
-## 6. Fixed-training-budget visual comparison
-
-### Question and comparison matrix
-
-The primary question is: with the same model-training budget and hardware,
-how many distinct data states actually participate in completed training,
-and what total time does the complete pipeline require?
-
-Use the existing Franka single-cycle PickPlace expert and physical success
-criteria. Keep the task's cube reset area and all physics unchanged. Run only
-`single` (third-person) and `dual` (third-person plus wrist) visual inputs.
-This measures diversity within the existing task distribution, not new task
-semantics, object classes or scene types.
-
-| Path | Availability and training | Purpose |
-| --- | --- | --- |
-| Offline-8 | Generate, encode and finalize 8 episodes, then train through standard LeRobot SDK decoding | Low acquisition cost, limited fixed corpus |
-| Offline-32 | Same, with 32 episodes | Intermediate time–coverage point |
-| Offline-128 | Same, with 128 episodes | Larger fixed corpus and acquisition cost |
-| ODS overlap | Start after the initial cache, then generate, record and train concurrently | Primary live-data path |
-| ODS serial replay | Regenerate the overlap run's accepted sources and replay its training manifest while blocking generation during training | Attribute the contribution of generation/training overlap |
+Run third-person (`single`) and third-person plus wrist (`dual`) camera
+conditions separately. The delivery-only diagnostic also supports state-only
+input, but that condition does not participate in the visual training matrix.
+Serial may overlap recording with generation or training; it must not acquire
+an extra archive-submission barrier that confounds the intended comparison.
 
 ```mermaid
 flowchart LR
-    Expert[Expert on generation GPU] --> Shared[Shared cache C]
-    Shared --> Block[Owned block C]
-    Block --> Train[Visual BC on training GPU]
-    Block --> Writer[Bounded LeRobot recorder]
-    Writer --> Files[Finalized dataset]
-    Files --> Decode[SDK and video decoding]
+    Expert[Expert generation] --> Shared[Shared cache C]
+    Shared --> Owned[Owned data at most C]
+    Owned --> Train[Visual BC updates]
+    Owned --> Writer[Bounded recorder]
+    Writer --> Files[Standard LeRobot dataset]
+    Files --> Decode[SDK video decoding]
     Decode --> Train
 ```
 
-The direct block-to-trainer edge is the ODS path; the file/decoder edge is
-the collect-then-train baseline. Both pay for recording. The serial control
-uses the direct path while prohibiting generation/training overlap.
+The direct owned-data edge is ODS; the finalized-dataset edge is offline.
+Every arm saves a standard dataset. The serial control reuses the direct path
+while prohibiting generation/model-update overlap.
 
-The offline sizes form a time–diversity curve; the comparison does not select
-only a small offline corpus. Each primary path starts from fresh acquisition.
-All acquisition paths may overlap recording with the next shared-cache fill.
-Request the next generation before waiting for the current owned block to
-enter the bounded recording queue, then release that block before taking the
-next snapshot. The serial control excludes generation/optimizer overlap; it
-must not additionally serialize generation with recorder submission.
-Do not require equal accepted data volume, final source coverage, anchor
-order or pixel values across the primary paths. These are measured outcomes.
-The serial attribution path alone must match the corresponding overlap
-source/anchor trace and completed training work; a failed manifest audit
-invalidates that attribution, without erasing the failed run.
+## Model and work contract
 
-### Fixed actual training work and visual model
+The systems default is U=128 updates, B=32 chunks, H=2 causal observations and
+F=32 future action targets. Each qualified run completes 4,096 training chunks
+and 131,072 valid action targets. Complete windows stay within one episode and
+continuity segment. A larger budget is a new frozen recipe; 128 updates do not
+imply task convergence.
 
-Freeze U=128 completed optimizer updates, B=32 chunks, H=2 causal observations
-and F=32 action targets. Every qualified run completes exactly:
-
-- 4,096 trained chunks and 128 real optimizer updates.
-- 131,072 valid future action targets, or 1,310,720 scalar components at width 10.
-- Complete histories and prediction windows inside a single continuity segment.
-
-Use actual updates and valid targets rather than matching epoch counts over
-unequal datasets. This is a small systems pilot; it does not assert that 128
-updates are sufficient to learn PickPlace. Any larger budget is a new frozen
-protocol, chosen from the actual training requirement rather than padded
-compute to manufacture overlap.
-
-The shared image encoder follows the ResNet10/GroupNorm/spatial-embedding
-structure in RLInf commit
+The shared lazy `learning/models/ResNet10Encoder` adapts RLInf commit
 [`91a302ec50ddacd1fdabc5859b85e3661d768236`](https://github.com/RLinf/RLinf/blob/91a302ec50ddacd1fdabc5859b85e3661d768236/rlinf/models/embodiment/modules/resnet_utils.py):
 
-- torchvision BasicBlock layers `[1,1,1,1]`, GroupNorm4, epsilon 1e-5.
-- Final spatial feature map, eight learned spatial embeddings, projection 256,
-  LayerNorm and Tanh; no unused classifier or dropout.
-- Scratch initialization, trainable backbone and aggregation; remove the
-  reference policy's pretrained load, freezing and feature detach.
-- One shared encoder across both history frames and all selected cameras,
-  concatenated in a fixed time/camera order.
+- torchvision BasicBlock stages `[1,1,1,1]`, GroupNorm4, epsilon 1e-5;
+- eight learned spatial embeddings, 256-dimensional projection, LayerNorm/Tanh;
+- scratch initialization with the full encoder trainable;
+- one encoder shared across ordered camera views and both history frames.
 
-Use the matching PyTorch 2.7/torchvision 0.22 environment. Keep source attribution
-and the applicable license notice with adapted code; the demo does not depend
-on the RLInf runtime. The shared encoder belongs to `learning/models` with
-lazy imports; the BC head and experiment orchestration remain example-local.
+Keep attribution and third-party license notices in the module. The compatible
+reference stack is PyTorch 2.7/torchvision 0.22. The example requires neither
+RLInf runtime nor pretrained weights.
 
-The data adapter supplies 256×256 RGB float32 in [0,1]. The encoder applies
-ImageNet mean/std once, consistent with the reference preprocessing, and never
-again divides float inputs by 255. Inputs are only two historical images per
-camera and two 27-feature robot-state observations. Cube pose, success,
-expert segment, plan progress and future observations do not enter the policy.
-Geometry retained in the audit batch is analysis/target-construction data only.
-The 512/512 MLP predicts F×10 absolute TCP/rotation/gripper targets, reusing
-the existing ChunkBC target construction and arm/gripper loss.
+Adapters supply 256×256 RGB float32 in [0,1]; the encoder applies ImageNet
+normalization once. Numeric inputs are two 27-feature robot observations:
+qpos, qvel and TCP pose. Cube geometry, success, expert progress and future
+observations do not enter policy forward. The 512/512 MLP predicts F×10
+absolute TCP position, rotation and gripper targets. Target construction and
+normalized MSE follow ChunkBC. Future data are supervision only.
 
-Train in FP32 with AdamW learning rate 3e-4, weight decay 1e-6 and gradient-norm
-limit 1; disable image augmentation and observation noise. Match initial
-weights, model/optimizer settings and RNG state within each vision/seed. Freeze
-numeric normalization from the common initial 8 episodes. Use the same initial
-and final checkpoint format/cadence. Final loss and evaluation are measured;
-equal work does not require identical learned weights or policy quality.
+Use FP32 AdamW, learning rate 3e-4, weight decay 1e-6 and gradient-norm limit 1,
+with augmentation/noise disabled. Match initialization and recipe within each
+vision/seed; freeze numeric normalization from the common initial eight
+trajectories. Save model, optimizer, normalization, RNG, configuration and step
+state. Equal work does not require equal final weights or policy quality.
 
-### Online scheduling, quotas and persistence
+## Acquisition, reuse and recording
 
-The default visual runner now uses publication-granularity handoff. Initial
-normalization still uses the common full C-episode cache; subsequent complete
-P-episode producer subbatches become eligible as soon as their rows are
-published. Owner-only nonblocking acquisition validates and clones under the
-existing publication lock. Locked/unpublished rows return no data, and worker
-errors or overwritten expected identities fail explicitly. The owner copies
-every accepted source of one generation before requesting the next refill.
+Default C=8 shared episodes, P=2 parallel producer environments and lifetime
+per-source delivery cap K=128. K is an engineering guard, not an empirically
+optimal learning setting. Subsequent acquisition uses publication-granularity
+handoff; the initial full C block remains common to normalization.
 
-Training, archive staging and serial replay share a C-episode raw ownership
-bound. Packing creates an independent writer packet and releases the staging
-reference. Queue capacity remains two, with one active packet and at most one
-pending submission. Actual capacity exhaustion applies backpressure. Require
-P*K >= B so a subsequent retained subbatch can fund a complete training batch.
-Keep `handoff_mode=generation` as the original whole-cache control.
+The owner polls complete P-episode producer subbatches, validates immutable
+source/generation/frame/continuity metadata, and clones under the existing
+publication lock. Busy or unpublished rows return no data; overwritten expected
+identities and worker failures fail explicitly. Copy all accepted sources in a
+generation before requesting its successor. The public engine's immediate
+sample/error behavior does not change.
 
-Offline collection uses the same acquisition/recording settings. Publication
-Serial archives subbatches while generation runs, retains their raw data within
-the same C bound, then replays model updates after generation completes. Only
-generation/model-update overlap is excluded. Versioned traces preserve the
-exact retained source boundaries; v1 input compatibility remains supported.
+Raw training, archive-staging and serial-ready owners share a C-episode bound.
+Packing creates independent writer packets and releases raw references. The
+writer queue holds two packets, plus one active packet and at most one pending
+submission. Returned batches are independent of later cache replacement.
+Require P*K>=B and enough batch entries to cover every retained source.
+`--handoff-mode generation` retains whole-generation acquisition as a control.
+Serial archives published subbatches during generation and defers updates until
+that generation completes. Trace v2 records retained block boundaries and
+recorder/handoff settings; v1 traces remain readable.
 
-Recorder profiling splits the existing episode SDK service into validation,
-frame writing, save/encode/commit and reference/manifest work. These nested
-spans are not extra wall time. An explicit AV1 encoder thread limit defaults
-to one and is matched across controls and audited in the persisted manifest.
-Camera encoding remains sequential to avoid SDK process-pool fork from the
-CUDA learner's writer thread.
+At each batch boundary, budget-aware prefetch requests necessary supply when
+remaining credits cannot fund remaining updates. Optional refresh uses measured
+generation, recorder-staging, snapshot and recent complete ready-update times.
+Cold model startup is excluded from the latter estimate. Unknown timing defers
+optional requests. Pending requests coalesce; credits never reset on eviction.
+An `eager` diagnostic requests after every switch and reports unused data.
 
-ODS uses C=8 shared episodes, P=2 producer environments and per-source lifetime
-cap K=128. K is an engineering reuse guard, not a demonstrated optimal or
-learning-safe value. It is an upper bound, not a requirement to train every
-trajectory 128 times.
+Each block receives at least one completed batch covering all sources before
+replacement. Sample sources evenly, visiting unused legal anchors before
+reshuffling. Offline uses the same balancing/anchor rule but may reuse its
+fixed corpus to complete the budget. After update U, accept no new requests;
+finish and record every already-requested generation. Untrained tails count
+as acquisition cost and never as trained diversity.
 
-After the initial cache is ready, retain an independently owned C-episode
-training block. Default budget-aware prefetch requests the next generation
-when the current block's unreserved, undelivered credits cannot fund the
-remaining optimizer updates. With sufficient credits, it requests a refresh
-only when measured arrival time leaves room for a completed future update.
-Estimate arrival as the maximum of recent generation service and old-block
-recording-staging release time, plus snapshot time; these services overlap.
-Estimate remaining training using recent fast preparation/transfer/update
-times after at least three completed updates, excluding generation/quota waits.
-Unknown estimates defer optional refreshes but never necessary supply.
-Reconsider at each batch boundary, coalesce while a request is pending, and
-preserve every accepted generation if a prediction misses the deadline.
-The explicit `eager` diagnostic keeps the original request-after-switch policy.
-Train the current block while its successor is generated and recorded.
-Each block must have at least one completed
-batch covering all its sources before replacement; validate B>=C for this
-rule. Once the next block is ready, switch at a batch boundary. While it is
-not ready, continue the current block only within K; wait when credits are
-insufficient. Never reset credits on block eviction, restart or iterator
-recreation.
+Create and finalize datasets through LeRobot 0.4.4, with real Parquet/video
+features, 30 FPS and AV1/yuv420p/GOP2/CRF30. Explicit encoder threads default to
+one and must match across arms. Camera encoding is sequential to avoid an SDK
+process-pool fork from the CUDA learner's writer thread. SDK episode service
+has nested validation, frame-ingestion, save/encode/commit and manifest spans;
+these partition the outer service and are not additional wall time.
 
-Within each source, visit previously unused legal anchors before reshuffling.
-Use the same source-balancing and anchor-selection rule offline, allowing
-unbounded corpus reuse so that Offline-8 can complete the fixed training
-budget. Report actual offline reuse rather than treating it as a failure.
-With default work and K, at least 32 sources must participate in ODS training,
-while real throughput may yield more. A generated-but-untrained source never
-increases training diversity.
+Offline training uses the official Dataset and CPU TorchCodec 0.5 decoding,
+four spawned workers and prefetch factor one. Numeric supervision reads the
+required 33 frames; each camera reads only the two causal history frames.
+Do not replace standard decoding with a resident fully decoded corpus.
 
-After the Uth update, request no new generation. An already requested
-refill completes and all accepted episodes are recorded, including those not
-trained. Their cost and count remain explicit. Bound retention to C shared
-cache episodes plus C independently owned training episodes; exclude only
-separately declared bounded batches. The recorder has a two-episode queue,
-nonblocking owner submission and explicit backpressure. Dynamic finalize
-checks the actual accepted/submitted count. Dataset encoding, decode audits,
-writer drain and process shutdown must finish normally.
+## Timing, resources and capacity guidance
 
-The training adapter reads 33 numeric context frames but only the H=2 historical
-images. Standard LeRobot uses the official temporal Dataset API, four spawned
-DataLoader workers, prefetch factor 1 and real TorchCodec CPU decoding. It does
-not replace that path with a fully resident decoded corpus. Separate
-`reserved`, `delivered` and `trained` ledgers survive iterator recreation;
-only a synchronized completed optimizer update advances training metrics.
-Archive/snapshot copies are not training chunk deliveries. Apply the source
-cap to all successful deliveries and reconcile it against trained work;
-discarded prefetch cannot silently replenish K.
+Complete pipeline time starts at supervised process launch and ends after
+training, all accepted recording, checkpoint writes and normal process closure.
+Also record last-update time, first-update latency, waits and recording drain.
+Mandatory content audit and requested independent policy evaluation run after
+this clock. Zero-scene runs explicitly record evaluation as not requested.
+Failures remain visible and do not enter qualified ratios.
 
-### Timing and resource boundaries
+Use separate simulation/training primary GPUs and the same eight-CPU affinity
+across compared arms. Record GPU UUIDs, masks, thread budgets, actual context
+placement and sampled resources. Hardware admission is not exclusive host
+reservation. An explicitly declared passive graphics allowance is recorded and
+bounded separately; it grants no extra compute capacity.
 
-Every path has the same two primary GPUs, one for simulation and one for
-training, the same eight-CPU affinity/thread budget, P, camera profile,
-recording settings and RAM limits. An explicitly selected, qualified auxiliary
-UUID permits only the native driver's passive pure-G footprint, with known
-memory at most 8 MiB per owned PID and 16 GiB free. This new training policy
-records foreign auxiliary activity without using that board as compute; it
-does not require the passive board to be idle. The historical delivery
-supervisor's auxiliary admission still requires three idle readings. Keep
-the same auxiliary scope across training paths. The auxiliary allowance grants
-no compute capacity outside a pipeline's primary pair. An explicitly requested
-idle board may also be another pipeline's primary; all process-group guards
-still enforce the assigned two-GPU compute budget. Admit idle primary devices by
-measured utilization and sufficient free memory; never terminate unrelated jobs.
-Record primary/auxiliary device UUIDs and owned compute/graphics contexts.
+Measure accepted generation episodes/s, recorder busy-service episodes/s, and
+complete ready-batch preparation/transfer/optimizer updates/s. Keep pure model
+time separate. `min(generation, recording)` estimates bottleneck supply;
+`gamma_effective*K/B` estimates its protected update ceiling. Shared-host
+contention, startup and cleanup prevent treating either as total-time forecasts.
+Overlapping intervals cannot be summed to obtain pipeline time.
 
-The common clock is the supervisor's host-monotonic timestamp before launching
-any producer, reader, recorder or learner. Total time ends after the fixed
-training work, all accepted data recording/finalization, final checkpoint and
-normal teardown. Rejected expert attempts, model/CUDA initialization, copies,
-decoder startup, encoding and cleanup all remain timed. Also record the final
-completed update timestamp and the subsequent drain interval. Do not stop the
-clock at the last optimizer dispatch while background work remains unfinished.
-The CPU corpus/decoder correctness audit and independent policy evaluation
-run as separate processes after normal timed-worker exit. Their durations are
-recorded outside pipeline time; a failure disqualifies the run while preserving
-the original timing and artifacts.
-The audit covers every numeric frame, one legal H2 SDK window per source,
-sparse RGB fidelity references and a strict sequential software decode/count
-check of every saved AV1 frame. Full-decode hashes describe YUV420p rawvideo
-planes, not lossless RGB or every SDK random-seek position. Audit receipts and
-their frame-hash artifacts use exclusive fresh paths, including for backfills.
-Pending or missing validation cannot qualify an actual run. The supervisor
-records the true requested evaluation count independently of the training
-worker's zero-scene configuration. Formal qualification requires the completed
-passed corpus audit and every requested evaluation record with normal closure;
-zero scenes require explicit `not_requested` status.
+Preflight preserves C/P/B/K and defaults to `max(16,ceil(C*K/B)+8)` updates.
+It reports when later generations never reach training. Sweep feasible P
+values that divide C, then select the smallest measured P within 90% of the
+best effective supply under matched hardware/recipes. A computed K needed to
+keep training busy is diagnostic, not permission to raise the reuse guard.
+Freeze the workload before comparison; avoid artificial delays or dummy work.
 
-Record generation, recording, preparation/decode/transfer, synchronized actual
-training, waiting, finalization and cleanup spans. Intervals may overlap;
-their sum is not total time. Stage overlap alone is not proof of simultaneous
-GPU kernels. Keep actual device utilization and device training timings beside
-the host timeline. Before the formal matrix, measure accepted generation rate,
-writer write/encode busy-service rate and complete ready-batch learner rate,
-including a concurrent check. Keep the pure model rate separate. The effective
-episode supply estimate is the minimum of generation and recording capacities;
-its protected update ceiling is `gamma_effective*K/B`. Compare that ceiling
-with ready batch preparation + transfer + optimizer throughput, not just
-device kernel timing. Startup, staging and cleanup remain separate costs.
-Sweep feasible P values under matched hardware/recipes and choose the smallest
-measured P within 90% of the best measured effective supply. This is a measured
-capacity rule, not a search for the best K or a learning guarantee. The implied
-K for a fully busy learner is diagnostic only; keep the reuse guard bounded.
-Preflight defaults to `max(16,ceil(C*K/B)+8)` updates and explicitly reports
-whether later generations reached training. Then freeze the configuration
-and report the producer/recorder/learner imbalance. Do not add delays,
-empty compute or unnecessary updates to create apparent savings.
-SDK recording spans come from the single writer thread and include writing,
-encoding and recording bookkeeping. Reader spans come from actual worker fetch
-timestamps, including SDK startup, temporal reads, decoding and validation;
-prefetch may finish before the parent's request. Plot these separately from
-owner copying and waiting, rather than substituting parent wait for service.
-Disk metrics use finalized logical dataset/checkpoint sizes; temporary disk
-peaks and post-timing audit/evaluation artifacts are separate.
+## Metrics, evidence and acceptance
 
-### Metrics and figures
+Only synchronized completed updates increase training coverage. Preserve
+immutable source/frame identities, ordered update manifests and retired-source
+counters. Report trained and entropy-effective source counts, occupied initial
+XY cells (fixed 8×8 grid), cube XYZ voxels at anchors (2 cm), unique anchors,
+history/target frames, target duplication, publish-to-first-training latency,
+and lifetime chunks per source. New IDs do not imply new physical states.
 
-The denominator for data diversity is **completed training**, not generation,
-publication, reservation or decode. Store immutable source/frame IDs and the
-ordered completed training manifest so every metric can be recomputed.
+Generate time/coverage, coverage-growth, pipeline-timeline and lifetime-reuse
+figures from run logs. Resource metrics distinguish fixed numeric cache size
+from actual runtime memory, and finalized disk bytes from unmeasured temporary
+peaks. Preserve unused-source counts and all failure reasons.
 
-| Metric | Definition |
-| --- | --- |
-| Total pipeline time | Launch through complete training/data/checkpoint/normal-exit contract |
-| Trained source count | Accepted sources contributing to at least one completed optimizer update |
-| Effective trained sources | `exp(-sum(p_i*log(p_i)))`, where p_i is source i's completed-chunk share |
-| Initial-state coverage | Occupied cells in fixed 8×8 XY grid over [-0.46,-0.38]×[-0.12,-0.04]m, plus per-cell trained-chunk weights |
-| Anchor-state coverage | Distinct fixed 2 cm XYZ voxels occupied by cube states at trained anchors |
-| Reuse and frame coverage | Lifetime chunks per source, unique anchors/history frames/target frames and `1-unique_targets/target_occurrences` |
-| New-data training delay | Publication through the source's first synchronized completed update; unused sources remain separate |
-| Operational costs | First update, waits, recording drain, CPU/GPU utilization, sampled peak memory, disk bytes and recorded-but-untrained volume |
+Before paired ratios, verify matching initial-model/normalization hashes,
+initial-C numeric prefix, camera order, actual U/B/H/F, GPU assignment, CPU
+budget and supervisor/process evidence. Serial additionally matches source,
+anchor and retained-block order. Neither matching numerical manifests nor
+lossy AV1 files establish raw rendered RGB identity.
 
-Voxel/grid counts measure physical-state coverage within this task; a new
-source ID does not by itself increase them. Future prediction windows overlap,
-so target frame identities are deduplicated instead of counting every window
-as fresh data. Keep retired sources in all lifetime counters.
+Qualification covers reference-aligned encoder outputs/gradients, preprocessing,
+view/history order, image-dependent fitting, actual parameter updates and
+checkpoint reload. Shared encoder tests own its production contract. Actual
+pipeline checks cover causal windows, quotas, bounded ownership, old-output
+independence, real SDK decoding, AV1 PSNR/MAE, every saved video frame and normal
+worker closure. Add focused production regressions for core defects; do not
+build a separate general training-test framework around the example.
 
-Generate four PNG/SVG/PDF figures from retained events, without rerunning
-acquisition: time–diversity scatter for all offline sizes and ODS; coverage
-growth against both wall time and completed updates; measured pipeline
-stage timelines; and lifetime source reuse including retired and unused
-sources, with the K line. Save finite JSON, Markdown, model/config/RNG
-checkpoints, raw logs and the complete standard datasets. Failed, unsupported
-and unqualified runs remain visible but do not enter aggregate or paired
-ratios. Report each seed plus median/range; never replace a failed seed.
-
-For every qualified same-vision/seed baseline pair report its total-time ratio
-to ODS, beside the different data volumes, effective sources and physical
-coverage. A time ratio without those coverage results is incomplete. Do not
-collapse different vision models into one performance value. After timing,
-evaluate on the same 20 fixed development states as a quality check, with all
-failures retained; 80% policy success is not the systems acceptance gate.
-
-Before a formal paired ratio, verify matching initial-model/normalization
-SHA256 values, initial-C `(ordinal,length,numeric_sha256)` prefixes and camera
-order, declared/completed U/B/H/F, ordered generation/training GPU UUIDs and
-the exact eight-CPU affinity. Reconcile those assignments with the retained
-supervisor launch, UUID mask and single-thread environment, placement guard,
-normal-exit process record and total/origin clocks. Missing or inconsistent
-actual evidence excludes the run or pair, with reasons retained in JSON and
-Markdown. Initial-prefix matching does not require later datasets or training
-coverage to match. Smoke/calibration and CPU rendering fixtures remain
-engineering evidence and cannot establish formal paired speedup.
-
-### Qualification and execution order
-
-First qualify the CNN against the pinned reference: aligned weights and
-identical input, intermediate backbone/spatial/projection outputs, and
-backward gradients after explicitly removing reference freezing/detach.
-Verify RGB/layout/range/preprocessing exactly once, noncontiguous input,
-B=1/B=32, frame/camera ordering, both views' influence and future-image
-independence. Require finite nonzero gradients and parameter updates across
-every residual stage, spatial module and head. A fixed image-dependent
-small-data fitting test holds robot state constant; its dual-camera target
-requires information from both views. Check save/reload, CPU/CUDA FP32
-tolerances and wrong-view rejection. Production tests own the shared encoder
-contract; actual example qualification runs own the integration evidence.
-
-Then run engineering smoke, metric fixtures, throughput preflight and a
-one-seed scheduling pilot before the formal matrix. The pilot holds the same
-training budget and hardware per visual condition across Offline-32,
-budget-aware overlap and its serial replay; eager overlap is an independently
-reported control. Its paired engineering estimates do not become three-seed
-formal conclusions. A zero-scene pilot records that policy evaluation was not
-requested. The formal protocol has four primary arms×two visual modes×
-three fixed seeds =24 runs, plus six serial replays =30 runs. Alternate arm
-order, regenerate primary data and preserve every attempt. Do not combine
-smoke/calibration inputs with the qualified formal report.
-
-Engineering acceptance requires exact U/B/F work; consistent source/anchor
-manifests; K protection and bounded retained/prefetched data; unchanged old
-outputs after cache replacement; complete causal image histories; real model
-updates and reloadable checkpoints; standard readable datasets; and normal
-worker shutdown with no swallowed failures. Test known metric inputs for
-source-identity/state deduplication, unused-source exclusion, overlapping
-target counts and cap enforcement. Check the same RGB preprocessing through
-online and offline adapters, and AV1 roundtrip PSNR/MAE without asserting
-lossy pixel identity.
-
-Conclusions report the measured time–coverage frontier and the serial replay
-attribution. Small offline data may finish sooner; a larger offline corpus
-may cover more states; some workloads may show no ODS benefit. Preserve the
-historical 36 delivery runs and CPU copy benchmarks under their original
-scope. They cannot be relabeled as these real-training results.
+Run qualification, smoke, metric checks, throughput preflight and one-seed pilot
+before a formal matrix. The formal recipe is four primary arms×two camera
+modes×three seeds, plus six serial replays. Regenerate data, rotate arm order
+and retain slow/failed attempts. Evaluate the same 20 development states after
+timing as policy-quality context. Report the measured time–coverage tradeoff;
+the historical studies do not establish universal speedup or task convergence.

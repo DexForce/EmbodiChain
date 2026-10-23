@@ -1,6 +1,0 @@
-{
-  "passed": true,
-  "persistent_task_tensor_reset_twice": true,
-  "normal_tensor_after_no_grad": true,
-  "python310_ast": true
-}

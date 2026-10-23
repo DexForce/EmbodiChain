@@ -1,7 +1,0 @@
-{
-  "status": "failed",
-  "qualification_passed": false,
-  "post_audit_status": "failed",
-  "post_audit_seconds_outside_pipeline": 2.050525518,
-  "quality_error": "Owned process group remains after normal-exit grace (live_or_unknown; see process_group_shutdown identities)"
-}

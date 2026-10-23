@@ -1,5 +1,0 @@
-# Preserve generated export bytes so recorded SHA256 hashes remain valid.
-figures/*.svg -text -whitespace
-figures/*.patch -text -whitespace
-main/*.csv -text -whitespace
-appendix/*.csv -text -whitespace

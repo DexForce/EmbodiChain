@@ -1,7 +1,0 @@
-{
-  "actual_child_exit": 0,
-  "observed_exitcode": 255,
-  "simultaneous_status_readers": 2,
-  "thread_errors": [],
-  "threads_joined": true
-}

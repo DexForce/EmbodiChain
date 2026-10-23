@@ -13,32 +13,13 @@ an auditable training manifest. A faster result is interpreted together with
 the achieved data coverage and independent policy evaluation.
 
 The complete contract is in the
-[fixed-budget visual design](../../../docs/architecture/ods-data-stream-showcase-design.md#6-fixed-training-budget-visual-comparison).
+[fixed-budget visual design](../../../docs/architecture/ods-data-stream-showcase-design.md#fixed-training-budget-visual-comparison).
 
-The [completed visual study](results/2026-10-21-visual-training/README.md)
-retains all 30 formal attempts: 29 qualified and one audit-process shutdown
-failure. ODS starts updates earlier, but its complete pipeline is slower than
-Offline-32 at comparable observed coverage under this budget. The short
-training budget does not produce a reliable PickPlace policy.
-
-The [budget-aware follow-up](results/2026-10-22-budget-aware-prefetch/README.md)
-retains six capacity preflights and eight matched pilot outcomes. It removes
-eight untrained tail episodes and reduces complete time by 16–19% versus the
-eager control, and 4–5.5% versus Offline-32 in this single-seed measurement.
-Trained coverage remains similar, and serial is slightly faster than overlap;
-the pilot establishes neither a diversity advantage nor a positive isolated
-generation/training-overlap benefit. The three-stage guide explains how to
-measure and choose producer capacity without raising the protected reuse cap.
-
-The [publication-handoff follow-up](results/2026-10-23-publication-handoff/README.md)
-adds bounded consumption of published producer subbatches and recorder-stage
-profiling. Ten fresh fixed-budget runs pass independent audit. In both camera
-modes, 48 of 128 updates complete before their generation finishes publishing.
-Post-initial publish-to-training latency falls substantially; complete time
-changes only modestly, serial remains slightly faster, and trained coverage
-remains similar. This establishes earlier usable data, not an isolated overlap
-speedup or a diversity advantage. Recorder thread settings are matched across
-all arms; the isolated CPU thread sweep is not an end-to-end speed claim.
+Historical protocols, negative results and their immutable backup links are
+listed in [experiment evidence](EXPERIMENTS.md). The measured pilots establish
+earlier usable data, but do not establish a diversity advantage, an isolated
+overlap speedup, or a converged PickPlace policy. Generate fresh run outputs
+using the commands below; generated evidence is excluded from the source tree.
 
 ## Primary training paths
 
@@ -236,8 +217,8 @@ After the stage leader exits, the supervisor allows up to two seconds for its
 owned process group to disappear. Remaining members, including zombies, still
 fail the stage; PID, parent, state and termination evidence are retained in
 `process_group_shutdown`. This wait belongs to the stage, including pipeline
-time for the training stage. The formal study predates this shutdown fix and
-keeps its original failure; later validation is recorded separately.
+time for the training stage. Historical studies and failures are preserved separately in
+[experiment evidence](EXPERIMENTS.md).
 Actual runs remain unqualified while validation is pending. The supervisor
 persists the requested evaluation scene count; formal reports require all
 requested scenes and normal evaluation closure, or an explicit zero-scene
@@ -334,12 +315,9 @@ delivery, conversion and standard video-decode costs. Its state-only condition
 belongs to that diagnostic, not the visual training matrix above. It does not
 import a learner or produce policy-performance evidence.
 
-The [2026-10-21 study](results/2026-10-21/RESULTS.md) contains 27 main runs and
-nine appendix diagnostics validated in py311, raw logs and figures. It records
-the visual delivery limitation and teardown cleanup warnings. The subsequent
-[copy optimization](results/2026-10-21-copy-optimization/README.md) records CPU
-component timings and bitwise checks. These historical measurements are not
-relabelled as end-to-end visual training results.
+The historical delivery and CPU-copy studies remain available through
+[experiment evidence](EXPERIMENTS.md). Their measurements retain their original
+scope and are not relabeled as visual-training results.
 
 ## Compared paths
 

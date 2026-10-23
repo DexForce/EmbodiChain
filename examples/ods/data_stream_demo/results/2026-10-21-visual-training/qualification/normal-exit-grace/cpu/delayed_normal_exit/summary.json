@@ -1,9 +1,0 @@
-{
-  "status": "complete",
-  "qualification_passed": true,
-  "post_audit": {
-    "passed": true
-  },
-  "post_audit_status": "complete",
-  "post_audit_seconds_outside_pipeline": 0.254497861
-}

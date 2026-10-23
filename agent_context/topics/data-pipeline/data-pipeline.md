@@ -63,9 +63,10 @@ storage bounds. Worker SDK service timestamps remain separate from owner
 copy/wait spans. `training_audit.py` combines full numeric checks, source-window
 SDK reads and `video_integrity.py`'s all-frame software video count/integrity
 check; fresh post-timing receipts preserve earlier evidence.
-The [recorded study](../../../examples/ods/data_stream_demo/results/2026-10-21/RESULTS.md)
-owns measured results, raw-log reproduction and workload-specific limitations;
-it does not establish training efficiency or policy performance.
+The [experiment evidence index](../../../examples/ods/data_stream_demo/EXPERIMENTS.md)
+links immutable historical studies and their workload-specific limitations.
+Generated run evidence is excluded from the source tree; it does not establish
+training efficiency or policy performance.
 
 `BatchSource.sample_context()` returns owned TensorDicts under a shared
 `SequenceSpecCfg`; `SequenceDataset` supplies the common iteration interface.

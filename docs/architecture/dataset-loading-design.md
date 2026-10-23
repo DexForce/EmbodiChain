@@ -9,9 +9,9 @@ For use and operation, start with the [ODS guide](../source/features/online_data
 This document owns source/Dataset architecture and implementation boundaries; task parameters
 and historical run evidence remain with the demo.
 
-The proposed [ODS data-stream showcase](ods-data-stream-showcase-design.md)
+The [ODS data-stream showcase](ods-data-stream-showcase-design.md)
 uses standard SDK/DataLoader video decoding for its offline comparison. That
-planned reader is separate from the shipped resident numeric backend; its
+example-local reader is separate from the shipped resident numeric backend; its
 visual results cannot be obtained by dropping images or preloading decoded
 datasets through the current numeric loader.
 
