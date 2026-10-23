@@ -27,10 +27,12 @@ import hashlib
 import json
 import math
 import os
+import threading
 import time
 from collections.abc import Iterable
 from typing import Any
 
+import psutil
 import torch
 
 from embodichain.data_pipeline.datasets import data_schema_fingerprint
@@ -542,3 +544,109 @@ def resource_snapshot(
         ),
         "torch_cuda_this_process": cuda,
     }
+
+
+class _ResourceSampler:
+    """Best-effort wall-clock resource samples, never an exact peak or CPU total.
+
+    A background thread covers owner-side waits and short runs independently of
+    evaluation frequency. Collection cost is measured; this instrumentation
+    requires its own performance validation before use in a timed comparison.
+    """
+
+    def __init__(
+        self, cuda_devices: tuple[int, ...], interval_seconds: float = 5.0
+    ) -> None:
+        if not math.isfinite(interval_seconds) or interval_seconds <= 0:
+            raise ValueError("Resource sampling interval must be finite and positive")
+        self.cuda_devices = cuda_devices
+        self.interval_seconds = interval_seconds
+        self._stop = threading.Event()
+        self._lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+        self._records: list[dict[str, Any]] = []
+        self._errors: list[dict[str, Any]] = []
+        self._collection_seconds = 0.0
+        self._closed = False
+
+    def start(self) -> None:
+        if self._thread is not None or self._closed:
+            raise RuntimeError("Resource sampler cannot be restarted")
+        self.capture("before_worker_startup")
+        self._thread = threading.Thread(
+            target=self._run, name="ods-resource-sampler", daemon=True
+        )
+        self._thread.start()
+
+    def _run(self) -> None:
+        while not self._stop.wait(self.interval_seconds):
+            self.capture("periodic")
+
+    def capture(self, boundary: str) -> None:
+        with self._lock:
+            if self._closed:
+                return
+        started = time.monotonic()
+        snapshot = None
+        error_record = None
+        try:
+            process = psutil.Process()
+            pids = [process.pid] + [
+                child.pid for child in process.children(recursive=True)
+            ]
+            # resource_snapshot checks is_initialized before reading CUDA
+            # allocator counters; it never creates a CUDA context itself.
+            snapshot = resource_snapshot(pids, cuda_devices=self.cuda_devices)
+            snapshot["boundary"] = boundary
+            snapshot["collection_started_monotonic_seconds"] = started
+            snapshot["process_tree_scope"] = "best_effort_current_descendants"
+        except Exception as error:
+            error_record = {
+                "boundary": boundary,
+                "monotonic_seconds": started,
+                "error": f"{type(error).__name__}: {error}",
+            }
+        elapsed = time.monotonic() - started
+        with self._lock:
+            self._collection_seconds += elapsed
+            if snapshot is not None:
+                snapshot["collection_seconds"] = elapsed
+                self._records.append(snapshot)
+            if error_record is not None:
+                error_record["collection_seconds"] = elapsed
+                self._errors.append(error_record)
+
+    def stop(self) -> list[dict[str, Any]]:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=10.0)
+            if self._thread.is_alive():
+                with self._lock:
+                    self._closed = True
+                raise RuntimeError("Resource sampler did not stop within 10 seconds")
+        with self._lock:
+            self._closed = True
+            return list(self._records)
+
+    def report(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "started": self._thread is not None,
+                "stopped": self._closed
+                and (self._thread is None or not self._thread.is_alive()),
+                "interval_seconds": self.interval_seconds,
+                "samples": len(self._records),
+                "collection_wall_seconds": self._collection_seconds,
+                "errors": list(self._errors),
+                "missing_pid_observations": sum(
+                    len(row.get("missing_pids", [])) for row in self._records
+                ),
+                "scope": "sampled process-tree PSS and observed CPU counters; Torch allocator counters belong to the learner only",
+                "limitations": [
+                    "Memory values are sampled peaks, not exact peaks",
+                    "CPU counters omit work after a process's last observation and may miss short-lived descendants",
+                    "Missing processes or collection errors remain unknown, not zero",
+                    "Collection wall time sums sample service durations, including any overlapping forced/periodic captures; it is not end-to-end overhead",
+                    "End-to-end overhead and scheduling perturbation need workload-specific measurement",
+                ],
+            }

@@ -19,26 +19,27 @@
 from __future__ import annotations
 
 import time
-import math
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
+
+from embodichain.data_pipeline.datasets import DataBudgetExhaustedError
 
 from examples.ods.simple_bc_demo.lerobot import DirectLeRobotWriter
 
+if TYPE_CHECKING:
+    from embodichain.data_pipeline.runtime import ODSFlowController
+
 
 def collect_lerobot(
-    engine: Any,
+    flow: ODSFlowController,
     initial: dict[str, Any],
     destination: Path,
     *,
     schema: dict[str, Any],
     episodes: int,
     snapshot: Callable[[Any], dict[str, Any]],
-    request_refill: Callable[[], int],
-    progress: Callable[[], None],
     clock: Callable[[], float],
     record_interval: Callable[[str, float, float], None],
-    generation_timeout: float = 1800.0,
 ) -> dict[str, Any]:
     """Overlap generations with a bounded writer using cache-sized snapshots.
 
@@ -52,8 +53,8 @@ def collect_lerobot(
     rows, steps = initial["valid"].shape
     if episodes < rows or episodes % rows:
         raise ValueError("Collection requires a positive whole-cache episode count")
-    if not math.isfinite(generation_timeout) or generation_timeout <= 0:
-        raise ValueError("Generation timeout must be finite and positive")
+    engine = flow.engine
+    progress = flow.poll
     started = clock()
     writer = None
     try:
@@ -72,8 +73,13 @@ def collect_lerobot(
             for index in range(episodes // rows):
                 # The current snapshot is an independent copy. Producing the next
                 # cache can safely overlap enqueue/write of these accepted rows.
-                generation = request_refill() if (index + 1) * rows < episodes else None
-                deadline = time.monotonic() + generation_timeout
+                more = (index + 1) * rows < episodes
+                generation = flow.request_refill() if more else None
+                if more and generation is None:
+                    raise DataBudgetExhaustedError(
+                        "Production limit cannot supply the requested offline corpus"
+                    )
+                deadline = time.monotonic() + flow.cfg.generation_timeout
                 for row in range(rows):
                     progress()
                     writer.submit(
@@ -91,14 +97,7 @@ def collect_lerobot(
                     )
                 if generation is not None:
                     before = clock()
-                    while engine.get_stats()["completed_generation"] < generation:
-                        progress()
-                        if time.monotonic() >= deadline:
-                            raise TimeoutError(
-                                "Offline refill did not complete before its deadline"
-                            )
-                        time.sleep(0.02)
-                    progress()
+                    flow.wait_for_generation(generation, deadline=deadline)
                     record_interval("offline_refill_wait", before, clock())
                     current = snapshot(engine)
             before = clock()
