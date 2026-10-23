@@ -29,7 +29,9 @@ from embodichain.lab.sim.motion.expansion import (
     TrajectoryTemplate,
     compare_trajectory_segments,
     extract_trajectory_segments,
+    joint_residual,
     stitch_trajectory_segments,
+    via_points,
 )
 
 _CONTROL_DT = 0.1
@@ -119,6 +121,70 @@ def test_stitch_exact_boundary_deduplicates_shared_sample_and_keeps_lineage() ->
     ]
     assert result.placements[0].source_template_id == "nominal"
     assert result.placements[1].source_start_index == 3
+    assert [
+        (phase.start_index, phase.stop_index) for phase in result.template.phases
+    ] == [
+        (0, 3),
+        (2, 5),
+    ]
+    extracted = extract_trajectory_segments(result.template)
+    torch.testing.assert_close(extracted[0].positions, reach.positions)
+    torch.testing.assert_close(extracted[1].positions, retreat.positions)
+
+    limits = torch.tensor([[-10.0, 10.0]], dtype=torch.float64)
+    residual = joint_residual(
+        result.template,
+        joint_limits=limits,
+        normalized_scale=0.01,
+        generator=torch.Generator().manual_seed(4),
+    )
+    waypoint = via_points(
+        result.template,
+        joint_limits=limits,
+        via_count=1,
+        normalized_scale=0.01,
+        generator=torch.Generator().manual_seed(5),
+    )
+    assert residual.positions[1, 0] != result.template.positions[1, 0]
+    assert waypoint.positions[3, 0] != result.template.positions[3, 0]
+    torch.testing.assert_close(
+        residual.positions[[0, 2, 4]], result.template.positions[[0, 2, 4]]
+    )
+    torch.testing.assert_close(
+        waypoint.positions[[0, 2, 4]], result.template.positions[[0, 2, 4]]
+    )
+
+
+def test_stitch_two_sample_phases_share_boundary_and_remain_extractable() -> None:
+    reach, retreat = extract_trajectory_segments(_template("short"))
+    reach = replace(
+        reach,
+        positions=reach.positions[[0, -1]],
+        dt=torch.tensor([0.0, _CONTROL_DT], dtype=torch.float64),
+    )
+    retreat = replace(
+        retreat,
+        positions=retreat.positions[[0, -1]],
+        dt=torch.tensor([0.0, _CONTROL_DT], dtype=torch.float64),
+    )
+
+    result = stitch_trajectory_segments(
+        (reach, retreat),
+        source_id="composite",
+        source_revision="policy:short",
+        template_id="two_sample_phases",
+    )
+    extracted = extract_trajectory_segments(result.template)
+
+    assert result.template.positions[:, 0].tolist() == pytest.approx([0.0, 1.0, 2.0])
+    assert [
+        (phase.start_index, phase.stop_index) for phase in result.template.phases
+    ] == [
+        (0, 2),
+        (1, 3),
+    ]
+    torch.testing.assert_close(extracted[0].positions, reach.positions)
+    torch.testing.assert_close(extracted[1].positions, retreat.positions)
 
 
 def test_discontinuous_segments_require_and_record_a_minimum_jerk_bridge() -> None:

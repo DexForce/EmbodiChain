@@ -775,7 +775,12 @@ def expand_tutorial_task_space_variants(
 
     def kinematics(qpos: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         poses = solver.get_fk(qpos).to(qpos)
-        jacobians = solver.get_jacobian(qpos, jac_type="full").to(qpos)
+        tcp = torch.as_tensor(solver.get_tcp(), device=qpos.device, dtype=qpos.dtype)
+        jacobians = solver.get_jacobian(
+            qpos,
+            locations=tcp[:3, 3],
+            jac_type="full",
+        ).to(qpos)
         return poses, jacobians
 
     task_reference = task_space_from_joint_template(

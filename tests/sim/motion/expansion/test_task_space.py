@@ -23,6 +23,7 @@ import torch
 
 from embodichain.compute.kinematics import DifferentiableIKCfg
 from embodichain.lab.sim.motion.expansion import (
+    TASK_SPACE_RESIDUAL_OPERATOR,
     TaskSpaceDeformationConstraint,
     TrajectoryPhase,
     TrajectoryTemplate,
@@ -127,6 +128,28 @@ def test_task_space_deformation_leaves_unselected_phases_unchanged() -> None:
     )
 
     torch.testing.assert_close(result.poses[4:], task_space.poses[4:])
+
+
+def test_task_space_contract_rejects_nonfree_deformation_permission() -> None:
+    source = replace(
+        _joint_template(),
+        phases=(
+            TrajectoryPhase(
+                "move",
+                0,
+                _SAMPLE_COUNT,
+                "contact",
+                (TASK_SPACE_RESIDUAL_OPERATOR,),
+            ),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="only free phases"):
+        task_space_from_joint_template(
+            source,
+            frame_id="tool",
+            kinematics=_prismatic_kinematics,
+        )
 
 
 def test_task_space_deformation_is_reproducible_without_global_rng() -> None:

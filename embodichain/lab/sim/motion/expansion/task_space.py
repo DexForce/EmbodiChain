@@ -185,7 +185,16 @@ class TaskSpaceTrajectory:
             raise ValueError("dt[0] must be zero and later arrival intervals positive")
         object.__setattr__(self, "poses", poses)
         object.__setattr__(self, "dt", dt)
-        object.__setattr__(self, "phases", _phases(self.phases, poses.shape[0]))
+        phases = _phases(self.phases, poses.shape[0])
+        if any(
+            phase.kind != "free"
+            and TASK_SPACE_RESIDUAL_OPERATOR in phase.allowed_operators
+            for phase in phases
+        ):
+            raise ValueError(
+                "only free phases may allow task-space residual deformation"
+            )
+        object.__setattr__(self, "phases", phases)
         object.__setattr__(
             self,
             "allowed_operators",

@@ -637,10 +637,12 @@ def stitch_trajectory_segments(
 ) -> StitchedTrajectory:
     """Concatenate phase segments and explicitly plan discontinuous boundaries.
 
-    Segment first samples are shared boundaries and are emitted only once. A
-    planned bridge includes its own endpoints; those are also de-duplicated.
-    The result is structurally continuous but still requires motion-limit,
-    collision, and task validation.
+    Segment first samples are shared boundaries and are emitted only once. The
+    adjacent output phases both reference that one endpoint, which keeps each
+    phase independently extractable without duplicating trajectory samples. A
+    planned bridge follows the same boundary convention. The result is
+    structurally continuous but still requires motion-limit, collision, and
+    task validation.
 
     Args:
         segments: Ordered source phases to compose.
@@ -750,7 +752,12 @@ def stitch_trajectory_segments(
             dt_parts.append(bridge.dt[1:].to(dtype=values[0].dt.dtype))
             bridge_phase_id = f"bridge_{index - 1}_{index}"
             phases.append(
-                TrajectoryPhase(bridge_phase_id, cursor, cursor + appended, "free")
+                TrajectoryPhase(
+                    bridge_phase_id,
+                    cursor - 1,
+                    cursor + appended,
+                    "free",
+                )
             )
             bridge_ids.append(bridge_phase_id)
             cursor += appended
@@ -762,7 +769,7 @@ def stitch_trajectory_segments(
         phases.append(
             TrajectoryPhase(
                 phase_id,
-                cursor,
+                cursor - 1,
                 cursor + appended,
                 right.kind,
                 right.allowed_operators,
@@ -777,7 +784,7 @@ def stitch_trajectory_segments(
                 right.source_start_index,
                 right.source_stop_index,
                 phase_id,
-                cursor,
+                cursor - 1,
                 cursor + appended,
             )
         )

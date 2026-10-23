@@ -164,8 +164,10 @@ collision/dynamics checks, task validation and rejection of unsuccessful rows.
 `TrajectorySegment` values. `TrajectorySegmentBank` admits replacements only
 when semantic phase, motion kind, joint layout, controlled joints and tensor
 contracts agree; selection is deterministic. Stitching de-duplicates shared
-boundaries, gives every output phase a unique identity and retains multi-source
-lineage. A discontinuous boundary must go through an injected
+boundaries while adjacent output phases share that one endpoint index, so every
+phase remains independently extractable and augmentable. It gives every output
+phase a unique identity and retains multi-source lineage. A discontinuous
+boundary must go through an injected
 `TrajectoryBridgePlanner`; `MinimumJerkBridgePlanner` is only a sampled
 velocity/acceleration-limited geometric fallback and makes no collision claim.
 The resulting template enters the existing `TemplateSourceAdapter` path, so
