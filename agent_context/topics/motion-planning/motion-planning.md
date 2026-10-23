@@ -174,20 +174,21 @@ execution, reset, validation and persistence remain host responsibilities.
 renders both paths analytically on CPU and records IK residuals, source lineage
 and bridge phases without constructing a simulator.
 
-`scripts/tutorials/atomic_action/place.py` is the demonstration host, hooked
-the way the Affordance sampling tutorials are: shared helpers live in
-`examples/sim/atomic_action/support.py` through the `tutorial_utils.py` adapter;
-the tutorial declares only which named segments may move,
-and one variant replays per simulation row. Phases come from the action's own
-`TrajectorySegment` ranges; only motion at or after the lift is retimed so the
-shared `clear_dynamics()` step stays aligned. `--variant_plot_dir` writes a
-joint-trajectory figure and a tool-path figure with waypoint markers. Task
-Program, Gym lifecycle, dataset persistence and `ExpansionSession` collection
-bookkeeping are deliberately out of scope; this is a direct-simulation
-contract. Keep `joint_dedup_normalized_tol` below `joint_offset_scale`, or
-genuinely different variants are discarded as duplicates; an enabled spatial
-factor at or below the tolerance now fails configuration decoding instead of
-silently keeping the nominal variant alone.
+`examples/sim/atomic_action/place.py` is the demonstration host. Shared helpers
+in `examples/sim/atomic_action/support.py` convert the compiled action's named
+segments to the expansion contracts and replay one variant per simulation row.
+The default `joint_space` mode retains the earlier residual/via/null-space and
+retiming behavior. The optional `task_space` mode deforms only selected free
+lift/transport/retract segments, projects them through the production
+trajectory-IK API, and requires every requested row to be distinct and IK-valid.
+`examples/expansion/trajectory/task_environment_augmentation_showcase.py`
+selects that mode and defaults to one nominal plus eight variants in nine
+parallel arenas; recording frames the complete arena grid. `--variant_plot_dir`
+writes joint and tool-path figures with waypoint markers. Task Program, Gym
+lifecycle, dataset persistence and `ExpansionSession` collection bookkeeping
+remain out of scope; this is a direct-simulation contract. In joint-space mode,
+keep `joint_dedup_normalized_tol` below `joint_offset_scale`, or genuinely
+different variants are discarded as duplicates.
 
 The twelve-scene Atomic CLI uses the same variant operators through the
 shared Atomic plan adapter and owns its replay provenance; see the

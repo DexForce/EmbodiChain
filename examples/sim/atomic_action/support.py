@@ -288,6 +288,15 @@ def create_tutorial_argument_parser(
                 "exceed --num_envs, in which case only the first ones replay."
             ),
         )
+        parser.add_argument(
+            "--trajectory_variant_mode",
+            choices=("joint_space", "task_space"),
+            default="joint_space",
+            help=(
+                "Generate the established joint-space variants or project "
+                "endpoint-preserving task-space deformations through trajectory IK."
+            ),
+        )
         variants = parser.add_argument_group(
             "advanced variant options",
             "Override the default augmentation policy. Omit them all and the "
@@ -305,6 +314,18 @@ def create_tutorial_argument_parser(
         variants.add_argument("--duration_scales", type=float, nargs="+", default=None)
         variants.add_argument("--dedup_tolerance", type=float, default=None)
         variants.add_argument("--no_redundancy", action="store_true")
+        variants.add_argument(
+            "--task_space_translation_m",
+            type=float,
+            default=0.04,
+            help="Maximum horizontal task-space path offset in metres.",
+        )
+        variants.add_argument(
+            "--task_space_rotation_rad",
+            type=float,
+            default=0.0,
+            help="Maximum root-frame task-space rotation-vector norm in radians.",
+        )
         variants.add_argument(
             "--variant_plot_dir",
             type=str,
@@ -479,6 +500,18 @@ def parse_trajectory_variant_arguments(
         parser.error("--joint_offset_scale must lie in (0, 1].")
     if args.dedup_tolerance is not None and not 0 < args.dedup_tolerance <= 1:
         parser.error("--dedup_tolerance must lie in (0, 1].")
+    for name in ("task_space_translation_m", "task_space_rotation_rad"):
+        value = getattr(args, name)
+        if not math.isfinite(value) or value < 0:
+            parser.error(f"--{name} must be finite and non-negative.")
+    if (
+        args.trajectory_variant_mode == "task_space"
+        and args.task_space_translation_m == 0
+        and args.task_space_rotation_rad == 0
+    ):
+        parser.error(
+            "task-space variants require a positive translation or rotation bound."
+        )
     # Variants are generated from one reference, so their count is independent
     # of how many of them a run replays in parallel. Only default the two to
     # each other; an explicit --trajectory_variants may exceed --num_envs, and
@@ -551,6 +584,62 @@ def _variant_arm_columns(robot: Robot, control_part: str) -> tuple[int, ...]:
     return tuple(robot_names.index(name) for name in solver_names)
 
 
+def _tutorial_trajectory_template(
+    compiled: CompiledTrajectory,
+    robot: Robot,
+    *,
+    phase_kinds: Sequence[Mapping[str, str]],
+    path_operators: tuple[str, ...],
+    retimable: Sequence[Collection[str]] = (),
+    include_retime: bool = False,
+    control_part: str = "arm",
+) -> tuple["TrajectoryTemplate", float]:
+    """Convert a compiled tutorial plan to the shared expansion contract."""
+    from embodichain.lab.sim.motion.expansion import TrajectoryPhase, TrajectoryTemplate
+
+    arm_columns = _variant_arm_columns(robot, control_part)
+    positions = compiled.trajectory.positions[0]
+    intervals = compiled.trajectory.dt[0].clone()
+    intervals[0] = 0
+    positions, intervals, remap = _drop_action_junctions(positions, intervals)
+    spacing = intervals[1:]
+    control_dt = float(spacing[0]) if spacing.numel() else 0.0
+    if control_dt <= 0 or bool((spacing - control_dt).abs().max() > 1e-6):
+        raise ValueError(
+            "Trajectory expansion needs a reference on a fixed command clock; "
+            "this action produced non-uniform arrival intervals."
+        )
+    phases = []
+    for index, kinds in enumerate(phase_kinds):
+        allowed = set(retimable[index]) if index < len(retimable) else set()
+        for name, kind in kinds.items():
+            segment = compiled.segment(index, name)
+            start, stop = int(remap[segment.start]), int(remap[segment.stop])
+            operators: tuple[str, ...] = ()
+            if kind == "free":
+                operators = path_operators + (
+                    ("retime",) if include_retime and name in allowed else ()
+                )
+            phases.append(
+                TrajectoryPhase(f"{index}_{name}", start, stop, kind, operators)
+            )
+    allowed_operators = path_operators + (("retime",) if include_retime else ())
+    return (
+        TrajectoryTemplate(
+            source_id="atomic_action_tutorial",
+            source_revision=f"waypoints{positions.shape[0]}",
+            template_id="tutorial_reference",
+            joint_names=tuple(robot.joint_names),
+            positions=positions,
+            dt=intervals,
+            phases=tuple(phases),
+            allowed_operators=allowed_operators,
+            controlled_joint_indices=arm_columns,
+        ),
+        control_dt,
+    )
+
+
 def expand_tutorial_trajectory_variants(
     compiled: CompiledTrajectory,
     robot: Robot,
@@ -584,47 +673,21 @@ def expand_tutorial_trajectory_variants(
     """
     from embodichain.lab.sim.motion.expansion import (
         SceneCase,
-        TrajectoryPhase,
-        TrajectoryTemplate,
         expand_trajectory_variants,
     )
 
     path_operators = ("joint_residual", "via_points", "nullspace_residual")
-    arm_columns = _variant_arm_columns(robot, control_part)
-    positions = compiled.trajectory.positions[0]
-    intervals = compiled.trajectory.dt[0].clone()
-    intervals[0] = 0
-    positions, intervals, remap = _drop_action_junctions(positions, intervals)
-    spacing = intervals[1:]
-    control_dt = float(spacing[0]) if spacing.numel() else 0.0
-    if control_dt <= 0 or bool((spacing - control_dt).abs().max() > 1e-6):
-        raise ValueError(
-            "Variant retiming needs a reference on a fixed command clock; this "
-            "action produced non-uniform arrival intervals."
-        )
-    phases = []
-    for index, kinds in enumerate(phase_kinds):
-        allowed = set(retimable[index]) if index < len(retimable) else set()
-        for name, kind in kinds.items():
-            segment = compiled.segment(index, name)
-            start, stop = int(remap[segment.start]), int(remap[segment.stop])
-            operators: tuple[str, ...] = ()
-            if kind == "free":
-                operators = path_operators + (("retime",) if name in allowed else ())
-            phases.append(
-                TrajectoryPhase(f"{index}_{name}", start, stop, kind, operators)
-            )
-    template = TrajectoryTemplate(
-        source_id="atomic_action_tutorial",
-        source_revision=f"waypoints{positions.shape[0]}",
-        template_id="tutorial_reference",
-        joint_names=tuple(robot.joint_names),
-        positions=positions,
-        dt=intervals,
-        phases=tuple(phases),
-        allowed_operators=path_operators + ("retime",),
-        controlled_joint_indices=arm_columns,
+    template, control_dt = _tutorial_trajectory_template(
+        compiled,
+        robot,
+        phase_kinds=phase_kinds,
+        path_operators=path_operators,
+        retimable=retimable,
+        include_retime=True,
+        control_part=control_part,
     )
+    arm_columns = template.controlled_joint_indices
+    positions = template.positions
     cfg = create_trajectory_variant_cfg(args)
     jacobians = None
     if cfg is None or cfg.factors.ik.enabled:
@@ -647,6 +710,200 @@ def expand_tutorial_trajectory_variants(
         joint_limits=robot.get_qpos_limits()[0],
         control_dt=control_dt,
         task_jacobians=jacobians,
+    )
+
+
+def expand_tutorial_task_space_variants(
+    compiled: CompiledTrajectory,
+    robot: Robot,
+    args: argparse.Namespace,
+    *,
+    phase_kinds: Sequence[Mapping[str, str]],
+    editable: Sequence[Collection[str]],
+    control_part: str = "arm",
+) -> "TrajectoryVariantSet":
+    """Generate distinct endpoint-preserving task-space variants for replay.
+
+    The nominal reference is row zero. Every later row samples horizontal TCP
+    deformation in the selected free phases and projects all editable samples
+    together through the production trajectory-IK API. Unlike the general
+    row-assignment helper, this showcase route refuses to reuse rows: requesting
+    nine variants either produces nine distinct trajectories or raises.
+
+    Args:
+        compiled: Compiled PickUp -> Place trajectory.
+        robot: Tutorial robot supplying FK, Jacobians, and joint limits.
+        args: Parsed tutorial arguments and task-space bounds.
+        phase_kinds: Semantic phase kinds for each compiled action.
+        editable: Free segment names that may receive task-space deformation.
+        control_part: Kinematic control part to project.
+
+    Returns:
+        Exactly ``args.trajectory_variants`` distinct replay rows.
+    """
+    from embodichain.compute.kinematics import DifferentiableIKCfg
+    from embodichain.lab.sim.motion.expansion import (
+        CandidateIdentity,
+        CandidateTrajectoryBatch,
+        NOMINAL_OPERATOR,
+        TASK_SPACE_RESIDUAL_OPERATOR,
+        TaskSpaceDeformationConstraint,
+        TrajectoryVariant,
+        TrajectoryVariantSet,
+        deform_task_space_trajectory,
+        project_task_space_trajectory,
+        task_space_from_joint_template,
+    )
+
+    template, _ = _tutorial_trajectory_template(
+        compiled,
+        robot,
+        phase_kinds=phase_kinds,
+        path_operators=(),
+        control_part=control_part,
+    )
+    selected_names = {
+        f"{index}_{name}" for index, names in enumerate(editable) for name in names
+    }
+    known_free = {phase.phase_id for phase in template.phases if phase.kind == "free"}
+    if not selected_names or not selected_names <= known_free:
+        raise ValueError("editable task-space segments must name known free phases")
+
+    solver = robot.get_solver(control_part)
+    if solver is None:
+        raise RuntimeError(f"No kinematic solver is available for {control_part!r}.")
+
+    def kinematics(qpos: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        poses = solver.get_fk(qpos).to(qpos)
+        jacobians = solver.get_jacobian(qpos, jac_type="full").to(qpos)
+        return poses, jacobians
+
+    task_reference = task_space_from_joint_template(
+        template,
+        frame_id=f"{control_part}_tcp",
+        kinematics=kinematics,
+        editable_phase_ids=tuple(
+            phase.phase_id
+            for phase in template.phases
+            if phase.phase_id in selected_names
+        ),
+    )
+    constraints = {
+        phase_id: TaskSpaceDeformationConstraint(
+            phase_id=phase_id,
+            translation_axes=(True, True, False),
+            rotation_axes=(True, True, True),
+            max_translation_m=args.task_space_translation_m,
+            max_rotation_rad=args.task_space_rotation_rad,
+        )
+        for phase_id in selected_names
+    }
+    limits = robot.get_qpos_limits()[0].to(template.positions)
+    ik_cfg = DifferentiableIKCfg(
+        max_iterations=32,
+        damping=0.05,
+        step_size=0.5,
+        pos_eps=1e-3,
+        rot_eps=1e-3,
+    )
+    requested = args.trajectory_variants
+    seed = args.variant_seed or 0
+    accepted = [template]
+    variants = [TrajectoryVariant(0, NOMINAL_OPERATOR, 1.0, "uniform")]
+    evidence: list[dict[str, float | int | str]] = [variants[0].factors]
+    rejected: dict[str, int] = {}
+    attempts = 0
+    attempt_budget = max(16 * requested, requested)
+    controlled = list(template.controlled_joint_indices)
+    spans = (limits[controlled, 1] - limits[controlled, 0]).clamp_min(1e-12)
+    dedup_tolerance = args.dedup_tolerance or 1e-4
+
+    while len(accepted) < requested and attempts < attempt_budget:
+        attempts += 1
+        generator = torch.Generator(device="cpu").manual_seed(
+            (seed + attempts) % (2**63)
+        )
+        target = deform_task_space_trajectory(
+            task_reference,
+            constraints=constraints,
+            generator=generator,
+        )
+        projection = project_task_space_trajectory(
+            target,
+            template,
+            kinematics=kinematics,
+            joint_limits=limits,
+            ik_cfg=ik_cfg,
+        )
+        if not projection.accepted:
+            rejected["trajectory_ik"] = rejected.get("trajectory_ik", 0) + 1
+            continue
+        normalized = projection.template.positions[:, controlled] / spans
+        if any(
+            float((normalized - candidate.positions[:, controlled] / spans).abs().max())
+            <= dedup_tolerance
+            for candidate in accepted
+        ):
+            rejected["duplicate"] = rejected.get("duplicate", 0) + 1
+            continue
+        ordinal = len(accepted)
+        variant = TrajectoryVariant(
+            ordinal,
+            TASK_SPACE_RESIDUAL_OPERATOR,
+            1.0,
+            "uniform",
+        )
+        accepted.append(projection.template)
+        variants.append(variant)
+        evidence.append(
+            {
+                **variant.factors,
+                "max_position_error_m": float(
+                    projection.position_error.norm(dim=-1).max()
+                ),
+                "max_rotation_error_rad": float(
+                    projection.rotation_error.norm(dim=-1).max()
+                ),
+            }
+        )
+
+    if len(accepted) != requested:
+        raise RuntimeError(
+            f"Only {len(accepted)} of {requested} distinct task-space variants "
+            f"survived {attempts} attempts: {dict(sorted(rejected.items()))}."
+        )
+    positions = torch.stack([candidate.positions for candidate in accepted])
+    intervals = torch.stack([candidate.dt for candidate in accepted])
+    identities = tuple(
+        CandidateIdentity(
+            scene_case_id="atomic_action_tutorial",
+            initial_state_id="tutorial_initial_state",
+            candidate_id=f"task_space_candidate_{index:03d}",
+            geometry_family_id=f"task_space_geometry_{index:03d}",
+            source_id=template.source_id,
+            source_revision=template.source_revision,
+            template_id=template.template_id,
+        )
+        for index in range(requested)
+    )
+    return TrajectoryVariantSet(
+        candidates=CandidateTrajectoryBatch(
+            positions=positions,
+            dt=intervals,
+            valid_length=torch.full(
+                (requested,),
+                positions.shape[1],
+                dtype=torch.int64,
+                device=positions.device,
+            ),
+            identities=identities,
+            joint_names=template.joint_names,
+            phases=tuple(candidate.phases for candidate in accepted),
+            factors=tuple(evidence),
+        ),
+        variants=tuple(variants),
+        attempted=attempts + 1,
+        rejected=rejected,
     )
 
 
@@ -2204,7 +2461,7 @@ def start_auto_play_recording(
         return False
 
     # Frame all requested variants rather than recording only reference row 0.
-    if getattr(args, "run", None) is not None and args.num_envs > 1:
+    if args.num_envs > 1:
         offsets = sim.arena_offsets.detach().cpu()
         center = (offsets.max(dim=0).values + offsets.min(dim=0).values) * 0.5
         eye, target, up = (
@@ -2577,6 +2834,7 @@ __all__ = [
     "save_variant_joint_plot",
     "trajectory_variant_rows",
     "log_trajectory_variant_diagnostics",
+    "expand_tutorial_task_space_variants",
     "expand_tutorial_trajectory_variants",
     "create_trajectory_variant_cfg",
     "parse_trajectory_variant_arguments",

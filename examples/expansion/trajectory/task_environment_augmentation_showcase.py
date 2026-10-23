@@ -14,13 +14,14 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Show task-environment trajectory expansion on the PickUp -> Place scene.
+"""Show nine task-space trajectories on parallel PickUp -> Place scenes.
 
 This showcase reuses the existing Atomic Action task scene and runs the nominal
-plan plus configured trajectory variants through the real simulator. It writes
-joint/tool-path plots and ``place_auto_play.mp4`` to a caller-selected directory.
-It demonstrates physical task execution and variant diversity; it is not a
-dataset qualification or confirmed EpisodeSink run.
+plan plus eight endpoint-preserving task-space deformations through nine parallel
+simulation arenas. It writes joint/tool-path plots and ``place_auto_play.mp4``
+to a caller-selected directory. It demonstrates physical task execution and
+variant diversity; it is not a dataset qualification or confirmed EpisodeSink
+run.
 """
 
 from __future__ import annotations
@@ -44,7 +45,7 @@ def main(argv: list[str] | None = None) -> None:
             The only required showcase argument is ``--output-dir``.
     """
     parser = argparse.ArgumentParser(
-        description="Run nominal and trajectory-variant PickUp -> Place rollouts."
+        description="Run nine parallel task-space PickUp -> Place rollouts."
     )
     parser.add_argument(
         "--output-dir",
@@ -60,7 +61,11 @@ def main(argv: list[str] | None = None) -> None:
     if "--variant_plot_dir" not in forwarded:
         forwarded.extend(("--variant_plot_dir", str(args.output_dir)))
     if "--trajectory_variants" not in forwarded:
-        forwarded.extend(("--trajectory_variants", "4"))
+        forwarded.extend(("--trajectory_variants", "9"))
+    if "--num_envs" not in forwarded:
+        forwarded.extend(("--num_envs", "9"))
+    if "--trajectory_variant_mode" not in forwarded:
+        forwarded.extend(("--trajectory_variant_mode", "task_space"))
     if "--headless_play" not in forwarded:
         forwarded.append("--headless_play")
     if "--auto_play" not in forwarded:

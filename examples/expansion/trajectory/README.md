@@ -39,31 +39,38 @@ minimum-jerk bridge inserted at the discontinuous B/C boundary.
 
 ## Task-environment trajectory augmentation
 
-Run the PickUp → Place task scene with one nominal execution and several
-trajectory variants:
+Run the PickUp → Place task scene as a 3×3 parallel simulation: environment 1
+replays the nominal trajectory and environments 2–9 replay eight distinct
+endpoint-preserving task-space deformations:
 
 ```bash
 python examples/expansion/trajectory/task_environment_augmentation_showcase.py \
   --output-dir /tmp/embodichain-task-augmentation \
-  --num_envs 4 \
+  --num_envs 9 \
   --device cuda \
   --headless
 ```
 
 The showcase uses the existing Atomic Action task scene and MotionGenerator
-planning path. It keeps contact and release waypoints fixed while varying the
-authorized free motion using joint residuals, via points, and timing profiles.
-The output directory receives the joint-trajectory and tool-path plots plus
-``place_auto_play.mp4`` produced by the tutorial runtime.
+planning path. It converts the shared plan to the production
+``TaskSpaceTrajectory`` contract, bends the lift/transport/retract paths in the
+horizontal plane, and projects each target through batched trajectory IK. The
+grasp and release waypoints remain exact. Generation fails instead of silently
+reusing a row if nine distinct IK-valid variants cannot be produced. The output
+directory receives the nine-way joint/path plots plus a wide-view
+``place_auto_play.mp4`` showing all arenas at once.
 
 Useful overrides include:
 
 ```bash
---trajectory_variants 4
---spatial_methods joint_residual via_points
---no_redundancy
+--trajectory_variants 9
+--task_space_translation_m 0.04
+--task_space_rotation_rad 0.0
 --variant_seed 7
 ```
+
+Pass ``--trajectory_variant_mode joint_space`` to return to the earlier
+``joint_residual`` / ``via_points`` / ``nullspace_residual`` / retiming demo.
 
 This is a physical execution showcase. It does not claim confirmed dataset
 commits; use the expansion coordinator and EpisodeSink flow for collection.

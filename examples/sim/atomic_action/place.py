@@ -52,6 +52,7 @@ from examples.sim.atomic_action.support import (
     initialize_pre_pick_robot_pose,
     make_clear_dynamics_callback,
     prepare_tutorial_scene,
+    expand_tutorial_task_space_variants,
     expand_tutorial_trajectory_variants,
     log_trajectory_variant_diagnostics,
     parse_trajectory_variant_arguments,
@@ -235,18 +236,31 @@ def run(args: argparse.Namespace) -> None:
         # Each row replays a different way of executing the same plan. Only the
         # free motion changes: the grasp and the release keep their planned
         # waypoints, so every row picks and places the cube identically.
-        variants = expand_tutorial_trajectory_variants(
-            compiled,
-            robot,
-            args,
-            phase_kinds=(
-                {"approach": "free", "close": "contact", "lift": "free"},
-                {"approach": "free", "release": "contact", "retract": "free"},
-            ),
-            # Retiming anything before the lift would move the step index at which
-            # the executor clears the cube's dynamics.
-            retimable=(("lift",), ("approach", "retract")),
+        phase_kinds = (
+            {"approach": "free", "close": "contact", "lift": "free"},
+            {"approach": "free", "release": "contact", "retract": "free"},
         )
+        if args.trajectory_variant_mode == "task_space":
+            variants = expand_tutorial_task_space_variants(
+                compiled,
+                robot,
+                args,
+                phase_kinds=phase_kinds,
+                # Keep the pre-grasp approach nominal. The visible variants bend
+                # the held-object lift/transport and post-release retract while
+                # retaining the grasp and placement endpoints exactly.
+                editable=(("lift",), ("approach", "retract")),
+            )
+        else:
+            variants = expand_tutorial_trajectory_variants(
+                compiled,
+                robot,
+                args,
+                phase_kinds=phase_kinds,
+                # Retiming anything before the lift would move the step index at
+                # which the executor clears the cube's dynamics.
+                retimable=(("lift",), ("approach", "retract")),
+            )
         log_trajectory_variant_diagnostics(variants, args.trajectory_variants)
 
         if args.variant_plot_dir:
