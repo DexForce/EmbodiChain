@@ -1,6 +1,6 @@
 {
-  "description": "W1 documentation images captured with shared native rendering and camera settings.",
-  "source_commit": "f063f80bb9d546eaca7998b2b2a21f1d29d78513",
+  "description": "W1 documentation images captured through registered robot presets with shared native rendering and camera settings.",
+  "source_commit": "b6d8a232930a054a5d69607e48f9c7b5cb04d8d8",
   "render_cfg": {
     "renderer": "rt",
     "spp": 1,
@@ -136,7 +136,9 @@
         "RIGHT_PINKY_PIP": 0.0,
         "RIGHT_RING_PIP": 0.0,
         "RIGHT_HAND_THUMB1": 0.0
-      }
+      },
+      "rendered_from_catalog": true,
+      "image_sha256": "d55f90e1859df58c16a3a10b5e057275f251506ed2afec00282a4e66c3a7a39a"
     },
     "dexforcew1_v030.jpg": {
       "variant": "v030/bare",
@@ -163,7 +165,31 @@
         "RIGHT_J6": 0.0,
         "LEFT_J7": 0.0,
         "RIGHT_J7": 0.0
+      },
+      "rendered_from_catalog": true,
+      "image_sha256": "c3a5cd2d57149443c5ed311f4a95d895df1388cf13320690d66f12bd01e588ad",
+      "asset": {
+        "dataset_id": "DexforceW1V030",
+        "cache_prefix": "DexforceW1V030VisualsV2",
+        "repo_id": "DexForceAI/embodichain_data",
+        "repo_type": "dataset",
+        "revision": "3544bad4b6f8c7bc4b3263473b4a04e18db20fff",
+        "path": "dexforce_w1/v030/w1.zip",
+        "md5": "74ff7e835160f7309d32ade116172c52",
+        "sha256": "2cd4b2dbdfa5cbd3238d16e23d927f03a8e7c06f42a29846c633f60a636fc0e5"
       }
     }
+  },
+  "source_worktree_modified": true,
+  "capture_date": "2026-10-23",
+  "runtime": {
+    "dexsim": "0.5.1rc1",
+    "torch": "2.7.1+cu128",
+    "gpu": "NVIDIA GeForce RTX 5090"
+  },
+  "image_encoding": {
+    "format": "JPEG",
+    "quality": 95,
+    "subsampling": 0
   }
 }

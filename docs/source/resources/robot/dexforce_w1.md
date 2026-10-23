@@ -15,15 +15,16 @@ are configured separately.
   </figure>
 </div>
 
-Both images use the same camera, bent-elbow display pose and current
-`RenderCfg(renderer="rt")` defaults (OfflineRT), with default scene lighting.
+Both images are captured from the registered robot presets using the same
+camera, bent-elbow display pose and current `RenderCfg(renderer="rt")`
+defaults (OfflineRT), with default scene lighting.
 The display pose is for illustration; it does not change the preset home pose.
 
 :::{dropdown} Image rendering settings
 960 × 1200; 1 sample per pixel; DLSS offscreen reconstruction (quality 2);
 tone mapping off; exposure 1.0; path depths 4–8. The scene uses the default
-ground and environment emission, with no added direct lights. Camera and
-joint settings are recorded in the
+ground and environment emission, with no added direct lights. Camera settings,
+joint positions and the V030 asset revision are recorded in the
 [render manifest](../../_static/robots/dexforcew1_render.json).
 :::
 

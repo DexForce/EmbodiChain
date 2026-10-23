@@ -58,10 +58,13 @@ when needed. Solver/planner checkpoint download helpers can have separate paths.
 ZIP bundles must include directory entries before nested files for Open3D
 extraction. Validate new bundles through `get_data_path()` with an empty cache.
 
-`UniversalRobots` selects the V4 archive with corrected UR3/UR3e material
-colors. Its versioned `UniversalRobotsV4` cache directory changes source paths
-so URDF assembly also refreshes previously copied mesh materials; public
-`UniversalRobots/...` asset references remain unchanged.
+Visual-only asset revisions need versioned source-cache directories: URDF
+assembly signatures include source URDF paths and contents, not referenced
+mesh contents, so replacing GLBs at an unchanged source path can retain stale
+assembled materials. `UniversalRobots` uses `UniversalRobotsV4` for corrected
+UR3/UR3e colors; `DexforceW1V030` uses `DexforceW1V030VisualsV2` for its corrected
+shell colors. Their public asset selectors remain unchanged; W1 also retains
+its `dexforce_w1/v030/w1.zip` archive URL and existing URDF/collision definitions.
 
 Demo classes live in `assets/demo_assets.py` and are exported through the existing
 asset registry. `TabletopFourBases/scene_export` resolves the four-support rigid

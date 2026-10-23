@@ -161,6 +161,9 @@ class DexforceW1V030(EmbodiChainDataset):
     inertials match the corrected full body. Wrist camera and gripper assets
     belong to independently assembled attachments.
 
+    Corrected shell colors use a versioned cache so existing URDF assemblies
+    refresh their copied visual meshes.
+
     Args:
         data_root: Download and extraction cache root. Defaults to the configured
             EmbodiChain asset cache.
@@ -169,10 +172,11 @@ class DexforceW1V030(EmbodiChainDataset):
     def __init__(self, data_root: str | None = None) -> None:
         descriptor = o3d.data.DataDescriptor(
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, w1_assets, "v030", "w1.zip"),
-            "45fd6e516997d85cbac01f3d955acb4f",
+            "74ff7e835160f7309d32ade116172c52",
         )
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
-        super().__init__(type(self).__name__, descriptor, path)
+        # Assembly signatures track URDF paths rather than mesh contents.
+        super().__init__(f"{type(self).__name__}VisualsV2", descriptor, path)
 
 
 class DexforceW1ChassisV021(EmbodiChainDataset):
