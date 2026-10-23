@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 
 import numpy as np
@@ -62,14 +62,20 @@ class W1VersionSpec:
     version: DexforceW1Version
     component_urdfs: Mapping[DexforceW1Type, str]
     full_robot_urdf_path: str
-    arm_d_list: tuple[float, ...]
-    arm_base_z: float
+    arm_d_list: tuple[float, ...] | None
+    arm_base_z: float | None
     default_eef_attach_xpos: Mapping[DexforceW1ArmSide, tuple]
     solver_tcp: Mapping[DexforceW1ArmSide, tuple]
     eyes_attach_xpos: tuple[tuple[float, ...], ...]
-    wrist_camera_rpy: tuple[float, float, float]
-    wrist_camera_xyz: tuple[float, float, float]
+    wrist_camera_rpy: tuple[float, float, float] | None
+    wrist_camera_xyz: tuple[float, float, float] | None
     head_contains_eyes: bool = False
+    default_with_eef: bool = True
+    arm_solver_configs: Mapping[DexforceW1ArmSide, Mapping[str, object]] | None = None
+    component_frames: Mapping[DexforceW1Type, tuple[str, str]] = field(
+        default_factory=dict
+    )
+    component_prefix: tuple[tuple[str, str | None], ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -81,6 +87,20 @@ class W1VersionSpec:
             MappingProxyType(dict(self.default_eef_attach_xpos)),
         )
         object.__setattr__(self, "solver_tcp", MappingProxyType(dict(self.solver_tcp)))
+        object.__setattr__(
+            self, "component_frames", MappingProxyType(dict(self.component_frames))
+        )
+        if self.arm_solver_configs is not None:
+            object.__setattr__(
+                self,
+                "arm_solver_configs",
+                MappingProxyType(
+                    {
+                        side: MappingProxyType(dict(config))
+                        for side, config in self.arm_solver_configs.items()
+                    }
+                ),
+            )
 
     @property
     def assembly_name(self) -> str:
@@ -126,6 +146,10 @@ class W1VersionSpec:
         return np.asarray(self.eyes_attach_xpos, dtype=float).copy()
 
     def wrist_camera_xpos(self, arm_side: DexforceW1ArmSide) -> np.ndarray:
+        if self.wrist_camera_rpy is None or self.wrist_camera_xyz is None:
+            raise ValueError(
+                f"W1 {self.version.value} has no wrist camera calibration."
+            )
         attach_xpos = np.eye(4)
         attach_xpos[:3, :3] = R.from_euler("xyz", self.wrist_camera_rpy).as_matrix()
         attach_xpos[:3, 3] = self.wrist_camera_xyz
@@ -157,6 +181,16 @@ _V025_COMPONENT_URDFS = {
     DexforceW1Type.HEAD: "DexforceW1V025/w1/head.urdf",
     DexforceW1Type.LEFT_ARM: "DexforceW1V025/w1/left_arm.urdf",
     DexforceW1Type.RIGHT_ARM: "DexforceW1V025/w1/right_arm.urdf",
+}
+_V030_COMPONENT_URDFS = {
+    component: f"DexforceW1V030/w1/{component.value}.urdf"
+    for component in (
+        DexforceW1Type.CHASSIS,
+        DexforceW1Type.TORSO,
+        DexforceW1Type.HEAD,
+        DexforceW1Type.LEFT_ARM,
+        DexforceW1Type.RIGHT_ARM,
+    )
 }
 # Verified against the released V022 and V025 left/right arm URDF joint origins.
 _SHARED_D_LIST = (0.0, 0.0, 0.260, 0.0, 0.166, 0.098, 0.0)
@@ -237,6 +271,51 @@ _W1_VERSION_SPECS = {
         wrist_camera_rpy=_WRIST_CAMERA_RPY,
         wrist_camera_xyz=_WRIST_CAMERA_XYZ,
         head_contains_eyes=True,
+    ),
+    DexforceW1Version.V030: W1VersionSpec(
+        version=DexforceW1Version.V030,
+        component_urdfs=_V030_COMPONENT_URDFS,
+        full_robot_urdf_path="DexforceW1V030/w1/robot.urdf",
+        arm_d_list=None,
+        arm_base_z=None,
+        default_eef_attach_xpos=_V021_DEFAULT_EEF_ATTACH_XPOS,
+        # Standard V030 ends at the physical flanges; tools own their TCPs.
+        solver_tcp=_V021_DEFAULT_EEF_ATTACH_XPOS,
+        eyes_attach_xpos=(
+            (0.0, 0.25881904510252074, -0.9659258262890683, 0.091),
+            (-1.0, 0.0, 0.0, 0.0),
+            (0.0, 0.9659258262890683, 0.25881904510252074, 0.051),
+            (0.0, 0.0, 0.0, 1.0),
+        ),
+        # Wrist cameras belong to optional attachments, with their own calibration.
+        wrist_camera_rpy=None,
+        wrist_camera_xyz=None,
+        head_contains_eyes=True,
+        default_with_eef=False,
+        arm_solver_configs={
+            DexforceW1ArmSide.LEFT: {
+                "class_type": "FEPSolver",
+                "reference_qpos": (0.0, 0.0, -np.pi / 2, 0.0, 0.0, -np.pi / 2, 0.0),
+                "axis_alignment_tolerance": 2e-5,
+                "rotation_tolerance": 5e-5,
+                "redundancy_search": True,
+                # GeoFIK swivel is undefined at V030's outstretched home pose.
+                # Use joint distance/limit margins unless callers opt into it.
+                "arm_angle_weight": 0.0,
+            },
+            DexforceW1ArmSide.RIGHT: {
+                "class_type": "FEPSolver",
+                "reference_qpos": (0.0, 0.0, -np.pi / 2, 0.0, 0.0, np.pi / 2, 0.0),
+                "redundancy_search": True,
+                "arm_angle_weight": 0.0,
+            },
+        },
+        component_frames={
+            DexforceW1Type.CHASSIS: ("chassis_base_link", "chassis_base_link"),
+            DexforceW1Type.TORSO: ("torso_base", "upper_body_base"),
+            DexforceW1Type.HEAD: ("head_base", "head_pitch_j2_link"),
+        },
+        component_prefix=(("left_arm", None), ("right_arm", None)),
     ),
 }
 

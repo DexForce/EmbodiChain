@@ -49,6 +49,7 @@ def installed_benchmark(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path,
     ignore = shutil.ignore_patterns("__pycache__", "*.pyc", "*.egg-info")
     for name in (
         "embodichain",
+        "examples",
         "extensions/embodichain_robots",
         "extensions/embodichain_tasks",
         "extensions/embodichain_benchmarks",
@@ -151,12 +152,12 @@ target, repository = map(Path, sys.argv[1:3])
 sys.meta_path = [finder for finder in sys.meta_path if "__editable__" not in str(finder)]
 sys.path = [entry for entry in sys.path if entry and not Path(entry).is_relative_to(repository)]
 
-class RejectScripts(importlib.abc.MetaPathFinder):
+class RejectSamples(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname == "scripts" or fullname.startswith("scripts."):
-            raise AssertionError("installed benchmark imported source-checkout scripts")
+        if fullname.partition(".")[0] in {"scripts", "examples"}:
+            raise AssertionError("installed benchmark imported sample modules")
 
-sys.meta_path.insert(0, RejectScripts())
+sys.meta_path.insert(0, RejectSamples())
 from embodichain.cli.benchmark import main as benchmark_cli
 benchmark_cli(["--help"])
 assert not any(name == "embodichain_benchmarks" or name.startswith("embodichain_benchmarks.") for name in sys.modules)
@@ -168,7 +169,7 @@ for source in Path(benchmark.__file__).parent.rglob("*.py"):
     for node in ast.walk(ast.parse(source.read_text())):
         names = ([node.module] if isinstance(node, ast.ImportFrom) else
                  [alias.name for alias in node.names] if isinstance(node, ast.Import) else [])
-        assert not any(name and name.split(".")[0] == "scripts" for name in names), source
+        assert not any(name and name.split(".")[0] in {"scripts", "examples"} for name in names), source
 resources = files(benchmark).joinpath("suites")
 suite_names = sorted(path.name[:-5] for path in resources.iterdir() if path.name.endswith(".yaml"))
 for name in suite_names:
@@ -178,7 +179,7 @@ assert load_suite().name == "motion_panda_free_space_smoke"
 from embodichain_benchmarks.motion_generation import PlannerAdapter
 from embodichain_benchmarks.motion_generation.scenarios.atomic_grasps import parallel_jaw_sampler
 assert parallel_jaw_sampler(2)
-from embodichain.lab.scripts._atomic_action.placement_geometry import build_support_object_target_pose
+from embodichain_benchmarks.motion_generation.scenarios._placement_geometry import build_support_object_target_pose
 import torch
 assert build_support_object_target_pose(torch.eye(4), torch.device("cpu")).shape == (4, 4)
 from embodichain_benchmarks.motion_generation.artifacts import environment_metadata

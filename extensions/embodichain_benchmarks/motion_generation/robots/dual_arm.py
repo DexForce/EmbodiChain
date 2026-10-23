@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from embodichain.lab.sim.cfg import RobotCfg
-from embodichain.lab.scripts._atomic_action.scenario import (
+from .._atomic_fixtures import (
     DUAL_UR5_INIT_POS,
     DUAL_UR5_INIT_ROT,
     create_dual_tutorial_robot_cfg,

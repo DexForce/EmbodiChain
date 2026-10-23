@@ -361,10 +361,11 @@ def test_w1_variant_catalog_covers_body_and_independent_hand_registries():
     assert set(_W1_VERSIONS) == {version.value for version in DexforceW1Version}
     assert set(_W1_HANDS) == {brand.value for brand in DexforceW1HandBrand}
     variants = ROBOT_CONFIGS["DexforceW1"]["variants"]
-    expected_count = len(DexforceW1Version) * (
+    expected_count = (len(DexforceW1Version) - 1) * (
         1 + (len(DexforceW1HandBrand) - 1) ** 2 + 1
-    )
+    ) + 1
     assert len(variants) == expected_count
+    assert {name for name in variants if name.startswith("v030/")} == {"v030/bare"}
     assert ROBOT_CONFIGS["DexforceW1"]["default_variant"] == "v021/BrainCo"
 
 
@@ -381,7 +382,8 @@ def test_w1_variant_catalog_covers_body_and_independent_hand_registries():
             "L=DH_PGC,R=DH_PGC_M",
             "L=DH_PGC_M,R=DH_PGC",
         )
-    ],
+    ]
+    + ["v030/bare"],
 )
 def test_w1_variant_metadata_matches_config(catalogs, local_robot_assets, variant):
     from embodichain_robots._catalog import ROBOT_CONFIGS

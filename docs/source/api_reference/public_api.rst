@@ -73,8 +73,53 @@ embodichain.data.assets.solver_assets
 
    download_neural_ik_checkpoint
 
+embodichain.data.assets.w1_assets
+---------------------------------
+
+Versioned W1 URDF archives use the shared data-root and download cache. V021
+provides separate body components; V022 and V025 bundle the full robot and
+components. V030 packages the standard 20-DOF body without detachable grippers
+or wrist-camera attachments. Its component visuals and inertials match the
+corrected full-body definition.
+
+.. currentmodule:: embodichain.data.assets.w1_assets
+
+.. autosummary::
+   :nosignatures:
+
+   DexforceW1V021
+   DexforceW1V022
+   DexforceW1V025
+   DexforceW1V030
+   DexforceW1ChassisV021
+   DexforceW1TorsoV021
+   DexforceW1EyesV021
+   DexforceW1HeadV021
+   DexforceW1LeftArmV021
+   DexforceW1RightArmV021
+
+.. autoclass:: DexforceW1V021
+
+.. autoclass:: DexforceW1V022
+
+.. autoclass:: DexforceW1V025
+
+.. autoclass:: DexforceW1V030
+
+.. autoclass:: DexforceW1ChassisV021
+
+.. autoclass:: DexforceW1TorsoV021
+
+.. autoclass:: DexforceW1EyesV021
+
+.. autoclass:: DexforceW1HeadV021
+
+.. autoclass:: DexforceW1LeftArmV021
+
+.. autoclass:: DexforceW1RightArmV021
+
 embodichain.data_pipeline
-------------------------
+-------------------------
 
 The configuration submodule derives bounded pipeline settings without starting
 an online worker. Importing the data-pipeline package remains lazy.
@@ -86,7 +131,7 @@ an online worker. Importing the data-pipeline package remains lazy.
    configuration
 
 embodichain.data_pipeline.configuration
---------------------------------------
+---------------------------------------
 
 Configure ODS from measured generation and training capacities. A versioned
 profile bounds selections per trajectory; the planner never promotes provisional

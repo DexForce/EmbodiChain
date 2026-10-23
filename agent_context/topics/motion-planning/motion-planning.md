@@ -151,7 +151,7 @@ standoff poses the caller must replan. The resolved config is reported on the re
 
 `scripts/tutorials/atomic_action/place.py` is the demonstration host, hooked
 the way the Affordance sampling tutorials are: shared helpers live in
-`lab/scripts/_atomic_action/support.py` through the `tutorial_utils.py` adapter;
+`examples/sim/atomic_action/support.py` through the `tutorial_utils.py` adapter;
 the tutorial declares only which named segments may move,
 and one variant replays per simulation row. Phases come from the action's own
 `TrajectorySegment` ranges; only motion at or after the lift is retimed so the
@@ -164,8 +164,8 @@ genuinely different variants are discarded as duplicates; an enabled spatial
 factor at or below the tolerance now fails configuration decoding instead of
 silently keeping the nominal variant alone.
 
-The configured ten-scene CLI uses the same variant operators and owns its
-compiled-plan adaptation and replay provenance; see the
+The twelve-scene Atomic CLI uses the same variant operators through the
+shared Atomic plan adapter and owns its replay provenance; see the
 [Atomic host boundary](../atomic-actions/atomic-actions.md). It does not extend
 the Gym Task Program collection lifecycle.
 

@@ -637,7 +637,7 @@ def _compile_reference(
 
 def _antipodal_semantics(handle: AtomicObjectHandle) -> ObjectSemantics:
     """Return whole-object antipodal semantics for one configured object."""
-    from embodichain.lab.scripts._atomic_action.support import (
+    from .._atomic_fixtures import (
         create_antipodal_semantics,
     )
 
@@ -1274,7 +1274,7 @@ def _placement_pose_row(
     support_target_frame_pose: torch.Tensor | None = None,
 ) -> dict[str, torch.Tensor]:
     """Build one row of coordinated-placement grasps and targets."""
-    from embodichain.lab.scripts._atomic_action import placement_geometry
+    from . import _placement_geometry as placement_geometry
 
     device = placing_pose.device
     placing_grasp = placement_geometry.build_flat_object_grasp_pose(
@@ -1319,7 +1319,7 @@ def _placement_geometry(
     device: torch.device,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Load local meshes and bounds used by the tutorial pose builders."""
-    from embodichain.lab.scripts._atomic_action.scenario import (
+    from .._atomic_fixtures import (
         compute_local_bounds,
         get_local_vertices,
     )

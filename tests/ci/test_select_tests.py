@@ -120,6 +120,47 @@ def test_repository_manifest_maps_supported_scripts(
     assert expected_selector in plan.selectors
 
 
+@pytest.mark.parametrize(
+    "source_path",
+    [
+        "examples/sim/atomic_action/defaults.py",
+        "examples/sim/atomic_action/host.py",
+        "embodichain/cli/run_example.py",
+        "embodichain/cli/_example_runner.py",
+        "examples/sim/motion/planners/curobo_planner.py",
+    ],
+)
+def test_example_changes_keep_launch_package_and_physical_smoke_coverage(
+    source_path: str,
+) -> None:
+    root = Path(__file__).resolve().parents[2]
+    plan = build_plan(
+        root,
+        [ChangedPath(source_path)],
+        load_manifest(root / ".ci/test-impact.toml"),
+        map_data={"topics": []},
+    )
+
+    assert plan.mode == "partial"
+    assert {
+        "tests/cli/test_run_example.py",
+        "tests/test_example_package.py",
+        "tests/examples/atomic_action/test_run.py",
+        "tests/examples/atomic_action/test_host.py",
+    } <= set(plan.selectors)
+    smoke = "tests/examples/atomic_action/test_smoke.py"
+    assert smoke in plan.selectors
+    # Source-only changes keep the normal non-slow PR policy. An edited slow
+    # smoke must still run in the dedicated GPU lane, as in this repair.
+    updated_smoke = build_plan(
+        root,
+        [ChangedPath(source_path), ChangedPath(smoke)],
+        load_manifest(root / ".ci/test-impact.toml"),
+        map_data={"topics": []},
+    )
+    assert smoke in updated_smoke.slow_lanes["slow-gpu"]
+
+
 def test_repository_manifest_maps_ik_tutorial_to_its_behavior_contracts() -> None:
     root = Path(__file__).resolve().parents[2]
     manifest = load_manifest(root / ".ci/test-impact.toml")

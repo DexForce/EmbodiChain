@@ -47,6 +47,7 @@ EXPECTED_COMMANDS = {
     "preview-robot",
     "preview_lerobot_data",
     "run-task",
+    "run-example",
     "run-atomic-action",
     "scene-engine",
     "scene-randomization",

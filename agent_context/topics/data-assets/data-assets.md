@@ -58,6 +58,11 @@ when needed. Solver/planner checkpoint download helpers can have separate paths.
 ZIP bundles must include directory entries before nested files for Open3D
 extraction. Validate new bundles through `get_data_path()` with an empty cache.
 
+`UniversalRobots` selects the V4 archive with corrected UR3/UR3e material
+colors. Its versioned `UniversalRobotsV4` cache directory changes source paths
+so URDF assembly also refreshes previously copied mesh materials; public
+`UniversalRobots/...` asset references remain unchanged.
+
 Demo classes live in `assets/demo_assets.py` and are exported through the existing
 asset registry. `TabletopFourBases/scene_export` resolves the four-support rigid
 tabletop example from `demo/tabletop_four_bases.zip`. Its portable source contains

@@ -122,7 +122,7 @@ ROBOT_CONFIGS = {
     for name, class_path in _CONFIG_CLASSES.items()
 }
 
-_W1_VERSIONS = ("v021", "v022", "v025")
+_W1_VERSIONS = ("v021", "v022", "v025", "v030")
 _W1_HANDS = {
     "BRAINCO_HAND": ("BrainCo", 6, 6),
     "DH_PGC_GRIPPER": ("DH_PGC", 2, 1),
@@ -176,6 +176,9 @@ def _w1_variant_profile(
 
 _W1_VARIANTS: dict[str, dict[str, object]] = {}
 for _version in _W1_VERSIONS:
+    if _version == "v030":
+        _W1_VARIANTS[f"{_version}/bare"] = _w1_variant_profile(_version, None)
+        continue
     for _left, _right in product(_W1_HANDS, repeat=2):
         if (_left == "BRAINCO_HAND") != (_right == "BRAINCO_HAND"):
             continue

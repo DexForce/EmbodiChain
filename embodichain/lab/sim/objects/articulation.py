@@ -1913,11 +1913,13 @@ class Articulation(BatchEntity):
                     fields[name], local_env_ids, local_joint_ids, velocity=velocity
                 )
         if (
-            root_pose is not None
+            (root_pose is not None or qpos is not None)
             and self.device.type == "cpu"
             and not self._data.is_newton_backend
         ):
-            # Publish native CPU link transforms without advancing physics.
+            # Direct root/joint writes update native kinematics, but CPU link
+            # transforms are published by World.update. Do not advance physics
+            # or publish target-only control commands here.
             self._world.update(0.0)
 
     def set_qpos(

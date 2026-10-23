@@ -414,6 +414,97 @@ def test_w1_kine_params_accept_consistent_version_forms(version):
     assert params.version == DexforceW1Version.V025
 
 
+def test_w1_v030_standard_defaults_and_json_roundtrip(monkeypatch, tmp_path):
+    import json
+    from embodichain.lab.sim.motion.solvers import FEPSolverCfg
+
+    _mock_w1_asset_paths(monkeypatch, tmp_path)
+    cfg = DexforceW1Cfg.from_dict({"version": "v030"})
+    assert cfg.with_default_eef is False
+    assert set(cfg.urdf_cfg.components) == {
+        "chassis",
+        "torso",
+        "head",
+        "left_arm",
+        "right_arm",
+    }
+    assert len(set(j for names in cfg.control_parts.values() for j in names)) == 20
+    assert "left_eef" not in cfg.control_parts and "right_eef" not in cfg.control_parts
+    assert cfg.urdf_cfg.sensors == []
+    for side, solver in cfg.solver_cfg.items():
+        assert isinstance(solver, FEPSolverCfg)
+        assert solver.redundancy_search
+        assert solver.arm_angle_weight == 0.0
+        assert solver.user_qpos_limits is None
+        np.testing.assert_array_equal(solver.tcp, np.eye(4))
+    restored = DexforceW1Cfg.from_dict(json.loads(json.dumps(cfg.to_dict())))
+    assert restored.with_default_eef is False
+    assert restored.control_parts == cfg.control_parts
+    assert restored.urdf_cfg.component_prefix == cfg.urdf_cfg.component_prefix
+    for side in cfg.solver_cfg:
+        np.testing.assert_allclose(
+            restored.solver_cfg[side].reference_qpos,
+            cfg.solver_cfg[side].reference_qpos,
+        )
+
+
+def test_w1_v030_opt_in_hands_keep_independent_versions(monkeypatch, tmp_path):
+    _mock_w1_asset_paths(monkeypatch, tmp_path)
+    cfg = DexforceW1Cfg.from_dict({"version": "v030", "with_default_eef": True})
+    assert "left_hand" in cfg.urdf_cfg.components
+    assert "right_hand" in cfg.urdf_cfg.components
+    assert all(v == DexforceW1HandVersion.V021 for v in cfg.hand_versions.values())
+    assert "left_eef" in cfg.control_parts and "right_eef" in cfg.control_parts
+
+
+def test_w1_v030_custom_tool_tcp_roundtrip_preserves_fep(monkeypatch, tmp_path):
+    import json
+    from embodichain.lab.sim.motion.solvers import FEPSolverCfg
+
+    _mock_w1_asset_paths(monkeypatch, tmp_path)
+    tcp = np.array(
+        [
+            [0.0, -1.0, 0.0, 0.02],
+            [1.0, 0.0, 0.0, -0.03],
+            [0.0, 0.0, 1.0, 0.1],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
+    cfg = DexforceW1Cfg.from_dict(
+        {
+            "version": "v030",
+            "solver_cfg": {"left_arm": {"tcp": tcp.tolist()}},
+        }
+    )
+    restored = DexforceW1Cfg.from_dict(json.loads(json.dumps(cfg.to_dict())))
+    for instance in (cfg, restored):
+        solver = instance.solver_cfg["left_arm"]
+        assert isinstance(solver, FEPSolverCfg)
+        assert solver.redundancy_search
+        np.testing.assert_array_equal(solver.tcp, tcp)
+        np.testing.assert_allclose(
+            solver.reference_qpos, [0, 0, -np.pi / 2, 0, 0, -np.pi / 2, 0]
+        )
+
+
+def test_w1_v030_rejects_srs_geometry_and_uncalibrated_wrist_camera():
+    with pytest.raises(ValueError, match="no SRS geometry.*FEP"):
+        W1ArmKineParams(arm_side=DexforceW1ArmSide.LEFT, version=DexforceW1Version.V030)
+    with pytest.raises(ValueError, match="no wrist camera calibration"):
+        get_w1_version_spec("v030").wrist_camera_xpos(DexforceW1ArmSide.LEFT)
+
+
+def test_w1_v030_solver_specs_are_immutable_and_isolated(monkeypatch, tmp_path):
+    _mock_w1_asset_paths(monkeypatch, tmp_path)
+    spec = get_w1_version_spec("v030")
+    with pytest.raises(TypeError):
+        spec.arm_solver_configs[DexforceW1ArmSide.LEFT]["reference_qpos"] = ()
+    cfg = DexforceW1Cfg.from_dict({"version": "v030"})
+    cfg.solver_cfg["left_arm"].reference_qpos = [0.0] * 7
+    other = DexforceW1Cfg.from_dict({"version": "v030"})
+    assert other.solver_cfg["left_arm"].reference_qpos[2] == -np.pi / 2
+
+
 def test_w1_version_spec_mappings_are_immutable():
     spec = get_w1_version_spec("v025")
 

@@ -54,7 +54,7 @@ from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.utils import logger
 
-from embodichain.lab.scripts._atomic_action.placement_geometry import (
+from embodichain_benchmarks.motion_generation.scenarios._placement_geometry import (
     TABLE_TOP_Z,
     build_flat_object_grasp_pose,
     build_pan_handle_grasp_pose,

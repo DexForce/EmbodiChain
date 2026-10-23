@@ -24,7 +24,7 @@ from pathlib import Path
 
 from setuptools import Command, find_namespace_packages, setup
 
-__all__ = ["get_package_dir", "get_packages", "get_version"]
+__all__ = ["get_example_data_files", "get_package_dir", "get_packages", "get_version"]
 
 logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 logger = logging.getLogger()
@@ -36,6 +36,7 @@ TASKS_PROJECT_DIR = EXTENSIONS_DIR / "embodichain_tasks"
 TASKS_PACKAGE_PATTERNS = ["embodichain_tasks", "embodichain_tasks.*"]
 ROBOTS_PACKAGE_PATTERNS = ["embodichain_robots", "embodichain_robots.*"]
 BENCHMARKS_PACKAGE_PATTERNS = ["embodichain_benchmarks", "embodichain_benchmarks.*"]
+EXAMPLES_DIR = THIS_DIR / "examples"
 
 # Defer importing torch until it's actually needed (when building extensions).
 # This prevents `setup.py` from failing at import time in environments where
@@ -121,6 +122,30 @@ def get_package_dir() -> dict[str, str]:
     }
 
 
+def get_example_data_files() -> list[tuple[str, list[str]]]:
+    """Preserve the ordinary examples tree as installed distribution data.
+
+    Returns:
+        Destination directories and source files, without Python package discovery.
+    """
+    directories: dict[str, list[str]] = {}
+    for source in sorted(EXAMPLES_DIR.rglob("*")):
+        relative = source.relative_to(EXAMPLES_DIR)
+        if (
+            not source.is_file()
+            or any(
+                part.startswith(".") or part == "__pycache__" for part in relative.parts
+            )
+            or source.suffix in {".pyc", ".pyo"}
+        ):
+            continue
+        destination = Path("share/embodichain/examples") / relative.parent
+        directories.setdefault(destination.as_posix(), []).append(
+            source.relative_to(THIS_DIR).as_posix()
+        )
+    return sorted(directories.items())
+
+
 def get_version() -> str:
     """Read the complete package version from the repository version file."""
     with open(os.path.join(os.path.dirname(__file__), "VERSION")) as f:
@@ -154,7 +179,6 @@ def main():
             "embodichain": ["VERSION"],
             "embodichain_benchmarks.motion_generation": ["suites/*.yaml"],
             "embodichain.gen_sim.simready_pipeline.configs": ["*.json"],
-            "embodichain.lab.scripts._atomic_action": ["README.md"],
             "embodichain_tasks.configs": [
                 "**/*.json",
                 "**/*.yaml",
@@ -162,6 +186,7 @@ def main():
                 "**/README.md",
             ],
         },
+        data_files=get_example_data_files(),
         cmdclass=cmdclass,
         include_package_data=False,
     )

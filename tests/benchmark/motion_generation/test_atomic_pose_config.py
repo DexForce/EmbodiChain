@@ -1283,7 +1283,7 @@ def test_resolve_articulation_grasp_broadcasts_one_local_candidate_over_batch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Slide samples PGI once and screens the translated batch together."""
-    from scripts.tutorials.atomic_action import tutorial_utils
+    from embodichain_benchmarks.motion_generation import _atomic_fixtures
 
     batch_size = 4
     target_pose = torch.eye(4).repeat(batch_size, 1, 1)
@@ -1302,7 +1302,7 @@ def test_resolve_articulation_grasp_broadcasts_one_local_candidate_over_batch(
         (candidate.unsqueeze(0), torch.zeros(1))
     ]
     monkeypatch.setattr(
-        tutorial_utils,
+        _atomic_fixtures,
         "create_parallel_jaw_grasp_pose_generator",
         lambda **_: generator,
     )

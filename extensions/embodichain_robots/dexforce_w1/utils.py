@@ -55,11 +55,14 @@ class ChassisManager:
         )
 
     def get_config(self, version=DexforceW1Version.V021):
+        root, end = get_w1_version_spec(version).component_frames.get(
+            DexforceW1Type.CHASSIS, ("base_link", "base_link")
+        )
         return {
             "urdf_path": self.get_urdf(version),
             "joint_names": [],
-            "end_link_name": "base_link",
-            "root_link_name": "base_link",
+            "end_link_name": end,
+            "root_link_name": root,
         }
 
 
@@ -73,11 +76,14 @@ class TorsoManager:
         )
 
     def get_config(self, version=DexforceW1Version.V021):
+        root, end = get_w1_version_spec(version).component_frames.get(
+            DexforceW1Type.TORSO, ("base_link", "waist")
+        )
         return {
             "urdf_path": self.get_urdf(version),
             "joint_names": self.joint_names,
-            "end_link_name": "waist",
-            "root_link_name": "base_link",
+            "end_link_name": end,
+            "root_link_name": root,
         }
 
 
@@ -91,11 +97,14 @@ class HeadManager:
         )
 
     def get_config(self, version=DexforceW1Version.V021):
+        root, end = get_w1_version_spec(version).component_frames.get(
+            DexforceW1Type.HEAD, ("neck1", "neck2")
+        )
         return {
             "urdf_path": self.get_urdf(version),
             "joint_names": self.joint_names,
-            "end_link_name": "neck2",
-            "root_link_name": "neck1",
+            "end_link_name": end,
+            "root_link_name": root,
         }
 
 
@@ -188,7 +197,7 @@ def build_dexforce_w1_assembly_urdf_cfg(
     hand_types: dict[DexforceW1ArmSide, DexforceW1HandBrand] | None = None,
     hand_versions: dict[DexforceW1ArmSide, DexforceW1HandVersion] | None = None,
     hand_attach_xposes: dict[DexforceW1ArmSide, np.ndarray] | None = None,
-    include_hand: bool = True,
+    include_hand: bool | None = None,
 ) -> URDFCfg:
     """
     Assemble DexforceW1 robot urdf configuration.
@@ -200,13 +209,17 @@ def build_dexforce_w1_assembly_urdf_cfg(
         hand_versions: Hand asset version for each side. Defaults to hand V021,
             independently of the W1 robot version.
         hand_attach_xposes: Dict specifying hand attachment pose for each arm side. Default None, which uses the default attachment pose.
-        include_hand: Whether to include hand. Default True.
+        include_hand: Whether to include a hand. Defaults to the body revision:
+            V030 is bare; earlier releases include the configured hands.
 
     Returns:
         URDFCfg: Assembled URDF configuration.
     """
 
     version = DexforceW1Version.parse(version)
+    spec = get_w1_version_spec(version)
+    if include_hand is None:
+        include_hand = spec.default_with_eef
     hand_types, hand_versions, hand_attach_xposes = normalize_w1_hand_mappings(
         hand_types=hand_types,
         hand_versions=hand_versions,
@@ -272,6 +285,8 @@ def build_dexforce_w1_assembly_urdf_cfg(
         )
     for arm_side in DexforceW1ArmSide:
         camera_spec = get_w1_version_spec(version)
+        if camera_spec.wrist_camera_xyz is None:
+            continue
         attach_xpos = camera_spec.wrist_camera_xpos(arm_side)
 
         joint_xml = f"""
@@ -353,6 +368,7 @@ def build_dexforce_w1_assembly_urdf_cfg(
         sensors=sensors,
         fname=fname,
         name_case={"joint": "upper", "link": "lower"},
+        component_prefix=list(spec.component_prefix) or None,
     )
 
 

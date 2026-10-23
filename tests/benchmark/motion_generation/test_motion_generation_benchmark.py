@@ -1466,7 +1466,7 @@ def test_free_space_overrides_reach_each_configured_track():
 
 
 def test_atomic_skill_antipodal_grasp_uses_standalone_generator(monkeypatch):
-    from scripts.tutorials.atomic_action import tutorial_utils
+    from embodichain_benchmarks.motion_generation import _atomic_fixtures
 
     vertices = torch.tensor(
         [[-0.025, -0.025, -0.025], [0.025, 0.025, 0.025]],
@@ -1487,7 +1487,7 @@ def test_atomic_skill_antipodal_grasp_uses_standalone_generator(monkeypatch):
     ]
     generator_factory = Mock(return_value=generator)
     monkeypatch.setattr(
-        tutorial_utils,
+        _atomic_fixtures,
         "create_parallel_jaw_grasp_pose_generator",
         generator_factory,
     )
