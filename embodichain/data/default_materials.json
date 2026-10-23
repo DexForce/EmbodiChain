@@ -363,7 +363,7 @@
   ],
   "bundle": {
     "revision": "ec9f748242c50b85",
-    "source_repository": "https://github.com/DexForce/dexverse",
+    "source_repository": "http://192.168.3.16/Engine/dexverse.git",
     "source_commit": "c31dccd3d4a8ef98367e1a95c92c842e0a773596",
     "source_path": "modules/dexsim/resources/Material",
     "upstream_url": "http://192.168.3.120/CoreEngine/DexSim/resources/offlinert_materials.zip",
