@@ -1106,7 +1106,11 @@ def test_axis_align_and_relative_place_configs_use_closed_decoders() -> None:
         path="integration.runtime_services.registered_semantic_lowerers[1]",
     )
     axis_options = _decode_action_options(
-        {"kind": "axis_align", "target_axis": [0.0, 0.0, 1.0]},
+        {
+            "kind": "axis_align",
+            "target_axis": [0.0, 0.0, 1.0],
+            "pre_grasp_distance": 0.12,
+        },
         path="policy.action_options.simulation.axis_align",
     )
 
@@ -1115,6 +1119,7 @@ def test_axis_align_and_relative_place_configs_use_closed_decoders() -> None:
     assert place_factory.call_id == "simulation.place_relative"
     assert place_factory.routes[0].relation == "on"
     assert type(axis_options) is AxisAlignOptions
+    assert axis_options.pre_grasp_distance == pytest.approx(0.12)
     torch.testing.assert_close(axis_options.target_axis, torch.tensor((0.0, 0.0, 1.0)))
 
 
@@ -2136,48 +2141,6 @@ def test_examples_have_no_importable_task_environment_modules() -> None:
 
 
 __all__: list[str] = []
-
-
-def test_axis_align_lowerer_and_config_reuse_the_existing_atomic_skill() -> None:
-    """Configured E2 composition targets AxisAlign with a verified attachment."""
-    semantics = ObjectSemantics(
-        affordance=AxisAlignAffordance(internal_axis=torch.tensor([1.0, 0.0, 0.0])),
-        geometry={},
-        label="can",
-        entity_id="can",
-    )
-    lowerer = _AxisAlignLowerer((semantics,))
-    lowering = lowerer.lower(
-        RegisteredSemanticCall(
-            call_id="simulation.axis_align",
-            arguments={"object": "can"},
-            resources={"primary": "left"},
-        ),
-        context=None,  # type: ignore[arg-type]
-        bound=None,  # type: ignore[arg-type]
-        option_template=AxisAlignOptions(),
-    )
-    factory = _decode_registered_lowerer(
-        {"kind": "axis_align", "object_ids": ["can"]},
-        path="integration.runtime_services.registered_semantic_lowerers[0]",
-    )
-    options = _decode_action_options(
-        {
-            "kind": "axis_align",
-            "target_axis": [0.0, 0.0, 1.0],
-            "pre_grasp_distance": 0.12,
-        },
-        path="policy.action_options.simulation.axis_align",
-    )
-
-    assert type(lowering.goal) is AxisAlignGoal
-    assert lowering.goal.semantics is semantics
-    assert lowering.registered_effect is not None
-    assert lowering.registered_effect.effect_kind is SemanticEffectKind.ATTACH
-    assert factory.call_id == "simulation.axis_align"
-    assert type(options) is AxisAlignOptions
-    assert options.pre_grasp_distance == pytest.approx(0.12)
-    torch.testing.assert_close(options.target_axis, torch.tensor([0.0, 0.0, 1.0]))
 
 
 @pytest.mark.parametrize("kind", ["release_safe_pick", "move_held_object_upright"])

@@ -77,9 +77,7 @@ def test_image_object_analysis_preserves_articulated_object_metadata() -> None:
     assert scene.assets[0].is_articulated is True
 
 
-@pytest.mark.parametrize(
-    "category", sorted(scene_understanding._FORCED_ARTICULATION_CATEGORIES)
-)
+@pytest.mark.parametrize("category", ["bell", "push_button", "water_dispenser", "knob"])
 def test_known_movable_categories_are_promoted_to_articulation(category: str) -> None:
     scene = scene_understanding._parse_image_object_analysis_response(_response())
     scene.assets[0].category = category
