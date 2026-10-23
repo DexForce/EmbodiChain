@@ -596,7 +596,8 @@ def test_backend_property_groups_track_dexsim_spawn_descriptors() -> None:
         "is_site",
         # Asset-loading adapter option, not a native ShapeConfig parameter.
         "use_native_mesh_loader",
-        # Descriptor-only mesh-to-heightfield import resolution.
+        # Descriptor-only mesh-to-heightfield conversion options.
+        "convert_to_heightfield",
         "heightfield_resolution",
     }
     assert (
