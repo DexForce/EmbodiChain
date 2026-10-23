@@ -58,19 +58,20 @@ to Git and are not portable public artifacts. A rerun must create a fresh output
 directory and record its own source, package, hardware and native-library
 versions. Compare within that frozen recipe rather than mixing historical runs.
 
-## Scope retained in PR #828
+## Review layers
 
-Keep the ODS flow controller, engine health/status and copy fixes with their
-production tests; the simple BC caller migration; the lazy shared ResNet10
-encoder and tests; and the runnable data-stream/visual-training examples with
-their audit/report tools. These form active dependency chains. Keep API and
-operational documentation beside the public contracts.
+[PR #850](https://github.com/DexForce/EmbodiChain/pull/850) owns the standalone
+ODS foundation: the flow controller, engine health/status and copy/lifecycle
+fixes, their production tests and benchmark, the simple BC caller migration,
+and public operational/API documentation. It targets `main` independently.
 
-The largest removable group is the 1,040 generated evidence files: 174,638,781
-logical bytes and approximately 4.59 million added text lines. Their backup
-is linked above. If a second review split is wanted, separate the core ODS
-flow/copy changes and simple BC migration from the visual encoder and showcase
-as dependent changes. The shared recorder/acquisition/report helpers serve
-both delivery diagnostics and visual training; deleting one entry point alone
-does not remove that shared implementation. Future VLA/WAM adapters and richer
-task distributions require their own implementation changes.
+[PR #828](https://github.com/DexForce/EmbodiChain/pull/828) builds on that
+foundation and owns the lazy shared ResNet10 encoder plus the runnable visual
+training/data-stream example, qualification, recording, auditing and reporting.
+The delivery diagnostic also supplies helpers used by visual training; moving
+individual entry points requires extracting those shared helpers first.
+
+The 1,040 generated evidence files were removed from the code diff: 174,638,781
+logical bytes and approximately 4.59 million added text lines. Their immutable
+backup is linked above. Future VLA/WAM adapters and richer task distributions
+require their own implementation changes.
