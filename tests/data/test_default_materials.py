@@ -38,11 +38,11 @@ def test_offline_catalog_is_independent_and_includes_geometry_guidance(monkeypat
 
     monkeypatch.setattr(DefaultMaterials, "__init__", fail)
     names = list_default_materials()
-    assert len(names) == len(set(names)) == 18
+    assert len(names) == len(set(names)) == 24
     assert "SoapBubbleInterior" not in names
     assert (
         sum(get_default_material_info(name)["renderers"] == ["rt"] for name in names)
-        == 8
+        == 10
     )
     glass = get_default_material_info("GlassClear")
     assert glass["renderers"] == ["rt"]
@@ -51,6 +51,21 @@ def test_offline_catalog_is_independent_and_includes_geometry_guidance(monkeypat
     assert get_default_material_info("GlassClear")["renderers"] == ["rt"]
     assert get_default_material_info("SoapBubble")["geometry_notes"]
     assert get_default_material_info("SoapBubbleInterior")["auxiliary"]
+    assert (
+        sum(not get_default_material_info(name)["requires_download"] for name in names)
+        == 6
+    )
+    builtin = get_default_material_info("PlasticMatteBlue")
+    assert builtin["source"] == "builtin"
+    assert builtin["texture_resolution"] is None
+    assert builtin["nominal_size_m"] is None
+    assert builtin["revision"] == "builtin-v1"
+    assert builtin["parameters"]["base_color"] == [0.05, 0.22, 0.6, 1]
+    builtin["parameters"]["base_color"][0] = 1.0
+    assert (
+        get_default_material_info("PlasticMatteBlue")["parameters"]["base_color"][0]
+        == 0.05
+    )
     assert ("DefaultMaterials", DefaultMaterials) in get_registry()["materials"]
     with pytest.raises(ValueError, match="Unknown default material"):
         get_default_material_info("glassclear")
@@ -113,6 +128,8 @@ def test_verified_archive_repairs_missing_dependency_in_custom_cache(
     assert Path(second.extract_dir) == extract
     assert texture.read_bytes() == b"original pixels"
     assert (extract / "Material/SoapBubbleInterior/material.json").read_bytes() == b"{}"
+    with pytest.raises(ValueError, match="built-in parameter preset"):
+        second.get_material_path("PlasticMatteBlue")
 
 
 def test_data_cli_reports_the_versioned_cache_as_ready(tmp_path, monkeypatch, capsys):

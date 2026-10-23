@@ -133,12 +133,21 @@ class DefaultMaterials(EmbodiChainDataset):
         """Get an authored preset directory in this verified resource revision.
 
         Args:
-            name: Public preset name or ``SoapBubbleInterior``.
+            name: Downloadable resource preset or ``SoapBubbleInterior``.
 
         Returns:
             Absolute path suitable for DexSim's native material loader.
+
+        Raises:
+            ValueError: The name is unknown or denotes a built-in parameter
+                preset, which has no directory in this archive.
         """
-        get_default_material_info(name)
+        info = get_default_material_info(name)
+        if not info["requires_download"]:
+            raise ValueError(
+                f"{name!r} is a built-in parameter preset with no resource directory; "
+                "use VisualMaterialCfg.from_preset()."
+            )
         return str(Path(self.extract_dir) / "Material" / name)
 
 

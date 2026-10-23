@@ -8,6 +8,7 @@ quality, DLSS, and related performance trade-offs.
 
 Start with :doc:`configuration` for common ``RenderCfg`` options. Use
 :doc:`dlss` for NVIDIA DLSS behavior and temporal-rendering settings.
+Use :doc:`materials` for default material presets, parameters and OfflineRT galleries.
 
 See also
 --------
@@ -17,3 +18,4 @@ See also
 
     configuration.md
     dlss.md
+    materials.md

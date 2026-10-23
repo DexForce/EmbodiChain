@@ -37,7 +37,7 @@ def _catalog() -> dict[str, Any]:
 
 
 def list_default_materials() -> list[str]:
-    """List the 18 public presets without downloading assets or creating a World.
+    """List the 24 public presets without downloading assets or creating a World.
 
     Returns:
         Preset names in catalog order. Auxiliary resources are omitted.
@@ -52,8 +52,10 @@ def get_default_material_info(name: str) -> dict[str, Any]:
         name: Case-sensitive catalog name, including ``SoapBubbleInterior``.
 
     Returns:
-        Description, supported renderers, dependencies, suggested texture size,
-        geometry guidance and source revision. Suggested sizes do not change UVs.
+        Description, source, download requirement, supported renderers,
+        dependencies, geometry guidance and source revision. Built-in presets
+        also include their native parameter defaults and have no texture size.
+        Suggested resource sizes do not change UVs.
 
     Raises:
         ValueError: The name is not in the built-in catalog.
@@ -61,8 +63,14 @@ def get_default_material_info(name: str) -> dict[str, Any]:
     for item in _catalog()["materials"]:
         if item["name"] == name:
             result = copy.deepcopy(item)
-            result["texture_resolution"] = list(_catalog()["texture_resolution"])
-            result["revision"] = _catalog()["bundle"]["revision"]
+            result.setdefault("source", "resource")
+            result["requires_download"] = result["source"] != "builtin"
+            result["texture_resolution"] = (
+                list(_catalog()["texture_resolution"])
+                if result["requires_download"]
+                else None
+            )
+            result.setdefault("revision", _catalog()["bundle"]["revision"])
             return result
     raise ValueError(
         f"Unknown default material {name!r}. Available presets: {', '.join(list_default_materials())}."

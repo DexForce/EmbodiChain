@@ -18,7 +18,7 @@
 
 Run ``python examples/sim/rendering/default_materials.py --list`` for offline
 metadata. Use ``--all --compare-native --renderer rt`` for optical qualification,
-and repeat with ``hybrid`` / ``fast-rt`` for the ten basic materials. Each
+and repeat with ``hybrid`` / ``fast-rt`` for the compatible materials. Each
 renderer must run in a separate process. Scene geometry, lighting and cameras
 belong to this example; the material factory only loads material definitions.
 """
@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from time import perf_counter
 from typing import Any
 
@@ -37,9 +38,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--all", action="store_true")
+    parser.add_argument(
+        "--source",
+        choices=("all", "builtin", "resource"),
+        default="all",
+        help="Filter --all by built-in parameters or downloadable resources.",
+    )
     parser.add_argument("--material", default="GlassClear")
     parser.add_argument("--renderer", choices=("rt", "hybrid", "fast-rt"), default="rt")
     parser.add_argument("--compare-native", action="store_true")
+    parser.add_argument(
+        "--gallery",
+        action="store_true",
+        help="Export WebP previews and grouped galleries.",
+    )
     parser.add_argument(
         "--model",
         type=Path,
@@ -52,6 +64,84 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--frames", type=int, default=4)
     parser.add_argument("--spp", type=int, default=16)
     return parser
+
+
+def write_galleries(output: Path, rows: list[dict[str, Any]], renderer: str) -> None:
+    """Export captured images without changing their rendering settings.
+
+    Args:
+        output: Directory containing the preset PNG captures.
+        rows: Material records from the completed rendering run.
+        renderer: Renderer name shown in gallery captions.
+    """
+    import math
+    from importlib.metadata import version
+    import matplotlib
+    from PIL import Image
+    from embodichain.data import get_default_material_info
+
+    matplotlib.use("Agg")
+    from matplotlib import pyplot as plt
+
+    for row in rows:
+        with Image.open(output / f"{row['name']}_preset.png") as capture:
+            capture.save(output / f"{row['name']}.webp", quality=92)
+    groups = {
+        "default-materials": (rows, 6),
+        "builtin-materials": ([row for row in rows if row["source"] == "builtin"], 3),
+        "surface-materials": (
+            [
+                row
+                for row in rows
+                if row["source"] == "resource"
+                and len(get_default_material_info(row["name"])["renderers"]) > 1
+            ],
+            5,
+        ),
+        "advanced-materials": (
+            [
+                row
+                for row in rows
+                if row["source"] == "resource"
+                and get_default_material_info(row["name"])["renderers"] == ["rt"]
+            ],
+            4,
+        ),
+    }
+    for filename, (records, columns) in groups.items():
+        if not records:
+            continue
+        columns = min(columns, len(records))
+        count_rows = math.ceil(len(records) / columns)
+        fig, axes = plt.subplots(
+            count_rows,
+            columns,
+            figsize=(3.2 * columns, 3.5 * count_rows),
+            squeeze=False,
+            facecolor="#171b20",
+        )
+        for axis in axes.flat:
+            axis.axis("off")
+        for axis, row in zip(axes.flat, records):
+            with Image.open(output / f"{row['name']}_preset.png") as capture:
+                axis.imshow(capture.copy())
+            axis.set_title(row["name"], fontsize=11, color="white", pad=6)
+        renderer_label = {"rt": "OfflineRT", "hybrid": "Hybrid", "fast-rt": "FastRT"}[
+            renderer
+        ]
+        fig.suptitle(
+            f"Default materials · DexSim {version('dexsim-engine')} · {renderer_label}",
+            color="white",
+            fontsize=15,
+        )
+        fig.tight_layout(rect=(0, 0, 1, 0.95))
+        fig.savefig(
+            output / f"{filename}.webp",
+            dpi=160,
+            facecolor=fig.get_facecolor(),
+            pil_kwargs={"quality": 90},
+        )
+        plt.close(fig)
 
 
 def main(args: argparse.Namespace) -> None:
@@ -69,6 +159,10 @@ def main(args: argparse.Namespace) -> None:
             name
             for name in list_default_materials()
             if args.renderer in get_default_material_info(name)["renderers"]
+            and (
+                args.source == "all"
+                or get_default_material_info(name)["source"] == args.source
+            )
         ]
         if args.all
         else [args.material]
@@ -107,10 +201,11 @@ def main(args: argparse.Namespace) -> None:
     )
     world, env = sim.get_world(), sim.get_env()
     camera = sample = inner = native = material = None
+    reference_files = None
     rows: list[dict[str, Any]] = []
     try:
         sim.enable_physics(False)
-        sim.set_emission_light([0.85, 0.9, 1.0], 12.0)
+        sim.set_emission_light([0.85, 0.9, 1.0], 24.0)
         # Independent, fixed scene: colored cards reveal transmission, broad
         # rectangular lights reveal roughness and normal-map direction.
         for index, (x, color) in enumerate(
@@ -127,9 +222,17 @@ def main(args: argparse.Namespace) -> None:
                 VisualMaterialCfg(uid=f"card_{index}", base_color=color, roughness=0.6)
             )
             card.set_material(card_material.inst.mat)
+            if index == 1:
+                yy, xx = np.indices((256, 256))
+                checks = ((xx // 32 + yy // 32) % 2)[..., None]
+                pixels = np.where(checks, [225, 225, 225], [45, 45, 45]).astype(
+                    np.uint8
+                )
+                texture = env.create_color_texture(pixels, has_alpha=False)
+                card_material.inst.set_base_color_texture(texture_obj=texture)
         for name, location, direction, color, power in (
-            ("key", (-2, -2, 3), (2, 2, -2), (1, 0.85, 0.7), 60),
-            ("fill", (2, 0, 3), (-2, 0, -2), (0.6, 0.8, 1), 40),
+            ("key", (-2, -2, 3), (2, 2, -2), (1, 0.85, 0.7), 90),
+            ("fill", (2, 0, 3), (-2, 0, -2), (0.6, 0.8, 1), 60),
         ):
             light = env.create_light(name, render.LightType.RECT)
             light.set_location(*location)
@@ -151,8 +254,14 @@ def main(args: argparse.Namespace) -> None:
         )
         camera.look_at([1.5, -3.8, 1.8], [0, 0, 0.8], [0, 0, 1])
         camera.open_camera()
-        source = DefaultMaterials() if args.compare_native else None
+        source = None
+        reference_files = (
+            TemporaryDirectory(prefix="ec-material-reference-")
+            if args.compare_native
+            else None
+        )
         for name in names:
+            info = get_default_material_info(name)
             started = perf_counter()
             material = sim.create_visual_material(
                 VisualMaterialCfg.from_preset(name, uid=f"preset_{name}")
@@ -217,10 +326,14 @@ def main(args: argparse.Namespace) -> None:
                     world.update(0.0)
                     camera.render(render.ViewFlags.COLOR, render.ViewFlags.COLOR, False)
                 rgb = np.ascontiguousarray(camera.get_rgb_map()[..., :3])
-                cv2.imwrite(
+                saved = cv2.imwrite(
                     str(args.output / f"{name}_{label}.png"),
                     cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR),
                 )
+                if not saved:
+                    raise RuntimeError(
+                        f"Cannot save {name}_{label}.png to {args.output}."
+                    )
                 return rgb
 
             inner_material = (
@@ -239,12 +352,33 @@ def main(args: argparse.Namespace) -> None:
                 "load_ms": load_ms,
                 "ior": material.inst.ior,
                 "roughness": material.inst.roughness,
+                "metallic": material.inst.mat.get_metallic(),
+                "transmission": material.inst.mat.get_transmission(),
+                "base_color": material.inst.base_color,
                 "native_match": None,
+                "source": info["source"],
             }
-            if source:
-                native = env.load_material(
-                    source.get_material_path(name), f"reference_{name}"
-                )
+            if args.compare_native:
+                if info["source"] == "builtin":
+                    reference_path = Path(reference_files.name) / name
+                    reference_path.mkdir()
+                    # Direct native baseline uses the authored definition,
+                    # without the runtime resolver or Python default setters.
+                    (reference_path / "material.json").write_text(
+                        json.dumps(
+                            {
+                                "schema_version": 1,
+                                "parameters": info["parameters"],
+                                "textures": {},
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+                else:
+                    if source is None:
+                        source = DefaultMaterials()
+                    reference_path = Path(source.get_material_path(name))
+                native = env.load_material(str(reference_path), f"reference_{name}")
                 native_inner = (
                     env.load_material(
                         source.get_material_path("SoapBubbleInterior"),
@@ -293,6 +427,7 @@ def main(args: argparse.Namespace) -> None:
                     "get_roughness",
                     "get_metallic",
                     "get_transmission",
+                    "get_base_color",
                 ):
                     actual, expected = (
                         getattr(material.inst.mat, getter)(),
@@ -301,7 +436,7 @@ def main(args: argparse.Namespace) -> None:
                     if expected is None or actual is None:
                         assert expected is actual, (name, getter, actual, expected)
                     else:
-                        assert np.isclose(actual, expected, atol=1e-5), (
+                        assert np.allclose(actual, expected, atol=1e-5), (
                             name,
                             getter,
                             actual,
@@ -349,7 +484,11 @@ def main(args: argparse.Namespace) -> None:
             camera.close_camera()
         sim.destroy(exit_process=False)
         del sample, inner, native, material, camera
+        if reference_files is not None:
+            reference_files.cleanup()
         SimulationManager.flush_cleanup_queue()
+    if args.gallery:
+        write_galleries(args.output, rows, args.renderer)
 
 
 if __name__ == "__main__":

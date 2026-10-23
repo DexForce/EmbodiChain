@@ -20,6 +20,12 @@ loaded child on `RenderDesc.material`, including across rebuilds. NoRender keeps
 resource definitions without downloading or creating native materials. Render-only
 facades stay declared and are skipped by runtime binding/reset in that mode.
 
+Built-in parameter presets resolve from wheel metadata without constructing the
+downloadable resource dataset. Both sources use complete manifests and the same
+override, identity and reset path. Human-facing previews and parameter tables
+live in the [material guide](../../../docs/source/overview/sim/sim_manager/rendering/materials.md);
+keep renderer capabilities in the catalog.
+
 Resource templates remain immutable. Each public UID and instance receives a
 separate child; canonical revision/preset/overrides select shared templates.
 Stage parameter variations before binding and keep texture paths in the shared

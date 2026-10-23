@@ -313,7 +313,16 @@ class _MaterialResources:
         self._instances: dict[str, tuple[Any, Any]] = {}
 
     def _manifest(self, desc: _AssetMaterialDesc) -> dict[str, Any]:
-        if desc.preset:
+        info = get_default_material_info(desc.preset) if desc.preset else None
+        if info is not None and info["source"] == "builtin":
+            directory = Path.cwd()
+            pack_root = None
+            manifest = {
+                "schema_version": 1,
+                "parameters": info["parameters"],
+                "textures": {},
+            }
+        elif desc.preset:
             if self._dataset is None:
                 from embodichain.data.assets.materials import DefaultMaterials
 

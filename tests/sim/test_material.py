@@ -584,3 +584,50 @@ def test_common_parameter_aliases_canonicalize_before_replace_restores_inheritan
         VisualMaterialCfg.from_preset("GlassClear", parameters={"thin_walled": False}),
         "glass",
     )
+
+
+def test_builtin_presets_resolve_without_resource_download_and_keep_overrides(
+    monkeypatch,
+):
+    import json
+    from pathlib import Path
+    from embodichain.data import get_default_material_info
+    from embodichain.lab.sim._material_presets import _MaterialResources
+    from embodichain.lab.sim.material import _material_desc_from_cfg
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Built-in presets must not construct DefaultMaterials")
+
+    monkeypatch.setattr("embodichain.data.assets.materials.DefaultMaterials", forbidden)
+    world = MagicMock()
+    world.get_env.return_value.load_material.side_effect = (
+        lambda *args: _native_template()
+    )
+    resources = _MaterialResources(world, "rt")
+    cfg = VisualMaterialCfg.from_preset("PlasticMatteBlue", roughness=0.0)
+    try:
+        resources.resolve(_material_desc_from_cfg(cfg, "blue"))
+        path = (
+            Path(world.get_env.return_value.load_material.call_args.args[0])
+            / "material.json"
+        )
+        manifest = json.loads(path.read_text())
+        assert manifest["parameters"]["base_color"] == [0.05, 0.22, 0.6, 1]
+        assert manifest["parameters"]["roughness"] == 0.0
+        assert manifest["parameters"]["transmission"] == 0.0
+        assert manifest["textures"] == {}
+        assert (
+            get_default_material_info("PlasticMatteBlue")["parameters"]["roughness"]
+            == 0.65
+        )
+        resources.resolve(
+            _material_desc_from_cfg(cfg.replace(roughness=None), "inherited")
+        )
+        path = (
+            Path(world.get_env.return_value.load_material.call_args.args[0])
+            / "material.json"
+        )
+        assert json.loads(path.read_text())["parameters"]["roughness"] == 0.65
+        assert resources._dataset is None
+    finally:
+        resources.close()

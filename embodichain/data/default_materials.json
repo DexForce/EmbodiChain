@@ -359,6 +359,214 @@
       "auxiliary": true,
       "geometry_notes": "Bind to a separately authored inward-facing inner shell.",
       "auxiliary_resources": []
+    },
+    {
+      "name": "PlasticMatteBlue",
+      "category": "polymer",
+      "description": "Matte blue plastic",
+      "source": "builtin",
+      "revision": "builtin-v1",
+      "parameters": {
+        "base_color": [
+          0.05,
+          0.22,
+          0.6,
+          1
+        ],
+        "metallic": 0.0,
+        "roughness": 0.65,
+        "ior": 1.5,
+        "transmission": 0.0,
+        "emissive": [
+          0,
+          0,
+          0
+        ],
+        "emission_intensity": 1.0
+      },
+      "renderers": [
+        "hybrid",
+        "fast-rt",
+        "rt"
+      ],
+      "nominal_size_m": null,
+      "dependencies": [],
+      "auxiliary": false,
+      "auxiliary_resources": [],
+      "geometry_notes": ""
+    },
+    {
+      "name": "PlasticGlossyRed",
+      "category": "polymer",
+      "description": "Glossy red plastic",
+      "source": "builtin",
+      "revision": "builtin-v1",
+      "parameters": {
+        "base_color": [
+          0.55,
+          0.025,
+          0.025,
+          1
+        ],
+        "metallic": 0.0,
+        "roughness": 0.08,
+        "ior": 1.5,
+        "transmission": 0.0,
+        "emissive": [
+          0,
+          0,
+          0
+        ],
+        "emission_intensity": 1.0
+      },
+      "renderers": [
+        "hybrid",
+        "fast-rt",
+        "rt"
+      ],
+      "nominal_size_m": null,
+      "dependencies": [],
+      "auxiliary": false,
+      "auxiliary_resources": [],
+      "geometry_notes": ""
+    },
+    {
+      "name": "GoldMetal",
+      "category": "metal",
+      "description": "Gold-colored metal",
+      "source": "builtin",
+      "revision": "builtin-v1",
+      "parameters": {
+        "base_color": [
+          0.95,
+          0.76,
+          0.32,
+          1
+        ],
+        "metallic": 1.0,
+        "roughness": 0.22,
+        "ior": 1.5,
+        "transmission": 0.0,
+        "emissive": [
+          0,
+          0,
+          0
+        ],
+        "emission_intensity": 1.0
+      },
+      "renderers": [
+        "hybrid",
+        "fast-rt",
+        "rt"
+      ],
+      "nominal_size_m": null,
+      "dependencies": [],
+      "auxiliary": false,
+      "auxiliary_resources": [],
+      "geometry_notes": ""
+    },
+    {
+      "name": "MirrorMetal",
+      "category": "metal",
+      "description": "Smooth silver-colored metallic mirror",
+      "source": "builtin",
+      "revision": "builtin-v1",
+      "parameters": {
+        "base_color": [
+          0.95,
+          0.95,
+          0.95,
+          1
+        ],
+        "metallic": 1.0,
+        "roughness": 0,
+        "ior": 1.5,
+        "transmission": 0.0,
+        "emissive": [
+          0,
+          0,
+          0
+        ],
+        "emission_intensity": 1.0
+      },
+      "renderers": [
+        "hybrid",
+        "fast-rt",
+        "rt"
+      ],
+      "nominal_size_m": null,
+      "dependencies": [],
+      "auxiliary": false,
+      "auxiliary_resources": [],
+      "geometry_notes": ""
+    },
+    {
+      "name": "GlassClearSurface",
+      "category": "glass",
+      "description": "Clear glass with surface transmission",
+      "source": "builtin",
+      "revision": "builtin-v1",
+      "parameters": {
+        "base_color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "metallic": 0.0,
+        "roughness": 0,
+        "ior": 1.5,
+        "transmission": 1.0,
+        "emissive": [
+          0,
+          0,
+          0
+        ],
+        "emission_intensity": 1.0,
+        "thin_walled": true
+      },
+      "renderers": [
+        "rt"
+      ],
+      "nominal_size_m": null,
+      "dependencies": [],
+      "auxiliary": false,
+      "auxiliary_resources": [],
+      "geometry_notes": "Surface-only transmission; no volume absorption is configured."
+    },
+    {
+      "name": "GlassFrostedSurface",
+      "category": "glass",
+      "description": "Frosted glass with rough surface transmission",
+      "source": "builtin",
+      "revision": "builtin-v1",
+      "parameters": {
+        "base_color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "metallic": 0.0,
+        "roughness": 0.28,
+        "ior": 1.5,
+        "transmission": 1.0,
+        "emissive": [
+          0,
+          0,
+          0
+        ],
+        "emission_intensity": 1.0,
+        "thin_walled": true
+      },
+      "renderers": [
+        "rt"
+      ],
+      "nominal_size_m": null,
+      "dependencies": [],
+      "auxiliary": false,
+      "auxiliary_resources": [],
+      "geometry_notes": "Surface-only transmission; no volume absorption is configured."
     }
   ],
   "bundle": {

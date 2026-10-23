@@ -80,6 +80,12 @@ revision-specific cache prefix and the shared dataset lock, verifies archive
 SHA256 and member digests, and repairs extraction from the verified archive.
 Its data CLI registration follows the existing materials category.
 
+The same catalog includes six built-in parameter presets with their own revision,
+native parameters and no texture size. Metadata distinguishes `source` and
+`requires_download`; only resource entries belong to the `DefaultMaterials`
+archive. The runtime resolves built-ins directly from wheel metadata before any
+dataset construction. Keep their definitions out of the upstream ZIP checksum.
+
 The original DexSim archive is currently on its internal resource server; an
 explicit `EMBODICHAIN_DOWNLOAD_PREFIX` selects the catalog's versioned mirror
 path. Do not substitute an unverified public URL or depend on a DexSim source

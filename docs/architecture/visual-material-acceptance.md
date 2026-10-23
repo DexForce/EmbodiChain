@@ -58,11 +58,11 @@ In addition to the legacy handwritten-material checks above, qualify the unified
 | --- | --- |
 | Inheritance | GlassClear inherits IOR 1.52; explicit 1.5 overrides it. Zero/false are explicit; `replace(ior=None)` restores inheritance. No flat/native duplicate properties or invalid parameters reach native loading. |
 | Round trips | Constructor, factory, Python/YAML, copy, replace and dictionary round trips retain the preset and unspecified state. Manual construction retains historical concrete defaults. |
-| Distribution | Offline queries list 18 public presets, with SoapBubbleInterior available explicitly. Build/install a wheel away from the source checkout. With an empty data cache, download the pinned archive; repeat without network, repair a missing/corrupt member, and verify auxiliary texture references. |
+| Distribution | Offline queries list 24 public presets, including six built-ins without a texture-archive download, with SoapBubbleInterior available explicitly. Build/install a wheel away from the source checkout. With an empty data cache, download the pinned archive; repeat without network, repair a missing/corrupt member, and verify auxiliary texture references. |
 | Renderer preflight | Ten basic presets load on Hybrid/FastRT/OfflineRT. Eight advanced presets, the helper and advanced parameter variations require OfflineRT. Reject before download/native loading. NoRender preserves declarations and does neither. |
 | Native resources | Runtime-first and inline-first aliases share exact handles. Different UIDs use separate children of immutable templates. Repeated creation preserves state and bounded native instance counts. Variants stage JSON only, never duplicate PNGs. |
 | Lifecycle | Complete native template reset restores properties beyond the flattened fields. Default/Newton selection, reset, topology rebuild and cleanup preserve identity and expected assignments. |
-| Optical parity | Render all 18 on OfflineRT and the ten basic presets on Hybrid and FastRT. Compare the package route to direct native loading with identical geometry/camera/lights, plus a native-repeat noise control. Use closed glass meshes, explicit double shells for bubbles and optional segmented face geometry. |
+| Optical parity | Render all 24 on OfflineRT and the fourteen compatible presets on Hybrid and FastRT. Compare the package route to direct native loading with identical geometry/camera/lights, plus a native-repeat noise control. Use closed glass meshes, explicit double shells for bubbles and optional segmented face geometry. |
 
 ```bash
 python -m pytest -q tests/data/test_default_materials.py tests/sim/test_material.py
@@ -78,7 +78,7 @@ python examples/sim/rendering/default_materials.py --all --compare-native --rend
 The OfflineRT overview below was generated from the packaged preset previews;
 the skin sample uses the optional segmented face mesh.
 
-![Default material OfflineRT previews](../source/_static/visual_materials/default-materials-rc1.webp)
+![Default material OfflineRT previews](../source/_static/visual_materials/default-materials.webp)
 
 The preview writes candidate/native/repeat images and `results.json`. Its center
 crop RMSE tolerance is max(3/255, three times native-repeat RMSE plus 0.5/255).

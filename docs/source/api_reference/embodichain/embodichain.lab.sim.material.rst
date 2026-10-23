@@ -17,6 +17,11 @@ segmentation masks stay consistent across replicated environments.
 Default material presets
 ------------------------
 
+The 24-preset catalog contains six built-in parameter definitions and 18
+downloadable resources. See the
+:doc:`material guide </overview/sim/sim_manager/rendering/materials>` for
+parameter tables, individual previews and OfflineRT galleries.
+
 Handwritten and asset-based materials use the same configuration type::
 
    from embodichain.data import list_default_materials, get_default_material_info
@@ -66,6 +71,10 @@ native manifest and retain the manual material-type policy.
 ``SteelBrushed`` support ``hybrid``, ``fast-rt`` and ``rt``. ``ChromePolished``,
 ``GoldPolished``, ``CopperPolished``, ``GlassClear``, ``GlassFrosted``,
 ``GlassSmoke``, ``SkinHumanLight`` and ``SoapBubble`` require ``rt`` (OfflineRT).
+The built-ins ``PlasticMatteBlue``, ``PlasticGlossyRed``, ``GoldMetal`` and
+``MirrorMetal`` support all three renderers. ``GlassClearSurface`` and
+``GlassFrostedSurface`` require ``rt`` and configure surface transmission without
+volume absorption.
 Advanced parameter variations of a basic preset also require ``rt``; the
 factory rejects incompatible renderers before downloading or loading assets.
 NoRender stores declarations without downloading or creating native materials.
@@ -79,7 +88,11 @@ including advanced parameters and textures. Repeated creation preserves state.
 Native shader-model changes after binding are outside this interface's scope;
 pre-create variants and bind their instances instead.
 
-Catalog queries do not require a World or asset download. The archive is lazy,
+Catalog queries do not require a World or asset download. The six built-ins
+include native parameter defaults in the wheel and do not request the texture
+archive. Their metadata exposes ``source="builtin"`` and
+``requires_download=False``. Resource metadata uses ``source="resource"``.
+The archive is lazy,
 revisioned and checksum-verified. Pre-download with
 ``embodichain data download --name DefaultMaterials``. The current upstream
 archive is hosted on the DexSim internal resource server. To use a mirror, set

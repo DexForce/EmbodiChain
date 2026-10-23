@@ -142,7 +142,9 @@ embodichain.data.default_materials
 ------------------------------------
 
 The wheel includes catalog metadata so these functions work offline without
-asset downloads. Both functions are also available from ``embodichain.data``.
+asset downloads. Both functions are also available from ``embodichain.data``. The 24-preset
+catalog combines six built-in parameter definitions and 18 downloadable
+resources; metadata identifies their source and download requirement.
 Metadata includes compatible renderer names, source revision, dependencies,
 auxiliary resources and suggested physical texture dimensions. Dimensions do
 not change geometry or UVs.
