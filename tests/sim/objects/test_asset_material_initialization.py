@@ -228,3 +228,60 @@ def test_asset_reset_restores_selected_environment_material(asset_type):
     asset.reset(env_ids=[0])
 
     asset.restore_visual_material.assert_called_once_with(env_ids=[0])
+
+
+@pytest.mark.parametrize(
+    "asset_type", (RigidObject, VolumeDeformableObject, SurfaceDeformableObject)
+)
+def test_shape_optical_properties_reach_every_native_material(asset_type):
+    from embodichain.lab.sim.material import VisualMaterialCfg
+    from embodichain.lab.sim.shapes import MeshCfg
+
+    originals = [_material("first"), _material("second"), None]
+    asset, _ = _make_asset(asset_type, originals)
+    asset.cfg = SimpleNamespace(
+        shape=MeshCfg(
+            fpath="/assets/glass.obj",
+            visual_material=VisualMaterialCfg(
+                transmission=0.85,
+                volume_thickness=0.08,
+                volume_attenuation_distance=0.5,
+                volume_attenuation_color=(0.2, 0.6, 0.8),
+            ),
+        )
+    )
+
+    asset._initialize_existing_visual_material()
+
+    for material in originals[:2]:
+        assert material.set_pbr_param.call_args_list == [
+            call("transmission", 0.85),
+            call("volume_thickness", 0.08),
+            call("volume_attenuation_distance", 0.5),
+            call("volume_attenuation_color", 0.2, 0.6, 0.8),
+        ]
+
+
+def test_surface_optics_use_separate_visual_mesh_material():
+    from embodichain.lab.sim.material import VisualMaterialCfg
+    from embodichain.lab.sim.shapes import MeshCfg
+
+    original = _material("visual")
+    asset, _ = _make_asset(SurfaceDeformableObject, [original])
+    asset.cfg = SimpleNamespace(
+        shape=MeshCfg(
+            fpath="/assets/physics.obj",
+            visual_material=VisualMaterialCfg(transmission=0.1),
+        ),
+        visual_shape=MeshCfg(
+            fpath="/assets/visual.obj",
+            visual_material=VisualMaterialCfg(transmission=0.85, volume_thickness=0.08),
+        ),
+    )
+
+    asset._initialize_existing_visual_material()
+
+    assert original.set_pbr_param.call_args_list == [
+        call("transmission", 0.85),
+        call("volume_thickness", 0.08),
+    ]

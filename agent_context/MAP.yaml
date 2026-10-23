@@ -13,7 +13,7 @@ topics:
     NRDCfg, DLSS, NRD, frame_time_delta_ms, explicit physics stepping, arena, DexSim, PhysicsBackendCfg,
     DefaultPhysicsCfg, NewtonPhysicsCfg, VisualObject, VisualObjectCfg, UsdSourceCfg, source_prim_path, add_visual_object, 纯渲染对象, AutoSolverCfg, DexUniSolverCfg, DexUni, runtime control, deformable, particle set,
     ArticulationJointKinematics, get_parent_joint_chain, asset_physics_mode, joint_drive_props, enable_gravity,
-    fixed-cadence playback, quaternion, xyzw]
+    fixed-cadence playback, FluidObjectCfg, FluidSpawnCfg, FluidObject, SPHSolverCfg, revolved_volume, fill_level, 粒子采样, fluid, 流体, quaternion, xyzw]
   paths: [topics/simulation-system/simulation-system.md]
   source_of_truth:
   - embodichain/lab/sim/motion/__init__.py
@@ -22,6 +22,7 @@ topics:
   - embodichain/cli/_visualization.py
   - embodichain/lab/sim/__init__.py
   - embodichain/lab/sim/cfg/
+  - embodichain/compute/geometry/particles.py
   - embodichain/lab/sim/physics/
   - embodichain/lab/sim/spawn/
   - embodichain/lab/sim/common.py
@@ -34,7 +35,7 @@ topics:
   - embodichain/lab/sim/objects/gizmo.py
   - embodichain/lab/gym/envs/base_env.py
   watch_paths: [embodichain/lab/sim/sim_manager.py, embodichain/lab/sim/cfg/, embodichain/lab/sim/physics/,
-    embodichain/lab/sim/spawn/, embodichain/lab/sim/objects/, tests/sim/]
+    embodichain/lab/sim/spawn/, embodichain/lab/sim/objects/, embodichain/compute/geometry/particles.py, tests/compute/test_particles.py, tests/sim/]
   related_topics: [env-framework, robot-system, sensor-system, sim-visualization, ik-solvers, motion-planning,
     atomic-actions, rl-learning, configclass-pattern, robot-workspace]
   status: active

@@ -32,6 +32,7 @@ _AssetKind = Literal[
     "articulation",
     "soft_object",
     "cloth_object",
+    "fluid_object",
 ]
 
 
@@ -103,7 +104,21 @@ class SpawnScene:
             source_configurator=configure_source,
         )
 
-        if kind == "rigid_object_group":
+        if kind == "fluid_object":
+            declaration.descriptor = self.builder.add_fluid(
+                descriptor.name,
+                descriptor.positions,
+                pose=descriptor.pose,
+                density=descriptor.density,
+                particle_spacing=descriptor.particle_spacing,
+                particle_radius=descriptor.particle_radius,
+                render_radius=descriptor.render_radius,
+                render_mode=descriptor.render_mode,
+                mesh_surface=descriptor.mesh_surface,
+                material=descriptor.render_material,
+                per_env=descriptor.per_env,
+            )
+        elif kind == "rigid_object_group":
             declaration.descriptor = tuple(
                 self.builder.add_object(member) for member in descriptor
             )
@@ -184,7 +199,7 @@ class SpawnScene:
     def remove(self, uid: str) -> None:
         """Remove a declared asset from its DexSim owner."""
         declaration = self._assets[uid]
-        if declaration.kind in {"soft_object", "cloth_object"}:
+        if declaration.kind in {"soft_object", "cloth_object", "fluid_object"}:
             raise NotImplementedError(
                 "DexSim Spawn does not yet expose pending removal for "
                 f"{declaration.kind.replace('_', ' ')}."

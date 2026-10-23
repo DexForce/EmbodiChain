@@ -269,6 +269,7 @@ def scene_rows(sim: SimulationManager) -> list[Row]:
             ),
             ("Scene / env", "Object groups", str(len(sim._rigid_object_groups))),
             ("Scene / env", "Deformables", str(len(sim._deformable_objects))),
+            ("Scene / env", "Fluids", str(len(getattr(sim, "_fluid_objects", {})))),
             ("Scene / env", "Sensors", str(len(sim._sensors))),
             (
                 "Scene",
