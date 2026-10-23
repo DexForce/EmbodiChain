@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 
 import torch
 
@@ -83,7 +84,30 @@ def parse_arguments() -> argparse.Namespace:
         "Pick up a cube and place it at a target pose.",
         features=("grasp_sampling", "trajectory_variants", "visualize_axes"),
     )
-    return parse_trajectory_variant_arguments(parser)
+    parser.add_argument(
+        "--trajectory_strategy",
+        choices=("motion_gen", "ik_interp"),
+        default="motion_gen",
+        help=(
+            "Generate the PickUp/Place reference with the selected planner or "
+            "bounded IK interpolation (default: motion_gen)."
+        ),
+    )
+    parser.add_argument(
+        "--trajectory_control_dt",
+        type=float,
+        default=None,
+        help=(
+            "Reference-trajectory command period in seconds; defaults to the "
+            "physics period. It must be an integer multiple of physics_dt."
+        ),
+    )
+    args = parse_trajectory_variant_arguments(parser)
+    if args.trajectory_control_dt is not None and (
+        not math.isfinite(args.trajectory_control_dt) or args.trajectory_control_dt <= 0
+    ):
+        parser.error("--trajectory_control_dt must be finite and positive.")
+    return args
 
 
 def create_pick_object(sim) -> RigidObject:
@@ -139,6 +163,22 @@ def run(args: argparse.Namespace) -> None:
     robot = add_tutorial_robot(sim, args.robot, tcp_point="grasp")
     obj = create_pick_object(sim)
     sim.prepare()
+    trajectory_strategy = getattr(args, "trajectory_strategy", "motion_gen")
+    trajectory_control_dt = getattr(args, "trajectory_control_dt", None)
+    physics_dt = float(sim.sim_config.physics_dt)
+    if trajectory_control_dt is None:
+        trajectory_control_dt = physics_dt
+    control_ratio = trajectory_control_dt / physics_dt
+    if control_ratio < 1.0 or not math.isclose(
+        control_ratio,
+        round(control_ratio),
+        rel_tol=1e-6,
+        abs_tol=1e-8,
+    ):
+        raise ValueError(
+            "trajectory_control_dt must be an integer multiple of physics_dt "
+            f"({physics_dt:g}); got {trajectory_control_dt:g}."
+        )
     motion_gen = create_curobo_motion_generator(
         robot,
         planner=getattr(args, "planner", "trapezoidal"),
@@ -188,7 +228,7 @@ def run(args: argparse.Namespace) -> None:
                 GraspGoal(semantics),
                 control_parts=endpoint_mapping,
                 motion_policy=MotionPolicy(
-                    strategy="motion_gen",
+                    strategy=trajectory_strategy,
                     sample_count=PICK_SAMPLE_INTERVAL,
                 ),
                 skill_options=PickUpOptions(
@@ -206,7 +246,7 @@ def run(args: argparse.Namespace) -> None:
                 ),
                 control_parts=endpoint_mapping,
                 motion_policy=MotionPolicy(
-                    strategy="motion_gen",
+                    strategy=trajectory_strategy,
                     sample_count=PLACE_SAMPLE_INTERVAL,
                 ),
                 skill_options=PlaceOptions(
@@ -216,7 +256,7 @@ def run(args: argparse.Namespace) -> None:
             ),
         ),
         engine.initial_context(
-            control_dt=sim.sim_config.physics_dt,
+            control_dt=trajectory_control_dt,
             **(
                 {"affordance_sampling": create_affordance_sampling_context(args)}
                 if getattr(args, "run", None) is not None

@@ -52,7 +52,11 @@ python examples/expansion/trajectory/task_environment_augmentation_showcase.py \
 ```
 
 The showcase uses the existing Atomic Action task scene and MotionGenerator
-planning path. It converts the shared plan to the production
+planning path. By default it builds the augmentation reference with bounded IK
+interpolation on a 40 ms command grid, while simulation continues to integrate
+at its 10 ms physics period. This avoids turning the planner's internal 2 mm
+Cartesian discretization into thousands of augmentation samples. It converts
+the shared plan to the production
 ``TaskSpaceTrajectory`` contract, bends the lift/transport/retract paths in the
 horizontal plane, and projects each target through batched trajectory IK. The
 grasp and release waypoints remain exact. Generation fails instead of silently
@@ -69,7 +73,13 @@ Useful overrides include:
 --task_space_translation_m 0.04
 --task_space_rotation_rad 0.0
 --variant_seed 7
+--trajectory_strategy motion_gen
+--trajectory_control_dt 0.01
 ```
+
+The last two flags opt back into the planner-timed, physics-rate reference for
+comparison. The faster showcase defaults preserve the same phase and endpoint
+contracts; only the reference command grid changes.
 
 Pass ``--trajectory_variant_mode joint_space`` to return to the earlier
 ``joint_residual`` / ``via_points`` / ``nullspace_residual`` / retiming demo.

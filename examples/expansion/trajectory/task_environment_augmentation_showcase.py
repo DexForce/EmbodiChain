@@ -36,6 +36,14 @@ if str(_REPO_ROOT) not in sys.path:
 
 __all__ = ["main"]
 
+SHOWCASE_TRAJECTORY_STRATEGY = "ik_interp"
+SHOWCASE_TRAJECTORY_CONTROL_DT = 0.04
+
+
+def _has_option(arguments: list[str], option: str) -> bool:
+    """Return whether a forwarded option uses split or ``--name=value`` form."""
+    return any(value == option or value.startswith(f"{option}=") for value in arguments)
+
 
 def main(argv: list[str] | None = None) -> None:
     """Run the task-environment augmentation showcase.
@@ -58,19 +66,25 @@ def main(argv: list[str] | None = None) -> None:
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     forwarded = list(forwarded)
-    if "--variant_plot_dir" not in forwarded:
+    if not _has_option(forwarded, "--variant_plot_dir"):
         forwarded.extend(("--variant_plot_dir", str(args.output_dir)))
-    if "--trajectory_variants" not in forwarded:
+    if not _has_option(forwarded, "--trajectory_variants"):
         forwarded.extend(("--trajectory_variants", "9"))
-    if "--num_envs" not in forwarded:
+    if not _has_option(forwarded, "--num_envs"):
         forwarded.extend(("--num_envs", "9"))
-    if "--trajectory_variant_mode" not in forwarded:
+    if not _has_option(forwarded, "--trajectory_variant_mode"):
         forwarded.extend(("--trajectory_variant_mode", "task_space"))
+    if not _has_option(forwarded, "--trajectory_strategy"):
+        forwarded.extend(("--trajectory_strategy", SHOWCASE_TRAJECTORY_STRATEGY))
+    if not _has_option(forwarded, "--trajectory_control_dt"):
+        forwarded.extend(
+            ("--trajectory_control_dt", str(SHOWCASE_TRAJECTORY_CONTROL_DT))
+        )
     if "--headless" not in forwarded and "--no-headless" not in forwarded:
         forwarded.append("--headless")
     if "--auto_play" not in forwarded:
         forwarded.append("--auto_play")
-    if "--auto_play_video_path" not in forwarded:
+    if not _has_option(forwarded, "--auto_play_video_path"):
         forwarded.extend(
             (
                 "--auto_play_video_path",
