@@ -243,7 +243,8 @@ def test_native_material_creation_reset_and_topology_rebuild(physics):
 
 
 @pytest.mark.parametrize("physics", ["default", "newton"])
-def test_native_preset_identity_reset_and_rebuild(physics):
+@pytest.mark.parametrize("source", ["preset", "manual"])
+def test_native_parameter_material_identity_reset_and_rebuild(physics, source):
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=True,
@@ -251,11 +252,19 @@ def test_native_preset_identity_reset_and_rebuild(physics):
             num_envs=2,
             scene_node_capacity=128,
             physics_cfg=physics_cfg_for_backend(physics),
-            render_cfg=RenderCfg(renderer="hybrid"),
+            render_cfg=RenderCfg(renderer="hybrid" if source == "preset" else "rt"),
         )
     )
-    cfg = VisualMaterialCfg.from_preset(
-        "BrickRed", uid="brick", ior=1.6, roughness=0.25
+    cfg = (
+        VisualMaterialCfg.from_preset("BrickRed", uid="brick", ior=1.6, roughness=0.25)
+        if source == "preset"
+        else VisualMaterialCfg(
+            uid="brick",
+            base_color=[1, 1, 1, 1],
+            ior=1.6,
+            roughness=0.25,
+            parameters={"transmission": 0.75},
+        )
     )
     obj = runtime = other = child = extra = selected = alias = None
     try:
@@ -287,12 +296,15 @@ def test_native_preset_identity_reset_and_rebuild(physics):
         child = runtime.create_instance("other_brick")
         assert child.mat.get_material_id() != other.inst.mat.get_material_id()
         child.set_ior(2.0)
-        child.mat.set_transmission(0.75)
-        assert child.mat.get_transmission() == pytest.approx(0.75)
+        child.mat.set_transmission(0.25)
+        assert child.mat.get_transmission() == pytest.approx(0.25)
         runtime.set_default_properties(child, cfg)
         assert child.ior == pytest.approx(1.6)
-        # The authored legacy template leaves transmission unset (native None).
-        assert child.mat.get_transmission() is None
+        if source == "preset":
+            # The legacy resource template leaves transmission unset.
+            assert child.mat.get_transmission() is None
+        else:
+            assert child.mat.get_transmission() == pytest.approx(0.75)
         count = runtime.mat.inst_count()
         for _ in range(1025):
             assert runtime.create_instance("other_brick") is child

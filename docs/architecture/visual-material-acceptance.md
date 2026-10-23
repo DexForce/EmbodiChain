@@ -10,7 +10,7 @@ for implementation ownership and lifecycle rules.
 | Boundary | Required behavior |
 | --- | --- |
 | Identity and aliases | Unnamed materials keep independent appearances. Explicit UID conflicts fail across runtime and Spawn creation in either order. Equivalent aliases and repeated instance creation preserve native state. |
-| PBR conversion | Both creation paths agree for BRDF/BTDF/BSDF, emission intensities 0/1/10 and nondefault scalar properties. Invalid values fail before native writes. RGBA writes retain alpha; RGB getters cannot verify it. |
+| PBR conversion | Both creation paths agree for parameter-driven opaque, reflective and transmitting materials, emission intensities 0/1/10 and nondefault scalars. No explicit native scattering type is written. Invalid values fail before native writes. RGBA writes retain alpha; RGB getters cannot verify it. |
 | Native handles | Imported and working instances update their exact native handles. Material IDs distinguish different instances with identical names. |
 | Selection and reset | Empty selections do nothing; invalid indices and partial shared selections fail before writes. Independent updates affect selected environments only. Deterministic rigid-object and group resets restore selected properties. |
 | Randomization resources | Solid and library tiers honor scalar PBR ranges. Shared instances are mutated once per call. Different source directories remain separate; warmed texture pools and instance registries do not grow on repeated calls. |
@@ -58,6 +58,7 @@ In addition to the legacy handwritten-material checks above, qualify the unified
 | --- | --- |
 | Inheritance | GlassClear inherits IOR 1.52; explicit 1.5 overrides it. Zero/false are explicit; `replace(ior=None)` restores inheritance. No flat/native duplicate properties or invalid parameters reach native loading. |
 | Round trips | Constructor, factory, Python/YAML, copy, replace and dictionary round trips retain the preset and unspecified state. Manual construction retains historical concrete defaults. |
+| Removed scattering selector | Python construction rejects `material_type`; dictionary/YAML loading reports its removal, including old null values. Serialization emits no selector. Explicit transmission parameters survive native loading, complete reset and topology rebuild. |
 | Distribution | Offline queries list 24 public presets, including six built-ins without a texture-archive download, with SoapBubbleInterior available explicitly. Build/install a wheel away from the source checkout. With an empty data cache, download the pinned archive; repeat without network, repair a missing/corrupt member, and verify auxiliary texture references. |
 | Renderer preflight | Ten basic presets load on Hybrid/FastRT/OfflineRT. Eight advanced presets, the helper and advanced parameter variations require OfflineRT. Reject before download/native loading. NoRender preserves declarations and does neither. |
 | Native resources | Runtime-first and inline-first aliases share exact handles. Different UIDs use separate children of immutable templates. Repeated creation preserves state and bounded native instance counts. Variants stage JSON only, never duplicate PNGs. |
@@ -91,8 +92,9 @@ exactly the archive and versioned path documented in the material API. Asset
 redistribution/provenance must be retained when deploying a mirror.
 
 Parameter variants must be created before binding. Qualification does not cover
-cross-model hot shader mutation, NRD packaging fixes, automatic geometry/UV
-changes or a global removal of the legacy manual `material_type` interface.
+cross-model hot shader mutation, NRD packaging fixes or automatic geometry/UV
+changes. The public `material_type` selector is removed; legacy configurations
+must explicitly describe their intended optical properties.
 
 ## Compatibility
 
@@ -111,7 +113,7 @@ changes or a global removal of the legacy manual `material_type` interface.
 
 State and lifecycle checks do not establish optical correctness. Before release:
 
-- Compare BRDF/BTDF/BSDF reflection, transmission, alpha and emission intensities
+- Compare opaque/metal/mirror/transmitting parameter sets, alpha and emission intensities
   0/1/10 in a separate FastRT process with controlled lighting, camera and exposure.
 - Check multi-material meshes, URDF articulations and deformables across partial
   reset and rebuilds. Compare file, Tensor and native Texture inputs for color

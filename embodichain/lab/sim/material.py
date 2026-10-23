@@ -51,6 +51,9 @@ class VisualMaterialCfg:
     resource value. Serialization retains that distinction. Use
     :meth:`from_preset` to construct a new preset configuration; ``replace``
     preserves existing fields rather than switching configuration sources.
+    Native scattering is selected by optical parameters, including
+    ``parameters={"transmission": 1.0}`` for a transmitting material. Explicit
+    BRDF/BTDF/BSDF model selection is not part of this configuration.
     """
 
     uid: str | None = None
@@ -90,9 +93,6 @@ class VisualMaterialCfg:
     ior: float | None = None
     """Index of refraction for PBR materials, only used in ray tracing."""
 
-    material_type: str | None = None
-    """Ray tracing material type. Options: 'BRDF', 'BTDF', 'BSDF'"""
-
     preset: str | None = None
     """Default material name. Presets select scattering from native parameters."""
 
@@ -112,7 +112,6 @@ class VisualMaterialCfg:
                 "emissive": [0.0, 0.0, 0.0],
                 "emissive_intensity": 1.0,
                 "ior": 1.5,
-                "material_type": "BRDF",
             }
             for key, value in defaults.items():
                 if getattr(self, key) is None:
@@ -144,7 +143,8 @@ class VisualMaterialCfg:
 
         Raises:
             ValueError: A preset, override, duplicate property or texture edit
-                is invalid. ``material_type`` is unavailable for presets.
+                is invalid.
+            TypeError: An unknown configuration field is supplied.
         """
         from embodichain.data.default_materials import get_default_material_info
 
@@ -165,9 +165,19 @@ class VisualMaterialCfg:
 
         Returns:
             Configuration with inheritance preserved before defaults are filled.
+
+        Raises:
+            ValueError: The removed scattering selector or an unknown preset
+                field is supplied. Describe optical properties explicitly.
         """
         from dataclasses import fields
 
+        if "material_type" in cfg_dict:
+            raise ValueError(
+                "VisualMaterialCfg.material_type has been removed. Use material "
+                "parameters such as transmission, roughness, metallic and ior; "
+                "legacy BTDF/BSDF choices require explicit optical parameters."
+            )
         names = {item.name for item in fields(cls)}
         values = {}
         for k, v in cfg_dict.items():
@@ -180,13 +190,6 @@ class VisualMaterialCfg:
                     )
                 logger.log_warning(f"Unknown field '{k}' in VisualMaterialCfg.")
         return cls(**values)
-
-
-_MATERIAL_TYPES = {
-    "BRDF": "BRDF_GGX_SMITH",
-    "BTDF": "BTDF_GGX_SMITH",
-    "BSDF": "BSDF_GGX_SMITH",
-}
 
 
 def _material_scalar(
@@ -222,8 +225,6 @@ def _material_desc_from_cfg(
         from ._material_presets import _asset_desc_from_cfg
 
         return _asset_desc_from_cfg(cfg, uid)
-    if cfg.material_type not in _MATERIAL_TYPES:
-        raise ValueError(f"Invalid visual material_type {cfg.material_type!r}.")
     if cfg.parameters:
         from ._material_presets import _asset_desc_from_cfg
 
@@ -250,7 +251,6 @@ def _material_desc_from_cfg(
             1.0,
         ),
         ior=ior,
-        material_type=_MATERIAL_TYPES[cfg.material_type],
         has_alpha=True,
     )
 
@@ -261,14 +261,6 @@ class VisualMaterial:
     A visual material is actually a material template from which material instances can be created.
     It holds multiple material instances, which is used to assign to different objects in the environment.
     """
-
-    RT_MATERIAL_TYPES = [
-        "BRDF",
-        "BTDF",
-        "BSDF",
-    ]
-
-    MAT_TYPE_MAPPING: dict[str, str] = _MATERIAL_TYPES
 
     def __init__(
         self,
@@ -357,7 +349,6 @@ class VisualMaterial:
         mat_inst.set_ao_texture(cfg.ao_texture)
 
         mat_inst.set_ior(desc.ior)
-        mat_inst.mat.update_pbr_material_type(desc.material_type)
 
     def create_instance(self, uid: str) -> VisualMaterialInst:
         """Create a new material instance from this material template.

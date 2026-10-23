@@ -61,10 +61,23 @@ fields during construction, so ``replace(ior=None)`` also clears that form of
 override. The remaining advanced properties stay in ``parameters``.
 Specifying the same native property in both places is an error. Unknown,
 nonfinite, incorrectly typed and out-of-range parameters fail before native
-loading. Presets reject ``material_type`` and texture replacement; their native
-parameters select scattering. The manual ``material_type`` interface remains
-available. Manual configurations with advanced parameters also use a complete
-native manifest and retain the manual material-type policy.
+loading. Presets reject texture replacement. Both handwritten and preset
+materials select scattering from optical parameters; ``material_type`` and
+the ``VisualMaterial.RT_MATERIAL_TYPES`` / ``MAT_TYPE_MAPPING`` constants have
+been removed. No default BRDF is explicitly written to native instances.
+Manual configurations with advanced parameters use a complete native manifest::
+
+   ice = VisualMaterialCfg(
+       base_color=[1, 1, 1, 1], roughness=0.2, ior=1.31,
+       parameters={"transmission": 1.0},
+   )
+
+Transmission and other advanced handwritten parameters require OfflineRT.
+Remove ``material_type`` from stored Python/YAML configurations; ``from_dict``
+rejects the removed key even if its value is ``None``. Legacy BRDF/BTDF/BSDF
+labels are not silently converted because their scattering semantics are not
+interchangeable. See the
+:doc:`migration example </overview/sim/sim_manager/rendering/materials>`.
 
 ``BrickRed``, ``WoodOak``, ``CeramicTileWhite``, ``MarbleWhite``, ``AsphaltDark``,
 ``FabricGray``, ``LeatherBrown``, ``PlasticABSBlack``, ``RubberBlack`` and
@@ -107,8 +120,9 @@ The optional ``SoapBubbleInterior`` auxiliary material references SoapBubble's
 textures. Hollow bubble shells and segmented skin meshes belong to preview
 geometry. The factory neither creates those shapes nor changes UVs.
 ``SkinHumanLight`` approximates diffuse transmission rather than random-walk
-subsurface scattering. Run ``examples/sim/rendering/default_materials.py`` for
-previews, optional segmented-face geometry and direct-native image comparisons.
+subsurface scattering. Use ``embodichain preview-material`` for previews,
+optional segmented-face geometry and direct-native image comparisons; see the
+:doc:`CLI guide </guides/preview_material>`.
 
 .. rubric:: Classes
 

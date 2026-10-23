@@ -141,7 +141,7 @@ def test_overrides_keep_explicit_zero_false_and_none(captures) -> None:
         (["--material-params", '{"parameters":{"transmission":-1}}'], "Invalid visual"),
         (
             ["--material-params", '{"material_type":"BSDF"}'],
-            "cannot specify material_type",
+            "material_type",
         ),
         (
             [

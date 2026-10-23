@@ -11,6 +11,14 @@ to flat fields so `replace(field=None)` can restore inheritance. Do not infer
 override intent from equality
 with a default, or modify generic `configclass` for this policy.
 
+Scattering is parameter-driven in both modes. `VisualMaterialCfg` has no
+`material_type` field, and wrappers never force a native BRDF/BTDF/BSDF model.
+Basic handwritten materials keep native descriptor creation without a lobe
+override; advanced handwritten parameters use the manifest resolver and its
+renderer preflight. Dictionary input rejects the removed field rather than
+silently losing a legacy transmission choice. Migration examples live in the
+material guide linked below.
+
 `_material_presets.py` owns validated schema-v1 overrides, renderer preflight and
 World-scoped manifest/template caches. `SpawnScene._resolve_materials()` shares
 that path with runtime creation. Its resource definition registry reserves UIDs

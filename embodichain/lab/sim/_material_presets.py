@@ -219,7 +219,6 @@ class _AssetMaterialDesc:
     parameters_json: str
     revision: str
     textures: tuple[tuple[str, str], ...] = ()
-    material_type: str | None = None
 
     def template_key(self) -> str:
         definition = (
@@ -227,7 +226,6 @@ class _AssetMaterialDesc:
             self.preset,
             self.parameters_json,
             self.textures,
-            self.material_type,
         )
         return sha256(repr(definition).encode()).hexdigest()
 
@@ -235,10 +233,6 @@ class _AssetMaterialDesc:
 def _asset_desc_from_cfg(cfg: VisualMaterialCfg, uid: str) -> _AssetMaterialDesc:
     if cfg.preset is not None:
         info = get_default_material_info(cfg.preset)
-        if cfg.material_type is not None:
-            raise ValueError(
-                "Preset materials cannot specify material_type; native parameters select scattering."
-            )
         if any(getattr(cfg, key) is not None for key in _TEXTURE_FIELDS):
             raise ValueError("Preset texture replacement or removal is not supported.")
         revision = info["revision"]
@@ -257,7 +251,6 @@ def _asset_desc_from_cfg(cfg: VisualMaterialCfg, uid: str) -> _AssetMaterialDesc
             for field_name, key in _TEXTURE_FIELDS.items()
             if getattr(cfg, field_name) is not None
         ),
-        material_type=cfg.material_type if cfg.preset is None else None,
     )
 
 
@@ -393,12 +386,6 @@ class _MaterialResources:
             if template is None:
                 raise RuntimeError(
                     f"DexSim could not load material {desc.preset or desc.name!r}."
-                )
-            if desc.material_type is not None:
-                from .material import _MATERIAL_TYPES
-
-                template.get_inst().update_pbr_material_type(
-                    _MATERIAL_TYPES[desc.material_type]
                 )
             self._templates[key] = template
         template = self._templates[key]

@@ -153,10 +153,7 @@ def test_asset_wrapper_setters_use_exact_existing_handle(setter, value, native_s
 
 
 @pytest.mark.parametrize("intensity", [0.0, 1.0, 10.0])
-@pytest.mark.parametrize("material_type", ["BRDF", "BTDF", "BSDF"])
-def test_runtime_and_spawn_lower_identical_material_properties(
-    intensity, material_type
-):
+def test_runtime_and_spawn_lower_identical_material_properties(intensity):
     cfg = VisualMaterialCfg(
         uid="paint",
         base_color=[0.1, 0.2, 0.3, 0.5],
@@ -164,7 +161,6 @@ def test_runtime_and_spawn_lower_identical_material_properties(
         roughness=0.2,
         emissive=[0.2, 0.3, 0.4],
         emissive_intensity=intensity,
-        material_type=material_type,
         ior=2.0,
     )
     _, (_, descriptor) = _compile_visual_material("object", cfg)
@@ -178,7 +174,8 @@ def test_runtime_and_spawn_lower_identical_material_properties(
     np.testing.assert_allclose(
         native.set_emissive.call_args.args[0], descriptor.emissive
     )
-    native.update_pbr_material_type.assert_called_once_with(descriptor.material_type)
+    assert descriptor.material_type is None
+    native.update_pbr_material_type.assert_not_called()
     assert descriptor.has_alpha is True
 
 
@@ -206,7 +203,6 @@ def test_emissive_intensity_can_be_zero_then_restored_without_losing_rgb():
         {"ior": 0.0},
         {"emissive_intensity": -1.0},
         {"emissive": [1e308, 0.0, 0.0], "emissive_intensity": 1e308},
-        {"material_type": "unknown"},
     ],
 )
 def test_invalid_material_config_is_rejected_before_native_instance_creation(
@@ -422,7 +418,7 @@ def test_preset_inheritance_and_yaml_roundtrip_keep_explicit_defaults():
     assert VisualMaterialCfg.from_dict({"preset": "GlassClear"}).ior is None
     assert VisualMaterialCfg().ior == 1.5
     assert VisualMaterialCfg().roughness == 0.7
-    assert VisualMaterialCfg().material_type == "BRDF"
+    assert "material_type" not in VisualMaterialCfg().to_dict()
     assert (
         _material_desc_from_cfg(VisualMaterialCfg.from_dict(cfg.to_dict()), "glass")
         == inherited_desc
@@ -443,13 +439,56 @@ def test_preset_inheritance_and_yaml_roundtrip_keep_explicit_defaults():
         {"parameters": {"misspelled": 1.0}},
         {"ior": 0.0},
         {"roughness": 1.1},
-        {"material_type": "BSDF"},
         {"base_color_texture": "override.png"},
     ],
 )
 def test_preset_invalid_overrides_fail_before_download(properties):
     with pytest.raises(ValueError):
         VisualMaterialCfg.from_preset("GlassClear", **properties)
+
+
+@pytest.mark.parametrize("preset", [None, "GlassClear"])
+def test_removed_scattering_type_is_rejected_without_silent_conversion(preset):
+    with pytest.raises(TypeError, match="material_type"):
+        VisualMaterialCfg(preset=preset, material_type="BSDF")
+    for legacy in (None, "BRDF", "BTDF", "BSDF"):
+        with pytest.raises(ValueError, match="material_type has been removed"):
+            VisualMaterialCfg.from_dict({"preset": preset, "material_type": legacy})
+    if preset is not None:
+        with pytest.raises(TypeError, match="material_type"):
+            VisualMaterialCfg.from_preset(preset, material_type="BSDF")
+
+
+def test_manual_optical_parameters_load_without_an_explicit_scattering_type():
+    import json
+    from pathlib import Path
+    from embodichain.lab.sim._material_presets import _MaterialResources
+    from embodichain.lab.sim.material import _material_desc_from_cfg
+
+    cfg = VisualMaterialCfg(
+        uid="ice",
+        base_color=[1, 1, 1, 1],
+        ior=1.31,
+        roughness=0.2,
+        parameters={"transmission": 1.0},
+    )
+    _, (_, descriptor) = _compile_visual_material("ice_object", cfg)
+    assert descriptor == _material_desc_from_cfg(cfg, "ice")
+    world = MagicMock()
+    template = _native_template()
+    world.get_env.return_value.load_material.return_value = template
+    resources = _MaterialResources(world, "rt")
+    try:
+        resources.resolve(descriptor)
+        directory = Path(world.get_env.return_value.load_material.call_args.args[0])
+        manifest = json.loads((directory / "material.json").read_text())
+        assert manifest["parameters"]["transmission"] == 1.0
+        assert manifest["parameters"]["ior"] == 1.31
+        assert manifest["parameters"]["roughness"] == 0.2
+        template.get_inst().update_pbr_material_type.assert_not_called()
+        assert "material_type" not in cfg.to_dict()
+    finally:
+        resources.close()
 
 
 def test_resource_wrapper_preserves_authored_template_and_resets_full_instance():

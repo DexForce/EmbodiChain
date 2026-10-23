@@ -40,11 +40,37 @@ glass = VisualMaterialCfg.from_preset(
 )
 ```
 
-Presets select scattering through native material parameters. Keep variants
-pre-created and rebind their instances when changing appearance. The manual
-`material_type` interface remains available for handwritten configurations.
+Both handwritten materials and presets select scattering through native optical
+parameters. Keep variants pre-created and rebind their instances when changing
+appearance. `VisualMaterialCfg` no longer exposes `material_type`.
 See the {doc}`material API </api_reference/embodichain/embodichain.lab.sim.material>`
 for UID sharing, validation, copy/replace, reset and lifecycle rules.
+
+### Migrate handwritten materials
+
+Opaque materials keep their usual base color, metallic, roughness, emission and
+IOR defaults. For transmission, specify the optical properties explicitly:
+
+```python
+ice = VisualMaterialCfg(
+    base_color=[1.0, 1.0, 1.0, 1.0],
+    roughness=0.2,
+    ior=1.31,
+    parameters={"transmission": 1.0},
+)
+```
+
+This transmitting configuration requires OfflineRT (`renderer="rt"`). Native
+parameters select the reflection/transmission model before geometry is bound.
+The factory no longer forces a BRDF model on handwritten defaults.
+
+Remove `material_type` from Python and YAML configurations. Dictionary loading
+rejects the removed key, including a serialized `null`, with a migration error.
+Old BRDF/BTDF/BSDF labels are not automatically converted: pure transmission and
+reflection-plus-transmission have different semantics. Select a glass preset
+or specify transmission, IOR, roughness and any required volume/thin-wall
+properties for the intended material. `RT_MATERIAL_TYPES` and
+`MAT_TYPE_MAPPING` have also been removed from `VisualMaterial`.
 
 ## Built-in parameter presets
 

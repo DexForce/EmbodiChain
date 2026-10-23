@@ -47,7 +47,9 @@ embodichain preview-material --material PlasticMatteBlue --headless \
 
 Omitted fields and JSON `null` inherit the preset. Explicit `0` and `false`
 remain overrides. Duplicate flat/native properties, invalid values,
-`material_type` and texture edits fail before creating a World or loading assets.
+the removed `material_type` field and texture edits fail before creating a World
+or loading assets. Both handwritten and preset configurations now select
+scattering from optical parameters; see the catalog's migration example.
 The command owns material UIDs; select the preset using `--material`.
 
 Variants are created before binding. The preview does not depend on native
