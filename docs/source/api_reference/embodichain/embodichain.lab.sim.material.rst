@@ -14,6 +14,86 @@ passes; :class:`VisualMaterial` is the resolved material definition and
 :class:`ReuseSegmentState` tracks per-render-body segment reuse so that
 segmentation masks stay consistent across replicated environments.
 
+Default material presets
+------------------------
+
+Handwritten and asset-based materials use the same configuration type::
+
+   from embodichain.data import list_default_materials, get_default_material_info
+   from embodichain.lab.sim import VisualMaterialCfg
+   from embodichain.lab.sim.shapes import SphereCfg
+
+   cfg = VisualMaterialCfg.from_preset(
+       "GlassClear", uid="glass", ior=1.6,
+       parameters={"volume_attenuation_distance": 8.0},
+   )
+   material = sim.create_visual_material(cfg)
+   shape = SphereCfg(radius=0.25, visual_material=cfg)
+
+The equivalent YAML is:
+
+.. code-block:: yaml
+
+   visual_material:
+     preset: GlassClear
+     uid: glass
+     ior: 1.6
+     parameters:
+       volume_attenuation_distance: 8.0
+
+With a preset, unspecified common fields remain ``None`` and inherit authored
+values. GlassClear therefore retains IOR 1.52 unless an override is supplied;
+explicit ``ior=1.5`` sets 1.5. Zero and false values are explicit overrides.
+``cfg.replace(ior=None)`` restores inheritance. ``copy()``, ``replace()`` and
+dictionary/YAML round trips preserve the other explicit fields. Construct a
+new source with ``from_preset()``; ``replace()`` retains the original fields.
+Handwritten configurations still fill the historical defaults at construction.
+
+Common fields stay flat; native schema-v1 advanced parameters belong in
+``parameters``. ``emissive_intensity`` normalizes to ``emission_intensity``.
+Specifying the same native property in both places is an error. Unknown,
+nonfinite, incorrectly typed and out-of-range parameters fail before native
+loading. Presets reject ``material_type`` and texture replacement; their native
+parameters select scattering. The manual ``material_type`` interface remains
+available. Manual configurations with advanced parameters also use a complete
+native manifest and retain the manual material-type policy.
+
+``BrickRed``, ``WoodOak``, ``CeramicTileWhite``, ``MarbleWhite``, ``AsphaltDark``,
+``FabricGray``, ``LeatherBrown``, ``PlasticABSBlack``, ``RubberBlack`` and
+``SteelBrushed`` support ``hybrid``, ``fast-rt`` and ``rt``. ``ChromePolished``,
+``GoldPolished``, ``CopperPolished``, ``GlassClear``, ``GlassFrosted``,
+``GlassSmoke``, ``SkinHumanLight`` and ``SoapBubble`` require ``rt`` (OfflineRT).
+Advanced parameter variations of a basic preset also require ``rt``; the
+factory rejects incompatible renderers before downloading or loading assets.
+NoRender stores declarations without downloading or creating native materials.
+Render-only VisualObject facades remain unbound in that mode; their declarations
+are retained, while physics assets still prepare normally.
+
+Variants stage only JSON before binding. Textures stay in the shared resource
+cache. Equivalent definitions reuse immutable native templates, while each UID
+has a separate child instance. Explicit resets restore the entire template,
+including advanced parameters and textures. Repeated creation preserves state.
+Native shader-model changes after binding are outside this interface's scope;
+pre-create variants and bind their instances instead.
+
+Catalog queries do not require a World or asset download. The archive is lazy,
+revisioned and checksum-verified. Pre-download with
+``embodichain data download --name DefaultMaterials``. The current upstream
+archive is hosted on the DexSim internal resource server. To use a mirror, set
+``EMBODICHAIN_DOWNLOAD_PREFIX`` before importing EmbodiChain and place the same
+archive at
+``materials/default-materials/ec9f748242c50b85/offlinert_materials.zip`` below
+that prefix. The wheel contains metadata, not PNGs. The downloaded archive
+retains the upstream README and manifests; source attribution and file digests
+are recorded in ``embodichain/data/default_materials.json``.
+
+The optional ``SoapBubbleInterior`` auxiliary material references SoapBubble's
+textures. Hollow bubble shells and segmented skin meshes belong to preview
+geometry. The factory neither creates those shapes nor changes UVs.
+``SkinHumanLight`` approximates diffuse transmission rather than random-walk
+subsurface scattering. Run ``examples/sim/rendering/default_materials.py`` for
+previews, optional segmented-face geometry and direct-native image comparisons.
+
 .. rubric:: Classes
 
 .. autosummary::

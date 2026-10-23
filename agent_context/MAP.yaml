@@ -25,6 +25,7 @@ topics:
   - embodichain/lab/sim/physics/
   - embodichain/lab/sim/spawn/
   - embodichain/lab/sim/material.py
+  - embodichain/lab/sim/_material_presets.py
   - embodichain/lab/sim/common.py
   - embodichain/lab/sim/_startup_summary.py
   - embodichain/lab/sim/_runtime_controls.py
@@ -35,7 +36,7 @@ topics:
   - embodichain/lab/sim/objects/gizmo.py
   - embodichain/lab/gym/envs/base_env.py
   watch_paths: [embodichain/lab/sim/sim_manager.py, embodichain/lab/sim/cfg/, embodichain/lab/sim/physics/,
-    embodichain/lab/sim/spawn/, embodichain/lab/sim/material.py, embodichain/lab/sim/objects/, tests/sim/]
+    embodichain/lab/sim/spawn/, embodichain/lab/sim/material.py, embodichain/lab/sim/_material_presets.py, embodichain/lab/sim/objects/, tests/sim/]
   related_topics: [env-framework, robot-system, sensor-system, sim-visualization, ik-solvers, motion-planning,
     atomic-actions, rl-learning, configclass-pattern, robot-workspace]
   status: active
@@ -421,7 +422,7 @@ topics:
   title: Data Assets
   aliases: [data assets, data path, asset download, 数据资产, 资产下载, 数据路径]
   keywords: [get_data_path, get_data_class, EmbodiChainDataset, TabletopFourBases, demo assets, EMBODICHAIN_DATA_ROOT, EMBODICHAIN_DATASET_ROOT,
-    CATEGORY_MODULES, download lock, get_registry]
+    CATEGORY_MODULES, download lock, get_registry, DefaultMaterials, list_default_materials, get_default_material_info]
   paths: [topics/data-assets/data-assets.md]
   source_of_truth:
   - embodichain/data/dataset.py
@@ -429,6 +430,9 @@ topics:
   - embodichain/data/download.py
   - embodichain/data/__init__.py
   - embodichain/data/assets/__init__.py
+  - embodichain/data/assets/materials.py
+  - embodichain/data/default_materials.py
+  - embodichain/data/default_materials.json
   watch_paths: [embodichain/data/, embodichain/cli/main.py, tests/data/]
   related_topics: [gen-sim, robot-system, data-pipeline]
   status: active

@@ -1,0 +1,787 @@
+{
+  "schema_version": 1,
+  "texture_resolution": [
+    1024,
+    1024
+  ],
+  "filename_pattern": "{name}_{channel}.png",
+  "auto_loaded_channels": [
+    "Color",
+    "AmbientOcclusion",
+    "Roughness",
+    "Metallic",
+    "Normal"
+  ],
+  "authoring_only_channels": [
+    "Displacement"
+  ],
+  "advanced_parameters_manifest": "material.json",
+  "advanced_texture_channels": [
+    "Transmission",
+    "Clearcoat",
+    "ClearcoatRoughness",
+    "ClearcoatNormal",
+    "SheenColor",
+    "SheenRoughness",
+    "Iridescence",
+    "IridescenceThickness",
+    "SpecularColor",
+    "SpecularStrength",
+    "DiffuseTransmissionColor",
+    "DiffuseTransmissionStrength",
+    "VolumeAttenuationStrength"
+  ],
+  "materials": [
+    {
+      "name": "BrickRed",
+      "category": "architecture",
+      "description": "Red fired brick with gray mortar",
+      "nominal_size_m": [
+        1.2,
+        0.84
+      ],
+      "renderers": [
+        "hybrid",
+        "fast-rt",
+        "rt"
+      ],
+      "dependencies": [],
+      "auxiliary": false,
+      "geometry_notes": "",
+      "auxiliary_resources": []
+    },
+    {
+      "name": "WoodOak",
+      "category": "wood",
+      "description": "Warm oak wood grain",
+      "nominal_size_m": [
+        0.8,
+        0.8
+      ],
+      "renderers": [
+        "hybrid",
+        "fast-rt",
+        "rt"
+      ],
+      "dependencies": [],
+      "auxiliary": false,
+      "geometry_notes": "",
+      "auxiliary_resources": []
+    },
+    {
+      "name": "CeramicTileWhite",
+      "category": "architecture",
+      "description": "White glazed ceramic tiles with gray grout",
+      "nominal_size_m": [
+        1.0,
+        1.0
+      ],
+      "renderers": [
+        "hybrid",
+        "fast-rt",
+        "rt"
+      ],
+      "dependencies": [],
+      "auxiliary": false,
+      "geometry_notes": "",
+      "auxiliary_resources": []
+    },
+    {
+      "name": "MarbleWhite",
+      "category": "stone",
+      "description": "Polished white marble with gray veins",
+      "nominal_size_m": [
+        1.5,
+        1.5
+      ],
+      "renderers": [
+        "hybrid",
+        "fast-rt",
+        "rt"
+      ],
+      "dependencies": [],
+      "auxiliary": false,
+      "geometry_notes": "",
+      "auxiliary_resources": []
+    },
+    {
+      "name": "AsphaltDark",
+      "category": "ground",
+      "description": "Dark asphalt with fine aggregate",
+      "nominal_size_m": [
+        2.0,
+        2.0
+      ],
+      "renderers": [
+        "hybrid",
+        "fast-rt",
+        "rt"
+      ],
+      "dependencies": [],
+      "auxiliary": false,
+      "geometry_notes": "",
+      "auxiliary_resources": []
+    },
+    {
+      "name": "FabricGray",
+      "category": "fabric",
+      "description": "Fine woven gray fabric",
+      "nominal_size_m": [
+        0.25,
+        0.25
+      ],
+      "renderers": [
+        "hybrid",
+        "fast-rt",
+        "rt"
+      ],
+      "dependencies": [],
+      "auxiliary": false,
+      "geometry_notes": "",
+      "auxiliary_resources": []
+    },
+    {
+      "name": "LeatherBrown",
+      "category": "leather",
+      "description": "Brown grained leather",
+      "nominal_size_m": [
+        0.35,
+        0.35
+      ],
+      "renderers": [
+        "hybrid",
+        "fast-rt",
+        "rt"
+      ],
+      "dependencies": [],
+      "auxiliary": false,
+      "geometry_notes": "",
+      "auxiliary_resources": []
+    },
+    {
+      "name": "PlasticABSBlack",
+      "category": "polymer",
+      "description": "Black ABS plastic with a subtle orange-peel finish",
+      "nominal_size_m": [
+        0.25,
+        0.25
+      ],
+      "renderers": [
+        "hybrid",
+        "fast-rt",
+        "rt"
+      ],
+      "dependencies": [],
+      "auxiliary": false,
+      "geometry_notes": "",
+      "auxiliary_resources": []
+    },
+    {
+      "name": "RubberBlack",
+      "category": "polymer",
+      "description": "Rough black rubber",
+      "nominal_size_m": [
+        0.25,
+        0.25
+      ],
+      "renderers": [
+        "hybrid",
+        "fast-rt",
+        "rt"
+      ],
+      "dependencies": [],
+      "auxiliary": false,
+      "geometry_notes": "",
+      "auxiliary_resources": []
+    },
+    {
+      "name": "SteelBrushed",
+      "category": "metal",
+      "description": "Directional brushed steel",
+      "nominal_size_m": [
+        0.5,
+        0.5
+      ],
+      "renderers": [
+        "hybrid",
+        "fast-rt",
+        "rt"
+      ],
+      "dependencies": [],
+      "auxiliary": false,
+      "geometry_notes": "",
+      "auxiliary_resources": []
+    },
+    {
+      "name": "ChromePolished",
+      "category": "metal",
+      "description": "Highly reflective polished chrome",
+      "nominal_size_m": [
+        0.35,
+        0.35
+      ],
+      "renderers": [
+        "rt"
+      ],
+      "dependencies": [],
+      "auxiliary": false,
+      "geometry_notes": "",
+      "auxiliary_resources": []
+    },
+    {
+      "name": "GoldPolished",
+      "category": "metal",
+      "description": "Polished gold",
+      "nominal_size_m": [
+        0.35,
+        0.35
+      ],
+      "renderers": [
+        "rt"
+      ],
+      "dependencies": [],
+      "auxiliary": false,
+      "geometry_notes": "",
+      "auxiliary_resources": []
+    },
+    {
+      "name": "CopperPolished",
+      "category": "metal",
+      "description": "Polished copper",
+      "nominal_size_m": [
+        0.35,
+        0.35
+      ],
+      "renderers": [
+        "rt"
+      ],
+      "dependencies": [],
+      "auxiliary": false,
+      "geometry_notes": "",
+      "auxiliary_resources": []
+    },
+    {
+      "name": "GlassClear",
+      "category": "glass",
+      "description": "Clear solid glass with weak volume absorption",
+      "nominal_size_m": [
+        0.5,
+        0.5
+      ],
+      "renderers": [
+        "rt"
+      ],
+      "dependencies": [],
+      "auxiliary": false,
+      "geometry_notes": "",
+      "auxiliary_resources": []
+    },
+    {
+      "name": "GlassFrosted",
+      "category": "glass",
+      "description": "Rough transmitting frosted glass",
+      "nominal_size_m": [
+        0.5,
+        0.5
+      ],
+      "renderers": [
+        "rt"
+      ],
+      "dependencies": [],
+      "auxiliary": false,
+      "geometry_notes": "",
+      "auxiliary_resources": []
+    },
+    {
+      "name": "GlassSmoke",
+      "category": "glass",
+      "description": "Gray-blue absorbing smoke glass",
+      "nominal_size_m": [
+        0.5,
+        0.5
+      ],
+      "renderers": [
+        "rt"
+      ],
+      "dependencies": [],
+      "auxiliary": false,
+      "geometry_notes": "",
+      "auxiliary_resources": []
+    },
+    {
+      "name": "SkinHumanLight",
+      "category": "organic",
+      "description": "Light human skin with pores and approximate diffuse transmission",
+      "nominal_size_m": [
+        0.18,
+        0.18
+      ],
+      "renderers": [
+        "rt"
+      ],
+      "dependencies": [],
+      "auxiliary": false,
+      "geometry_notes": "Segmented face geometry belongs to the preview; this preset does not provide random-walk subsurface scattering.",
+      "auxiliary_resources": []
+    },
+    {
+      "name": "SoapBubble",
+      "category": "thin-film",
+      "description": "Soap film with spatially varying iridescence",
+      "nominal_size_m": [
+        0.5,
+        0.5
+      ],
+      "renderers": [
+        "rt"
+      ],
+      "dependencies": [],
+      "auxiliary": false,
+      "geometry_notes": "For a hollow bubble, bind SoapBubbleInterior to a separate inward-facing inner shell.",
+      "auxiliary_resources": [
+        "SoapBubbleInterior"
+      ]
+    },
+    {
+      "name": "SoapBubbleInterior",
+      "category": "thin-film",
+      "description": "Inward-facing auxiliary layer for a hollow soap film",
+      "nominal_size_m": [
+        0.5,
+        0.5
+      ],
+      "renderers": [
+        "rt"
+      ],
+      "dependencies": [
+        "SoapBubble"
+      ],
+      "auxiliary": true,
+      "geometry_notes": "Bind to a separately authored inward-facing inner shell.",
+      "auxiliary_resources": []
+    }
+  ],
+  "bundle": {
+    "revision": "ec9f748242c50b85",
+    "source_repository": "https://github.com/DexForce/dexverse",
+    "source_commit": "c31dccd3d4a8ef98367e1a95c92c842e0a773596",
+    "source_path": "modules/dexsim/resources/Material",
+    "upstream_url": "http://192.168.3.120/CoreEngine/DexSim/resources/offlinert_materials.zip",
+    "mirror_path": "materials/default-materials/ec9f748242c50b85/offlinert_materials.zip",
+    "archive_name": "offlinert_materials.zip",
+    "md5": "f9795c6706dbe0540052e0df9b5b835b",
+    "sha256": "ec9f748242c50b85b9a99d068836d7231570dfca51f788b9e005b6022c92623d",
+    "size_bytes": 29949936,
+    "attribution": "DexForce DexSim OfflineRT material collection. Authored source README and manifests are retained unmodified in the downloaded archive. No separate asset license is present in that source archive.",
+    "files": {
+      "Material/AsphaltDark/AsphaltDark_Metallic.png": {
+        "size_bytes": 13922,
+        "sha256": "6dc277ac7171be615c76ca0ffe7a721b2f0692c07b51120a0e28824da4c685ad"
+      },
+      "Material/AsphaltDark/AsphaltDark_Color.png": {
+        "size_bytes": 466078,
+        "sha256": "bea2dd69577b3058c19ef708ee475205a9fd57cc5cc1d7eabea0b904e2b9f2c5"
+      },
+      "Material/AsphaltDark/AsphaltDark_Roughness.png": {
+        "size_bytes": 391237,
+        "sha256": "eff065f9b6a15f484c1abd64b11b0e5718cf903323e3a995085ba82e62879119"
+      },
+      "Material/AsphaltDark/AsphaltDark_Normal.png": {
+        "size_bytes": 2154019,
+        "sha256": "6c99d78194745b907b87eefab4b701c3491fffa7fab0f3d90c76ccecf516baba"
+      },
+      "Material/AsphaltDark/AsphaltDark_AmbientOcclusion.png": {
+        "size_bytes": 675541,
+        "sha256": "07e1298054571e824223e1af8ed6944b511e8db2d152cf6c74e1d4e803613b56"
+      },
+      "Material/BrickRed/BrickRed_AmbientOcclusion.png": {
+        "size_bytes": 85111,
+        "sha256": "dc5c63d3cf26237bdd6043cc92db569cb7ccc8ec5ade8c677eb4fc5e7818251c"
+      },
+      "Material/BrickRed/BrickRed_Normal.png": {
+        "size_bytes": 898525,
+        "sha256": "1bed5717d9bfd699348370599962d22c36b00725bfd0d6b59ca9aa72594b7979"
+      },
+      "Material/BrickRed/BrickRed_Roughness.png": {
+        "size_bytes": 414644,
+        "sha256": "c5d093082d6d4f08f940a9dc0f47db2694b9b0a50ef70eef1c768b3361a2420c"
+      },
+      "Material/BrickRed/BrickRed_Color.png": {
+        "size_bytes": 562205,
+        "sha256": "e9d0e89823ed8ae153a22ea01deefe6eebb7ba94e192b643ae99b374a70b2a55"
+      },
+      "Material/BrickRed/BrickRed_Metallic.png": {
+        "size_bytes": 13922,
+        "sha256": "6dc277ac7171be615c76ca0ffe7a721b2f0692c07b51120a0e28824da4c685ad"
+      },
+      "Material/CeramicTileWhite/CeramicTileWhite_Roughness.png": {
+        "size_bytes": 129300,
+        "sha256": "9d0472faf51b0c1e6c3990ebb5abbc70de6f313eda0b71b352efee2684788247"
+      },
+      "Material/CeramicTileWhite/CeramicTileWhite_Normal.png": {
+        "size_bytes": 168738,
+        "sha256": "566e01fff54e48f42b2002cfd4126be229e8f9f6ed0dc2730119ca4e721bace4"
+      },
+      "Material/CeramicTileWhite/CeramicTileWhite_Color.png": {
+        "size_bytes": 372086,
+        "sha256": "622aad55cef21f88b6dca44075c29c745793f4e4cedd435cd5abfe8bd4fa6d7c"
+      },
+      "Material/CeramicTileWhite/CeramicTileWhite_AmbientOcclusion.png": {
+        "size_bytes": 22670,
+        "sha256": "0bad3852069f50dad9495edc548efd70968b55a1e186e842d39247c264165cb1"
+      },
+      "Material/CeramicTileWhite/CeramicTileWhite_Metallic.png": {
+        "size_bytes": 13922,
+        "sha256": "6dc277ac7171be615c76ca0ffe7a721b2f0692c07b51120a0e28824da4c685ad"
+      },
+      "Material/ChromePolished/ChromePolished_Normal.png": {
+        "size_bytes": 75414,
+        "sha256": "3ef74083f5694fb2f7decba181bc79aec8592d2e9d2c0f247f9f9f3fcb10597f"
+      },
+      "Material/ChromePolished/ChromePolished_Color.png": {
+        "size_bytes": 104437,
+        "sha256": "c0a7d4f30a646773fbb715d61ba444e99593a8523a3a17f7ca408802a76c0bec"
+      },
+      "Material/ChromePolished/material.json": {
+        "size_bytes": 588,
+        "sha256": "0c442d4dc141087ef27faa32ca81e2b5efee16584f741945cb39b721efad553d"
+      },
+      "Material/ChromePolished/ChromePolished_Roughness.png": {
+        "size_bytes": 50171,
+        "sha256": "5c83a706792780a794627228dc82d8cc411f40f52e1e1ff4d23b1f78d5b32376"
+      },
+      "Material/ChromePolished/ChromePolished_AmbientOcclusion.png": {
+        "size_bytes": 15886,
+        "sha256": "bdea23770958f6d6b4e8a984c836c77a28dc867331e4cace68414e9761d85719"
+      },
+      "Material/ChromePolished/ChromePolished_Metallic.png": {
+        "size_bytes": 15886,
+        "sha256": "bdea23770958f6d6b4e8a984c836c77a28dc867331e4cace68414e9761d85719"
+      },
+      "Material/CopperPolished/CopperPolished_Metallic.png": {
+        "size_bytes": 15886,
+        "sha256": "bdea23770958f6d6b4e8a984c836c77a28dc867331e4cace68414e9761d85719"
+      },
+      "Material/CopperPolished/CopperPolished_AmbientOcclusion.png": {
+        "size_bytes": 15886,
+        "sha256": "bdea23770958f6d6b4e8a984c836c77a28dc867331e4cace68414e9761d85719"
+      },
+      "Material/CopperPolished/CopperPolished_Normal.png": {
+        "size_bytes": 75606,
+        "sha256": "e8d51e304169383892367c6927b7b7ff1768fb2c7a3153d91190912994925f03"
+      },
+      "Material/CopperPolished/material.json": {
+        "size_bytes": 588,
+        "sha256": "b40e24ae03f0251b0a1fcd96793e8ba23fb1b136951fc11936fd75328d4ace31"
+      },
+      "Material/CopperPolished/CopperPolished_Roughness.png": {
+        "size_bytes": 51047,
+        "sha256": "a4a574b0dd11dee7e42156311e78ae6deeea7fee359f6c5fbb317eb15be2a3d4"
+      },
+      "Material/CopperPolished/CopperPolished_Color.png": {
+        "size_bytes": 76739,
+        "sha256": "d44db86e838209c2be3c6de226009462d1c082aff015e6a88efa7e555444a266"
+      },
+      "Material/FabricGray/FabricGray_Normal.png": {
+        "size_bytes": 1630990,
+        "sha256": "7086a519f162ddce3a4bad589dad4c906b15c05580a5a8c7b69612ebde55aea6"
+      },
+      "Material/FabricGray/FabricGray_Color.png": {
+        "size_bytes": 809076,
+        "sha256": "adf4f17f9bc682b0aa7ed65386e33984d7522a88ec9304a97790f9343665271c"
+      },
+      "Material/FabricGray/FabricGray_Metallic.png": {
+        "size_bytes": 13922,
+        "sha256": "6dc277ac7171be615c76ca0ffe7a721b2f0692c07b51120a0e28824da4c685ad"
+      },
+      "Material/FabricGray/FabricGray_Roughness.png": {
+        "size_bytes": 91537,
+        "sha256": "0cf32a52d8b13cbf2587ff2b0d09fb1a63cc5a5c4787c28e5097df0c1379b9ca"
+      },
+      "Material/FabricGray/FabricGray_AmbientOcclusion.png": {
+        "size_bytes": 671034,
+        "sha256": "18b830ad44d26c8f24a203cdd6fcebb4d317df0b2b9263f36beb779505f8f719"
+      },
+      "Material/GlassClear/GlassClear_Color.png": {
+        "size_bytes": 65512,
+        "sha256": "6ff83db7f08435e85570f7880aa3c6df0a3f6f974461f1d35427fb2b2d921c24"
+      },
+      "Material/GlassClear/GlassClear_AmbientOcclusion.png": {
+        "size_bytes": 15886,
+        "sha256": "bdea23770958f6d6b4e8a984c836c77a28dc867331e4cace68414e9761d85719"
+      },
+      "Material/GlassClear/GlassClear_Normal.png": {
+        "size_bytes": 252032,
+        "sha256": "5f6c92db4d79ab04b76645c04c6577891912ca53d632e2dea31f8b16b1ba46c2"
+      },
+      "Material/GlassClear/GlassClear_Metallic.png": {
+        "size_bytes": 13922,
+        "sha256": "6dc277ac7171be615c76ca0ffe7a721b2f0692c07b51120a0e28824da4c685ad"
+      },
+      "Material/GlassClear/material.json": {
+        "size_bytes": 727,
+        "sha256": "27a838dc38fdac24a1b3e863e1e9be29d069fafb1a32b7325661c69bb52c02b1"
+      },
+      "Material/GlassClear/GlassClear_Roughness.png": {
+        "size_bytes": 68873,
+        "sha256": "d3dbd730411489ffa27036c9af60eea8ad90c8b897142721c6c78aa0a3f6b2e8"
+      },
+      "Material/GlassFrosted/GlassFrosted_Roughness.png": {
+        "size_bytes": 447338,
+        "sha256": "6c2beba522e89035c8bbeac0eff8af15bbbd5973e8ba12cc2071608c05017c32"
+      },
+      "Material/GlassFrosted/GlassFrosted_Normal.png": {
+        "size_bytes": 1194686,
+        "sha256": "cdd2236c318afdd65f485b3c7c2a8994dbb8903bf7cc273d99a0f3fdda34630d"
+      },
+      "Material/GlassFrosted/material.json": {
+        "size_bytes": 736,
+        "sha256": "989915da70644307eabf04c124a94f89b98d764c27b0c4597a53d595e7d8e0dd"
+      },
+      "Material/GlassFrosted/GlassFrosted_Metallic.png": {
+        "size_bytes": 13922,
+        "sha256": "6dc277ac7171be615c76ca0ffe7a721b2f0692c07b51120a0e28824da4c685ad"
+      },
+      "Material/GlassFrosted/GlassFrosted_AmbientOcclusion.png": {
+        "size_bytes": 239848,
+        "sha256": "1f68a1a0f666af54a7e03dcf7b28b9dbf6bc6ba4bfb86e0b1a7359e7cc509ad2"
+      },
+      "Material/GlassFrosted/GlassFrosted_Color.png": {
+        "size_bytes": 478134,
+        "sha256": "473de77fc1435254292c1c225fb8bc0a95e8b0a74bf2db12ed758cce84dec48b"
+      },
+      "Material/GlassSmoke/GlassSmoke_AmbientOcclusion.png": {
+        "size_bytes": 15886,
+        "sha256": "bdea23770958f6d6b4e8a984c836c77a28dc867331e4cace68414e9761d85719"
+      },
+      "Material/GlassSmoke/GlassSmoke_Metallic.png": {
+        "size_bytes": 13922,
+        "sha256": "6dc277ac7171be615c76ca0ffe7a721b2f0692c07b51120a0e28824da4c685ad"
+      },
+      "Material/GlassSmoke/GlassSmoke_Roughness.png": {
+        "size_bytes": 41208,
+        "sha256": "516966964eea378c08ae7774cc6fdd8d08151e6098d4d299945acd0f6fd81179"
+      },
+      "Material/GlassSmoke/GlassSmoke_Normal.png": {
+        "size_bytes": 31503,
+        "sha256": "13290872674bd8d589e41573f1693f61c8f849509d22b1317363b8615ad1c9f8"
+      },
+      "Material/GlassSmoke/GlassSmoke_Color.png": {
+        "size_bytes": 266645,
+        "sha256": "5c491910029480e132751a7b0ef30fa21d3a056a86cfc1da22ad261cabca35c4"
+      },
+      "Material/GlassSmoke/material.json": {
+        "size_bytes": 715,
+        "sha256": "0e451e3b6234cb7b96e9ee6ae3ce425a1735b28eff7eb72cb7f12eae825380e9"
+      },
+      "Material/GoldPolished/GoldPolished_Color.png": {
+        "size_bytes": 85516,
+        "sha256": "70fe1ac0c815a9ab30ff26316e877f3a1d182feb3e646f1c65d458ef82b3ebd3"
+      },
+      "Material/GoldPolished/material.json": {
+        "size_bytes": 581,
+        "sha256": "0494435ed2afbff44e72e2fd3033728399c431218fd4696da79152bfb40e900c"
+      },
+      "Material/GoldPolished/GoldPolished_Metallic.png": {
+        "size_bytes": 15886,
+        "sha256": "bdea23770958f6d6b4e8a984c836c77a28dc867331e4cace68414e9761d85719"
+      },
+      "Material/GoldPolished/GoldPolished_AmbientOcclusion.png": {
+        "size_bytes": 15886,
+        "sha256": "bdea23770958f6d6b4e8a984c836c77a28dc867331e4cace68414e9761d85719"
+      },
+      "Material/GoldPolished/GoldPolished_Roughness.png": {
+        "size_bytes": 51250,
+        "sha256": "9e9d43ab5258510ef0a7415dd58a3f02e921418a868ef9552d9f0ecd8480868f"
+      },
+      "Material/GoldPolished/GoldPolished_Normal.png": {
+        "size_bytes": 77243,
+        "sha256": "5ba353c25e94a19bb5f2e39dee0592381c307eebadb4a020d8a21f1f0d4ad2f6"
+      },
+      "Material/LeatherBrown/LeatherBrown_Color.png": {
+        "size_bytes": 806290,
+        "sha256": "e7bc2d28da759fdc913957fb5153016be17b90eb750acdb9d22d775360bb5964"
+      },
+      "Material/LeatherBrown/LeatherBrown_Roughness.png": {
+        "size_bytes": 568256,
+        "sha256": "ff7ca26cc10953d75c92f46e095138000eaef1c898332db07e944f3ea932b3e3"
+      },
+      "Material/LeatherBrown/LeatherBrown_Normal.png": {
+        "size_bytes": 2081908,
+        "sha256": "48ccd2055fba5e13d762fc38fab4863f726725ac7d2e751b8c48a9c61a6d5bfa"
+      },
+      "Material/LeatherBrown/LeatherBrown_AmbientOcclusion.png": {
+        "size_bytes": 600787,
+        "sha256": "86a870c4b81d8de4469c66fef116f8d2b7569f880d4972f0cd06ea63a4aca077"
+      },
+      "Material/LeatherBrown/LeatherBrown_Metallic.png": {
+        "size_bytes": 13922,
+        "sha256": "6dc277ac7171be615c76ca0ffe7a721b2f0692c07b51120a0e28824da4c685ad"
+      },
+      "Material/MarbleWhite/MarbleWhite_Metallic.png": {
+        "size_bytes": 13922,
+        "sha256": "6dc277ac7171be615c76ca0ffe7a721b2f0692c07b51120a0e28824da4c685ad"
+      },
+      "Material/MarbleWhite/MarbleWhite_AmbientOcclusion.png": {
+        "size_bytes": 184011,
+        "sha256": "1d9e608a2df6507cc61c1d411e5408a0f85f214b64297f777b400bd9ed4a581b"
+      },
+      "Material/MarbleWhite/MarbleWhite_Color.png": {
+        "size_bytes": 621517,
+        "sha256": "abda3d9b580bfff628d646d51ab1eda7ae91d97a63d84164b7b30c4372436026"
+      },
+      "Material/MarbleWhite/MarbleWhite_Roughness.png": {
+        "size_bytes": 274246,
+        "sha256": "0923211c80300550b56071c7c14842db9820274413b19916de914c398cbfb960"
+      },
+      "Material/MarbleWhite/MarbleWhite_Normal.png": {
+        "size_bytes": 500754,
+        "sha256": "915aeb7392a1d7d07a96e7136f5cadbd0d5596933fe48fced56b8b9eaab1e5e9"
+      },
+      "Material/PlasticABSBlack/PlasticABSBlack_Normal.png": {
+        "size_bytes": 1049698,
+        "sha256": "e8a485e73cbb5e7945fa8d34544f4d84816f9b82807736eeb46e745379e6513b"
+      },
+      "Material/PlasticABSBlack/PlasticABSBlack_Roughness.png": {
+        "size_bytes": 445656,
+        "sha256": "11d0b71bde236cbc6012da93d75fe0ab99b48c67e3cf08c3caa0cf300b4c32fa"
+      },
+      "Material/PlasticABSBlack/PlasticABSBlack_Color.png": {
+        "size_bytes": 184591,
+        "sha256": "e8d5deda3a482651222bc81780357c0d88e10e397a5bfa06a9d04d199aad248f"
+      },
+      "Material/PlasticABSBlack/PlasticABSBlack_AmbientOcclusion.png": {
+        "size_bytes": 335027,
+        "sha256": "8b173f7f8f2ef1127b89221d6b8590ec96063d0fb670d19169d7f1d5046f3dd0"
+      },
+      "Material/PlasticABSBlack/PlasticABSBlack_Metallic.png": {
+        "size_bytes": 13922,
+        "sha256": "6dc277ac7171be615c76ca0ffe7a721b2f0692c07b51120a0e28824da4c685ad"
+      },
+      "Material/RubberBlack/RubberBlack_AmbientOcclusion.png": {
+        "size_bytes": 430869,
+        "sha256": "fc706946fa890601e9c0ad132a61f7b19ec7c9cb6b680fb7fcf67e4ec3bb58ac"
+      },
+      "Material/RubberBlack/RubberBlack_Roughness.png": {
+        "size_bytes": 421041,
+        "sha256": "225277d265b364626d17b34049fea19fa3754150c1e1fe30b33eef89d929a3e8"
+      },
+      "Material/RubberBlack/RubberBlack_Metallic.png": {
+        "size_bytes": 13922,
+        "sha256": "6dc277ac7171be615c76ca0ffe7a721b2f0692c07b51120a0e28824da4c685ad"
+      },
+      "Material/RubberBlack/RubberBlack_Normal.png": {
+        "size_bytes": 1960731,
+        "sha256": "01798359c3ee69383fa45648c73fb738c11ad7bafe202dd28caa14cc8e289887"
+      },
+      "Material/RubberBlack/RubberBlack_Color.png": {
+        "size_bytes": 276578,
+        "sha256": "a7b9c2e1894e1ce6401d7061502b5e672dd56b82f44dbe3f5c8befd57d3404d9"
+      },
+      "Material/SkinHumanLight/SkinHumanLight_AmbientOcclusion.png": {
+        "size_bytes": 153206,
+        "sha256": "f598b68ec9115fc7b6b27b281bc68aada28687fd8c0791a73ca74f1911c2577a"
+      },
+      "Material/SkinHumanLight/SkinHumanLight_Roughness.png": {
+        "size_bytes": 549626,
+        "sha256": "30e940d268b970a03dfdd7cb63628cfbc06acda6aa9d22b584329085cf0b75be"
+      },
+      "Material/SkinHumanLight/SkinHumanLight_Color.png": {
+        "size_bytes": 195646,
+        "sha256": "ce5bacdcd87a1e8784ef2191e960119bd8738d906c7e85f9722557f31c1ae97a"
+      },
+      "Material/SkinHumanLight/material.json": {
+        "size_bytes": 861,
+        "sha256": "a2ff37eb591a8275e955f027b4817f9f247b853169e7ac4a8304e8e87d67286c"
+      },
+      "Material/SkinHumanLight/SkinHumanLight_Normal.png": {
+        "size_bytes": 526198,
+        "sha256": "9f64070801c85286d44557b7572d36bf0456d3b2161190a292abb34149011768"
+      },
+      "Material/SkinHumanLight/SkinHumanLight_Metallic.png": {
+        "size_bytes": 13922,
+        "sha256": "6dc277ac7171be615c76ca0ffe7a721b2f0692c07b51120a0e28824da4c685ad"
+      },
+      "Material/SoapBubble/SoapBubble_Normal.png": {
+        "size_bytes": 781481,
+        "sha256": "50e93086ae22c4e89cc64a78259afe60b10d16f1a53e1d99e92c75eab7a669a2"
+      },
+      "Material/SoapBubble/SoapBubble_Metallic.png": {
+        "size_bytes": 13922,
+        "sha256": "6dc277ac7171be615c76ca0ffe7a721b2f0692c07b51120a0e28824da4c685ad"
+      },
+      "Material/SoapBubble/SoapBubble_Color.png": {
+        "size_bytes": 29583,
+        "sha256": "38524c66c715c56f768df86d3d0f1eacf40b093cc1bba12246d1169ce131f529"
+      },
+      "Material/SoapBubble/SoapBubble_IridescenceColor.png": {
+        "size_bytes": 666142,
+        "sha256": "478be3eaeaab24c4c7a09f577a0ad68501c195df16f132136d9b151f0dfc814c"
+      },
+      "Material/SoapBubble/material.json": {
+        "size_bytes": 1124,
+        "sha256": "eae22fa44d9f417a595064f246e27b39ab5fded9b92a059821b0d4d5b86f7c9f"
+      },
+      "Material/SoapBubble/SoapBubble_IridescenceThickness.png": {
+        "size_bytes": 180816,
+        "sha256": "49393f845fd93248fa434ebe795d15517d41560bec19f36ddc81cd6e65a1d7ac"
+      },
+      "Material/SoapBubble/SoapBubble_AmbientOcclusion.png": {
+        "size_bytes": 15886,
+        "sha256": "bdea23770958f6d6b4e8a984c836c77a28dc867331e4cace68414e9761d85719"
+      },
+      "Material/SoapBubbleInterior/material.json": {
+        "size_bytes": 1076,
+        "sha256": "aff09dae47233767fea6a8297c9f0abec8a9c483b72f70420c73ff07b8aaa4b8"
+      },
+      "Material/SteelBrushed/SteelBrushed_AmbientOcclusion.png": {
+        "size_bytes": 31509,
+        "sha256": "cffd780fa1c0414c4d828c7a6c2e53354b1ab48c16af8c799143ce5a26592970"
+      },
+      "Material/SteelBrushed/SteelBrushed_Normal.png": {
+        "size_bytes": 230534,
+        "sha256": "1982a6e85e0aa6db4b2187cde28c2a6ec48eba1cdb168d94c7e906b604330a02"
+      },
+      "Material/SteelBrushed/SteelBrushed_Metallic.png": {
+        "size_bytes": 15886,
+        "sha256": "bdea23770958f6d6b4e8a984c836c77a28dc867331e4cace68414e9761d85719"
+      },
+      "Material/SteelBrushed/SteelBrushed_Roughness.png": {
+        "size_bytes": 119608,
+        "sha256": "6dd65d00276f083e5728dd41b50bcfb61445b98bdb3c5d808921d254bd0e8337"
+      },
+      "Material/SteelBrushed/SteelBrushed_Color.png": {
+        "size_bytes": 123807,
+        "sha256": "dad42a69cda26582a9ed64d5818f365d2502ecc3b4548b3a03e86c1f1ad56bc9"
+      },
+      "Material/WoodOak/WoodOak_Metallic.png": {
+        "size_bytes": 13922,
+        "sha256": "6dc277ac7171be615c76ca0ffe7a721b2f0692c07b51120a0e28824da4c685ad"
+      },
+      "Material/WoodOak/WoodOak_Color.png": {
+        "size_bytes": 785857,
+        "sha256": "560fde97a88c8df04a014c859e97fb7f00311dc0498c647045dd281c0452dea5"
+      },
+      "Material/WoodOak/WoodOak_Roughness.png": {
+        "size_bytes": 359902,
+        "sha256": "a4dd93885fc25200e951afbbe42571fd11a1b8b4e1e1a1f596ea6f019085d85f"
+      },
+      "Material/WoodOak/WoodOak_Normal.png": {
+        "size_bytes": 1014975,
+        "sha256": "4dd202105de185d904d08e5a8b20fd4d40e8c9b7c68a96e0fe80fa1553e4e8ff"
+      },
+      "Material/WoodOak/WoodOak_AmbientOcclusion.png": {
+        "size_bytes": 277161,
+        "sha256": "0ad7dcf106c992d0c008279fea67a17817530496213880b3885ea748c67b4794"
+      },
+      "Material/catalog.json": {
+        "size_bytes": 3975,
+        "sha256": "cc0c8f227a26562d2f91f0b0844099af22e6ed44211a7c4b78d3f7328ce2059e"
+      },
+      "Material/README.md": {
+        "size_bytes": 4224,
+        "sha256": "382908eacc9a673d7ae86b53b969b921b3bb85852c9e6a7401da05fbacdf676a"
+      }
+    }
+  }
+}

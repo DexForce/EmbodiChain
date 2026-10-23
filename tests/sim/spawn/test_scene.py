@@ -629,3 +629,23 @@ def test_replacement_declaration_does_not_attach_uncommitted_old_handle() -> Non
     scene.builder.has_pending_changes = False
     scene.bind()
     assert facade._entities == [new_handle]
+
+
+def test_no_render_retains_visual_declaration_without_native_transform_binding():
+    scene = _make_scene({})
+    scene._material_resources = SimpleNamespace(renderer="no-render")
+    facade = MagicMock()
+    facade.is_declared = True
+    scene.builder.add_object = MagicMock()
+    scene.declare(
+        "visual_object", "visual", SimpleNamespace(name="visual"), facade=facade
+    )
+
+    scene.bind()
+
+    facade.bind_spawn.assert_not_called()
+    facade.attach_spawn_handles.assert_not_called()
+    scene.builder.add_object.assert_not_called()
+    assert "visual" in scene._assets
+    scene.remove("visual")
+    assert "visual" not in scene._assets

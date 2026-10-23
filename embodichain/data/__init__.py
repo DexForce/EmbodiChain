@@ -16,6 +16,8 @@
 
 """Dataset resolution, asset-download helpers, preset asset registries, and shared constants/enums used by simulation tasks and training pipelines."""
 
+from __future__ import annotations
+
 import os
 
 from .constants import EMBODICHAIN_DEFAULT_DATABASE_ROOT
@@ -27,3 +29,4 @@ database_demo_dir = os.path.join(database_dir, "demostration")
 
 from . import assets
 from .dataset import *
+from .default_materials import list_default_materials, get_default_material_info

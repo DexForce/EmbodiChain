@@ -728,6 +728,7 @@ class SimulationManager:
             self._world,
             num_envs=sim_config.num_envs,
             spacing=(sim_config.arena_space, sim_config.arena_space, 0.0),
+            renderer=sim_config.render_cfg.renderer,
         )
         self._arenas = list(self._spawn_scene.builder.prepare_arenas())
         self._prepared_spawn_topology_revision = -1
@@ -4819,7 +4820,7 @@ class SimulationManager:
         cfg = cfg.replace(uid=cfg.uid or f"visual_material_{uuid4().hex}")
         descriptor = _material_desc_from_cfg(cfg, cfg.uid)
         definitions = self._spawn_scene.builder.materials
-        registered = definitions.get(cfg.uid)
+        registered = self._spawn_scene._material_definition(cfg.uid)
         if registered is not None and registered != descriptor:
             raise ValueError(f"Conflicting visual material definition for {cfg.uid!r}.")
         if cfg.uid in self._visual_materials:
@@ -4830,13 +4831,19 @@ class SimulationManager:
                 )
             return existing
 
-        mat: Material | None = self._env.find_material(cfg.uid)
-        initialize_default = mat is None or registered is None
-        if mat is None:
-            mat = self._env.create_pbr_material(cfg.uid, True)
-        visual_mat = VisualMaterial(cfg, mat, initialize_default=initialize_default)
-
-        definitions[cfg.uid] = descriptor
+        if cfg.preset is not None or cfg.parameters:
+            self._spawn_scene._resolve_materials({cfg.uid: descriptor})
+            mat, native_inst = self._spawn_scene._material_resources.resolve(descriptor)
+            visual_mat = VisualMaterial(
+                cfg, mat, initialize_default=False, mat_inst=native_inst
+            )
+        else:
+            mat: Material | None = self._env.find_material(cfg.uid)
+            initialize_default = mat is None or registered is None
+            if mat is None:
+                mat = self._env.create_pbr_material(cfg.uid, True)
+            visual_mat = VisualMaterial(cfg, mat, initialize_default=initialize_default)
+            definitions[cfg.uid] = descriptor
         self._visual_materials[cfg.uid] = visual_mat
         return visual_mat
 
@@ -4923,7 +4930,7 @@ class SimulationManager:
                 else:
                     articulation.reset(env_ids)
         for uid, visual in getattr(self, "_visual_objects", {}).items():
-            if uid not in excluded_uids:
+            if uid not in excluded_uids and visual.is_spawn_bound:
                 visual.reset(env_ids)
         for uid, rigid_obj in self._rigid_objects.items():
             if uid not in excluded_uids:

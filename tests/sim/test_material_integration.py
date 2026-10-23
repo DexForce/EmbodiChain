@@ -240,3 +240,105 @@ def test_native_material_creation_reset_and_topology_rebuild(physics):
         sim.destroy(exit_process=False)
         del obj, other, runtime
         SimulationManager.flush_cleanup_queue()
+
+
+@pytest.mark.parametrize("physics", ["default", "newton"])
+def test_native_preset_identity_reset_and_rebuild(physics):
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            device="cpu",
+            num_envs=2,
+            scene_node_capacity=128,
+            physics_cfg=physics_cfg_for_backend(physics),
+            render_cfg=RenderCfg(renderer="hybrid"),
+        )
+    )
+    cfg = VisualMaterialCfg.from_preset(
+        "BrickRed", uid="brick", ior=1.6, roughness=0.25
+    )
+    obj = runtime = other = child = extra = selected = alias = None
+    try:
+        # Inline first, then runtime creation borrows the exact current handle.
+        obj = sim.add_rigid_object(
+            RigidObjectCfg(
+                uid="brick_shape",
+                body_type="static",
+                init_pos=(0, 0, 0.5),
+                shape=CubeCfg(size=(0.1, 0.1, 0.1), visual_material=cfg),
+            )
+        )
+        sim.prepare()
+        original_ids = [m.mat.get_material_id() for m in obj.get_visual_material_inst()]
+        assert obj.get_visual_material_inst()[0].ior == pytest.approx(1.6)
+        obj.get_visual_material_inst()[0].set_roughness(0.55)
+        runtime = sim.create_visual_material(cfg)
+        assert runtime.inst.mat.get_material_id() == original_ids[0]
+        assert runtime.inst.roughness == pytest.approx(0.55)
+        # Equivalent UIDs share immutable native templates, with separate children.
+        other = sim.create_visual_material(cfg.replace(uid="other_brick"))
+        assert other.inst.mat.get_material_id() != runtime.inst.mat.get_material_id()
+        assert other.inst.roughness == pytest.approx(0.25)
+        assert runtime.mat.get_inst().get_roughness() == pytest.approx(0.25)
+        assert (
+            other.mat.get_inst().get_material_id()
+            == runtime.mat.get_inst().get_material_id()
+        )
+        child = runtime.create_instance("other_brick")
+        assert child.mat.get_material_id() != other.inst.mat.get_material_id()
+        child.set_ior(2.0)
+        child.mat.set_transmission(0.75)
+        assert child.mat.get_transmission() == pytest.approx(0.75)
+        runtime.set_default_properties(child, cfg)
+        assert child.ior == pytest.approx(1.6)
+        # The authored legacy template leaves transmission unset (native None).
+        assert child.mat.get_transmission() is None
+        count = runtime.mat.inst_count()
+        for _ in range(1025):
+            assert runtime.create_instance("other_brick") is child
+            assert sim.create_visual_material(cfg) is runtime
+        assert runtime.mat.inst_count() == count
+        with pytest.raises(ValueError, match="Conflicting visual material"):
+            sim.create_visual_material(cfg.replace(ior=1.7))
+        # Runtime first, then a Spawn declaration binds that exact child.
+        alias = sim.add_visual_object(
+            VisualObjectCfg(
+                uid="runtime_alias",
+                shape=CubeCfg(
+                    size=(0.1, 0.1, 0.1), visual_material=cfg.replace(uid="other_brick")
+                ),
+            )
+        )
+        assert (
+            alias.get_visual_material_inst()[0].mat.get_material_id()
+            == other.inst.mat.get_material_id()
+        )
+        obj.set_visual_material(other, [1])
+        selected = obj.get_visual_material_inst([1])[0]
+        assert (
+            other.get_instance(selected.uid).mat.get_material_id()
+            == selected.mat.get_material_id()
+        )
+        selected_id = selected.mat.get_material_id()
+        extra = sim.add_visual_object(
+            VisualObjectCfg(uid="extra_preset", shape=CubeCfg(size=(0.1, 0.1, 0.1)))
+        )
+        assert obj.get_visual_material_inst([1])[0].mat.get_material_id() == selected_id
+        obj.reset([1])
+        assert [
+            m.mat.get_material_id() for m in obj.get_visual_material_inst()
+        ] == original_ids
+        assert sim.remove_asset("extra_preset")
+        sim.prepare()
+        assert [
+            m.mat.get_material_id() for m in obj.get_visual_material_inst()
+        ] == original_ids
+        # Native cleanup preserves reserved definitions and live resource state.
+        sim.clean_materials()
+        runtime = sim.create_visual_material(cfg)
+        assert runtime.inst.roughness == pytest.approx(0.55)
+        assert runtime.inst.mat.get_material_id() == original_ids[0]
+    finally:
+        sim.destroy(exit_process=False)
+        del obj, runtime, other, child, extra, selected, alias
+        SimulationManager.flush_cleanup_queue()

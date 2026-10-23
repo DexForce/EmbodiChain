@@ -24,7 +24,7 @@ import numpy as np
 
 from dataclasses import dataclass
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from dexsim.engine import MaterialInst, Material
@@ -32,6 +32,7 @@ from embodichain.utils import configclass, logger
 
 if TYPE_CHECKING:
     from dexsim.spawn import MaterialDesc
+    from ._material_presets import _AssetMaterialDesc
 
 __all__ = [
     "VisualMaterialCfg",
@@ -43,24 +44,31 @@ __all__ = [
 
 @configclass
 class VisualMaterialCfg:
-    """Configuration for visual material with PBR properties for rasterization and ray tracing."""
+    """Manual PBR properties or explicit overrides of a default material preset.
+
+    With ``preset=None``, unspecified common fields receive the historical
+    defaults at construction. With a preset, ``None`` inherits the authored
+    resource value. Serialization retains that distinction. Use
+    :meth:`from_preset` to construct a new preset configuration; ``replace``
+    preserves existing fields rather than switching configuration sources.
+    """
 
     uid: str | None = None
     """Explicit shared identity, or None for an automatically named material."""
 
     # Basic PBR properties
-    base_color: list[float] = [0.5, 0.5, 0.5, 1.0]
+    base_color: list[float] | None = None
     """Base color/diffuse color (RGBA)"""
 
-    metallic: float = 0.0
+    metallic: float | None = None
     """Metallic factor (0.0 = dielectric, 1.0 = metallic)"""
 
-    roughness: float = 0.7
+    roughness: float | None = None
     """Surface roughness (0.0 = smooth, 1.0 = rough)"""
 
     # Additional PBR properties
-    emissive: list[float] = [0.0, 0.0, 0.0]  # Emissive color (RGB)
-    emissive_intensity: float = 1.0  # Emissive intensity multiplier
+    emissive: list[float] | None = None  # Emissive color (RGB)
+    emissive_intensity: float | None = None  # Emissive intensity multiplier
 
     # Texture maps
     base_color_texture: str | None = None
@@ -79,25 +87,95 @@ class VisualMaterialCfg:
     """Ambient occlusion map"""
 
     # Ray tracing specific properties
-    ior: float = 1.5
+    ior: float | None = None
     """Index of refraction for PBR materials, only used in ray tracing."""
 
-    material_type: str = "BRDF"
+    material_type: str | None = None
     """Ray tracing material type. Options: 'BRDF', 'BTDF', 'BSDF'"""
 
-    # Currently disabled properties
-    # subsurface: float = 0.0  # Subsurface scattering factor
-    # subsurface_color: list = [1.0, 1.0, 1.0]  # Subsurface scattering color
+    preset: str | None = None
+    """Default material name. Presets select scattering from native parameters."""
+
+    parameters: dict[str, Any] = {}
+    """Native schema-v1 advanced parameters; cannot duplicate common fields."""
+
+    def __post_init__(self) -> None:
+        if self.preset is None:
+            defaults = {
+                "base_color": [0.5, 0.5, 0.5, 1.0],
+                "metallic": 0.0,
+                "roughness": 0.7,
+                "emissive": [0.0, 0.0, 0.0],
+                "emissive_intensity": 1.0,
+                "ior": 1.5,
+                "material_type": "BRDF",
+            }
+            for key, value in defaults.items():
+                if getattr(self, key) is None:
+                    setattr(self, key, copy.deepcopy(value))
+        else:
+            from ._material_presets import _asset_desc_from_cfg
+
+            _asset_desc_from_cfg(self, self.uid or "preset")
 
     @classmethod
-    def from_dict(cls, cfg_dict: dict) -> VisualMaterialCfg:
-        base = cls()
+    def from_preset(
+        cls,
+        name: str,
+        *,
+        uid: str | None = None,
+        parameters: dict[str, Any] | None = None,
+        **properties: Any,
+    ) -> VisualMaterialCfg:
+        """Construct explicit overrides of an authored default material.
+
+        Args:
+            name: Case-sensitive catalog name, or ``SoapBubbleInterior``.
+            uid: Optional shared identity within the simulation World.
+            parameters: Advanced native parameters, such as volume absorption.
+            **properties: Common fields such as ``ior`` or ``roughness``.
+
+        Returns:
+            A configuration retaining ``None`` for inherited common fields.
+
+        Raises:
+            ValueError: A preset, override, duplicate property or texture edit
+                is invalid. ``material_type`` is unavailable for presets.
+        """
+        from embodichain.data.default_materials import get_default_material_info
+
+        get_default_material_info(name)
+        return cls(
+            preset=name,
+            uid=uid,
+            parameters={} if parameters is None else parameters,
+            **properties,
+        )
+
+    @classmethod
+    def from_dict(cls, cfg_dict: dict[str, Any]) -> VisualMaterialCfg:
+        """Construct manual defaults or preset overrides from Python/YAML data.
+
+        Args:
+            cfg_dict: Serialized configuration, including optional ``preset``.
+
+        Returns:
+            Configuration with inheritance preserved before defaults are filled.
+        """
+        from dataclasses import fields
+
+        names = {item.name for item in fields(cls)}
+        values = {}
         for k, v in cfg_dict.items():
-            if hasattr(base, k):
-                setattr(base, k, v)
+            if k in names:
+                values[k] = v
             else:
+                if cfg_dict.get("preset") is not None:
+                    raise ValueError(
+                        f"Unknown field {k!r} in preset VisualMaterialCfg."
+                    )
                 logger.log_warning(f"Unknown field '{k}' in VisualMaterialCfg.")
-        return base
+        return cls(**values)
 
 
 _MATERIAL_TYPES = {
@@ -126,14 +204,26 @@ def _material_color(value: Sequence[float], name: str, size: int) -> tuple[float
     return tuple(_material_scalar(v, name) for v in value)
 
 
-def _material_desc_from_cfg(cfg: VisualMaterialCfg, uid: str) -> MaterialDesc:
+def _material_desc_from_cfg(
+    cfg: VisualMaterialCfg, uid: str
+) -> MaterialDesc | _AssetMaterialDesc:
     """Normalize both declaration and runtime material creation at one boundary."""
     from dexsim.spawn import MaterialDesc
 
     if not isinstance(uid, str) or not uid.strip():
         raise ValueError("Visual material uid must be a nonempty string.")
+    if not isinstance(cfg.parameters, dict):
+        raise ValueError("Visual material parameters must be a dictionary.")
+    if cfg.preset is not None:
+        from ._material_presets import _asset_desc_from_cfg
+
+        return _asset_desc_from_cfg(cfg, uid)
     if cfg.material_type not in _MATERIAL_TYPES:
         raise ValueError(f"Invalid visual material_type {cfg.material_type!r}.")
+    if cfg.parameters:
+        from ._material_presets import _asset_desc_from_cfg
+
+        return _asset_desc_from_cfg(cfg, uid)
     color = _material_color(cfg.base_color, "base_color (RGBA)", 4)
     _material_scalar(color[3], "base_color alpha", upper=1.0)
     emissive = _material_color(cfg.emissive, "emissive (RGB)", 3)
@@ -177,7 +267,12 @@ class VisualMaterial:
     MAT_TYPE_MAPPING: dict[str, str] = _MATERIAL_TYPES
 
     def __init__(
-        self, cfg: VisualMaterialCfg, mat: Material, *, initialize_default: bool = True
+        self,
+        cfg: VisualMaterialCfg,
+        mat: Material,
+        *,
+        initialize_default: bool = True,
+        mat_inst: MaterialInst | None = None,
     ) -> None:
         """Create a template wrapper or borrow an already configured native one.
 
@@ -186,22 +281,33 @@ class VisualMaterial:
             mat: Native template owned by the simulation.
             initialize_default: Apply configuration to the native default instance.
                 Disable for a known existing template to preserve runtime edits.
+            mat_inst: Exact child instance of an immutable native resource template.
         """
         self.uid = cfg.uid or f"visual_material_{uuid4().hex}"
-        _material_desc_from_cfg(cfg, self.uid)
+        self._definition = _material_desc_from_cfg(cfg, self.uid)
+        self._uses_manifest = cfg.preset is not None or bool(cfg.parameters)
         self.cfg = copy.deepcopy(cfg)
         self.cfg.uid = self.uid
         self._mat = mat
         self._instances: dict[str, VisualMaterialInst] = {}
+        self._native_instance_aliases: dict[str, VisualMaterialInst] = {}
 
         # Spawn resolves a named template through its native default instance.
         # Keep that entry configured too when runtime and declarations share a UID.
+        if mat_inst is None and self._uses_manifest:
+            mat_inst = self._mat.get_inst(f"ec_instance_{uuid4().hex}")
         self._default_mat_inst = VisualMaterialInst(
-            self.uid, self._mat, mat_inst=self._mat.get_inst()
+            self.uid,
+            self._mat,
+            mat_inst=mat_inst if mat_inst is not None else self._mat.get_inst(),
         )
-        if initialize_default:
+        if initialize_default and not self._uses_manifest:
             self.set_default_properties(self._default_mat_inst, self.cfg)
         self._instances[self.uid] = self._default_mat_inst
+        if self._uses_manifest:
+            self._native_instance_aliases[self._default_mat_inst.mat.get_name()] = (
+                self._default_mat_inst
+            )
 
     @property
     def mat(self) -> Material:
@@ -221,6 +327,20 @@ class VisualMaterial:
             cfg: Material properties to apply.
         """
         desc = _material_desc_from_cfg(cfg, self.uid)
+        if self._uses_manifest:
+            if desc != self._definition:
+                raise ValueError(
+                    "Resource material reset requires its original definition; create a variant before binding."
+                )
+            self._mat.reset_inst(mat_inst.mat)
+            mat_inst._emissive_rgb = None
+            mat_inst._emissive_intensity = 1.0
+            mat_inst.base_color_texture = mat_inst.mat.get_base_color_map()
+            mat_inst.metallic_texture = None
+            mat_inst.roughness_texture = None
+            mat_inst.normal_texture = None
+            mat_inst.ao_texture = None
+            return
         mat_inst.set_base_color(desc.base_color)
         mat_inst.set_metallic(desc.metallic)
         mat_inst.set_roughness(desc.roughness)
@@ -249,9 +369,20 @@ class VisualMaterial:
         """
         if uid in self._instances:
             return self._instances[uid]
-        inst = VisualMaterialInst(uid, self._mat)
-        self.set_default_properties(inst, self.cfg)
+        if self._uses_manifest:
+            # Distinct public templates may share a native immutable template.
+            # Keep child names private so their user-provided UIDs cannot alias.
+            inst = VisualMaterialInst(
+                uid,
+                self._mat,
+                mat_inst=self._mat.get_inst(f"ec_instance_{uuid4().hex}"),
+            )
+        else:
+            inst = VisualMaterialInst(uid, self._mat)
+            self.set_default_properties(inst, self.cfg)
         self._instances[uid] = inst
+        if self._uses_manifest:
+            self._native_instance_aliases[inst.mat.get_name()] = inst
         return inst
 
     def get_default_instance(self) -> VisualMaterialInst:
@@ -271,6 +402,10 @@ class VisualMaterial:
         Returns:
             VisualMaterialInst: The material instance.
         """
+        if uid in self._instances:
+            return self._instances[uid]
+        if uid in self._native_instance_aliases:
+            return self._native_instance_aliases[uid]
         if uid not in self._instances:
             logger.log_error(f"Material instance with uid '{uid}' does not exist.")
         return self._instances[uid]

@@ -3,8 +3,30 @@
 `embodichain/lab/sim/material.py` owns `VisualMaterialCfg`, material templates,
 native instance wrappers and segment assignment helpers. Its private
 `_material_desc_from_cfg()` validates and normalizes both runtime creation and
-`spawn/descriptors.py` lowering. Keep material type and emission semantics at
-this shared boundary rather than duplicating conversion in callers.
+`spawn/descriptors.py` lowering. Handwritten configurations fill historical
+defaults during construction. Preset configurations keep unspecified fields
+as `None`; only explicit values override resources. `from_dict()` constructs in
+that mode before filling defaults. Do not infer override intent from equality
+with a default, or modify generic `configclass` for this policy.
+
+`_material_presets.py` owns validated schema-v1 overrides, renderer preflight and
+World-scoped manifest/template caches. `SpawnScene._resolve_materials()` shares
+that path with runtime creation. Its resource definition registry reserves UIDs
+alongside native Spawn's simplified material registry; full resource definitions
+must not pass through the simplified `MaterialDesc` initializer. Bind the exact
+loaded child on `RenderDesc.material`, including across rebuilds. NoRender keeps
+resource definitions without downloading or creating native materials. Render-only
+facades stay declared and are skipped by runtime binding/reset in that mode.
+
+Resource templates remain immutable. Each public UID and instance receives a
+separate child; canonical revision/preset/overrides select shared templates.
+Stage parameter variations before binding and keep texture paths in the shared
+resource cache. Full resource reset uses native `Material.reset_inst()` instead
+of rewriting only common fields. Native model changes after binding and NRD
+resource fixes are outside this contract. Catalog/distribution ownership lives
+in [data assets](../data-assets/data-assets.md); public usage and renderer limits
+are documented in the
+[material API](../../../docs/source/api_reference/embodichain/embodichain.lab.sim.material.rst).
 
 ## Identity and state
 

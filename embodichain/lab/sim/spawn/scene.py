@@ -22,6 +22,11 @@ from dataclasses import dataclass
 from typing import Any, Callable, Literal
 
 from ._usd_assets import _UsdTextureFiles
+from .._material_presets import (
+    _AssetMaterialDesc,
+    _MaterialResources,
+    _validate_backend,
+)
 
 __all__ = ["SpawnScene"]
 
@@ -41,6 +46,7 @@ class _AssetDeclaration:
     descriptor: Any
     facade: Any | None
     source_configurator: Callable[[Any], None] | None = None
+    declaration_only: bool = False
 
 
 class SpawnScene:
@@ -57,6 +63,7 @@ class SpawnScene:
         *,
         num_envs: int,
         spacing: tuple[float, float, float] = (0.0, 0.0, 0.0),
+        renderer: str | None = None,
     ) -> None:
         from dexsim.spawn import SceneBuilder
 
@@ -70,6 +77,17 @@ class SpawnScene:
         )
         self._assets: dict[str, _AssetDeclaration] = {}
         self._usd_texture_files = _UsdTextureFiles()
+        if renderer is None:
+            from dexsim.types import Renderer
+
+            renderer = {
+                Renderer.NORENDER: "no-render",
+                Renderer.HYBRID: "hybrid",
+                Renderer.FASTRT: "fast-rt",
+                Renderer.OFFLINERT: "rt",
+            }[world.get_renderer_type()]
+        self._material_resources = _MaterialResources(world, renderer)
+        self._resource_material_definitions: dict[str, _AssetMaterialDesc] = {}
         self._pending_material_assignments: (
             dict[tuple[str, int, str | None], list[Any]] | None
         ) = None
@@ -78,10 +96,47 @@ class SpawnScene:
         """Resolve package images before DexSim creates native materials."""
         resolved = self._usd_texture_files.resolve(materials)
         for uid, descriptor in resolved.items():
-            existing = self.builder.materials.get(uid)
+            existing = self._material_definition(uid)
             if existing is not None and existing != descriptor:
                 raise ValueError(f"Conflicting visual material definition for {uid!r}.")
-        return resolved
+        resources = {
+            uid: desc
+            for uid, desc in resolved.items()
+            if isinstance(desc, _AssetMaterialDesc)
+        }
+        for desc in resources.values():
+            _validate_backend(desc, self._material_resources.renderer)
+        for uid, desc in resources.items():
+            if self._material_resources.renderer != "no-render":
+                self._material_resources.resolve(desc)
+            self._resource_material_definitions[uid] = desc
+        # Native Spawn's simplified MaterialDesc path cannot express these
+        # definitions. Bind the exact loaded child directly on each RenderDesc.
+        # NoRender retains only metadata and never invokes a native loader.
+        return {uid: desc for uid, desc in resolved.items() if uid not in resources}
+
+    def _material_definition(self, uid: str) -> Any | None:
+        return getattr(self, "_resource_material_definitions", {}).get(
+            uid, self.builder.materials.get(uid)
+        )
+
+    def _bind_resource_materials(self, descriptor: Any) -> None:
+        definitions = getattr(self, "_resource_material_definitions", {})
+        if not definitions or self._material_resources.renderer == "no-render":
+            return
+        if isinstance(descriptor, (tuple, list)):
+            for member in descriptor:
+                self._bind_resource_materials(member)
+            return
+        reference = getattr(descriptor, "material_ref", None)
+        if reference in definitions:
+            _, descriptor.material = self._material_resources.resolve(
+                definitions[reference]
+            )
+        for name in ("renders", "links", "mesh", "visual_mesh"):
+            value = getattr(descriptor, name, None)
+            if value is not None:
+                self._bind_resource_materials(value)
 
     @property
     def arena_names(self) -> tuple[str, ...]:
@@ -103,6 +158,7 @@ class SpawnScene:
         """Add a descriptor and associate it with an EmbodiChain facade."""
         if uid in self._assets:
             raise ValueError(f"Spawn asset uid is already declared: {uid!r}.")
+        self._bind_resource_materials(descriptor)
         self._initialize_facade_declaration(facade)
         declaration = _AssetDeclaration(
             kind=kind,
@@ -110,6 +166,14 @@ class SpawnScene:
             facade=facade,
             source_configurator=configure_source,
         )
+        if (
+            kind == "visual_object"
+            and getattr(getattr(self, "_material_resources", None), "renderer", None)
+            == "no-render"
+        ):
+            declaration.declaration_only = True
+            self._assets[uid] = declaration
+            return
 
         if kind == "rigid_object_group":
             declaration.descriptor = tuple(
@@ -124,6 +188,7 @@ class SpawnScene:
             ):
                 self._resolve_articulation_source(descriptor)
                 configure_source(descriptor)
+                self._bind_resource_materials(descriptor)
                 declaration.source_configurator = None
             add_name = {
                 "visual_object": "add_object",
@@ -169,6 +234,7 @@ class SpawnScene:
             if configure is None:
                 continue
             configure(declaration.descriptor)
+            self._bind_resource_materials(declaration.descriptor)
             declaration.source_configurator = None
 
     def track(
@@ -192,6 +258,9 @@ class SpawnScene:
     def remove(self, uid: str) -> None:
         """Remove a declared asset from its DexSim owner."""
         declaration = self._assets[uid]
+        if getattr(declaration, "declaration_only", False):
+            del self._assets[uid]
+            return
         if declaration.kind in {"soft_object", "cloth_object"}:
             raise NotImplementedError(
                 "DexSim Spawn does not yet expose pending removal for "
@@ -300,6 +369,16 @@ class SpawnScene:
             facade = declaration.facade
             if facade is None or not facade.is_declared:
                 continue
+            if (
+                declaration.kind == "visual_object"
+                and getattr(
+                    getattr(self, "_material_resources", None), "renderer", None
+                )
+                == "no-render"
+            ):
+                # NoRender has no transform batch for render-only actors.
+                # Keep their geometry/material declarations without binding.
+                continue
             if not facade._entities:
                 facade.attach_spawn_handles(self.handles(uid))
             facade.bind_spawn(result)
@@ -334,6 +413,9 @@ class SpawnScene:
             self.builder.result = None
             self._assets.clear()
             self._usd_texture_files.close()
+            if hasattr(self, "_material_resources"):
+                self._material_resources.close()
+                self._resource_material_definitions.clear()
 
     def handles(self, uid: str) -> tuple[Any, ...]:
         """Return currently materialized handles for one logical asset."""

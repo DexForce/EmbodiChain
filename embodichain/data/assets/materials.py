@@ -14,11 +14,16 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import os
+import hashlib
+import shutil
+import zipfile
 import open3d as o3d
 
 from pathlib import Path
-from typing import List
+from typing import ClassVar, List
 
 from embodichain.data.dataset import EmbodiChainDataset
 from embodichain.utils import logger
@@ -26,8 +31,115 @@ from embodichain.data.constants import (
     EMBODICHAIN_DOWNLOAD_PREFIX,
     EMBODICHAIN_DEFAULT_DATA_ROOT,
 )
+from embodichain.data.default_materials import _catalog, get_default_material_info
+
+__all__ = [
+    "SimResources",
+    "EnvMapHDR",
+    "CocoBackground",
+    "BackgroundTexture",
+    "DefaultMaterials",
+]
 
 material_assets = "materials"
+
+
+class DefaultMaterials(EmbodiChainDataset):
+    """Lazily download the pinned default-material collection.
+
+    Args:
+        data_root: Optional data cache root. Each resource revision has its own
+            locked cache entry. ``EMBODICHAIN_DOWNLOAD_PREFIX`` selects a mirror
+            containing the catalog's versioned archive path; otherwise the
+            original DexSim resource server is used (requires network access).
+    """
+
+    cache_prefix: ClassVar[str] = f"DefaultMaterials_{_catalog()['bundle']['revision']}"
+    """Revision-specific cache identity, also used by the data CLI."""
+
+    def __init__(self, data_root: str | None = None) -> None:
+        bundle = _catalog()["bundle"]
+        url = (
+            EMBODICHAIN_DOWNLOAD_PREFIX + bundle["mirror_path"]
+            if os.environ.get("EMBODICHAIN_DOWNLOAD_PREFIX")
+            else bundle["upstream_url"]
+        )
+        root = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+        prefix = self.cache_prefix
+        super().__init__(prefix, o3d.data.DataDescriptor(url, bundle["md5"]), root)
+        archive = Path(self.download_dir) / bundle["archive_name"]
+        if self._sha256(archive) != bundle["sha256"]:
+            raise ValueError(
+                "DefaultMaterials archive does not match its pinned SHA256."
+            )
+        self._verify_files(Path(self.extract_dir))
+
+    @staticmethod
+    def _sha256(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+        return digest.hexdigest()
+
+    @classmethod
+    def _verify_files(cls, root: Path) -> None:
+        for name, info in _catalog()["bundle"]["files"].items():
+            path = root / name
+            if (
+                not path.is_file()
+                or path.stat().st_size != info["size_bytes"]
+                or cls._sha256(path) != info["sha256"]
+            ):
+                raise ValueError(
+                    f"Incomplete or corrupt DefaultMaterials resource: {path}."
+                )
+
+    def check_zip(
+        self, prefix: str, data_descriptor: o3d.data.DataDescriptor, path: str
+    ) -> None:
+        """Validate or repair this revision while the dataset lock is held.
+
+        Args:
+            prefix: Versioned cache entry owned by this dataset.
+            data_descriptor: Native download descriptor with the pinned MD5.
+            path: Data cache root, including caller-provided roots.
+        """
+        # Called under EmbodiChainDataset's existing interprocess lock. Repair
+        # only this revision's extraction, including caches with custom roots.
+        archive = (
+            Path(path) / "download" / prefix / _catalog()["bundle"]["archive_name"]
+        )
+        extracted = Path(path) / "extract" / prefix
+        if not archive.is_file():
+            if extracted.exists():
+                shutil.rmtree(extracted)
+            return
+        if self._sha256(archive) != _catalog()["bundle"]["sha256"]:
+            archive.unlink()
+            if extracted.exists():
+                shutil.rmtree(extracted)
+            return
+        try:
+            self._verify_files(extracted)
+        except ValueError:
+            if extracted.exists():
+                shutil.rmtree(extracted)
+            # The archive was verified against a built-in immutable digest.
+            with zipfile.ZipFile(archive) as bundle:
+                bundle.extractall(extracted)
+
+    def get_material_path(self, name: str) -> str:
+        """Get an authored preset directory in this verified resource revision.
+
+        Args:
+            name: Public preset name or ``SoapBubbleInterior``.
+
+        Returns:
+            Absolute path suitable for DexSim's native material loader.
+        """
+        get_default_material_info(name)
+        return str(Path(self.extract_dir) / "Material" / name)
 
 
 class SimResources(EmbodiChainDataset):

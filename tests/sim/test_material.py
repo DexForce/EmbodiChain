@@ -386,3 +386,174 @@ def test_deterministic_group_reset_reapplies_properties_only_to_selected_environ
 
     assert first.roughness == pytest.approx(0.9)
     assert second.roughness == pytest.approx(0.2)
+
+
+def test_preset_inheritance_and_yaml_roundtrip_keep_explicit_defaults():
+    import yaml
+    from embodichain.lab.sim.material import _material_desc_from_cfg
+    from embodichain.lab.sim.shapes import ShapeCfg
+
+    cfg = VisualMaterialCfg.from_preset("GlassClear", uid="glass")
+    assert cfg.ior is None
+    explicit = cfg.replace(ior=1.5, roughness=0.0)
+    explicit.parameters = {"thin_walled": False, "transmission": 0.0}
+    restored = VisualMaterialCfg.from_dict(
+        yaml.safe_load(yaml.safe_dump(explicit.to_dict()))
+    )
+    assert restored.to_dict() == explicit.to_dict()
+    shape = ShapeCfg.from_dict(
+        yaml.safe_load(
+            yaml.safe_dump(
+                {
+                    "shape_type": "Sphere",
+                    "radius": 0.25,
+                    "visual_material": explicit.to_dict(),
+                }
+            )
+        )
+    )
+    assert shape.visual_material.to_dict() == explicit.to_dict()
+    assert restored.copy().to_dict() == explicit.to_dict()
+    assert restored.replace(ior=None).ior is None
+    assert restored.replace(ior=None).roughness == 0.0
+    inherited_desc = _material_desc_from_cfg(cfg, "glass")
+    explicit_desc = _material_desc_from_cfg(explicit, "glass")
+    assert inherited_desc != explicit_desc
+    assert VisualMaterialCfg.from_dict({"preset": "GlassClear"}).ior is None
+    assert VisualMaterialCfg().ior == 1.5
+    assert VisualMaterialCfg().roughness == 0.7
+    assert VisualMaterialCfg().material_type == "BRDF"
+    assert (
+        _material_desc_from_cfg(VisualMaterialCfg.from_dict(cfg.to_dict()), "glass")
+        == inherited_desc
+    )
+
+
+@pytest.mark.parametrize(
+    "properties",
+    [
+        {"ior": 1.5, "parameters": {"ior": 1.6}},
+        {"emissive_intensity": 0.0, "parameters": {"emission_intensity": 1.0}},
+        {"parameters": {"emission_intensity": 1.0, "emissive_intensity": 2.0}},
+        {"parameters": {"thin_walled": 0}},
+        {"parameters": {"volume_attenuation_distance": 0.0}},
+        {"parameters": {"iridescence_thickness": [520, 250]}},
+        {"parameters": {"transmission": float("nan")}},
+        {"parameters": {"transmission": None}},
+        {"parameters": {"misspelled": 1.0}},
+        {"ior": 0.0},
+        {"roughness": 1.1},
+        {"material_type": "BSDF"},
+        {"base_color_texture": "override.png"},
+    ],
+)
+def test_preset_invalid_overrides_fail_before_download(properties):
+    with pytest.raises(ValueError):
+        VisualMaterialCfg.from_preset("GlassClear", **properties)
+
+
+def test_resource_wrapper_preserves_authored_template_and_resets_full_instance():
+    template = _native_template()
+    default = template.get_inst()
+    default.set_pbr_param("ior", 1.52)
+    child = template.get_inst("private_child")
+    child.set_pbr_param("ior", 1.52)
+    template.reset_mock()
+    cfg = VisualMaterialCfg.from_preset("GlassClear", uid="glass")
+    material = VisualMaterial(cfg, template, initialize_default=False, mat_inst=child)
+    assert material.inst.mat is child
+    child.set_roughness.assert_not_called()
+    child.update_pbr_material_type.assert_not_called()
+    assert default.get_ior() == pytest.approx(1.52)
+    material.set_default_properties(material.inst, cfg)
+    template.reset_inst.assert_called_once_with(child)
+    with pytest.raises(ValueError, match="original definition"):
+        material.set_default_properties(material.inst, cfg.replace(ior=1.6))
+
+
+def test_preset_backend_preflight_and_no_render_declarations():
+    from embodichain.lab.sim._material_presets import _MaterialResources
+    from embodichain.lab.sim.material import _material_desc_from_cfg
+
+    manager = _material_manager()
+    scene = manager._spawn_scene
+    world = MagicMock()
+    scene._material_resources = _MaterialResources(world, "hybrid")
+    scene._resource_material_definitions = {}
+    glass = _material_desc_from_cfg(
+        VisualMaterialCfg.from_preset("GlassClear"), "glass"
+    )
+    with pytest.raises(ValueError, match="OfflineRT"):
+        scene._resolve_materials({"glass": glass})
+    advanced = _material_desc_from_cfg(
+        VisualMaterialCfg.from_preset("BrickRed", parameters={"clearcoat": 0.0}),
+        "brick",
+    )
+    with pytest.raises(ValueError, match="OfflineRT"):
+        scene._resolve_materials({"brick": advanced})
+    world.get_env.assert_not_called()
+    scene._material_resources.renderer = "no-render"
+    assert scene._resolve_materials({"glass": glass}) == {}
+    assert scene._material_definition("glass") == glass
+    world.get_env.assert_not_called()
+    scene._material_resources.close()
+
+
+def test_native_manifest_variants_share_images_and_templates_without_mutation(
+    tmp_path, monkeypatch
+):
+    import json
+    from pathlib import Path
+    from embodichain.lab.sim._material_presets import _MaterialResources
+    from embodichain.lab.sim.material import _material_desc_from_cfg
+
+    source = tmp_path / "Material/GlassClear"
+    source.mkdir(parents=True)
+    (source / "Color.png").write_bytes(b"shared original image")
+    manifest = {
+        "schema_version": 1,
+        "parameters": {
+            "ior": 1.52,
+            "transmission": 1.0,
+            "volume_attenuation_color": [0.995, 0.998, 1.0],
+            "iridescence_thickness": [250, 520],
+        },
+        "textures": {"base_color": "Color.png"},
+    }
+    original = json.dumps(manifest)
+    (source / "material.json").write_text(original)
+    dataset = SimpleNamespace(get_material_path=lambda name: str(source))
+    monkeypatch.setattr(
+        "embodichain.data.assets.materials.DefaultMaterials", lambda: dataset
+    )
+    world = MagicMock()
+    world.get_env.return_value.load_material.side_effect = (
+        lambda *args: _native_template()
+    )
+    resources = _MaterialResources(world, "rt")
+    cfg = VisualMaterialCfg.from_preset(
+        "GlassClear",
+        ior=1.5,
+        parameters={"volume_attenuation_distance": 8.0, "thin_walled": False},
+    )
+    try:
+        first = resources.resolve(_material_desc_from_cfg(cfg, "one"))
+        second = resources.resolve(_material_desc_from_cfg(cfg, "two"))
+        assert first[0] is second[0]
+        assert first[1] is not second[1]
+        assert resources.resolve(_material_desc_from_cfg(cfg, "one")) is first
+        world.get_env.return_value.load_material.assert_called_once()
+        directory = Path(world.get_env.return_value.load_material.call_args.args[0])
+        staged = json.loads((directory / "material.json").read_text())
+        assert staged["parameters"] == {
+            **manifest["parameters"],
+            "ior": 1.5,
+            "volume_attenuation_distance": 8.0,
+            "thin_walled": False,
+        }
+        assert Path(staged["textures"]["base_color"]) == source / "Color.png"
+        assert list(directory.iterdir()) == [directory / "material.json"]
+        assert (source / "material.json").read_text() == original
+    finally:
+        resources.close()
+    assert not directory.exists()

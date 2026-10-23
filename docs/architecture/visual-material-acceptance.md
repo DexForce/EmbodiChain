@@ -49,6 +49,45 @@ python docs/scripts/check_api_docs.py
 python .agents/skills/project-dev-context/scripts/context.py check
 ```
 
+## Default material package
+
+In addition to the legacy handwritten-material checks above, qualify the unified
+`VisualMaterialCfg.from_preset()` route:
+
+| Boundary | Acceptance |
+| --- | --- |
+| Inheritance | GlassClear inherits IOR 1.52; explicit 1.5 overrides it. Zero/false are explicit; `replace(ior=None)` restores inheritance. No flat/native duplicate properties or invalid parameters reach native loading. |
+| Round trips | Constructor, factory, Python/YAML, copy, replace and dictionary round trips retain the preset and unspecified state. Manual construction retains historical concrete defaults. |
+| Distribution | Offline queries list 18 public presets, with SoapBubbleInterior available explicitly. Build/install a wheel away from the source checkout. With an empty data cache, download the pinned archive; repeat without network, repair a missing/corrupt member, and verify auxiliary texture references. |
+| Renderer preflight | Ten basic presets load on Hybrid/FastRT/OfflineRT. Eight advanced presets, the helper and advanced parameter variations require OfflineRT. Reject before download/native loading. NoRender preserves declarations and does neither. |
+| Native resources | Runtime-first and inline-first aliases share exact handles. Different UIDs use separate children of immutable templates. Repeated creation preserves state and bounded native instance counts. Variants stage JSON only, never duplicate PNGs. |
+| Lifecycle | Complete native template reset restores properties beyond the flattened fields. Default/Newton selection, reset, topology rebuild and cleanup preserve identity and expected assignments. |
+| Optical parity | Render all 18 on OfflineRT and the ten basic presets on Hybrid and FastRT. Compare the package route to direct native loading with identical geometry/camera/lights, plus a native-repeat noise control. Use closed glass meshes, explicit double shells for bubbles and optional segmented face geometry. |
+
+```bash
+python -m pytest -q tests/data/test_default_materials.py tests/sim/test_material.py
+python -m pytest -q --run-gpu tests/sim/test_material_integration.py
+
+# Each renderer requires a separate process. Run native checks serially.
+python examples/sim/rendering/default_materials.py --all --compare-native --renderer rt
+python examples/sim/rendering/default_materials.py --all --compare-native --renderer hybrid
+python examples/sim/rendering/default_materials.py --all --compare-native --renderer fast-rt
+# Optionally add --model /path/to/skin_face.glb for SkinHumanLight.
+```
+
+The preview writes candidate/native/repeat images and `results.json`. Its center
+crop RMSE tolerance is max(3/255, three times native-repeat RMSE plus 0.5/255).
+Inspect the images as well as the metric: similar dark or empty frames alone do
+not establish material correctness. The first material load includes data-cache
+verification; creation timings are descriptive, not a render-throughput claim.
+The current pinned upstream address is internal; public mirrors must provide
+exactly the archive and versioned path documented in the material API. Asset
+redistribution/provenance must be retained when deploying a mirror.
+
+Parameter variants must be created before binding. Qualification does not cover
+cross-model hot shader mutation, NRD packaging fixes, automatic geometry/UV
+changes or a global removal of the legacy manual `material_type` interface.
+
 ## Compatibility
 
 - `base_color` reads return native display-sRGB RGB; configuration and writes
