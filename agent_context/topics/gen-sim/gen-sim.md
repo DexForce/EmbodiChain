@@ -467,6 +467,9 @@ One bundle has one material policy, not dynamic per-call switching; mixed recipe
 containing Pour retain composition and require their own physical qualification.
 Both profiles use 100/100/30 mm COM/position/support tolerances
 for supported on-placement, independently of final TaskSpec acceptance.
+Experimental ordinary relative-placement stability post-policies use the same
+100 mm position bound as their generated near-relative-target validators;
+hold, alignment, collision and velocity contracts are not relaxed.
 Generated handover contact revisions compose with existing occurrence permissions;
 different revisions for the same call reject rather than replacing an earlier
 selection. It derives horizontal end-grasp HandOver/Place
@@ -480,14 +483,23 @@ visible empty-arm clearance/restore pair. Its finite proximal-joint proposals
 are ranked by FK endpoint separation, screened against the current scene and
 rechecked on emitted (including transformed) MoveJoints trajectories. This is
 a bounded heuristic, not a complete bimanual planner or stability guarantee.
+After an ordinary on/inside release onto an unmoved reference, later E1
+collection may prefer the arm nearest both that reference and the unmoved target
+over the earlier Pour arm. Rehandling either subject or reference invalidates the
+location hint; explicit arms, live holders and resource occupancy remain authoritative.
 Composition keeps original Pick closure and total sample counts, and retains
 canonical gripper effort limits instead of recalibrating an earlier light-object
 grip from which arm later Pour/control recipes use. Legacy/default and contact
-profiles retain their existing effort calibration. Contact also
-retains its qualified 24-point ordinary Pick closure with 12 extra total samples,
+profiles retain their existing effort calibration.
+Contact-profile qualified light E1/E2 grips cap actuator effort at 5 rather than
+0.5; Default retains 0.5. Both preserve any lower authored limit. Unknown/heavier payloads and blocked recipe resources
+retain their original limits. This is not an acquisition or holding exemption.
+Contact also retains its qualified 24-point ordinary Pick closure with 12 extra total samples,
 leaving approach/lift counts unchanged. Frozen physical inputs reject these opt-ins.
 `planning.experimental_open_release` independently selects the release observer;
-packaged defaults set false, while both explicit experiment configurations set true.
+packaged defaults leave it null, deriving false for the resolved default profile
+and true for Contact/Composition; an explicit false still keeps revision 1.
+Both explicit experiment configurations set true.
 Old bundles and direct builder callers that omit the marker retain their original
 profile-based release selection. Its native grip observer revision 2 permits an experimental detached
 observation when the measured independent URDF driving joints are within the
@@ -564,6 +576,13 @@ refined with convex-solid covers of the same complete source vertices, retaining
 the 2 mm separation requirement. Containment, unavailable geometry and unresolved
 distance reject; this is not native contact or continuous collision certification. Explicit Cartesian
 routes, dynamic collision policies, drawer routes and E2 z caps are not overridden.
+Motion validation revision 15 preserves the original gradual hand opening when
+ordinary Pick rebuilds its free-space/contact approach. It resamples opening
+alongside the replacement arm path instead of holding a previously closed hand
+until the close boundary; the exact grasp branch and close/lift suffix remain.
+Full emitted velocity and discrete scene checks still qualify the rebuilt plan.
+Rejected speeds report the emitting joint, frame, phase and ratio. Regenerate
+bundles after this revision; old fingerprints cannot certify the new path.
 Missing bound rigid geometry or bound articulation obstacles disable this fallback.
 Motion validation revision 13 separately owns positively bound ordinary on-Place
 calls with `preserve_current_object_orientation=false`, B1 and `ik_interp/off`,
@@ -671,8 +690,9 @@ global branch search or physical-success certificate.
 Deployments with an ordinary Pick bind grasp constraint observations to the
 queried object's two native finger-pad contacts on the queried hand. Positive
 impulses and opposing normals qualify acquisition; absent contacts qualify
-release. One-sided, non-opposing, nonfinite or saturated observations remain
-unverified. Shared pose-relation, consecutive-sample, lift and release monitors
+release. Outside the explicit experimental open-hand rule above, one-sided,
+non-opposing, nonfinite or saturated observations remain unverified.
+Shared pose-relation, consecutive-sample, lift and release monitors
 are retained; a wide object does not need an arbitrary minimum closing angle.
 This uses the canonical dual-Franka pad bindings and is not a new executor or
 a certificate of complete-task success. Regenerate affected bundles.
@@ -775,6 +795,12 @@ endpoints do not enter the closing sweep. Two-sided occupancy probes orient
 each queried normal using the signed-distance solid convention, not global
 mesh volume: independently reversed components and nested cavities retain
 their own inside/outside boundary. Ambiguous probes cannot certify contact.
+E5 empty-hand acquisition also gives the already-qualified finite candidates
+a cargo-clearance preference. Same-context rigid contents are captured only for
+that planning call; open/mid/contact hand samples against their signed world AABBs
+adjust finite proposal costs with an 8 mm heuristic reserve. No candidate is
+removed, no new rejection gate is added, and missing geometry keeps base costs.
+This does not certify native collision, contact halos or cargo retention.
 Regenerate E5 bundles after changes
 to this versioned geometry policy.
 Single-arm generator methods and
@@ -856,21 +882,64 @@ Failed single-environment CPU
 terminal configurations, solve the contact path backwards, then connect a
 free-space joint approach. Slide recovery is capped at 1.5 times the request
 and 390 command frames; larger caller budgets are not shortened. Failed E6
-withdrawal can try local IK without changing its targets or frame budget.
+withdrawal first tries local IK without changing its targets or frame budget.
 For an adjacent Slide/withdraw pair with identical part/state/resources,
-failed-Slide recovery also qualifies each proposed release posture against
-the declared withdrawal sample budget. It shares the runtime's unchanged
-withdrawal geometry, screens continuous IK, velocity and robot meshes, and
+nominal Slide planning and failed-Slide recovery qualify each release posture against
+the declared withdrawal sample budget. Every original terminal/cleanup option
+has priority over a shorter cleanup. Only after exhausting those options may
+an otherwise qualified terminal use a 20 mm rail-outward-only empty-hand route.
+Preview and actual withdrawal derive the same finite geometry; both screen
+continuous IK, velocity and robot meshes, and the preview
 discards the preview path. This is not a predicted-scene certificate: actual
 withdrawal is freshly planned and checked against current scene meshes before
 dispatch, including when its nominal plan succeeds, only when the lookahead
 actually rejected the formerly admissible terminal and selected another one.
+The exact adjacent E6 Park after an installed short withdrawal may reuse the
+existing four joint-via Park recovery with fresh full-scene qualification. Its
+canonical home target, timing and released-hand requirement remain unchanged;
+ordinary E6 Parks do not acquire this extra gate. A failed signed push may try
+50 mm then 30 mm approach/return offsets, preserving the handle grasp, rail,
+joint target and all full-path checks. Pulls and nominal successes are unchanged.
+Push diagnostics record the first failed leg instead of only exhaustion.
 Unchanged successful branches and unpaired calls retain their existing checks;
 they do not acquire a blanket new scene gate. Qualification is read from the
 paired public ExecutionSession's installed plan attempts, not from speculative
 planning side effects. Rejected revisions cannot erase it; a later nominal
 replan in that session does not erase earlier installed reselection evidence.
-The E6 recovery fingerprint revision owns this change.
+For a push with valid complete contact kinematics/robot meshes whose free
+approach collides with the scene, at most two existing cuRobo joint-prefix
+proposals may replace that approach. The passive snapshot uses the actual
+observed hand, not its future preshape. Prefix endpoints, hand commands,
+reach/push/open/return suffix, frame budget and control dt remain unchanged;
+longer prefixes reject rather than being accelerated. Shared Slide rebuilds
+the commands, then native joint/velocity/full-robot and fresh approach-scene
+checks qualify them. This does not bypass collision predictions or certify CCD.
+The E6 recovery fingerprint revision 11 owns these changes. A valid nominal paired
+continuation retains its exact commands; a supported but unqualified nominal
+terminal enters the same bounded branch search, without dispatching a preview.
+An ordinary rigid lateral Pick/Place pair may reuse goal-conditioned payload
+transport only after its cheap preserved-orientation Place fallback reports a
+robot self collision. It retains the exact release, contact and return targets;
+the existing payload-aware free prefix and emitted collision/velocity checks
+must qualify. Pick previews derive payload pose from the projected held context,
+not the native object's unmoved pose. This binding has a conditional fingerprint
+revision; on/inside, authored-grasp and nonordinary routes do not acquire it.
+Within this failure-only lateral recovery, the existing single-row CPU
+PytorchSolver search may supply up to four distinct release branches. Each
+branch rebuilds and qualifies the entire transport/contact/release/retreat;
+other solvers retain one branch, and no endpoint alone certifies the path.
+Ordinary rigid on-Place may use the same preserved-orientation transport only
+after the cheap fallback collides with its own support. Support affordances
+resolve through their bound rigid parent, never by name parsing. Non-target
+obstacle, self-collision and velocity refusals do not activate this on-specific
+route. Its conditional fingerprint requires regenerating affected on bundles;
+the exact release/contact/retract goals and complete emitted checks remain.
+Generated ordinary E1 cardinal side placements beside rigid references release
+30 mm above the projected tabletop landing instead of the resting evidence
+target. XY, world orientation and settled validators remain unchanged; qualified
+articulated-link, on/above, diagonal and E2 routes retain their existing heights.
+The explicit route vector seals this release height in new bundle identity;
+saved bundles and the original collision, release and stability gates are unchanged.
 Failed five-stage push/close plans may instead qualify up to four grasp-seeded
 branches using the original per-stage targets and frame counts. Backward reach
 joins forward push, release and return through continuous IK; only the empty-hand
@@ -952,6 +1021,10 @@ line layout, E5 terminal hold, other task routes, and a downstream
 E6 `count`/`all` sets retain their qualified synthetic part UIDs through
 binding, then expand to ordered Slide/withdraw/Park recipes with a distinct
 part binding per step. Cabinet-root sets do not stand in for drawer parts.
+Handleless parts explicitly named as button, press, plunger or switch controls
+are excluded from the pullable catalog; otherwise one button could invalidate
+all drawers in the same asset. A real pull handle retains its part, while other
+handleless mechanisms still reject rather than inventing a grasp.
 For opening sets, measured world-space handle heights order parts bottom-to-top
 within each cabinet. The existing 1 cm spatial tolerance groups same-height
 parts, retaining their original lateral order, including horizontal rows and
@@ -1075,7 +1148,13 @@ Constrained E2 Pick lowerers
 snapshot their object/target rule selector into the goal; only that Pick uses
 an immutable filtered-generator view. Unscoped sampling, including HandOver,
 checks opening clearance without applying another stage's region/release rules.
-Drawer transport and release remain drawer-owned. Relative placement geometry and
+Drawer transport and release remain drawer-owned. Drawer release recovery keeps
+the original rim route and extra 120 mm release lift first. On failure it may
+omit only that extra lift, retaining the outside/rim poses and payload floor
+target. Both modes share the original two-full-plan budget, final velocity gate,
+physical release and containment checks. A conditional drawer release revision
+requires regenerating affected bundles; this is not permission to ignore walls
+or close around an uncontained payload. Relative placement geometry and
 stability use preceding alignment operations, never future E2 state. E2 after
 an explicit on/above placement retains that support and uses its measured top
 for staging, release and grasp clearance. Its constrained regrasp uses a
@@ -1117,6 +1196,37 @@ instead of assigning overlapping destinations. Each landing uses only declared
 orientations preceding its own Place; a reservation retains its placement-time
 orientation rather than a later alignment target. This is a planning snapshot,
 not a live occupancy tracker or physical placement acceptance.
+Ordinary E1 `on` routes sharing one stationary rigid support also reserve the
+projected footprints of preceding releases. Only an overlapping later endpoint
+is relocated on that same support with the existing 20 mm separation; re-picking
+an object frees its reservation. Single-object, moved-support, articulated and
+explicit spatial-reference routes retain their prior targets. These source-mesh
+proposals do not replace runtime collision, release or support qualification.
+Stationary eligibility excludes any support named as a manipulated object in
+the program, including HandOver and registered coordinated hold/transport, not
+only ordinary Pick. Loading a later-carried vessel therefore does not acquire
+flat-surface packing constraints merely by splitting E4-place into E4-hold/E1.
+Later lateral placement relative to a prior rigid-inside release uses that
+stationary container's measured source floor to project the anchor height,
+rather than its pre-transfer height. Re-picking invalidates the projection;
+moved containers, articulated/tilted or unmeasured floors and aligned anchors
+retain their existing route. This is a preparation-time target projection,
+not a physical release receipt or a change to runtime placement acceptance.
+The contact experiment also grants native revision-8 closing/depth checks to an
+unconstrained horizontal rigid Pick immediately followed by an ordinary on-Place
+with the same object and arm, when source geometry has a 3:1 long-axis aspect
+ratio. Explicit grasps, upright sources, Pour, inside and other profiles retain
+their prior declarations. This reuses the existing bounded native search and
+does not relax measured acquisition or retention.
+For untouched height-dominant rigid sources in unconstrained ordinary inside
+recipes, the contact profile selects native closing revision 9. It retains
+revision 8's source, opening, depth and scene screens and additionally bounds
+the native collision-pad center line to two degrees from the gravity plane
+through the first nominal bilateral contact. Gravity is captured in the current
+object frame; emitted closing commands use the same check. Other profiles,
+authored grasps, previously moved sources, upright-result revision 2 and confined
+measured-preshape routes retain their existing policies. This discrete quality
+condition is not evidence of real acquisition, retention or placement success.
 Generated non-drawer held-object transports declare a measured attachment postcondition.
 GenSim installs PickUp, HandOver, MoveHeldObject, Place and Pour wrappers for all
 deployments after shared engine validation and configure shared Lab action

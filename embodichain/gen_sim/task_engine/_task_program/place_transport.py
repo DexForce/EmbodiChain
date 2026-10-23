@@ -32,6 +32,7 @@ from embodichain.lab.sim.atomic_actions.plans import ActionPlan
 from embodichain.lab.sim.atomic_actions.trajectory_ops import split_three_segments
 from embodichain.lab.sim.motion.motion_generator import MotionGenOptions
 from embodichain.lab.sim.motion.planners.utils import MoveType, PlanState
+from embodichain.utils.math import pose_inv
 from . import motion, place_branch as branch
 from .drawer_curobo import (
     CuroboPlannerCfg,
@@ -147,9 +148,21 @@ def _free_prefix(scope: _Scope, arm: JointPositionTarget) -> torch.Tensor:
         raise ValueError(
             "Place payload requires the complete single-row live geometry."
         )
+    obj = simulation.get_rigid_object(subject)
+    if scope.preserved_transport:
+        pose = action.robot.compute_fk(
+            qpos=context.robot.qpos[:, list(arm.joint_ids)],
+            name=arm.control_part,
+            to_matrix=True,
+        )
+        pose = pose @ pose_inv(held.object_to_eef.to(pose))
+        if pose.shape != (1, 4, 4) or not torch.isfinite(pose).all():
+            raise ValueError("Place payload requires a finite projected held pose.")
+        pose = pose.detach().clone()
+        obj = SimpleNamespace(get_local_pose=lambda **_: pose.clone())
     observation = SimpleNamespace(
         route=SimpleNamespace(object_id=subject),
-        obj=simulation.get_rigid_object(subject),
+        obj=obj,
         vertices=vertices[0].clone(),
     )
     sources = world_sources(simulation, subject)
@@ -168,6 +181,11 @@ def _free_prefix(scope: _Scope, arm: JointPositionTarget) -> torch.Tensor:
         "payload": subject,
         "world_ids": list(sources),
         "simulator_attachment": False,
+        **(
+            {"payload_pose_source": "projected_held_context"}
+            if scope.preserved_transport
+            else {}
+        ),
         "single_release_goal_preserved": True,
         "superseded_sample_source": "Place._translation_keyframes transport midpoint",
     }

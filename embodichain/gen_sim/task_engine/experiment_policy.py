@@ -175,8 +175,10 @@ def apply_contact_options(integration: dict[str, Any]) -> None:
 def apply_placement_tolerances(
     constraints: dict[str, Any], program: dict[str, Any]
 ) -> None:
-    """Apply the declared experimental tolerances to all supported on placements."""
+    """Keep experimental placement post-policies and position validators aligned."""
     for cfg in constraints["presets"].values():
+        if cfg.get("kind") == "placement":
+            cfg["position_tolerance"] = 0.10
         if cfg.get("kind") == "supported_placement":
             cfg.update(
                 position_tolerance=0.10, support_tolerance=0.03, com_tolerance=0.10

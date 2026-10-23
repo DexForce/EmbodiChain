@@ -90,7 +90,11 @@ def _inspect_pick_plan(
     _initial_command_qpos: torch.Tensor | None = None,
 ) -> dict[str, Any]:
     """Certify full emitted approach/close/lift, not only grasp candidate IK."""
-    from .motion import _joint_velocity_limits, _velocity_validity
+    from .motion import (
+        _joint_velocity_limits,
+        _velocity_diagnostics,
+        _velocity_validity,
+    )
 
     try:
         trajectory = plan.joint_trajectory
@@ -134,7 +138,17 @@ def _inspect_pick_plan(
             raise ValueError("Pick changed its zero-time arm start.")
         limits = _joint_velocity_limits(robot, None).to(positions)[context.env_ids]
         if not _velocity_validity(positions, dt, limits).all():
-            return {"valid": False, "reason": "final_velocity_rejected"}
+            velocity = _velocity_diagnostics(positions, dt, limits)
+            for row in velocity:
+                row["phase"] = next(
+                    (s.name for s in plan.segments if s.start <= row["frame"] < s.stop),
+                    None,
+                )
+            return {
+                "valid": False,
+                "reason": "final_velocity_rejected",
+                "velocity": velocity,
+            }
         for target in targets:
             bounds = robot.get_qpos_limits(
                 name=target.control_part, env_ids=context.env_ids

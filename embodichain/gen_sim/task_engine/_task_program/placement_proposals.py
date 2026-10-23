@@ -43,6 +43,9 @@ def generate_on_targets(
     preferred_xy: Sequence[float] | Sequence[Sequence[float]],
     clearance_m: float,
     contact_band_m: float,
+    *,
+    occupied_footprints: Iterable[BaseGeometry] = (),
+    separation_m: float = 0.0,
 ) -> list[dict[str, Any]]:
     """Propose full-footprint placements with source contact-patch COM coverage.
 
@@ -51,6 +54,8 @@ def generate_on_targets(
     prior, including for non-watertight sources. Native bearing is unverified.
     The finite point choices are conservative, not a complete feasible set.
     Preferred XY values are one point or a nonempty batch of world-frame points.
+    Occupied world-XY footprints exclude complete payload overlap, with the
+    requested planar separation. Their convex envelopes are conservative.
     """
     preferred = np.asarray(preferred_xy, dtype=float)
     if preferred.shape == (2,):
@@ -62,8 +67,18 @@ def generate_on_targets(
         or not np.isfinite(preferred).all()
     ):
         raise ValueError("preferred_xy must contain finite XY points.")
-    if any(not np.isfinite(v) or v < 0 for v in (clearance_m, contact_band_m)):
+    if any(
+        not np.isfinite(v) or v < 0 for v in (clearance_m, contact_band_m, separation_m)
+    ):
         raise ValueError("Placement distances must be finite and non-negative.")
+    occupied = tuple(occupied_footprints)
+    if any(
+        region.is_empty
+        or not region.is_valid
+        or region.convex_hull.geom_type != "Polygon"
+        for region in occupied
+    ):
+        raise ValueError("Occupied footprints must be finite nonempty polygons.")
     for mesh in (object_mesh_zup, reference_mesh_world):
         if not len(mesh.faces) or not np.isfinite(mesh.vertices).all():
             raise ValueError("Placement requires finite triangular source geometry.")
@@ -98,6 +113,13 @@ def generate_on_targets(
             allowed = allowed.intersection(translate(silhouette, xoff=-x, yoff=-y))
             if allowed.is_empty:
                 break
+        footprint_points = np.asarray(footprint.exterior.coords[:-1])
+        for region in occupied:
+            vertices = np.asarray(region.convex_hull.exterior.coords[:-1])
+            forbidden = MultiPoint(
+                (vertices[:, None, :] - footprint_points[None, :, :]).reshape(-1, 2)
+            ).convex_hull.buffer(separation_m + 1e-6, join_style=2)
+            allowed = allowed.difference(forbidden)
         if allowed.is_empty:
             continue
         lower = rotated.slice_plane([0, 0, bottom + half_band], [0, 0, -1], cap=False)
@@ -115,6 +137,8 @@ def generate_on_targets(
             seen.add(xy)
             placed = translate(footprint, xoff=xy[0], yoff=xy[1])
             if not silhouette.covers(placed):
+                continue
+            if any(placed.distance(region) < separation_m for region in occupied):
                 continue
             # Split the band so paired surface heights differ by at most its sum.
             patch = upper_region.intersection(

@@ -73,18 +73,42 @@ def _inputs(
 
 @pytest.mark.parametrize("task_type", ["E1", "E2"])
 @pytest.mark.parametrize("resource", ["left", "right"])
+@pytest.mark.parametrize("profile,cap", [("default", 0.5), ("contact_experiment", 5.0)])
 def test_light_rigid_grip_limits_only_the_used_gripper(
-    task_type: str, resource: str
+    task_type: str, resource: str, profile: str, cap: float
 ) -> None:
     embodiment, scene, graph = _inputs(task_type=task_type)
     graph["nodes"][0]["call"]["resources"]["primary"] = resource
-    _calibrate_task_gripper_effort(embodiment, scene, graph)
+    _calibrate_task_gripper_effort(embodiment, scene, graph, runtime_profile=profile)
     assert embodiment["simulation"]["joint_drive_props"]["max_effort"] == {
         "left_arm": 10000.0,
-        "left_eef": 0.5 if resource == "left" else 500.0,
-        "right_eef": 0.5 if resource == "right" else 500.0,
+        "left_eef": cap if resource == "left" else 500.0,
+        "right_eef": cap if resource == "right" else 500.0,
     }
     assert "mimic_compliance" not in embodiment["simulation"]
+
+
+@pytest.mark.parametrize("limit", [0.25, 0.5, 2.0, 5.0])
+def test_light_grip_calibration_never_raises_an_authored_lower_limit(
+    limit: float,
+) -> None:
+    embodiment, scene, graph = _inputs()
+    limits = embodiment["simulation"]["joint_drive_props"]["max_effort"]
+    limits["left_eef"] = limit
+    _calibrate_task_gripper_effort(
+        embodiment, scene, graph, runtime_profile="contact_experiment"
+    )
+    assert limits["left_eef"] == limit
+
+
+@pytest.mark.parametrize(
+    "mass", [None, True, 0, -0.01, 0.0101, float("nan"), float("inf")]
+)
+def test_unqualified_payload_does_not_change_effort(mass: float | None) -> None:
+    embodiment, scene, graph = _inputs(mass=mass)
+    before = deepcopy(embodiment)
+    _calibrate_task_gripper_effort(embodiment, scene, graph)
+    assert embodiment == before
 
 
 @pytest.mark.parametrize(

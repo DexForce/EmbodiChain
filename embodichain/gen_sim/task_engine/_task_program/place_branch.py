@@ -53,6 +53,8 @@ from . import place_recovery
 from .solver_tolerances import _pose_validation_parameters
 
 __all__: list[str] = []
+PRESERVED_LATERAL_RECOVERY_REVISION = 2
+PRESERVED_ON_RECOVERY_REVISION = 1
 
 if TYPE_CHECKING:
     from .place_transport import _ContactPhases
@@ -74,6 +76,9 @@ class _Scope:
     request: Any
     context: Any
     velocity_phase_allocation: bool = False
+    preserved_transport: bool = False
+    release_branch_index: int = 0
+    release_branches: list[torch.Tensor] | None = None
     groups: list[torch.Tensor] = field(default_factory=list)
     qposes: torch.Tensor | None = None
     solves: int = 0
@@ -249,10 +254,60 @@ def bind_on_invocations(
     return frozenset(result)
 
 
+def bind_lateral_invocations(
+    routes: Iterable[Any],
+    purposes: Mapping[str, str] | Iterable[tuple[str, str]],
+    scene_binding: Any,
+) -> frozenset[str]:
+    """Bind ordinary same-resource lateral releases, not authored pose goals."""
+    routes = tuple(routes)
+    if not routes:
+        return frozenset()
+    rigid = {item.entity_id for item in scene_binding.rigid_objects}
+    purposes = dict(purposes)
+    result = set()
+    for route in routes:
+        pick, place = route.pick_call, route.place_call
+        if (
+            type(pick) is not Pick
+            or pick.grasp is not None
+            or type(place) is not RegisteredSemanticCall
+            or place.call_id != "simulation.place_relative"
+            or purposes.get(route.pick_id) != "ordinary"
+            or dict(pick.resources) != dict(place.resources)
+            or set(place.resources) != {"primary"}
+        ):
+            continue
+        args = place.arguments
+        if (
+            set(args) - {"object", "reference", "relation", "stage_id"}
+            or args.get("relation") not in {"left_of", "right_of", "front_of", "behind"}
+            or args.get("object") != pick.object.entity_id
+            or args.get("object") not in rigid
+            or args.get("reference") not in rigid
+            or args.get("reference") == args.get("object")
+        ):
+            continue
+        result.add(route.place_id)
+    return frozenset(result)
+
+
 def owns(action: Any, request: Any, context: Any) -> bool:
     """Own only an unconstrained live ordinary release with a new target R."""
+    return _owns_ordinary(action, request, context, preserve=False)
+
+
+def _owns_ordinary(
+    action: Any, request: Any, context: Any, *, preserve: bool, on_support: bool = False
+) -> bool:
     if not action.is_bound or getattr(request, "invocation_id", None) not in getattr(
-        action, "ordinary_on_invocations", ()
+        action,
+        (
+            "ordinary_lateral_invocations"
+            if preserve and not on_support
+            else "ordinary_on_invocations"
+        ),
+        (),
     ):
         return False
     goal = getattr(request, "goal", None)
@@ -265,9 +320,10 @@ def owns(action: Any, request: Any, context: Any) -> bool:
         or context.env_ids.tolist() != [0]
         or _CARTESIAN_APPROACH.get()
         or not isinstance(goal.xpos, SceneEntityPose)
-        or goal.xpos.world_orientation is not None
+        or (not preserve and goal.xpos.world_orientation is not None)
         or goal.tcp_symmetry != "none"
-        or options.preserve_current_object_orientation
+        or options.preserve_current_object_orientation != preserve
+        or (preserve and options.cartesian_waypoint_count != 2)
         or options.max_approach_retract_z is not None
         or request.motion_policy.strategy != "ik_interp"
         or request.motion_policy.dynamic_collision_mode != "off"
@@ -281,6 +337,90 @@ def owns(action: Any, request: Any, context: Any) -> bool:
         affordance is not None
         and affordance.get_custom_config(ADAPTIVE_GRASP) in {None, "ordinary"}
         and affordance.get_custom_config(_PICK_GRASP_RULE) is None
+    )
+
+
+def recover_preserved_lateral(
+    action: Any,
+    request: Any,
+    context: Any,
+    rejected: ActionPlan,
+    build: Callable[[Any, Any], ActionPlan],
+) -> ActionPlan:
+    """Replace only a self-colliding waypoint transport, never the release goal."""
+    return _recover_preserved(
+        action, request, context, rejected, build, on_support=False
+    )
+
+
+def recover_preserved_on(
+    action: Any,
+    request: Any,
+    context: Any,
+    rejected: ActionPlan,
+    build: Callable[[Any, Any], ActionPlan],
+) -> ActionPlan:
+    """Recover a support-colliding free prefix without changing the on-release."""
+    return _recover_preserved(
+        action, request, context, rejected, build, on_support=True
+    )
+
+
+def _recover_preserved(
+    action: Any,
+    request: Any,
+    context: Any,
+    rejected: ActionPlan,
+    build: Callable[[Any, Any], ActionPlan],
+    *,
+    on_support: bool,
+) -> ActionPlan:
+    probe = rejected.diagnostics.metadata.get("gen_sim_place_waypoint_probe", {})
+    acceptance = probe.get("acceptance", {})
+    if (
+        rejected.plan_success.any()
+        or not _owns_ordinary(
+            action, request, context, preserve=True, on_support=on_support
+        )
+        or not (
+            acceptance.get("reason") == "held_object_scene_envelope_rejected"
+            and acceptance.get("entity")
+            == (getattr(action, "support_surface_owners", None) or {}).get(
+                request.goal.xpos.entity_id, request.goal.xpos.entity_id
+            )
+            if on_support
+            else acceptance.get("reason") == "robot_proxy_rejected"
+            and acceptance.get("collision", {}).get("kind") == "self"
+        )
+    ):
+        return rejected
+    candidate = plan(
+        action,
+        request,
+        context,
+        build,
+        **(
+            {"preserved_on_transport": True}
+            if on_support
+            else {"preserved_transport": True}
+        ),
+    )
+    receipt = candidate.diagnostics.metadata["gen_sim_place_branch"]
+    chosen = candidate if candidate.plan_success.all() else rejected
+    return replace(
+        chosen,
+        diagnostics=replace(
+            chosen.diagnostics,
+            metadata={
+                **chosen.diagnostics.metadata,
+                "gen_sim_place_branch": receipt,
+                **(
+                    {"gen_sim_place_waypoint_recovery": receipt["inspection"]}
+                    if candidate.plan_success.all()
+                    else {}
+                ),
+            },
+        ),
     )
 
 
@@ -450,9 +590,25 @@ def solve_waypoints(
     ):
         raise ValueError("Place requires the original finite joint bounds.")
     release = scope.groups[0][:, -1].to(start_qpos)
-    ok, qrelease = generator.robot.compute_ik(
-        pose=release, name=control_part, joint_seed=start_qpos
-    )
+    if scope.preserved_transport and scope.release_branches is None:
+        scope.release_branches = _release_branches(
+            generator.robot,
+            control_part,
+            release,
+            start_qpos,
+            scope.context.require_control_dt(),
+        )
+    if scope.release_branches is not None:
+        if scope.release_branch_index >= len(scope.release_branches):
+            raise ValueError("No qualified Place release branch remains.")
+        qrelease = scope.release_branches[scope.release_branch_index]
+        ok = torch.ones(qrelease.shape[:-1], dtype=torch.bool, device=qrelease.device)
+        scope.receipt["release_branch_index"] = scope.release_branch_index
+        scope.receipt["release_branch_count"] = len(scope.release_branches)
+    else:
+        ok, qrelease = generator.robot.compute_ik(
+            pose=release, name=control_part, joint_seed=start_qpos
+        )
     qrelease = torch.as_tensor(qrelease).to(start_qpos)
     measured = _qualification(
         generator.robot, control_part, qrelease, release, ok, bounds
@@ -481,6 +637,24 @@ def solve_waypoints(
         torch.zeros(1, dtype=torch.bool, device=start_qpos.device),
         start_qpos[:, None].expand(-1, poses.shape[1], -1).clone(),
     )
+
+
+def _release_branches(
+    robot: Any, part: str, pose: torch.Tensor, start: torch.Tensor, dt: float
+) -> list[torch.Tensor] | None:
+    """Reuse the existing four-branch CPU IK search without changing other solvers."""
+    from embodichain.lab.sim.motion.solvers import PytorchSolver
+    from .articulation_recovery import _Search
+
+    solver = robot.get_solver(part)
+    if (
+        not isinstance(solver, PytorchSolver)
+        or solver.device.type != "cpu"
+        or solver._seed_sampler is not None
+    ):
+        return None
+    search = _Search(robot, part, dt)
+    return [q.to(start) for _, q in search.endpoints(search.to_root(pose), start)]
 
 
 def _velocity_phase(
@@ -630,25 +804,56 @@ def plan(
     request: Any,
     context: Any,
     build: Callable[[Any, Any], ActionPlan],
+    *,
+    preserved_transport: bool = False,
+    preserved_on_transport: bool = False,
 ) -> ActionPlan:
     """Build one shared Place plan and qualify it without fallback or dispatch."""
     post_handover = owns_post_handover(action, request, context)
-    if not (owns(action, request, context) or post_handover):
+    if preserved_transport and preserved_on_transport:
+        raise ValueError("Place cannot select two preserved transport routes.")
+    preserving = preserved_transport or preserved_on_transport
+    owned = (
+        _owns_ordinary(
+            action, request, context, preserve=True, on_support=preserved_on_transport
+        )
+        if preserving
+        else owns(action, request, context) or post_handover
+    )
+    if not owned:
         raise ValueError(
             "Place branch requires a bound ordinary on or post-handover invocation."
         )
-    scope = _Scope(action, request, context, velocity_phase_allocation=post_handover)
     state = _RandomState.capture(
         _cuda_devices(action.robot.device, context.robot.qpos.device)
     )
-    token = _SCOPE.set(scope)
     chosen = None
+    branches = None
+    attempts = []
     try:
-        chosen = _rebuild(scope, build(request, context))
-    except (ValueError, RuntimeError) as error:
-        scope.receipt["unavailable"] = str(error)
+        for index in range(4 if preserving else 1):
+            state.restore()
+            scope = _Scope(
+                action,
+                request,
+                context,
+                velocity_phase_allocation=post_handover or preserving,
+                preserved_transport=preserving,
+                release_branch_index=index,
+                release_branches=branches,
+            )
+            token = _SCOPE.set(scope)
+            try:
+                chosen = _rebuild(scope, build(request, context))
+            except (ValueError, RuntimeError) as error:
+                scope.receipt["unavailable"] = str(error)
+            finally:
+                _SCOPE.reset(token)
+            branches = scope.release_branches
+            attempts.append(dict(scope.receipt))
+            if chosen is not None or branches is None or index + 1 >= len(branches):
+                break
     finally:
-        _SCOPE.reset(token)
         state.restore()
     accepted = chosen is not None
     if not accepted:
@@ -672,7 +877,8 @@ def plan(
                     "scope": "goal_conditioned_waypoint_ik_and_emitted_phase_checks",
                     "mandatory_counts": [p.shape[1] for p in scope.groups],
                     "solve_requests": scope.solves,
-                    "retries": 0,
+                    "retries": len(attempts) - 1,
+                    **({"release_branch_attempts": attempts} if preserving else {}),
                     "timing_unchanged": scope.receipt.get("timing_unchanged", True),
                 },
             },

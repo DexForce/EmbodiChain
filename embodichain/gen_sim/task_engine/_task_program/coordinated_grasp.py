@@ -19,6 +19,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from contextlib import contextmanager
+from contextvars import ContextVar
+from collections.abc import Iterator, Mapping
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable
@@ -35,10 +38,101 @@ from embodichain.utils import logger
 
 __all__: list[str] = []
 
-COORDINATED_GRASP_REVISION = 4
+COORDINATED_GRASP_REVISION = 6
 _CONTACT_TOLERANCE = 0.0005
 # A geometric facing cone, not a friction-cone or force-closure certificate.
 _CONTACT_NORMAL_COSINE = 0.5
+_CARGO_RESERVE_M = 0.008
+_CARGO_BOUNDS: ContextVar[tuple[tuple[torch.Tensor, torch.Tensor], ...]] = ContextVar(
+    "gen_sim_e5_cargo_preference", default=()
+)
+
+
+@contextmanager
+def cargo_clearance_scope(
+    context: Any, meshes: Mapping[str, torch.Tensor] | None, carrier_id: str
+) -> Iterator[None]:
+    """Capture current contents for proposal preference, not cargo certification."""
+    from .cargo import inside_envelope
+
+    bounds = []
+    if (
+        meshes
+        and carrier_id in meshes
+        and context.batch_size == 1
+        and context.env_ids.tolist() == [0]
+    ):
+        try:
+
+            def pose(uid: str) -> torch.Tensor:
+                entity = context.scene.entities[uid]
+                if getattr(entity, "confidence", 1) <= 0:
+                    raise ValueError("Cargo preference requires an observed pose.")
+                value = torch.as_tensor(entity.pose)
+                return value[None] if value.ndim == 2 else value
+
+            carrier = pose(carrier_id)
+            source = meshes[carrier_id].to(carrier)
+            limits = torch.stack((source[0].amin(0), source[0].amax(0)))
+            for uid, vertices in meshes.items():
+                if uid == carrier_id:
+                    continue
+                observed = pose(uid).to(carrier)
+                vertices = vertices.to(carrier)
+                if bool(inside_envelope(vertices, observed, carrier, limits).all()):
+                    world = vertices @ observed[:, :3, :3].transpose(-1, -2)
+                    world = world + observed[:, None, :3, 3]
+                    bounds.append((world[0].amin(0).clone(), world[0].amax(0).clone()))
+        except (ValueError, RuntimeError, KeyError, TypeError, AttributeError) as error:
+            logger.log_warning(
+                f"E5 cargo preference unavailable; retaining base costs: {error}"
+            )
+            bounds = []
+    token = _CARGO_BOUNDS.set(tuple(bounds))
+    try:
+        yield
+    finally:
+        _CARGO_BOUNDS.reset(token)
+
+
+def _cargo_costs(
+    geometry: HandGeometry,
+    poses: torch.Tensor,
+    widths: torch.Tensor,
+    costs: torch.Tensor,
+) -> torch.Tensor:
+    """Prefer cargo clearance within the already-qualified finite candidate set."""
+    bounds = _CARGO_BOUNDS.get()
+    if not bounds or not len(costs):
+        return costs
+    try:
+        distance = torch.full_like(costs, torch.inf)
+        opened = geometry.gaps[0].to(widths).expand_as(widths)
+        for gaps in (opened, (opened + widths) / 2, widths):
+            body, pads = geometry.at_width(gaps)
+            points = torch.cat((body, pads.flatten(1, 2)), 1)
+            world = points @ poses[:, :3, :3].transpose(-1, -2) + poses[:, None, :3, 3]
+            for lower, upper in bounds:
+                gaps = torch.maximum(lower.to(world) - world, world - upper.to(world))
+                signed = torch.linalg.vector_norm(gaps.clamp_min(0), dim=-1)
+                signed += gaps.amax(-1).clamp_max(0)
+                distance = torch.minimum(distance, signed.amin(-1))
+        near = distance < _CARGO_RESERVE_M
+        logger.log_info(
+            f"GenSim E5 cargo preference: candidates={len(costs)}, "
+            f"clear={int((~near).sum())}, minimum_signed_box_gaps_m={distance.detach().cpu().tolist()}"
+        )
+        if not near.any():
+            return costs
+        spread = (costs.max() - costs.min()).clamp_min(1)
+        penalty = spread + 1 + (1 - distance / _CARGO_RESERVE_M).clamp_min(0) * spread
+        ranked = costs + near.to(costs) * penalty
+        return ranked if torch.isfinite(ranked).all() else costs
+    except (ValueError, RuntimeError, TypeError, AttributeError) as error:
+        logger.log_warning(
+            f"E5 cargo preference unavailable; retaining base costs: {error}"
+        )
+        return costs
 
 
 @dataclass(frozen=True)
@@ -556,6 +650,13 @@ class _HandSampler(AntipodalGraspPoseGenerator):
                     "open_lengths": torch.cat(accepted_widths)[chosen],
                     "total_cost": combined_costs[chosen],
                 }
+                selected = result[self._role]
+                selected["total_cost"] = _cargo_costs(
+                    self._geometry,
+                    selected["grasp_poses"],
+                    selected["open_lengths"],
+                    selected["total_cost"],
+                )
             output.append(result)
         return output
 

@@ -149,7 +149,7 @@ class TaskGraspPoseGenerator(ParallelJawGraspPoseGenerator):
     def for_native_closing(self, screen: Any) -> TaskGraspPoseGenerator:
         """Bind local proposals to mandatory native closing qualification.
 
-        Revision 8 also defers the approximate source proxy in this view only.
+        Revisions 8 and 9 defer the approximate source proxy in this view only.
         Transformed candidates and emitted close commands still require native
         qualification by the owning action.
         """
@@ -160,15 +160,16 @@ class TaskGraspPoseGenerator(ParallelJawGraspPoseGenerator):
             6,
             7,
             8,
+            9,
         ):
             raise ValueError(
-                "Local grasp proposals require native closing revision 5, 6, 7 or 8."
+                "Local grasp proposals require native closing revision 5 through 9."
             )
         if self._active_rules:
             raise ValueError("Constrained grasp rules retain their opening contract.")
         view = TaskGraspPoseGenerator(self._delegate, self._rules)
         view._native_closing = True
-        if screen.revision == 8:
+        if screen.revision in (8, 9):
             view._native_proposal_screen = screen
         return view
 

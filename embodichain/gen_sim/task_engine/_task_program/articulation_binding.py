@@ -22,6 +22,7 @@ from dataclasses import asdict, dataclass, fields
 import hashlib
 from numbers import Real
 from pathlib import Path
+import re
 from typing import Any
 
 import numpy as np
@@ -243,11 +244,12 @@ def _stage(path: str | Path) -> Any:
 def discover_prismatic_parts(
     config: dict[str, Any],
 ) -> tuple[ArticulationPartCandidate, ...]:
-    """Discover every enabled prismatic part without selecting one for execution.
+    """Discover pullable prismatic parts without selecting one for execution.
 
     The result is intentionally a catalog candidate.  Handle selection and
     runtime binding remain separate so that natural-language grounding cannot
-    bypass deterministic USD validation.
+    bypass deterministic USD validation. Named handleless push controls belong
+    to Press, not this catalog; other handleless parts still reject.
     """
     from pxr import Gf, UsdGeom, UsdPhysics
 
@@ -341,6 +343,12 @@ def discover_prismatic_parts(
         )
         if primary_grips:
             handles = primary_grips
+        if not handles and re.search(
+            r"(?:^|[_\s])(?:button|press|plunger|switch)(?:[_\s]|$)",
+            f"{prim.GetName()} {body.GetName()}",
+            re.I,
+        ):
+            continue
         axis = np.eye(3)[{"X": 0, "Y": 1, "Z": 2}[str(joint.GetAxisAttr().Get())]]
         q = joint.GetLocalRot1Attr().Get()
         axis = (

@@ -50,11 +50,11 @@ def contact_revision_declarations(value: object) -> dict[str, int]:
         type(name) is not str
         or not name
         or type(revision) is not int
-        or revision not in range(1, 9)
+        or revision not in range(1, 10)
         for name, revision in value.items()
     ):
         raise ValueError(
-            "Pick contact revisions must map segment names to revisions 1-8."
+            "Pick contact revisions must map segment names to revisions 1-9."
         )
     return dict(value)
 

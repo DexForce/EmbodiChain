@@ -75,8 +75,9 @@ class ClosingContactScreen:
         *,
         revision: int = 1,
         target_contact_offset: float | None = None,
+        gravity_in_object: np.ndarray | None = None,
     ) -> None:
-        if type(revision) is not int or revision not in (1, 2, 3, 4, 5, 6, 7, 8):
+        if type(revision) is not int or revision not in (1, 2, 3, 4, 5, 6, 7, 8, 9):
             raise ValueError("Unsupported Pick closing revision")
         if not parts or sum(part.pad for part in parts) != 2 or not target_meshes:
             raise ValueError("Closing screen requires a complete hand and target")
@@ -118,6 +119,28 @@ class ClosingContactScreen:
                 + part.tcp_poses[:, None, :3, 3]
             )
         self._part_tcp_boxes = np.stack(boxes, axis=1)
+        if revision == 9:
+            gravity = np.asarray(gravity_in_object, dtype=np.float64)
+            if (
+                gravity.shape != (3,)
+                or not np.isfinite(gravity).all()
+                or np.linalg.norm(gravity) <= 0
+            ):
+                raise ValueError(
+                    "Pad-line quality requires finite nonzero object-frame gravity"
+                )
+            self._quality_gravity = gravity / np.linalg.norm(gravity)
+            pads = self._part_tcp_boxes[:, [part.pad for part in parts]]
+            centers = (pads.min(2) + pads.max(2)) / 2
+            axes = centers[:, 1] - centers[:, 0]
+            lengths = np.linalg.norm(axes, axis=-1)
+            if not np.isfinite(lengths).all() or (lengths <= 1e-8).any():
+                raise ValueError("Native pad centers must define a closing line")
+            self._quality_axes = axes / lengths[:, None]
+            self._quality_gravity.setflags(write=False)
+            self._quality_axes.setflags(write=False)
+        elif gravity_in_object is not None:
+            raise ValueError("Pad-line quality is owned only by closing revision 9")
         self._distance_thresholds = np.array(
             [
                 max(
@@ -182,6 +205,17 @@ class ClosingContactScreen:
         }
         first_halo = None
         for step in range(self.steps):
+            if self.revision == 9:
+                axis = pose[:3, :3] @ self._quality_axes[step]
+                sine = float(abs(axis @ self._quality_gravity))
+                if sine > math.sin(math.radians(2)) + 1e-9:
+                    outcome = {
+                        "valid": False,
+                        "reason": "native_pad_line_tilt_exceeds_limit",
+                        "pad_line_tilt_deg": math.degrees(math.asin(min(sine, 1.0))),
+                        "pad_line_tilt_limit_deg": 2.0,
+                    }
+                    break
             pad_contact = 0
             rejected = None
             halo = None
@@ -200,7 +234,7 @@ class ClosingContactScreen:
                     if part.pad:
                         pad_contact += 1
                         if (
-                            self.revision in (5, 6, 7, 8)
+                            self.revision in (5, 6, 7, 8, 9)
                             and step == 0
                             and rejected is None
                         ):
@@ -230,7 +264,7 @@ class ClosingContactScreen:
                             "native_pair_contact_offset_m": contact,
                         }
             if (
-                self.revision in (4, 5, 6, 7, 8)
+                self.revision in (4, 5, 6, 7, 8, 9)
                 and halo is not None
                 and first_halo is None
             ):
@@ -257,7 +291,7 @@ class ClosingContactScreen:
                         halo is not None
                     )
                 break
-            if halo is not None and self.revision not in (4, 5, 6, 7, 8):
+            if halo is not None and self.revision not in (4, 5, 6, 7, 8, 9):
                 outcome = halo
                 break
         if first_halo is not None:
@@ -287,7 +321,7 @@ class ClosingContactScreen:
             valid = source["valid"]
             if (
                 valid
-                and self.revision in (3, 4, 5, 6, 7, 8)
+                and self.revision in (3, 4, 5, 6, 7, 8, 9)
                 and self.opening_screen is not None
             ):
                 valid = self.opening_screen.inspect(grasp, source)["valid"]
@@ -298,7 +332,7 @@ class ClosingContactScreen:
 
     def depth_offsets(self) -> tuple[float, ...]:
         """Bound contact-depth alternatives by the actual pads, not object names."""
-        if self.revision not in (6, 7, 8):
+        if self.revision not in (6, 7, 8, 9):
             return (0.0,)
         spans = []
         rest = []
@@ -332,28 +366,35 @@ class ClosingContactScreen:
             "accepted_queries": sum(item["valid"] for item in self.cache.values()),
             "reasons": [dict(item) for item in self.cache.values()],
         }
-        if self.revision in (4, 5, 6, 7, 8):
+        if self.revision in (4, 5, 6, 7, 8, 9):
             result["scope"] = (
                 "discrete_nominal_rest_order_with_contact_halo_diagnostics"
                 "_not_physical_acquisition"
             )
             result["nonpad_contact_halo_is_veto"] = False
-        if self.revision in (5, 6, 7, 8):
+        if self.revision in (5, 6, 7, 8, 9):
             result["native_opening_rest_screen"] = True
             result["whole_object_opening_envelope"] = False
-        if self.revision in (6, 7, 8):
+        if self.revision in (6, 7, 8, 9):
             result["native_depth_offsets_m"] = list(self.depth_offsets())
-        if self.revision in (3, 4, 5, 6, 7, 8):
+        if self.revision in (3, 4, 5, 6, 7, 8, 9):
             result["opening"] = (
                 None if self.opening_screen is None else self.opening_screen.report()
             )
-        if self.revision == 8:
+        if self.revision in (8, 9):
             result["proposal_source_proxy_deferred"] = (
                 self.deferred_source_proposal_calls > 0
             )
             result["deferred_source_proposal_calls"] = (
                 self.deferred_source_proposal_calls
             )
+        if self.revision == 9:
+            result["pad_line_quality"] = {
+                "tilt_limit_deg": 2.0,
+                "gravity_in_object": self._quality_gravity.tolist(),
+                "basis": "native_pad_collision_bounds_centers",
+                "scope": "precontact_nominal_geometry_not_physical_grasp",
+            }
         return result
 
 
@@ -431,7 +472,8 @@ def build_closing_contact_screen(
             or the same geometry with measured pad-depth proposals (6). Revision
             7 adds ordinary precontact scene checks; 8 retains them and owns
             external source-proposal qualification through this native screen.
-        context: Current invocation context, required for owned revisions 3-8.
+            Revision 9 adds a two-degree gravity-level native pad-line limit.
+        context: Current invocation context, required for owned revisions 3-9.
         preview: Exact bound Pick/Place continuation, or None for standalone Pick.
         purpose: Bound call-local Pick purpose; only ordinary on-placement opens.
 
@@ -556,6 +598,9 @@ def build_closing_contact_screen(
                 float(body.get_contact_offset()) if revision >= 2 else None,
             )
         )
+    quality = {}
+    if revision == 9:
+        quality["gravity_in_object"] = _quality_gravity(simulation, request, context)
     screen = ClosingContactScreen(
         tuple(parts),
         target_meshes,
@@ -564,6 +609,7 @@ def build_closing_contact_screen(
         target_contact_offset=(
             float(target_body.get_contact_offset()) if revision >= 2 else None
         ),
+        **quality,
     )
     screen.identity = {
         "object_id": object_id,
@@ -577,7 +623,7 @@ def build_closing_contact_screen(
         "native_target_shapes": len(target_meshes),
     }
     screen.build_seconds = time.monotonic() - started
-    if revision in (3, 4, 5, 6, 7, 8):
+    if revision in (3, 4, 5, 6, 7, 8, 9):
         from .release_contact import build_opening_screen
 
         screen.opening_screen = build_opening_screen(
@@ -591,3 +637,31 @@ def build_closing_contact_screen(
             purpose=purpose,
         )
     return screen
+
+
+def _quality_gravity(simulation: Any, request: Any, context: Any) -> np.ndarray:
+    """Freeze gravity in the same object frame used by closing candidates."""
+    from embodichain.lab.sim.atomic_actions.goals import (
+        _resolve_object_pose,
+        resolve_pose_goal,
+    )
+    from .pour_services import gravity_from_simulation
+
+    if context is None or context.batch_size != 1:
+        raise ValueError("Pad-line quality requires the current B1 object observation")
+    goal = request.goal
+    pose = (
+        _resolve_object_pose(goal.semantics, context, name="pickup_object_pose")
+        if goal.object_pose is None
+        else resolve_pose_goal(goal.object_pose, context, name="object_pose")
+    )
+    frame = pose.detach().cpu().double().numpy()
+    if (
+        frame.shape != (1, 4, 4)
+        or not np.isfinite(frame).all()
+        or not np.allclose(frame[0, 3], (0, 0, 0, 1))
+        or not np.allclose(frame[0, :3, :3].T @ frame[0, :3, :3], np.eye(3), atol=1e-5)
+        or not np.isclose(np.linalg.det(frame[0, :3, :3]), 1.0, atol=1e-5)
+    ):
+        raise ValueError("Pad-line quality requires a proper observed object pose")
+    return frame[0, :3, :3].T @ np.asarray(gravity_from_simulation(simulation))

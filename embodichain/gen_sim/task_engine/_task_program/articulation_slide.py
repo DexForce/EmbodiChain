@@ -260,6 +260,22 @@ def _withdrawal_targets(current: torch.Tensor, outward: torch.Tensor) -> torch.T
     return torch.stack((current, raised, withdrawn), dim=1)
 
 
+def _short_withdrawal_targets(nominal: torch.Tensor) -> torch.Tensor:
+    """Derive one outward-only cleanup alternative without changing wrist pose."""
+    if nominal.ndim != 4 or nominal.shape[1:] != (3, 4, 4):
+        raise ValueError(
+            "Short withdrawal requires the owned three-pose cleanup route."
+        )
+    direction = nominal[:, -1, :3, 3] - nominal[:, -2, :3, 3]
+    length = torch.linalg.vector_norm(direction, dim=-1, keepdim=True)
+    if not torch.isfinite(length).all() or (length <= 0).any():
+        raise ValueError("Withdrawal rail direction is unavailable.")
+    start = nominal[:, 0]
+    end = start.clone()
+    end[:, :3, 3] += 0.02 * direction / length
+    return torch.stack((start, end), dim=1)
+
+
 class _WithdrawLowerer(_SlideLowerer):
     call_id: ClassVar[str] = WITHDRAW_CALL
     target_descriptor = MoveEndEffector.descriptor()

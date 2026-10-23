@@ -46,6 +46,7 @@ from .invocation_policy import GenSimActionEngine
 __all__: list[str] = []
 
 DRAWER_MAX_FULL_PLAN_CANDIDATES = 2
+DRAWER_RELEASE_RECOVERY_REVISION = 1
 _DRAWER_PREFILTER_STAGES = ("outside", "rim", "release")
 
 
@@ -263,7 +264,7 @@ class DrawerObservation:
         return self._entry_poses_for_target(target)
 
     def _entry_poses_for_target(
-        self, target: torch.Tensor
+        self, target: torch.Tensor, *, release_lift: float = 0.12
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Build outside/rim/release poses for one payload target."""
         _, link = self.poses()
@@ -293,13 +294,16 @@ class DrawerObservation:
         # Open above the rim.  The payload can fall toward the drawer while the
         # hand avoids pushing the front panel or the upper drawer stack.
         release = rim.clone()
-        release[:, :3, 3] += link[:, :3, 2] * 0.12
+        release[:, :3, 3] += link[:, :3, 2] * release_lift
         return outside, rim, release
 
-    def entry_pose_candidates(self) -> tuple[tuple[torch.Tensor, ...], ...]:
+    def entry_pose_candidates(
+        self, *, release_lift: float = 0.12
+    ) -> tuple[tuple[torch.Tensor, ...], ...]:
         """Return finite outside/rim/release candidates for each environment."""
         return tuple(
-            self._entry_poses_for_target(target) for target in self._target_poses()
+            self._entry_poses_for_target(target, release_lift=release_lift)
+            for target in self._target_poses()
         )
 
     def containment_report(self) -> dict[str, object]:
@@ -362,6 +366,8 @@ def prepare_place_candidates(
     request: Any,
     context: Any,
     observations: tuple[DrawerObservation, ...],
+    *,
+    release_lift: float = 0.12,
 ) -> tuple[Any, ...]:
     """Create bounded drawer Place requests without touching shared Place."""
     if not isinstance(request.goal, PlaceGoal) or not isinstance(
@@ -384,7 +390,7 @@ def prepare_place_candidates(
         raise ValueError("Drawer Place requires the declared object to be held.")
     object_to_eef = held.object_to_eef.to(context.robot.qpos)
     requests = []
-    for entry in observation.entry_pose_candidates():
+    for entry in observation.entry_pose_candidates(release_lift=release_lift):
         target = torch.stack(entry, dim=1).to(context.robot.qpos)
         requests.append(
             replace(
@@ -529,48 +535,67 @@ class DrawerPlacementEngine(GenSimActionEngine):
                 prepared, current, plan_transform=plan_transform
             )
 
-        all_prepared_candidates = prepare_place_candidates(
-            request, current, self._drawer_observations
-        )
-        if not all_prepared_candidates:
-            raise ValueError("Drawer placement produced no candidate targets.")
-        selected_candidates, prefilter_results = _prefilter_place_candidates(
-            request, current, all_prepared_candidates, self.robot
-        )
         plans = []
         candidate_results = []
-        for index, prepared in selected_candidates:
-            with self.motion_generator.placement_path(prepared.goal.xpos):
-                plan = super()._plan_request(prepared, current, plan_transform=None)
-            plan = _validate_drawer_plan_velocity(plan, self.robot)
-            plan = replace(
-                plan,
-                diagnostics=replace(
-                    plan.diagnostics,
-                    metadata={
-                        **plan.diagnostics.metadata,
-                        "drawer_placement_candidate": index,
-                        "drawer_placement_candidate_count": len(
-                            all_prepared_candidates
-                        ),
-                    },
-                ),
+        clearance_attempts = []
+        for release_lift in (0.12, 0.0):
+            if len(plans) >= DRAWER_MAX_FULL_PLAN_CANDIDATES or any(
+                bool(p.plan_success.all()) for p in plans
+            ):
+                break
+            all_prepared_candidates = prepare_place_candidates(
+                request, current, self._drawer_observations, release_lift=release_lift
             )
-            candidate_results.append(
+            if not all_prepared_candidates:
+                raise ValueError("Drawer placement produced no candidate targets.")
+            selected_candidates, prefilter_results = _prefilter_place_candidates(
+                request, current, all_prepared_candidates, self.robot
+            )
+            clearance_attempts.append(
                 {
-                    "candidate_id": f"drawer_candidate_{index}",
-                    "index": index,
-                    "plan_success": plan.plan_success.detach().cpu().tolist(),
-                    "failure": (
-                        None
-                        if plan.diagnostics.failure is None
-                        else plan.diagnostics.failure.code
-                    ),
+                    "release_lift_m": release_lift,
+                    "prefilter": prefilter_results,
+                    "target_positions": [
+                        p.goal.xpos[:, :, :3, 3].detach().cpu().tolist()
+                        for p in all_prepared_candidates
+                    ],
                 }
             )
-            plans.append(plan)
-            if bool(plan.plan_success.all().item()):
-                break
+            remaining = DRAWER_MAX_FULL_PLAN_CANDIDATES - len(plans)
+            for index, prepared in selected_candidates[:remaining]:
+                with self.motion_generator.placement_path(prepared.goal.xpos):
+                    plan = super()._plan_request(prepared, current, plan_transform=None)
+                plan = _validate_drawer_plan_velocity(plan, self.robot)
+                plan = replace(
+                    plan,
+                    diagnostics=replace(
+                        plan.diagnostics,
+                        metadata={
+                            **plan.diagnostics.metadata,
+                            "drawer_placement_candidate": index,
+                            "drawer_placement_candidate_count": len(
+                                all_prepared_candidates
+                            ),
+                            "drawer_release_lift_m": release_lift,
+                        },
+                    ),
+                )
+                candidate_results.append(
+                    {
+                        "candidate_id": f"drawer_candidate_{index}",
+                        "index": index,
+                        "release_lift_m": release_lift,
+                        "plan_success": plan.plan_success.detach().cpu().tolist(),
+                        "failure": (
+                            None
+                            if plan.diagnostics.failure is None
+                            else plan.diagnostics.failure.code
+                        ),
+                    }
+                )
+                plans.append(plan)
+                if bool(plan.plan_success.all().item()):
+                    break
 
         plan = plans[-1]
         selected_index = candidate_results[-1]["index"]
@@ -587,6 +612,7 @@ class DrawerPlacementEngine(GenSimActionEngine):
                     **plan.diagnostics.metadata,
                     "drawer_placement_prefilter": prefilter_results,
                     "drawer_placement_candidates": candidate_results,
+                    "drawer_release_clearance_attempts": clearance_attempts,
                     "drawer_candidate_target_positions": [
                         prepared.goal.xpos[:, :, :3, 3].detach().cpu().tolist()
                         for prepared in all_prepared_candidates

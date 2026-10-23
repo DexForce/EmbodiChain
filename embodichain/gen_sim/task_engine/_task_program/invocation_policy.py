@@ -113,6 +113,7 @@ def bind_articulation_calls(program: Any) -> tuple[tuple[str, str], ...]:
     kinds = {
         "gen_sim.articulation_slide": "slide",
         "gen_sim.articulation_withdraw": "withdraw",
+        "gen_sim.articulation_park": "park",
     }
     return tuple(
         (ids[segment.name], kinds[segment.calls[0].call.call_id])
@@ -133,6 +134,15 @@ def bind_articulation_followups(program: Any) -> tuple[tuple[str, str], ...]:
             and getattr(withdraw, "call_id", None) == "gen_sim.articulation_withdraw"
             and slide.arguments == withdraw.arguments
             and slide.resources == withdraw.resources
+        ):
+            pairs.append((ids[first.name], ids[second.name]))
+        elif (
+            getattr(slide, "call_id", None) == "gen_sim.articulation_withdraw"
+            and getattr(withdraw, "call_id", None) == "gen_sim.articulation_park"
+            and not withdraw.arguments
+            and slide.resources == withdraw.resources
+            and first.parallel_block is None
+            and second.parallel_block is None
         ):
             pairs.append((ids[first.name], ids[second.name]))
     return tuple(pairs)
@@ -283,7 +293,9 @@ class GenSimActionEngine(AtomicActionEngine):
         self._clearance_simulation: Any = None
         self._alignment_continuations: dict[str, Any] = {}
         if len(self._articulation_calls) != len(articulation_calls) or any(
-            not isinstance(key, str) or not key or value not in {"slide", "withdraw"}
+            not isinstance(key, str)
+            or not key
+            or value not in {"slide", "withdraw", "park"}
             for key, value in articulation_calls
         ):
             raise ValueError(
@@ -297,8 +309,11 @@ class GenSimActionEngine(AtomicActionEngine):
                 "Invocation motion budgets require unique IDs and integer sample counts."
             )
         if len(self._articulation_followups) != len(articulation_followups) or any(
-            self._articulation_calls.get(slide) != "slide"
-            or self._articulation_calls.get(withdraw) != "withdraw"
+            (
+                self._articulation_calls.get(slide),
+                self._articulation_calls.get(withdraw),
+            )
+            not in {("slide", "withdraw"), ("withdraw", "park")}
             or withdraw not in self._motion_samples
             for slide, withdraw in articulation_followups
         ):
@@ -388,6 +403,28 @@ class GenSimActionEngine(AtomicActionEngine):
                 "gen_sim_articulation_recovery", {}
             ).get("withdrawal_selection_changed")
             is True
+            for attempt in session.plan_attempts
+        )
+
+    def _articulation_park_after_short_withdrawal(self, invocation_id: str) -> bool:
+        """Own only the adjacent Park of an installed shorter cleanup plan."""
+        calls = getattr(self, "_articulation_calls", {})
+        entry = getattr(self, "_articulation_sessions", {}).get(invocation_id)
+        if calls.get(invocation_id) != "park" or entry is None:
+            return False
+        previous, session = entry
+        if calls.get(previous) != "withdraw":
+            return False
+        return any(
+            attempt.request.invocation_id == previous
+            and bool(attempt.planned_mask.any())
+            and (
+                detail := attempt.plan.diagnostics.metadata.get(
+                    "gen_sim_withdrawal_target_recovery", {}
+                )
+            ).get("accepted")
+            is True
+            and detail.get("route") == "outward_20mm"
             for attempt in session.plan_attempts
         )
 
@@ -669,14 +706,19 @@ class GenSimActionEngine(AtomicActionEngine):
             with cartesian_approach_scope(enabled):
                 kind = self._articulation_calls.get(request.invocation_id)
                 if (
-                    kind is not None
+                    kind in {"slide", "withdraw"}
                     and enabled
                     and context is not None
                     and context.batch_size == 1
                     and request.motion_policy.strategy == "ik_interp"
                     and request.motion_policy.dynamic_collision_mode == "off"
                 ):
-                    from .articulation_recovery import planning_scope, recover
+                    from .articulation_recovery import (
+                        planning_scope,
+                        recover,
+                        retry_short_withdrawal,
+                        retry_push_pregrasp,
+                    )
 
                     def build(selected: Any) -> Any:
                         return super(GenSimActionEngine, self)._plan_request(
@@ -688,6 +730,7 @@ class GenSimActionEngine(AtomicActionEngine):
                     withdrawal_samples = (
                         self._motion_samples[following]
                         if following is not None
+                        and self._articulation_calls.get(following) == "withdraw"
                         else None
                     )
                     if self._withdrawal_was_reselected(request.invocation_id):
@@ -699,6 +742,10 @@ class GenSimActionEngine(AtomicActionEngine):
                     ) as scope:
                         plan = build(request)
                         plan = recover(scope, request, context, plan, build)
+                        plan = retry_short_withdrawal(
+                            scope, request, context, plan, build
+                        )
+                        plan = retry_push_pregrasp(scope, request, context, plan, build)
                 else:
                     plan = super()._plan_request(
                         request, context, plan_transform=plan_transform
@@ -853,13 +900,26 @@ class GenSimActionEngine(AtomicActionEngine):
                         robot=self.robot,
                         simulation=self._clearance_simulation,
                     )
-                elif request.invocation_id in getattr(self, "_clearance_parks", ()):
+                elif request.invocation_id in getattr(
+                    self, "_clearance_parks", ()
+                ) or self._articulation_park_after_short_withdrawal(
+                    request.invocation_id
+                ):
                     from .clearance_recovery import validate_motion
                     from embodichain.lab.sim.atomic_actions import JointPositionTarget
                     from embodichain.lab.sim.atomic_actions.plans import PlanningFailure
 
                     endpoint = request.binding.endpoint("primary", "motion")
                     motion = endpoint.require_target(JointPositionTarget)
+                    simulation = self._clearance_simulation
+                    if self._articulation_park_after_short_withdrawal(
+                        request.invocation_id
+                    ):
+                        from embodichain.lab.sim.sim_manager import SimulationManager
+
+                        simulation = SimulationManager.get_instance(
+                            self.motion_generator.planner.cfg.sim_instance_id
+                        )
                     held = context.task.get_held_object(endpoint.task_state_key)
                     acceptance = (
                         {"valid": False, "reason": "park_requires_released_hand"}
@@ -868,7 +928,7 @@ class GenSimActionEngine(AtomicActionEngine):
                             plan,
                             context,
                             self.robot,
-                            self._clearance_simulation,
+                            simulation,
                             motion.control_part,
                         )
                     )
@@ -884,7 +944,7 @@ class GenSimActionEngine(AtomicActionEngine):
                         build=lambda selected, current: self._plan_request(
                             selected, current, plan_transform=plan_transform
                         ),
-                        simulation=self._clearance_simulation,
+                        simulation=simulation,
                     )
                     if plan is not original_park and plan.plan_success.all():
                         acceptance = plan.diagnostics.metadata["gen_sim_clearance_park"]

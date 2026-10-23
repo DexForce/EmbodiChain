@@ -282,7 +282,10 @@ class _TaskFactory(SimulationTaskProgramFactory):
         pick.path_simulation = getattr(self, "_simulation", None)
         pick.path_excluded_invocations = frozenset(self._cartesian_calls)
         contact_revisions = dict(self._pick_contact_revisions)
-        if self._pick_contact_revision in (1, 2, 3, 4, 5, 6, 7, 8) or contact_revisions:
+        if (
+            self._pick_contact_revision in (1, 2, 3, 4, 5, 6, 7, 8, 9)
+            or contact_revisions
+        ):
             from .pick_contact import build_closing_contact_screen
 
             def closing_geometry(request: Any, context: Any) -> Any:
@@ -292,7 +295,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
                 if revision is None:
                     return None
                 opening = {}
-                if revision in (3, 4, 5, 6, 7, 8):
+                if revision in (3, 4, 5, 6, 7, 8, 9):
                     opening = {
                         "context": context,
                         "preview": (pick.continuation_previews or {}).get(
@@ -360,9 +363,18 @@ class _TaskFactory(SimulationTaskProgramFactory):
             route.place_id: (route.subject, route.receiver, route.reference)
             for route in self._post_handover_places
         }
-        from .place_branch import bind_on_invocations
+        from .place_branch import bind_on_invocations, bind_lateral_invocations
 
         place.ordinary_on_invocations = bind_on_invocations(
+            self._pick_continuations,
+            self._pick_purposes,
+            self.task_program_registration.scene_binding,
+        )
+        place.support_surface_owners = {
+            item.entity_id: item.parent_id
+            for item in self.task_program_registration.scene_binding.support_surfaces
+        }
+        place.ordinary_lateral_invocations = bind_lateral_invocations(
             self._pick_continuations,
             self._pick_purposes,
             self.task_program_registration.scene_binding,
@@ -383,7 +395,9 @@ class _TaskFactory(SimulationTaskProgramFactory):
             )
         engine.register(pour, replace=True)
         if self._coordinated_motion:
-            engine.register(GenSimCoordinatedPickment(), replace=True)
+            coordinated = GenSimCoordinatedPickment()
+            coordinated.cargo_scene_vertices = meshes
+            engine.register(coordinated, replace=True)
         if self._press_routes:
             from .press_runtime import GenSimPress
 
@@ -907,7 +921,7 @@ def load_deployment(
     pick_contact_revision = payload.get("pick_contact_revision")
     if pick_contact_revision is not None and (
         type(pick_contact_revision) is not int
-        or pick_contact_revision not in (1, 2, 3, 4, 5, 6, 7, 8)
+        or pick_contact_revision not in (1, 2, 3, 4, 5, 6, 7, 8, 9)
     ):
         raise ValueError("Unsupported GenSim Pick contact revision.")
     if support_revision is not None and (
@@ -1212,6 +1226,36 @@ def load_deployment(
         tuple(item[0] for item in staging_retention_sources),
         continuation_preset,
     )
+    from .pick_continuation import bind_calls as bind_pick_continuations
+    from .place_branch import (
+        PRESERVED_LATERAL_RECOVERY_REVISION,
+        PRESERVED_ON_RECOVERY_REVISION,
+        bind_lateral_invocations,
+        bind_on_invocations,
+    )
+
+    lateral_recovery = (
+        adaptive_pick
+        and continuation_preset is not None
+        and bool(
+            bind_lateral_invocations(
+                bind_pick_continuations(compiled, continuation_preset),
+                pick_purposes,
+                registration.scene_binding,
+            )
+        )
+    )
+    on_recovery = (
+        adaptive_pick
+        and continuation_preset is not None
+        and bool(
+            bind_on_invocations(
+                bind_pick_continuations(compiled, continuation_preset),
+                pick_purposes,
+                registration.scene_binding,
+            )
+        )
+    )
     grasp_factories = base.integration.grasp_factories
     coordinated = any(
         item.get("steps", {}).get("call", {}).get("call_id")
@@ -1234,10 +1278,25 @@ def load_deployment(
     from .pick_safety import PICK_OPENING_RECOVERY_REVISION
     from .services import _PickLowererFactory
 
+    if drawers:
+        from .drawer_runtime import DRAWER_RELEASE_RECOVERY_REVISION
+
     fingerprint = canonical_hash(
         {
             "adaptive_grasp_revision": ADAPTIVE_GRASP_REVISION,
             "invocation_policy_revision": INVOCATION_POLICY_REVISION,
+            **(
+                {
+                    "preserved_lateral_recovery_revision": PRESERVED_LATERAL_RECOVERY_REVISION
+                }
+                if lateral_recovery
+                else {}
+            ),
+            **(
+                {"preserved_on_recovery_revision": PRESERVED_ON_RECOVERY_REVISION}
+                if on_recovery
+                else {}
+            ),
             **(
                 {"measured_rigid_revision": MEASURED_RIGID_REVISION}
                 if measured_rigid_calls
@@ -1335,6 +1394,11 @@ def load_deployment(
             ),
             "grasp_filter_revision": GRASP_FILTER_REVISION,
             "motion_validation_revision": MOTION_VALIDATION_REVISION,
+            **(
+                {"drawer_release_recovery_revision": DRAWER_RELEASE_RECOVERY_REVISION}
+                if drawers
+                else {}
+            ),
             "core_integration": base.integration.integration_fingerprint,
             "registration": bundle_registration_fingerprint(registration),
             "task_constraints": payload,

@@ -28,7 +28,10 @@ from embodichain.compute.trajectory import retime_to_control_grid
 from embodichain.lab.sim.atomic_actions import JointPositionTarget
 from embodichain.lab.sim.atomic_actions.affordance import AntipodalAffordance
 from embodichain.lab.sim.atomic_actions.plans import PlanningFailure, TimedTrajectory
-from embodichain.lab.sim.atomic_actions.trajectory_ops import build_pose_plan_states
+from embodichain.lab.sim.atomic_actions.trajectory_ops import (
+    build_pose_plan_states,
+    interpolate_hand_qpos,
+)
 from embodichain.lab.sim.motion.motion_generator import MotionGenOptions
 from embodichain.lab.sim.motion.planners.utils import MoveType, PlanState
 from embodichain.lab.sim.motion.planners.utils import interpolate_xpos_batched
@@ -37,7 +40,11 @@ from embodichain.utils.math import quat_error_magnitude, quat_from_matrix
 
 from .articulation_collision import check_free_motion
 from .held_alignment_recovery import _RandomState, _cuda_devices
-from .motion import _joint_velocity_limits, resolve_continuous_ik_path
+from .motion import (
+    _curobo_joint_prefix,
+    _joint_velocity_limits,
+    resolve_continuous_ik_path,
+)
 from .pick_safety import _inspect_pick_plan
 from .solver_tolerances import _pose_validation_parameters
 
@@ -97,6 +104,8 @@ def _compose_approach(
     arm_ids: list[int],
     prefix: torch.Tensor,
     contact: torch.Tensor,
+    hand_ids: list[int],
+    hand_limits: torch.Tensor,
 ) -> torch.Tensor:
     """Keep the exact acquired joint endpoint, close/lift suffix and passive holds."""
     if not torch.equal(prefix[:, -1], contact[:, 0]):
@@ -106,91 +115,17 @@ def _compose_approach(
     if not torch.equal(contact[:, -1], original[:, approach_stop - 1, arm_ids]):
         raise ValueError("Contact path changed the selected grasp joint endpoint.")
     arm = torch.cat((prefix, contact[:, 1:]), dim=1)
-    approach = original[:, :1].expand(-1, arm.shape[1], -1).clone()
+    # Preserve opening before close, including a previously closed Press hand.
+    approach = interpolate_hand_qpos(
+        original[:, 0], original[:, approach_stop - 1], n_waypoints=arm.shape[1]
+    )
+    # Native drive overshoot is an observation, not a legal desired command.
+    # The final certificate separately checks the observed-to-command speed.
+    approach[:, 0, hand_ids] = approach[:, 0, hand_ids].clamp(
+        hand_limits[..., 0], hand_limits[..., 1]
+    )
     approach[:, :, arm_ids] = arm
     return torch.cat((approach, original[:, approach_stop:]), dim=1)
-
-
-def _curobo_prefix(
-    action: Any,
-    context: Any,
-    part: str,
-    start: torch.Tensor,
-    target: torch.Tensor,
-    opened_full: torch.Tensor,
-) -> Any:
-    """Use the existing planner with a fresh world and exact joint-space goal."""
-    from embodichain.lab.sim.motion.motion_generator import (
-        MotionGenCfg,
-        MotionGenerator,
-    )
-    from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
-        CuroboPlanner,
-        CuroboPlannerCfg,
-        CuroboWorldCfg,
-        CuroboPlanOptions,
-    )
-    from .drawer_curobo import snapshot_in_base, world_sources
-
-    class SnapshotPlanner(CuroboPlanner):
-        def _load_runtime_robot_config(self, path: str) -> dict:
-            config = super()._load_runtime_robot_config(path)
-            joints = dict(
-                zip(self.robot.joint_names, opened_full[0].tolist(), strict=True)
-            )
-            kinematics = config["robot_cfg"]["kinematics"]
-            kinematics["lock_joints"] = {
-                name: joints[name] for name in kinematics.get("lock_joints", {})
-            }
-            return config
-
-        def _materialize_profile(self, control_part: str) -> Any:
-            profile = super()._materialize_profile(control_part)
-            self.base_pose = self.robot.get_link_pose(
-                profile.sim_base_link_name, to_matrix=True
-            ).clone()
-            return profile
-
-        def _auto_generate_world_scene(self, cfg: Any) -> Any:
-            return super()._auto_generate_world_scene(
-                replace(
-                    cfg,
-                    rigid_objects=snapshot_in_base(cfg.rigid_objects, self.base_pose),
-                )
-            )
-
-    class SnapshotGenerator(MotionGenerator):
-        def _create_planner(self, cfg: Any) -> Any:
-            return SnapshotPlanner(cfg)
-
-    cfg = CuroboPlannerCfg(
-        robot_uid=action.robot.uid,
-        sim_instance_id=action.motion_generator.planner.cfg.sim_instance_id,
-        world=CuroboWorldCfg(
-            rigid_objects=world_sources(action.path_simulation, ""),
-            max_voxel_count=4_000_000,
-        ),
-        use_cuda_graph=False,
-        warmup_iterations=0,
-        interpolation_dt=context.require_control_dt(),
-        preserve_plan_samples=True,
-    )
-    # cuRobo may use CUDA even when the simulator/IK input is on CPU.
-    with torch.random.fork_rng(devices=[torch.cuda.current_device()]):
-        generator = SnapshotGenerator(MotionGenCfg(planner_cfg=cfg))
-        try:
-            return generator.generate(
-                [PlanState(move_type=MoveType.JOINT_MOVE, qpos=target)],
-                options=MotionGenOptions(
-                    strategy="motion_gen",
-                    start_qpos=start,
-                    control_part=part,
-                    sample_count=None,
-                    plan_opts=CuroboPlanOptions(),
-                ),
-            )
-        finally:
-            generator.planner.close()
 
 
 def rebuild(action: Any, request: Any, context: Any, first: Any, selection: Any) -> Any:
@@ -205,6 +140,12 @@ def rebuild(action: Any, request: Any, context: Any, first: Any, selection: Any)
         arm = request.binding.endpoint("primary", "motion").require_target(
             JointPositionTarget
         )
+        hand = request.binding.endpoint("primary", "grasp").require_target(
+            JointPositionTarget
+        )
+        hand_limits = action.robot.get_qpos_limits(
+            name=hand.control_part, env_ids=context.env_ids
+        ).to(first.joint_trajectory.positions)
         ids = list(arm.joint_ids)
         segments = {segment.name: segment for segment in first.segments}
         if set(segments) != {"approach", "close", "lift"}:
@@ -340,8 +281,14 @@ def rebuild(action: Any, request: Any, context: Any, first: Any, selection: Any)
                     result = direct
                 else:
                     state.restore()
-                    result = _curobo_prefix(
-                        action, context, arm.control_part, start, target, original[:, 0]
+                    result = _curobo_joint_prefix(
+                        action.motion_generator,
+                        action.path_simulation,
+                        context,
+                        arm.control_part,
+                        start,
+                        target,
+                        original[:, 0],
                     )
                 if (
                     not result.success.all()
@@ -365,7 +312,15 @@ def rebuild(action: Any, request: Any, context: Any, first: Any, selection: Any)
                         "Pick prefix endpoints differ beyond native rounding."
                     )
                 prefix[:, 0], prefix[:, -1] = start, target
-                full = _compose_approach(original, stop, ids, prefix, contact)
+                full = _compose_approach(
+                    original,
+                    stop,
+                    ids,
+                    prefix,
+                    contact,
+                    list(hand.joint_ids),
+                    hand_limits,
+                )
                 lengths = {
                     segment.name: segment.stop - segment.start
                     for segment in first.segments
