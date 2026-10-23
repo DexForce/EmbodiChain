@@ -109,6 +109,7 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
                     "preserve_order": True,
                     "offset": self.velocity_task_config.default_joint_position,
                     "scale": self.velocity_task_config.action_scale,
+                    "clip": None,
                 }
                 for name, value in mapping.items():
                     term_cfg.params.setdefault(name, value)
@@ -183,32 +184,7 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
             dtype=torch.float32,
             device=self.device,
         )
-        sensor = self.get_sensor("locomotion_contacts")
-        self._foot_contacts = sensor.create_history(
-            "feet",
-            sensor.get_actor_ids(self.robot.uid, self.foot_link_names),
-            counterpart_ids=sensor.get_actor_ids("default_plane"),
-            # These flat scenes have only one static contact surface. The query
-            # can omit static counterpart identities, represented by -1.
-            include_unknown_counterpart=True,
-        )
-        self._illegal_contacts = sensor.create_history(
-            "illegal",
-            sensor.get_actor_ids(self.robot.uid, self.illegal_contact_link_names),
-        )
-        if "self_collision_count" in self._state_fields:
-            robot_ids = sensor.get_actor_ids(self.robot.uid, self.robot.link_names)
-            self._self_contacts = sensor.create_history(
-                "self",
-                robot_ids,
-                counterpart_ids=robot_ids,
-                force_threshold=float(
-                    config.data.get("rewards", {})
-                    .get("self_collisions", {})
-                    .get("params", {})
-                    .get("force_threshold", 0.0)
-                ),
-            )
+        self._initialize_contact_histories()
         self._locomotion_generator = self.get_generator("locomotion.commands_and_noise")
         action_shape = (self.num_envs, config.action_dim)
         foot_shape = (self.num_envs, len(self.foot_link_names))
@@ -268,6 +244,36 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
             shape=(config.action_dim,),
             dtype=np.float32,
         )
+
+    def _initialize_contact_histories(self) -> None:
+        """Register the generic task's substep force and contact-time histories."""
+        config = self.velocity_task_config
+        sensor = self.get_sensor("locomotion_contacts")
+        self._foot_contacts = sensor.create_history(
+            "feet",
+            sensor.get_actor_ids(self.robot.uid, self.foot_link_names),
+            counterpart_ids=sensor.get_actor_ids("default_plane"),
+            # These flat scenes have only one static contact surface. The query
+            # can omit static counterpart identities, represented by -1.
+            include_unknown_counterpart=True,
+        )
+        self._illegal_contacts = sensor.create_history(
+            "illegal",
+            sensor.get_actor_ids(self.robot.uid, self.illegal_contact_link_names),
+        )
+        if "self_collision_count" in self._state_fields:
+            robot_ids = sensor.get_actor_ids(self.robot.uid, self.robot.link_names)
+            self._self_contacts = sensor.create_history(
+                "self",
+                robot_ids,
+                counterpart_ids=robot_ids,
+                force_threshold=float(
+                    config.data.get("rewards", {})
+                    .get("self_collisions", {})
+                    .get("params", {})
+                    .get("force_threshold", 0.0)
+                ),
+            )
 
     def _bind_locomotion_action_state(self) -> None:
         """Bind task state to the default-position action term buffers.
@@ -549,7 +555,7 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
         )
         self.command.masked_fill_(self._standing_env.unsqueeze(-1), 0.0)
 
-    def _update_sim_state(self, **kwargs) -> None:
+    def _update_sim_state(self, **kwargs) -> dict[str, torch.Tensor] | None:
         super()._update_sim_state(**kwargs)
         state = None
         if {
@@ -592,6 +598,7 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
         self._advance_command_timer()
         self._update_heading_commands()
         self._invalidate_task_cache()
+        return state
 
     def _initialize_episode(
         self,
@@ -633,14 +640,7 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
         joint_position = constant(
             self.velocity_task_config.default_joint_position, pose
         ).expand(count, -1)
-        self.robot.set_state(
-            env_ids=ids,
-            joint_ids=self.policy_joint_ids,
-            root_pose=pose,
-            qpos=joint_position,
-            target_qpos=joint_position,
-            clear_dynamics=True,
-        )
+        self._write_episode_initial_state(ids, pose, joint_position)
         self._episode_step.index_fill_(0, ids, 0)
         self._previous_joint_velocity.index_fill_(0, ids, 0.0)
         self._joint_acceleration.index_fill_(0, ids, 0.0)
@@ -654,6 +654,22 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
         self._update_heading_commands()
         self.reward_command[ids] = self.command[ids]
         self._invalidate_task_cache()
+
+    def _write_episode_initial_state(
+        self,
+        env_ids: torch.Tensor,
+        root_pose: torch.Tensor,
+        joint_position: torch.Tensor,
+    ) -> None:
+        """Write the sampled default root and joint state."""
+        self.robot.set_state(
+            env_ids=env_ids,
+            joint_ids=self.policy_joint_ids,
+            root_pose=root_pose,
+            qpos=joint_position,
+            target_qpos=joint_position,
+            clear_dynamics=True,
+        )
 
     def _invalidate_task_cache(self) -> None:
         self._state_cache = None

@@ -88,6 +88,7 @@ See also
     train_script.md
     multi_gpu.md
     locomotion.md
+    dexterous.md
 
 See Also
 --------

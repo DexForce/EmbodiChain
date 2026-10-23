@@ -123,7 +123,8 @@ def test_contact_sensor_guard_uses_backend_capability() -> None:
     [
         ("mujoco_warp", "cuda:0", True),
         ("mujoco_warp", "cpu", False),
-        ("dexuni", "cuda:0", False),
+        ("dexuni", "cuda:0", True),
+        ("dexuni", "cpu", False),
         ("xpbd", "cpu", True),
     ],
 )

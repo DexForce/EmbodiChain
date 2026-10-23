@@ -91,6 +91,94 @@ def _assert_state_equal(first, second) -> None:
         assert first == second
 
 
+def _attach_curriculum(trainer: Trainer, level: int) -> None:
+    """Expose rank-local task state on the existing lightweight environment."""
+    env = trainer.env
+    env.levels = torch.full((env.num_envs,), level, dtype=torch.long)
+
+    def validate(state):
+        if state["levels"].shape != env.levels.shape:
+            raise ValueError("Curriculum instance count differs")
+
+    def load(state):
+        validate(state)
+        env.levels.copy_(state["levels"])
+
+    env.get_training_state = lambda: {"levels": env.levels.clone()}
+    env.validate_training_state = validate
+    env.load_training_state = load
+
+
+def test_v2_restores_environment_state_before_reset(tmp_path, monkeypatch):
+    source = _trainer(tmp_path / "source")
+    _attach_curriculum(source, 3)
+    source.train(16)
+    path = source.save_checkpoint()
+    payload = torch.load(path, weights_only=True)
+    assert payload["schema_version"] == 2
+    assert len(payload["environment_state_by_rank"]) == 1
+    restored = _trainer(tmp_path / "restored")
+    _attach_curriculum(restored, 0)
+    reset = restored.collector._reset_env
+
+    def check_reset():
+        torch.testing.assert_close(restored.env.levels, source.env.levels)
+        return reset()
+
+    monkeypatch.setattr(restored.collector, "_reset_env", check_reset)
+    restored.load_checkpoint(path)
+    _assert_state_equal(source.policy.state_dict(), restored.policy.state_dict())
+    _assert_state_equal(source.algorithm.state_dict(), restored.algorithm.state_dict())
+    restored.train(32)
+    assert restored.num_updates == 2
+    again = torch.load(restored.save_checkpoint(), weights_only=True)
+    assert again["schema_version"] == 2
+    _assert_state_equal(
+        payload["environment_state_by_rank"], again["environment_state_by_rank"]
+    )
+
+
+@pytest.mark.parametrize("defect", ["rank_count", "instance_count", "loader"])
+def test_environment_state_rejected_before_learning_state_changes(tmp_path, defect):
+    source = _trainer(tmp_path / "source")
+    _attach_curriculum(source, 3)
+    source.train(16)
+    payload = torch.load(source.save_checkpoint(), weights_only=True)
+    restored = _trainer(tmp_path / "restored")
+    _attach_curriculum(restored, 0)
+    if defect == "rank_count":
+        payload["environment_state_by_rank"] = []
+    elif defect == "instance_count":
+        payload["environment_state_by_rank"][0]["levels"] = torch.zeros(3)
+    else:
+        del restored.env.load_training_state
+    path = tmp_path / "invalid.pt"
+    torch.save(payload, path)
+    policy = deepcopy(restored.policy.state_dict())
+    optimizer = deepcopy(restored.algorithm.state_dict())
+    with pytest.raises(ValueError, match="[Ee]nvironment|[Cc]urriculum"):
+        restored.load_checkpoint(path)
+    _assert_state_equal(policy, restored.policy.state_dict())
+    _assert_state_equal(optimizer, restored.algorithm.state_dict())
+    assert restored.num_updates == 0
+    assert not restored.env.levels.any()
+
+
+def test_older_v2_reports_missing_environment_state(tmp_path):
+    source = _trainer(tmp_path / "source")
+    source.train(16)
+    payload = torch.load(source.save_checkpoint(), weights_only=True)
+    payload.pop("environment_state_by_rank")
+    path = tmp_path / "older-v2.pt"
+    torch.save(payload, path)
+    restored = _trainer(tmp_path / "restored")
+    _attach_curriculum(restored, 0)
+    with pytest.warns(UserWarning, match="environment training state"):
+        restored.load_checkpoint(path)
+    assert restored.num_updates == 1
+    _assert_state_equal(source.policy.state_dict(), restored.policy.state_dict())
+
+
 @pytest.mark.parametrize("algorithm", ["ppo", "grpo"])
 @pytest.mark.parametrize(
     "scheduler",

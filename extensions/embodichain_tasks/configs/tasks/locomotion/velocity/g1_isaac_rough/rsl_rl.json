@@ -1,0 +1,65 @@
+{
+  "seed": 42,
+  "device": "cuda:0",
+  "num_steps_per_env": 24,
+  "max_iterations": 5000,
+  "obs_groups": {
+    "actor": [
+      "policy"
+    ],
+    "critic": [
+      "policy"
+    ]
+  },
+  "check_for_nan": true,
+  "save_interval": 50,
+  "experiment_name": "g1_rough",
+  "logger": "tensorboard",
+  "class_name": "OnPolicyRunner",
+  "algorithm": {
+    "class_name": "PPO",
+    "num_learning_epochs": 5,
+    "num_mini_batches": 4,
+    "learning_rate": 0.001,
+    "schedule": "adaptive",
+    "gamma": 0.99,
+    "lam": 0.95,
+    "entropy_coef": 0.008,
+    "desired_kl": 0.01,
+    "max_grad_norm": 1.0,
+    "optimizer": "adam",
+    "value_loss_coef": 1.0,
+    "use_clipped_value_loss": true,
+    "clip_param": 0.2,
+    "normalize_advantage_per_mini_batch": false,
+    "share_cnn_encoders": false,
+    "rnd_cfg": null,
+    "symmetry_cfg": null
+  },
+  "actor": {
+    "class_name": "MLPModel",
+    "hidden_dims": [
+      512,
+      256,
+      128
+    ],
+    "activation": "elu",
+    "obs_normalization": false,
+    "distribution_cfg": {
+      "class_name": "GaussianDistribution",
+      "init_std": 1.0,
+      "std_type": "scalar"
+    }
+  },
+  "critic": {
+    "class_name": "MLPModel",
+    "hidden_dims": [
+      512,
+      256,
+      128
+    ],
+    "activation": "elu",
+    "obs_normalization": false,
+    "distribution_cfg": null
+  }
+}
