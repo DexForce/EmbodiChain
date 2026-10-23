@@ -17,9 +17,6 @@ Core Framework
 
 The core ``embodichain`` framework includes these top-level packages:
 
-``benchmarks``
-    Installable motion-generation evaluation suites and external planner adapters.
-
 ``compute``
     Shared numerical computations: analytical kinematics, trajectory
     interpolation/resampling/warping, geometry queries, and image layouts.
@@ -58,7 +55,6 @@ The core ``embodichain`` framework includes these top-level packages:
    :toctree: embodichain
 
    compute
-   benchmarks
    data
    data_pipeline
    lab

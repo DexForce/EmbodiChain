@@ -1201,6 +1201,53 @@ def test_nmg_over_capacity_case_is_explicitly_unsupported_without_truncation():
     assert "not truncated or split" in reason
 
 
+@pytest.mark.parametrize(
+    "modalities,translation,supported",
+    [
+        (["position"], None, True),
+        (["position"], (0.0, 0.0, 0.0), True),
+        (["position"], (0.0, 0.0, 1.0e-8), True),
+        (["position"], (0.0, 0.0, 0.1), False),
+        (["joint", "position"], (-0.1, 0.0, 0.0), False),
+        (["pose", "position"], (0.0, 0.1, 0.0), False),
+        (["joint", "orientation", "pose"], (0.1, 0.0, 0.0), True),
+    ],
+)
+def test_nmg_case_support_respects_position_only_tcp_origin_requirement(
+    modalities: list[str],
+    translation: tuple[float, float, float] | None,
+    supported: bool,
+) -> None:
+    transform = None
+    if translation is not None:
+        tcp_pose = torch.eye(4)
+        # A rotation between coincident TCP origins remains representable.
+        tcp_pose[:2, :2] = torch.tensor([[0.0, -1.0], [1.0, 0.0]])
+        tcp_pose[:3, 3] = torch.tensor(translation)
+        transform = tcp_pose.tolist()
+    adapter = _nmg_adapter(runtime_tcp_from_policy_tcp=transform)
+    waypoint_count = len(modalities)
+    case = replace(
+        _case(),
+        num_waypoints=waypoint_count,
+        target_waypoints=torch.eye(4).repeat(1, waypoint_count, 1, 1),
+        reference_qpos=torch.zeros(1, waypoint_count, 7),
+        case_parameters={
+            "motion_validity": "ordered_constraint_waypoints",
+            "constraint_modalities": modalities,
+        },
+    )
+
+    actual_supported, reason = adapter.supports_case(case)
+
+    assert actual_supported is supported
+    if supported:
+        assert reason is None
+    else:
+        assert reason is not None
+        assert "TCP origins" in reason
+
+
 def test_nmg_case_budget_is_thirty_steps_per_waypoint():
     from embodichain_benchmarks.motion_generation.config import PlannerSpecCfg
     from embodichain_benchmarks.motion_generation.planners.base import PlannerContext

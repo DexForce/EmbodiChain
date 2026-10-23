@@ -21,6 +21,8 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import torch
+
 from embodichain.lab.sim.motion.motion_generator import (
     MotionGenCfg,
     MotionGenOptions,
@@ -111,7 +113,7 @@ class NmgOnnxAdapter(PlannerAdapter):
         return True, None
 
     def supports_case(self, case: BenchmarkCase) -> tuple[bool, str | None]:
-        """Reject unsupported modalities or sequences beyond policy capacity."""
+        """Reject constraints incompatible with policy capacity or TCP mapping."""
         supported, reason = super().supports_case(case)
         if not supported:
             return supported, reason
@@ -122,6 +124,16 @@ class NmgOnnxAdapter(PlannerAdapter):
                 f"NMG policy supports at most {capacity} waypoints; case has "
                 + f"{case.num_waypoints} and was not truncated or split.",
             )
+        modalities = case.case_parameters.get("constraint_modalities", ())
+        tcp_transform = self.spec.config.get("runtime_tcp_from_policy_tcp")
+        if "position" in modalities and tcp_transform is not None:
+            offset = torch.as_tensor(tcp_transform, dtype=torch.float32)[:3, 3]
+            if bool(torch.any(offset.abs() > 1.0e-8)):
+                return (
+                    False,
+                    "NMG position-only constraints require the runtime and policy "
+                    "TCP origins to coincide.",
+                )
         return True, None
 
     def _case_max_steps(self, case: BenchmarkCase) -> int:
