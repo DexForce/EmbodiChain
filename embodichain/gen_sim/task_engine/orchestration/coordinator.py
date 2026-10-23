@@ -290,7 +290,10 @@ class TaskEngineCoordinator:
                     "dual_franka_robotiq_arg2f_140",
                 }:
                     selection = select_manipulation_policy(
-                        graph, plan.candidate, adaptation.prepared_scene
+                        graph,
+                        plan.candidate,
+                        adaptation.prepared_scene,
+                        runtime_profile=runtime_profile,
                     )
                     extra.update(selection)
                     (staging / "manipulation_policy_selection.json").write_text(

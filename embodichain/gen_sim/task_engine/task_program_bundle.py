@@ -110,6 +110,7 @@ _FRONT_RELATION_DISTANCE: Final = 0.18
 _RELATION_CLEARANCE: Final = 0.02
 _AXIS_ALIGNED_RELATION_CLEARANCE: Final = 0.04
 _PLACEMENT_CLEARANCE: Final = 0.01
+_LATERAL_RELEASE_CLEARANCE: Final = 0.03
 _RELATIVE_POSITION_TOLERANCE: Final = 0.05
 _AXIS_ALIGN_CALL_ID: Final = "simulation.axis_align"
 _COORDINATED_TRANSPORT_CALL_ID: Final = "simulation.coordinated_transport"
@@ -711,6 +712,11 @@ def generate_task_program_bundle(
         generated_places, generated_revisions = horizontal_handover_permissions(
             selected_graph
         )
+        if runtime_profile == CONTACT_PROFILE:
+            generated_revisions = merge_contact_revisions(
+                generated_revisions,
+                _horizontal_on_pick_revisions(selected_graph, scene_objects),
+            )
         pick_contact_revisions = merge_contact_revisions(
             pick_contact_revisions, generated_revisions
         )
@@ -761,8 +767,12 @@ def generate_task_program_bundle(
             table_top_z=scene.table_top_z,
             table_bounds=table_bounds,
         )
-        if runtime_profile != COMPOSITION_PROFILE:
-            _calibrate_task_gripper_effort(embodiment_payload, scene, selected_graph)
+        _calibrate_task_gripper_effort(
+            embodiment_payload,
+            scene,
+            selected_graph,
+            runtime_profile=runtime_profile,
+        )
     if articulation_bindings and frozen is None:
         # Calibrate this generated E6 deployment, not shared robot defaults.
         stiffness = embodiment_payload["simulation"]["joint_drive_props"]["stiffness"]
@@ -1108,7 +1118,7 @@ def _task_stability_payload(
     objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
     if pick_contact_revision is not None and (
         type(pick_contact_revision) is not int
-        or pick_contact_revision not in (1, 2, 3, 4, 5, 6, 7, 8)
+        or pick_contact_revision not in (1, 2, 3, 4, 5, 6, 7, 8, 9)
     ):
         raise ValueError("Unsupported GenSim Pick contact revision.")
     if support_contract_revision is not None and (
@@ -3254,21 +3264,36 @@ def _grasp_contact_clearances(
 
 
 def _calibrate_task_gripper_effort(
-    embodiment: dict[str, Any], scene: Any, graph: SemanticTaskGraph
+    embodiment: dict[str, Any],
+    scene: Any,
+    graph: SemanticTaskGraph,
+    *,
+    runtime_profile: str = "default",
 ) -> None:
-    """Bound qualified <=10 g E1/E2 grips, including light E5 compositions.
+    """Cap qualified <=10 g grips without changing unrelated resources.
 
     The canonical Robotiq keeps its complete closing range. Unknown/heavier
     payloads and other recipe families retain their declared actuator limits.
+    E3 pouring and Contact use 5; other Default grips retain 0.5. Composition
+    changes only qualified pouring resources. Lower authored limits remain intact.
     This does not change the imported mechanism or any collision properties.
     """
+    from .experiment_policy import COMPOSITION_PROFILE, CONTACT_PROFILE
+
+    effort_limit = 5.0 if runtime_profile == CONTACT_PROFILE else 0.5
     picks = []
     blocked_resources: set[str] = set()
+    pour_resources: set[str] = set()
+    press_resources: set[str] = set()
     carriers: dict[str, set[str]] = {}
     for node in graph["nodes"]:
         call = node["call"]
         resources = set(call.get("resources", {}).values())
-        if node["task_type"] not in {"E1", "E2", "E5"}:
+        if node["task_type"] == "E9":
+            # Press requires an empty hand; it adds no carried payload.
+            press_resources.update(resources)
+            continue
+        if node["task_type"] not in {"E1", "E2", "E3", "E5"}:
             blocked_resources.update(resources)
             continue
         if node["task_type"] == "E5":
@@ -3290,9 +3315,13 @@ def _calibrate_task_gripper_effort(
             object_id = call["arguments"]["object"]
         else:
             continue
-        picks.append((object_id, call.get("resources", {}).get("primary", "left")))
+        owner = call.get("resources", {}).get("primary", "left")
+        picks.append((object_id, owner))
+        if node["task_type"] == "E3":
+            pour_resources.add(owner)
     if not picks:
         return
+    blocked_resources.update(press_resources - pour_resources)
     objects = {item["uid"]: item for item in scene.rigid_objects}
     limits = embodiment["simulation"]["joint_drive_props"].get("max_effort")
     if not isinstance(limits, dict):
@@ -3305,6 +3334,8 @@ def _calibrate_task_gripper_effort(
     }
     for resource in {resource for _, resource in picks}:
         if resource in blocked_resources:
+            continue
+        if runtime_profile == COMPOSITION_PROFILE and resource not in pour_resources:
             continue
         payloads = {uid for uid, owner in picks if owner == resource} | carriers.get(
             resource, set()
@@ -3323,7 +3354,8 @@ def _calibrate_task_gripper_effort(
             continue
         part = grasp_parts[resource]
         if part in limits:
-            limits[part] = min(float(limits[part]), 0.5)
+            cap = 5.0 if resource in pour_resources else effort_limit
+            limits[part] = min(float(limits[part]), cap)
 
 
 def _calibrate_task_gripper_opening(embodiment: dict[str, Any]) -> None:
@@ -3464,6 +3496,66 @@ def _public_routes(
     ]
 
 
+def _horizontal_on_pick_revisions(
+    graph: SemanticTaskGraph, scene_objects: Mapping[str, Any]
+) -> dict[str, int]:
+    """Use native depth checks for unconstrained horizontal slender on-Picks.
+
+    The contact profile owns this permission. Upright sources, Pour, inside
+    and explicit-grasp routes retain their existing contracts.
+    """
+    result = {}
+    for node, following in zip(graph["nodes"], graph["nodes"][1:]):
+        call, place = node["call"], following["call"]
+        args = place.get("arguments", {})
+        if (
+            node.get("task_type") != "E1"
+            or call["kind"] != "pick"
+            or call.get("grasp") is not None
+            or place.get("call_id") != _PLACE_RELATIVE_CALL_ID
+            or args.get("relation") != "on"
+            or args.get("object") != call["object"]
+            or place.get("resources", {}).get("primary")
+            != call.get("resources", {}).get("primary")
+        ):
+            continue
+        source = scene_objects[call["object"]]
+        if source.get("role") != "rigid_object":
+            continue
+        spans = np.ptp(_mesh_vertices(source), axis=0)
+        ordered = np.sort(spans)
+        world_axis = _initial_rotation(source)[:, int(np.argmax(spans))]
+        if ordered[1] > 0 and ordered[2] >= 3 * ordered[1] and abs(world_axis[2]) < 0.5:
+            result[node["id"]] = 8
+    return result
+
+
+def _inside_reference_height(
+    call: Mapping[str, Any], objects: dict[str, Any]
+) -> float | None:
+    """Project a prior rigid-inside landing, not an executed-placement receipt."""
+    from ._task_program.container_targets import _floor_region
+    from ._task_program.drawer_binding import inside_parts
+
+    container_id, child_id, part = inside_parts(str(call["inside"]))
+    container, child = objects.get(container_id, {}), objects.get(child_id, {})
+    if (
+        part is not None
+        or any(item.get("role") != "rigid_object" for item in (container, child))
+        or not container.get("shape", {}).get("fpath")
+        or not np.allclose(
+            _initial_rotation(container)[2], [0, 0, 1], atol=1e-6, rtol=0
+        )
+    ):
+        return None
+    measured = _floor_region(_rigid_mesh_zup(container))
+    if measured is None:
+        return None
+    _, floor = measured
+    bottom, _ = _vertical_mesh_bounds(child, axis_aligned=False)
+    return _position(container)[2] + floor - bottom + 0.001
+
+
 def _relative_place_route_payloads(
     graph: SemanticTaskGraph,
     scene: Any,
@@ -3478,14 +3570,73 @@ def _relative_place_route_payloads(
     from ._task_program.spatial_reference import graph_references
 
     spatial_references = graph_references(graph, scene)
+    support_subjects: dict[str, set[str]] = {}
+    manipulated = {
+        node["call"].get("object", node["call"].get("arguments", {}).get("object"))
+        for node in graph["nodes"]
+    }
+    for node in graph["nodes"]:
+        call = node["call"]
+        arguments = call.get("arguments", {})
+        reference_id = str(arguments.get("reference", ""))
+        if (
+            node.get("task_type") == "E1"
+            and call.get("call_id") == _PLACE_RELATIVE_CALL_ID
+            and arguments.get("relation") == "on"
+            and reference_id != "table"
+            and reference_id not in manipulated
+            and scene_objects.get(reference_id, {}).get("role") == "rigid_object"
+            and "reference_part" not in arguments
+        ):
+            support_subjects.setdefault(reference_id, set()).add(
+                str(arguments["object"])
+            )
+    shared_supports = {
+        reference
+        for reference, subjects in support_subjects.items()
+        if len(subjects) > 1
+    }
+    landings: dict[str, dict[str, Any]] = {}
     actuated_references = {
         node["call"].get("arguments", {}).get("object")
         for node in graph["nodes"]
         if node["call"].get("call_id") == SLIDE_CALL
     }
     routes: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    reference_heights: dict[str, float] = {}
+    lateral_references = {
+        node["call"]["arguments"]["reference"]
+        for node in graph["nodes"]
+        if node.get("task_type") == "E1"
+        and node["call"].get("call_id") == _PLACE_RELATIVE_CALL_ID
+        and node["call"]["arguments"].get("relation") not in {"on", "above"}
+    }
+    from ._task_program.drawer_binding import inside_parts
+    from ._task_program.adaptive_grasp import is_handover_source_call_id
+
     for node in graph["nodes"]:
         call = node["call"]
+        if call["kind"] == "hand_over" or is_handover_source_call_id(
+            call.get("call_id")
+        ):
+            reference_heights.pop(
+                str(call.get("object", call.get("arguments", {}).get("object"))), None
+            )
+        if call["kind"] == "pick":
+            reference_heights.pop(str(call["object"]), None)
+            for reservations in landings.values():
+                reservations.pop(str(call["object"]), None)
+        if (
+            node.get("task_type") == "E1"
+            and call["kind"] == "place"
+            and "inside" in call
+            and str(call["object"]) in lateral_references - axis_align_objects
+        ):
+            container_id = inside_parts(str(call["inside"]))[0]
+            if container_id not in manipulated | axis_align_objects:
+                height = _inside_reference_height(call, scene_objects)
+                if height is not None:
+                    reference_heights[str(call["object"])] = height
         if call["kind"] != "registered":
             continue
         if call["call_id"] in {_AXIS_ALIGN_CALL_ID, _ALIGN_HELD_CALL_ID} or (
@@ -3562,6 +3713,20 @@ def _relative_place_route_payloads(
                 displacement[2] -= _upright_release_clearance(scene_objects[object_id])
         else:
             placement_objects = scene_objects
+            if (
+                reference_id in reference_heights
+                and reference_id not in axis_align_objects
+                and relation not in {"on", "above"}
+            ):
+                reference_position = list(_position(scene_objects[reference_id]))
+                reference_position[2] = reference_heights[reference_id]
+                placement_objects = {
+                    **scene_objects,
+                    reference_id: {
+                        **scene_objects[reference_id],
+                        "init_pos": reference_position,
+                    },
+                }
             if reference_id == "table" and relation == "on":
                 # The planner view omits fixed-base and joint configuration.
                 # Endpoint clearance needs the actual authored mechanisms.
@@ -3607,10 +3772,46 @@ def _relative_place_route_payloads(
                     + _PLACEMENT_CLEARANCE
                     - float(spatial_reference.initial_pose[2, 3])
                 )
+            if (
+                not settled
+                and node.get("task_type") == "E1"
+                and call["call_id"] == _PLACE_RELATIVE_CALL_ID
+                and relation in {"left_of", "right_of", "front_of", "behind"}
+                and spatial_reference is None
+                and scene_objects[reference_id].get("role") == "rigid_object"
+            ):
+                # Release above the resting target; settled evidence stays unchanged.
+                displacement[2] += _LATERAL_RELEASE_CLEARANCE - _PLACEMENT_CLEARANCE
             if settled and (
                 call["call_id"] == _STACK_PLACE_CALL_ID or coordinated_only
             ):
                 displacement[2] -= _PLACEMENT_CLEARANCE
+        if (
+            reference_id in shared_supports
+            and node.get("task_type") == "E1"
+            and call["call_id"] == _PLACE_RELATIVE_CALL_ID
+            and relation == "on"
+            and object_id not in axis_align_objects
+            and spatial_reference is None
+        ):
+            from shapely.affinity import translate
+            from shapely.geometry import MultiPoint
+
+            reservations = landings.setdefault(reference_id, {})
+            reservations.pop(object_id, None)
+            obj, reference = scene_objects[object_id], scene_objects[reference_id]
+            vertices = _mesh_vertices(obj) @ _initial_rotation(obj).T
+            footprint = MultiPoint(vertices[:, :2]).convex_hull
+            position = np.asarray(_position(reference)) + displacement
+            placed = translate(footprint, xoff=position[0], yoff=position[1])
+            if any(
+                placed.distance(previous) < _RELATION_CLEARANCE
+                for previous in reservations.values()
+            ):
+                displacement, placed = _unoccupied_support_landing(
+                    obj, reference, displacement, tuple(reservations.values())
+                )
+            reservations[object_id] = placed
         route = {
             "stage_id": stage_id,
             "object_id": object_id,
@@ -3639,6 +3840,43 @@ def _relative_place_route_payloads(
             )
         routes[selector] = route
     return [routes[selector] for selector in sorted(routes)]
+
+
+def _unoccupied_support_landing(
+    obj: dict[str, Any],
+    reference: dict[str, Any],
+    displacement: list[float],
+    occupied: tuple[Any, ...],
+) -> tuple[list[float], Any]:
+    """Relocate only a conflicting E1 endpoint, on the same measured support."""
+    from shapely.geometry import Polygon
+
+    from ._task_program.placement_proposals import generate_on_targets
+
+    support = _rigid_mesh_zup(reference)
+    origin = np.asarray(_position(reference))
+    support.vertices = (
+        np.asarray(support.vertices) @ _initial_rotation(reference).T + origin
+    )
+    proposals = generate_on_targets(
+        _rigid_mesh_zup(obj),
+        support,
+        [_initial_rotation(obj)],
+        _position(obj)[:2],
+        clearance_m=_PLACEMENT_CLEARANCE,
+        contact_band_m=_RELATION_CLEARANCE,
+        occupied_footprints=occupied,
+        separation_m=_RELATION_CLEARANCE,
+    )
+    if not proposals:
+        raise ValueError(
+            f"Support {reference['runtime_uid']!r} has no unoccupied full-footprint "
+            f"landing for {obj['runtime_uid']!r}."
+        )
+    selected = proposals[0]
+    result = list(displacement)
+    result[:2] = (selected["pose"][:2, 3] - origin[:2]).tolist()
+    return result, Polygon(selected["footprint"])
 
 
 def _relative_world_displacement(
@@ -4186,6 +4424,11 @@ def _mesh_vertices(source: dict[str, Any]) -> np.ndarray:
                 "Articulated reference requires a finite positive body_scale."
             )
         return read_articulation_geometry(path).vertices * scale
+    return np.asarray(_rigid_mesh_zup(source).vertices, dtype=np.float64)
+
+
+def _rigid_mesh_zup(source: dict[str, Any]) -> Any:
+    """Retain mesh faces in the same scaled Z-up basis as runtime vertices."""
     shape = source.get("shape")
     if not isinstance(shape, dict) or not shape.get("fpath"):
         raise ValueError(
@@ -4216,7 +4459,8 @@ def _mesh_vertices(source: dict[str, Any]) -> np.ndarray:
         raise ValueError(
             f"Scene object {source.get('runtime_uid')!r} has invalid body_scale."
         )
-    return result * scale
+    geometry.vertices = result * scale
+    return geometry
 
 
 def _position(source: dict[str, Any]) -> tuple[float, float, float]:

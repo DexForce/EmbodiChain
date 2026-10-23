@@ -217,6 +217,8 @@ class SemanticTaskPlanner:
         result_objects: dict[str, str] = {}
         held_by: dict[str, str] = {}
         pour_resources: dict[str, str] = {}
+        released_references: dict[str, str] = {}
+        moved_objects: set[str] = set()
         pending_cleanup: set[str] = set()
         upright_objects: set[str] = set()
         upright_staging_targets: dict[str, str] = {}
@@ -523,6 +525,18 @@ class SemanticTaskPlanner:
                     )
                 }
                 previous = pour_resources.get(object_id)
+                released_at = released_references.get(object_id)
+                if (
+                    previous is not None
+                    and released_at is not None
+                    and target_id != "table"
+                    and target_id not in moved_objects
+                ):
+                    source_side = self._nearest_resource(released_at, objects)
+                    target_side = self._nearest_resource(target_id, objects)
+                    # A pour arm is a preference, not ownership of its receiver.
+                    if source_side == target_side:
+                        previous = source_side
                 resource = (
                     holder
                     or (previous if previous not in occupied_resources else None)
@@ -761,6 +775,20 @@ class SemanticTaskPlanner:
                 raise UnsupportedSemanticCapabilityError(
                     f"Task type {task_type!r} has no phase-one Semantic Call route."
                 )
+
+            released_references = {
+                subject: reference
+                for subject, reference in released_references.items()
+                if object_id not in (subject, reference)
+            }
+            moved_objects.add(object_id)
+            if (
+                task_type == "E1"
+                and step.get("relation") in {"on", "inside"}
+                and target_id != "table"
+                and target_id not in moved_objects
+            ):
+                released_references[object_id] = target_id
 
             requested_upright = (
                 task_type in {"E1", "E4"} and step.get("orientation_goal") == "upright"

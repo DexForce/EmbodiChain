@@ -57,22 +57,35 @@ _UNAVAILABLE = (
 def eligible(engine: Any, request: Any, context: Any) -> bool:
     """Retain the factory's exact canonical release/cleanup/Park authority."""
     try:
+        owns_articulation = getattr(
+            engine, "_articulation_park_after_short_withdrawal", lambda _: False
+        )(request.invocation_id)
         preview = engine._park_recovery_previews.get(request.invocation_id)
-        if (
+        if not owns_articulation and (
             not isinstance(preview, _ParkPreview)
             or preview.compiler.integration.engine is not engine
         ):
             return False
-        bound = preview.workflow.calls[preview.call_index].bound
-        call = bound.linked.call
         endpoint = request.binding.endpoint("primary", "motion")
-        reference = preview.binding.endpoint("primary", "motion")
+        if owns_articulation:
+            reference, resource = endpoint, endpoint.resource_id
+            owned = True
+        else:
+            bound = preview.workflow.calls[preview.call_index].bound
+            call = bound.linked.call
+            reference, resource = (
+                preview.binding.endpoint("primary", "motion"),
+                call.resources["primary"],
+            )
+            owned = (
+                type(call) is RegisteredSemanticCall
+                and call.call_id == "simulation.park"
+                and not call.arguments
+                and set(call.resources) == {"primary"}
+                and bound.preset.effect_assurance is EffectAssurance.VERIFIED
+            )
         return bool(
-            type(call) is RegisteredSemanticCall
-            and call.call_id == "simulation.park"
-            and not call.arguments
-            and set(call.resources) == {"primary"}
-            and bound.preset.effect_assurance is EffectAssurance.VERIFIED
+            owned
             and isinstance(engine._actions.get(request.skill_id), MoveJoints)
             and request.skill_id == "move_joints"
             and type(request.goal) is JointPositionGoal
@@ -81,7 +94,7 @@ def eligible(engine: Any, request: Any, context: Any) -> bool:
             and len(request.binding.endpoints) == 1
             and endpoint.target == reference.target
             and endpoint.task_state_key == reference.task_state_key
-            and endpoint.resource_id == call.resources["primary"]
+            and endpoint.resource_id == resource
             and endpoint.commands[PARK_COMMAND].equivalent_to(
                 reference.commands[PARK_COMMAND]
             )

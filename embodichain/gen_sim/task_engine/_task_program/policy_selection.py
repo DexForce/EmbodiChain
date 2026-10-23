@@ -66,13 +66,20 @@ def select_manipulation_policy(
     graph: Mapping[str, Any],
     candidate: Mapping[str, Any],
     scene: PreparedScene,
+    *,
+    runtime_profile: str = "default",
 ) -> dict[str, Any]:
     """Select existing capabilities only for unconstrained ordinary rigid-inside pairs.
 
     Permissions come from the original typed step, not task names or the mere
     presence of another recipe. Runtime native geometry and all physical gates
     still qualify each proposal. Direct bundle callers keep explicit control.
+    The contact profile grants level native-pad closing to untouched tall
+    sources; omitted profile preserves the earlier caller behavior.
     """
+    from ..experiment_policy import CONTACT_PROFILE, resolve_profile
+
+    contact_profile = resolve_profile(runtime_profile, graph) == CONTACT_PROFILE
     steps = {step["id"]: step for step in candidate["draft"]["steps"]}
     by_id = {node["id"]: node for node in graph["nodes"]}
 
@@ -149,16 +156,24 @@ def select_manipulation_policy(
             and source_untouched
             and _confined_source(rigids[subject], tuple(scene.planner_objects))
         )
-        pairs.append((pick, place, receiver, upright_result, confined))
+        bounds = _bounds(rigids[subject])
+        tall_source = False
+        if bounds is not None:
+            spans = [high - low for low, high in zip(*bounds, strict=True)]
+            tall_source = spans[2] > max(spans[:2])
+        level_pads = (
+            contact_profile and source_untouched and tall_source and not confined
+        )
+        pairs.append((pick, place, receiver, upright_result, confined, level_pads))
     contact, yaw, measured = {}, [], []
-    for pick, place, receiver, upright_result, confined in pairs:
+    for pick, place, receiver, upright_result, confined, level_pads in pairs:
         yaw.append(place["id"])
         prior_nodes = ancestors(place)
         prior_confined_transfer = any(
             prior_confined
             and prior_receiver == receiver
             and prior_place["id"] in prior_nodes
-            for _, prior_place, prior_receiver, _, prior_confined in pairs
+            for _, prior_place, prior_receiver, _, prior_confined, _ in pairs
         )
         if confined or prior_confined_transfer:
             measured.append(place["id"])
@@ -168,6 +183,8 @@ def select_manipulation_policy(
             contact[pick["id"]] = 2
         elif confined:
             measured.append(pick["id"])
+        elif level_pads:
+            contact[pick["id"]] = 9
     result: dict[str, Any] = {}
     if contact:
         result["pick_contact_revisions"] = dict(sorted(contact.items()))

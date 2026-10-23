@@ -64,6 +64,7 @@ from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     to_full_robot_trajectory,
 )
 from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
+from embodichain.utils import logger
 
 from .adaptive_grasp import (
     ADAPTIVE_GRASP,
@@ -344,7 +345,7 @@ class GenSimPickUp(PickUp):
         }
         if (
             valid
-            and screen.revision == 8
+            and screen.revision in (8, 9)
             and (
                 (self.pick_purposes or {}).get(request.invocation_id) == "ordinary"
                 or self._native_handover_source(request, screen)
@@ -376,7 +377,7 @@ class GenSimPickUp(PickUp):
             )
         if (
             acceptance["valid"]
-            and screen.revision in (7, 8)
+            and screen.revision in (7, 8, 9)
             and (
                 (self.pick_purposes or {}).get(request.invocation_id) == "ordinary"
                 or self._native_handover_source(request, screen)
@@ -1506,7 +1507,7 @@ class GenSimPickUp(PickUp):
             generator = self.planning_services.grasp_pose_generator(grasp_target_id)
             if (
                 selection.closing_geometry is not None
-                and selection.closing_geometry.revision in (5, 6, 7, 8)
+                and selection.closing_geometry.revision in (5, 6, 7, 8, 9)
             ):
                 from .grasp_filter import TaskGraspPoseGenerator
 
@@ -1612,9 +1613,9 @@ class GenSimPickUp(PickUp):
         opened = opening["valid"]
         selection = _PICK_SELECTION.get()
         screen = None if selection is None else selection.closing_geometry
-        if screen is not None and screen.revision in (7, 8):
+        if screen is not None and screen.revision in (7, 8, 9):
             selection.closing_scene_checks.append({"stage": "open_endpoint", **opening})
-        if not opened or screen is None or screen.revision not in (7, 8):
+        if not opened or screen is None or screen.revision not in (7, 8, 9):
             return bool(opened)
         scene = self._inspect_closing_scene(
             request, context, path[0, stop : stop + lengths["close"]], screen
@@ -1669,7 +1670,7 @@ class GenSimPickUp(PickUp):
             contact_fraction=contact["nominal_closing_fraction"],
             grid_samples=screen.steps,
         )
-        if result["valid"] and screen.revision == 8:
+        if result["valid"] and screen.revision in (8, 9):
             from .pick_native_scene import build_native_rigid_scene
 
             if screen.rigid_scene_screen is None:
@@ -1730,7 +1731,7 @@ class GenSimPickUp(PickUp):
         )
         depth_enabled = (
             selection.closing_geometry is not None
-            and selection.closing_geometry.revision in (6, 7, 8)
+            and selection.closing_geometry.revision in (6, 7, 8, 9)
             and context.batch_size == 1
             and not selection.constrained
             and (axis_region_policy == "mesh_extent" or native_source)
@@ -1889,7 +1890,7 @@ class GenSimPickUp(PickUp):
                 )
                 key = (
                     "open_and_precontact_scene_valid"
-                    if selection.closing_geometry.revision in (7, 8)
+                    if selection.closing_geometry.revision in (7, 8, 9)
                     else "open_endpoint_scene_valid"
                 )
                 attempt[key] = bool(clear)
@@ -2511,6 +2512,8 @@ class GenSimPlace(Place):
     binding_contract = Place.binding_contract
     recovery_scene_vertices: dict | None = None
     ordinary_on_invocations: frozenset[str] = frozenset()
+    ordinary_lateral_invocations: frozenset[str] = frozenset()
+    support_surface_owners: dict[str, str] | None = None
     world_yaw_free_routes: dict | None = None
     world_yaw_simulation: Any = None
     post_handover_places: dict[str, tuple[str, str, str]] | None = None
@@ -2642,10 +2645,27 @@ class GenSimPlace(Place):
         early_fallback = None
         if early and not plan.plan_success.any():
             candidate = recover(self, request, context, plan, build)
+            candidate = place_branch.recover_preserved_lateral(
+                self, request, context, candidate, build
+            )
+            candidate = place_branch.recover_preserved_on(
+                self, request, context, candidate, build
+            )
             if candidate.plan_success.all():
                 early_fallback = candidate
             acceptance = candidate.diagnostics.metadata.get(
                 "gen_sim_place_waypoint_recovery", {}
+            )
+            probe = candidate.diagnostics.metadata.get(
+                "gen_sim_place_waypoint_probe", {}
+            )
+            logger.log_info(
+                "GenSim ordinary Place early recovery: "
+                f"invocation={request.invocation_id}, "
+                f"qualified={bool(candidate.plan_success.all())}, "
+                f"rotation_max_rad={acceptance.get('rotation_max_rad')}, "
+                f"probe={probe.get('acceptance')}, "
+                f"branch={candidate.diagnostics.metadata.get('gen_sim_place_branch')}"
             )
             # Large turns retain the complete Cartesian search before fallback.
             if (

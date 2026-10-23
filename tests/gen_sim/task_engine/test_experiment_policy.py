@@ -130,7 +130,7 @@ def test_packaged_defaults_enable_automatic_qualified_policy():
     assert workflow.max_parallel_workers == 1
     assert workflow.max_action_attempts == 1
     assert planning.runtime_profile == "auto"
-    assert planning.experimental_open_release is False
+    assert planning.experimental_open_release is None
     assert execution.acceptance_mode == "experiment"
 
 

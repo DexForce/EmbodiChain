@@ -162,3 +162,20 @@ def test_explicit_reference_links_remain_in_bundle_identity(deployment):
         identities.append(bundle_registration_fingerprint(bound))
     assert baseline not in identities
     assert identities[0] != identities[1]
+
+
+def test_experimental_open_release_changes_native_evidence_identity(
+    deployment: configured.TaskDeployment,
+) -> None:
+    from embodichain.gen_sim.task_engine._task_program.grip_evidence import (
+        with_native_grip_evidence,
+    )
+
+    original = deployment.integration.registration
+    ordinary = with_native_grip_evidence(original, experimental_open_release=False)
+    experiment = with_native_grip_evidence(original, experimental_open_release=True)
+    assert ordinary.control_part_evidence_factory.algorithm_revision == 1
+    assert experiment.control_part_evidence_factory.algorithm_revision == 2
+    assert bundle_registration_fingerprint(ordinary) != bundle_registration_fingerprint(
+        experiment
+    )

@@ -35,7 +35,7 @@ __all__: list[str] = []
 
 PREPARE_CALL = "gen_sim.press_prepare"
 PRESS_CALL = "gen_sim.press"
-PRESS_REVISION = "16"
+PRESS_REVISION = "20"
 
 
 @dataclass(frozen=True, slots=True)

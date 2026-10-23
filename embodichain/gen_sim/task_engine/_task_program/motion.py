@@ -46,7 +46,7 @@ from embodichain.lab.sim.motion.planners.utils import (
 
 __all__: list[str] = []
 
-MOTION_VALIDATION_REVISION = 14
+MOTION_VALIDATION_REVISION = 15
 SAMPLED_MOTION_CONTRACT = "gen_sim.sampled_velocity/v1"
 SHARED_MOTION_CONTRACT = "lab.motion_limits/v1"
 
@@ -704,3 +704,84 @@ class ApproachMotionGenerator(CheckedMotionGenerator):
         options: MotionGenOptions | None = None,
     ) -> PlanResult:
         return _generate_cartesian_approach(self, target_states, options)
+
+
+def _curobo_joint_prefix(
+    owner: Any,
+    simulation: Any,
+    context: Any,
+    part: str,
+    start: torch.Tensor,
+    target: torch.Tensor,
+    locked_full: torch.Tensor,
+) -> Any:
+    """Plan an exact joint goal against a fresh world and passive-joint snapshot."""
+    from embodichain.lab.sim.motion.motion_generator import (
+        MotionGenCfg,
+        MotionGenerator,
+    )
+    from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
+        CuroboPlanner,
+        CuroboPlannerCfg,
+        CuroboWorldCfg,
+        CuroboPlanOptions,
+    )
+    from .drawer_curobo import snapshot_in_base, world_sources
+
+    class SnapshotPlanner(CuroboPlanner):
+        def _load_runtime_robot_config(self, path: str) -> dict:
+            config = super()._load_runtime_robot_config(path)
+            joints = dict(
+                zip(self.robot.joint_names, locked_full[0].tolist(), strict=True)
+            )
+            kinematics = config["robot_cfg"]["kinematics"]
+            kinematics["lock_joints"] = {
+                name: joints[name] for name in kinematics.get("lock_joints", {})
+            }
+            return config
+
+        def _materialize_profile(self, control_part: str) -> Any:
+            profile = super()._materialize_profile(control_part)
+            self.base_pose = self.robot.get_link_pose(
+                profile.sim_base_link_name, to_matrix=True
+            ).clone()
+            return profile
+
+        def _auto_generate_world_scene(self, cfg: Any) -> Any:
+            return super()._auto_generate_world_scene(
+                replace(
+                    cfg,
+                    rigid_objects=snapshot_in_base(cfg.rigid_objects, self.base_pose),
+                )
+            )
+
+    class SnapshotGenerator(MotionGenerator):
+        def _create_planner(self, cfg: Any) -> Any:
+            return SnapshotPlanner(cfg)
+
+    cfg = CuroboPlannerCfg(
+        robot_uid=owner.robot.uid,
+        sim_instance_id=owner.planner.cfg.sim_instance_id,
+        world=CuroboWorldCfg(
+            rigid_objects=world_sources(simulation, ""), max_voxel_count=4_000_000
+        ),
+        use_cuda_graph=False,
+        warmup_iterations=0,
+        interpolation_dt=context.require_control_dt(),
+        preserve_plan_samples=True,
+    )
+    with torch.random.fork_rng(devices=[torch.cuda.current_device()]):
+        generator = SnapshotGenerator(MotionGenCfg(planner_cfg=cfg))
+        try:
+            return generator.generate(
+                [PlanState(move_type=MoveType.JOINT_MOVE, qpos=target)],
+                options=MotionGenOptions(
+                    strategy="motion_gen",
+                    start_qpos=start,
+                    control_part=part,
+                    sample_count=None,
+                    plan_opts=CuroboPlanOptions(),
+                ),
+            )
+        finally:
+            generator.planner.close()

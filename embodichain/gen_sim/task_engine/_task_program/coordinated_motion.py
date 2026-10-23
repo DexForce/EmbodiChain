@@ -55,6 +55,7 @@ class GenSimCoordinatedPickment(
     binding_contract = CoordinatedPickment.binding_contract
     agent_visible = CoordinatedPickment.agent_visible
     open_loop = CoordinatedPickment.open_loop
+    cargo_scene_vertices: dict[str, torch.Tensor] | None = None
 
     def __init__(
         self, default_options: CoordinatedPickmentOptions | None = None
@@ -79,7 +80,12 @@ class GenSimCoordinatedPickment(
         keys = (resources.left_task_state_key, resources.right_task_state_key)
         masks = [context.task.held_object_mask(key) for key in keys]
         if not bool((masks[0] | masks[1]).any()):
-            return helper.plan(request, context)
+            from .coordinated_grasp import cargo_clearance_scope
+
+            with cargo_clearance_scope(
+                context, self.cargo_scene_vertices, request.goal.semantics.entity_id
+            ):
+                return helper.plan(request, context)
 
         held = [context.task.get_held_object(key) for key in keys]
         entity = request.goal.semantics.entity_id
