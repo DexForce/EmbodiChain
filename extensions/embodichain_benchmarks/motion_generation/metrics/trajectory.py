@@ -712,7 +712,11 @@ def compute_case_outcomes(
         subdivisions = max(1, math.ceil((validation_samples - 1) / max(1, count - 1)))
         if count > 1:
             parameter = (
-                torch.arange((count - 1) * subdivisions + 1, device=positions.device)
+                torch.arange(
+                    (count - 1) * subdivisions + 1,
+                    device=safe_positions.device,
+                    dtype=safe_positions.dtype,
+                )
                 / subdivisions
             )
             left = parameter.long().clamp(max=count - 2)

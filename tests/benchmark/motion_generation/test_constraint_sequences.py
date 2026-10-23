@@ -187,6 +187,7 @@ def test_empty_trajectory_is_a_failed_semantic_match():
     assert result["completed_waypoint_ratio"] == 0.0
 
 
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
 @pytest.mark.parametrize(
     "validity,modalities",
     [
@@ -195,8 +196,8 @@ def test_empty_trajectory_is_a_failed_semantic_match():
     ],
 )
 def test_case_outcomes_preserve_native_samples_for_masked_and_common_inputs(
-    validity, modalities
-):
+    validity: str, modalities: list[str], dtype: torch.dtype
+) -> None:
     from embodichain_benchmarks.motion_generation.models import BenchmarkCase
     from embodichain_benchmarks.motion_generation.metrics.trajectory import (
         compute_case_outcomes,
@@ -212,7 +213,7 @@ def test_case_outcomes_preserve_native_samples_for_masked_and_common_inputs(
             pose[..., :3, 3] = qpos[..., :3]
             return pose
 
-    q = torch.zeros(1, 3, 7)
+    q = torch.zeros(1, 3, 7, dtype=dtype)
     q[0, 1, 0] = 0.1
     q[0, 2, 0] = 0.2
     goals = torch.stack([_pose(x=0.1, angle=2.0), _pose(x=0.2, angle=2.0)])[None]
