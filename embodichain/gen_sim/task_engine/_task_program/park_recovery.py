@@ -58,7 +58,7 @@ def eligible(engine: Any, request: Any, context: Any) -> bool:
     """Retain the factory's exact canonical release/cleanup/Park authority."""
     try:
         owns_articulation = getattr(
-            engine, "_articulation_park_after_short_withdrawal", lambda _: False
+            engine, "_articulation_park_after_withdrawal", lambda _: False
         )(request.invocation_id)
         preview = engine._park_recovery_previews.get(request.invocation_id)
         if not owns_articulation and (

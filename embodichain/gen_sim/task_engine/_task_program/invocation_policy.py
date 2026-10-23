@@ -406,8 +406,8 @@ class GenSimActionEngine(AtomicActionEngine):
             for attempt in session.plan_attempts
         )
 
-    def _articulation_park_after_short_withdrawal(self, invocation_id: str) -> bool:
-        """Own only the adjacent Park of an installed shorter cleanup plan."""
+    def _articulation_park_after_withdrawal(self, invocation_id: str) -> bool:
+        """Own the adjacent Park of an installed nominal or recovered E6 withdrawal."""
         calls = getattr(self, "_articulation_calls", {})
         entry = getattr(self, "_articulation_sessions", {}).get(invocation_id)
         if calls.get(invocation_id) != "park" or entry is None:
@@ -418,13 +418,10 @@ class GenSimActionEngine(AtomicActionEngine):
         return any(
             attempt.request.invocation_id == previous
             and bool(attempt.planned_mask.any())
-            and (
-                detail := attempt.plan.diagnostics.metadata.get(
-                    "gen_sim_withdrawal_target_recovery", {}
-                )
+            and attempt.plan.diagnostics.metadata.get(
+                "gen_sim_withdrawal_target_recovery", {"accepted": True}
             ).get("accepted")
             is True
-            and detail.get("route") == "outward_20mm"
             for attempt in session.plan_attempts
         )
 
@@ -902,9 +899,7 @@ class GenSimActionEngine(AtomicActionEngine):
                     )
                 elif request.invocation_id in getattr(
                     self, "_clearance_parks", ()
-                ) or self._articulation_park_after_short_withdrawal(
-                    request.invocation_id
-                ):
+                ) or self._articulation_park_after_withdrawal(request.invocation_id):
                     from .clearance_recovery import validate_motion
                     from embodichain.lab.sim.atomic_actions import JointPositionTarget
                     from embodichain.lab.sim.atomic_actions.plans import PlanningFailure
@@ -912,9 +907,7 @@ class GenSimActionEngine(AtomicActionEngine):
                     endpoint = request.binding.endpoint("primary", "motion")
                     motion = endpoint.require_target(JointPositionTarget)
                     simulation = self._clearance_simulation
-                    if self._articulation_park_after_short_withdrawal(
-                        request.invocation_id
-                    ):
+                    if self._articulation_park_after_withdrawal(request.invocation_id):
                         from embodichain.lab.sim.sim_manager import SimulationManager
 
                         simulation = SimulationManager.get_instance(

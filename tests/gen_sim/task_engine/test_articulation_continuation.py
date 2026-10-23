@@ -379,12 +379,43 @@ def test_short_park_authority_comes_from_installed_withdrawal(
         _articulation_sessions={"park": ("withdraw", NS(plan_attempts=[attempt]))},
     )
     assert (
-        GenSimActionEngine._articulation_park_after_short_withdrawal(engine, "park")
+        GenSimActionEngine._articulation_park_after_withdrawal(engine, "park")
         is expected
     )
     assert (
-        GenSimActionEngine._articulation_park_after_short_withdrawal(engine, "unbound")
+        GenSimActionEngine._articulation_park_after_withdrawal(engine, "unbound")
         is False
+    )
+
+
+@pytest.mark.parametrize(
+    "previous_kind,installed,expected",
+    [
+        ("withdraw", True, True),
+        ("withdraw", False, False),
+        ("slide", True, False),
+        ("park", True, False),
+    ],
+)
+def test_nominal_withdrawal_also_owns_the_following_park(
+    previous_kind: str, installed: bool, expected: bool
+) -> None:
+    from embodichain.gen_sim.task_engine._task_program.invocation_policy import (
+        GenSimActionEngine,
+    )
+
+    attempt = NS(
+        request=NS(invocation_id="previous"),
+        planned_mask=torch.tensor([installed]),
+        plan=NS(diagnostics=NS(metadata={})),
+    )
+    engine = NS(
+        _articulation_calls={"previous": previous_kind, "park": "park"},
+        _articulation_sessions={"park": ("previous", NS(plan_attempts=[attempt]))},
+    )
+    assert (
+        GenSimActionEngine._articulation_park_after_withdrawal(engine, "park")
+        is expected
     )
 
 
@@ -415,7 +446,7 @@ def test_existing_park_recovery_can_qualify_only_owned_empty_e6_park(
     engine = NS(
         _park_recovery_previews={},
         _actions={"move_joints": MoveJoints()},
-        _articulation_park_after_short_withdrawal=lambda identity: owned,
+        _articulation_park_after_withdrawal=lambda identity: owned,
     )
     context = NS(
         batch_size=1,

@@ -896,15 +896,16 @@ discards the preview path. This is not a predicted-scene certificate: actual
 withdrawal is freshly planned and checked against current scene meshes before
 dispatch, including when its nominal plan succeeds, only when the lookahead
 actually rejected the formerly admissible terminal and selected another one.
-The exact adjacent E6 Park after an installed short withdrawal may reuse the
-existing four joint-via Park recovery with fresh full-scene qualification. Its
-canonical home target, timing and released-hand requirement remain unchanged;
-ordinary E6 Parks do not acquire this extra gate. A failed signed push may try
+The exact adjacent E6 Park after an installed nominal or recovered withdrawal
+uses fresh full-scene qualification and may reuse the existing four joint-via
+Park recovery. An unchanged safe home path remains preferred. Its canonical
+home target, timing and released-hand requirement remain unchanged; E8/E9 parks
+without an adjacent E6 withdrawal are not included. A failed signed push may try
 50 mm then 30 mm approach/return offsets, preserving the handle grasp, rail,
 joint target and all full-path checks. Pulls and nominal successes are unchanged.
 Push diagnostics record the first failed leg instead of only exhaustion.
-Unchanged successful branches and unpaired calls retain their existing checks;
-they do not acquire a blanket new scene gate. Qualification is read from the
+Unpaired calls retain their existing checks rather than acquiring a blanket
+scene gate. Qualification is read from the
 paired public ExecutionSession's installed plan attempts, not from speculative
 planning side effects. Rejected revisions cannot erase it; a later nominal
 replan in that session does not erase earlier installed reselection evidence.
@@ -916,7 +917,7 @@ reach/push/open/return suffix, frame budget and control dt remain unchanged;
 longer prefixes reject rather than being accelerated. Shared Slide rebuilds
 the commands, then native joint/velocity/full-robot and fresh approach-scene
 checks qualify them. This does not bypass collision predictions or certify CCD.
-The E6 recovery fingerprint revision 11 owns these changes. A valid nominal paired
+The E6 recovery fingerprint revision 12 owns these changes. A valid nominal paired
 continuation retains its exact commands; a supported but unqualified nominal
 terminal enters the same bounded branch search, without dispatching a preview.
 An ordinary rigid lateral Pick/Place pair may reuse goal-conditioned payload
