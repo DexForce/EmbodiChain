@@ -1016,6 +1016,26 @@ def _contact_phase_drift(result) -> float:
     return worst
 
 
+def _free_phase_deviation(result) -> float:
+    """Return the largest free-phase deviation from the reference trajectory."""
+    batch = result.candidates
+    reference = {phase.phase_id: phase for phase in batch.phases[0]}
+    worst = 0.0
+    for row in range(1, len(result.variants)):
+        for phase in batch.phases[row]:
+            source = reference.get(phase.phase_id)
+            if source is None or phase.kind != "free":
+                continue
+            variant_window = batch.positions[row, phase.start_index : phase.stop_index]
+            reference_window = batch.positions[
+                0, source.start_index : source.stop_index
+            ]
+            if variant_window.shape != reference_window.shape:
+                continue
+            worst = max(worst, float((variant_window - reference_window).abs().max()))
+    return worst
+
+
 def save_variant_joint_plot(
     result: TrajectoryVariantSet, robot: Robot, path: str | pathlib.Path
 ) -> None:
@@ -1042,6 +1062,7 @@ def save_variant_joint_plot(
     figure, axes = plt.subplots(rows, 3, figsize=(13, 3.1 * rows), sharex=True)
     flat = axes.flatten()
     drift = _contact_phase_drift(result)
+    free_deviation = _free_phase_deviation(result)
     styles, groups = _variant_styles(result)
     for position, joint in enumerate(arm):
         axis = flat[position]
@@ -1103,8 +1124,8 @@ def save_variant_joint_plot(
                 title_fontsize=9,
             )
     figure.suptitle(
-        "Trajectory variants: curves separate between waypoints and rejoin inside "
-        f"the shaded contact phases (max contact deviation {drift:.2e} rad)",
+        f"Trajectory variants: max free-phase joint deviation {free_deviation:.2f} "
+        f"rad; max shaded contact-phase deviation {drift:.2e} rad",
         fontsize=11,
     )
     figure.tight_layout(rect=(0, 0.1, 1, 0.97))

@@ -58,20 +58,26 @@ at its 10 ms physics period. This avoids turning the planner's internal 2 mm
 Cartesian discretization into thousands of augmentation samples. It converts
 the shared plan to the production
 ``TaskSpaceTrajectory`` contract, bends the lift/transport/retract paths in the
-horizontal plane, and projects each target through batched trajectory IK. The
-grasp and release waypoints remain exact. Generation fails instead of silently
-reusing a row if nine distinct IK-valid variants cannot be produced. The output
-directory receives the nine-way joint/path plots plus a wide-view
+horizontal plane, adds a small orientation residual, and projects each target
+through batched trajectory IK. The showcase uses an 8 cm translation bound, a
+0.05 rad rotation bound and a 0.01 normalized joint-path separation threshold
+so all nine paths are visibly different. The grasp and release waypoints remain
+exact. Generation fails instead of silently reusing a row if nine distinct
+IK-valid variants cannot be produced. The output directory receives the
+nine-way joint/path plots plus a wide-view
 ``place_auto_play.mp4`` showing all arenas at once.
 
 ![Nine parallel PickUp -> Place trajectory variants](assets/task_environment_parallel_9.png)
+
+![Nine endpoint-preserving joint trajectory variants](assets/task_environment_parallel_9_joints.png)
 
 Useful overrides include:
 
 ```bash
 --trajectory_variants 9
---task_space_translation_m 0.04
---task_space_rotation_rad 0.0
+--task_space_translation_m 0.08
+--task_space_rotation_rad 0.05
+--dedup_tolerance 0.01
 --variant_seed 7
 --trajectory_strategy motion_gen
 --trajectory_control_dt 0.01

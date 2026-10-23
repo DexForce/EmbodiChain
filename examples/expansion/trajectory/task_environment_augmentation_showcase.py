@@ -38,6 +38,9 @@ __all__ = ["main"]
 
 SHOWCASE_TRAJECTORY_STRATEGY = "ik_interp"
 SHOWCASE_TRAJECTORY_CONTROL_DT = 0.04
+SHOWCASE_TASK_SPACE_TRANSLATION_M = 0.08
+SHOWCASE_TASK_SPACE_ROTATION_RAD = 0.05
+SHOWCASE_DEDUP_TOLERANCE = 0.01
 
 
 def _has_option(arguments: list[str], option: str) -> bool:
@@ -80,6 +83,19 @@ def main(argv: list[str] | None = None) -> None:
         forwarded.extend(
             ("--trajectory_control_dt", str(SHOWCASE_TRAJECTORY_CONTROL_DT))
         )
+    if not _has_option(forwarded, "--task_space_translation_m"):
+        forwarded.extend(
+            (
+                "--task_space_translation_m",
+                str(SHOWCASE_TASK_SPACE_TRANSLATION_M),
+            )
+        )
+    if not _has_option(forwarded, "--task_space_rotation_rad"):
+        forwarded.extend(
+            ("--task_space_rotation_rad", str(SHOWCASE_TASK_SPACE_ROTATION_RAD))
+        )
+    if not _has_option(forwarded, "--dedup_tolerance"):
+        forwarded.extend(("--dedup_tolerance", str(SHOWCASE_DEDUP_TOLERANCE)))
     if "--headless" not in forwarded and "--no-headless" not in forwarded:
         forwarded.append("--headless")
     if "--auto_play" not in forwarded:
