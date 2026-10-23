@@ -6,7 +6,9 @@ native instance wrappers and segment assignment helpers. Its private
 `spawn/descriptors.py` lowering. Handwritten configurations fill historical
 defaults during construction. Preset configurations keep unspecified fields
 as `None`; only explicit values override resources. `from_dict()` constructs in
-that mode before filling defaults. Do not infer override intent from equality
+that mode before filling defaults. Construction moves common parameter aliases
+to flat fields so `replace(field=None)` can restore inheritance. Do not infer
+override intent from equality
 with a default, or modify generic `configclass` for this policy.
 
 `_material_presets.py` owns validated schema-v1 overrides, renderer preflight and

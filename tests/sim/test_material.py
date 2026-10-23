@@ -557,3 +557,30 @@ def test_native_manifest_variants_share_images_and_templates_without_mutation(
     finally:
         resources.close()
     assert not directory.exists()
+
+
+def test_common_parameter_aliases_canonicalize_before_replace_restores_inheritance():
+    from embodichain.lab.sim.material import _material_desc_from_cfg
+
+    cfg = VisualMaterialCfg.from_dict(
+        {
+            "preset": "GlassClear",
+            "uid": "glass",
+            "parameters": {"ior": 1.5, "emission_intensity": 0.0, "thin_walled": False},
+        }
+    )
+    expected = VisualMaterialCfg.from_preset(
+        "GlassClear",
+        uid="glass",
+        ior=1.5,
+        emissive_intensity=0.0,
+        parameters={"thin_walled": False},
+    )
+    assert cfg.to_dict() == expected.to_dict()
+    inherited = cfg.replace(ior=None, emissive_intensity=None)
+    assert inherited.ior is None and inherited.emissive_intensity is None
+    assert inherited.parameters == {"thin_walled": False}
+    assert _material_desc_from_cfg(inherited, "glass") == _material_desc_from_cfg(
+        VisualMaterialCfg.from_preset("GlassClear", parameters={"thin_walled": False}),
+        "glass",
+    )

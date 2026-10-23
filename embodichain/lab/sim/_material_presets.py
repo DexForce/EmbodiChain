@@ -180,6 +180,23 @@ def _normalize_parameters(parameters: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def _canonical_cfg_parameters(cfg: VisualMaterialCfg) -> dict[str, Any]:
+    """Keep common overrides in their flat fields, including native aliases.
+
+    This makes dataclasses.replace(ior=None) clear an override regardless of
+    whether it originally came from Python keywords or a parameters mapping.
+    """
+    parameters = _normalize_parameters(cfg.parameters)
+    for field_name, key in _FLAT_PARAMETERS.items():
+        if key in parameters:
+            if getattr(cfg, field_name) is not None:
+                raise ValueError(
+                    f"Duplicate visual material parameter {key!r} in flat fields and parameters."
+                )
+            setattr(cfg, field_name, parameters.pop(key))
+    return parameters
+
+
 def _cfg_parameters(cfg: VisualMaterialCfg) -> dict[str, Any]:
     parameters = _normalize_parameters(cfg.parameters)
     for field_name, key in _FLAT_PARAMETERS.items():

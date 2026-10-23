@@ -51,6 +51,9 @@ Handwritten configurations still fill the historical defaults at construction.
 
 Common fields stay flat; native schema-v1 advanced parameters belong in
 ``parameters``. ``emissive_intensity`` normalizes to ``emission_intensity``.
+Common properties supplied through ``parameters`` are moved to their flat
+fields during construction, so ``replace(ior=None)`` also clears that form of
+override. The remaining advanced properties stay in ``parameters``.
 Specifying the same native property in both places is an error. Unknown,
 nonfinite, incorrectly typed and out-of-range parameters fail before native
 loading. Presets reject ``material_type`` and texture replacement; their native

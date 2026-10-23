@@ -100,6 +100,10 @@ class VisualMaterialCfg:
     """Native schema-v1 advanced parameters; cannot duplicate common fields."""
 
     def __post_init__(self) -> None:
+        if self.preset is not None or self.parameters:
+            from ._material_presets import _canonical_cfg_parameters
+
+            self.parameters = _canonical_cfg_parameters(self)
         if self.preset is None:
             defaults = {
                 "base_color": [0.5, 0.5, 0.5, 1.0],
