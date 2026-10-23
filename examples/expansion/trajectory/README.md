@@ -60,6 +60,8 @@ reusing a row if nine distinct IK-valid variants cannot be produced. The output
 directory receives the nine-way joint/path plots plus a wide-view
 ``place_auto_play.mp4`` showing all arenas at once.
 
+![Nine parallel PickUp -> Place trajectory variants](assets/task_environment_parallel_9.png)
+
 Useful overrides include:
 
 ```bash

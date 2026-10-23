@@ -66,8 +66,8 @@ def main(argv: list[str] | None = None) -> None:
         forwarded.extend(("--num_envs", "9"))
     if "--trajectory_variant_mode" not in forwarded:
         forwarded.extend(("--trajectory_variant_mode", "task_space"))
-    if "--headless_play" not in forwarded:
-        forwarded.append("--headless_play")
+    if "--headless" not in forwarded and "--no-headless" not in forwarded:
+        forwarded.append("--headless")
     if "--auto_play" not in forwarded:
         forwarded.append("--auto_play")
     if "--auto_play_video_path" not in forwarded:

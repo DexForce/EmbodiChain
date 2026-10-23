@@ -815,6 +815,20 @@ def expand_tutorial_task_space_variants(
     attempts = 0
     attempt_budget = max(16 * requested, requested)
     controlled = list(template.controlled_joint_indices)
+    uncontrolled = sorted(set(range(template.positions.shape[1])) - set(controlled))
+    projection_limits = limits.clone()
+    if uncontrolled:
+        # Trajectory IK owns only the selected arm columns. Preserve copied
+        # gripper/controller values even when their authored command range is
+        # wider than the simulator's raw joint-state limits.
+        copied = template.positions[:, uncontrolled]
+        margin = torch.finfo(copied.dtype).eps
+        projection_limits[uncontrolled, 0] = torch.minimum(
+            projection_limits[uncontrolled, 0], copied.min(dim=0).values - margin
+        )
+        projection_limits[uncontrolled, 1] = torch.maximum(
+            projection_limits[uncontrolled, 1], copied.max(dim=0).values + margin
+        )
     spans = (limits[controlled, 1] - limits[controlled, 0]).clamp_min(1e-12)
     dedup_tolerance = args.dedup_tolerance or 1e-4
 
@@ -832,7 +846,7 @@ def expand_tutorial_task_space_variants(
             target,
             template,
             kinematics=kinematics,
-            joint_limits=limits,
+            joint_limits=projection_limits,
             ik_cfg=ik_cfg,
         )
         if not projection.accepted:
