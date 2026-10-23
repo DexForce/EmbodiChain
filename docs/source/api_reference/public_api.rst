@@ -919,6 +919,24 @@ embodichain.lab.scripts.preview_lerobot_data
    main
    resolve_dataset_root
 
+embodichain.lab.scripts.preview_material
+----------------------------------------
+
+.. currentmodule:: embodichain.lab.scripts.preview_material
+
+Query the default catalog without loading simulation dependencies, or render
+presets and parameter variants with fixed preview settings and managed cleanup.
+
+.. autosummary::
+
+   main
+   cli
+
+.. autofunction:: main
+
+.. autofunction:: cli
+
+
 embodichain.lab.scripts.preview_robot
 -------------------------------------
 

@@ -63,15 +63,16 @@ In addition to the legacy handwritten-material checks above, qualify the unified
 | Native resources | Runtime-first and inline-first aliases share exact handles. Different UIDs use separate children of immutable templates. Repeated creation preserves state and bounded native instance counts. Variants stage JSON only, never duplicate PNGs. |
 | Lifecycle | Complete native template reset restores properties beyond the flattened fields. Default/Newton selection, reset, topology rebuild and cleanup preserve identity and expected assignments. |
 | Optical parity | Render all 24 on OfflineRT and the fourteen compatible presets on Hybrid and FastRT. Compare the package route to direct native loading with identical geometry/camera/lights, plus a native-repeat noise control. Use closed glass meshes, explicit double shells for bubbles and optional segmented face geometry. |
+| Preview CLI | Installed-wheel help/list need no simulator imports, GPU or asset download. Overrides preserve inheritance and explicit zero/false. Incompatible requests fail before World creation; compatible-only batches report every exclusion. Captures and metadata reproduce the selected configuration. |
 
 ```bash
-python -m pytest -q tests/data/test_default_materials.py tests/sim/test_material.py
+python -m pytest -q tests/data/test_default_materials.py tests/sim/test_material.py tests/lab/scripts/test_preview_material.py tests/test_main.py
 python -m pytest -q --run-gpu tests/sim/test_material_integration.py
 
 # Each renderer requires a separate process. Run native checks serially.
-python examples/sim/rendering/default_materials.py --all --compare-native --renderer rt
-python examples/sim/rendering/default_materials.py --all --compare-native --renderer hybrid
-python examples/sim/rendering/default_materials.py --all --compare-native --renderer fast-rt
+embodichain preview-material --all --headless --compare-native --renderer rt
+embodichain preview-material --all --compatible-only --compare-native --renderer hybrid
+embodichain preview-material --all --compatible-only --compare-native --renderer fast-rt
 # Optionally add --model /path/to/skin_face.glb for SkinHumanLight.
 ```
 

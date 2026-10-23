@@ -18,60 +18,10 @@
 
 from __future__ import annotations
 
-import copy
-import json
-from functools import lru_cache
-from importlib.resources import files
-from typing import Any
+from embodichain._material_catalog import (
+    _catalog,
+    get_default_material_info,
+    list_default_materials,
+)
 
 __all__ = ["list_default_materials", "get_default_material_info"]
-
-
-@lru_cache(maxsize=1)
-def _catalog() -> dict[str, Any]:
-    return json.loads(
-        files("embodichain.data")
-        .joinpath("default_materials.json")
-        .read_text(encoding="utf-8")
-    )
-
-
-def list_default_materials() -> list[str]:
-    """List the 24 public presets without downloading assets or creating a World.
-
-    Returns:
-        Preset names in catalog order. Auxiliary resources are omitted.
-    """
-    return [item["name"] for item in _catalog()["materials"] if not item["auxiliary"]]
-
-
-def get_default_material_info(name: str) -> dict[str, Any]:
-    """Read independent metadata for a public preset or auxiliary resource.
-
-    Args:
-        name: Case-sensitive catalog name, including ``SoapBubbleInterior``.
-
-    Returns:
-        Description, source, download requirement, supported renderers,
-        dependencies, geometry guidance and source revision. Built-in presets
-        also include their native parameter defaults and have no texture size.
-        Suggested resource sizes do not change UVs.
-
-    Raises:
-        ValueError: The name is not in the built-in catalog.
-    """
-    for item in _catalog()["materials"]:
-        if item["name"] == name:
-            result = copy.deepcopy(item)
-            result.setdefault("source", "resource")
-            result["requires_download"] = result["source"] != "builtin"
-            result["texture_resolution"] = (
-                list(_catalog()["texture_resolution"])
-                if result["requires_download"]
-                else None
-            )
-            result.setdefault("revision", _catalog()["bundle"]["revision"])
-            return result
-    raise ValueError(
-        f"Unknown default material {name!r}. Available presets: {', '.join(list_default_materials())}."
-    )

@@ -23,8 +23,16 @@ facades stay declared and are skipped by runtime binding/reset in that mode.
 Built-in parameter presets resolve from wheel metadata without constructing the
 downloadable resource dataset. Both sources use complete manifests and the same
 override, identity and reset path. Human-facing previews and parameter tables
-live in the [material guide](../../../docs/source/overview/sim/sim_manager/rendering/materials.md);
-keep renderer capabilities in the catalog.
+live in the [material guide](../../../docs/source/overview/sim/sim_manager/rendering/materials.md).
+`embodichain/lab/scripts/preview_material.py` owns `preview-material`; the example
+delegates to it with a headless default. Help/list use the lightweight catalog
+without simulator imports. Rendering preflights the same configurations/backend
+validator as production before World creation. Batch exclusions require explicit
+`--compatible-only` and are reported; never switch renderers or silently drop
+parameters. Geometry, studio settings and direct-native comparisons belong to
+the preview, not the material factory. See the
+[CLI guide](../../../docs/source/guides/preview_material.md) and
+`tests/lab/scripts/test_preview_material.py`; keep capabilities in the catalog.
 
 Resource templates remain immutable. Each public UID and instance receives a
 separate child; canonical revision/preset/overrides select shared templates.

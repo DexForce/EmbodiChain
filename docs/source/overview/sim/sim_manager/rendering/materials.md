@@ -241,7 +241,7 @@ creates a smaller inward-facing inner shell; the factory only creates materials.
 sheen, clearcoat and diffuse transmission. It does not implement random-walk
 subsurface scattering. The portrait preview uses an optional caller-provided
 segmented `SkinFaceDemo` GLB; that mesh is not included in the material archive.
-Without `--model`, the example renders the same skin material on a sphere.
+Without `--model`, the preview renders the same skin material on a sphere.
 
 ## Query, cache and reproduce
 
@@ -263,21 +263,27 @@ NoRender retains declarations without downloading or loading native materials.
 
 ```bash
 # Offline catalog query.
-python examples/sim/rendering/default_materials.py --list
+embodichain preview-material --list
 
 # Only the six built-in parameter materials.
-python examples/sim/rendering/default_materials.py \
-  --all --source builtin --renderer rt --compare-native --size 640 --frames 6 --spp 12 --gallery
+embodichain preview-material \
+  --all --headless --source builtin --renderer rt --compare-native --size 640 --frames 6 --spp 12 --gallery
 
 # All 24 presets; add --model /path/to/skin_face.glb for the portrait sample.
-python examples/sim/rendering/default_materials.py \
-  --all --renderer rt --compare-native --size 640 --frames 6 --spp 12 --gallery
+embodichain preview-material \
+  --all --headless --renderer rt --compare-native --size 640 --frames 6 --spp 12 --gallery
 
 # Pre-download the 18 resource presets and the bubble helper.
 embodichain data download --name DefaultMaterials
 ```
 
-The preview saves lossless `*_preset.png`, `*_native.png` and
+Use `embodichain preview-material --material GlassClear` for a native window,
+or add `--headless` to export and exit. See the
+{doc}`preview-material guide </guides/preview_material>` for parameter overrides,
+compatible batch selection and output metadata. The existing example delegates
+to the same implementation and retains its headless default.
+
+The native-comparison preview saves lossless `*_preset.png`, `*_native.png` and
 `*_native_repeat.png` images plus `results.json`. Direct-native comparisons use
 the original resource directory or the built-in native parameter definition,
 with the same geometry, camera, exposure and lights. Material parameter readback
