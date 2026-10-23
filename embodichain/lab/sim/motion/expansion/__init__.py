@@ -103,6 +103,28 @@ from .source import (
     SourceContext,
     TemplateSourceAdapter,
 )
+from .stitching import (
+    MinimumJerkBridgePlanner,
+    SegmentCompatibility,
+    StitchedSegmentPlacement,
+    StitchedTrajectory,
+    TrajectoryBridge,
+    TrajectoryBridgePlanner,
+    TrajectorySegment,
+    TrajectorySegmentBank,
+    compare_trajectory_segments,
+    extract_trajectory_segments,
+    stitch_trajectory_segments,
+)
+from .task_space import (
+    TASK_SPACE_RESIDUAL_OPERATOR,
+    TaskSpaceDeformationConstraint,
+    TaskSpaceProjectionResult,
+    TaskSpaceTrajectory,
+    deform_task_space_trajectory,
+    project_task_space_trajectory,
+    task_space_from_joint_template,
+)
 
 __all__ = [
     "SPATIAL_METHODS",
@@ -171,4 +193,22 @@ __all__ = [
     "SourceContext",
     "TemplateSourceAdapter",
     "PlanResultSourceAdapter",
+    "TASK_SPACE_RESIDUAL_OPERATOR",
+    "TaskSpaceDeformationConstraint",
+    "TaskSpaceProjectionResult",
+    "TaskSpaceTrajectory",
+    "task_space_from_joint_template",
+    "deform_task_space_trajectory",
+    "project_task_space_trajectory",
+    "TrajectorySegment",
+    "SegmentCompatibility",
+    "TrajectorySegmentBank",
+    "TrajectoryBridge",
+    "TrajectoryBridgePlanner",
+    "MinimumJerkBridgePlanner",
+    "StitchedSegmentPlacement",
+    "StitchedTrajectory",
+    "extract_trajectory_segments",
+    "compare_trajectory_segments",
+    "stitch_trajectory_segments",
 ]
