@@ -24,6 +24,9 @@ the caller's output directory. Run from the repository root with py311.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import resource
+import subprocess
 import json
 import sys
 from pathlib import Path
@@ -155,6 +158,23 @@ def main() -> None:
         and bool(torch.isfinite(gradient).all())
         and float(gradient[:, 0].norm()) > 0
     )
+    repository = Path(__file__).resolve().parents[3]
+    sources = [
+        "scripts/experiments/rwm/controlled_fit.py",
+        "embodichain/learning/models/rwm.py",
+        "embodichain/learning/sl/rwm.py",
+        "embodichain/compute/dynamics/robot_state.py",
+        "embodichain/learning/sl/learner.py",
+        "embodichain/learning/sl/trainer.py",
+        "embodichain/learning/sl/sources.py",
+    ]
+    device = torch.device(args.device)
+    cuda_memory = None
+    if device.type == "cuda":
+        cuda_memory = {
+            "allocator_peak_bytes": torch.cuda.max_memory_allocated(device),
+            "allocator_reserved_peak_bytes": torch.cuda.max_memory_reserved(device),
+        }
     summary = {
         "protocol": "rwm-controlled-fit-v1",
         "seed": args.seed,
@@ -164,6 +184,25 @@ def main() -> None:
         "final_validation": final,
         "loss_ratio": final["loss"] / initial["loss"],
         "fit_seconds": elapsed,
+        "fit_timing_scope": "Synchronous training loop including periodic validation and checkpoint I/O; excludes imports and final validation",
+        "process_peak_rss_bytes": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        * (1 if sys.platform == "darwin" else 1024),
+        "torch_cuda_memory": cuda_memory,
+        "provenance": {
+            "git_commit": subprocess.check_output(
+                ["git", "-C", str(repository), "rev-parse", "HEAD"], text=True
+            ).strip(),
+            "python": sys.version,
+            "torch": str(torch.__version__),
+            "source_sha256": {
+                name: hashlib.sha256((repository / name).read_bytes()).hexdigest()
+                for name in sources
+            },
+            "data_sha256": {
+                name: hashlib.sha256((args.output / name).read_bytes()).hexdigest()
+                for name in ("train.pt", "validation.pt")
+            },
+        },
         "robot_layout": {
             "num_joints": 29,
             "context_dim": 3,

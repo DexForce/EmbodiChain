@@ -27,3 +27,9 @@ matrix (9), world linear/angular velocity (3 each), ordered joint positions and
 ordered joint velocities. Controls, their units, the joint order and fixed
 control period belong to the dataset/model contract. Replay callers must supply
 the physical next state before any automatic reset.
+
+Reports bind the exact source and tensor-corpus hashes, Python/Torch versions,
+process peak RSS and optional Torch CUDA allocator peaks. The measured fit loop
+includes its periodic validation and checkpoint I/O; interpreter/import startup
+and final held-out validation are outside that interval. CUDA allocator peaks
+do not include driver/native allocations.
