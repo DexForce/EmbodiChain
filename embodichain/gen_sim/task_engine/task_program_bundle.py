@@ -885,6 +885,11 @@ def generate_task_program_bundle(
             selected_graph,
             runtime_profile=runtime_profile,
         )
+        posture = _calibrate_initial_articulation_posture(
+            embodiment_payload, selected_graph
+        )
+        if posture is not None:
+            _write_json(root / "ur10_initial_posture_selection.json", posture)
     if articulation_bindings and frozen is None:
         # Calibrate this generated E6 deployment, not shared robot defaults.
         stiffness = embodiment_payload["simulation"]["joint_drive_props"]["stiffness"]
@@ -3378,6 +3383,36 @@ def _grasp_contact_clearances(
     return {
         str(obj["uid"]): robot_offset + contact_offset(obj.get("attrs"), default_offset)
         for obj in scene.rigid_objects
+    }
+
+
+def _calibrate_initial_articulation_posture(
+    embodiment: dict[str, Any], graph: SemanticTaskGraph
+) -> dict[str, Any] | None:
+    """Keep the initial E6 arm seed and tuck only its idle UR10 neighbor."""
+    first = graph["nodes"][0]["call"]
+    active = first.get("resources", {}).get("primary")
+    if (
+        embodiment["embodiment_id"] != "dual_ur10_robotiq_arg2f_140"
+        or first.get("call_id") != "gen_sim.articulation_slide"
+        or active not in {"left", "right"}
+    ):
+        return None
+    idle = "right" if active == "left" else "left"
+    positions = embodiment["simulation"]["init_qpos"]
+    # UR10 source DOFs interleave the two equal six-joint arm chains.
+    idle_shoulder_index = 3 if idle == "right" else 2
+    positions[idle_shoulder_index] -= 0.5
+    for preset in embodiment["skill_profile"]["command_presets"]:
+        if preset["preset_id"] in {"left_arm_postures", "right_arm_postures"}:
+            preset["commands"]["park"][1] -= 0.5
+    return {
+        "schema_version": "gen_sim.ur10-initial-articulation-posture/v1",
+        "reason": "initial_prismatic_operation_idle_arm_clearance",
+        "active_resource": active,
+        "tucked_initial_resource": idle,
+        "shoulder_offset_rad": -0.5,
+        "physical_clearance_certified": False,
     }
 
 

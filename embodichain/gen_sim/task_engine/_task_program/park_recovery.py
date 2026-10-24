@@ -14,11 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Bounded joint vias only for canonical released-hand Park scene failures."""
+"""Bounded joint vias for canonical released-hand Park path collisions."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import replace
 from typing import Any
 
@@ -43,7 +43,7 @@ from .motion import _joint_velocity_limits
 
 __all__: list[str] = []
 
-PARK_RECOVERY_REVISION = 1
+PARK_RECOVERY_REVISION = 2
 _UNAVAILABLE = (
     ImportError,
     ValueError,
@@ -183,6 +183,19 @@ def _annotate(plan: Any, report: dict[str, Any], *, failed: bool = False) -> Any
     )
 
 
+def _neutral_joint_routes(
+    current: torch.Tensor, ready: torch.Tensor, bounds: torch.Tensor
+) -> Iterator[tuple[int, torch.Tensor]]:
+    """Temporarily free one interior joint, then restore the exact ready target."""
+    for index in range(1, min(current.shape[1] - 1, 5)):
+        neutral = torch.zeros_like(current[:, index]).clamp(
+            min=bounds[:, index, 0], max=bounds[:, index, 1]
+        )
+        first, second = current.clone(), ready.clone()
+        first[:, index] = second[:, index] = neutral
+        yield index, torch.stack((first, second, ready), dim=1)
+
+
 def recover(
     engine: Any,
     request: Any,
@@ -193,7 +206,7 @@ def recover(
     build: Callable[[Any, Any], Any],
     simulation: Any,
 ) -> Any:
-    """Use the same four p32 vias in previews and fresh actual Park planning."""
+    """Keep bounded, fully checked vias in previews and actual Park planning."""
     if not eligible(engine, request, context):
         return original
     basic = basic_check(engine, request, context, original)
@@ -208,7 +221,7 @@ def recover(
     )
     if (
         not basic["valid"]
-        or collision.get("kind") != "scene"
+        or collision.get("kind") not in {"scene", "self", "other_arm"}
         or type(collision.get("frame")) is not int
         or not 1 < collision["frame"] < frames
         or acceptance.get("joint_limits", {}).get("valid") is not True
@@ -232,6 +245,28 @@ def recover(
             ready = endpoint.joint_positions(
                 PARK_COMMAND, num_envs=1, device=current.device, dtype=current.dtype
             )
+
+            def qualify(waypoints: torch.Tensor, entry: dict[str, Any]) -> Any:
+                selected = replace(request, goal=JointPositionGoal(waypoints))
+                candidate = build(selected, context)
+                check = basic_check(engine, selected, context, candidate, frames=frames)
+                if check["valid"]:
+                    check = validate_motion(candidate, context, robot, simulation, part)
+                entry.update(
+                    accepted=check["valid"],
+                    reason=check.get("reason"),
+                    collision=check.get(
+                        "collision",
+                        candidate.diagnostics.metadata.get(
+                            "gen_sim_clearance_park", {}
+                        ).get("collision"),
+                    ),
+                )
+                if check["valid"]:
+                    report["accepted"] = True
+                    return _annotate(candidate, report)
+                return None
+
             start_pose = (
                 robot.compute_fk(qpos=current, name=part, to_matrix=True)
                 .detach()
@@ -240,7 +275,8 @@ def recover(
             ready_pose = (
                 robot.compute_fk(qpos=ready, name=part, to_matrix=True).detach().clone()
             )
-            for kind, height in (("midpoint", 0.05), ("over_ready", 0.10)):
+            vias = (("midpoint", 0.05), ("over_ready", 0.10))
+            for kind, height in vias:
                 pose = (start_pose if kind == "midpoint" else ready_pose).clone()
                 if kind == "midpoint":
                     pose[:, :3, 3] = (start_pose[:, :3, 3] + ready_pose[:, :3, 3]) / 2
@@ -267,31 +303,32 @@ def recover(
                         via = solved[1].reshape(1, -1).detach().clone()
                         if via.shape != ready.shape or not torch.isfinite(via).all():
                             raise ValueError("Invalid Park IK waypoint.")
-                        selected = replace(
-                            request,
-                            goal=JointPositionGoal(torch.stack((via, ready), dim=1)),
-                        )
-                        candidate = build(selected, context)
-                        check = basic_check(
-                            engine, selected, context, candidate, frames=frames
-                        )
-                        if check["valid"]:
-                            check = validate_motion(
-                                candidate, context, robot, simulation, part
+                        accepted = qualify(torch.stack((via, ready), dim=1), entry)
+                        if accepted is not None:
+                            return accepted
+                    except _UNAVAILABLE as error:
+                        entry["reason"] = str(error)
+                    finally:
+                        if not torch.equal(before, robot.get_qpos()):
+                            raise RuntimeError(
+                                "Park planning changed native robot state."
                             )
-                        entry.update(
-                            accepted=check["valid"],
-                            reason=check.get("reason"),
-                            collision=check.get(
-                                "collision",
-                                candidate.diagnostics.metadata.get(
-                                    "gen_sim_clearance_park", {}
-                                ).get("collision"),
-                            ),
-                        )
-                        if check["valid"]:
-                            report["accepted"] = True
-                            return _annotate(candidate, report)
+            if collision["kind"] in {"self", "other_arm"}:
+                bounds = robot.get_qpos_limits(name=part, env_ids=context.env_ids).to(
+                    current
+                )
+                for index, waypoints in _neutral_joint_routes(current, ready, bounds):
+                    stop.restore()
+                    entry = {
+                        "kind": "neutral_joint",
+                        "joint_index": index,
+                        "accepted": False,
+                    }
+                    report["attempts"].append(entry)
+                    try:
+                        accepted = qualify(waypoints, entry)
+                        if accepted is not None:
+                            return accepted
                     except _UNAVAILABLE as error:
                         entry["reason"] = str(error)
                     finally:

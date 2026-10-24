@@ -191,6 +191,52 @@ def test_selected_robot_bundle_composes_and_keeps_identity(
         assert all(park == simulation["init_qpos"][:12:2] for park in parks)
 
 
+@pytest.mark.parametrize(
+    "profile,call,active,selected",
+    [
+        ("dual_ur10", "gen_sim.articulation_slide", "left", True),
+        ("dual_ur10", "gen_sim.articulation_slide", "right", True),
+        ("dual_ur10", "pick", "left", False),
+        ("dual_franka", "gen_sim.articulation_slide", "left", False),
+        ("tianji_marvin", "gen_sim.articulation_slide", "right", False),
+    ],
+)
+def test_initial_articulation_posture_is_ur10_and_start_call_scoped(
+    profile, call, active, selected
+):
+    from embodichain.gen_sim.task_engine.task_program_bundle import (
+        _calibrate_initial_articulation_posture,
+    )
+
+    payload = {
+        "embodiment_id": f"{profile}_robotiq_arg2f_140",
+        "simulation": {"init_qpos": [i / 10 for i in range(24)]},
+        "skill_profile": {
+            "command_presets": [
+                {
+                    "preset_id": f"{side}_arm_postures",
+                    "commands": {"park": [i / 10 for i in range(6)]},
+                }
+                for side in ("left", "right")
+            ]
+        },
+    }
+    before = deepcopy(payload)
+    graph = {"nodes": [{"call": {"call_id": call, "resources": {"primary": active}}}]}
+    result = _calibrate_initial_articulation_posture(payload, graph)
+    if not selected:
+        assert result is None and payload == before
+        return
+    idle_index = 3 if active == "left" else 2
+    expected = deepcopy(before)
+    expected["simulation"]["init_qpos"][idle_index] -= 0.5
+    for preset in expected["skill_profile"]["command_presets"]:
+        preset["commands"]["park"][1] -= 0.5
+    assert payload == expected
+    assert result["active_resource"] == active
+    assert result["physical_clearance_certified"] is False
+
+
 @pytest.mark.parametrize("profile", ["dual_franka", "dual_tianji"])
 def test_native_pick_exploration_rejects_other_robots(
     tmp_path: Path, profile: str

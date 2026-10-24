@@ -86,6 +86,13 @@ by `task_program_bundle.py`'s payload/embodiment calibration, not just the sourc
 component: inspect the generated embodiment before comparing actuator settings.
 UR10 light-grip calibration is isolated from Franka and retains lower authored
 limits. These settings do not establish full-path or complete-task qualification.
+For a newly generated UR10 bundle whose first call is prismatic Slide, task-level
+posture calibration keeps the operated arm's initial seed, tucks its idle neighbor
+by 0.5 rad and uses tucked released-hand Park targets. Selection follows the
+bound initial resource, not task or object IDs. Other initial calls, Franka,
+Marvin and frozen physical references retain their postures. The bundle's
+`ur10_initial_posture_selection.json` is configuration provenance, not a physical
+clearance certificate; runtime path and task checks still apply.
 `_task_program/solver_tolerances.py` preserves iterative
 solver budgets and supplies explicit analytic-UR FK validation budgets without
 requiring or mutating an iteration API on the shared solver.
@@ -938,8 +945,12 @@ withdrawal is freshly planned and checked against current scene meshes before
 dispatch, including when its nominal plan succeeds, only when the lookahead
 actually rejected the formerly admissible terminal and selected another one.
 The exact adjacent E6 Park after an installed nominal or recovered withdrawal
-uses fresh full-scene qualification and may reuse the existing four joint-via
-Park recovery. An unchanged safe home path remains preferred. Its canonical
+uses fresh full-scene qualification and may reuse the four Cartesian-via
+Park recovery. Interior self/other-arm path collisions may also try those vias,
+then at most four limit-clamped neutral interior-joint routes, restoring the
+exact canonical Park target. Initial-state collisions remain rejected. Every
+candidate retains full scene/self/other-arm, command, limit and velocity checks;
+this is not a Native exploration bypass. An unchanged safe home path remains preferred. Its canonical
 home target, timing and released-hand requirement remain unchanged; E8/E9 parks
 without an adjacent E6 withdrawal are not included. A failed signed push may try
 50 mm then 30 mm approach/return offsets, preserving the handle grasp, rail,
