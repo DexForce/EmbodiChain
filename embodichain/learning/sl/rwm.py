@@ -367,6 +367,7 @@ def build_rwm_trainer(config: Mapping[str, Any]) -> SupervisedTrainer:
             "recipe": "robot-world-model-v1",
             "model": model.get_extra_state(),
             "objective": dict(config.get("objective", {})),
+            "optimizer": dict(config.get("optimizer", {})),
             "validation_source": None if validation is None else validation.source_id,
         },
         evaluate=evaluate if validation is not None else None,
