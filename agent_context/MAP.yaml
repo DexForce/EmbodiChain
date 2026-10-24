@@ -542,3 +542,15 @@ topics:
   watch_paths: [embodichain/data/asset_catalog/, tests/data/asset_catalog/, embodichain/lab/task_program/semantics/asset_requirements.py, tests/lab/task_program/semantics/test_asset_requirements.py, embodichain/lab/task_program/semantics/asset_matching.py, tests/lab/task_program/semantics/test_asset_matching.py, embodichain/lab/task_program/integrations/asset_materialization.py, tests/gym/envs/task_program/test_asset_materialization.py, embodichain/lab/gym/envs/asset_generalization.py, tests/gym/envs/test_asset_generalization.py, examples/expansion/asset_generalization/, examples/expansion/asset_catalog/, examples/expansion/README.md]
   related_topics: [data-assets, task-programs, gen-sim, scene-services, manager-functor, env-framework]
   status: active
+
+- id: supervised-learning
+  title: Supervised Learning
+  aliases: [supervised learning, SL learning, 监督学习, 统一监督学习]
+  keywords: [train-sl, SupervisedBatch, LossResult, SupervisedObjective, SupervisedLearner, SupervisedTrainer, TensorBatchSource]
+  paths: [topics/supervised-learning/supervised-learning.md]
+  source_of_truth:
+  - embodichain/learning/sl/
+  - embodichain/cli/main.py
+  watch_paths: [embodichain/learning/sl/, tests/learning/sl/]
+  related_topics: [learning-layers, data-pipeline, rl-learning]
+  status: active
