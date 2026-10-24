@@ -73,7 +73,13 @@ policy. Adapter identity seals this routing, and changed bundles must be
 regenerated and qualified rather than resealing old receipts. Final open
 commands and physical release gates are unchanged.
 UR10 ready/Park shoulder pan faces the table under the shared mount; its zero
-pan pose faces away. `_task_program/solver_tolerances.py` preserves iterative
+pan pose faces away. Its ready and Park postures share an upper-wrist seed to
+avoid the below-table analytic branch at low flanges. Final hand effort is owned
+by `task_program_bundle.py`'s payload/embodiment calibration, not just the source
+component: inspect the generated embodiment before comparing actuator settings.
+UR10 light-grip calibration is isolated from Franka and retains lower authored
+limits. These settings do not establish full-path or complete-task qualification.
+`_task_program/solver_tolerances.py` preserves iterative
 solver budgets and supplies explicit analytic-UR FK validation budgets without
 requiring or mutating an iteration API on the shared solver.
 

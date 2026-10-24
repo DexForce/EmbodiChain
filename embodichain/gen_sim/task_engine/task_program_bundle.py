@@ -3383,13 +3383,20 @@ def _calibrate_task_gripper_effort(
 
     The canonical Robotiq keeps its complete closing range. Unknown/heavier
     payloads and other recipe families retain their declared actuator limits.
-    E3 pouring and Contact use 5; other Default grips retain 0.5. Composition
-    changes only qualified pouring resources. Lower authored limits remain intact.
+    E3 pouring, Contact and UR10 light grips use 5; other Default grips retain
+    0.5. UR10's tabletop wrist orientations need this effort against gravity.
+    Composition changes only qualified pouring resources. Lower authored limits
+    remain intact.
     This does not change the imported mechanism or any collision properties.
     """
     from .experiment_policy import COMPOSITION_PROFILE, CONTACT_PROFILE
 
-    effort_limit = 5.0 if runtime_profile == CONTACT_PROFILE else 0.5
+    effort_limit = (
+        5.0
+        if runtime_profile == CONTACT_PROFILE
+        or embodiment.get("embodiment_id") == "dual_ur10_robotiq_arg2f_140"
+        else 0.5
+    )
     picks = []
     blocked_resources: set[str] = set()
     pour_resources: set[str] = set()

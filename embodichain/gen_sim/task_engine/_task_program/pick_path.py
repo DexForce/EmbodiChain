@@ -121,8 +121,8 @@ def _compose_approach(
     )
     # Native drive overshoot is an observation, not a legal desired command.
     # The final certificate separately checks the observed-to-command speed.
-    approach[:, 0, hand_ids] = approach[:, 0, hand_ids].clamp(
-        hand_limits[..., 0], hand_limits[..., 1]
+    approach[:, :, hand_ids] = approach[:, :, hand_ids].clamp(
+        hand_limits[:, None, :, 0], hand_limits[:, None, :, 1]
     )
     approach[:, :, arm_ids] = arm
     return torch.cat((approach, original[:, approach_stop:]), dim=1)

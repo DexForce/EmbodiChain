@@ -22,7 +22,7 @@ import torch
 from embodichain.gen_sim.task_engine._task_program.pick_path import _compose_approach
 
 
-@pytest.mark.parametrize("initial_hand", [0.0, 0.7, 0.700128])
+@pytest.mark.parametrize("initial_hand", [-0.002, 0.0, 0.7, 0.700128])
 def test_rebuilt_approach_preserves_opening_before_close_and_passive_joints(
     initial_hand: float,
 ) -> None:
@@ -42,7 +42,10 @@ def test_rebuilt_approach_preserves_opening_before_close_and_passive_joints(
     assert torch.equal(result[:, 4:approach_count, :2], contact[:, 1:])
     assert torch.equal(result[:, approach_count:], original[:, 4:])
     assert torch.equal(result[:, :, 3], torch.full_like(result[:, :, 3], 0.37))
-    assert result[0, 0, 2] == min(initial_hand, 0.7)
+    assert result[0, 0, 2] == max(0.0, min(initial_hand, 0.7))
+    assert (
+        (result[:, :approach_count, 2] >= 0) & (result[:, :approach_count, 2] <= 0.7)
+    ).all()
     assert result[0, 0, 0] == original[0, 0, 0]
     assert result[0, approach_count - 1, 2] == result[0, approach_count, 2] == 0.0
     assert (result[0, 1:approach_count, 2] <= result[0, : approach_count - 1, 2]).all()

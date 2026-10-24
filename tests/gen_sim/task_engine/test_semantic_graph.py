@@ -161,6 +161,18 @@ def test_selected_robot_bundle_composes_and_keeps_identity(
     assert len(embodiment["simulation"]["control_parts"]["left_arm"]) == (
         6 if robot_profile == "dual_ur10" else 7
     )
+    if robot_profile == "dual_ur10":
+        # The upper-wrist seed avoids the below-table branch at low flanges.
+        simulation = embodiment["simulation"]
+        assert simulation["init_qpos"][8:10] == [pytest.approx(1.5707963267948966)] * 2
+        presets = embodiment["skill_profile"]["command_presets"]
+        parks = [
+            preset["commands"]["park"]
+            for preset in presets
+            if preset["preset_id"] in {"left_arm_postures", "right_arm_postures"}
+        ]
+        assert len(parks) == 2
+        assert all(park == simulation["init_qpos"][:12:2] for park in parks)
 
 
 def _prepared_axis_scene(tmp_path: Path) -> PreparedScene:
