@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Sequence
 import importlib
 import json
 from pathlib import Path
@@ -55,12 +56,16 @@ def train_from_config(
     return trainer.fit()
 
 
-def cli() -> None:
-    """Train a supervised recipe from a YAML/JSON file and optional checkpoint."""
+def cli(argv: Sequence[str] | None = None) -> None:
+    """Train a supervised recipe from a YAML/JSON file and optional checkpoint.
+
+    Args:
+        argv: Explicit CLI arguments, or the current process arguments.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--resume")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     import yaml
 
     config = yaml.safe_load(args.config.read_text())
