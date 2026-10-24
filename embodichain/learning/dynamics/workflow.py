@@ -215,9 +215,9 @@ def run_eval(config: dict[str, Any]) -> dict[str, Any]:
             "attention_backend": model.cfg.attention_backend,
         }
         if config.get("output"):
-            Path(config["output"]).write_text(
-                json.dumps(result, indent=2, allow_nan=False)
-            )
+            output = Path(config["output"])
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(json.dumps(result, indent=2, allow_nan=False))
         return result
     finally:
         dataset.close()

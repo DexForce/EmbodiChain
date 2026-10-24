@@ -35,7 +35,6 @@ provides a `snapshot_download` example.
 Run from the repository root:
 
 ```bash
-mkdir -p outputs/dynamics/ant/pretrained
 embodichain dynamics eval --config extensions/embodichain_tasks/configs/tasks/classic_control/ant/dynamics.eval.pretrained.yaml
 embodichain dynamics eval --config extensions/embodichain_tasks/configs/tasks/classic_control/ant/dynamics.rollout.pretrained.yaml
 ```

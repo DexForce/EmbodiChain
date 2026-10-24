@@ -184,7 +184,7 @@ def test_real_offline_cli_train_export_eval(tmp_path):
         "mode": "offline",
         "dataset": "data",
         "model": "export",
-        "output": "result.json",
+        "output": "reports/evaluation/result.json",
         "device": "cpu",
     }
     eval_cfg = tmp_path / "eval.yaml"
@@ -212,7 +212,7 @@ assert not any(k == 'dexsim' or k.startswith('embodichain.lab.sim') for k in sys
         env=env,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    report = json.loads((tmp_path / "result.json").read_text())
+    report = json.loads((tmp_path / "reports/evaluation/result.json").read_text())
     assert report["split"] == "test" and report["windows"] == 3
 
 
@@ -252,8 +252,10 @@ def test_packaged_workflow_configs_decode_through_cli(tmp_path, monkeypatch):
         "dynamics.train.full.yaml",
         "dynamics.eval.smoke.yaml",
         "dynamics.eval.full.yaml",
+        "dynamics.eval.pretrained.yaml",
         "dynamics.rollout.smoke.yaml",
         "dynamics.rollout.full.yaml",
+        "dynamics.rollout.pretrained.yaml",
     }
     for robot in ("cartpole", "ant"):
         robot_configs = list(

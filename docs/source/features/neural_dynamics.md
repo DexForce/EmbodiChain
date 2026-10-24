@@ -94,7 +94,6 @@ snapshot_download(
 Evaluate the saved test transitions without starting a simulator:
 
 ```bash
-mkdir -p outputs/dynamics/cartpole/pretrained
 embodichain dynamics eval --config extensions/embodichain_tasks/configs/tasks/classic_control/cartpole/dynamics.eval.pretrained.yaml
 ```
 
