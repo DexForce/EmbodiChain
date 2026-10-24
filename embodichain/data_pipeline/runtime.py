@@ -339,7 +339,9 @@ class ODSFlowController:
         """Retry only transient live-sampling errors within the data deadline.
 
         Call :meth:`prepare_batch` first to apply a plan's pacing/supply limit.
-        Resident sources are sampled directly and never retried by this class.
+        This helper accepts only a live source wrapping the controlled engine.
+        Sample resident sources through their own ``sample_context()`` method;
+        they are not accepted by this controller.
 
         Args:
             source: Live source wrapping this controller's engine.
