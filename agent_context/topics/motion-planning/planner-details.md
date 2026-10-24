@@ -34,8 +34,11 @@ Preserve these coupled result rules in `motion_generator.py`:
 - Resampling is time-based, preserves each row's duration, recomputes velocities
   and invalidates accelerations. Unchanged samples retain native derivatives.
 - `uses_sparse_joint_waypoints` lets a backend receive `start_qpos` plus goals
-  without generic pre-interpolation. `preserve_plan_samples` keeps its native
-  grid and derivatives through normalization. TrapezoidalPlanner declares both.
+  without generic pre-interpolation. Free Cartesian goals become sparse IK
+  waypoints; only an explicit `is_linear` request adds Cartesian path samples.
+  This avoids treating interpolated samples as mandatory rest points.
+  `preserve_plan_samples` keeps its native grid and derivatives through
+  normalization. TrapezoidalPlanner declares both.
 - Failed rows hold the supplied start pose unless the backend declares
   `preserve_failed_plan_positions`; NeuralPlanner uses that capability to keep
   partial rollout evidence while reporting failure.

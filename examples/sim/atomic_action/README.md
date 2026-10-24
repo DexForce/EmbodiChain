@@ -21,6 +21,21 @@ The twelve scenes are `pickup`, `place`, `pour`, `press`, `slide`, `twist`,
 Pickup, Place, MoveJoint, and Handover also accept `franka` and `ur10`; other
 scenes currently require UR5. Unsupported selectors fail before simulation.
 
+The HandOver can scene uses Robotiq 2F-140. The standalone horizontal-stick
+variant selects two DH PGC-140-50 grippers, their short-pad TCPs and a 50 mm
+grasp model. Run it with either planner:
+
+```bash
+python scripts/tutorials/atomic_action/hand_over.py --is_horizontal --planner trapezoidal --headless --auto_play
+python scripts/tutorials/atomic_action/hand_over.py --is_horizontal --planner toppra --headless --auto_play
+```
+
+PGC uses a 25 mm inward command per finger. Its TCP rotates the grasp-frame
+opening axis onto the hand's Y axis and places the grasp center at local
+Z = 0.12 m, within the short finger pads. These are coupled to the selected
+asset and grasp model; changing only the mounted mesh leaves the old grasp
+geometry in use.
+
 `--variants N` defaults to one and creates exactly N parallel environments.
 Variant zero retains the reference. There is no collection loop or implicit
 batching. `--expansion both` is the default for N > 1: each added execution uses
@@ -106,19 +121,23 @@ local frame; the upper-left 3x3 block is rotation.
 | UR5 + Robotiq 2F-140, Handover | `UR5_ROBOTIQ_2F_140_HANDOVER_TCP` | 0.21 m, with a 90-degree local-Z rotation |
 | Franka + Robotiq 2F-140, Handover | `FRANKA_ROBOTIQ_2F_140_HANDOVER_TCP` | 0.21 m, with a 90-degree local-Z rotation |
 | UR10 + Robotiq 2F-140 | `UR10_ROBOTIQ_2F_140_TCP` | 0.21 m, with its mounting rotation |
+| UR5 + PGC-140-50, horizontal HandOver | `UR5_PGC_140_50_HANDOVER_TCP` | 0.12 m, with a 90-degree local-Z rotation |
+| Franka + PGC-140-50, horizontal HandOver | `FRANKA_PGC_140_50_HANDOVER_TCP` | 0.12 m, with a 90-degree local-Z rotation |
+| UR10 + PGC-140-50, horizontal HandOver | `UR10_PGC_140_50_HANDOVER_TCP` | 0.12 m, with a 90-degree local-Z rotation |
 
 For `--skill place --robot franka`, edit `FRANKA_PGI_TCP`. This calibrates the
 single-arm Franka/PGI tool without affecting UR5, Robotiq, or the separately
 authored handover calibration. Each solver receives an independent matrix.
 For `--skill handover --robot franka`, edit
 `FRANKA_ROBOTIQ_2F_140_HANDOVER_TCP`; the corresponding UR5 calibration is
-`UR5_ROBOTIQ_2F_140_HANDOVER_TCP`. The generic dual helper retains PGI unless
-the scene explicitly selects `gripper="robotiq_2f_140"`.
+`UR5_ROBOTIQ_2F_140_HANDOVER_TCP`. Horizontal HandOver selects the corresponding
+`*_PGC_140_50_HANDOVER_TCP` pose instead. The generic dual helper retains its
+robot's default hand unless the scene explicitly selects a gripper.
 The named tool points preserve the existing sample offsets; they are sample
 calibrations, not measured guarantees for another physical fixture.
 
 Sample scenes select named tool points instead of embedding a generic
 `tcp_z`. Python helpers still accept explicit PGI `tcp_z` overrides, including
 Franka; an override changes local Z while preserving the fixture's rotation
-and lateral offsets. Robotiq keeps its own full mounting pose. TCP calibration
+and lateral offsets. Robotiq and PGC keep their full mounting poses. TCP calibration
 changes the FK/IK tool reference, not the gripper mesh or physical length.
