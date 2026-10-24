@@ -186,7 +186,6 @@
             "md5": "74ff7e835160f7309d32ade116172c52",
             "sha256": "2cd4b2dbdfa5cbd3238d16e23d927f03a8e7c06f42a29846c633f60a636fc0e5"
           },
-          "preparation_script": "scripts/tools/prepare_w1_v030_materials.py",
           "reference_variant": "v021/BrainCo",
           "yellow_srgb": [
             248,

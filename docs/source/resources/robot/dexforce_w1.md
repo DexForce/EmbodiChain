@@ -30,8 +30,7 @@ ground and environment emission, with no added direct lights. Camera settings,
 joint positions and the V030 asset revision are recorded in the
 [render manifest](../../_static/robots/dexforcew1_render.json).
 The manifest also records the V021 material parameters and the published
-archive checksums. `scripts/tools/prepare_w1_v030_materials.py` reproduces the
-material update from the original archive revision recorded there.
+archive checksums.
 :::
 
 ## Supported Body Revisions
