@@ -204,7 +204,7 @@ def test_warp_cartpole_import_preserves_measured_mass_and_body_armature():
 
 
 def test_warp_ant_import_preserves_geometry_density_and_force_mode():
-    """Check measured Warp 1.5.1 masses, inertia regularization and friction."""
+    """Check measured Warp 1.5.1 mass, body armature and source materials."""
     builder = _import_reference("ant", "warp_reference")
     np.testing.assert_allclose(
         builder.body_mass,
@@ -219,6 +219,7 @@ def test_warp_ant_import_preserves_geometry_density_and_force_mode():
     )
     np.testing.assert_allclose(builder.joint_damping, 0.0)
     np.testing.assert_allclose(builder.joint_target_kd, 0.0)
+    # The host applies any solver-specific material conversion after import.
     np.testing.assert_allclose(builder.shape_material_mu, 0.75)
     np.testing.assert_allclose(builder.shape_margin, 0.0)
     transform = builder.shape_transform[1]
@@ -228,6 +229,19 @@ def test_warp_ant_import_preserves_geometry_density_and_force_mode():
     np.testing.assert_allclose(first_slot, [0.2, 0.2, 0.0], atol=5e-8)
     assert reference_asset_hash("ant") == (
         "23e9a720465a71fde3fd9fd2d5a18f8c11ec642f3dca8921c66cb4e169421fa7"
+    )
+
+
+def test_native_ant_import_keeps_original_modern_material_and_mass_defaults():
+    """The explicit legacy-motion recipe must not change the native domain."""
+    builder = _import_reference("ant")
+    # The modern MJCF parser honors the asset's authored friction=1.5.
+    np.testing.assert_allclose(builder.shape_material_mu, 1.5)
+    np.testing.assert_allclose(builder.joint_damping[6:], 0.1)
+    np.testing.assert_allclose(
+        builder.body_mass,
+        [0.48388024694610887, *[0.039157753856, 0.067592205994] * 4],
+        rtol=1e-6,
     )
 
 

@@ -36,7 +36,12 @@ APIs, not native backend mutation.
 semantics. `warp_reference` reconstructs measured legacy asset mass/inertia,
 body armature, force-mode damping and ordered capsule contact slots before
 Spawn materialization; its shared ground has explicit material parameters.
-It still runs current Newton and records that teacher identity. Featherstone
+For Ant Featherstone, Huber smoothing and both materials' Coulomb coefficients
+are coupled to approximate legacy Euclidean friction. NeRD reconstructs that
+material domain from the export's `reference_friction_mapping`; missing markers
+retain the older domain, and the provider still validates its physical signature.
+Other analytical solvers keep their ordinary material coefficients. The profile
+still runs current Newton and records that teacher identity. Featherstone
 teachers use complete public articulation writes at macro boundaries; their
 mass-matrix update interval must divide the macro substep count. Old and new
 contact algorithms can differ even after parameter matching. The isolated
@@ -135,7 +140,7 @@ multi-seed accuracy and deployment accuracy. Small synthetic datasets or finite
 gradients do not prove the broader claims. Reference identities, budgets and
 thresholds are frozen in comparison manifests; missing runs remain pending.
 The acceptance contract is `design/neural-dynamics-solvers.md`; user commands
-are documented in `docs/source/guides/neural_dynamics.md`.
+are documented in [Neural Dynamics Models](../../../docs/source/features/neural_dynamics.md).
 
 Equal seeds do not prove identical GPU teacher trajectories. Freeze shared
 evaluation corpora and verify their ordered content hashes for paired runs.

@@ -58,6 +58,32 @@ _JOINTS = {
 }
 
 
+def _ant_reference_friction() -> dict[str, Any]:
+    """Describe the coupled old Euclidean-to-Newton Huber friction mapping.
+
+    Newton uses ``H=delta*(speed-delta/2)`` above ``delta`` in both
+    normalization and the viscous/Coulomb minimum. Scaling both materials'
+    Coulomb coefficients by the same ``delta`` approximates the original
+    Euclidean law without changing the installed solver. This is a parameter
+    semantics conversion, not equality of the numerical material arrays.
+    """
+    delta = 1e-3
+    return {
+        "schema": "ant-warp-euclidean-to-newton-huber-friction-v1",
+        "friction_smoothing": delta,
+        "material_mu_scale": delta,
+        "reference_shape_mu": 0.75,
+        "reference_ground_mu": 0.5,
+        "shape_mu": 0.75 * delta,
+        "ground_mu": 0.5 * delta,
+        "interpretation": (
+            "Coupled Huber/Coulomb parameter mapping; approximate original "
+            "Euclidean friction above the smoothing scale. Actual Newton "
+            "coefficients differ from the original coefficients."
+        ),
+    }
+
+
 def _asset(robot: str) -> Path:
     if robot not in _ASSETS:
         raise ValueError(f"Unsupported NeRD reference robot: {robot}")
@@ -233,8 +259,11 @@ def make_reference_articulation(
 ) -> ArticulationDesc:
     """Build an independent public descriptor with imported physical properties.
 
-    ``warp_reference`` explicitly reproduces measured old-Warp asset parameters;
-    it does not select the old simulator or assert identical contact algorithms.
+    ``warp_reference`` reconstructs measured old-Warp asset parameters. The
+    host applies a solver-specific Ant friction conversion to fresh descriptors
+    when using Newton Featherstone; other solvers retain these source material
+    coefficients. This does not select the old simulator or assert identical
+    contact algorithms.
     Body/joint names retain their asset spelling, with only the importer's path
     prefix removed. The free root is represented by ``fixed_base=False`` and is
     created by Spawn. Default nonzero joint positions are in ``reference_profile``

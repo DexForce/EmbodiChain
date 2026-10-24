@@ -19,6 +19,5 @@ Practical guides for common tasks in EmbodiChain.
    task_catalog
    robot_catalog
    policy_evaluation
-   neural_dynamics
    rlinf
    cli

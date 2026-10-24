@@ -50,7 +50,11 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import NewtonPhysicsCfg, RenderCfg
 
 from ._nerd_binding import NeRDBinding
-from ._reference_assets import make_reference_articulation, reference_profile
+from ._reference_assets import (
+    _ant_reference_friction,
+    make_reference_articulation,
+    reference_profile,
+)
 
 __all__ = [
     "DynamicsGenerationCfg",
@@ -149,6 +153,34 @@ class DynamicsSimulation:
         )
         neural = solver_cfg.get("solver_type") == "nerd"
         self._featherstone_teacher = solver_cfg.get("solver_type") == "featherstone"
+        friction_mapping = None
+        if robot == "ant" and physics_profile == "warp_reference":
+            if self._featherstone_teacher:
+                friction_mapping = _ant_reference_friction()
+                delta = friction_mapping["friction_smoothing"]
+                requested = solver_cfg.setdefault("friction_smoothing", delta)
+                if isinstance(requested, bool) or requested != delta:
+                    raise ValueError(
+                        "Ant warp_reference requires the coupled contact mapping: "
+                        f"friction_smoothing={delta} with scaled shape/ground mu."
+                    )
+            elif neural:
+                # Older exports predate the Featherstone friction conversion.
+                # Their original material domain must still be reconstructed;
+                # the provider then validates the actual physics signature.
+                options = solver_cfg.get("options", {})
+                checkpoint = Path(options["checkpoint"])
+                exported = json.loads((checkpoint / "manifest.json").read_text())
+                recorded = exported.get("reference_friction_mapping")
+                if recorded is not None:
+                    expected = _ant_reference_friction()
+                    if not isinstance(recorded, Mapping) or any(
+                        recorded.get(key) != value
+                        for key, value in expected.items()
+                        if key != "interpretation"
+                    ):
+                        raise ValueError("Unsupported Ant reference friction mapping")
+                    friction_mapping = dict(recorded)
         if self._featherstone_teacher:
             interval = solver_cfg.get("update_mass_matrix_interval", 1)
             if type(interval) is not int or interval < 1 or num_substeps % interval:
@@ -203,7 +235,7 @@ class DynamicsSimulation:
                     ke=1e5,
                     kd=1e3,
                     kf=1e3,
-                    mu=0.5,
+                    mu=(friction_mapping["ground_mu"] if friction_mapping else 0.5),
                     margin=1e-5,
                     gap=0.05,
                     mu_torsional=0.0,
@@ -217,9 +249,14 @@ class DynamicsSimulation:
                         per_env=False,
                     )
                 )
-            self.articulation = self.sim.add_articulation_descriptor(
-                make_reference_articulation(robot, physics_profile)
-            )
+            descriptor = make_reference_articulation(robot, physics_profile)
+            if friction_mapping is not None:
+                # Scale every freshly authored Ant shape, including the shared
+                # plane above, before Spawn finalizes the physical model.
+                for link in descriptor.links:
+                    for collision in link.collisions:
+                        collision.newton.mu *= friction_mapping["material_mu_scale"]
+            self.articulation = self.sim.add_articulation_descriptor(descriptor)
             self.sim.prepare()
             self.binding = NeRDBinding.from_metadata(
                 dict(self.sim.spawn_result.dynamics_metadata()), robot
@@ -250,6 +287,11 @@ class DynamicsSimulation:
                     "physics_signature_schema"
                 ],
             }
+            if friction_mapping is not None:
+                self.manifest["reference_friction_mapping"] = friction_mapping
+                self.manifest["teacher_origin"]["reference_friction_mapping"] = dict(
+                    friction_mapping
+                )
             self.reset()
         except Exception:
             self.close()

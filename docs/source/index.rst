@@ -47,6 +47,7 @@ Table of Contents
    :glob:
 
    features/online_data.md
+   features/neural_dynamics.md
    features/generative_sim/index*
    features/workspace_analyzer/index*
    features/interaction/index*

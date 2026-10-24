@@ -92,6 +92,89 @@ def test_warp_parameter_profile_preserves_reset_replay(robot, substeps) -> None:
         assert host.manifest["physics_profile"] == "warp_reference"
         assert host.manifest["teacher_origin"]["kind"] == "current_newton"
         assert host.manifest["teacher"]["solver"]["solver_type"] == "featherstone"
+        if robot == "ant":
+            # Validate the actual Spawn-built scene, including its shared plane.
+            metadata = host.sim.spawn_result.dynamics_metadata()
+            body = metadata["shape_body"].cpu().numpy()
+            mu = metadata["shape_material_mu"].cpu().numpy()
+            np.testing.assert_allclose(mu[body >= 0], 0.00075)
+            np.testing.assert_allclose(mu[body < 0], 0.0005)
+            assert host.manifest["teacher"]["solver"]["friction_smoothing"] == 0.001
+            semantics = host.manifest["reference_friction_mapping"]
+            assert semantics["material_mu_scale"] == 0.001
+            assert semantics["reference_shape_mu"] == 0.75
+            assert semantics["reference_ground_mu"] == 0.5
+            assert (
+                host.manifest["teacher_origin"]["reference_friction_mapping"]
+                == semantics
+            )
+        else:
+            assert "friction_smoothing" not in host.manifest["teacher"]["solver"]
+            assert "reference_friction_mapping" not in host.manifest
+
+
+@pytest.mark.parametrize("smoothing", [1.0, 0.0, 1e-5, True, float("nan")])
+def test_ant_warp_contact_mapping_rejects_inconsistent_solver_before_scene(
+    monkeypatch, smoothing
+) -> None:
+    from embodichain.lab.sim.physics.solvers import collection
+
+    def forbidden_scene(*args, **kwargs):
+        pytest.fail("Invalid coupled parameters must fail before allocating a scene")
+
+    monkeypatch.setattr(collection, "SimulationManager", forbidden_scene)
+    with pytest.raises(ValueError, match="coupled contact mapping"):
+        collection.DynamicsSimulation(
+            "ant",
+            physics_profile="warp_reference",
+            num_substeps=16,
+            solver={
+                "solver_type": "featherstone",
+                "update_mass_matrix_interval": 16,
+                "friction_smoothing": smoothing,
+            },
+        )
+
+
+def test_ant_warp_mujoco_keeps_original_material_domain() -> None:
+    from embodichain.lab.sim.physics.solvers.collection import DynamicsSimulation
+
+    with DynamicsSimulation(
+        "ant",
+        physics_profile="warp_reference",
+        solver={"solver_type": "mujoco_warp", "use_mujoco_cpu": True},
+    ) as host:
+        metadata = host.sim.spawn_result.dynamics_metadata()
+        body = metadata["shape_body"].cpu().numpy()
+        mu = metadata["shape_material_mu"].cpu().numpy()
+        np.testing.assert_allclose(mu[body >= 0], 0.75)
+        np.testing.assert_allclose(mu[body < 0], 0.5)
+        assert "friction_smoothing" not in host.manifest["teacher"]["solver"]
+        assert "reference_friction_mapping" not in host.manifest
+
+
+def test_ant_warp_neural_mapping_rejects_unknown_marker_before_scene(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from embodichain.lab.sim.physics.solvers import collection
+
+    checkpoint = tmp_path / "unknown-mapping"
+    checkpoint.mkdir()
+    (checkpoint / "manifest.json").write_text(
+        json.dumps({"reference_friction_mapping": {"schema": "unknown"}})
+    )
+
+    def forbidden_scene(*args, **kwargs):
+        pytest.fail("Unknown mapping must fail before allocating a scene")
+
+    monkeypatch.setattr(collection, "SimulationManager", forbidden_scene)
+    with pytest.raises(ValueError, match="Unsupported Ant reference friction mapping"):
+        collection.DynamicsSimulation(
+            "ant",
+            physics_profile="warp_reference",
+            num_substeps=1,
+            solver={"solver_type": "nerd", "options": {"checkpoint": str(checkpoint)}},
+        )
 
 
 def test_fixed_policy_adapter_uses_own_state_and_records_hash() -> None:
@@ -110,6 +193,51 @@ def _helper():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+@pytest.mark.parametrize("mapped", [False, True])
+def test_ant_warp_contact_mapping_survives_nerd_scene_rebuild(
+    tmp_path: Path, mapped: bool
+) -> None:
+    """Exports and neural scenes must bind the same actual material domain."""
+    from embodichain.lab.sim.physics.solvers.collection import DynamicsSimulation
+
+    from embodichain.learning.models.nerd import export_model, load_model
+
+    solver = None if mapped else {"solver_type": "mujoco_warp", "use_mujoco_cpu": True}
+    with DynamicsSimulation(
+        "ant", num_substeps=16, physics_profile="warp_reference", solver=solver
+    ) as teacher:
+        expected_signature = teacher.binding.physics_signature
+        prototype = _helper()._small_export(
+            teacher.sim.spawn_result, tmp_path / "prototype-ant", "ant"
+        )
+        network, _ = load_model(prototype)
+        checkpoint = tmp_path / "exported-ant"
+        export_model(checkpoint, network, teacher.manifest)
+    with DynamicsSimulation(
+        "ant",
+        physics_profile="warp_reference",
+        num_substeps=1,
+        solver={"solver_type": "nerd", "options": {"checkpoint": str(checkpoint)}},
+    ) as neural:
+        metadata = neural.sim.spawn_result.dynamics_metadata()
+        body = metadata["shape_body"].cpu().numpy()
+        mu = metadata["shape_material_mu"].cpu().numpy()
+        np.testing.assert_allclose(mu[body >= 0], 0.00075 if mapped else 0.75)
+        np.testing.assert_allclose(mu[body < 0], 0.0005 if mapped else 0.5)
+        assert neural.binding.physics_signature == expected_signature
+        if mapped:
+            assert (
+                neural.manifest["reference_friction_mapping"]["material_mu_scale"]
+                == 0.001
+            )
+        else:
+            assert "reference_friction_mapping" not in neural.manifest
+        neural.step(torch.zeros((1, 14)))
+        state, _ = neural.snapshot()
+        assert torch.isfinite(state["q"]).all()
+        assert torch.isfinite(state["qd"]).all()
 
 
 def _check_pipeline(tmp_path: Path, robot: str) -> None:

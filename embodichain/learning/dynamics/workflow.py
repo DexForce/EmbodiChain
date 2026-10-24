@@ -45,6 +45,7 @@ _DEPLOYMENT_MANIFEST_FIELDS = frozenset(
         "gravity_transport_override",
         "source_physical_arrays",
         "legacy_velocity",
+        "reference_friction_mapping",
     }
 )
 

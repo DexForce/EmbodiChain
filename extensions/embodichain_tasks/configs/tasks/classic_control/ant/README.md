@@ -1,126 +1,67 @@
-# Ant neural dynamics workflow
+# Ant neural dynamics
 
-These files configure `embodichain dynamics`; they are not Gym deployments and
-have no runnable environment ID. The simulator host constructs the pinned NeRD
-reference asset through EmbodiChain and DexSim Spawn. The generated manifest
-provides the actual physics, asset and codec identity; training inherits it.
+These files configure the `embodichain dynamics` workflow. They are separate
+from runnable Gym deployments. See the
+[Neural Dynamics Models feature](../../../../../../docs/source/features/neural_dynamics.md)
+for the architecture, published datasets and models, comparison videos and
+supported deployment boundaries.
 
-Run from the repository root (replace `smoke` with `full` for the single-GPU profile):
+## Configuration profiles
+
+| Profile | Purpose |
+| --- | --- |
+| `dynamics.*.smoke.yaml` | Small CPU collection/training/evaluation workflow |
+| `dynamics.*.full.yaml` | Reference network scale and long training budget for a newly generated native dataset |
+| `dynamics.generate.warp-reference.yaml` | Current-Newton reference-asset collection with Featherstone |
+| `dynamics.eval.pretrained.yaml` | Offline test evaluation of the published Hugging Face dataset/model pair |
+| `dynamics.rollout.pretrained.yaml` | Released NeRD model versus its matching Newton reference teacher |
+| `env.nerd.yaml` | Registered Gym scene using an export from the matching native workflow |
+| `agents/apg.nerd.yaml` | Policy learning through the dynamics environment |
+
+The published reference models use `warp_reference` physics. They do not match
+the default native/MuJoCo-generated dataset or the native Gym preset merely
+because the robot has the same name. The pretrained rollout preset reconstructs
+the asset, materials and solver configuration expected by the released model.
+
+## Use published data and models
+
+Download `neural_dynamics/nerd/ant/v1` from the dataset repository
+[DexForceAI/embodichain_datasets](https://huggingface.co/datasets/DexForceAI/embodichain_datasets)
+into `outputs/datasets`, and from the model repository
+[DexForceAI/embodichain_model](https://huggingface.co/DexForceAI/embodichain_model)
+into `outputs/models`. Keep the path prefix when downloading; the feature page
+provides a `snapshot_download` example.
+
+Run from the repository root:
+
+```bash
+mkdir -p outputs/dynamics/ant/pretrained
+embodichain dynamics eval --config extensions/embodichain_tasks/configs/tasks/classic_control/ant/dynamics.eval.pretrained.yaml
+embodichain dynamics eval --config extensions/embodichain_tasks/configs/tasks/classic_control/ant/dynamics.rollout.pretrained.yaml
+```
+
+Offline evaluation needs no simulation. Live rollouts require an installed
+DexSim build with named solver extensions and Scene functional/snapshot APIs.
+Use `--device cpu` or `--device cuda:0` to select the device, and `--output` with a
+new path to retain repeated rollout results. The reference models are research
+artifacts; consult their model cards for measured error and supported versions.
+
+## Train and export a new model
 
 ```bash
 embodichain dynamics generate --config extensions/embodichain_tasks/configs/tasks/classic_control/ant/dynamics.generate.smoke.yaml
 embodichain dynamics train --config extensions/embodichain_tasks/configs/tasks/classic_control/ant/dynamics.train.smoke.yaml
 embodichain dynamics export --checkpoint outputs/dynamics/ant/smoke/train/best.pt --output outputs/dynamics/ant/smoke/export
 embodichain dynamics eval --config extensions/embodichain_tasks/configs/tasks/classic_control/ant/dynamics.eval.smoke.yaml
-embodichain dynamics eval --config extensions/embodichain_tasks/configs/tasks/classic_control/ant/dynamics.rollout.smoke.yaml
 ```
 
-Paths inside YAML resolve relative to the YAML file. CLI path overrides resolve
-relative to the current directory. Output directories are under repository
-`outputs/`, which is ignored by Git. Exports require a new destination directory.
-Generation resumes with `--resume`; training resumes with
-`--resume outputs/dynamics/ant/smoke/train/last.pt`. Exact resume preserves
-budget, seed, device, configuration, immutable data fingerprint, optimizer, RNG
-and the committed sampler cursor. Use `--fine-tune path/to/export` for a new run.
+Smoke profiles verify executable flow, not accuracy. For a different dataset,
+copy the appropriate training config and set `dataset` and `output_dir` to its
+location and a new training directory. For a different physical system, collect
+new teacher data and train a matching model.
 
-The smoke profile uses CPU, 64 short trajectories, a small Transformer and
-100 optimizer steps. It tests the complete plumbing and does not qualify model
-accuracy. Ant smoke uses effort_scale=0.05 and default initial states; this is deliberately a different distribution from the official-range full profile.
-
-The full profile uses one CUDA device, the official six-layer, twelve-head
-Transformer with embedding width 384, history 10, batch 512, and
-4,995,000 Adam updates. This matches 999 trained epochs × 5000 updates in the
-saved official configuration (epoch zero only evaluates). The learning rate is
-held for 5000 updates, with offset one and a 1000-interval denominator, matching
-the official epoch timing. Gradient clipping is a norm limit of 1.0; it does not
-truncate temporal gradients. Validation uses the first 100 complete/partial
-batches; final offline evaluation reads the entire test split. The expected
-training budget is substantial and is not run automatically by tests.
-
-Default generation samples the full recorded force range: cart force ±1500
-with no pole actuation, or Ant scalar joints ±400. Teachers use MuJoCo-Warp with
-10 substeps per 1/60-second macro step. CPU fixtures explicitly request separate
-worlds. Source MJCF motor objects and solver XML options are not installed into
-the teacher: the host applies actual generalized forces and records its solver
-configuration. This profile is a current Newton teacher, not Warp 1.5.1 paper
-reproduction.
-
-## Official comparison controls
-
-Default training uses deterministic sampling with replacement and streamed
-population moments over overlapping training windows. These choices are explicit;
-they do not reproduce the official dataloader's permutation or its running
-normalizer initialization automatically.
-
-For a paired official comparison, pass the **same** immutable data, trajectory
-split, initialized weights, batch order, normalizer artifact and update budget to
-both trainers. `--statistics stats.pt` loads a tensor-only artifact containing
-`schema_version: 1`, `inputs: {name: {mean, var}}`, and
-`output: {mean, var}`. No validation/test samples may enter these statistics.
-`--sample-order order.npy` reads a memory-mapped integer array of shape
-`[total_steps, batch_size]`; each row indexes the full-window training dataset.
-A `.pt` tensor is also accepted for short fixtures. The array hash and committed
-cursor are checked on resume; large `.npy` orders are never loaded in full.
-
-Use `--seed 0` through `--seed 4` with distinct `--output-dir` values for the
-five paired training seeds. Export each validation-selected checkpoint separately
-and use evaluation's `--model` and `--output` overrides to retain every result.
-Full rollout configurations request 2048 trajectories at horizons 1, 10, 100,
-1000; repeat with `motion_mode: passive` and with the qualified fixed policy.
-A common seed alone does not guarantee identical minibatches across trainers.
-
-No committed configuration is evidence that the full run passed. Required reports
-include short numerical/Adam parity, both teachers × both trainers, five seed
-pairs, confidence bounds, non-finite/failure rates, fixed-policy return and
-software/asset/checkpoint hashes. `qualification.paired_noninferiority` implements
-the seed-paired one-sided 95% bootstrap gate; fewer than five seeds is pending.
-A 100-step smoke cannot replace the full budget or paper reproduction.
-
-## Registered differentiable task
-
-After exporting a matching model, `env.nerd.yaml` creates the registered
-`AntDynamics-v1` task. Its checkpoint path resolves from the
-working directory, unlike dynamics workflow file paths (config-relative).
-
-```bash
-embodichain run-task --gym_config extensions/embodichain_tasks/configs/tasks/classic_control/ant/env.nerd.yaml --preview
-embodichain train-rl --config extensions/embodichain_tasks/configs/tasks/classic_control/ant/agents/apg.nerd.yaml
-```
-
-Use preview for the Gym scene: this task does not implement an expert trajectory
-collector. The APG configuration uses the existing learning-environment factory
-and trainer, with graph-connected state/reward hooks. Its policy checkpoint is
-separate from the NeRD dynamics-model export.
-
-## Legacy Warp parameter comparison
-
-`dynamics.generate.warp-reference.yaml` selects `physics_profile: warp_reference`
-and Featherstone with 16 substeps per 1/60-second frame. It preserves measured
-legacy asset masses/inertia, body armature, force-mode damping and contact-slot
-order. Ant also uses an explicitly authored shared ground material. The simulator
-is still current Newton; contact algorithms can differ from old Warp.
-
-Generate this bounded 512-trajectory dataset with:
-
-```bash
-embodichain dynamics generate --config extensions/embodichain_tasks/configs/tasks/classic_control/ant/dynamics.generate.warp-reference.yaml
-```
-
-Keep the same `physics_profile` in rollout evaluation. Existing exports remain
-bound to their recorded physical signature; generate new data and train or
-fine-tune a new export for this profile. The default `native` profile retains
-modern importer semantics. Both profiles need an installed DexSim with named
-solver extensions; the measured SDK branch is MR !1483 at `b61e920f`.
-
-The isolated historical/current replay tool is
-`scripts/experiments/neural_dynamics/physics_alignment.py`. Its shared input and
-trace hashes, plus finite/failure counts, are required when comparing trajectories.
-
-
-## Supported-version reference data
-
-The [original data and paired evaluation workflow](../../../../../../scripts/experiments/neural_dynamics/README.md)
-uses isolated Python3.8/Torch2.2 generation, immutable raw/canonical teacher
-traces and independently evolving model feedback. Training and evaluation
-runtimes are recorded separately; a current-Newton corpus cannot be relabeled
-as original-Warp data.
+Configuration paths resolve relative to the YAML file; CLI path overrides
+resolve relative to the working directory. Exports require a new destination.
+Resume an identical training run with `train --resume PATH/last.pt`, or initialize
+a new run from a portable export with `train --fine-tune PATH`. Validation data
+selects the checkpoint; the test split remains held out.
