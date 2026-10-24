@@ -25,10 +25,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 import time
 
 import torch
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from embodichain.compute.dynamics.robot_state import integrate_robot_state
 from embodichain.learning.sl import SupervisedBatch, SupervisedLearner
