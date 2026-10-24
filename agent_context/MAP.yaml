@@ -545,8 +545,8 @@ topics:
 
 - id: supervised-learning
   title: Supervised Learning
-  aliases: [supervised learning, SL learning, 监督学习, 统一监督学习]
-  keywords: [train-sl, SupervisedBatch, LossResult, SupervisedObjective, SupervisedLearner, SupervisedTrainer, TensorBatchSource]
+  aliases: [supervised learning, SL learning, behavior cloning, 行为克隆, 监督学习, 统一监督学习]
+  keywords: [train-sl, SupervisedBatch, LossResult, SupervisedObjective, SupervisedLearner, SupervisedTrainer, TensorBatchSource, ChunkBCModel, ChunkBCExecutor, BCWindowDataset]
   paths: [topics/supervised-learning/supervised-learning.md]
   source_of_truth:
   - embodichain/learning/sl/

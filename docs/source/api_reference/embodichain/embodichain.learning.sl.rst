@@ -123,3 +123,11 @@ embodichain.learning.sl.workflow
 .. autofunction:: train_from_config
 
 .. autofunction:: cli
+
+Behavior cloning
+----------------
+
+.. toctree::
+   :maxdepth: 1
+
+   embodichain.learning.sl.bc

@@ -34,3 +34,24 @@ may select checkpoints. Acquisition and producer lifecycles remain application-o
 nonfinite update boundaries, owned samples, simulator-free imports and exact
 CPU recovery with dropout, optimizer and sampling state. Model-specific
 qualification belongs to each model's acceptance recipe.
+
+## Behavior cloning
+
+`learning/models/chunk_bc.py` owns configurable state/visual chunk prediction
+and per-environment causal history/target queues. `learning/sl/bc.py` owns the
+masked normalized-target objective and offline source adaptation. Optional
+vision imports are deferred until a visual policy is constructed.
+
+`data_pipeline/datasets/bc_hdf5.py` reads fixed per-episode windows through bounded
+HDF5 handles. Its source identity binds the immutable manifest, selected fields,
+observation slices, H/F, camera order and declared target-transform version.
+Only history RGB frames enter policy inputs; future geometry may construct
+labels but never enters visual policy forward. Prefetch keeps one owned batch
+and a private RNG reservation; only delivered sampling progress is committed.
+
+`experiments/learning/sl/train_bc.py` owns the pinned offline PickPlace recipe,
+development checkpoint selection and sealed final test. Task-specific pose
+encoding/decoding and physical success remain in its task adapter. The collector
+prepares a fixed corpus directly, independently of the SL learner. Formal
+qualification requires a completed immutable corpus and unchanged physical,
+camera, target and optimizer contracts.
