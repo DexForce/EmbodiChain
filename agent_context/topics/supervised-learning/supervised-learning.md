@@ -31,3 +31,22 @@ may select checkpoints. Acquisition and producer lifecycles remain application-o
 nonfinite update boundaries, owned samples, simulator-free imports and exact
 CPU recovery with dropout, optimizer and sampling state. Model-specific
 qualification belongs to each model's acceptance recipe.
+
+## Robot world models
+
+`learning/models/rwm.py` owns configurable frame-local state-increment models.
+`compute/dynamics/robot_state.py` owns canonical state transforms and SO(3)
+integration. `learning/sl/rwm.py` owns autoregressive supervision and the
+`train-sl` recipe factory. `RWMPredictor` owns graph-connected prediction state;
+selected reset replaces rows without modifying outstanding graph tensors.
+
+`data_pipeline/datasets/transition_replay.py` owns fixed-byte-budget device
+replay. Append copies detached pre-reset transitions; sampled windows and
+histories respect episode boundaries and ring overwrite. Physical acquisition
+and APG update scheduling remain caller-owned. Freeze model parameters and
+normalization during action/state differentiation and finish dependent backward
+work before changing model weights.
+
+Focused contracts are covered by `tests/learning/sl/test_rwm.py`, model/state
+tests and `tests/data_pipeline/test_transition_replay.py`. Controlled experiment
+recipes under `scripts/experiments/rwm/` preserve measured fitting evidence.
