@@ -293,3 +293,36 @@ def test_prefetched_training_resume_rebuilds_unused_batch_exactly(tmp_path):
     finally:
         full.source.close()
         resumed.source.close()
+
+
+def test_rgb_storage_remains_fp32_under_different_default_dtype(tmp_path):
+    manifest = _corpus(tmp_path)
+    dataset = BCWindowDataset(manifest)
+    previous = torch.get_default_dtype()
+    try:
+        torch.set_default_dtype(torch.float64)
+        batch = dataset.sample(1, generator=torch.Generator().manual_seed(2))
+        assert batch["inputs"]["history"].dtype == torch.float32
+        assert batch["inputs"]["images"]["front"].dtype == torch.float32
+    finally:
+        torch.set_default_dtype(previous)
+        dataset.close()
+
+
+def test_encoded_targets_own_storage_and_do_not_retain_teacher_graph(tmp_path):
+    manifest = _corpus(tmp_path, cameras=False)
+    reusable = torch.ones(2, 1, 1, requires_grad=True)
+    dataset = BCWindowDataset(
+        manifest,
+        target_encoder=lambda fields: reusable,
+        target_fields=("targets",),
+        target_encoder_id="constant-reference@1",
+    )
+    try:
+        batch = dataset.sample(2, generator=torch.Generator().manual_seed(2))
+        with torch.no_grad():
+            reusable.fill_(9)
+        assert not batch["targets"].requires_grad
+        torch.testing.assert_close(batch["targets"], torch.ones(2, 1, 1))
+    finally:
+        dataset.close()

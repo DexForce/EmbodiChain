@@ -187,6 +187,7 @@ class BCWindowDataset:
         handle = self._handle(ordinal)
         return {name: torch.from_numpy(handle[name][:]) for name in fields}
 
+    @torch.no_grad()
     def sample(self, batch_size: int, *, generator: torch.Generator) -> dict[str, Any]:
         """Draw complete numeric windows and causal RGB histories.
 
@@ -208,7 +209,9 @@ class BCWindowDataset:
             name: [] for name in self.target_fields
         }
         images = {
-            camera: torch.empty(batch_size, self.history_length, 3, 256, 256)
+            camera: torch.empty(
+                batch_size, self.history_length, 3, 256, 256, dtype=torch.float32
+            )
             for camera in self.cameras
         }
         for row, (ordinal, draw) in enumerate(
@@ -258,6 +261,16 @@ class BCWindowDataset:
                 {name: torch.stack(values) for name, values in fields.items()}
             )
         )
+        if (
+            not isinstance(encoded, torch.Tensor)
+            or encoded.ndim != 3
+            or encoded.shape[:2] != (batch_size, self.prediction_horizon)
+            or encoded.shape[-1] < 1
+            or encoded.dtype != torch.float32
+        ):
+            raise ValueError("BC target encoding must return FP32 [B,F,K] vectors")
+        if self.target_encoder is not None:
+            encoded = encoded.detach().clone()
         return {
             "inputs": inputs,
             "targets": encoded,

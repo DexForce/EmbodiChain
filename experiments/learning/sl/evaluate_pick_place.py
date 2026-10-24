@@ -54,6 +54,7 @@ def evaluate_checkpoint(
     policy_device: str = "cuda:1",
 ) -> dict[str, Any]:
     """Measure frozen student behavior without constructing an expert engine."""
+    invocation_started = time.monotonic()
     state = torch.load(checkpoint, map_location="cpu", weights_only=False)
     signature = state["signature"]
     weights = state["learner"]["model"]
@@ -68,6 +69,9 @@ def evaluate_checkpoint(
         )
     model.load_state_dict(weights)
     model = model.to(policy_device).eval()
+    if torch.device(policy_device).type == "cuda":
+        torch.cuda.synchronize(policy_device)
+    policy_load_seconds = time.monotonic() - invocation_started
     executor = ChunkBCExecutor(model, action_horizon=signature["action_horizon"])
     config = deepcopy(signature["environment"])
     config.update(
@@ -99,17 +103,23 @@ def evaluate_checkpoint(
     records: list[dict[str, Any]] = []
     env = None
     started = time.monotonic()
+    reset_seconds, step_seconds, cleanup_seconds = 0.0, 0.0, 0.0
+    simulation_setup_seconds = 0.0
     try:
         env = gym.make(config["id"], cfg=cfg)
+        simulation_setup_seconds = time.monotonic() - started
         raw = env.unwrapped
         raw._replay_no_auto_reset = True
         for ordinal, xy in enumerate(positions):
+            reset_started = time.monotonic()
             observation, _ = env.reset(
                 seed=seed + ordinal,
                 options={"save_data": False, "cube_xy": [xy.tolist()]},
             )
+            reset_seconds += time.monotonic() - reset_started
             executor.reset()
             terminal, truncated = False, False
+            steps_started = time.monotonic()
             with torch.no_grad():
                 for length in range(1, 601):
                     geometry = policy_observations(observation).to(policy_device)
@@ -144,6 +154,7 @@ def evaluate_checkpoint(
                     )
                     if terminal or truncated:
                         break
+            step_seconds += time.monotonic() - steps_started
             success, failed, metrics = raw.compute_task_state()
             record = {
                 "scene": ordinal,
@@ -174,11 +185,13 @@ def evaluate_checkpoint(
                 "Student evaluation unexpectedly initialized an expert engine"
             )
     finally:
+        cleanup_started = time.monotonic()
         try:
             if env is not None:
                 env.unwrapped.close(exit_process=False)
         finally:
             SimulationManager.flush_cleanup_queue()
+            cleanup_seconds = time.monotonic() - cleanup_started
     report = {
         "status": "complete",
         "checkpoint": str(checkpoint.resolve()),
@@ -191,7 +204,14 @@ def evaluate_checkpoint(
         "success_rate": sum(record["success"] for record in records) / scenes,
         "goal_error": sum(record["goal_error"] for record in records) / scenes,
         "lift_rate": sum(record["lifted"] for record in records) / scenes,
-        "wall_seconds": time.monotonic() - started,
+        "wall_seconds": time.monotonic() - invocation_started,
+        "timing": {
+            "policy_load_seconds": policy_load_seconds,
+            "simulation_setup_seconds": simulation_setup_seconds,
+            "reset_seconds": reset_seconds,
+            "step_seconds": step_seconds,
+            "cleanup_seconds": cleanup_seconds,
+        },
         "expert_initialized": False,
         "closed": True,
     }

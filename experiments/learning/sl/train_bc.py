@@ -163,11 +163,17 @@ def _evaluate(
         try:
             code = process.wait(timeout=timeout)
         except BaseException:
-            os.killpg(process.pid, signal.SIGTERM)
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
             try:
                 process.wait(timeout=10)
             except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
                 process.wait()
             raise
     if code:
@@ -225,7 +231,7 @@ def build_trainer(config: dict[str, Any]) -> SupervisedTrainer:
     torch.manual_seed(cfg.seed)
     model = ChunkBCModel(ChunkBCModelCfg(**config["model"]))
     model.set_normalization(**statistics)
-    model.to(cfg.device)
+    model.to(device=cfg.device, dtype=torch.float32)
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=FORMAL_OPTIMIZER["learning_rate"],
@@ -303,6 +309,11 @@ def build_trainer(config: dict[str, Any]) -> SupervisedTrainer:
                 "final_learning_rate": FORMAL_OPTIMIZER["final_learning_rate"],
             },
             "model": model.get_extra_state(),
+            "numerics": {
+                "dtype": "float32",
+                "cudnn_allow_tf32": torch.backends.cudnn.allow_tf32,
+                "matmul_allow_tf32": torch.backends.cuda.matmul.allow_tf32,
+            },
             "camera_profile_version": "pick-place-v2",
             "action_horizon": 8,
             "environment": environment,
