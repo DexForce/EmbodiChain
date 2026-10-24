@@ -112,7 +112,7 @@ class TensorBatchSource:
             _map_tensors(self.batch.targets, gather),
             _map_tensors(self.batch.masks, gather),
             {
-                **self.batch.metadata,
+                **copy.deepcopy(self.batch.metadata),
                 "source_id": self.source_id,
                 "indices": indices.clone(),
             },
