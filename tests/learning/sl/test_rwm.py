@@ -303,3 +303,40 @@ def test_cuda_replay_and_bfloat16_network_preserve_fp32_state():
     replay.append(state, action, prediction)
     batch = replay.sample_windows(2, 1)
     assert batch["state"].is_cuda and not batch["state"].requires_grad
+
+
+@pytest.mark.parametrize("declared_names", [None, ["other"], ["hinge"]])
+def test_recipe_binds_recorded_joint_order(tmp_path, declared_names):
+    corpus = _controlled_batch(8, 2)
+    metadata = {
+        "split": "train",
+        "action_semantics": "generalized_effort",
+        "step_dt": 0.02,
+    }
+    if declared_names is not None:
+        metadata["joint_names"] = declared_names
+    path = tmp_path / "named.pt"
+    torch.save(
+        {
+            "inputs": corpus.inputs,
+            "targets": corpus.targets,
+            "masks": corpus.masks,
+            "metadata": metadata,
+        },
+        path,
+    )
+    config = {
+        "model": {"hidden_dims": [16], "joint_names": ["hinge"]},
+        "data": {"path": str(path)},
+        "trainer": {
+            "total_updates": 1,
+            "batch_size": 4,
+            "output_dir": str(tmp_path / "run"),
+        },
+    }
+    if declared_names == ["hinge"]:
+        assert build_rwm_trainer(config).fit()["num_updates"] == 1
+    else:
+        with pytest.raises(ValueError, match="joint_names"):
+            build_rwm_trainer(config)
+        assert not (tmp_path / "run").exists()

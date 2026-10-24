@@ -270,7 +270,8 @@ def build_rwm_trainer(config: Mapping[str, Any]) -> SupervisedTrainer:
         config: Standard ``model/data/objective/optimizer/trainer/evaluation``
             mapping. ``data.path`` is a tensor-only PyTorch file containing
             ``inputs``, ``targets``, ``masks`` and ``metadata``. Metadata must
-            declare ``split``, ``action_semantics`` and ``step_dt``. Optional
+            declare ``split``, ``action_semantics`` and ``step_dt``. Named model
+            joints require the same ordered ``joint_names`` in metadata. Optional
             ``data.validation_path`` must identify a validation split. Inputs
             follow :meth:`RobotWorldModelObjective.compute_loss`.
 
@@ -298,6 +299,13 @@ def build_rwm_trainer(config: Mapping[str, Any]) -> SupervisedTrainer:
             or metadata.get("step_dt") != model.cfg.step_dt
         ):
             raise ValueError("RWM corpus action semantics or control period differ")
+        declared_joints = metadata.get("joint_names", ())
+        if not isinstance(declared_joints, (list, tuple)) or tuple(
+            declared_joints
+        ) != tuple(model.cfg.joint_names):
+            raise ValueError(
+                "RWM corpus ordered joint_names differ from model contract"
+            )
         return TensorBatchSource(
             SupervisedBatch(
                 payload["inputs"], payload["targets"], payload["masks"], metadata
