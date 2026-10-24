@@ -281,6 +281,61 @@ def test_initialize_episode_saves_failed_reset_envs_when_enabled() -> None:
     assert torch.equal(manager.saved_env_ids, torch.tensor([1, 2]))
 
 
+def test_reset_does_not_create_unused_demo_metadata() -> None:
+    env, _ = make_env_for_episode_selection(
+        save_failed_episodes=False, successful_env_ids=[]
+    )
+    env.dataset_manager = None
+    env._demo_metadata_initialized = False
+    env._demo_episode_metadata = [{}, {}, {}]
+    env._new_demo_episode_metadata = MagicMock(return_value={"episode_uuid": "new"})
+
+    EmbodiedEnv._initialize_episode(env, env_ids=[1, 2], save_data=False)
+
+    env._new_demo_episode_metadata.assert_not_called()
+    assert env._demo_episode_metadata == [{}, {}, {}]
+
+
+def test_reset_refreshes_only_selected_recording_metadata() -> None:
+    env, _ = make_env_for_episode_selection(
+        save_failed_episodes=False, successful_env_ids=[]
+    )
+    env.dataset_manager = None
+    env._demo_metadata_initialized = True
+    env._demo_episode_metadata = [{"episode_uuid": str(row)} for row in range(3)]
+    env._new_demo_episode_metadata = lambda row: {"episode_uuid": f"next-{row}"}
+
+    EmbodiedEnv._initialize_episode(env, env_ids=[1], save_data=False)
+
+    assert env._demo_episode_metadata == [
+        {"episode_uuid": "0"},
+        {"episode_uuid": "next-1"},
+        {"episode_uuid": "2"},
+    ]
+
+
+@pytest.mark.parametrize("recorded", [False, True])
+def test_initialize_episode_preserves_unselected_action_histories(
+    recorded: bool,
+) -> None:
+    """Lazy histories remain absent; populated histories clear selected rows."""
+    env, _ = make_env_for_episode_selection(
+        save_failed_episodes=False, successful_env_ids=[]
+    )
+    env.dataset_manager = None
+    env._raw_action_history = [["raw-0"], ["raw-1"], ["raw-2"]] if recorded else None
+    env._expert_controller_qpos_history = (
+        [["qpos-0"], ["qpos-1"], ["qpos-2"]] if recorded else None
+    )
+    EmbodiedEnv._initialize_episode(env, env_ids=torch.tensor([2, 0]), save_data=False)
+    if recorded:
+        assert env._raw_action_history == [[], ["raw-1"], []]
+        assert env._expert_controller_qpos_history == [[], ["qpos-1"], []]
+    else:
+        assert env._raw_action_history is None
+        assert env._expert_controller_qpos_history is None
+
+
 def test_initialize_episode_saves_row_with_accepted_segment_fragment() -> None:
     """Fragment eligibility is independent of whole-episode success."""
     env, manager = make_env_for_episode_selection(

@@ -57,3 +57,21 @@ embodichain train-rl --config embodichain_tasks/configs/tasks/locomotion/velocit
 Local smoke checks cover environment construction, stepping, finite tensors, selective reset and policy forward execution, with zero training updates.
 
 See the [task API reference](../../api_reference/locomotion_tasks.rst) for configuration and MDP types.
+
+## Batched simulation updates
+
+RL rollouts allocate demonstration action histories only when recording starts.
+Requesting demonstration metadata still produces an owned snapshot with episode
+provenance; recording and replay retain their existing interfaces.
+
+For spawn-bound Newton articulations, `set_mass`, `set_inertia`, and
+`set_com_pose` use selected-row batch writes when row/link selections are
+unique. Inertia values remain principal moments in the applied COM frame; COM
+poses use XYZ followed by XYZW. The paired DexSim version must expose selected
+link writes. Duplicate selections preserve ordered per-entity updates.
+
+Before scene preparation, `SimulationManager.configure_ground_plane_collision`
+can replace the global ground geometry and collision descriptor. Newton
+collision configuration also accepts `preserve_mesh_transform` to retain the
+authored collision mesh pose and scale. These options do not change the default
+settings of existing tasks.

@@ -142,7 +142,11 @@ physical-objective initialization and final observations; it is not forwarded
 to functors. `BaseEnv` owns `EpisodeContext`; successful initialization seeds recording from
 the final observation. `EmbodiedEnv` consumes old records before physical reset.
 Failed checks remain attached to buffers until the selected rows are consumed
-and a new episode begins. Info and recorder metadata carry owned context snapshots. The concrete preparation/restore host and
+and a new episode begins. Info and recorder metadata carry owned context snapshots.
+`EnvCfg.episode_context_in_info` defaults to true. Batched RL deployments may
+disable automatic info snapshots while retaining context lifecycle, recorder
+metadata and explicit snapshots. Reset reuses the snapshot from `get_info()`;
+overrides that omit it receive one when the option is enabled. The concrete preparation/restore host and
 snapshot limitations belong to [scene expansion](../scene-expansion/scene-expansion.md).
 
 ## Change sites and focused validation

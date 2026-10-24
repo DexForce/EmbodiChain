@@ -302,6 +302,13 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     on CUDA unless the caller explicitly supplies another device.
     """
 
+    mesh_bvh_constructor: Literal["sah", "median", "lbvh", "cubql"] | None = None
+    """Optional mesh and heightfield query BVH constructor.
+
+    ``None`` preserves the engine default. CUDA terrain ray workloads can select
+    ``"cubql"`` through a DexSim build exposing this configuration field.
+    """
+
     num_substeps: int = 10
     """Number of Newton solver substeps per EmbodiChain physics step.
 
@@ -446,6 +453,8 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
             "collision_pipeline_cfg": collision_pipeline_cfg,
             "sync_to_dexsim": self.sync_to_renderer,
         }
+        if self.mesh_bvh_constructor is not None:
+            newton_cfg_args["mesh_bvh_constructor"] = self.mesh_bvh_constructor
         if solver_cfg is not None:
             newton_cfg_args["solver_cfg"] = solver_cfg
 
