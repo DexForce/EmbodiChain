@@ -123,3 +123,11 @@ embodichain.learning.sl.workflow
 .. autofunction:: train_from_config
 
 .. autofunction:: cli
+
+NeRD integration
+----------------
+
+.. toctree::
+   :maxdepth: 1
+
+   embodichain.learning.dynamics.sl
