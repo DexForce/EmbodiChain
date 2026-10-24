@@ -215,12 +215,26 @@ readers never reseal stale artifacts. Missing legacy companions are not generate
 implicitly. `validate-graph --bundle` is read-only, and `visualize --output *.html`
 uses the same graph data rather than a separate execution representation.
 `task_engine/semantic_graph_html.py` owns the offline report and its control-part
-lanes. Optional bounded local thumbnails come from bundle-owned scene metadata;
+lanes. Its packaged HTML/CSS/JS and OFL fonts render the bilingual viewer for all
+publication/run paths; task IDs, assets, environment choices and statuses come
+from the existing graph and reports, not a case-specific template. Optional
+bounded local thumbnails come from bundle-owned scene metadata;
 source cutouts and generation-stage GLB renders are not final-geometry evidence.
 Workflow and CLI completion write scoped monotonic wall time to `run_summary.json`
 and refresh only the current run's selected viewer. This display-only sidecar
 does not alter sealed companions, execution outcomes or TaskSpec qualification;
-missing images and timing remain unavailable, without network or renderer calls.
+missing images and timing remain unavailable. Imported/reused/baked assets may
+have valid geometry but no segmentation cutout or generation-stage render; do not
+substitute another asset's picture. HTML rendering and `visualize` stay offline,
+without model or renderer calls. After publication, workflow/CLI finalization
+attempts one display-only bilingual translation using the configured Task Engine
+model, without retries and with an HTTP phase timeout. The digest-bound
+`semantic_graph_localizations.json` beside the selected output HTML caches both
+success and unavailable results, so the second finalizer does not call again.
+Stale graph/source-text digests are ignored; missing/failed translations show the
+original text. Translations never change the normative instruction, graph,
+TaskSpec, execution report or success decision. The original instruction remains
+inspectable, and rendering an existing cache needs no provider credentials.
 CLI and HTML links discover committed videos in both legacy `videos/` and
 per-environment `videos/env_*/` directories, excluding partial files and links
 outside the current recording root. The viewer distinguishes program completion

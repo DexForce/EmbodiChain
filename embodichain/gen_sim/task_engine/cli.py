@@ -317,6 +317,7 @@ def _run_workflow(
         payload,
         task_id=args.task_id,
         created_at=allocation.created_at.isoformat(),
+        model=args.model,
     )
     _print_json(payload)
     accepted = result.succeeded if execute else result.status == "prepared"
@@ -392,6 +393,7 @@ def _finish_html(
     task_id: str,
     created_at: str,
     html_path: Path | None = None,
+    model: str | None = None,
 ) -> str | None:
     from .semantic_graph_html import _finalize_run_html
 
@@ -399,13 +401,15 @@ def _finish_html(
         output_dir,
         bundle=bundle,
         html_path=html_path,
+        translate=True,
+        model=model,
         summary={
             "task_id": task_id,
             "run_id": payload["run_id"],
             "created_at": created_at,
             "status": payload["status"],
             "elapsed_seconds": payload["elapsed_seconds"],
-            "elapsed_scope": "CLI wall time through publication, excluding HTML refresh",
+            "elapsed_scope": "CLI wall time before final graph presentation",
         },
     )
     if path is not None:

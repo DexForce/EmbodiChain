@@ -19,8 +19,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import base64
 import json
 from pathlib import Path
+import re
 import sys
 from typing import Any
 
@@ -37,6 +39,53 @@ from .semantic_graph_validation import (
 )
 
 __all__ = ["render_semantic_task_graph_html", "write_semantic_task_graph_html"]
+
+
+def _json_script(value: Any) -> str:
+    encoded = json.dumps(
+        value, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+    )
+    for character, escaped in (
+        ("<", r"\u003c"),
+        (">", r"\u003e"),
+        ("&", r"\u0026"),
+        ("\u2028", r"\u2028"),
+        ("\u2029", r"\u2029"),
+    ):
+        encoded = encoded.replace(character, escaped)
+    return encoded
+
+
+def _viewer_document(data: Mapping[str, Any]) -> str:
+    root = Path(__file__).parent
+    assets = root / "_graph_assets"
+    fonts = (assets / "fonts.css").read_text(encoding="utf-8")
+    for token, name in (
+        ("__PLEX_REGULAR__", "plex-sc-regular.woff2"),
+        ("__PLEX_MEDIUM__", "plex-sc-medium.woff2"),
+        ("__MANROPE__", "manrope.ttf"),
+    ):
+        fonts = fonts.replace(
+            token, base64.b64encode((assets / name).read_bytes()).decode("ascii")
+        )
+    values = {
+        "__GRAPH_DATA__": _json_script(data),
+        "__VIEWER_STYLE__": fonts
+        + (root / "_semantic_graph_viewer.css").read_text(encoding="utf-8"),
+        "__VIEWER_SCRIPT__": (root / "_semantic_graph_viewer.js").read_text(
+            encoding="utf-8"
+        ),
+        "__FONT_LICENSES__": _json_script(
+            (assets / "LICENSE.txt").read_text(encoding="utf-8")
+        ),
+    }
+    template = (root / "_semantic_graph_viewer.html").read_text(encoding="utf-8")
+    pattern = re.compile(r"__[A-Z][A-Z_]*__")
+    tokens = pattern.findall(template)
+    if set(tokens) != set(values) or any(tokens.count(token) != 1 for token in values):
+        raise ValueError("Semantic graph viewer has invalid template slots.")
+    # Substitute once so token-like source instructions stay literal evidence.
+    return pattern.sub(lambda match: values[match.group()], template)
 
 
 def render_semantic_task_graph_html(
@@ -158,23 +207,7 @@ def render_semantic_task_graph_html(
             **dict(presentation or {}),
         },
     }
-    encoded = json.dumps(
-        data, ensure_ascii=False, separators=(",", ":"), allow_nan=False
-    )
-    for character, escaped in (
-        ("<", r"\u003c"),
-        (">", r"\u003e"),
-        ("&", r"\u0026"),
-        ("\u2028", r"\u2028"),
-        ("\u2029", r"\u2029"),
-    ):
-        encoded = encoded.replace(character, escaped)
-    template = (
-        Path(__file__)
-        .with_name("_semantic_graph_viewer.html")
-        .read_text(encoding="utf-8")
-    )
-    return template.replace("__GRAPH_DATA__", encoded)
+    return _viewer_document(data)
 
 
 def write_semantic_task_graph_html(
@@ -232,6 +265,8 @@ def _finalize_run_html(
     bundle: Path | None,
     summary: Mapping[str, Any],
     html_path: str | Path | None = None,
+    translate: bool = False,
+    model: str | None = None,
 ) -> Path | None:
     """Publish display-only timing and refresh only this run's selected viewer."""
     if not output_dir.is_dir():
@@ -312,6 +347,15 @@ def _finalize_run_html(
             if report_path.is_file()
             else None
         )
+        if translate:
+            from ._graph_localization import _FILENAME, _ensure_localizations
+
+            _ensure_localizations(
+                destination.parent / _FILENAME,
+                graph,
+                _graph_presentation(graph, bundle_root=bundle),
+                model=model,
+            )
         write_semantic_task_graph_html(
             graph,
             destination,
