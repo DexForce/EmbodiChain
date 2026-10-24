@@ -15,6 +15,12 @@ the achieved data coverage and independent policy evaluation.
 The complete contract is in the
 [fixed-budget visual design](../../../docs/architecture/ods-data-stream-showcase-design.md#fixed-training-budget-visual-comparison).
 
+For task learning with periodic student evaluation, start with the separate
+[dual-camera convergence recipe](CONVERGENCE.md). It provides an acquisition-only
+camera preview and a reviewable configuration before training, then selects a
+checkpoint on development states before one held-out test. Its longer learning
+budget is separate from the fixed-work system comparison below.
+
 Historical protocols, negative results and their immutable backup links are
 listed in [experiment evidence](EXPERIMENTS.md). The measured pilots establish
 earlier usable data, but do not establish a diversity advantage, an isolated

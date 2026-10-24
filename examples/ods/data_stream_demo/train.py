@@ -1297,6 +1297,7 @@ class _Experiment:
             budget=None,
             max_episode_steps=args.max_episode_steps,
             initialization_timeout=args.initialization_timeout,
+            camera_profile=getattr(args, "camera_profile", "benchmark"),
         )
         self.source_run_id = self.engine.run_id
         self.cache_bytes = sum(

@@ -1,0 +1,22 @@
+# Candidate learning recipe. Review before running the train command.
+updates: 20000
+batch_size: 64
+buffer_size: 32
+producer_envs: 4
+episode_budget: 2048
+learning_rate: 0.0003
+final_learning_rate: 0.00003
+warmup_updates: 500
+prediction_horizon: 32
+action_horizon: 8
+encoder_threads: 2
+evaluate_every: 2000
+development_scenes: 20
+development_success_rate: 0.9
+test_scenes: 100
+test_success_rate: 0.8
+training_seed: 20261025
+development_seed: 20271025
+test_seed: 20281025
+run_timeout: 21600
+evaluation_timeout: 3600

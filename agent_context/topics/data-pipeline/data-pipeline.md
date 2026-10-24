@@ -18,6 +18,7 @@ belongs to [data-assets](../data-assets/data-assets.md).
 | Local Franka ChunkBC demo and offline comparisons | `examples/ods/simple_bc_demo/train.py`; local task/config/model/trainer/evaluator and evidence in the same directory |
 | Pure delivery capability and standard video decoding comparison | `examples/ods/data_stream_demo/run.py`, `suite.py`, `report.py`; no learner, real SDK/DataLoader decode and parent-owned prefetch quotas |
 | Fixed-budget visual training, diversity and total pipeline time | `examples/ods/data_stream_demo/train.py`, `training_metrics.py`, `training_report.py`; single/dual-camera BC, standard dataset recording and completed-training accounting; `training_throughput.py` owns three-stage preflight guidance |
+| Dual-camera learning and camera review | `examples/ods/data_stream_demo/converge.py`, `preview.py`; `CONVERGENCE.md` owns the candidate recipe, development selection and one held-out test |
 | Commit/discard/finalization dispatch | `embodichain/lab/gym/envs/managers/dataset_manager.py` |
 | Synchronous LeRobot persistence | `embodichain/lab/gym/envs/managers/datasets.py`: `LeRobotRecorder` |
 | Background persistence | `embodichain/lab/gym/envs/managers/async_datasets.py`: `AsyncLeRobotRecorder` |

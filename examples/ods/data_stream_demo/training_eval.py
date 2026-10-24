@@ -16,9 +16,9 @@
 
 """Independent physical evaluation of a saved visual BC checkpoint.
 
-Run this entry point in a separate process after the timed training pipeline
-has closed. Evaluation results are quality information outside its time budget.
-The caller reserves and masks both simulation and inference devices explicitly.
+Run this entry point in a separate process. The comparison supervisor evaluates
+after its timed pipeline; the learning driver also evaluates between updates.
+The caller owns total-run timing and reserves/masks both devices explicitly.
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ if __package__ in {None, ""}:
     ]
 
 from examples.ods.data_stream_demo.acquisition import (
-    CAMERA_PROFILE_VERSION,
+    camera_profile_version,
     camera_uids,
     load_acquisition_config,
 )
@@ -173,7 +173,16 @@ def evaluate_checkpoint(
         + (torch.rand(scenes, 2, generator=generator) - 0.5) * 0.08
     )
     scene_digest = hashlib.sha256(positions.numpy().tobytes()).hexdigest()
-    config = load_acquisition_config(vision, sim_device, producer_envs=1, seed=seed)
+    profile = state["config"].get("camera_profile", "benchmark")
+    if state["config"].get(
+        "camera_profile_version", camera_profile_version(profile)
+    ) != camera_profile_version(profile):
+        raise ValueError(
+            "Checkpoint camera calibration version differs from this evaluator"
+        )
+    config = load_acquisition_config(
+        vision, sim_device, producer_envs=1, seed=seed, camera_profile=profile
+    )
     config["max_episode_steps"] = 600
     os.environ["EMBODICHAIN_SIM_EXIT_PROCESS"] = "0"
     # Import the runtime package before manager configuration, matching native
@@ -324,7 +333,7 @@ def evaluate_checkpoint(
         "policy_step": int(state["step"]),
         "vision": vision,
         "cameras": list(model.cameras),
-        "camera_profile_version": CAMERA_PROFILE_VERSION,
+        "camera_profile_version": camera_profile_version(profile),
         "prediction_horizon": model.prediction_horizon,
         "action_horizon": action_horizon,
         "sim_device": sim_device,
@@ -338,7 +347,7 @@ def evaluate_checkpoint(
         "goal_error": sum(record["goal_error"] for record in records) / scenes,
         "episode_length": sum(record["length"] for record in records) / scenes,
         "wall_seconds": time.monotonic() - started,
-        "timing_scope": "evaluation only; excluded from training pipeline time",
+        "timing_scope": "this evaluation invocation; total-run inclusion is caller-owned",
         "closed": True,
         "expert_initialized": False,
     }

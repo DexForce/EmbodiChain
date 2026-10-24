@@ -33,6 +33,8 @@ __all__ = [
     "CAMERA_PROFILE_VERSION",
     "VisionMode",
     "camera_uids",
+    "camera_configs",
+    "camera_profile_version",
     "load_acquisition_config",
     "make_engine",
     "iter_generation_episodes",
@@ -48,6 +50,13 @@ VisionMode = Literal["state", "single", "dual"]
 CAMERA_PROFILE_VERSION = "v3"
 
 
+def camera_profile_version(profile: str = "benchmark") -> str:
+    """Identify the benchmark or close-up PickPlace camera calibration."""
+    if profile not in ("benchmark", "pick_place"):
+        raise ValueError(f"Unknown camera profile: {profile!r}")
+    return CAMERA_PROFILE_VERSION if profile == "benchmark" else "pick-place-v2"
+
+
 def camera_uids(vision: VisionMode) -> tuple[str, ...]:
     """Return the frozen camera order, rejecting unknown profiles."""
     if vision == "state":
@@ -59,9 +68,11 @@ def camera_uids(vision: VisionMode) -> tuple[str, ...]:
     raise ValueError(f"Unknown vision profile: {vision!r}")
 
 
-def _camera(uid: str, extrinsics: dict[str, Any]) -> dict[str, Any]:
-    # A square pinhole camera with horizontal/vertical FOV=60 degrees.
-    focal = 128.0 / math.tan(math.radians(30.0))
+def _camera(
+    uid: str, extrinsics: dict[str, Any], *, fov_degrees: float = 60.0
+) -> dict[str, Any]:
+    # Square pinhole images use the same horizontal and vertical FOV.
+    focal = 128.0 / math.tan(math.radians(fov_degrees / 2))
     return {
         "sensor_type": "Camera",
         "uid": uid,
@@ -79,11 +90,58 @@ def _camera(uid: str, extrinsics: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def camera_configs(
+    vision: VisionMode, *, camera_profile: str = "benchmark"
+) -> list[dict[str, Any]]:
+    """Return ordered camera calibration without importing simulation bindings."""
+    camera_profile_version(camera_profile)
+    cameras = camera_uids(vision)
+    sensors = []
+    if cameras:
+        eye, target = [-0.50, -0.90, 0.88], [-0.50, 0.10, 0.20]
+        if camera_profile == "pick_place":
+            eye, target = [-0.60, -0.45, 0.50], [-0.42, 0.10, 0.08]
+        sensors.append(
+            _camera(
+                "cam_high",
+                {
+                    "eye": eye,
+                    "target": target,
+                    "up": [0.0, 0.0, 1.0],
+                },
+            )
+        )
+    if vision == "dual":
+        sensors.append(
+            _camera(
+                "cam_wrist",
+                {
+                    "parent": "FrankaPanda/fr3_hand_tcp",
+                    "eye": (
+                        [0.12, 0.0, -0.04]
+                        if camera_profile == "pick_place"
+                        else [0.10, 0.0, -0.10]
+                    ),
+                    "target": (
+                        [0.0, 0.0, 0.05]
+                        if camera_profile == "pick_place"
+                        else [0.0, 0.0, 0.03]
+                    ),
+                    "up": [0.0, 1.0, 0.0],
+                },
+                fov_degrees=90.0 if camera_profile == "pick_place" else 60.0,
+            )
+        )
+    return sensors
+
+
 def load_acquisition_config(
     vision: VisionMode,
     device: str,
     producer_envs: int = 2,
     seed: int = 19001,
+    *,
+    camera_profile: str = "benchmark",
 ) -> dict[str, Any]:
     """Expand the existing physical task with the showcase's sensor profile.
 
@@ -97,11 +155,13 @@ def load_acquisition_config(
         device: Explicit simulation tensor device, such as ``cuda:0``.
         producer_envs: Number of parallel physical environments.
         seed: Expert/reset random seed.
+        camera_profile: Historical benchmark or close-up PickPlace calibration.
 
     Returns:
         Expanded Gym configuration; callers may serialize it as a run artifact.
     """
     cameras = camera_uids(vision)
+    version = camera_profile_version(camera_profile)
     if type(producer_envs) is not int or producer_envs < 1:
         raise ValueError("producer_envs must be a positive integer")
     if type(seed) is not int or seed < 0:
@@ -121,7 +181,7 @@ def load_acquisition_config(
         seed=seed,
         headless=True,
         enable_sensor=bool(cameras),
-        camera_profile_version=CAMERA_PROFILE_VERSION,
+        camera_profile_version=version,
         renderer="fast-rt" if cameras else "no-render",
         render_cfg={
             "spp": 1,
@@ -131,32 +191,8 @@ def load_acquisition_config(
             },
         },
     )
-    # Replace the inherited 640x480 preview camera; state-only must not leave
-    # a hidden camera or acquire images solely for report/video generation.
-    config["sensor"] = []
-    if cameras:
-        config["sensor"].append(
-            _camera(
-                "cam_high",
-                {
-                    "eye": [-0.50, -0.90, 0.88],
-                    "target": [-0.50, 0.10, 0.20],
-                    "up": [0.0, 0.0, 1.0],
-                },
-            )
-        )
-    if vision == "dual":
-        config["sensor"].append(
-            _camera(
-                "cam_wrist",
-                {
-                    "parent": "FrankaPanda/fr3_hand_tcp",
-                    "eye": [0.10, 0.0, -0.10],
-                    "target": [0.0, 0.0, 0.03],
-                    "up": [0.0, 1.0, 0.0],
-                },
-            )
-        )
+    # Replace the inherited preview camera; state-only keeps no hidden sensor.
+    config["sensor"] = camera_configs(vision, camera_profile=camera_profile)
     return config
 
 
@@ -171,6 +207,7 @@ def make_engine(
     max_episode_steps: int = 600,
     initialization_timeout: float = 1800.0,
     shutdown_timeout: float = 30.0,
+    camera_profile: str = "benchmark",
 ) -> OnlineDataEngine:
     """Allocate, but do not start, the manual CPU-shared-memory producer.
 
@@ -184,13 +221,16 @@ def make_engine(
         max_episode_steps: Physical episode and shared-row capacity.
         initialization_timeout: Initial accepted-data fill deadline in seconds.
         shutdown_timeout: Graceful producer shutdown bound in seconds.
+        camera_profile: Camera calibration shared with policy evaluation.
 
     Returns:
         Unstarted engine with source provenance and bounded lifecycle logging.
     """
     from embodichain.data_pipeline.engine import OnlineDataEngine, OnlineDataEngineCfg
 
-    config = load_acquisition_config(vision, device, producer_envs, seed)
+    config = load_acquisition_config(
+        vision, device, producer_envs, seed, camera_profile=camera_profile
+    )
     if type(buffer_size) is not int or buffer_size < 1 or buffer_size % producer_envs:
         raise ValueError("buffer_size must be positive and divisible by producer_envs")
     if type(max_episode_steps) is not int or max_episode_steps < 1:
