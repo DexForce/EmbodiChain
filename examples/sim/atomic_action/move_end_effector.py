@@ -34,7 +34,7 @@ from embodichain.lab.sim.atomic_actions import (
     MotionPolicy,
 )
 from embodichain.utils import logger
-from scripts.tutorials.atomic_action.tutorial_utils import (
+from examples.sim.atomic_action.support import (
     add_tutorial_robot,
     broadcast_pose_batch,
     broadcast_waypoint_pose_batch,
@@ -46,7 +46,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     replay_trajectory,
     run_tutorial,
 )
-from scripts.tutorials.atomic_action.tutorial_utils import (
+from examples.sim.atomic_action.support import (
     initialize_benchmark_simulation,
 )
 

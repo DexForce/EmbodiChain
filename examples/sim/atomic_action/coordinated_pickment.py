@@ -48,7 +48,7 @@ from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.utils import logger
 from embodichain.utils.math import matrix_from_euler
-from scripts.tutorials.atomic_action.scenario_utils import (
+from examples.sim.atomic_action.scenario import (
     add_dual_tutorial_robot,
     add_support_surface,
     compute_world_bounds,
@@ -58,7 +58,7 @@ from scripts.tutorials.atomic_action.scenario_utils import (
     rotate_pose_about_world_z,
     settle_object,
 )
-from scripts.tutorials.atomic_action.tutorial_utils import (
+from examples.sim.atomic_action.support import (
     TutorialRobot,
     broadcast_pose_batch,
     clone_local_pose_from_first_env,

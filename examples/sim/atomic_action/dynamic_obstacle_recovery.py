@@ -60,7 +60,7 @@ from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.visualization import SceneOverlays, TrajectoryOverlay
 from embodichain.utils import logger
-from scripts.tutorials.atomic_action.tutorial_utils import (
+from examples.sim.atomic_action.support import (
     add_tutorial_robot,
     create_tutorial_argument_parser,
     create_tutorial_simulation,

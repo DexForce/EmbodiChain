@@ -41,20 +41,20 @@ from embodichain.lab.sim.cfg import (
     RigidBodyMaterialCfg,
 )
 from embodichain.lab.sim.motion.solvers import BaseSolver
-from scripts.tutorials.atomic_action.dynamic_obstacle_recovery import (
+from examples.sim.atomic_action.dynamic_obstacle_recovery import (
     _animate_obstacle_to_pose,
     _blocking_obstacle_pose,
     _maximum_path_deviation,
     _minimum_cuboid_clearance,
     _obstacle_motion_trigger_command,
 )
-from scripts.tutorials.atomic_action.coordinated_pickment import (
+from examples.sim.atomic_action.coordinated_pickment import (
     compute_left_to_right_arm_direction,
 )
-from scripts.tutorials.atomic_action.scenario_utils import (
+from examples.sim.atomic_action.scenario import (
     create_dual_tutorial_robot_cfg,
 )
-from scripts.tutorials.atomic_action.tutorial_utils import (
+from examples.sim.atomic_action.support import (
     DEFAULT_TUTORIAL_SUN_DIRECTION,
     DEFAULT_TUTORIAL_SUN_INTENSITY,
     NEWTON_GRASP_CONTACT_DAMPING,
@@ -117,10 +117,10 @@ ATOMIC_ACTION_TUTORIAL_MODULES = (
     "coordinated_pickment",
     "coordinated_placement",
     "dynamic_obstacle_recovery",
-    "hand_over",
+    "handover",
     "move_end_effector",
-    "move_held_object",
-    "move_joints",
+    "move_held_object_cup",
+    "move_joint",
     "moving_target_recovery",
     "open_door",
     "pickup",
@@ -134,8 +134,8 @@ RIGID_SCENE_TUTORIAL_MODULES = (
     "assemble",
     "axis_align",
     "coordinated_placement",
-    "hand_over",
-    "move_held_object",
+    "handover",
+    "move_held_object_cup",
     "pickup",
     "place",
     "pour",
@@ -154,7 +154,7 @@ EXPLICIT_SCENE_LIFECYCLE_TUTORIAL_MODULES = (
 SCENE_FREE_TUTORIAL_MODULES = (
     "control_dt",
     "move_end_effector",
-    "move_joints",
+    "move_joint",
 )
 TUTORIAL_PRISMATIC_JOINT_AXIS = torch.tensor([2.0, 2.0, 1.0])
 TUTORIAL_REVOLUTE_JOINT_AXIS = torch.tensor([-1.0, 2.0, 2.0])
@@ -268,7 +268,7 @@ def _run_obstacle_animation(*, pace_wall_time: bool) -> tuple[MagicMock, MagicMo
 
 
 def test_atomic_action_tutorial_uses_native_mujoco_contact_settings() -> None:
-    module = importlib.import_module("scripts.tutorials.atomic_action.tutorial_utils")
+    module = importlib.import_module("examples.sim.atomic_action.support")
 
     default_cfg = module._tutorial_physics_cfg("default")
     newton_cfg = module._tutorial_physics_cfg("newton")
@@ -348,7 +348,7 @@ def test_articulation_tutorial_semantics_resolve_signed_parent_joint_axis(
     neighbor_offset: tuple[float, float, float],
     expected_axis: tuple[float, float, float],
 ) -> None:
-    module = importlib.import_module(f"scripts.tutorials.atomic_action.{module_name}")
+    module = importlib.import_module(f"examples.sim.atomic_action.{module_name}")
     geometry = _tutorial_axis_geometry(neighbor_offset)
     sampled_geometry = _tutorial_articulation_geometry(geometry)
     articulation = _TutorialArticulation(geometry)
@@ -755,7 +755,7 @@ def test_curobo_motion_generator_factory_selects_curobo_backend() -> None:
     robot = MagicMock(uid="tutorial_robot")
 
     with patch(
-        "scripts.tutorials.atomic_action.tutorial_utils.MotionGenerator"
+        "examples.sim.atomic_action.support.MotionGenerator"
     ) as motion_generator_cls:
         result = create_curobo_motion_generator(robot, use_cuda_graph=False)
 
@@ -835,17 +835,15 @@ def test_run_tutorial_uses_deferred_simulation_cleanup() -> None:
 
     with (
         patch(
-            "scripts.tutorials.atomic_action.tutorial_utils."
-            "SimulationManager.is_instantiated",
+            "examples.sim.atomic_action.support." "SimulationManager.is_instantiated",
             return_value=True,
         ),
         patch(
-            "scripts.tutorials.atomic_action.tutorial_utils."
-            "SimulationManager.get_instance",
+            "examples.sim.atomic_action.support." "SimulationManager.get_instance",
             return_value=sim,
         ),
         patch(
-            "scripts.tutorials.atomic_action.tutorial_utils."
+            "examples.sim.atomic_action.support."
             "SimulationManager.flush_cleanup_queue"
         ) as flush_cleanup_queue,
     ):
@@ -863,7 +861,7 @@ def test_tutorial_motion_generator_factory_selects_requested_backend(
     robot = MagicMock(uid="tutorial_robot")
 
     with patch(
-        "scripts.tutorials.atomic_action.tutorial_utils.MotionGenerator"
+        "examples.sim.atomic_action.support.MotionGenerator"
     ) as motion_generator_cls:
         result = create_tutorial_motion_generator(robot, planner)
 
@@ -884,7 +882,7 @@ def test_tutorial_motion_generator_factory_defaults_to_trapezoidal() -> None:
     robot = MagicMock(uid="tutorial_robot")
 
     with patch(
-        "scripts.tutorials.atomic_action.tutorial_utils.MotionGenerator"
+        "examples.sim.atomic_action.support.MotionGenerator"
     ) as motion_generator_cls:
         create_tutorial_motion_generator(robot)
 
@@ -898,15 +896,13 @@ def test_tutorial_simulation_uses_one_global_sun_light() -> None:
 
     with (
         patch(
-            "scripts.tutorials.atomic_action.tutorial_utils.SimulationManager",
+            "examples.sim.atomic_action.support.SimulationManager",
             return_value=simulation,
         ),
-        patch("scripts.tutorials.atomic_action.tutorial_utils.SimulationManagerCfg"),
-        patch("scripts.tutorials.atomic_action.tutorial_utils.RenderCfg"),
-        patch("scripts.tutorials.atomic_action.tutorial_utils.LightCfg") as light_cfg,
-        patch(
-            "scripts.tutorials.atomic_action.tutorial_utils.visualization_cfg_from_args"
-        ),
+        patch("examples.sim.atomic_action.support.SimulationManagerCfg"),
+        patch("examples.sim.atomic_action.support.RenderCfg"),
+        patch("examples.sim.atomic_action.support.LightCfg") as light_cfg,
+        patch("examples.sim.atomic_action.support.visualization_cfg_from_args"),
     ):
         result = create_tutorial_simulation(args)
 
@@ -955,7 +951,7 @@ def test_shared_tutorial_planner_selection_excludes_neural_backend() -> None:
 
 
 def test_handover_tutorial_defaults_to_cpu_for_grasp_planning() -> None:
-    module = importlib.import_module("scripts.tutorials.atomic_action.hand_over")
+    module = importlib.import_module("examples.sim.atomic_action.handover")
 
     with patch("sys.argv", ["hand_over.py"]):
         args = module.parse_arguments()
@@ -964,7 +960,7 @@ def test_handover_tutorial_defaults_to_cpu_for_grasp_planning() -> None:
 
 
 def test_assemble_tutorial_uses_center_grasp_for_laid_soda_can() -> None:
-    module = importlib.import_module("scripts.tutorials.atomic_action.assemble")
+    module = importlib.import_module("examples.sim.atomic_action.assemble")
 
     assert module.PICKUP_OBJECT_PART == "center"
     assert "pick_object_part=PICKUP_OBJECT_PART" in inspect.getsource(
@@ -996,7 +992,7 @@ def test_arm_direction_uses_selected_robot_solver_roots() -> None:
 def test_all_atomic_action_tutorials_accept_both_robot_choices(
     module_name: str,
 ) -> None:
-    module = importlib.import_module(f"scripts.tutorials.atomic_action.{module_name}")
+    module = importlib.import_module(f"examples.sim.atomic_action.{module_name}")
 
     with patch("sys.argv", [f"{module_name}.py"]):
         default_args = module.parse_arguments()
@@ -1018,7 +1014,7 @@ def test_all_atomic_action_tutorials_accept_both_robot_choices(
 
 
 def test_place_tutorial_registers_pick_object_with_simulation_engine_factory() -> None:
-    module = importlib.import_module("scripts.tutorials.atomic_action.place")
+    module = importlib.import_module("examples.sim.atomic_action.place")
     args = Namespace(
         auto_play=True,
         force_reannotate=False,
@@ -1114,7 +1110,7 @@ def test_add_tutorial_robot_authors_newton_contacts_before_spawn() -> None:
     robot_cfg = SimpleNamespace(link_attrs=None)
 
     with patch(
-        "scripts.tutorials.atomic_action.tutorial_utils.create_tutorial_robot_cfg",
+        "examples.sim.atomic_action.support.create_tutorial_robot_cfg",
         return_value=robot_cfg,
     ):
         result = add_tutorial_robot(sim, "ur5")
@@ -1169,7 +1165,7 @@ def test_articulation_contact_tutorials_author_newton_material_before_spawn(
     group_name: str,
     contact_link: str,
 ) -> None:
-    module = importlib.import_module(f"scripts.tutorials.atomic_action.{module_name}")
+    module = importlib.import_module(f"examples.sim.atomic_action.{module_name}")
     sim = MagicMock()
     sim.is_newton_backend = True
 
@@ -1201,7 +1197,7 @@ def test_place_cube_uses_backend_scoped_contact_material(
     is_newton_backend: bool,
     expected_material_type: type[RigidBodyMaterialCfg],
 ) -> None:
-    module = importlib.import_module("scripts.tutorials.atomic_action.place")
+    module = importlib.import_module("examples.sim.atomic_action.place")
     sim = MagicMock()
     sim.is_newton_backend = is_newton_backend
     obj = MagicMock()
@@ -1233,7 +1229,7 @@ def test_place_cube_uses_backend_scoped_contact_material(
 
 
 def test_move_held_object_cup_starts_above_the_ground() -> None:
-    module = importlib.import_module("scripts.tutorials.atomic_action.move_held_object")
+    module = importlib.import_module("examples.sim.atomic_action.move_held_object_cup")
     sim = MagicMock()
     sim.is_newton_backend = True
     obj = MagicMock()
@@ -1251,7 +1247,7 @@ def test_move_held_object_cup_starts_above_the_ground() -> None:
 def test_rigid_scene_tutorials_use_simulation_engine_factory(
     module_name: str,
 ) -> None:
-    module = importlib.import_module(f"scripts.tutorials.atomic_action.{module_name}")
+    module = importlib.import_module(f"examples.sim.atomic_action.{module_name}")
     source = inspect.getsource(module)
 
     assert "create_simulation_atomic_action_engine(" in source
@@ -1263,7 +1259,7 @@ def test_rigid_scene_tutorials_use_simulation_engine_factory(
 def test_static_pose_tutorials_do_not_construct_scene_snapshots(
     module_name: str,
 ) -> None:
-    module = importlib.import_module(f"scripts.tutorials.atomic_action.{module_name}")
+    module = importlib.import_module(f"examples.sim.atomic_action.{module_name}")
     source = inspect.getsource(module)
 
     assert "SceneSnapshot" not in source
@@ -1271,7 +1267,7 @@ def test_static_pose_tutorials_do_not_construct_scene_snapshots(
 
 
 def test_axis_align_tutorial_exposes_upright_and_horizontal_modes() -> None:
-    module = importlib.import_module("scripts.tutorials.atomic_action.axis_align")
+    module = importlib.import_module("examples.sim.atomic_action.axis_align")
 
     with patch("sys.argv", ["axis_align.py"]):
         upright_args = module.parse_arguments()
@@ -1294,7 +1290,7 @@ def test_axis_align_tutorial_exposes_upright_and_horizontal_modes() -> None:
 
 
 def test_pour_tutorial_uses_configured_pickup_and_local_rotation_axis() -> None:
-    module = importlib.import_module("scripts.tutorials.atomic_action.pour")
+    module = importlib.import_module("examples.sim.atomic_action.pour")
 
     with patch("sys.argv", ["pour.py"]):
         default_args = module.parse_arguments()
@@ -1322,7 +1318,7 @@ def test_replay_timed_trajectory_uses_arrival_intervals() -> None:
         dt=torch.tensor([[0.0, 0.2, 0.25]]),
     )
 
-    with patch("scripts.tutorials.atomic_action.tutorial_utils.time.sleep"):
+    with patch("examples.sim.atomic_action.support.time.sleep"):
         replay_trajectory(
             sim,
             robot,
@@ -1349,7 +1345,7 @@ def test_replay_timed_trajectory_settles_once_after_newton_native_grasp() -> Non
         dt=torch.tensor([[0.0, 0.1, 0.1]]),
     )
 
-    with patch("scripts.tutorials.atomic_action.tutorial_utils.time.sleep"):
+    with patch("examples.sim.atomic_action.support.time.sleep"):
         replay_trajectory(
             sim,
             robot,
@@ -1387,7 +1383,7 @@ def test_replay_timed_trajectory_settles_after_each_native_hand_phase() -> None:
         dt=torch.tensor([[0.0, 0.1, 0.1, 0.1, 0.1, 0.1]]),
     )
 
-    with patch("scripts.tutorials.atomic_action.tutorial_utils.time.sleep"):
+    with patch("examples.sim.atomic_action.support.time.sleep"):
         replay_trajectory(
             sim,
             robot,
@@ -1426,7 +1422,7 @@ def test_obstacle_animation_interpolates_and_reaches_target_pose() -> None:
 
 def test_obstacle_animation_paces_live_viewer_in_wall_time() -> None:
     with patch(
-        "scripts.tutorials.atomic_action.dynamic_obstacle_recovery.time.sleep"
+        "examples.sim.atomic_action.dynamic_obstacle_recovery.time.sleep"
     ) as sleep:
         _run_obstacle_animation(pace_wall_time=True)
 
@@ -1450,7 +1446,7 @@ def test_blocking_pose_targets_the_selected_initial_path_waypoint() -> None:
 
 def test_dynamic_obstacle_recovery_keeps_strict_collision_contract() -> None:
     module = importlib.import_module(
-        "scripts.tutorials.atomic_action.dynamic_obstacle_recovery"
+        "examples.sim.atomic_action.dynamic_obstacle_recovery"
     )
     main_source = inspect.getsource(module.main)
 

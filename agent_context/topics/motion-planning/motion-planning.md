@@ -149,10 +149,9 @@ explicitly enabled factor that cannot produce a qpos variant raises rather than
 disappearing: `ik` without Jacobians, and `approach`, which owns Cartesian
 standoff poses the caller must replan. The resolved config is reported on the result.
 
-`scripts/tutorials/atomic_action/place.py` is the demonstration host, hooked
-the way the Affordance sampling tutorials are: shared helpers live in
-`examples/sim/atomic_action/support.py` through the `tutorial_utils.py` adapter;
-the tutorial declares only which named segments may move,
+`examples/sim/atomic_action/place.py` is the demonstration host. Shared
+helpers live directly in `examples/sim/atomic_action/support.py`; the example
+declares which named segments may move,
 and one variant replays per simulation row. Phases come from the action's own
 `TrajectorySegment` ranges; only motion at or after the lift is retimed so the
 shared `clear_dynamics()` step stays aligned. `--variant_plot_dir` writes a
