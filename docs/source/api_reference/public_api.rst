@@ -287,6 +287,20 @@ embodichain.data_pipeline.depth_video
    DEPTH_MILLIMETER_UNIT
    DEPTH_QMAX
 
+embodichain.data_pipeline.dynamics.generation
+---------------------------------------------
+
+Generate bounded batches of Cartpole/Ant trajectories with Newton's built-in
+analytical solvers. This offline collector does not initialize DexSim or register
+a learned simulation solver. Committed shards support resumable generation.
+
+.. currentmodule:: embodichain.data_pipeline.dynamics.generation
+
+.. autosummary::
+
+   DynamicsGenerationCfg
+   generate_dataset
+
 embodichain.data_pipeline.dynamics.shards
 -----------------------------------------
 

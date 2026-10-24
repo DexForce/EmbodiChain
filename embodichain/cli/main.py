@@ -115,7 +115,7 @@ COMMANDS = (
     Command(
         name="dynamics",
         target="embodichain.cli.dynamics:main",
-        help="Generate data, train and evaluate neural dynamics solvers.",
+        help="Generate data, train and evaluate neural dynamics models.",
     ),
     Command(
         name="preview_lerobot_data",

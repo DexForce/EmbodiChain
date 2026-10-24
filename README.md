@@ -50,8 +50,8 @@ To get started with EmbodiChain, follow these steps:
 
 Official task environments are included in the main `embodichain` installation.
 Use `embodichain list-task` to discover tasks and `embodichain run-task` to launch
-one with its configuration. See [Task Environments](https://dexforce.github.io/EmbodiChain/main/quick_start/task_environments.html)
-for a quick start and links to task authoring guides.
+one with its configuration. See [Supported Tasks](https://dexforce.github.io/EmbodiChain/main/resources/task/index.html)
+for available tasks, runnable configurations, and task authoring guides.
 
 For external training, see the optional
 [RLinf integration](https://dexforce.github.io/EmbodiChain/main/guides/rlinf.html)

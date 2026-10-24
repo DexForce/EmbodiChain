@@ -129,6 +129,13 @@ The workflow configurations are under
 They configure `embodichain dynamics` commands and are separate from runnable
 Gym deployment configs.
 
+These Scene-matched generation presets declare `collector: scene` and require
+the DexSim solver/Scene extension. The independent model/data/training PR also
+provides `collector: newton` (the CLI default), which collects directly with
+Newton and needs no DexSim imports. Its separate physical signature describes
+a different model-building path; it cannot be relabeled to qualify a Scene
+export. Existing published datasets remain available for offline training.
+
 For a short local workflow, use the smoke presets:
 
 ```bash

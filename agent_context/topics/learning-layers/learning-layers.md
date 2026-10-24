@@ -13,7 +13,10 @@ returns TCP poses and geometric Jacobians from one FK pass, retaining dJ/dq.
 
 `learning/layers/` owns `KinematicsLayer` and `DifferentiableIKLayer` Torch
 module interfaces. `learning/models/` owns general MLPs, feature normalization
-and configuration-driven MLP construction. These components do not import RL,
+and configuration-driven MLP construction. `learning/models/nerd/` owns the NeRD causal model and portable weights;
+offline dynamics training is in `learning/dynamics/`. See
+[neural dynamics](../neural-dynamics/neural-dynamics.md) for dataset and checkpoint
+contracts. These components do not import RL,
 TensorDict or simulation. RL policy interfaces, actor-critic composition and
 policy registration/builders belong to `learning/rl/policies/`; RL code consumes
 the shared networks and normalizer. See [RL learning](../rl-learning/rl-learning.md)

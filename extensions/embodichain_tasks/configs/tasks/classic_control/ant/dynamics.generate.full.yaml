@@ -1,5 +1,6 @@
 # Dynamics workflow configuration; not a runnable Gym deployment.
 robot: ant
+collector: scene
 output_dir: ../../../../../../outputs/dynamics/ant/full/data
 device: cuda:0
 num_envs: 512

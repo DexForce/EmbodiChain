@@ -64,9 +64,10 @@ Task Environments
 
 Official task environments are included in the main ``embodichain``
 installation. Use ``embodichain list-task`` to discover tasks and
-``embodichain run-task`` to launch one with its configuration. See `Task
-Environments <https://dexforce.github.io/EmbodiChain/main/quick_start/task_environments.html>`__
-for a quick start and links to task authoring guides.
+``embodichain run-task`` to launch one with its configuration. See
+`Supported
+Tasks <https://dexforce.github.io/EmbodiChain/main/resources/task/index.html>`__
+for available tasks, runnable configurations, and task authoring guides.
 
 For external training, see the optional `RLinf
 integration <https://dexforce.github.io/EmbodiChain/main/guides/rlinf.html>`__

@@ -46,7 +46,9 @@ def test_generate_rollout_routing_and_path_resolution(tmp_path, monkeypatch):
     host.evaluate_rollouts = Mock(return_value={"status": "ok"})
     monkeypatch.setitem(sys.modules, host.__name__, host)
     config = tmp_path / "generate.yaml"
-    config.write_text("robot: cartpole\noutput_dir: data\ndevice: cpu\nresume: false\n")
+    config.write_text(
+        "robot: cartpole\ncollector: scene\noutput_dir: data\ndevice: cpu\nresume: false\n"
+    )
     main(["generate", "--config", str(config), "--seed", "7", "--resume"])
     received = host.generate_dataset.call_args.args[0]
     assert received["output_dir"] == str(tmp_path / "data")

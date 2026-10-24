@@ -223,10 +223,17 @@ def main(argv: Sequence[str] | None = None) -> None:
                     )
             config = _resolve_paths(config, path.parent, args.operation)
             if args.operation == "generate":
-                from embodichain.lab.sim.physics.solvers.collection import (
-                    generate_dataset,
-                )
-
+                collector = config.pop("collector", "newton")
+                if collector == "newton":
+                    from embodichain.data_pipeline.dynamics.generation import (
+                        generate_dataset,
+                    )
+                elif collector == "scene":
+                    from embodichain.lab.sim.physics.solvers.collection import (
+                        generate_dataset,
+                    )
+                else:
+                    raise ValueError("collector must be newton or scene")
                 result = generate_dataset(config)
             elif args.operation == "train":
                 from embodichain.learning.dynamics.workflow import run_train

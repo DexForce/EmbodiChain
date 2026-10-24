@@ -26,7 +26,6 @@ Table of Contents
    :glob:
 
    quick_start/install.md
-   quick_start/task_environments
    tutorial/index
    guides/index
 

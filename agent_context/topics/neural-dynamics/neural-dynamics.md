@@ -10,12 +10,20 @@
 | Tensor state/contact codec | `compute/dynamics/codec.py` |
 | Shared rollout error/content calculations | `compute/dynamics/_evaluation.py` |
 | Network and portable checkpoints | `learning/models/nerd/` |
-| Teacher collection and rollout evaluation | `lab/sim/physics/solvers/collection.py` |
+| Matched Scene collection and rollout evaluation | `lab/sim/physics/solvers/collection.py` |
 | Shard persistence and sequence windows | `data_pipeline/dynamics/shards.py` |
 | Supervised training, resume and export | `learning/dynamics/trainer.py`, `workflow.py` |
 | Official comparisons | `learning/dynamics/reference.py`, `comparison.py`, `report.py` |
 | Historical original-Warp rollout | `learning/dynamics/reference_rollout.py` |
 | Command dispatch | `cli/dynamics.py`: `embodichain dynamics` |
+
+The independent model/data/training layer lives below the solver integration.
+`data_pipeline/dynamics/generation.py` collects directly with built-in Newton
+solvers and remains the default `dynamics generate` path. An explicit
+`collector: scene` selects this layer's matched Scene collector; its presets use
+that setting so exported models bind the actual deployment scene. Direct-Newton
+data uses `nerd-direct-newton-builder-v1` and must not be relabeled as a matching
+Scene signature. Both collectors share asset interpretation and shard formats.
 
 DexSim owns the generic registry and provider contracts. EmbodiChain registers
 `nerd` in `pyproject.toml`; third-party packages use the same entry-point group.
