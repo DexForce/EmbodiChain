@@ -11,7 +11,7 @@ topics:
   aliases: [simulation system, simulation manager, Newton physics backend, motion module, sim motion, camera attachment, 运动能力模块, 仿真系统, 仿真管理器]
   keywords: [SimulationManager, SimulationManagerCfg, RenderCfg, DenoisingCfg, DenoisingMode, DLSSCfg,
     NRDCfg, DLSS, NRD, frame_time_delta_ms, explicit physics stepping, arena, DexSim, PhysicsBackendCfg,
-    DefaultPhysicsCfg, NewtonPhysicsCfg, VisualObject, VisualObjectCfg, UsdSourceCfg, source_prim_path, add_visual_object, 纯渲染对象, AutoSolverCfg, DexUniSolverCfg, DexUni, runtime control, deformable, particle set,
+    DefaultPhysicsCfg, NewtonPhysicsCfg, VisualObject, VisualObjectCfg, VisualMaterial, VisualMaterialCfg, VisualMaterialInst, preview-material, 材质预览, UsdSourceCfg, source_prim_path, add_visual_object, 纯渲染对象, AutoSolverCfg, DexUniSolverCfg, DexUni, runtime control, deformable, particle set,
     ArticulationJointKinematics, get_parent_joint_chain, asset_physics_mode, joint_drive_props, enable_gravity,
     fixed-cadence playback, quaternion, xyzw]
   paths: [topics/simulation-system/simulation-system.md]
@@ -24,6 +24,9 @@ topics:
   - embodichain/lab/sim/cfg/
   - embodichain/lab/sim/physics/
   - embodichain/lab/sim/spawn/
+  - embodichain/lab/sim/material.py
+  - embodichain/lab/sim/_material_presets.py
+  - embodichain/lab/scripts/preview_material.py
   - embodichain/lab/sim/common.py
   - embodichain/lab/sim/_startup_summary.py
   - embodichain/lab/sim/_runtime_controls.py
@@ -34,7 +37,7 @@ topics:
   - embodichain/lab/sim/objects/gizmo.py
   - embodichain/lab/gym/envs/base_env.py
   watch_paths: [embodichain/lab/sim/sim_manager.py, embodichain/lab/sim/cfg/, embodichain/lab/sim/physics/,
-    embodichain/lab/sim/spawn/, embodichain/lab/sim/objects/, tests/sim/]
+    embodichain/lab/sim/spawn/, embodichain/lab/sim/material.py, embodichain/lab/sim/_material_presets.py, embodichain/lab/scripts/preview_material.py, tests/lab/scripts/test_preview_material.py, embodichain/lab/sim/objects/, tests/sim/]
   related_topics: [env-framework, robot-system, sensor-system, sim-visualization, ik-solvers, motion-planning,
     atomic-actions, rl-learning, configclass-pattern, robot-workspace]
   status: active
@@ -423,7 +426,7 @@ topics:
   title: Data Assets
   aliases: [data assets, data path, asset download, 数据资产, 资产下载, 数据路径]
   keywords: [get_data_path, get_data_class, EmbodiChainDataset, TabletopFourBases, demo assets, EMBODICHAIN_DATA_ROOT, EMBODICHAIN_DATASET_ROOT,
-    CATEGORY_MODULES, download lock, get_registry]
+    CATEGORY_MODULES, download lock, get_registry, DefaultMaterials, list_default_materials, get_default_material_info]
   paths: [topics/data-assets/data-assets.md]
   source_of_truth:
   - embodichain/data/dataset.py
@@ -431,7 +434,11 @@ topics:
   - embodichain/data/download.py
   - embodichain/data/__init__.py
   - embodichain/data/assets/__init__.py
-  watch_paths: [embodichain/data/, embodichain/cli/main.py, tests/data/]
+  - embodichain/data/assets/materials.py
+  - embodichain/data/default_materials.py
+  - embodichain/data/default_materials.json
+  - embodichain/_material_catalog.py
+  watch_paths: [embodichain/data/, embodichain/_material_catalog.py, embodichain/cli/main.py, tests/data/]
   related_topics: [gen-sim, robot-system, data-pipeline]
   status: active
 - id: data-pipeline

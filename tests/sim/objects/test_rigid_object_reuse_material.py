@@ -30,6 +30,7 @@ class _MockRigidObject(RigidObject):
         # num_instances is a read-only property on BatchEntity, driven by _entities.
         self._entities = entities
         self._all_indices = list(range(len(entities)))
+        self._visual_material = [None] * len(entities)
         self.uid = uid
 
 
@@ -64,6 +65,8 @@ def test_get_existing_visual_material_builds_state_per_segment():
     assert states[0][0].working_inst is states[0][1].working_inst
     seg_mats[0][1].create_inst.assert_called_once()
     seg_mats[1][1].create_inst.assert_not_called()
+    assert states[0][0].working_inst.mat is seg_mats[0][1].create_inst.return_value
+    seg_mats[0][1].get_inst.assert_not_called()
 
 
 def test_get_existing_visual_material_shared_returns_single_env():
@@ -104,3 +107,4 @@ def test_apply_render_material_inst_skips_attached_material():
     obj.apply_render_material_inst(0, inst)
 
     render_body.set_material.assert_not_called()
+    assert obj.get_visual_material_inst()[0].mat is inst

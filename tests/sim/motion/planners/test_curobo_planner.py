@@ -1172,7 +1172,7 @@ class _FakeDexsimMaterial:
     def __init__(self, name, color):
         self.name = name
         self.color = color
-        self.pbr_type = None
+        self.transmission = None
         self.pbr_params = {}
 
     def set_base_color(self, color):
@@ -1181,8 +1181,8 @@ class _FakeDexsimMaterial:
     def get_inst(self):
         return self
 
-    def update_pbr_material_type(self, material_type):
-        self.pbr_type = material_type
+    def set_transmission(self, value):
+        self.transmission = value
 
     def set_pbr_param(self, name, *values):
         self.pbr_params[name] = values
@@ -1261,6 +1261,9 @@ def test_obstacle_collision_visualization_loads_one_combined_dexsim_actor():
     assert bounds.get_extent() == pytest.approx([0.1, 0.1, 0.1])
     assert actors[0].material.name == "curobo_world_collision_material"
     assert actors[0].material.color == [1.0, 0.0, 0.0]
+    assert actors[0].material.transmission == pytest.approx(0.55)
+    assert "colorAbsorption" not in actors[0].material.pbr_params
+    assert "scaleAbsorption" not in actors[0].material.pbr_params
 
 
 def test_combined_collision_visualization_colors_and_cleans_two_actors(
@@ -1324,11 +1327,13 @@ def test_combined_collision_visualization_colors_and_cleans_two_actors(
     assert robot_bounds.get_extent() == pytest.approx([0.22, 0.22, 0.22])
     assert robot_actor.material.name == "curobo_robot_collision_material"
     assert robot_actor.material.color == [0.75, 0.75, 1.0]
+    assert robot_actor.material.transmission == pytest.approx(0.55)
     obstacle_bounds = obstacle_actor.mesh.get_axis_aligned_bounding_box()
     assert obstacle_bounds.get_center() == pytest.approx([2.0, 2.0, 3.0])
     assert obstacle_bounds.get_extent() == pytest.approx([0.1, 0.1, 0.1])
     assert obstacle_actor.material.name == "curobo_world_collision_material"
     assert obstacle_actor.material.color == [1.0, 0.75, 0.75]
+    assert obstacle_actor.material.transmission == pytest.approx(0.55)
     assert env.removed_actors == list(reversed(env.actors))
     assert all(not Path(path).exists() for path in env.loaded_paths)
     assert "Showing 2 cuRobo collision spheres" in prompts[0]

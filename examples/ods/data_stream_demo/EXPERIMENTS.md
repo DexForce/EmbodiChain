@@ -63,11 +63,16 @@ versions. Compare within that frozen recipe rather than mixing historical runs.
 [PR #850](https://github.com/DexForce/EmbodiChain/pull/850) owns the standalone
 ODS foundation: the flow controller, engine health/status and copy/lifecycle
 fixes, their production tests and benchmark, the simple BC caller migration,
-and public operational/API documentation. It targets `main` independently.
+and public operational/API documentation. It was merged into `main` as
+[`0dcacf739`](https://github.com/DexForce/EmbodiChain/commit/0dcacf7393f30876cd57e65d921f8df5ab1ee6a8)
+after the full repository test gate passed, including the runtime-module import
+fix. The controller accepts only its engine's live source; resident sources
+sample directly through their own interface.
 
 [PR #828](https://github.com/DexForce/EmbodiChain/pull/828) builds on that
-foundation and owns the lazy shared ResNet10 encoder plus the runnable visual
-training/data-stream example, qualification, recording, auditing and reporting.
+merged foundation and targets `main`. It owns the lazy shared ResNet10 encoder
+plus the runnable visual training/data-stream example, qualification, recording,
+auditing and reporting.
 The delivery diagnostic also supplies helpers used by visual training; moving
 individual entry points requires extracting those shared helpers first.
 

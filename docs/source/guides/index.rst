@@ -12,6 +12,7 @@ Practical guides for common tasks in EmbodiChain.
    add_robot
    preview_asset
    preview_robot
+   preview_material
    run_task
    expert_task_language
    offline_expert_datasets

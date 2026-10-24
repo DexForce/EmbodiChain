@@ -33,6 +33,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import MISSING, dataclass, field, fields, replace
 import math
+import hashlib
 import numbers
 import os
 import warnings
@@ -1723,28 +1724,16 @@ def _compile_visual_material(
 ) -> tuple[str | None, tuple[str, MaterialDesc] | None]:
     if cfg is None:
         return None, None
-    key = str(cfg.uid or f"{object_uid}_material")
-    base_color = tuple(float(value) for value in cfg.base_color)
-    if len(base_color) != 4:
-        raise ValueError("VisualMaterialCfg.base_color must be RGBA.")
-    emissive_rgb = tuple(
-        float(value) * float(cfg.emissive_intensity) for value in cfg.emissive
-    )
-    if len(emissive_rgb) != 3:
-        raise ValueError("VisualMaterialCfg.emissive must be RGB.")
-    desc = MaterialDesc(
-        name=key,
-        base_color=base_color,
-        base_color_map=cfg.base_color_texture,
-        normal_map=cfg.normal_texture,
-        emissive=(*emissive_rgb, 1.0),
-        roughness=float(cfg.roughness),
-        roughness_map=cfg.roughness_texture,
-        metallic=float(cfg.metallic),
-        metallic_map=cfg.metallic_texture,
-        ao_map=cfg.ao_texture,
-        ior=float(cfg.ior),
-    )
+    from embodichain.lab.sim.material import _material_desc_from_cfg
+
+    key = cfg.uid or f"{object_uid}_material"
+    desc = _material_desc_from_cfg(cfg, key)
+    if not cfg.uid:
+        # Replacements may keep the object UID while changing appearance. Reuse
+        # an implicit template only for the same normalized material definition.
+        digest = hashlib.sha256(repr(desc).encode("utf-8")).hexdigest()[:16]
+        key = f"{key}_{digest}"
+        desc.name = key
     return key, (key, desc)
 
 
