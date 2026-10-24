@@ -1,6 +1,5 @@
 embodichain.learning
-====================
-
+=============
 .. automodule:: embodichain.learning
 
    .. rubric:: Submodules
@@ -11,6 +10,7 @@ embodichain.learning
       models
       rl
       sl
+      dynamics
 
 Reinforcement Learning
 ----------------------
