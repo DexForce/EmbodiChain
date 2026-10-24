@@ -83,13 +83,32 @@ Each renderer must run in a separate process. `--gallery` requires Pillow and
 matplotlib; install those packages if they are absent. Gallery composition runs
 after native renderer cleanup and uses the saved captures.
 
+## Studio lighting
+
+The default `material-studio-v2` recipe uses the same lighting for every preset
+so material appearances can be compared:
+
+| Setting | Value |
+| --- | ---: |
+| Linear exposure multiplier | 1.6 |
+| Environment emission intensity | 48 |
+| Key rectangle light intensity | 150 |
+| Fill rectangle light intensity | 120 |
+
+Light colors, geometry and camera poses are fixed by the preview scene.
+These settings are recorded in `results.json` under `lighting`, alongside the
+`scene` recipe identifier. The catalog images use this recipe at 640×640,
+six accumulation frames and 12 render iterations per frame. Material parameters
+remain the authored preset values.
+
 ## Outputs and direct-native verification
 
 Every render writes `<PresetName>_preset.png` and `results.json` under
 `--output` (default `outputs/default-materials`). Use a separate directory per
 variant or renderer to retain previous results. The report records the scene
-recipe, renderer and DexSim version, capture settings, material source/revision,
-serialized configuration, geometry choice, parameter readback and exclusions.
+recipe and lighting, renderer and DexSim version, capture settings, material
+source/revision, serialized configuration, geometry choice, parameter readback
+and exclusions.
 Unspecified configuration fields stay `null`; authored resource defaults are
 not expanded into explicit overrides.
 

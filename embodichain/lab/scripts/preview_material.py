@@ -38,6 +38,13 @@ if TYPE_CHECKING:
 
 __all__ = ["main", "cli"]
 
+_STUDIO_LIGHTING = {
+    "exposure": 1.6,
+    "environment_intensity": 48.0,
+    "key_intensity": 150.0,
+    "fill_intensity": 120.0,
+}
+
 
 def _positive_integer(value: str) -> int:
     number = int(value)
@@ -344,7 +351,7 @@ def _render_materials(
                 min_bounces=3,
                 max_bounces=14,
                 tone_mapping_enabled=True,
-                tone_mapping_exposure=0.9,
+                tone_mapping_exposure=_STUDIO_LIGHTING["exposure"],
                 denoising=DenoisingCfg(window="optix", offscreen="optix"),
             ),
         )
@@ -355,7 +362,9 @@ def _render_materials(
     rows: list[dict[str, Any]] = []
     try:
         sim.enable_physics(False)
-        sim.set_emission_light([0.85, 0.9, 1.0], 24.0)
+        sim.set_emission_light(
+            [0.85, 0.9, 1.0], _STUDIO_LIGHTING["environment_intensity"]
+        )
         # Independent, fixed scene: colored cards reveal transmission, broad
         # rectangular lights reveal roughness and normal-map direction.
         for index, (x, color) in enumerate(
@@ -381,8 +390,20 @@ def _render_materials(
                 texture = env.create_color_texture(pixels, has_alpha=False)
                 card_material.inst.set_base_color_texture(texture_obj=texture)
         for name, location, direction, color, power in (
-            ("key", (-2, -2, 3), (2, 2, -2), (1, 0.85, 0.7), 90),
-            ("fill", (2, 0, 3), (-2, 0, -2), (0.6, 0.8, 1), 60),
+            (
+                "key",
+                (-2, -2, 3),
+                (2, 2, -2),
+                (1, 0.85, 0.7),
+                _STUDIO_LIGHTING["key_intensity"],
+            ),
+            (
+                "fill",
+                (2, 0, 3),
+                (-2, 0, -2),
+                (0.6, 0.8, 1),
+                _STUDIO_LIGHTING["fill_intensity"],
+            ),
         ):
             light = env.create_light(name, render.LightType.RECT)
             light.set_location(*location)
@@ -612,7 +633,8 @@ def _render_materials(
             print(json.dumps(row), flush=True)
         report = {
             "schema_version": 1,
-            "scene": "material-studio-v1",
+            "scene": "material-studio-v2",
+            "lighting": dict(_STUDIO_LIGHTING),
             "renderer": args.renderer,
             "dexsim": version("dexsim-engine"),
             "size": args.size,

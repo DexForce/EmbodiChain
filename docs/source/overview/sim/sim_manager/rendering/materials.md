@@ -6,9 +6,11 @@ EmbodiChain provides **24 public material presets** through one
 material supplies the inward-facing interface for the bubble preview.
 
 The images below are actual DexSim **0.5.1rc1 OfflineRT** renders. All presets
-use the same studio lighting and exposure; a checkerboard and colored cards
-make reflection, transmission and roughness visible. Click a material name in
-a table to open its individual image.
+use the same `material-studio-v2` lighting recipe: linear exposure 1.6,
+environment intensity 48, key light intensity 150 and fill light intensity 120.
+A checkerboard and colored cards make reflection, transmission and roughness
+visible. Click a material name in a table to open its individual image. See the
+{doc}`preview guide </guides/preview_material>` for reproduction settings.
 
 ## Create and override a material
 
