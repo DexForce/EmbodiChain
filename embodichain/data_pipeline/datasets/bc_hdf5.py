@@ -42,7 +42,7 @@ class BCWindowDataset:
         observation_key: Numeric HDF5 dataset containing measured observations.
         observation_slice: Optional feature slice selected before model input.
         target_key: HDF5 physical targets, when no encoder is supplied.
-        target_encoder: Optional task-owned transform of aligned numeric fields
+        target_encoder: Optional pure deterministic task-owned transform of aligned numeric fields
             with leading ``[batch,prediction_horizon]`` axes.
         target_fields: HDF5 inputs required by the target encoder.
         target_encoder_id: Explicit versioned target-transform identity, required
@@ -135,6 +135,9 @@ class BCWindowDataset:
             "target_fields": target_fields,
             "target_encoder_id": target_encoder_id,
             "cameras": self.cameras,
+            "numeric_cast": "float32",
+            "image_transform": "uint8-thwc-rgb-to-float32-nchw-div255@1",
+            "sampling": "episode-uniform-complete-windows@1",
         }
         self.view_id = hashlib.sha256(
             json.dumps(view, sort_keys=True, allow_nan=False).encode()

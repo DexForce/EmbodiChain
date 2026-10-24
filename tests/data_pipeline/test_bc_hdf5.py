@@ -248,3 +248,48 @@ def test_one_batch_prefetch_preserves_sampling_cursor_and_retry_batches(tmp_path
     finally:
         direct.close()
         prefetched.close()
+
+
+def test_prefetched_training_resume_rebuilds_unused_batch_exactly(tmp_path):
+    manifest = _corpus(tmp_path, cameras=False)
+
+    def trainer(name):
+        dataset = BCWindowDataset(manifest, observation_slice=slice(0, 1))
+        model = ChunkBCModel(
+            ChunkBCModelCfg(observation_dim=1, target_dim=1, hidden_dims=(4,))
+        )
+        learner = SupervisedLearner(
+            model, ChunkBCObjective(), torch.optim.Adam(model.parameters(), lr=1e-3)
+        )
+        return SupervisedTrainer(
+            learner,
+            PrefetchedBCSource(HDF5BCSource(dataset)),
+            SupervisedTrainerCfg(
+                total_updates=4,
+                batch_size=2,
+                output_dir=str(tmp_path / name),
+                checkpoint_interval=0,
+                seed=19,
+            ),
+        )
+
+    full = trainer("full")
+    resumed = trainer("resumed")
+    try:
+        full.fit(stop_after=2)
+        prefix = tmp_path / "prefix.pt"
+        full.save(prefix)
+        full.fit()
+        resumed.resume(prefix)
+        resumed.fit()
+        for name, value in full.learner.model.state_dict().items():
+            if isinstance(value, torch.Tensor):
+                torch.testing.assert_close(
+                    resumed.learner.model.state_dict()[name], value, atol=0, rtol=0
+                )
+        torch.testing.assert_close(
+            full.sampler.get_state(), resumed.sampler.get_state(), atol=0, rtol=0
+        )
+    finally:
+        full.source.close()
+        resumed.source.close()
