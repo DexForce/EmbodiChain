@@ -124,3 +124,39 @@ def test_unified_cli_routes_sl_help():
     )
     assert "--config" in result.stdout
     assert "--resume" in result.stdout
+
+
+def test_sample_metadata_is_owned():
+    source = TensorBatchSource(
+        SupervisedBatch(
+            torch.ones(2, 1), torch.zeros(2, 1), metadata={"units": {"position": "m"}}
+        )
+    )
+    first = source.sample(1, generator=torch.Generator())
+    first.metadata["units"]["position"] = "cm"
+    second = source.sample(1, generator=torch.Generator())
+    assert second.metadata["units"]["position"] == "m"
+
+
+def test_optimizer_incompatibility_rejected_before_model_mutation():
+    first = torch.nn.Linear(2, 1)
+    saved = SupervisedLearner(
+        first, Regression(), torch.optim.Adam(first.parameters())
+    ).state_dict()
+    for optimizer in (torch.optim.SGD, torch.optim.Adam):
+        candidate = torch.nn.Linear(2, 1)
+        parameters = (
+            [{"params": [candidate.weight]}, {"params": [candidate.bias]}]
+            if optimizer is torch.optim.Adam
+            else candidate.parameters()
+        )
+        learner = SupervisedLearner(
+            candidate, Regression(), optimizer(parameters, lr=0.01)
+        )
+        before = copy.deepcopy(candidate.state_dict())
+        with pytest.raises(ValueError, match="optimizer"):
+            learner.load_state_dict(saved)
+        for key, value in before.items():
+            torch.testing.assert_close(
+                candidate.state_dict()[key], value, rtol=0, atol=0
+            )

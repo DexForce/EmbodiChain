@@ -133,6 +133,20 @@ class SupervisedLearner:
         )
         return metrics
 
+    def _optimizer_layout(self) -> list[list[str]]:
+        names = {
+            id(parameter): name for name, parameter in self.model.named_parameters()
+        }
+        try:
+            return [
+                [names[id(parameter)] for parameter in group["params"]]
+                for group in self.optimizer.param_groups
+            ]
+        except KeyError as error:
+            raise ValueError(
+                "Optimizer parameters must belong to the learner model"
+            ) from error
+
     def state_dict(self) -> dict[str, Any]:
         """Return model, optimizer and committed update state.
 
@@ -142,6 +156,8 @@ class SupervisedLearner:
         return {
             "model": self.model.state_dict(),
             "optimizer": self.optimizer.state_dict(),
+            "optimizer_type": f"{type(self.optimizer).__module__}.{type(self.optimizer).__qualname__}",
+            "optimizer_layout": self._optimizer_layout(),
             "num_updates": self.num_updates,
         }
 
@@ -167,6 +183,22 @@ class SupervisedLearner:
         count = state["num_updates"]
         if type(count) is not int or count < 0:
             raise ValueError("Invalid committed update count")
+        optimizer_type = (
+            f"{type(self.optimizer).__module__}.{type(self.optimizer).__qualname__}"
+        )
+        if (
+            state.get("optimizer_type") != optimizer_type
+            or state.get("optimizer_layout") != self._optimizer_layout()
+        ):
+            raise ValueError(
+                "Supervised checkpoint optimizer type or parameter layout differs"
+            )
+        groups = state["optimizer"].get("param_groups", [])
+        if len(groups) != len(self.optimizer.param_groups) or any(
+            len(group.get("params", [])) != len(actual["params"])
+            for group, actual in zip(groups, self.optimizer.param_groups)
+        ):
+            raise ValueError("Supervised checkpoint optimizer parameter groups differ")
         self.model.load_state_dict(saved)
         self.optimizer.load_state_dict(state["optimizer"])
         self.num_updates = count
