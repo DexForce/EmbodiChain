@@ -1,0 +1,257 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+"""Lazy offline training, evaluation and model export entry points."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+__all__ = ["run_train", "run_eval", "run_export"]
+
+# These fields may only come from the dataset's measured deployment contract.
+# Even an absent field cannot be invented through a training annotation override.
+_DEPLOYMENT_MANIFEST_FIELDS = frozenset(
+    {
+        "robot",
+        "codec",
+        "dt",
+        "joint_names",
+        "q_dim",
+        "qd_dim",
+        "asset_sha256",
+        "assets",
+        "asset_hashes",
+        "physics_signature",
+        "physics_signature_schema",
+        "gravity",
+        "contact_schema",
+        "world_rotation_xyzw",
+        "gravity_transport_override",
+        "source_physical_arrays",
+        "legacy_velocity",
+        "reference_friction_mapping",
+    }
+)
+
+
+def _arguments(value: dict[str, Any], allowed: set[str]) -> None:
+    unknown = value.keys() - allowed
+    if unknown:
+        raise ValueError(f"Unknown dynamics workflow fields: {sorted(unknown)}")
+
+
+def run_train(config: dict[str, Any]) -> dict[str, Any]:
+    """Train from scratch, resume a committed run, or fine-tune an export.
+
+    Configuration keys are ``dataset``, ``output_dir``, ``model``, ``train``,
+    ``manifest``, optional ``statistics``, ``resume``, ``fine_tune``,
+    ``include_prefix``, ``sample_order`` and ``stop_after``. Relative paths should
+    be resolved by the configuration-file entry point before this call.
+    """
+    _arguments(
+        config,
+        {
+            "dataset",
+            "output_dir",
+            "model",
+            "train",
+            "manifest",
+            "statistics",
+            "resume",
+            "fine_tune",
+            "include_prefix",
+            "sample_order",
+            "stop_after",
+        },
+    )
+    import torch
+    from embodichain.compute.dynamics import NeRDStateCodec
+    from embodichain.learning.models.nerd import NeRDModel, NeRDModelCfg, load_model
+    from embodichain.data_pipeline.dynamics.shards import (
+        DynamicsWindowDataset,
+        load_manifest,
+    )
+    from .trainer import DynamicsTrainCfg, DynamicsTrainer, load_statistics
+    from ._runtime import _training_runtime_identity
+
+    if config.get("resume") and config.get("statistics"):
+        raise ValueError("Resume restores frozen statistics; omit statistics override")
+    if config.get("resume") and config.get("fine_tune"):
+        raise ValueError("resume and fine_tune are mutually exclusive")
+    cfg = DynamicsTrainCfg(**config.get("train", {}))
+    torch.manual_seed(cfg.seed)
+    dataset_metadata = load_manifest(config["dataset"])["metadata"]
+    supplied_manifest = config.get("manifest")
+    manifest = dataset_metadata if supplied_manifest is None else supplied_manifest
+    if not isinstance(manifest, dict):
+        raise ValueError("Training manifest must be a mapping")
+    # Canonical JSON data is also the export contract; copy before training so an
+    # external dictionary mutation cannot relabel a run after validation.
+    manifest = json.loads(json.dumps(manifest, allow_nan=False))
+    missing = object()
+    for key in set(dataset_metadata) | _DEPLOYMENT_MANIFEST_FIELDS:
+        if manifest.get(key, missing) != dataset_metadata.get(key, missing):
+            raise ValueError(
+                f"Training manifest/data {key} mismatch; annotations may add fields but cannot replace or drop dataset provenance"
+            )
+    codec = NeRDStateCodec(**manifest["codec"])
+    if config.get("fine_tune"):
+        model, pretrained_manifest = load_model(config["fine_tune"], device=cfg.device)
+        if pretrained_manifest["codec"] != manifest["codec"] or pretrained_manifest.get(
+            "dt"
+        ) != manifest.get("dt"):
+            raise ValueError("Fine-tuning requires compatible codec and timestep")
+    else:
+        model = NeRDModel(NeRDModelCfg(**config["model"]))
+    train = DynamicsWindowDataset(
+        config["dataset"],
+        "train",
+        model.cfg.history_length,
+        include_prefix=config.get("include_prefix", False),
+        verify=True,
+    )
+    validation = DynamicsWindowDataset(
+        config["dataset"],
+        "validation",
+        model.cfg.history_length,
+        include_prefix=config.get("include_prefix", False),
+    )
+    statistics = (
+        load_statistics(config["statistics"]) if config.get("statistics") else None
+    )
+    order = None
+    if config.get("sample_order"):
+        order_path = Path(config["sample_order"])
+        order = (
+            order_path
+            if order_path.suffix in {".npy", ".json"}
+            else torch.load(order_path, map_location="cpu", weights_only=True)
+        )
+    try:
+        trainer = DynamicsTrainer(
+            model,
+            codec,
+            train,
+            validation,
+            cfg,
+            config["output_dir"],
+            manifest=manifest,
+            statistics=statistics,
+            initialize_normalization=not config.get("resume")
+            and (not config.get("fine_tune") or statistics is not None),
+            sample_order=order,
+        )
+        if config.get("resume"):
+            trainer.resume(config["resume"])
+        result = trainer.train(stop_after=config.get("stop_after"))
+        result["runtime_identity"] = _training_runtime_identity(trainer.model)
+        Path(config["output_dir"], "result.json").write_text(
+            json.dumps(result, indent=2, allow_nan=False)
+        )
+        return result
+    finally:
+        train.close()
+        validation.close()
+
+
+def run_eval(config: dict[str, Any]) -> dict[str, Any]:
+    """Evaluate an exported model on a fixed offline split, without simulation."""
+    _arguments(
+        config,
+        {
+            "dataset",
+            "model",
+            "split",
+            "batch_size",
+            "device",
+            "output",
+            "include_prefix",
+        },
+    )
+    from embodichain.compute.dynamics import NeRDStateCodec
+    from embodichain.learning.models.nerd import load_model
+    from embodichain.data_pipeline.dynamics.shards import DynamicsWindowDataset
+    from .trainer import evaluate_model
+
+    device = config.get("device", "cpu")
+    model, manifest = load_model(config["model"], device=device)
+    codec = NeRDStateCodec(**manifest["codec"])
+    dataset = DynamicsWindowDataset(
+        config["dataset"],
+        config.get("split", "test"),
+        model.cfg.history_length,
+        include_prefix=config.get("include_prefix", False),
+        verify=True,
+    )
+    try:
+        metadata = dataset.manifest["metadata"]
+        if metadata["codec"] != manifest["codec"] or metadata.get("dt") != manifest.get(
+            "dt"
+        ):
+            raise ValueError("Evaluation data/model codec or timestep mismatch")
+        result = {
+            **evaluate_model(
+                model, codec, dataset, config.get("batch_size", 64), device
+            ),
+            "dataset_fingerprint": dataset.fingerprint,
+            "qualification": "offline_only",
+            "numerical_profile": manifest.get("numerical_profile", "default"),
+            "attention_backend": model.cfg.attention_backend,
+        }
+        if config.get("output"):
+            output = Path(config["output"])
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(json.dumps(result, indent=2, allow_nan=False))
+        return result
+    finally:
+        dataset.close()
+
+
+def run_export(checkpoint: str | Path, output: str | Path) -> dict[str, Any]:
+    """Export a training checkpoint using the production model artifact writer."""
+    import torch
+    from embodichain.learning.models.nerd import NeRDModel, NeRDModelCfg, export_model
+    from ._numerics import _checkpoint_numerical_profile
+
+    state = torch.load(checkpoint, map_location="cpu", weights_only=True)
+    if state.get("format") != "embodichain.nerd.training.v1":
+        raise ValueError("Expected a dynamics training checkpoint")
+    profile = _checkpoint_numerical_profile(state)
+    model = NeRDModel(NeRDModelCfg(**state["model_cfg"]))
+    model.load_state_dict(state["model"])
+    manifest = {
+        **state["manifest"],
+        "numerical_profile": profile,
+        "attention_backend": model.cfg.attention_backend,
+        "training": {
+            "global_step": state["global_step"],
+            "dataset_fingerprint": state["dataset_fingerprint"],
+            "qualification": "unqualified",
+            "numerical_profile": profile,
+            "attention_backend": model.cfg.attention_backend,
+        },
+    }
+    export_model(output, model, manifest)
+    return {
+        "output": str(output),
+        "global_step": state["global_step"],
+        "qualification": "unqualified",
+        "numerical_profile": profile,
+        "attention_backend": model.cfg.attention_backend,
+    }
