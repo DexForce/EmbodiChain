@@ -38,17 +38,6 @@ SUPPORT_TOLERANCE_M = 0.05
 PENETRATION_TOLERANCE_M = 0.01
 
 
-class UnqualifiedContainment(ValueError):
-    """A planar-floor rejection is not proof of a 3D container violation."""
-
-    def __init__(self, measurements: dict[str, Any]) -> None:
-        super().__init__(
-            "Planar floor projection cannot decide this nonplanar container; "
-            "a qualified three-dimensional cavity observation is required."
-        )
-        self.measurements = measurements
-
-
 def _support_gap_valid(gap: float) -> bool:
     """Relax positive support clearance, not penetration into the floor."""
     return -PENETRATION_TOLERANCE_M <= gap <= SUPPORT_TOLERANCE_M

@@ -308,7 +308,14 @@ def capture_final_goals(
             {
                 "members": observations,
                 "values": [
-                    all(v["accepted"][i] is True for v in observations)
+                    (
+                        all(v["accepted"][i] is True for v in observations)
+                        if all(
+                            v.get("available") is None or v["available"][i]
+                            for v in observations
+                        )
+                        else None
+                    )
                     for i in range(num_envs)
                 ],
             }
@@ -1189,6 +1196,23 @@ def _strong_placement_matches(
         return False
 
 
+def _containment_available(metrics: Mapping[str, Any]) -> list[bool]:
+    """Keep ambiguous 3D cavity evidence local to each released payload row."""
+    from .placement_evidence import _support_gap_valid
+
+    return [
+        not (free and raised and overlap and not footprint and _support_gap_valid(gap))
+        for free, raised, overlap, footprint, gap in zip(
+            metrics["released"],
+            metrics["reference_has_raised_geometry"],
+            metrics["reference_aabb_overlap"],
+            metrics["full_footprint_inside"],
+            metrics["support_gap_m"],
+            strict=True,
+        )
+    ]
+
+
 def _placement_record(
     target: Any,
     deployment: Any,
@@ -1365,6 +1389,7 @@ def _placement_record(
         )
     if (
         not legacy_observer
+        and not region_scope
         and predicate.arguments["relation"] == "on"
         and getattr(target, "_gen_sim_acceptance_contacts", None) is not None
     ):
@@ -1513,30 +1538,6 @@ def _placement_record(
         relation=predicate.arguments["relation"],
         released=released,
     )
-    if (
-        not legacy_observer
-        and predicate.arguments["relation"] == "inside"
-        and any(
-            not ok
-            and free
-            and raised
-            and overlap
-            and not footprint
-            and -0.01 <= gap <= 0.05
-            for ok, free, raised, overlap, footprint, gap in zip(
-                accepted,
-                released,
-                metrics.get("reference_has_raised_geometry", [False] * num_envs),
-                metrics.get("reference_aabb_overlap", [False] * num_envs),
-                metrics["full_footprint_inside"],
-                metrics["support_gap_m"],
-                strict=True,
-            )
-        )
-    ):
-        from .placement_evidence import UnqualifiedContainment
-
-        raise UnqualifiedContainment(metrics)
     if predicate.arguments.get("task_type") == "E4":
         metrics.update(
             placement_node_id=node["id"],
@@ -1550,6 +1551,11 @@ def _placement_record(
         "part_id": member["object_part_id"],
         "accepted": [a and b for a, b in zip(accepted, released, strict=True)],
         "measurements": metrics,
+        **(
+            {"available": _containment_available(metrics)}
+            if not legacy_observer and predicate.arguments["relation"] == "inside"
+            else {}
+        ),
     }
 
 
@@ -1705,6 +1711,8 @@ def _placement_measurement_matches(
     contact_timeline: Mapping[str, Any] | None = None,
 ) -> bool:
     """Do not accept a generic success/alignment record as relation evidence."""
+    if "available" in record and not _bool_rows(record["available"], num_envs):
+        return False
     if predicate.arguments.get("task_type") == "E5":
         from .coordinated_placement_evidence import transport_record_matches
 
@@ -1782,6 +1790,11 @@ def _placement_measurement_matches(
         try:
             metrics = record["measurements"]
             reference = roles[predicate.arguments["reference"]]
+            configured = StabilityConstraint.decode(
+                constraints["presets"][f"gen_sim.{metrics['placement_node_id']}.stable"]
+            )
+            if configured.kind == "supported_region":
+                return False
             boundary = (
                 segments[
                     next(
@@ -1814,15 +1827,7 @@ def _placement_measurement_matches(
                 and metrics["entity"] == record["uid"]
                 and metrics["reference_uid"] == metrics["reference"]
                 and canonical_hash(metrics["constraint"])
-                == canonical_hash(
-                    asdict(
-                        StabilityConstraint.decode(
-                            constraints["presets"][
-                                f"gen_sim.{metrics['placement_node_id']}.stable"
-                            ]
-                        )
-                    )
-                )
+                == canonical_hash(asdict(configured))
                 and metrics["boundary_frames"] == boundary["end_steps"]
                 and metrics["end_step"] == boundary["end_steps"][0]
                 and record["accepted"]
@@ -2060,9 +2065,22 @@ def _placement_measurement_matches(
         _support_gap_valid,
     )
 
+    available = [True] * num_envs
+    if (
+        not side_scope
+        and metrics.get("relation") == "inside"
+        and metrics.get("footprint_kind") == "native_triangle_projection/v1"
+    ):
+        if not all(
+            _bool_rows(metrics.get(key), num_envs)
+            for key in ("reference_has_raised_geometry", "reference_aabb_overlap")
+        ):
+            return False
+        available = _containment_available(metrics)
     return (
         support.get("support_tolerance_m") == SUPPORT_TOLERANCE_M
         and support.get("penetration_tolerance_m") == PENETRATION_TOLERANCE_M
+        and record.get("available", [True] * num_envs) == available
         and all(
             a == (f and r and s and _support_gap_valid(g))
             for a, f, r, g, s in zip(
@@ -2367,6 +2385,7 @@ def evaluate_runtime_evidence(
                             program=program,
                             contact_timeline=contact_timeline,
                         )
+                        and (v.get("available") is None or v["available"][env_id])
                     )
                     for v in observations
                 )
@@ -2704,6 +2723,10 @@ def evaluate_runtime_evidence(
                                     program=program,
                                     contact_timeline=contact_timeline,
                                 )
+                                and (
+                                    value.get("available") is None
+                                    or value["available"][env_id]
+                                )
                                 for id, value in zip(
                                     record["groups"], records, strict=True
                                 )
@@ -2752,7 +2775,7 @@ def evaluate_runtime_evidence(
     return {
         "schema_version": "task_spec_evaluation/v1",
         "observer_revision": (
-            9
+            10
             if any(
                 member.get("measurements", {}).get("footprint_kind")
                 == "native_triangle_projection/v1"

@@ -44,6 +44,9 @@ cavity. When released payload geometry overlaps a raised reference and only
 the floor footprint fails, containment remains unavailable until a qualified
 three-dimensional cavity observer exists. Clear misses, penetration and excessive
 support gaps remain failures. Diagnostics retain the native projected areas.
+Current planar containment records carry a per-environment `available` mask;
+matchers recompute it from the measured geometry and release flags. An ambiguous
+row remains unavailable without erasing other rows' final or stage observations.
 
 An E5 composition may collect a native contact timeline through a sensor
 registered in both SimulationManager and Gym's sensor dictionary. The existing
@@ -65,6 +68,8 @@ Zero active contacts cannot distinguish native sleep from absent support and
 remain unavailable unless an independent observation proves a violation.
 Support by a named carrier, whole-footprint containment in a region, and an
 explicit anchor over a region are different contracts, never automatic fallbacks.
+Installing an E5 contact timeline does not replace an E1 `supported_region`'s
+full footprint, contact-gap and exact release-window requirements with support alone.
 
 Coordinated transport observation currently qualifies one environment and an
 explicit configured `on` placement. It binds two distinct resource slots and
