@@ -195,7 +195,10 @@ with OnlineDataEngine(engine_cfg) as engine:
 
 The context manager starts and stops the engine. The controller requires manual
 refill and runs only in its creating process/thread; it creates no background
-scheduler or DataLoader worker. It validates the engine's cache, producer count
+scheduler or DataLoader worker. Its `sample_context()` accepts only an
+`OnlineDataSource` wrapping the controlled engine. Sample resident sources
+directly through their own `sample_context()`; do not pass them to the controller.
+It validates the engine's cache, producer count
 and assigned/hard quotas against the plan; `prepare_batch()` validates batch
 size. With either a plan or a production limit, `engine.cfg.gym_config` must
 declare a positive integer `num_envs` that divides cache size, so each fill
