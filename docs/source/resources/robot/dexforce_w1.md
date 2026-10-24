@@ -19,6 +19,9 @@ Both images are captured from the registered robot presets using the same
 camera, bent-elbow display pose and current `RenderCfg(renderer="rt")`
 defaults (OfflineRT), with default scene lighting.
 The display pose is for illustration; it does not change the preset home pose.
+V030 uses the V021 yellow (`#F8C349`) and dark
+(`#2E2E2E`) plastic palette with matching roughness, retaining V030 geometry
+and markings.
 
 :::{dropdown} Image rendering settings
 960 × 1200; 1 sample per pixel; DLSS offscreen reconstruction (quality 2);
@@ -26,6 +29,9 @@ tone mapping off; exposure 1.0; path depths 4–8. The scene uses the default
 ground and environment emission, with no added direct lights. Camera settings,
 joint positions and the V030 asset revision are recorded in the
 [render manifest](../../_static/robots/dexforcew1_render.json).
+The manifest also records the V021 material parameters and the published
+archive checksums. `scripts/tools/prepare_w1_v030_materials.py` reproduces the
+material update from the original archive revision recorded there.
 :::
 
 ## Supported Body Revisions

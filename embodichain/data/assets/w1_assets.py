@@ -158,8 +158,9 @@ class DexforceW1V030(EmbodiChainDataset):
 
     The archive is published at ``dexforce_w1/v030/w1.zip`` with
     ``w1/robot.urdf`` and the five component URDFs. Component visuals and
-    inertials match the corrected full body. Wrist camera and gripper assets
-    belong to independently assembled attachments.
+    inertials match the corrected full body. Its yellow and dark plastic
+    materials match V021. Wrist camera and gripper assets belong to independently
+    assembled attachments.
 
     Args:
         data_root: Download and extraction cache root. Defaults to the configured
@@ -169,7 +170,7 @@ class DexforceW1V030(EmbodiChainDataset):
     def __init__(self, data_root: str | None = None) -> None:
         descriptor = o3d.data.DataDescriptor(
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, w1_assets, "v030", "w1.zip"),
-            "74ff7e835160f7309d32ade116172c52",
+            "c3fa8994563f729a0e8387e2129a28c1",
         )
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
         super().__init__(type(self).__name__, descriptor, path)
