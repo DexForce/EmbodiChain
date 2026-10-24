@@ -8,10 +8,14 @@ NVlabs/neural-robot-dynamics, commit
 
 Source: https://github.com/NVlabs/neural-robot-dynamics/tree/476dc67fccc6a99be293bf611f897b1c06f13e30/envs/newton_envs/assets
 
-EmbodiChain translates these assets using the installed Newton public importer,
-then passes their physical descriptors through DexSim Spawn. This is a current
-Newton teacher profile, not a claim to reproduce legacy Warp 1.5.1 physics.
-Imported motor actuator declarations and XML solver options are not installed
-into the Spawn scene: the host supplies actual generalized forces and declares
-its own solver configuration. Masses, inertia, COMs, joint limits, passive joint
-parameters and collision geometry/material parameters are retained.
+EmbodiChain interprets these assets using the installed Newton public importer.
+The independent data collector finalizes an analytical Newton model directly;
+Scene-based neural solver integration is a separate consumer of the same asset
+interpretation. Neither path claims to reproduce legacy Warp 1.5.1 physics.
+
+The host supplies generalized forces and its own solver configuration rather
+than installing the source motor actuators. Dataset manifests identify the
+importer profile, asset hash, actual parameter hashes and solver versions.
+`warp_reference` reconstructs measured legacy mass, inertia and contact-parameter
+semantics; it does not select the historical simulator or guarantee identical
+trajectories across solver versions.
