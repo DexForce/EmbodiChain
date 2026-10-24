@@ -19,8 +19,8 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
-from typing import ClassVar, Literal
+from dataclasses import dataclass
+from typing import ClassVar
 
 import torch
 
@@ -66,11 +66,6 @@ class PourGoal:
 class PourOptions(ActionOptions):
     """Per-invocation pouring behavior."""
 
-    hand_source: Literal["observed", "grasp_command"] = field(
-        default="grasp_command", kw_only=True
-    )
-    """Hand target retained throughout pouring, independent of measured deflection."""
-
     rotate_angle: float = math.pi / 4.0
     """Signed rotation about the held object's local internal axis, in radians."""
 
@@ -78,8 +73,6 @@ class PourOptions(ActionOptions):
     """Minimum time to remain at the poured orientation, in seconds."""
 
     def __post_init__(self) -> None:
-        if self.hand_source not in ("observed", "grasp_command"):
-            raise ValueError("hand_source must be observed or grasp_command.")
         if not math.isfinite(self.rotate_angle):
             raise ValueError("rotate_angle must be finite.")
         if not math.isfinite(self.dwell_duration) or self.dwell_duration < 0.0:
@@ -221,16 +214,15 @@ class Pour(AtomicAction[PourGoal, PourOptions]):
             .clone()
         )
         full[:, :, arm_joint_ids] = arm_trajectory
-        # Explicit observed mode preserves the measured hand posture.
-        full[:, :, hand_joint_ids] = context.last_qpos[:, hand_joint_ids].unsqueeze(1)
-        if options.hand_source == "grasp_command":
-            # Retain closing effort while rotating, dwelling and returning.
-            full[:, :, hand_joint_ids] = grasp_endpoint.joint_positions(
-                GRASP_COMMAND,
-                num_envs=context.batch_size,
-                device=self.device,
-                dtype=context.robot.qpos.dtype,
-            ).unsqueeze(1)
+        # A contact-blocked finger measurement is not a holding command.
+        # Retain closing effort while rotating, dwelling and returning.
+        hold_hand_qpos = grasp_endpoint.joint_positions(
+            GRASP_COMMAND,
+            num_envs=context.batch_size,
+            device=self.device,
+            dtype=context.robot.qpos.dtype,
+        )
+        full[:, :, hand_joint_ids] = hold_hand_qpos.unsqueeze(1)
         timed = TimedTrajectory.from_uniform_step(
             full,
             env_ids=context.env_ids,

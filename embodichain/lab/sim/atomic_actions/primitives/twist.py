@@ -25,10 +25,7 @@ from typing import ClassVar
 
 import torch
 
-from embodichain.utils.math import (
-    axis_angle_to_rotation_matrix,
-    pose_inv,
-)
+from embodichain.compute.geometry import rotate_rigid_grasp
 
 from embodichain.lab.sim.atomic_actions.affordance import TwistAffordance
 from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
@@ -495,29 +492,14 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
         fractions: torch.Tensor,
     ) -> torch.Tensor:
         """Sample the rigid grasp path at normalized twist-angle fractions."""
-        axis = twist_axis.to(device=self.device, dtype=torch.float32)
-        axis = axis / torch.linalg.vector_norm(axis)
-        fractions = fractions.to(device=self.device, dtype=torch.float32)
-        angles = twist_angle * fractions
-        rotations = (
-            torch.eye(4, dtype=torch.float32, device=self.device)
-            .reshape(1, 4, 4)
-            .repeat(fractions.numel(), 1, 1)
+        _, eef_poses = rotate_rigid_grasp(
+            link_pose,
+            grasp_xpos,
+            twist_axis,
+            axis_origin,
+            twist_angle * fractions.to(device=self.device, dtype=torch.float32),
         )
-        rotations[:, :3, :3] = axis_angle_to_rotation_matrix(angles[:, None] * axis)
-        link_to_eef = torch.bmm(pose_inv(link_pose), grasp_xpos)
-        origin = torch.tensor(axis_origin, dtype=torch.float32, device=self.device)
-        to_origin = torch.eye(4, dtype=torch.float32, device=self.device)
-        from_origin = torch.eye(4, dtype=torch.float32, device=self.device)
-        to_origin[:3, 3] = origin
-        from_origin[:3, 3] = -origin
-        local_rotations = torch.matmul(
-            torch.matmul(to_origin[None], rotations), from_origin[None]
-        )
-        return torch.matmul(
-            torch.matmul(link_pose[:, None], local_rotations[None]),
-            link_to_eef[:, None],
-        )
+        return eef_poses
 
 
 __all__ = ["Twist", "TwistGoal", "TwistOptions"]

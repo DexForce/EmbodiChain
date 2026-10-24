@@ -134,7 +134,7 @@ COMMANDS = (
     ),
     Command(
         name="benchmark",
-        target="scripts.benchmark.__main__:main",
+        target="embodichain.cli.benchmark:main",
         help="Run EmbodiChain performance benchmarks.",
     ),
     Command(

@@ -69,8 +69,10 @@ def capture_final_goals(
     num_envs: int,
     *,
     runtime: Mapping[str, Any] | None = None,
+    pour_motions: Mapping[str, Any] | None = None,
+    legacy_observer: bool = False,
 ) -> dict[str, Any]:
-    """Collect instantaneous final geometry, never reusing milestone success."""
+    """Collect final geometry and measured events, never generic milestone success."""
     target = getattr(env, "unwrapped", env)
     simulation = target.sim
     registration = deployment.integration.registration
@@ -118,6 +120,7 @@ def capture_final_goals(
             continue
         observations = []
         errors = []
+        diagnostics = []
         for group_id in goal["groups"]:
             member = next(
                 v
@@ -173,6 +176,14 @@ def capture_final_goals(
                         )
                     )
                     continue
+                if predicate.name == "pour_motion" and not legacy_observer:
+                    record = (pour_motions or {}).get(group_id, {})
+                    if "accepted" not in record:
+                        raise ValueError(
+                            record.get("unavailable", "No measured pour-motion event.")
+                        )
+                    observations.append(deepcopy(record))
+                    continue
                 if predicate.name == "articulation_joint_near":
                     factory = next(
                         v
@@ -204,7 +215,9 @@ def capture_final_goals(
                         "joint_position": values.tolist(),
                         "joint_target": expected,
                     }
-                elif _placement_predicate(predicate):
+                elif _placement_predicate(predicate) and not (
+                    legacy_observer and predicate.arguments.get("task_type") == "E5"
+                ):
                     if runtime is None:
                         raise ValueError(
                             "Placement requires measured execution release evidence."
@@ -224,6 +237,12 @@ def capture_final_goals(
                         segments,
                         next(reversed(segments.values())),
                         num_envs,
+                        legacy_observer=legacy_observer,
+                        program=(
+                            load_config(bundle / "task_program/program.yaml")
+                            if predicate.arguments.get("task_type") == "E5"
+                            else None
+                        ),
                     )
                     observations.append(record)
                     continue
@@ -289,16 +308,28 @@ def capture_final_goals(
                 AttributeError,
             ) as error:
                 errors.append(str(error) or type(error).__name__)
+                if hasattr(error, "measurements"):
+                    diagnostics.append(error.measurements)
         result[predicate.id] = (
             {
                 "members": observations,
                 "values": [
-                    all(v["accepted"][i] is True for v in observations)
+                    (
+                        all(v["accepted"][i] is True for v in observations)
+                        if all(
+                            v.get("available") is None or v["available"][i]
+                            for v in observations
+                        )
+                        else None
+                    )
                     for i in range(num_envs)
                 ],
             }
             if observations and not errors
-            else {"unavailable": errors or ["No final observation."]}
+            else {
+                "unavailable": errors or ["No final observation."],
+                **({"measurements": diagnostics} if diagnostics else {}),
+            }
         )
     return result
 
@@ -324,8 +355,9 @@ def _side_placement_record(
     num_envs: int,
     *,
     recorded: bool,
+    legacy_observer: bool = False,
 ) -> dict[str, Any]:
-    """Observe a qualified link, a real tabletop landing, and measured release."""
+    """Observe a bound rigid body/link, tabletop landing, and measured release."""
     from .placement_evidence import _native_mesh, _valid_pose
     from .spatial_reference import measure_relation, resolve_reference
 
@@ -366,41 +398,71 @@ def _side_placement_record(
         and r.relation == predicate.arguments["relation"]
         and r.stage_id in {"", stage}
     ]
-    if len(routes) != 1 or routes[0].reference_link_id is None:
-        raise ValueError("Side placement lacks one qualified reference link route.")
+    if len(routes) != 1:
+        raise ValueError("Side placement lacks one qualified reference route.")
     route = routes[0]
+    if legacy_observer and route.reference_link_id is None:
+        raise ValueError("Side placement lacks one qualified reference link route.")
+    reference_id = route.reference_link_id or reference_uid
     preset = f"gen_sim.{node['id']}.stable"
     constraint = dict(deployment.integration.adapter_factory.constraints)[preset]
+    expected_release = constraint.displacement
+    if (
+        node["task_type"] == "E1"
+        and route.reference_link_id is None
+        and route.reference_part is None
+        and route.relation in {"left_of", "right_of", "front_of", "behind"}
+        and expected_release is not None
+    ):
+        from ..task_program_bundle import (
+            _LATERAL_RELEASE_CLEARANCE,
+            _PLACEMENT_CLEARANCE,
+        )
+
+        # The generator deliberately separates the release command height from
+        # its settled preset. Reconstruct that exact policy, not a Z tolerance.
+        expected_release = (
+            *expected_release[:2],
+            expected_release[2] + (_LATERAL_RELEASE_CLEARANCE - _PLACEMENT_CLEARANCE),
+        )
     if (
         constraint.entity != member["object_uid"]
-        or constraint.reference != route.reference_link_id
-        or constraint.displacement != route.world_displacement
+        or constraint.reference != reference_id
+        or expected_release != route.world_displacement
     ):
         raise ValueError("Side planning route and acceptance reference disagree.")
-    link = next(
-        b for b in scene_binding.links if b.entity_id == route.reference_link_id
-    )
-    parent = next(
-        b for b in scene_binding.articulations if b.entity_id == reference_uid
-    )
-    if link.articulation_id != reference_uid:
-        raise ValueError("Side reference link belongs to a different articulation.")
-    art = target.sim.get_articulation(parent.simulation_uid)
-    geometry = resolve_reference(
-        {
-            "uid": reference_uid,
-            "fpath": art.cfg.fpath,
-            "body_scale": art.cfg.body_scale,
-            "fix_base": art.cfg.root_props.fixed_base,
-            "init_local_pose": art.cfg.init_local_pose,
-            "init_pos": art.cfg.init_pos,
-            "init_rot": art.cfg.init_rot,
-        },
-        part,
-    )
-    if geometry.link != link.native_link_name:
-        raise ValueError("Side reference native link differs from its qualified part.")
     bindings = {b.entity_id: b for b in scene_binding.rigid_objects}
+    if route.reference_link_id is not None:
+        link = next(b for b in scene_binding.links if b.entity_id == reference_id)
+        parent = next(
+            b for b in scene_binding.articulations if b.entity_id == reference_uid
+        )
+        if link.articulation_id != reference_uid:
+            raise ValueError("Side reference link belongs to a different articulation.")
+        art = target.sim.get_articulation(parent.simulation_uid)
+        geometry = resolve_reference(
+            {
+                "uid": reference_uid,
+                "fpath": art.cfg.fpath,
+                "body_scale": art.cfg.body_scale,
+                "fix_base": art.cfg.root_props.fixed_base,
+                "init_local_pose": art.cfg.init_local_pose,
+                "init_pos": art.cfg.init_pos,
+                "init_rot": art.cfg.init_rot,
+            },
+            part,
+        )
+        if geometry.link != link.native_link_name:
+            raise ValueError(
+                "Side reference native link differs from its qualified part."
+            )
+        reference_vertices = geometry.vertices
+    else:
+        if part is not None or reference_uid not in bindings:
+            raise ValueError("Side reference requires its exact bound rigid body.")
+        reference_vertices, _ = _native_mesh(
+            target.sim, bindings[reference_uid], num_envs
+        )
     object_binding, table_binding = bindings[member["object_uid"]], bindings["table"]
     frames = None
     if recorded:
@@ -443,7 +505,7 @@ def _side_placement_record(
             and type(p.get("policy_index")) is int
             and p.get("source_path") == [*prefix, "post", p["policy_index"]]
             and p.get("result", {}).get("measurements", {}).get("reference")
-            == route.reference_link_id
+            == reference_id
             and p["result"]["measurements"].get("entity") == member["object_uid"]
             and p["result"].get("preset") == preset
             and p["result"].get("kind") == constraint.kind
@@ -477,6 +539,10 @@ def _side_placement_record(
             raise ValueError(
                 "Side milestone observation differs from its recorded boundary."
             )
+        if route.reference_link_id is None and not torch.allclose(
+            reference_pose, pose(bindings[reference_uid]), atol=1e-4, rtol=0
+        ):
+            raise ValueError("Side reference differs from its recorded boundary.")
     else:
 
         def pose(binding: Any) -> torch.Tensor:
@@ -484,11 +550,13 @@ def _side_placement_record(
 
         reference_pose = (
             art.get_link_pose(link.native_link_name, to_matrix=True).detach().cpu()
+            if route.reference_link_id is not None
+            else pose(bindings[reference_uid])
         )
     object_pose = pose(object_binding)
     vertices, _ = _native_mesh(target.sim, object_binding, num_envs)
     accepted, metrics = measure_relation(
-        vertices, object_pose, geometry.vertices, reference_pose, route.relation
+        vertices, object_pose, reference_vertices, reference_pose, route.relation
     )
     supported, support = measure_planar_placement(
         target.sim, object_binding, table_binding, object_pose, pose(table_binding)
@@ -497,6 +565,11 @@ def _side_placement_record(
         node, member["object_uid"], segments, boundary, num_envs
     )
     metrics.update(
+        scope=(
+            "bound_link_world_axes"
+            if route.reference_link_id is not None
+            else "bound_rigid_world_axes"
+        ),
         reference_uid=reference_uid,
         reference_part=part,
         reference_link_id=route.reference_link_id,
@@ -1129,6 +1202,23 @@ def _strong_placement_matches(
         return False
 
 
+def _containment_available(metrics: Mapping[str, Any]) -> list[bool]:
+    """Keep ambiguous 3D cavity evidence local to each released payload row."""
+    from .placement_evidence import _support_gap_valid
+
+    return [
+        not (free and raised and overlap and not footprint and _support_gap_valid(gap))
+        for free, raised, overlap, footprint, gap in zip(
+            metrics["released"],
+            metrics["reference_has_raised_geometry"],
+            metrics["reference_aabb_overlap"],
+            metrics["full_footprint_inside"],
+            metrics["support_gap_m"],
+            strict=True,
+        )
+    ]
+
+
 def _placement_record(
     target: Any,
     deployment: Any,
@@ -1141,7 +1231,33 @@ def _placement_record(
     num_envs: int,
     *,
     recorded: bool = False,
+    legacy_observer: bool = False,
+    program: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    if predicate.arguments.get("task_type") == "E5":
+        if legacy_observer:
+            raise ValueError(
+                "Complete final relation/release observer is not available."
+            )
+        from .coordinated_placement_evidence import capture_transport_placement
+
+        if program is None:
+            raise ValueError("E5 placement requires its exact compiled program.")
+        group = next(
+            value for value in graph["task_groups"] if value["id"] == member["group_id"]
+        )
+        return capture_transport_placement(
+            target,
+            deployment,
+            graph,
+            {"segments": list(segments.values())},
+            program,
+            group,
+            member,
+            boundary,
+            num_envs,
+            recorded=recorded,
+        )
     registration = deployment.integration.registration
     strong = (
         getattr(
@@ -1167,6 +1283,7 @@ def _placement_record(
             boundary,
             num_envs,
             recorded=recorded,
+            legacy_observer=legacy_observer,
         )
     scene_binding = registration.scene_binding
     bindings = {v.entity_id: v for v in scene_binding.rigid_objects}
@@ -1276,6 +1393,42 @@ def _placement_record(
             recorded=recorded,
             frames=frames,
         )
+    if (
+        not legacy_observer
+        and not region_scope
+        and predicate.arguments["relation"] == "on"
+        and getattr(target, "_gen_sim_acceptance_contacts", None) is not None
+    ):
+        from .stable_support_evidence import capture_stable_support
+
+        released, release_receipt, _ = measured_release(
+            node, uid, segments, boundary, num_envs, with_receipt=True
+        )
+        observed = list(frames) if recorded else target._traj_steps.tolist()
+        accepted, metrics = capture_stable_support(
+            target,
+            bindings,
+            uid,
+            reference_uid,
+            observed[0],
+            configured,
+            release_receipt["timestamp"],
+        )
+        metrics.update(
+            reference_uid=reference_uid,
+            relation="on",
+            released=released,
+            placement_node_id=node["id"],
+            boundary_frames=observed,
+            observation_kind="recorded" if recorded else "final",
+        )
+        return {
+            "group_id": group_id,
+            "uid": uid,
+            "part_id": member["object_part_id"],
+            "accepted": [a and b for a, b in zip(accepted, released, strict=True)],
+            "measurements": metrics,
+        }
     if predicate.arguments["relation"] == "on":
         if recorded:
             prefix = boundary["metadata"]["program_segment_source_path"]
@@ -1343,6 +1496,7 @@ def _placement_record(
             bindings[reference_uid],
             object_pose,
             reference_pose,
+            exact_silhouette=not legacy_observer,
         )
     released = measured_release(node, uid, segments, boundary, num_envs)
     if region_scope:
@@ -1403,6 +1557,11 @@ def _placement_record(
         "part_id": member["object_part_id"],
         "accepted": [a and b for a, b in zip(accepted, released, strict=True)],
         "measurements": metrics,
+        **(
+            {"available": _containment_available(metrics)}
+            if not legacy_observer and predicate.arguments["relation"] == "inside"
+            else {}
+        ),
     }
 
 
@@ -1415,6 +1574,8 @@ def capture_placement_milestones(
     num_envs: int,
     *,
     spec: TaskSpec,
+    legacy_observer: bool = False,
+    program: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Measure placement at its own boundary, not at a later terminal state."""
     target = getattr(env, "unwrapped", env)
@@ -1432,7 +1593,9 @@ def capture_placement_milestones(
     for entries in contract["coverage"]["lineage"].values():
         for member in entries:
             group = groups[member["group_id"]]
-            if group["task_type"] not in {"E1", "E4"}:
+            if group["task_type"] not in {"E1", "E4", "E5"} or (
+                legacy_observer and group["task_type"] == "E5"
+            ):
                 continue
             terminal = segments.get(group["node_ids"][-1])
             if terminal is None:
@@ -1452,6 +1615,8 @@ def capture_placement_milestones(
                     terminal,
                     num_envs,
                     recorded=True,
+                    legacy_observer=legacy_observer,
+                    program=program,
                 )
             except (
                 KeyError,
@@ -1461,7 +1626,12 @@ def capture_placement_milestones(
                 StopIteration,
             ) as error:
                 result[group["id"]] = {
-                    "unavailable": str(error) or type(error).__name__
+                    "unavailable": str(error) or type(error).__name__,
+                    **(
+                        {"measurements": error.measurements}
+                        if hasattr(error, "measurements")
+                        else {}
+                    ),
                 }
     return result
 
@@ -1543,8 +1713,35 @@ def _placement_measurement_matches(
     graph: Mapping[str, Any],
     constraints: Mapping[str, Any],
     segments: Mapping[str, Any],
+    program: Mapping[str, Any] | None = None,
+    contact_timeline: Mapping[str, Any] | None = None,
 ) -> bool:
     """Do not accept a generic success/alignment record as relation evidence."""
+    if "available" in record and not _bool_rows(record["available"], num_envs):
+        return False
+    if predicate.arguments.get("task_type") == "E5":
+        from .coordinated_placement_evidence import transport_record_matches
+
+        if record.get("measurements", {}).get("scope") != "native_stable_support":
+            return False
+        if not transport_record_matches(
+            record,
+            predicate,
+            roles,
+            next(
+                (
+                    group
+                    for group in graph["task_groups"]
+                    if group["id"] == record.get("group_id")
+                ),
+                {},
+            ),
+            graph,
+            {"segments": list(segments.values())},
+            program,
+            contact_timeline,
+        ):
+            return False
     if predicate.arguments.get("task_type") == "E4":
         try:
             metrics = record["measurements"]
@@ -1589,6 +1786,66 @@ def _placement_measurement_matches(
                 node, record["uid"], segments, boundary, num_envs
             ):
                 return False
+        except (KeyError, ValueError, TypeError, StopIteration, AttributeError):
+            return False
+    if record.get("measurements", {}).get("scope") == "native_stable_support":
+        from .stable_support_evidence import stable_support_flags
+        from .stability import StabilityConstraint
+        from dataclasses import asdict
+
+        try:
+            metrics = record["measurements"]
+            reference = roles[predicate.arguments["reference"]]
+            configured = StabilityConstraint.decode(
+                constraints["presets"][f"gen_sim.{metrics['placement_node_id']}.stable"]
+            )
+            if configured.kind == "supported_region":
+                return False
+            boundary = (
+                segments[
+                    next(
+                        group["node_ids"][-1]
+                        for group in graph["task_groups"]
+                        if group["id"] == record["group_id"]
+                    )
+                ]
+                if metrics["observation_kind"] == "recorded"
+                else next(reversed(segments.values()))
+            )
+            if predicate.arguments.get("task_type") != "E5":
+                source_node = next(
+                    n for n in graph["nodes"] if n["id"] == metrics["placement_node_id"]
+                )
+                _, released_receipt, _ = measured_release(
+                    source_node,
+                    record["uid"],
+                    segments,
+                    boundary,
+                    num_envs,
+                    with_receipt=True,
+                )
+                if metrics["release_timestamp"] != released_receipt["timestamp"]:
+                    return False
+            return bool(
+                num_envs == 1
+                and predicate.arguments.get("relation") == "on"
+                and reference == [{"uid": metrics["reference"], "part_id": None}]
+                and metrics["entity"] == record["uid"]
+                and metrics["reference_uid"] == metrics["reference"]
+                and canonical_hash(metrics["constraint"])
+                == canonical_hash(asdict(configured))
+                and metrics["boundary_frames"] == boundary["end_steps"]
+                and metrics["end_step"] == boundary["end_steps"][0]
+                and record["accepted"]
+                == [
+                    a and b
+                    for a, b in zip(
+                        stable_support_flags(metrics, contact_timeline),
+                        metrics["released"],
+                        strict=True,
+                    )
+                ]
+            )
         except (KeyError, ValueError, TypeError, StopIteration, AttributeError):
             return False
     if constraints.get("support_contract_revision") == 1 or any(
@@ -1744,8 +2001,11 @@ def _placement_measurement_matches(
         )
     from .spatial_reference import SIDE_RELATIONS
 
-    link_scope = metrics.get("scope") == "bound_link_world_axes"
-    support = metrics.get("tabletop", {}) if link_scope else metrics
+    side_scope = metrics.get("scope") in {
+        "bound_link_world_axes",
+        "bound_rigid_world_axes",
+    }
+    support = metrics.get("tabletop", {}) if side_scope else metrics
     footprint = support.get("full_footprint_inside", [])
     released = metrics.get("released", [])
     gaps = support.get("support_gap_m", [])
@@ -1767,7 +2027,7 @@ def _placement_measurement_matches(
     ):
         return False
     side = [True] * num_envs
-    if link_scope:
+    if side_scope:
         relation = predicate.arguments.get("relation")
         side_gaps = metrics.get("envelope_gaps_m", [])
         expected_axes = (
@@ -1779,8 +2039,19 @@ def _placement_measurement_matches(
         if (
             relation not in SIDE_RELATIONS
             or metrics.get("reference_part") != references[0]["part_id"]
-            or not isinstance(metrics.get("reference_link_id"), str)
-            or not metrics["reference_link_id"].startswith(f"{references[0]['uid']}__")
+            or (
+                (
+                    not isinstance(metrics.get("reference_link_id"), str)
+                    or not metrics["reference_link_id"].startswith(
+                        f"{references[0]['uid']}__"
+                    )
+                )
+                if metrics["scope"] == "bound_link_world_axes"
+                else (
+                    references[0]["part_id"] is not None
+                    or metrics.get("reference_link_id") is not None
+                )
+            )
             or not isinstance(side_gaps, list)
             or len(side_gaps) != expected_axes
             or any(
@@ -1800,9 +2071,22 @@ def _placement_measurement_matches(
         _support_gap_valid,
     )
 
+    available = [True] * num_envs
+    if (
+        not side_scope
+        and metrics.get("relation") == "inside"
+        and metrics.get("footprint_kind") == "native_triangle_projection/v1"
+    ):
+        if not all(
+            _bool_rows(metrics.get(key), num_envs)
+            for key in ("reference_has_raised_geometry", "reference_aabb_overlap")
+        ):
+            return False
+        available = _containment_available(metrics)
     return (
         support.get("support_tolerance_m") == SUPPORT_TOLERANCE_M
         and support.get("penetration_tolerance_m") == PENETRATION_TOLERANCE_M
+        and record.get("available", [True] * num_envs) == available
         and all(
             a == (f and r and s and _support_gap_valid(g))
             for a, f, r, g, s in zip(
@@ -1912,6 +2196,24 @@ def _articulation_milestone_matches(
         return False
 
 
+def _transport_hold_matches(
+    record, predicate, roles, group, graph, runtime, program, timeline
+):
+    from .coordinated_placement_evidence import transport_record_matches
+
+    return transport_record_matches(
+        record,
+        predicate,
+        roles,
+        group,
+        graph,
+        runtime,
+        program,
+        timeline,
+        acquisition=True,
+    )
+
+
 def evaluate_runtime_evidence(
     spec: TaskSpec,
     contract: Mapping[str, Any],
@@ -1927,8 +2229,16 @@ def evaluate_runtime_evidence(
     control_milestones: Mapping[str, Any] | None = None,
     handover_milestones: Mapping[str, Any] | None = None,
     coordinated_milestones: Mapping[str, Any] | None = None,
+    pour_milestones: Mapping[str, Any] | None = None,
+    legacy_observer: bool = False,
+    contact_timeline: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Evaluate only newly collected final measurements and exact segment evidence."""
+    from .pour_evidence import pour_record_matches
+
+    if legacy_observer:
+        pour_milestones = None
+
     if contract["task_spec_digest"] != canonical_hash(spec.to_dict()) or contract[
         "graph_digest"
     ] != canonical_hash(graph):
@@ -2056,6 +2366,19 @@ def evaluate_runtime_evidence(
                         )
                     )
                     and (
+                        predicate.name != "pour_motion"
+                        or pour_record_matches(
+                            v,
+                            predicate,
+                            contract["coverage"]["roles"],
+                            groups[v["group_id"]],
+                            graph,
+                            runtime,
+                            program,
+                            num_envs,
+                        )
+                    )
+                    and (
                         not _placement_predicate(predicate)
                         or _placement_measurement_matches(
                             v,
@@ -2065,7 +2388,10 @@ def evaluate_runtime_evidence(
                             graph=graph,
                             constraints=constraints,
                             segments=segments,
+                            program=program,
+                            contact_timeline=contact_timeline,
                         )
+                        and (v.get("available") is None or v["available"][env_id])
                     )
                     for v in observations
                 )
@@ -2169,7 +2495,10 @@ def evaluate_runtime_evidence(
                         in {
                             "measured_planar_landing_region",
                             "bound_link_world_axes",
+                            "bound_rigid_world_axes",
                             "native_contact_support",
+                            "native_stable_support",
+                            "measured_coordinated_transport/v1",
                             "native_supported_landing_region",
                             "native_supported_placement",
                         }
@@ -2273,14 +2602,28 @@ def evaluate_runtime_evidence(
                                 and isinstance(value.get("measurements"), Mapping)
                                 and bool(value["measurements"])
                                 and coordinated_matches is not None
-                                and coordinated_matches(
-                                    value,
-                                    groups[id],
-                                    graph,
-                                    runtime,
-                                    program,
-                                    constraints,
-                                    num_envs,
+                                and (
+                                    _transport_hold_matches(
+                                        value,
+                                        predicate,
+                                        contract["coverage"]["roles"],
+                                        groups[id],
+                                        graph,
+                                        runtime,
+                                        program,
+                                        contact_timeline,
+                                    )
+                                    if value.get("measurements", {}).get("scope")
+                                    == "measured_coordinated_transport/v1"
+                                    else coordinated_matches(
+                                        value,
+                                        groups[id],
+                                        graph,
+                                        runtime,
+                                        program,
+                                        constraints,
+                                        num_envs,
+                                    )
                                 )
                                 for id, value in zip(
                                     record["groups"], observations, strict=True
@@ -2343,6 +2686,31 @@ def evaluate_runtime_evidence(
                             ):
                                 snapshot[predicate.observation or predicate.id] = True
                             continue
+                        if predicate.name == "pour_motion":
+                            records = [
+                                (pour_milestones or {}).get(id, {})
+                                for id in record["groups"]
+                            ]
+                            if records and all(
+                                set(groups[id]["node_ids"]).issubset(successful_nodes)
+                                and pour_record_matches(
+                                    value,
+                                    predicate,
+                                    contract["coverage"]["roles"],
+                                    groups[id],
+                                    graph,
+                                    runtime,
+                                    program,
+                                    num_envs,
+                                )
+                                for id, value in zip(
+                                    record["groups"], records, strict=True
+                                )
+                            ):
+                                snapshot[predicate.observation or predicate.id] = all(
+                                    value["accepted"][env_id] for value in records
+                                )
+                            continue
                         if _placement_predicate(predicate):
                             records = [
                                 measured_placements.get(id, {})
@@ -2358,6 +2726,12 @@ def evaluate_runtime_evidence(
                                     graph=graph,
                                     constraints=constraints,
                                     segments=segments,
+                                    program=program,
+                                    contact_timeline=contact_timeline,
+                                )
+                                and (
+                                    value.get("available") is None
+                                    or value["available"][env_id]
                                 )
                                 for id, value in zip(
                                     record["groups"], records, strict=True
@@ -2407,12 +2781,34 @@ def evaluate_runtime_evidence(
     return {
         "schema_version": "task_spec_evaluation/v1",
         "observer_revision": (
-            7
-            if e4_placement_groups
+            10
+            if any(
+                member.get("measurements", {}).get("footprint_kind")
+                == "native_triangle_projection/v1"
+                for goal in final_goals.values()
+                for member in goal.get("members", [])
+            )
             else (
-                6
-                if any(g["task_type"] == "E5" for g in groups.values())
-                else (5 if any(g["task_type"] == "E4" for g in groups.values()) else 4)
+                8
+                if pour_milestones
+                or any(
+                    value.get("measurements", {}).get("scope")
+                    == "bound_rigid_world_axes"
+                    for value in (placement_milestones or {}).values()
+                )
+                else (
+                    7
+                    if e4_placement_groups
+                    else (
+                        6
+                        if any(g["task_type"] == "E5" for g in groups.values())
+                        else (
+                            5
+                            if any(g["task_type"] == "E4" for g in groups.values())
+                            else 4
+                        )
+                    )
+                )
             )
         ),
         "run_id": run_id,
@@ -2423,6 +2819,11 @@ def evaluate_runtime_evidence(
         "constraints_digest": contract["constraints_digest"],
         "environments": rows,
         "placement_milestone_measurements": dict(placement_milestones or {}),
+        **(
+            {"pour_motion_measurements": dict(pour_milestones)}
+            if pour_milestones
+            else {}
+        ),
         **(
             {"coordinated_milestone_measurements": dict(coordinated_milestones)}
             if coordinated_milestones is not None

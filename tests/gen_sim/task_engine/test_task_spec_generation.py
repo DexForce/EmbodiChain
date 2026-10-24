@@ -108,6 +108,39 @@ def test_explicit_pour_motion_is_distinct_and_legacy_fluid_identity_is_preserved
     assert motion["scene_request"] == legacy["scene_request"]
 
 
+@pytest.mark.parametrize("mode", ["motion", "fluid"])
+def test_new_instruction_preserves_explicit_pour_evidence_mode(mode):
+    from embodichain.gen_sim.task_engine.interpretation import (
+        interpret_instruction_draft,
+    )
+
+    value = step(
+        "E3",
+        "vessel",
+        id="s1",
+        target=selector("bowl"),
+        relation="above",
+        pour_goal_mode=mode,
+    )
+    result = interpret_instruction_draft(
+        "Perform the requested pour operation.", caller=lambda **_kw: {"steps": [value]}
+    )
+    assert result.intent["steps"][0]["pour_goal_mode"] == mode
+
+
+def test_new_instruction_never_guesses_motion_when_pour_mode_is_omitted():
+    from embodichain.gen_sim.task_engine.interpretation import (
+        interpret_instruction_draft,
+    )
+
+    value = step("E3", "vessel", id="s1", target=selector("bowl"), relation="above")
+    with pytest.raises(ValueError, match="explicit pour_goal_mode"):
+        interpret_instruction_draft(
+            "Verify actual liquid transfer, not just tilting.",
+            caller=lambda **_kw: {"steps": [value]},
+        )
+
+
 @pytest.mark.parametrize(
     "kind,mode", [("E2", "motion"), ("E3", "contact_only"), ("E3", None), ("E3", True)]
 )

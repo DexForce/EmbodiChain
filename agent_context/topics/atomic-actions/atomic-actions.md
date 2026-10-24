@@ -54,13 +54,12 @@ that commits or invalidates observed effects.
 verified grasp. Its goal optionally frees only the final world yaw; default
 goals remain exact. Heading alternatives are checked as complete motion paths,
 with accepted rows retained independently and selected offsets in diagnostics.
-MoveHeldObject, Pour and Place expose `hand_source: observed|grasp_command`.
-The default retains the resolved endpoint's grasp command, including invocation
-overrides, rather than a contact-blocked measured aperture. Explicit observed
-mode preserves measured posture. Place retains grasp commands only for held
-rows, keeps measured posture for free rows, and switches
-to the unchanged open command only at its release phase. This choice does not
-change observations, attachments, failed-row holds or physical effect gates.
+MoveHeldObject and Pour retain the resolved endpoint's grasp command, including
+invocation overrides, rather than a contact-blocked measured aperture. Place
+retains that command only for held rows, keeps measured posture for free rows,
+and switches to the open command at release. The protected `_held_hand_qpos`
+hook lets a transport specialization own a different hand target without
+changing observations, attachments, failed-row holds or physical effect gates.
 
 Existing-hold `HandOver` resolves its internal exchange object pose and receiving
 grasp together through `_resolve_existing_hold_receive`. The default retains
@@ -68,13 +67,12 @@ the original root-midpoint construction and grasp selection. A specialization
 must return a consistent pair: source transport and the receiving attachment
 are derived from that same pose; the hook never commits effects or steps physics.
 
-Grasp generation defaults to the original `mesh_extent` axis partition. Its
-optional `supported_end` request is call-local and reserved for derived region
-hints: it preserves an already viable region and can reinterpret only an empty
-pre-IK geometry pool using qualified grasp support. Callers must keep authored
-top/bottom restrictions on `mesh_extent`; the policy does not recover IK,
-trajectory, closing or acquisition failure.
-The shared default does not forward a new keyword to existing custom services.
+Grasp generation retains the original mesh-axis partition. Antipodal's optional
+`pg_grasp.GraspRegionSelector` may select only angle/NMS/collision-qualified fallback
+rows before ranking and top-K, and only when the requested region is empty.
+The default keeps existing custom-service signatures and viable-region RNG
+behavior. Application-specific region interpretation belongs to the provider;
+it cannot recover IK, trajectory, closing or acquisition failure.
 
 Pick projects downstream targets through the protected lazy
 `_iter_downstream_eef_targets` hook before choosing between TCP-roll variants.

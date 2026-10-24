@@ -284,6 +284,48 @@ def _literal_setup_keyword(keyword_name: str) -> object:
     return ast.literal_eval(keywords[keyword_name])
 
 
+def test_graph_viewer_resources_survive_package_staging(tmp_path: Path) -> None:
+    """The installed renderer must not depend on the prototype or handbook."""
+    from importlib.util import module_from_spec, spec_from_file_location
+
+    package = "embodichain.gen_sim.task_engine"
+    source = _REPOSITORY_ROOT / "embodichain/gen_sim/task_engine"
+    destination = tmp_path / "build_lib"
+    distribution = Distribution(
+        {
+            "packages": [package],
+            "package_dir": {package: str(source)},
+            "package_data": _literal_setup_keyword("package_data"),
+            "include_package_data": False,
+        }
+    )
+    distribution.script_name = str(_SETUP_PATH)
+    command = build_py(distribution)
+    command.build_lib = str(destination)
+    command.ensure_finalized()
+    command.run()
+    staged = destination / "embodichain/gen_sim/task_engine"
+    for name in (
+        "_semantic_graph_viewer.html",
+        "_semantic_graph_viewer.css",
+        "_semantic_graph_viewer.js",
+        "_graph_assets/fonts.css",
+        "_graph_assets/plex-sc-regular.woff2",
+        "_graph_assets/plex-sc-medium.woff2",
+        "_graph_assets/manrope.ttf",
+        "_graph_assets/LICENSE.txt",
+    ):
+        assert (staged / name).read_bytes() == (source / name).read_bytes()
+    spec = spec_from_file_location(
+        package + "._packaged_viewer", staged / "semantic_graph_html.py"
+    )
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    html = module._viewer_document({"graph": {"task_id": "packaged-viewer"}})
+    assert "data:font/woff2;base64," in html and "data:font/ttf;base64," in html
+    assert "__VIEWER_SCRIPT__" not in html and "__VIEWER_STYLE__" not in html
+
+
 @pytest.fixture
 def staged_config_package(tmp_path: Path) -> _StagedConfigPackage:
     """Stage official Task Program resources through the real build command."""

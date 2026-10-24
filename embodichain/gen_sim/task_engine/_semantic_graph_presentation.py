@@ -183,4 +183,10 @@ def _graph_presentation(
                 if asset[kind] is not None:
                     asset[kind + "_source"] = path.as_posix()
         result["assets"].append(asset)
+    if output is not None:
+        from ._graph_localization import _FILENAME, _read_localizations
+
+        translated = _read_localizations(output.parent / _FILENAME, graph, result)
+        if translated is not None and translated["status"] == "translated":
+            result["localizations"] = translated["localizations"]
     return result

@@ -252,6 +252,27 @@ class DrawerObservation:
         self.vertices = self.obj.get_vertices(scale=True)[0].detach().cpu().numpy()
         self.other_payloads: tuple[DrawerObservation, ...] = ()
 
+    def for_invocation(self, invocation_id: str) -> DrawerObservation:
+        """Select the call's policy without mutating shared observed geometry."""
+        calls = self.route.upright_calls
+        if calls is None:
+            return self
+        if type(invocation_id) is not str or not invocation_id:
+            raise ValueError("Scoped drawer policy requires an invocation identity.")
+        # Generated segments contain one call; recovery retains its segment namespace.
+        upright = any(
+            invocation_id == name
+            or invocation_id.startswith(f"{name.rsplit(':', 1)[0]}:workflow_recovery:")
+            for name in calls
+        )
+        if upright == self.route.upright:
+            return self
+        from copy import copy
+
+        result = copy(self)
+        result.route = replace(self.route, upright=upright)
+        return result
+
     def poses(self) -> tuple[torch.Tensor, torch.Tensor]:
         return (
             self.obj.get_local_pose(to_matrix=True),
@@ -434,6 +455,14 @@ class DrawerObservation:
         return self.entry_poses()[0]
 
 
+def _scope_observation(
+    observation: DrawerObservation, request: Any
+) -> DrawerObservation:
+    if getattr(observation.route, "upright_calls", None) is None:
+        return observation
+    return observation.for_invocation(request.invocation_id)
+
+
 def prepare_place(
     request: Any,
     context: Any,
@@ -454,6 +483,7 @@ def prepare_place(
     )
     if observation is None:
         return request
+    observation = _scope_observation(observation, request)
     endpoint = request.binding.endpoint("primary", "motion")
     held = context.task.get_held_object(endpoint.task_state_key)
     if held is None or held.semantics.entity_id != observation.route.object_id:
@@ -496,6 +526,7 @@ def prepare_place_candidates(
     )
     if observation is None:
         return (request,)
+    observation = _scope_observation(observation, request)
     endpoint = request.binding.endpoint("primary", "motion")
     held = context.task.get_held_object(endpoint.task_state_key)
     if held is None or held.semantics.entity_id != observation.route.object_id:
@@ -544,8 +575,11 @@ class DrawerPlacementEngine(GenSimActionEngine):
         plan_transform: PlanTransform | None = None,
     ) -> Any:
         current = self.initial_context() if context is None else context
+        observations = tuple(
+            _scope_observation(obs, request) for obs in self._drawer_observations
+        )
         if (
-            self._drawer_observations
+            observations
             and isinstance(request.goal, (PlaceGoal, HeldObjectPoseGoal, SlideGoal))
             and getattr(current, "batch_size", 1) != 1
         ):
@@ -557,7 +591,7 @@ class DrawerPlacementEngine(GenSimActionEngine):
             and request.goal.joint_target is not None
         ):
             target = request.goal.joint_target
-            for observation in self._drawer_observations:
+            for observation in observations:
                 binding = observation.route.binding
                 if (
                     binding.object_id == target.articulation_id
@@ -577,7 +611,7 @@ class DrawerPlacementEngine(GenSimActionEngine):
             observation = next(
                 (
                     obs
-                    for obs in self._drawer_observations
+                    for obs in observations
                     if obs.route.affordance == request.goal.object_target_pose.entity_id
                 ),
                 None,
@@ -687,7 +721,7 @@ class DrawerPlacementEngine(GenSimActionEngine):
             )
         candidate_mode = isinstance(request.goal, PlaceGoal) and any(
             obs.route.affordance == request.goal.xpos.entity_id
-            for obs in self._drawer_observations
+            for obs in observations
             if isinstance(request.goal.xpos, SceneEntityPose)
         )
         if not candidate_mode:
@@ -700,7 +734,7 @@ class DrawerPlacementEngine(GenSimActionEngine):
         clearance_attempts = []
         upright = any(
             obs.route.affordance == request.goal.xpos.entity_id and obs.route.upright
-            for obs in self._drawer_observations
+            for obs in observations
         )
         checker = None
         if upright:
@@ -719,7 +753,7 @@ class DrawerPlacementEngine(GenSimActionEngine):
             ):
                 break
             all_prepared_candidates = prepare_place_candidates(
-                request, current, self._drawer_observations, release_lift=release_lift
+                request, current, observations, release_lift=release_lift
             )
             if not all_prepared_candidates:
                 raise ValueError("Drawer placement produced no candidate targets.")

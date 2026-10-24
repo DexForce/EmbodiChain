@@ -2090,3 +2090,36 @@ def test_mutated_options_cannot_restore_implicit_planner_bypass() -> None:
         generator.generate(
             [PlanState.from_xpos(torch.eye(4).repeat(BATCH_SIZE, 1, 1))], options
         )
+
+
+def test_cartesian_timing_budget_exhaustion_returns_failed_safe_hold(monkeypatch):
+    from embodichain.lab.sim.motion.motion_generator import (
+        MotionGenerator,
+        MotionGenOptions,
+    )
+
+    generator = object.__new__(MotionGenerator)
+    monkeypatch.setattr(
+        generator,
+        "_resolve_velocity_limits",
+        lambda **kwargs: torch.tensor([1e-6, 1e-6]),
+    )
+    monkeypatch.setattr(
+        generator,
+        "_sample_cartesian_path",
+        lambda *args, **kwargs: pytest.fail("allocated over-budget path"),
+    )
+    q = torch.tensor([[[0.1, 0.2], [1.0, 1.0]]])
+    success, positions = generator._interpolate_cartesian_with_limits(
+        torch.eye(4)[None, None].repeat(1, 2, 1, 1),
+        q,
+        MotionGenOptions(
+            control_part="arm",
+            sample_count=2,
+            interpolation_dt=0.01,
+            velocity_limit=1e-6,
+            acceleration_limit=1.0,
+        ),
+    )
+    assert success.tolist() == [False]
+    assert torch.equal(positions, q[:, :1].repeat(1, 2, 1))

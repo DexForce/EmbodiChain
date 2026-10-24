@@ -65,11 +65,13 @@ generator and numerical utilities, and keep the existing URDF speed,
 collision, release and stability gates, and do not claim the newer acceleration
 budget. Explicit authored motion limits require `lab.motion_limits/v1`; bundles
 without the contract keep that shared path. Native runs save `motion_contract.json`.
-Generated MoveHeldObject, Pour and Place options select
-`hand_source: grasp_command` to preserve drive authority under measured finger
-deflection. Shared defaults also retain the grasp command; final open commands and physical
-release gates are unchanged. These declarations participate in bundle identity
-and require new full-task qualification, not reuse of old receipts.
+Generated MoveHeldObject, Pour and Place use the shared bound grasp-command
+behavior. GenSim binds legacy `lab.motion_limits/v1` alignment occurrences to
+measured hand targets through `_task_program/held_command.py`; sampled-velocity
+alignment retains the grasp command. Shared options no longer carry a hand-source
+policy. Adapter identity seals this routing, and changed bundles must be
+regenerated and qualified rather than resealing old receipts. Final open
+commands and physical release gates are unchanged.
 UR10 ready/Park shoulder pan faces the table under the shared mount; its zero
 pan pose faces away. `_task_program/solver_tolerances.py` preserves iterative
 solver budgets and supplies explicit analytic-UR FK validation budgets without
@@ -185,6 +187,8 @@ TaskSpec owns the reusable normative task identity and evidence contract across
 these boundaries; its schemas, predicate rules, and cache behavior are owned by
 `embodichain/gen_sim/task_spec/` and detailed in the
 [GenSim/TaskSpec design](../../../docs/architecture/gen-sim-taskspec-design.md).
+Read [acceptance evidence](acceptance-evidence.md) for historical events, stage
+and final-state observation, the legacy/current audit and native evidence gaps.
 Long-horizon specifications keep the terminal state in `goal` and represent
 ordered intermediate achievements as acyclic `milestones`.
 Interpretation checks explicit held-resource conflicts before grounding using
@@ -218,12 +222,26 @@ readers never reseal stale artifacts. Missing legacy companions are not generate
 implicitly. `validate-graph --bundle` is read-only, and `visualize --output *.html`
 uses the same graph data rather than a separate execution representation.
 `task_engine/semantic_graph_html.py` owns the offline report and its control-part
-lanes. Optional bounded local thumbnails come from bundle-owned scene metadata;
+lanes. Its packaged HTML/CSS/JS and OFL fonts render the bilingual viewer for all
+publication/run paths; task IDs, assets, environment choices and statuses come
+from the existing graph and reports, not a case-specific template. Optional
+bounded local thumbnails come from bundle-owned scene metadata;
 source cutouts and generation-stage GLB renders are not final-geometry evidence.
 Workflow and CLI completion write scoped monotonic wall time to `run_summary.json`
 and refresh only the current run's selected viewer. This display-only sidecar
 does not alter sealed companions, execution outcomes or TaskSpec qualification;
-missing images and timing remain unavailable, without network or renderer calls.
+missing images and timing remain unavailable. Imported/reused/baked assets may
+have valid geometry but no segmentation cutout or generation-stage render; do not
+substitute another asset's picture. HTML rendering and `visualize` stay offline,
+without model or renderer calls. After publication, workflow/CLI finalization
+attempts one display-only bilingual translation using the configured Task Engine
+model, without retries and with an HTTP phase timeout. The digest-bound
+`semantic_graph_localizations.json` beside the selected output HTML caches both
+success and unavailable results, so the second finalizer does not call again.
+Stale graph/source-text digests are ignored; missing/failed translations show the
+original text. Translations never change the normative instruction, graph,
+TaskSpec, execution report or success decision. The original instruction remains
+inspectable, and rendering an existing cache needs no provider credentials.
 CLI and HTML links discover committed videos in both legacy `videos/` and
 per-environment `videos/env_*/` directories, excluding partial files and links
 outside the current recording root. The viewer distinguishes program completion
@@ -1109,15 +1127,19 @@ against live articulation meshes while selecting its existing yaw candidates.
 This narrow screen prevents uprighting from pushing a drawer closed; it is not
 a carried-payload or ordinary-rigid scene certificate. Non-drawer staging keeps
 its original robot-proxy screen.
-Drawer routes with an explicit upright alignment in the same task group retain
-that intent in their serialized contract: placement varies yaw, not pitch/roll,
+Drawer routes share geometry per affordance but serialize `upright_calls` for
+the exact transport and Place occurrences with an explicit upright alignment
+in the same task group. Assembly binds these names to invocation identities;
+runtime selects a non-mutating observation view, including recovery within the
+same generated one-call segment. A later placement cannot overwrite an earlier
+call's policy. Legacy route-wide flags remain readable. Placement varies yaw, not pitch/roll,
 and first tries a supported release after crossing the rim rather than a high
 drop. The rim retains 25 mm payload clearance without the extra 120 mm legacy
 lift. Before payload-aware transport, these routes rank the same finite entry,
 release and open-hand endpoint candidates; cuRobo transports in the selected
 heading. Place still replans from observed state and checks its complete path.
 This is endpoint ranking, not a full future Place replay. Ordinary drawer routes
-retain their original release order and wire form.
+retain their original release order; new bundles declare an empty call scope.
 Explicit E1 `orientation_goal=vertical` means an undirected long axis only
 when the user permits either pole. It keeps ordinary acquisition and serializes
 `axis_direction_free` on alignment calls and their stability presets. Alignment
@@ -1178,25 +1200,28 @@ certify target contact, robot self-collision, payload clearance, future scene
 motion or between-sample clearance. Its E4-only revision is fingerprinted;
 regenerate changed E4 bundles instead of resealing historical artifacts.
 Transfer, release, retreat and state effects remain owned by shared HandOver.
-Only derived adaptive handover ends may request the grasp service's call-local
-`supported_end` policy. An already viable mesh-end pool retains its poses,
+Only derived adaptive handover ends may select the GenSim-owned
+`_task_program/supported_end.py` provider policy. An already viable mesh-end pool retains its poses,
 costs and random draws unchanged. If that geometry pool is empty before IK,
 the same prepared pairs and approach variants may define an end from the
 angle/NMS/static-qualified support, before ranking truncation. Explicit
 top/bottom or hard task regions remain `mesh_extent`; IK, path and physical
-acquisition failures never activate this reinterpretation. The service owns
-the geometry stages, not a second GenSim sampler or deployment-wide setting.
-Its revision is fingerprinted only for generated handover deployments.
-Generated E4 integrations include the curated Pick monitor needed by the existing bounded
-workflow recovery, even when source acquisition uses a registered alias.
+acquisition failures never activate this reinterpretation. GraspKit owns
+qualification and ranking; its Antipodal `pg_grasp.GraspRegionSelector` extension passes
+only qualified rows to the GenSim strategy before top-K. The provider does not
+copy the backend, mutate its cache, or create a second sampler. The adapter
+contract requires regeneration when this policy boundary changes.
+Generated integrations with HandOver or curated Place include the curated Pick
+monitor needed by existing bounded workflow recovery, even when source
+acquisition uses only a registered alias.
 This does not change recovery budgets or qualify initial grasp stability;
 regenerate bundles to acquire the declaration rather than resealing old files.
-Generated profiles select `source_hold_mode=grasp_command` to retain the bound closing
-drive during existing-hold transfers. GenSim composition applies that default
-when the field is absent and preserves explicit modes. Missing retreat budgets
-also retain v38's default; shared composition keeps its own defaults. The mode's
-contract belongs to
-[Atomic Action execution](../atomic-actions/execution.md).
+GenSimHandOver retains the bound closing drive through the shared hand-target
+hook during existing-hold transfers. This is an application strategy, not a
+shared HandOver option; old `source_hold_mode` declarations are rejected rather
+than silently ignored. Missing retreat budgets retain the GenSim default, while
+shared composition keeps its own defaults. See
+[Atomic Action execution](../atomic-actions/execution.md) for the hook boundary.
 E5 paired grasping and E6 handle policies remain separate. These GenSim-local
 skill replacements use the shared goals and options. Unmarked calls
 delegate unchanged; drawer deployments install the same ordinary wrappers.

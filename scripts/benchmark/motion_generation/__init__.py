@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Extensible motion-generation benchmark suite."""
+"""Source-checkout compatibility entry points for packaged benchmarks."""
 
 from __future__ import annotations
 

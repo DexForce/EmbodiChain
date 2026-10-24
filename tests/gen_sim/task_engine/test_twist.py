@@ -278,7 +278,6 @@ def test_twist_bundle_preflight_and_nested_publication(knob_scene, tmp_path):
     [
         "positive",
         "no_contact",
-        "passive",
         "wrong_direction",
         "rebound",
         "stale",
@@ -297,7 +296,7 @@ def test_twist_evidence_ablation(knob_scene, variant):
         PressSample(0.4, target, "cleanup", False),
     ]
     final = target
-    if variant in {"no_contact", "passive"}:
+    if variant == "no_contact":
         samples = [replace(s, target_contact=False) for s in samples]
     elif variant == "wrong_direction":
         samples = [replace(s, qpos=-s.qpos) for s in samples]

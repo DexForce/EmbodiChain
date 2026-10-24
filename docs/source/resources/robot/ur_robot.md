@@ -3,8 +3,7 @@
 `URRobotCfg` covers six Universal Robots manipulators in one configuration class:
 `ur3`, `ur3e`, `ur5`, `ur5e`, `ur10`, and `ur10e`. The images below show the exact
 variants currently documented in EmbodiChain: the compact UR3 pair, the mid-reach
-UR5 pair, and the long-reach UR10 pair, with darker classic models and brighter
-silver-arm e-series renders.
+UR5 pair, and the long-reach UR10 pair, using their versioned asset materials.
 
 <div style="display: flex; justify-content: center; align-items: flex-start; gap: 20px; flex-wrap: wrap;">
   <figure style="text-align: center; margin: 10px;">
@@ -33,11 +32,16 @@ silver-arm e-series renders.
   </figure>
 </div>
 
+Images use `RenderCfg(renderer="rt")` (OfflineRT), default lighting and a common
+display pose. The V4 asset bundle corrects the UR3/UR3e material colors while
+preserving geometry and kinematics. Camera and rendering settings are recorded
+in the [render manifest](../../_static/robots/ur/render_manifest.json).
+
 ## Key Features
 
 - **One config, six UR variants** selected through `robot_type`.
 - **Image-matched family lineup** from the shortest-reach UR3 pair to the longest-reach UR10 pair.
-- **Classic and e-series styling** with darker legacy arms and brighter silver-arm e-series renders.
+- **Distinct link and joint materials** with silver links, grey housings and blue joint covers.
 - **Analytic UR inverse kinematics** through `URSolverCfg` and the Warp-based UR solver path.
 - **Simulation-ready defaults** for URDF selection, control parts, drive properties, and rigid-body attributes.
 
@@ -46,8 +50,8 @@ silver-arm e-series renders.
 - **UR3 / UR3e** are the most compact renders in the set and keep the wrist close to the base.
 - **UR5 / UR5e** extend the shoulder-to-wrist span while keeping the same 6-axis arm layout.
 - **UR10 / UR10e** show the longest upper-arm and forearm links, matching the largest reach tier in the family.
-- **Classic models (`ur3`, `ur5`, `ur10`)** appear darker overall, especially on the arm links.
-- **e-series models (`ur3e`, `ur5e`, `ur10e`)** use brighter silver links and lighter joint accents in these renders.
+- **UR3 / UR3e materials** use the corrected V4 palette, removing the legacy
+  darkening of the silver links and blue joint covers.
 
 ## Usage
 

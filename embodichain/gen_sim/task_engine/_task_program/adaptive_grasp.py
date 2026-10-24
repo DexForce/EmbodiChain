@@ -235,23 +235,20 @@ def select_grasp(
         raise ValueError("Unknown axis_region_policy.")
     if candidate_pool is not None and len(choices) != 1:
         raise ValueError("A cached candidate pool belongs to exactly one strategy.")
-    policy = (
-        {"axis_region_policy": axis_region_policy}
-        if axis_region_policy != "mesh_extent"
-        else {}
-    )
+    from .supported_end import for_axis_region
+
+    scoped_generator = for_axis_region(generator, axis_region_policy)
     covered = torch.zeros(pose.shape[0], dtype=torch.bool, device=pose.device)
     pools, directions, strategies, counts = [], [], [], []
     for index, choice in enumerate(choices):
         candidates = candidate_pool
         if candidates is None:
             candidates = affordance.get_grasp_candidates(
-                generator,
+                scoped_generator,
                 pose,
                 choice.direction,
                 obj_longest_axis=choice.axis,
                 is_positive_part=choice.positive,
-                **policy,
             )
         if raw_candidate_observer is not None:
             raw_candidate_observer(candidates)
@@ -299,7 +296,11 @@ def select_grasp(
             metadata={
                 **sample.metadata,
                 "adaptive_grasp": {
-                    **policy,
+                    **(
+                        {"axis_region_policy": axis_region_policy}
+                        if axis_region_policy != "mesh_extent"
+                        else {}
+                    ),
                     "strategy_indices": torch.where(
                         sample.success, strategy, -1
                     ).tolist(),

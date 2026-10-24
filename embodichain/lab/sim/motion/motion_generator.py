@@ -1135,9 +1135,14 @@ class MotionGenerator:
         positions = solved_keyframes
         for _ in range(6):
             if interval_count > 10_000:
-                raise ValueError(
-                    "Cartesian path requires more than 10000 control intervals "
-                    "to satisfy the requested motion limits."
+                # This is bounded planning failure, not malformed caller input.
+                # Retain a safe start hold so Atomic consumers can propagate the
+                # failed success mask without executing an unchecked IK path.
+                logger.log_warning(
+                    "Cartesian timing exhausted its 10000-control-interval budget."
+                )
+                return torch.zeros_like(success), solved_keyframes[:, :1].repeat(
+                    1, 2, 1
                 )
             sampled_poses = self._sample_cartesian_path(
                 target_poses,

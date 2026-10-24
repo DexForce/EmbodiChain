@@ -595,7 +595,9 @@ class TaskStabilityPort:
                 error = torch.linalg.vector_norm(pose[:, :3, 3] - target, dim=-1)
                 valid &= error <= cfg.position_tolerance
                 measurements["position_error"] = error.tolist()
-                if cfg.reference in self._link_references:
+                if reference is not None and (
+                    cfg.kind == "placement" or cfg.reference in self._link_references
+                ):
                     measurements.update(
                         entity=cfg.entity,
                         reference=cfg.reference,

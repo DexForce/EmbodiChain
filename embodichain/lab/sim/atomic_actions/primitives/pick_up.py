@@ -318,13 +318,7 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         self,
         request: ResolvedActionRequest[GraspGoal, PickUpOptions],
     ) -> tuple[str, ...]:
-        """Monitor only the object that the current invocation must acquire.
-
-        Downstream object targets guide grasp selection for static look-ahead,
-        but they are grounded again at the next Semantic Call boundary.  A
-        moving downstream destination must therefore not invalidate an active
-        pickup after a feasible grasp has already been selected.
-        """
+        """Monitor pickup geometry; downstream targets are grounded at the next call."""
         dependencies = set(super()._scene_dependencies(request))
         entity_id = request.goal.semantics.entity_id
         # An explicit object pose is a scene-independent planning input.  Do
@@ -636,13 +630,8 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
                 ),
             ),
             segment_lengths=segment_lengths,
-            # Once the approach is dispatched, contact can move the object and
-            # the selected downstream suffix can be grounded again after this
-            # semantic boundary.  Neither expected pickup motion nor a later
-            # destination revision should invalidate an already acquired grasp
-            # during close/lift.  Only the object whose pose was used for this
-            # invocation is self-induced; downstream look-ahead entities remain
-            # ordinary dependencies for the next semantic boundary.
+            # Stop monitoring pickup-induced object motion after approach commit.
+            # Downstream look-ahead does not own this action's scene dependencies.
             scene_dependency_monitor_until=(
                 {}
                 if monitored_object_id is None

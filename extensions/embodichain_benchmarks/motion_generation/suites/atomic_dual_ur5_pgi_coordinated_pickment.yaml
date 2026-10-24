@@ -1,0 +1,100 @@
+schema_version: 1
+name: atomic_dual_ur5_pgi_coordinated_pickment
+suite_version: atomic_dual_ur5_pgi_coordinated_pickment_v3
+profile: smoke
+
+# CoordinatedPickment on the tutorial dual UR5 + PGI robot and scene.
+# CoordinatedPickment solves its keyframes with robot IK and interpolates them
+# itself, so the planner does not change its trajectory; the suite measures
+# the skill's physical result.  The skill rejects cuRobo.
+robot:
+  id: dual_ur5_pgi_coordinated_pickment
+  provider: dual_arm
+  config:
+    robot_type: ur5
+    uid: benchmark_dual_ur5_coordinated_pickment
+    urdf_name: benchmark_dual_ur5_coordinated_pickment
+    tcp_z: 0.121
+    solver: pytorch
+
+planners:
+  - id: toppra
+    adapter: toppra
+    role: primary_baseline
+    enabled: true
+    config: {}
+
+protocol:
+  report_schema_version: "3"
+  # Preserve the existing Atomic motion budget for every timed planner.
+  joint_velocity_limit_rad_s: 0.2
+  joint_acceleration_limit_rad_s2: 0.5
+  warmup_trials: 1
+  measured_trials: 1
+  sample_interval: 80
+  validation_samples: 512
+  position_threshold_m: 0.01
+  rotation_threshold_rad: 0.1
+  joint_limit_tolerance_rad: 0.00001
+
+tracks:
+  - id: atomic-skill
+    scenario: atomic_skill
+    enabled: true
+    config:
+      batch_sizes: [1]
+      seeds: [11]
+      physics:
+        clock: compiled
+        steps_per_waypoint: 16
+        hold_steps: 80
+        hold_sim_steps: 2
+        joint_tracking_tolerance_rad: 0.05
+      grippers:
+        - control_part: left_eef
+          open_qpos: [0.0]
+          grasp_qpos: [0.026]
+        - control_part: right_eef
+          open_qpos: [0.0]
+          grasp_qpos: [0.026]
+      fixtures:
+        - id: support_surface
+          kind: cube
+          size: [0.7, 1.2, 0.02]
+          position: [0.0, 0.0, 0.54]
+          mass: 10.0
+          dynamic_friction: 0.9
+          static_friction: 0.95
+          restitution: 0.01
+      objects:
+        - id: plastic_tray
+          kind: mesh
+          asset_path: PlasticTray/plastic_tray.glb
+          rotation_deg: [0.0, 0.0, 90.0]
+          position: [-0.02, 0.02, 0.60]
+          max_convex_hull_num: 16
+          mass: 0.01
+          dynamic_friction: 0.97
+          static_friction: 0.99
+          restitution: 0.01
+          linear_damping: 0.5
+          angular_damping: 1.0
+          contact_offset: 0.001
+          rest_offset: 0.0
+          settle_steps: 300
+      skills:
+        - id: coordinated_pickment
+          sample_count: 96
+          object_motion_keyframes: 6
+          pre_grasp_distance_m: 0.11
+          lift_height_m: 0.10
+          hand_interp_steps: 10
+          hold_steps: 4
+          middle_empty_ratio: 0.7
+          grasp_sample_count: 10000
+          pre_action_settle_steps: 300
+          cases:
+            - name: plastic_tray_lift_and_move
+              object: plastic_tray
+              task_difficulty: medium
+              target_object_offset_m: [-0.12, -0.03, 0.108]

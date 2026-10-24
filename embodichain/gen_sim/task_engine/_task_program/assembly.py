@@ -47,7 +47,7 @@ from .motion import (
     validate_motion_contract,
 )
 from .state_handoff import StagingContract
-from .held_command import bind_held_command_sources
+from .held_command import bind_held_command_sources, bind_observed_alignment_calls
 
 __all__: list[str] = []
 
@@ -66,7 +66,7 @@ from .invocation_policy import (
     bind_articulation_followups,
 )
 
-ADAPTER_CONTRACT = "gen_sim.task_program/2620929c/v15"
+ADAPTER_CONTRACT = "gen_sim.task_program/2620929c/v16"
 
 
 def _press_scene_identity(base_dir: str | Path) -> dict[str, Any]:
@@ -133,6 +133,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         measured_rigid_calls: tuple = (),
         post_handover_places: tuple = (),
         idle_invocations: tuple[tuple[str, str], ...] = (),
+        observed_transport_calls: tuple[str, ...] = (),
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -160,6 +161,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         self._measured_rigid_calls = measured_rigid_calls
         self._post_handover_places = post_handover_places
         self._idle_invocations = idle_invocations
+        self._observed_transport_calls = observed_transport_calls
         self._task_post_port = TaskStabilityPort(
             self.segment_policy_port,
             self._simulation,
@@ -339,6 +341,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         transport = GenSimMoveHeldObject(
             staging_contract=self._staging_contract,
         )
+        transport.observed_hand_invocations = frozenset(self._observed_transport_calls)
         from .place_recovery import scene_vertices
 
         meshes = scene_vertices(
@@ -559,6 +562,7 @@ class TaskAdapterFactory:
     pour_return_calls: tuple[str, ...] = ()
     held_command_sources: tuple = ()
     motion_contract: str = SHARED_MOTION_CONTRACT
+    observed_transport_calls: tuple[str, ...] = ()
 
     def create_adapter(self, environment: Any) -> TaskProgramEnvironmentAdapter:
         """Bind task-owned planning scopes without overriding Session or Bridge."""
@@ -796,6 +800,7 @@ class TaskAdapterFactory:
             clearance_routes=self.clearance_routes,
             alignment_continuation_routes=self.alignment_continuation_routes,
             staging_contract=self.staging_contract,
+            observed_transport_calls=self.observed_transport_calls,
             runtime_preset=self.runtime_preset,
             press_routes=self.press_routes,
             pick_continuations=pick_continuations,
@@ -1086,11 +1091,6 @@ def load_deployment(
 
     registration = with_held_alignment(
         registration,
-        hand_source=(
-            "grasp_command"
-            if motion_contract == "gen_sim.sampled_velocity/v1"
-            else "observed"
-        ),
         program=program,
         constraints=constraints,
         verify_retention=True,
@@ -1169,11 +1169,15 @@ def load_deployment(
             )
     motion_samples = bind_motion_samples(payload["motion_samples"], compiled)
     cartesian_calls = bind_cartesian_calls(payload["cartesian_calls"], compiled)
+    from .drawer_binding import bind_drawer_routes
+
+    drawers = bind_drawer_routes(drawers, compiled)
     pour_return_calls = bind_pour_return_calls(
         payload.get("pour_return_calls", []), compiled
     )
     articulation_calls = bind_articulation_calls(compiled)
     articulation_followups = bind_articulation_followups(compiled)
+    observed_transport_calls = bind_observed_alignment_calls(compiled, motion_contract)
     held_command_revision = payload.get("held_command_revision", 1)
     held_command_sources = bind_held_command_sources(
         payload.get("held_command_sources", {}),
@@ -1378,6 +1382,7 @@ def load_deployment(
                 else {}
             ),
             "adapter_contract": ADAPTER_CONTRACT,
+            "observed_transport_calls": observed_transport_calls,
             **(
                 {
                     "twist_runtime_revision": 1,
@@ -1429,6 +1434,7 @@ def load_deployment(
         handover_scene_clearance=handover_scene_clearance,
         motion_samples=motion_samples,
         motion_contract=motion_contract,
+        observed_transport_calls=observed_transport_calls,
         cartesian_calls=cartesian_calls,
         articulation_calls=articulation_calls,
         articulation_followups=articulation_followups,

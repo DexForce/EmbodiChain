@@ -29,6 +29,61 @@ from embodichain.compute.trajectory import (
 )
 
 
+@pytest.mark.parametrize("batch_size", [1, 8, 64])
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+def test_torch_distance_resampling_preserves_dtype_and_duplicate_endpoints(
+    monkeypatch: pytest.MonkeyPatch, batch_size: int, dtype: torch.dtype
+) -> None:
+    def reject_warp(*args, **kwargs):
+        pytest.fail("The Torch backend must not enter Warp.")
+
+    monkeypatch.setattr(wp, "from_torch", reject_warp)
+    # A very short segment must still interpolate across its full distance.
+    # Float64 also keeps an offset that would disappear in a float32 cast.
+    offset = 1.0 if dtype == torch.float64 else 0.0
+    path = torch.tensor(
+        [
+            [
+                [offset, 0.0],
+                [offset, 0.0],
+                [offset + 1.0e-9, 0.0],
+                [offset + 1.0e-9, 0.0],
+            ]
+        ],
+        dtype=dtype,
+    ).expand(batch_size, -1, -1)
+    path = path.transpose(1, 2).contiguous().transpose(1, 2)
+
+    result = resample_with_distance(path, 5, device="cpu", backend="torch")
+
+    assert result.dtype == dtype
+    expected = torch.linspace(offset, offset + 1.0e-9, 5, dtype=dtype)
+    torch.testing.assert_close(
+        result[..., 0], expected.expand(batch_size, -1), rtol=0, atol=1.0e-15
+    )
+    assert torch.equal(result[:, 0], path[:, 0])
+    assert torch.equal(result[:, -1], path[:, -1])
+
+
+@pytest.mark.parametrize("point_count", [1, 3])
+def test_torch_distance_resampling_repeats_stationary_paths(point_count: int) -> None:
+    path = torch.tensor([[[1.0, 2.0]]], dtype=torch.float64).expand(2, point_count, -1)
+
+    result = resample_with_distance(path, 5, device="cpu", backend="torch")
+
+    torch.testing.assert_close(result, path[:, :1].expand(-1, 5, -1))
+    result[0, 0, 0] = 9.0
+    assert path[0, 0, 0] == 1.0
+
+
+@pytest.mark.parametrize("shape, count", [((0, 3, 2), 5), ((2, 0, 3), 0)])
+def test_torch_distance_resampling_preserves_empty_axes(shape, count: int) -> None:
+    path = torch.empty(shape, dtype=torch.float64)
+    result = resample_with_distance(path, count, device="cpu", backend="torch")
+    assert result.shape == (shape[0], count, shape[2])
+    assert result.dtype == path.dtype
+
+
 def test_minimum_jerk_expands_sample_count_and_preserves_limits() -> None:
     keyframes = torch.tensor([[[0.0], [1.0], [0.5]]])
     step_dt = 0.05

@@ -73,6 +73,23 @@ Its configuration separates the physical gripper model, grasp algorithm,
 collision policy, and annotation/cache policy. Mesh-specific sampling and
 collision state remain private implementation details.
 
+Its optional region selector filters an empty region's qualified fallback pool
+before cost ranking and top-K. It returns a subset and ranking center, not new
+poses, and cannot bypass collision qualification. This capability belongs to
+the Antipodal generator, not the generic grasp-service contract.
+
+.. autoclass:: GraspRegionSelector
+   :members:
+
+.. currentmodule:: embodichain.toolkits.graspkit.pg_grasp.pose_generator
+
+.. autosummary::
+   :nosignatures:
+
+   GraspRegionSelector
+
+.. currentmodule:: embodichain.toolkits.graspkit.pg_grasp
+
 .. autosummary::
    :nosignatures:
 
@@ -81,6 +98,7 @@ collision state remain private implementation details.
    ParallelJawGripperModelCfg
    AntipodalGraspPoseGenerator
    AntipodalGraspPoseGeneratorCfg
+   GraspRegionSelector
    ParallelJawGraspCollisionCfg
    GraspAnnotationCfg
    AntipodalSampler

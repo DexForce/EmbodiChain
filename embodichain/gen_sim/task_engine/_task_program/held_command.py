@@ -37,6 +37,25 @@ def _retains(call_id: str | None) -> bool:
     )
 
 
+def bind_observed_alignment_calls(
+    program: Any, motion_contract: str
+) -> tuple[str, ...]:
+    """Preserve measured alignment hands for the original shared motion contract."""
+    from .align_held import ALIGN_HELD_CALL
+    from .motion import SAMPLED_MOTION_CONTRACT, validate_motion_contract
+
+    validate_motion_contract(motion_contract)
+    if motion_contract == SAMPLED_MOTION_CONTRACT:
+        return ()
+    ids = _invocation_ids(program)
+    return tuple(
+        ids[segment.name]
+        for segment in program.iter_segments()
+        if isinstance(segment.calls[0].call, RegisteredSemanticCall)
+        and segment.calls[0].call.call_id == ALIGN_HELD_CALL
+    )
+
+
 def held_command_declarations(graph: dict[str, Any]) -> dict[str, str]:
     """Select adjacent same-object/resource held commands, independent of E type."""
     result = {}

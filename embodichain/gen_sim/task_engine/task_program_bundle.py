@@ -1075,9 +1075,6 @@ def generate_task_program_bundle(
                         "check_interval_steps": 2,
                         "required_stable_checks": 3,
                         "timeout_behavior": "raise",
-                        # Plan from the measured settled pose. Teleporting
-                        # afterward invalidates the settled contact state.
-                        "restore_initial_xy": False,
                     },
                 }
             },
@@ -2745,7 +2742,6 @@ def _integration_payload(
                 "pick": default_pick_options,
                 "place": {
                     "kind": "place",
-                    "hand_source": "grasp_command",
                     "hand_interp_steps": 12,
                     "release_settle_steps": 60,
                     "lift_height": 0.05,
@@ -2769,7 +2765,6 @@ def _integration_payload(
                     {
                         call_id: {
                             "kind": "place",
-                            "hand_source": "grasp_command",
                             "hand_interp_steps": 12,
                             "release_settle_steps": 60,
                             "lift_height": 0.10,
@@ -2792,7 +2787,6 @@ def _integration_payload(
                     {
                         _MOVE_HELD_OBJECT_CALL_ID: {
                             "kind": "move_held_object",
-                            "hand_source": "grasp_command",
                         }
                     }
                     if move_held_routes
@@ -2802,7 +2796,6 @@ def _integration_payload(
                     {
                         DRAWER_TRANSPORT_CALL: {
                             "kind": "move_held_object",
-                            "hand_source": "grasp_command",
                         }
                     }
                     if drawer_transport_routes
@@ -2812,7 +2805,6 @@ def _integration_payload(
                     {
                         _POUR_CALL_ID: {
                             "kind": "pour",
-                            "hand_source": "grasp_command",
                             "dwell_duration": 0.0,
                             "rotate_angle": -1.0471975512,
                         }
@@ -2960,7 +2952,7 @@ def _integration_payload(
                     or node["call"].get("call_id") == semantic_id
                     or (
                         semantic_id == "pick"
-                        and node["call"].get("kind") == "hand_over"
+                        and node["call"].get("kind") in {"hand_over", "place"}
                     )
                     for node in graph["nodes"]
                 )
