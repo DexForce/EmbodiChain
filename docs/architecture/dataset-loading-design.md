@@ -9,6 +9,12 @@ For use and operation, start with the [ODS guide](../source/features/online_data
 This document owns source/Dataset architecture and implementation boundaries; task parameters
 and historical run evidence remain with the demo.
 
+The [ODS data-stream showcase](ods-data-stream-showcase-design.md)
+uses standard SDK/DataLoader video decoding for its offline comparison. That
+example-local reader is separate from the shipped resident numeric backend; its
+visual results cannot be obtained by dropping images or preloading decoded
+datasets through the current numeric loader.
+
 ## Problem and acceptance criterion
 
 `SequenceDataset` supplies one PyTorch context-iteration interface for live and

@@ -272,7 +272,8 @@ topics:
   title: Differentiable Learning Layers
   aliases: [learning layers, differentiable IK layer, 可微 IK, 训练层, 学习模块分层]
   keywords: [DifferentiableIKLayer, KinematicsLayer, SerialChainKinematics, DifferentiableIKCfg,
-    solve_dls_ik, damped_least_squares_step, Jacobian gradient, dJ/dq, learn_grasp_yaw, grasp yaw, 抓取角度优化, 抓取姿态学习]
+    solve_dls_ik, damped_least_squares_step, Jacobian gradient, dJ/dq, learn_grasp_yaw, grasp yaw, 抓取角度优化, 抓取姿态学习,
+    ResNet10Encoder, ResNet10, visual encoder, 视觉编码器]
   paths: [topics/learning-layers/learning-layers.md]
   source_of_truth:
   - embodichain/compute/kinematics/dls.py
@@ -442,7 +443,7 @@ topics:
   status: active
 - id: data-pipeline
   title: Data Pipeline
-  aliases: [online data, online dataset, async recorder, dataset persistence, simple BC demo, ODS documentation, ODS 文档, 数据管线, 在线数据, 数据集持久化, 数据保存,
+  aliases: [online data, online dataset, async recorder, dataset persistence, simple BC demo, ODS documentation, ODS capability showcase, ODS 能力展示, ODS 文档, 数据管线, 在线数据, 数据集持久化, 数据保存,
     深度视频, 数据集校验, 数据集转换, 数据集划分]
   keywords: [OnlineDataEngine, OnlineDataset, sample_batch, sample_batch_with_context, lock_index, LeRobotRecorder, AsyncLeRobotRecorder,
     DepthSidecarManager, depth_meta.json, fragment_id, finalize, expert action schema, qpos_slice, qvel_slice,
@@ -468,6 +469,7 @@ topics:
   - docs/source/features/online_data.md
   - docs/source/features/ods/
   - docs/architecture/dataset-loading-design.md
+  - docs/architecture/ods-data-stream-showcase-design.md
   - embodichain/lab/gym/envs/managers/dataset_manager.py
   - embodichain/lab/gym/envs/managers/datasets.py
   - embodichain/lab/gym/envs/managers/async_datasets.py
@@ -479,9 +481,10 @@ topics:
   - tools/lerobot_export/
   - embodichain/lab/scripts/run_task.py
   - examples/ods/simple_bc_demo/
+  - examples/ods/data_stream_demo/
   watch_paths: [embodichain/data_pipeline/, embodichain/lab/gym/envs/managers/dataset_manager.py, embodichain/lab/gym/envs/managers/datasets.py,
     embodichain/lab/gym/envs/managers/async_datasets.py, embodichain/lab/gym/envs/embodied_env.py, embodichain/lab/scripts/run_task.py,
-    tests/data_pipeline/, embodichain/cli/dataset.py, tools/lerobot_export/, examples/ods/simple_bc_demo/,
+    tests/data_pipeline/, embodichain/cli/dataset.py, tools/lerobot_export/, examples/ods/simple_bc_demo/, examples/ods/data_stream_demo/,
     docs/source/features/online_data.md, docs/source/features/ods/, docs/architecture/dataset-loading-design.md]
   related_topics: [manager-functor, env-framework, task-programs, sensor-system]
   status: active

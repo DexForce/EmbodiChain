@@ -17,6 +17,7 @@ RL policy interfaces and construction belong to
    MLP
    EmpiricalNormalizer
    build_mlp_from_cfg
+   ResNet10Encoder
 
 .. automodule:: embodichain.learning.models
    :members:
@@ -33,4 +34,15 @@ Feature normalization
 ---------------------
 
 .. automodule:: embodichain.learning.models.normalizer
+   :members:
+
+Trainable visual features
+-------------------------
+
+``ResNet10Encoder`` maps float32 NCHW RGB images in ``[0, 1]`` at 256 by
+256 pixels to 256-dimensional features. It owns ImageNet normalization and
+keeps the GroupNorm residual backbone and learned spatial pooling trainable.
+Its torchvision dependency is loaded only when the visual encoder is imported.
+
+.. automodule:: embodichain.learning.models.resnet_encoder
    :members:

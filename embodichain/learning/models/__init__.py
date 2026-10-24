@@ -14,19 +14,20 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""General neural networks, normalization and network construction."""
+"""General neural networks, visual features and normalization, imported lazily."""
 
 from __future__ import annotations
 
 from importlib import import_module
 from typing import Any
 
-__all__ = ["MLP", "EmpiricalNormalizer", "build_mlp_from_cfg"]
+__all__ = ["MLP", "EmpiricalNormalizer", "build_mlp_from_cfg", "ResNet10Encoder"]
 
 _EXPORT_MODULES = {
     "MLP": "mlp",
     "EmpiricalNormalizer": "normalizer",
     "build_mlp_from_cfg": "mlp",
+    "ResNet10Encoder": "resnet_encoder",
 }
 
 

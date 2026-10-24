@@ -16,6 +16,9 @@ belongs to [data-assets](../data-assets/data-assets.md).
 | Shared sequence contract and sources | `embodichain/data_pipeline/datasets/sequence.py`, `sources.py`, `_sampling.py` |
 | Bounded numeric LeRobot loading | `embodichain/data_pipeline/datasets/lerobot.py`: `LeRobotDataSource`, explicit field mapping |
 | Local Franka ChunkBC demo and offline comparisons | `examples/ods/simple_bc_demo/train.py`; local task/config/model/trainer/evaluator and evidence in the same directory |
+| Pure delivery capability and standard video decoding comparison | `examples/ods/data_stream_demo/run.py`, `suite.py`, `report.py`; no learner, real SDK/DataLoader decode and parent-owned prefetch quotas |
+| Fixed-budget visual training, diversity and total pipeline time | `examples/ods/data_stream_demo/train.py`, `training_metrics.py`, `training_report.py`; single/dual-camera BC, standard dataset recording and completed-training accounting; `training_throughput.py` owns three-stage preflight guidance |
+| Dual-camera learning and camera review | `examples/ods/data_stream_demo/converge.py`, `preview.py`; `CONVERGENCE.md` owns the candidate recipe, development selection and one held-out test |
 | Commit/discard/finalization dispatch | `embodichain/lab/gym/envs/managers/dataset_manager.py` |
 | Synchronous LeRobot persistence | `embodichain/lab/gym/envs/managers/datasets.py`: `LeRobotRecorder` |
 | Background persistence | `embodichain/lab/gym/envs/managers/async_datasets.py`: `AsyncLeRobotRecorder` |
@@ -37,6 +40,34 @@ and [configuration/runtime checks](../../../docs/source/features/ods/configurati
 Example-local documentation owns its task binding, CLI/artifact names,
 comparison protocol and historical evidence. Keep generic operational contracts
 in the core guides.
+
+The [ODS capability-showcase design](../../../docs/architecture/ods-data-stream-showcase-design.md)
+owns the fixed-budget single/dual-camera BC comparison and the historical
+state/single/dual delivery diagnostic. Its example-local decoded reader is
+separate from the public resident numeric reader. Follow it for offline corpus
+sizes, source-reuse protection, camera qualification and timing boundaries.
+Training comparisons match actual updates and valid supervision; data volume
+and trained-state diversity are outcomes. Record only completed optimizer
+updates as training coverage, and include recording/finalization and normal
+teardown in total pipeline time. Serial trace replay separately attributes
+generation/training overlap.
+Budget-aware prefetch and three-stage capacity guidance remain example-local;
+they do not change public engine/controller scheduling. The
+[visual demo README](../../../examples/ods/data_stream_demo/README.md)
+owns calibration and pilot commands, including isolated eager controls.
+The visual runner can ingest complete producer subbatches before generation
+completion. Its raw training/archive/serial owners share one C-episode bound;
+serial controls still archive during generation. This example-local handoff
+and nested SDK-stage profiling preserve the public sampling contract.
+All acquisition controls may overlap recording and generation within the same
+storage bounds. Worker SDK service timestamps remain separate from owner
+copy/wait spans. `training_audit.py` combines full numeric checks, source-window
+SDK reads and `video_integrity.py`'s all-frame software video count/integrity
+check; fresh post-timing receipts preserve earlier evidence.
+The [experiment evidence index](../../../examples/ods/data_stream_demo/EXPERIMENTS.md)
+links immutable historical studies and their workload-specific limitations.
+Generated run evidence is excluded from the source tree; it does not establish
+training efficiency or policy performance.
 
 `BatchSource.sample_context()` returns owned TensorDicts under a shared
 `SequenceSpecCfg`; `SequenceDataset` supplies the common iteration interface.
