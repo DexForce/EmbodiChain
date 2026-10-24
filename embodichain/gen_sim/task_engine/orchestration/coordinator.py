@@ -118,6 +118,7 @@ class TaskEngineCoordinator:
         twist_mass_source: bool = False,
         runtime_profile: str = "default",
         experimental_open_release: bool | None = None,
+        native_pick_exploration: bool = False,
         press_extra_distance: float | None = None,
         candidate_set: TaskCandidateSet | Mapping[str, Any] | None = None,
         force_most_likely: bool = False,
@@ -141,10 +142,19 @@ class TaskEngineCoordinator:
         ):
             raise TypeError("experimental_open_release must be a boolean or None.")
         normalized_source = self._coerce_source(source)
+        from ..experiment_policy import validate_native_pick_exploration
+
+        validate_native_pick_exploration(
+            native_pick_exploration, normalized_source.robot_profile
+        )
         selected_physical = physical_input or getattr(
             self.scene_adapter, "physical_input", None
         )
         if selected_physical is not None:
+            if native_pick_exploration:
+                raise ValueError(
+                    "Selected physical input forbids native_pick_exploration."
+                )
             if runtime_profile != "default":
                 raise ValueError(
                     "Selected physical input requires runtime_profile=default."
@@ -335,6 +345,8 @@ class TaskEngineCoordinator:
                     extra["runtime_profile"] = runtime_profile
                 if experimental_open_release is not None:
                     extra["experimental_open_release"] = experimental_open_release
+                if native_pick_exploration:
+                    extra["native_pick_exploration"] = True
                 if press_extra_distance is not None:
                     extra["press_extra_distance"] = press_extra_distance
                 if twist_mass_source:

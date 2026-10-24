@@ -27,6 +27,7 @@ from embodichain.gen_sim.task_engine.orchestration.coordinator import (
 )
 from embodichain.gen_sim.task_engine.robot_profiles import _require_robot_assets
 from embodichain.gen_sim.task_engine.workflow import _error_record
+from embodichain.gen_sim.task_engine.config import TaskEnginePlanningCfg
 
 
 def test_workflow_preserves_original_exception():
@@ -35,6 +36,56 @@ def test_workflow_preserves_original_exception():
         "failure_type": "terminal",
         "message": "missing robot package",
     }
+
+
+def test_native_pick_exploration_requires_explicit_boolean_opt_in() -> None:
+    assert TaskEnginePlanningCfg().native_pick_exploration is False
+    assert (
+        TaskEnginePlanningCfg(native_pick_exploration=True).native_pick_exploration
+        is True
+    )
+    with pytest.raises(TypeError, match="native_pick_exploration"):
+        TaskEnginePlanningCfg(native_pick_exploration="true")
+    with pytest.raises(ValueError, match="physical_reference"):
+        TaskEnginePlanningCfg(physical_reference="bundle", native_pick_exploration=True)
+
+
+def test_native_pick_exploration_cli_flag_is_explicit() -> None:
+    parser = cli.build_parser()
+    base = [
+        "prepare",
+        "--mode",
+        "scene",
+        "--task-id",
+        "t",
+        "--instruction",
+        "pick",
+        "--scene",
+        "scene",
+        "--output-root",
+        "output",
+    ]
+    assert parser.parse_args(base).native_pick_exploration is False
+    assert (
+        parser.parse_args(
+            [*base, "--robot-profile", "dual_ur10", "--native-pick-exploration"]
+        ).native_pick_exploration
+        is True
+    )
+
+
+def test_native_pick_exploration_rejects_franka_before_provider_calls(
+    tmp_path: Path,
+) -> None:
+    scene = tmp_path / "scene"
+    scene.mkdir()
+    coordinator = TaskEngineCoordinator(
+        task_agent=object(), scene_adapter=SimpleNamespace(robot_profile="dual_franka")
+    )
+    with pytest.raises(ValueError, match="UR10"):
+        coordinator.prepare(
+            "task", "Pick", scene, tmp_path / "output", native_pick_exploration=True
+        )
 
 
 @pytest.mark.parametrize("profile", ["dual_franka", "dual_ur10", "dual_tianji"])

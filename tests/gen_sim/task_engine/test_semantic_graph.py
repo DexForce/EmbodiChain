@@ -122,10 +122,19 @@ def test_bundle_rejects_out_of_scope_tasks_before_writing_assets(
     assert not output.exists()
 
 
-@pytest.mark.parametrize("robot_profile", ["dual_franka", "dual_ur10", "dual_tianji"])
+@pytest.mark.parametrize(
+    "robot_profile,native_exploration",
+    [
+        ("dual_franka", False),
+        ("dual_ur10", False),
+        ("dual_tianji", False),
+        ("dual_ur10", True),
+    ],
+)
 def test_selected_robot_bundle_composes_and_keeps_identity(
     tmp_path: Path,
     robot_profile: str,
+    native_exploration: bool,
 ) -> None:
     graph = _graph()
     graph["nodes"][0]["call"] = {
@@ -145,6 +154,7 @@ def test_selected_robot_bundle_composes_and_keeps_identity(
         _prepared_axis_scene(tmp_path),
         tmp_path / "bundle",
         robot_profile=robot_profile,
+        **({"native_pick_exploration": True} if native_exploration else {}),
     )
     record = load_config(paths.integration_fingerprint)
     _verify_program_projection(paths.program, generated)
@@ -155,6 +165,12 @@ def test_selected_robot_bundle_composes_and_keeps_identity(
         record,
     )
     integration.integration.registration.assert_unchanged()
+    assert (
+        getattr(
+            integration.integration.adapter_factory, "native_pick_exploration", False
+        )
+        is native_exploration
+    )
     embodiment = load_config(paths.embodiment)
     prefix = "tianji_marvin" if robot_profile == "dual_tianji" else robot_profile
     assert embodiment["embodiment_id"].startswith(prefix)
@@ -173,6 +189,20 @@ def test_selected_robot_bundle_composes_and_keeps_identity(
         ]
         assert len(parks) == 2
         assert all(park == simulation["init_qpos"][:12:2] for park in parks)
+
+
+@pytest.mark.parametrize("profile", ["dual_franka", "dual_tianji"])
+def test_native_pick_exploration_rejects_other_robots(
+    tmp_path: Path, profile: str
+) -> None:
+    with pytest.raises(ValueError, match="UR10"):
+        generate_task_program_bundle(
+            _graph(),
+            None,
+            tmp_path / "bundle",
+            robot_profile=profile,
+            native_pick_exploration=True,
+        )
 
 
 def _prepared_axis_scene(tmp_path: Path) -> PreparedScene:

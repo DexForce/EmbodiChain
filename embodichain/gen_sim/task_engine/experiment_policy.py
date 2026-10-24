@@ -28,6 +28,20 @@ COMPOSITION_PROFILE = "composition_experiment"
 AUTO_PROFILE = "auto"
 
 
+def validate_native_pick_exploration(
+    value: bool, robot_profile: str | None = None
+) -> None:
+    """Keep the explicit simulation trial separate from other robot defaults."""
+    if type(value) is not bool:
+        raise TypeError("native_pick_exploration must be a boolean.")
+    if (
+        value
+        and robot_profile is not None
+        and robot_profile not in {"dual_ur10", "dual_ur10_robotiq_arg2f_140"}
+    ):
+        raise ValueError("Native Pick exploration is supported only for dual UR10.")
+
+
 def validate_profile(value: str) -> None:
     if value not in {"default", AUTO_PROFILE, CONTACT_PROFILE, COMPOSITION_PROFILE}:
         raise ValueError(

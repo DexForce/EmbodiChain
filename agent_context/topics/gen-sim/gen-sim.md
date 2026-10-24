@@ -54,6 +54,13 @@ physical reference owns its frozen model and arm anchors. Robot switching
 requires a new bundle; `run --bundle` never replaces its embodiment. New-profile
 TaskSpec envelopes seal robot assets as well as component declarations. Static
 assembly/preflight is not collision, contact or complete-task qualification.
+`prepare`/`run-all --native-pick-exploration` explicitly opts dual UR10 into
+ordinary Pick physics trials with experiment acceptance. The sealed bundle owns
+this option; frozen `run --bundle` cannot toggle it. Scene mesh clearance becomes
+diagnostic, not certified; IK, robot command/velocity guards, tracking, physical
+effects and TaskSpec validators remain enabled. Constrained Pick, Pour, HandOver
+and other robots keep their existing paths. Default omission does not opt in.
+`native_pick_exploration.json` records the mode; per-call diagnostics record use.
 Official components resolve through `resolve_config_path`; concrete robot
 presets import from `embodichain_robots`. Changes to endpoint names, motion
 limits or validator declarations require bundle regeneration and new identity;

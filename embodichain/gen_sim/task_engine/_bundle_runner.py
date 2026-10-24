@@ -121,6 +121,33 @@ def execute_bundle(
         "motion_contract",
         "lab.motion_limits/v1",
     )
+    native_pick_exploration = getattr(
+        deployment.integration.adapter_factory, "native_pick_exploration", False
+    )
+    if native_pick_exploration:
+        if acceptance_mode != "experiment":
+            raise ValueError(
+                "Native Pick exploration requires experiment acceptance mode."
+            )
+        (output / "native_pick_exploration.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "gen_sim.native-pick-exploration/v1",
+                    "configured": True,
+                    "robot_profile": "dual_ur10",
+                    "scope": "ordinary_pick_only; actual use is recorded in per-call planner diagnostics",
+                    "planned_scene_clearance_certified": False,
+                    "native_contact_tracking_release_and_task_validators": "unchanged",
+                    "task_spec_results_modified": False,
+                },
+                indent=2,
+            )
+            + "\n"
+        )
+        print(
+            "[Task Engine] UR10 Native Pick exploration: no planned scene-clearance certificate; native effects, tracking and task validators remain enabled.",
+            flush=True,
+        )
     (output / "motion_contract.json").write_text(
         json.dumps(
             {
@@ -129,7 +156,11 @@ def execute_bundle(
                 == "gen_sim.sampled_velocity/v1",
                 "new_acceleration_certification_claimed": False,
                 "hand_source": "See sealed GenSim call policies and issued endpoint commands",
-                "existing_velocity_collision_release_gates": "retained",
+                "existing_velocity_collision_release_gates": (
+                    "velocity_release_and_robot_command_guards_retained; scene_clearance_not_certified"
+                    if native_pick_exploration
+                    else "retained"
+                ),
             },
             indent=2,
         )

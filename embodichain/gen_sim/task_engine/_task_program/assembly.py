@@ -134,6 +134,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         post_handover_places: tuple = (),
         idle_invocations: tuple[tuple[str, str], ...] = (),
         observed_transport_calls: tuple[str, ...] = (),
+        native_pick_exploration: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -162,6 +163,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         self._post_handover_places = post_handover_places
         self._idle_invocations = idle_invocations
         self._observed_transport_calls = observed_transport_calls
+        self._native_pick_exploration = native_pick_exploration
         self._task_post_port = TaskStabilityPort(
             self.segment_policy_port,
             self._simulation,
@@ -280,6 +282,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
             engine.register(idle, replace=True)
         pick = GenSimPickUp()
         pick.adaptive_unconstrained = self._adaptive_pick
+        pick.native_pick_exploration = self._native_pick_exploration
         pick.pick_purposes = dict(self._pick_purposes)
         pick.path_simulation = getattr(self, "_simulation", None)
         pick.path_excluded_invocations = frozenset(self._cartesian_calls)
@@ -563,6 +566,7 @@ class TaskAdapterFactory:
     held_command_sources: tuple = ()
     motion_contract: str = SHARED_MOTION_CONTRACT
     observed_transport_calls: tuple[str, ...] = ()
+    native_pick_exploration: bool = False
 
     def create_adapter(self, environment: Any) -> TaskProgramEnvironmentAdapter:
         """Bind task-owned planning scopes without overriding Session or Bridge."""
@@ -801,6 +805,7 @@ class TaskAdapterFactory:
             alignment_continuation_routes=self.alignment_continuation_routes,
             staging_contract=self.staging_contract,
             observed_transport_calls=self.observed_transport_calls,
+            native_pick_exploration=self.native_pick_exploration,
             runtime_preset=self.runtime_preset,
             press_routes=self.press_routes,
             pick_continuations=pick_continuations,
@@ -883,6 +888,7 @@ def load_deployment(
             "post_handover_places",
             "runtime_profile",
             "experimental_open_release",
+            "native_pick_exploration",
         }
         or payload["schema_version"] != "gen_sim_task_constraints/v1"
     ):
@@ -893,6 +899,13 @@ def load_deployment(
     if not isinstance(legacy_quality, dict) or legacy_quality:
         raise ValueError("upright_container_picks is unsupported in this deployment.")
     presets = payload["presets"]
+    from ..experiment_policy import validate_native_pick_exploration
+
+    native_pick_exploration = payload.get("native_pick_exploration", False)
+    validate_native_pick_exploration(
+        native_pick_exploration,
+        base.integration.registration.robot_profile_binding.profile_id,
+    )
     motion_contract = validate_motion_contract(
         payload.get("motion_contract", SHARED_MOTION_CONTRACT)
     )
@@ -1407,6 +1420,11 @@ def load_deployment(
             "core_integration": base.integration.integration_fingerprint,
             "registration": bundle_registration_fingerprint(registration),
             "task_constraints": payload,
+            **(
+                {"native_pick_exploration_revision": 1}
+                if native_pick_exploration
+                else {}
+            ),
             "program": program,
             "cartesian_calls": cartesian_calls,
             "pour_receivers": pour_receivers,
@@ -1435,6 +1453,7 @@ def load_deployment(
         motion_samples=motion_samples,
         motion_contract=motion_contract,
         observed_transport_calls=observed_transport_calls,
+        native_pick_exploration=native_pick_exploration,
         cartesian_calls=cartesian_calls,
         articulation_calls=articulation_calls,
         articulation_followups=articulation_followups,

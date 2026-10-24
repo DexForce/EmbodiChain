@@ -270,6 +270,7 @@ def generate_task_program_bundle(
     idle_clearance_routes: Sequence[Mapping[str, Any]] | None = None,
     runtime_profile: str = "default",
     experimental_open_release: bool | None = None,
+    native_pick_exploration: bool = False,
     press_extra_distance: float | None = None,
 ) -> tuple[SemanticTaskGraph, TaskProgramBundlePaths]:
     """Write, compose, and provider-free preflight one semantic deployment.
@@ -339,6 +340,8 @@ def generate_task_program_bundle(
             Omission preserves legacy physics, sampling and route declarations.
         experimental_open_release: Explicit release-evidence policy. None retains
             legacy profile selection; False keeps the original release gate.
+        native_pick_exploration: Explicit UR10 ordinary Pick physics trials
+            without planned scene-clearance certification. Defaults to False.
         press_extra_distance: Request-owned E9 overtravel in metres, added to the
             native button stroke. None preserves the legacy 10 mm extra travel;
             zero requests only the native stroke without changing other tasks.
@@ -367,6 +370,9 @@ def generate_task_program_bundle(
         experimental_release_enabled,
     )
 
+    from .experiment_policy import validate_native_pick_exploration
+
+    validate_native_pick_exploration(native_pick_exploration, robot_profile)
     requested_runtime_profile = runtime_profile
     runtime_profile = resolve_profile(runtime_profile, selected_graph)
     experiment = runtime_profile != "default"
@@ -420,6 +426,7 @@ def generate_task_program_bundle(
             raise ValueError("Frozen physical input owns its robot-profile selection.")
         if (
             fit_grasp_assets
+            or native_pick_exploration
             or requested_runtime_profile != "default"
             or twist_mass_source
             or twist_grip_depth_m is not None
@@ -976,6 +983,8 @@ def generate_task_program_bundle(
         stability["runtime_profile"] = runtime_profile
     if experimental_open_release is not None:
         stability["experimental_open_release"] = experimental_open_release
+    if native_pick_exploration:
+        stability["native_pick_exploration"] = True
     save_config(paths.program, program_payload)
     _write_json(
         task_program_root / "constraints.json",

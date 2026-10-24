@@ -128,10 +128,68 @@ def _compose_approach(
     return torch.cat((approach, original[:, approach_stop:]), dim=1)
 
 
+def _native_scene_attempt(
+    action: Any, request: Any, context: Any, first: Any
+) -> Any | None:
+    """Keep command guards while treating scene clearance as an unproved trial."""
+    if not getattr(action, "native_pick_exploration", False):
+        return None
+    state = _RandomState.capture(
+        _cuda_devices(action.robot.device, context.robot.qpos.device)
+    )
+    try:
+        certificate = _inspect_pick_plan(action.robot, request, context, first)
+        if certificate["valid"]:
+            motion = request.binding.endpoint("primary", "motion").require_target(
+                JointPositionTarget
+            )
+            approach = next(
+                segment for segment in first.segments if segment.name == "approach"
+            )
+            try:
+                scene = check_free_motion(
+                    action.robot,
+                    action.path_simulation,
+                    first.joint_trajectory.positions[0, : approach.stop],
+                    motion.control_part,
+                )
+            except (
+                ImportError,
+                ValueError,
+                RuntimeError,
+                AttributeError,
+                KeyError,
+                TypeError,
+            ) as error:
+                scene = {"valid": None, "unavailable": str(error)}
+            return replace(
+                first,
+                diagnostics=replace(
+                    first.diagnostics,
+                    metadata={
+                        **first.diagnostics.metadata,
+                        "gen_sim_native_pick_exploration": {
+                            "scope": "native_physics_trial_not_planned_scene_clearance",
+                            "planned_scene_clearance_certified": False,
+                            "robot_limits_velocity_command_checks": certificate,
+                            "scene_precheck": scene,
+                            "native_effects_tracking_and_validators": "unchanged",
+                        },
+                    },
+                ),
+            )
+        return None
+    finally:
+        state.restore()
+
+
 def rebuild(action: Any, request: Any, context: Any, first: Any, selection: Any) -> Any:
     """Preserve a qualified original; rebuild a curved contact leg without new grasps."""
     if not first.plan_success.all():
         return first
+    exploration = _native_scene_attempt(action, request, context, first)
+    if exploration is not None:
+        return exploration
     state = _RandomState.capture(
         _cuda_devices(action.robot.device, context.robot.qpos.device)
     )

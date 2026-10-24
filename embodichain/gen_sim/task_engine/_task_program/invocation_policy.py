@@ -624,9 +624,10 @@ class GenSimActionEngine(AtomicActionEngine):
                 isinstance(transformed_action, GenSimPickUp)
                 and transformed_action.closing_geometry_factory is not None
             )
-            pick_transform = isinstance(
-                transformed_action, GenSimPickUp
-            ) and _owns_constrained_pick(request, context, self.motion_generator)
+            pick_transform = isinstance(transformed_action, GenSimPickUp) and (
+                _owns_constrained_pick(request, context, self.motion_generator)
+                or transformed_action.native_pick_exploration
+            )
         if context is None and (
             alignment
             or pick_transform
@@ -972,8 +973,12 @@ class GenSimActionEngine(AtomicActionEngine):
                     )
                 if (
                     pick_transform
-                    and _owns_constrained_pick(
-                        selected_request, context, self.motion_generator
+                    and (
+                        _owns_constrained_pick(
+                            selected_request, context, self.motion_generator
+                        )
+                        or "gen_sim_native_pick_exploration"
+                        in plan.diagnostics.metadata
                     )
                     and plan.plan_success.any()
                 ):

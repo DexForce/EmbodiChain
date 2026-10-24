@@ -177,6 +177,7 @@ class GenSimPickUp(PickUp):
     OptionsType = PickUp.OptionsType
     binding_contract = PickUp.binding_contract
     adaptive_unconstrained = False
+    native_pick_exploration = False
     pick_purposes: dict[str, str] | None = None
     continuation_previews: dict | None = None
     path_simulation: object | None = None

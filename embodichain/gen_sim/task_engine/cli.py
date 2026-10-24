@@ -112,6 +112,11 @@ def _add_workflow_arguments(parser: argparse.ArgumentParser) -> None:
         default="dual_franka",
         help="Robot deployment selector; tianji_marvin is a legacy alias of dual_tianji.",
     )
+    parser.add_argument(
+        "--native-pick-exploration",
+        action="store_true",
+        help="Explicit UR10 ordinary Pick physics trials without a planned scene-clearance certificate; native effects and execution checks remain enabled.",
+    )
     _add_failure_policy_argument(parser)
 
 
@@ -265,6 +270,19 @@ def _run_workflow(
         validate_scene_history_root(scene, args.output_root)
     instruction = _instruction(args)
     workflow_cfg, planning_cfg, execution_cfg = load_task_engine_config(args.config)
+    if args.native_pick_exploration:
+        planning_cfg = replace(planning_cfg, native_pick_exploration=True)
+    if planning_cfg.native_pick_exploration:
+        from .experiment_policy import validate_native_pick_exploration
+
+        try:
+            validate_native_pick_exploration(True, args.robot_profile)
+            if execution_cfg.acceptance_mode != "experiment":
+                raise ValueError(
+                    "Native Pick exploration requires experiment acceptance mode."
+                )
+        except (TypeError, ValueError) as exc:
+            parser.error(str(exc))
     if planning_cfg.physical_reference is None:
         try:
             _require_robot_assets(args.robot_profile)
