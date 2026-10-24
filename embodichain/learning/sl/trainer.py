@@ -102,6 +102,13 @@ class SupervisedTrainer:
         self.output = Path(self.cfg.output_dir)
         self.output.mkdir(parents=True, exist_ok=True)
         self.learner.model.to(self.cfg.device)
+        self._output_was_used = (
+            (self.output / "metrics.jsonl").exists()
+            or (self.output / "last.pt").exists()
+            or next(self.output.glob("step_*.pt"), None) is not None
+        )
+        self._fit_started = False
+        self._restored = False
 
     def fit(self, *, stop_after: int | None = None) -> dict[str, Any]:
         """Train up to the configured or an earlier committed update boundary.
@@ -119,6 +126,11 @@ class SupervisedTrainer:
         )
         if end < self.learner.num_updates:
             raise ValueError("stop_after precedes the restored update cursor")
+        if not self._fit_started and not self._restored and self._output_was_used:
+            raise FileExistsError(
+                "SL output contains a run; restore a checkpoint or use a fresh output directory"
+            )
+        self._fit_started = True
         metrics = {}
         while self.learner.num_updates < end:
             candidate = torch.Generator(device="cpu")
@@ -236,8 +248,24 @@ class SupervisedTrainer:
         )
         if state.get("scheduler_type") != scheduler_type:
             raise ValueError("Supervised checkpoint scheduler type differs")
+        metrics_path = self.output / "metrics.jsonl"
+        if metrics_path.exists():
+            last_line = ""
+            with metrics_path.open() as handle:
+                for line in handle:
+                    if line.strip():
+                        last_line = line
+            if (
+                last_line
+                and json.loads(last_line)["num_updates"]
+                > state["learner"]["num_updates"]
+            ):
+                raise ValueError(
+                    "SL output history is ahead of this checkpoint; use a fresh output directory"
+                )
         self.learner.load_state_dict(state["learner"])
         if self.scheduler is not None:
             self.scheduler.load_state_dict(state["scheduler"])
         self.sampler.set_state(state["sampler"])
         self._restore_rng(state["rng"])
+        self._restored = True
