@@ -21,6 +21,9 @@ There is no registered Robot solver adapter: callers provide root-frame targets
 and explicitly configure the layer's TCP and limits. Existing Robot solver binding
 and arena conversion remain in [IK solvers](../ik-solvers/ik-solvers.md).
 
+Supervised optimizer and offline-run ownership belongs to
+[supervised learning](../supervised-learning/supervised-learning.md).
+
 ## Gradient and state boundaries
 
 Targets are root-frame TCP matrices; seed batch axes match the target or contain

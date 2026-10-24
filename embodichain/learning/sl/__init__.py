@@ -20,10 +20,16 @@ from __future__ import annotations
 
 from .types import LossResult, SupervisedBatch, SupervisedObjective
 from .learner import SupervisedLearner
+from .sources import SupervisedSource, TensorBatchSource
+from .trainer import SupervisedTrainer, SupervisedTrainerCfg
 
 __all__ = [
     "LossResult",
     "SupervisedBatch",
     "SupervisedObjective",
     "SupervisedLearner",
+    "SupervisedSource",
+    "TensorBatchSource",
+    "SupervisedTrainer",
+    "SupervisedTrainerCfg",
 ]
