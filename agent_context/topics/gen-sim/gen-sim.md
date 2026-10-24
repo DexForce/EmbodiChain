@@ -201,7 +201,14 @@ does not by itself certify a task witness.
 
 Task Engine preparation derives the normative specification before binding,
 then `SemanticTaskPlanner.plan_spec()` retains the original witness and emits
-explicit expansion lineage. `semantic_graph_validation.py` checks every source
+explicit expansion lineage. If the selected witness fails planner preflight,
+the coordinator tries only the remaining already-bound candidates, ordered by
+vote count, before generating any bundle. Each failed attempt remains in the
+preparation audit; this adds no provider, scene, or physical action attempts.
+Embedded E8/E9 control references may bind their source-described owning root
+when no separate control entity exists; native joint/contact discovery still
+qualifies the actual route and ambiguous ownership remains unresolved.
+`semantic_graph_validation.py` checks every source
 member, required resource, milestone dependency and surviving terminal clause.
 The existing graph/reader/executor remains the only execution path;
 new bundles add root-level `task_spec.json`, `semantic_graph_validation.json`
