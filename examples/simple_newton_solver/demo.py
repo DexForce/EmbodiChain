@@ -22,6 +22,7 @@ import json
 from pathlib import Path
 
 import torch
+from dexsim.engine.newton_physics import ProviderNewtonSolverCfg
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
@@ -31,10 +32,11 @@ from embodichain.lab.sim.cfg import (
     RigidBodyPhysicsCfg,
 )
 from embodichain.lab.visualization import VisualizationCfg
+from embodichain.lab.sim.physics.solvers.simple import SimpleSolverProvider
 
 
 def run(device: str) -> dict[str, object]:
-    """Demonstrate discovery, parity, gradients, publication and partial reset."""
+    """Demonstrate direct provider creation, parity, gradients and partial reset."""
     config = SimulationManagerCfg(
         headless=True,
         visualization=VisualizationCfg(backend="none"),
@@ -49,7 +51,10 @@ def run(device: str) -> dict[str, object]:
             requires_grad=True,
             use_cuda_graph=False,
             collision_cfg=None,
-            solver_cfg={"solver_type": "simple", "stiffness": 2.0, "damping": 0.2},
+            solver_cfg=ProviderNewtonSolverCfg(
+                provider_factory=SimpleSolverProvider,
+                options={"stiffness": 2.0, "damping": 0.2},
+            ),
         ),
     )
     sim = SimulationManager(config, requires_native_renderer=False)

@@ -311,7 +311,7 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     requires_grad: bool = False
     """Whether to finalize the Newton model with differentiable state enabled.
 
-    Requires Semi-implicit or an installed named solver supporting the requested
+    Requires Semi-implicit or a direct/named provider supporting the requested
     gradient mode. The provider validates native support during model creation;
     Scene functional calls additionally require its functional dynamics service.
     CUDA graph capture is disabled when gradients are enabled.
@@ -356,6 +356,12 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     DexSim builds with the named-extension API. For example,
     ``{"solver_type": "simple", "stiffness": 2.0}`` selects the spring-slider
     demonstration. Extension names are exact; options pass to their provider.
+
+    Python callers can pass DexSim's ``ProviderNewtonSolverCfg`` with a
+    ``provider_factory`` class or zero-argument factory and provider ``options``.
+    That configuration passes through directly without package discovery. The
+    SDK creates a fresh provider for each model build; pass a factory rather
+    than a live provider or solver instance.
     """
 
     collision_cfg: NewtonCollisionPipelineCfg | Mapping[str, Any] | None = field(

@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""Optional Newton solver providers, loaded through package entry points."""
+"""Optional Newton providers for direct factories or named package discovery."""
 
 from __future__ import annotations
 

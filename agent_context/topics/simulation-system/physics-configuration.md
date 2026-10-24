@@ -25,9 +25,12 @@ Newton `solver_cfg=None` preserves DexSim's scene-aware `AutoSolverCfg`.
 The concrete solver is resolved from the complete Spawn scene, then exposed
 through `NewtonPhysicsBackend.solver_type`. Do not guess a solver-specific robot
 preset while it is unresolved. Gradient mode requires an explicit
-`semi_implicit` solver or a named provider supporting the requested native
+`semi_implicit` solver or a direct/named provider supporting the requested native
 gradient mode. Functional Scene calls additionally require its functional
-dynamics service. Installed `dexsim.newton_solvers` names pass through to DexSim's
+dynamics service. Python callers pass DexSim's `ProviderNewtonSolverCfg` with a
+provider class/zero-argument factory directly through `solver_cfg`; this path
+does not inspect installed metadata. DexSim creates fresh instances per model
+build. Installed `dexsim.newton_solvers` names optionally pass through to DexSim's
 `RegisteredNewtonSolverCfg`; missing SDK capabilities fail at selection or
 provider loading rather than breaking ordinary backend imports. Read exact solver options/defaults in
 `cfg/simulation.py` and the installed DexSim config types; do not substitute a
@@ -36,7 +39,9 @@ hardcoded fallback when an expected DexSim API is absent.
 `physics/solvers/simple.py` owns the optional spring-slider provider;
 `examples/simple_newton_solver/` demonstrates it through the public
 `SimulationManager.spawn_result` Scene. The installed SDK must include the
-service API. DexSim owns physical state, clocks and publication; the provider
+direct-factory and service APIs. The example uses direct factory configuration;
+the `simple` entry point remains optional for name-based configurations.
+DexSim owns physical state, clocks and publication; the provider
 owns its model-scoped parameters and functional transition. Independent
 rollout uses `publish=False`; publishing advances the live clock once and must
 not be paired with a manager update for the same transition. Scene functional

@@ -1,19 +1,19 @@
 # Simple Newton solver
 
-This example installs a real `dexsim.newton_solvers` provider named `simple`
-from EmbodiChain. It demonstrates an ordinary `SimulationManager.update()`,
+This example passes `SimpleSolverProvider` directly to DexSim, without requiring
+entry-point registration. It demonstrates an ordinary `SimulationManager.update()`,
 independent differentiable rollout, parameter/input gradients, publication into
 the live Scene, and partial functional/native reset in two environments.
 
 ## Prerequisite
 
 Use Python 3.10 or 3.11 with Torch and a DexSim build containing the
-`FunctionalDynamics` service and `Scene.dynamics_capabilities()` revision of
+`ProviderNewtonSolverCfg`, `FunctionalDynamics` service and `Scene.dynamics_capabilities()` revision of
 [DexSim MR !1483](http://192.168.3.16/Engine/dexverse/-/merge_requests/1483).
 The released DexSim pin in EmbodiChain does not yet provide that API. Normal
 EmbodiChain installations remain supported; this optional example requires the
-integration SDK. The older callback and early service revisions without the
-capability query are also insufficient.
+integration SDK. Older callback/service revisions without the direct factory
+configuration are also insufficient.
 
 In a dedicated EmbodiChain development environment, install this checkout and
 then the matching SDK wheel. Use `--no-deps` only for the EmbodiChain checkout,
@@ -30,7 +30,7 @@ python examples/simple_newton_solver/demo.py --device cpu
 python examples/simple_newton_solver/demo.py --device cuda:0
 ```
 
-Reinstall editable metadata after changing entry points. The command runs
+The command runs
 headlessly and prints a JSON result with positions and nonzero gradients. It
 checks numerical equality and state isolation before reporting success.
 
@@ -41,6 +41,7 @@ skip is not validation of the solver:
 ```bash
 python - <<'PY'
 from dexsim.engine.newton_physics import FunctionalDynamics
+from dexsim.engine.newton_physics import ProviderNewtonSolverCfg
 from dexsim.scene import Scene
 assert callable(getattr(Scene, "dynamics_capabilities", None))
 PY
@@ -75,8 +76,30 @@ errors. This eager solver does not support CUDA Graph capture.
 
 ## API boundaries
 
-`NewtonPhysicsCfg(solver_cfg={"solver_type": "simple", "stiffness": 2.0})`
-uses installed metadata discovery; no global registration call is needed.
+Python configuration passes the provider factory directly:
+
+```python
+from dexsim.engine.newton_physics import ProviderNewtonSolverCfg
+from embodichain.lab.sim.cfg import NewtonPhysicsCfg
+from embodichain.lab.sim.physics.solvers.simple import SimpleSolverProvider
+
+physics = NewtonPhysicsCfg(
+    solver_cfg=ProviderNewtonSolverCfg(
+        provider_factory=SimpleSolverProvider,
+        options={"stiffness": 2.0},
+    ),
+)
+```
+
+Pass a class or zero-argument factory, not an already-created provider/solver.
+DexSim creates a fresh provider for every model build and applies the same
+validation and lifecycle as named providers. This path does not scan installed
+entry points.
+
+The package also keeps an optional `simple` entry point for data-based configs:
+`NewtonPhysicsCfg(solver_cfg={"solver_type": "simple", "stiffness": 2.0})`.
+Only that name-based path requires installed metadata; reinstall editable
+metadata after changing entry points. No global registration call is needed.
 `requires_grad=True` enables the functional path. After `sim.prepare()`, use
 the public `sim.spawn_result` Scene:
 

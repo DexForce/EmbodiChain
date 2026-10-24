@@ -27,15 +27,20 @@ import warp as wp
 
 from dexsim.engine import newton_physics
 
-if not hasattr(newton_physics, "FunctionalDynamics"):
+if not hasattr(newton_physics, "ProviderNewtonSolverCfg"):
     pytest.skip(
-        "Optional simple solver requires the DexSim FunctionalDynamics SDK; "
+        "Optional simple solver requires the DexSim direct-provider SDK; "
         "run its integration acceptance with the matching SDK wheel",
         allow_module_level=True,
     )
 
-from dexsim.engine.newton_physics import NewtonSolverContext, resolve_newton_solver
+from dexsim.engine.newton_physics import (
+    NewtonSolverContext,
+    ProviderNewtonSolverCfg,
+    resolve_newton_solver,
+)
 from embodichain.lab.sim.cfg import NewtonPhysicsCfg
+from embodichain.lab.sim.physics.solvers.simple import SimpleSolverProvider
 
 
 def _model(device="cpu", *, joint="prismatic", collision=False, gravity=(0, 0, 0)):
@@ -52,8 +57,8 @@ def _model(device="cpu", *, joint="prismatic", collision=False, gravity=(0, 0, 0
     return builder.finalize(device)
 
 
-def _extension(model, **options):
-    provider = resolve_newton_solver("simple")
+def _extension(model, *, named=False, **options):
+    provider = resolve_newton_solver("simple" if named else SimpleSolverProvider)
     return provider.create(
         NewtonSolverContext(model, model.control(), None, model.device, 0.1, {}),
         options,
@@ -63,9 +68,10 @@ def _extension(model, **options):
 @pytest.mark.parametrize(
     "device", ["cpu", pytest.param("cuda:0", marks=pytest.mark.gpu)]
 )
-def test_discovered_solver_native_parity_and_analytical_gradients(device):
+@pytest.mark.parametrize("named", [False, True])
+def test_solver_native_parity_and_analytical_gradients(device, named):
     model = _model(device)
-    extension = _extension(model, stiffness=0, damping=0)
+    extension = _extension(model, named=named, stiffness=0, damping=0)
     dynamics = extension.functional
     native = model.state()
     newton.eval_fk(model, native.joint_q, native.joint_qd, native)
@@ -181,10 +187,17 @@ def test_fixed_loop_cannot_be_treated_as_an_independent_slider():
 @pytest.mark.parametrize("owner", ["articulation", "manager"])
 @pytest.mark.parametrize("requires_grad", [False, True])
 def test_effort_only_reset_restores_selected_environment(
-    tmp_path, owner, requires_grad
+    tmp_path, monkeypatch, owner, requires_grad
 ):
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
     from embodichain.lab.sim.cfg import ArticulationCfg
+
+    def no_discovery():
+        pytest.fail("Direct solver configuration must not discover entry points")
+
+    monkeypatch.setattr(
+        "dexsim.engine.newton_physics.solver_extensions._entry_points", no_discovery
+    )
 
     asset = tmp_path / "slider.urdf"
     asset.write_text("""<robot name="slider">
@@ -203,7 +216,9 @@ def test_effort_only_reset_restores_selected_environment(
                 gravity=(0, 0, 0),
                 requires_grad=requires_grad,
                 collision_cfg=None,
-                solver_cfg={"solver_type": "simple"},
+                solver_cfg=ProviderNewtonSolverCfg(
+                    provider_factory=SimpleSolverProvider
+                ),
             ),
         ),
         requires_native_renderer=False,
