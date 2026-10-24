@@ -149,6 +149,61 @@ def test_statistics_only_training_windows(tmp_path):
 
 
 @pytest.mark.parametrize("numerical_profile", ["default", "reference"])
+def test_shared_recipe_matches_legacy_updates_and_restores_sampler(
+    tmp_path, numerical_profile
+):
+    """The new CLI recipe retains the established NeRD schedule and updates."""
+    from embodichain.learning.dynamics.sl_recipe import build_supervised_trainer
+
+    make_data(tmp_path / "data")
+    legacy = build(
+        tmp_path / "data",
+        tmp_path / "legacy",
+        steps=4,
+        numerical_profile=numerical_profile,
+    )
+    config = {
+        "model": architecture().to_dict(),
+        "data": {"path": str(tmp_path / "data")},
+        "objective": {"numerical_profile": numerical_profile},
+        "optimizer": {
+            "learning_rate": 0.005,
+            "final_learning_rate": 0.002,
+            "max_grad_norm": 1.0,
+        },
+        "trainer": {
+            "total_updates": 4,
+            "batch_size": 8,
+            "seed": 9,
+            "output_dir": str(tmp_path / "shared"),
+        },
+    }
+    shared = build_supervised_trainer(config)
+    shared.learner.model.load_state_dict(legacy.model.state_dict())
+    for _ in range(4):
+        legacy.step()
+    shared.fit(stop_after=2)
+    restored = build_supervised_trainer(config)
+    restored.resume(tmp_path / "shared/last.pt")
+    restored.fit()
+    for name, value in legacy.model.state_dict().items():
+        torch.testing.assert_close(
+            restored.learner.model.state_dict()[name], value, atol=0, rtol=0
+        )
+    assert torch.equal(restored.sampler.get_state(), legacy.sampler.get_state())
+    from embodichain.learning.sl.workflow import train_from_config
+
+    report = train_from_config(
+        {
+            "factory": "embodichain.learning.dynamics.sl_recipe:build_supervised_trainer",
+            **config,
+        },
+        resume=str(tmp_path / "shared/last.pt"),
+    )
+    assert report["num_updates"] == legacy.global_step
+
+
+@pytest.mark.parametrize("numerical_profile", ["default", "reference"])
 def test_exact_resume_with_dropout_optimizer_sampler_rng(tmp_path, numerical_profile):
     make_data(tmp_path / "data")
     full = build(

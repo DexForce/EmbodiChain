@@ -32,6 +32,8 @@ from torch import Tensor
 
 from embodichain.utils import configclass
 from embodichain.data_pipeline.dynamics.shards import DynamicsWindowDataset
+from embodichain.learning.sl import SupervisedLearner
+from .supervised import NeRDObjective, make_nerd_batch
 from ._sample_order import _CheckpointedOrder, _OfficialShuffleOrder, _open_order
 from ._numerics import (
     _attention_context,
@@ -475,6 +477,19 @@ class DynamicsTrainer:
                     encode_batch(warm_batch, self.codec, cfg.device)
             del warm_batch
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=cfg.learning_rate)
+        self.learner = SupervisedLearner(
+            self.model,
+            NeRDObjective(include_prefix=train_dataset.include_prefix),
+            self.optimizer,
+            max_grad_norm=cfg.max_grad_norm,
+            clip_grad=lambda parameters, max_norm: _clip_grad_norm_(
+                parameters,
+                max_norm,
+                profile=cfg.numerical_profile,
+                error_if_nonfinite=cfg.numerical_profile == "default",
+            ),
+            numerical_context=lambda: _attention_context(cfg.numerical_profile),
+        )
         random.seed(cfg.seed)
         np.random.seed(cfg.seed)
         torch.manual_seed(cfg.seed)
@@ -541,46 +556,18 @@ class DynamicsTrainer:
         if any(not 0 <= int(index) < len(self.train_dataset) for index in indices):
             raise ValueError("sample_order contains out-of-range dataset indices")
         batch = self.train_dataset.get_batch(indices)
-        inputs, target, mask = encode_batch(batch, self.codec, self.cfg.device)
-        self.model.train()
-        self.optimizer.zero_grad(set_to_none=True)
+        supervised_batch = make_nerd_batch(batch, self.codec, self.cfg.device)
         lr = self._lr()
         for group in self.optimizer.param_groups:
             group["lr"] = lr
-        observed = None
-        with _attention_context(self.cfg.numerical_profile):
-            prediction = self.model(inputs)
-            loss = normalized_mse(
-                prediction,
-                target,
-                _model_variance(self.model),
-                mask if self.train_dataset.include_prefix else None,
-            )
-            if self.cfg.numerical_profile == "default" and not torch.isfinite(loss):
-                raise FloatingPointError("Non-finite dynamics training loss")
-            loss.backward()
-            norm = _clip_grad_norm_(
-                self.model.parameters(),
-                self.cfg.max_grad_norm,
-                profile=self.cfg.numerical_profile,
-                error_if_nonfinite=self.cfg.numerical_profile == "default",
-            )
-            if self.cfg.numerical_profile == "reference":
-                # One device-to-host observation covers loss, total norm and
-                # finite checks; no parameter norm is read back individually.
-                observed = torch.stack((loss.detach(), norm)).cpu().tolist()
-                if not all(math.isfinite(value) for value in observed):
-                    raise FloatingPointError(
-                        "Non-finite dynamics loss or gradient norm"
-                    )
-        self.optimizer.step()
+        metrics = self.learner.update(supervised_batch)
         self.sampler.set_state(candidate_sampler.get_state())
         self.global_step += 1
         return {
             "step": self.global_step,
-            "loss": float(loss.detach()) if observed is None else observed[0],
+            "loss": metrics["loss"],
             "learning_rate": lr,
-            "grad_norm": float(norm) if observed is None else observed[1],
+            "grad_norm": metrics["grad_norm"],
         }
 
     def save(self, path: str | Path) -> None:
@@ -670,6 +657,7 @@ class DynamicsTrainer:
             state["best_validation"],
         )
         self.statistics = state["statistics"]
+        self.learner.num_updates = self.global_step
         self.sampler.set_state(state["sampler_state"])
         _restore_rng_state(state["rng"])
 
