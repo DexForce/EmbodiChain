@@ -311,8 +311,9 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     requires_grad: bool = False
     """Whether to finalize the Newton model with differentiable state enabled.
 
-    EmbodiChain currently requires the Semi-implicit solver for this mode and
-    disables CUDA graph capture when gradients are enabled.
+    Semi-implicit kinematics and registered differentiable solver providers
+    support this mode. Provider capabilities are validated after scene creation.
+    CUDA graph capture is disabled when gradients are enabled.
     """
 
     use_cuda_graph: bool = True
@@ -346,7 +347,8 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
 
     A mapping is converted to the matching DexSim Newton solver config. Include
     ``solver_type`` or ``class_type`` to select the solver, then add any
-    parameters accepted by that DexSim solver config. If omitted, EmbodiChain
+    parameters accepted by that DexSim solver config. Registered providers use
+    their entry-point name and an ``options`` mapping. If omitted, EmbodiChain
     preserves DexSim's scene-aware ``AutoSolverCfg`` default. A DexSim build
     exporting ``AutoSolverCfg`` is required; no concrete-solver fallback is used.
     """
@@ -382,6 +384,7 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
             SemiImplicitSolverCfg,
             VBDSolverCfg,
             XPBDSolverCfg,
+            RegisteredNewtonSolverCfg,
         )
 
         torch_device = (
@@ -408,12 +411,16 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
         )
 
         if self.requires_grad and (
-            solver_cfg is None or solver_cfg.solver_type != "semi_implicit"
+            solver_cfg is None
+            or (
+                solver_cfg.solver_type != "semi_implicit"
+                and not isinstance(solver_cfg, RegisteredNewtonSolverCfg)
+            )
         ):
             logger.log_error(
                 "Newton gradient mode requires an explicit "
-                "solver_type='semi_implicit'; AutoSolver does not select a "
-                "differentiable solver."
+                "solver_type='semi_implicit' or a registered differentiable "
+                "provider; AutoSolver does not select a differentiable solver."
             )
 
         collision_pipeline_cfg = None
@@ -458,48 +465,14 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
 
 def _normalize_newton_solver_type(solver_type: str) -> str:
     """Normalize public EmbodiChain and DexSim Newton solver aliases."""
-    key = solver_type.replace("-", "_").lower()
-    aliases = {
-        "auto": "auto",
-        "autosolver": "auto",
-        "autosolvercfg": "auto",
-        "auto_solver": "auto",
-        "auto_solver_cfg": "auto",
-        "mjwarp": "mujoco_warp",
-        "mjwarpsolver": "mujoco_warp",
-        "mjwarpsolvercfg": "mujoco_warp",
-        "mjwarp_solver": "mujoco_warp",
-        "mjwarp_solver_cfg": "mujoco_warp",
-        "mujoco_warp": "mujoco_warp",
-        "mujocowarp": "mujoco_warp",
-        "mujocowarpsolver": "mujoco_warp",
-        "mujocowarpsolvercfg": "mujoco_warp",
-        "dexuni": "dexuni",
-        "dexunisolver": "dexuni",
-        "dexunisolvercfg": "dexuni",
-        "dexuni_solver": "dexuni",
-        "dexuni_solver_cfg": "dexuni",
-        "xpbdsolver": "xpbd",
-        "xpbdsolvercfg": "xpbd",
-        "xpbd": "xpbd",
-        "semiimplicit": "semi_implicit",
-        "semi_implicit": "semi_implicit",
-        "semiimplicitsolver": "semi_implicit",
-        "semiimplicitsolvercfg": "semi_implicit",
-        "featherstone": "featherstone",
-        "featherstonesolver": "featherstone",
-        "featherstonesolvercfg": "featherstone",
-        "vbd": "vbd",
-        "vbdsolver": "vbd",
-        "vbdsolvercfg": "vbd",
-    }
-    if key not in aliases:
-        logger.log_error(
-            f"Unsupported Newton solver type '{solver_type}'. "
-            "Expected one of 'auto', 'dexuni', 'mjwarp', 'xpbd', 'semi_implicit', "
-            "'featherstone', or 'vbd'."
-        )
-    return aliases[key]
+    try:
+        from dexsim.engine.newton_physics import normalize_newton_solver_name
+    except ImportError as exc:
+        raise RuntimeError(
+            "Named Newton solvers require a DexSim build exposing "
+            "normalize_newton_solver_name and RegisteredNewtonSolverCfg."
+        ) from exc
+    return normalize_newton_solver_name(solver_type)
 
 
 def _newton_solver_cfg_to_dexsim(
@@ -511,6 +484,21 @@ def _newton_solver_cfg_to_dexsim(
         return None
 
     if not isinstance(solver_cfg, Mapping):
+        from dexsim.engine.newton_physics import RegisteredNewtonSolverCfg
+
+        if isinstance(solver_cfg, RegisteredNewtonSolverCfg):
+            name = _normalize_newton_solver_type(str(solver_cfg.solver_type))
+            if name in solver_cfg_map:
+                if {"solver_type", "class_type"}.intersection(solver_cfg.options):
+                    raise ValueError(
+                        "Builtin solver options cannot override the registered name."
+                    )
+                return _newton_solver_cfg_to_dexsim(
+                    {"solver_type": name, **dict(solver_cfg.options)}, solver_cfg_map
+                )
+            return RegisteredNewtonSolverCfg(
+                solver_type=name, options=dict(solver_cfg.options)
+            )
         if not hasattr(solver_cfg, "solver_type"):
             logger.log_error(
                 "Newton solver_cfg must be a mapping or a DexSim Newton solver "
@@ -525,6 +513,19 @@ def _newton_solver_cfg_to_dexsim(
         or "auto"
     )
     normalized_solver_type = _normalize_newton_solver_type(str(configured_solver_type))
+    if normalized_solver_type not in solver_cfg_map:
+        from dexsim.engine.newton_physics import RegisteredNewtonSolverCfg
+
+        unexpected = set(solver_cfg_data) - {"options"}
+        if unexpected:
+            raise ValueError(
+                "Registered solver settings belong in options; unexpected fields: "
+                f"{sorted(unexpected)}."
+            )
+        return RegisteredNewtonSolverCfg(
+            solver_type=normalized_solver_type,
+            options=solver_cfg_data.get("options", {}),
+        )
     solver_cfg_type = solver_cfg_map[normalized_solver_type]
     if normalized_solver_type == "dexuni":
         try:

@@ -1,5 +1,6 @@
 # Dynamics workflow configuration; not a runnable Gym deployment.
 robot: cartpole
+collector: scene
 output_dir: ../../../../../../outputs/dynamics/cartpole/smoke/data
 device: cpu
 num_envs: 4

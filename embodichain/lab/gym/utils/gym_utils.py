@@ -729,6 +729,7 @@ def config_to_cfg(
         viser_server = ViserServerCfg(**viser_server_config)
 
     env_cfg.sim_cfg = SimulationManagerCfg(
+        enable_ground_plane=config.get("enable_ground_plane", True),
         startup_summary=config.get("startup_summary", "compact"),
         dexsim_startup_info=config.get("dexsim_startup_info", False),
         scene_node_capacity=config.get("scene_node_capacity"),
@@ -746,10 +747,13 @@ def config_to_cfg(
         ),
     )
 
-    env_cfg.robot = _robot_cfg_from_dict(config["robot"])
-    env_cfg.robot.enable_sensor = env_cfg.enable_sensor
-    if env_cfg.robot.source is not None:
-        resolve_asset_paths(env_cfg.robot)
+    env_cfg.robot = (
+        None if config["robot"] is None else _robot_cfg_from_dict(config["robot"])
+    )
+    if env_cfg.robot is not None:
+        env_cfg.robot.enable_sensor = env_cfg.enable_sensor
+        if env_cfg.robot.source is not None:
+            resolve_asset_paths(env_cfg.robot)
 
     # Parse source-neutral expert trajectory settings owned by the environment.
     # Keep this under ``env`` so deployment configs do not duplicate runtime

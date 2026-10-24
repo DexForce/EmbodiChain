@@ -1,0 +1,22 @@
+# Published model versus its matching current-Newton analytical teacher.
+mode: rollout
+robot: ant
+model: ../../../../../../outputs/models/neural_dynamics/nerd/ant/v1
+device: cuda:0
+num_envs: 16
+trajectories: 16
+horizons:
+- 1
+- 10
+- 100
+seed: 1000000
+physics_profile: warp_reference
+teacher_solver:
+  solver_type: featherstone
+  update_mass_matrix_interval: 16
+  friction_smoothing: 0.001
+num_substeps: 16
+motion_mode: random_effort
+initial_states: sample
+effort_scale: 1.0
+output: ../../../../../../outputs/dynamics/ant/pretrained/rollout.json

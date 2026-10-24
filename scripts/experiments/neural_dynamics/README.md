@@ -1,7 +1,7 @@
 # NeRD reference experiments
 
 These command-line tools compare an upstream NeRD implementation with the
-EmbodiChain implementation. The normal dataset, training, export
+EmbodiChain implementation. The normal dataset, training, export and solver
 workflow is documented in
 [Neural Dynamics Models](../../../docs/source/features/neural_dynamics.md).
 Downloadable datasets and inference models are linked there. Training logs,
@@ -22,6 +22,19 @@ Pin the source revision and keep any portability adapter separate from the
 upstream numerical implementation. Use each tool's `--help` for its arguments.
 
 ## Tool ownership
+
+| Tool | Purpose |
+| --- | --- |
+| `official_model_reference.py` | Generate upstream reference data and model observations |
+| `official_evaluation_data.py` | Freeze upstream teacher trajectories and provenance |
+| `compare_official_model.py` | Compare a portable copy with an upstream checkpoint |
+| `official_small_budget.py` | Observe the original training entry point and consumed batches |
+| `matched_small_budget.py` | Replay captured initialization, statistics and sampling in the production trainer |
+| `official_small_budget_evaluate.py` | Evaluate an observed original training run |
+| `official_small_budget_rollout.py` | Evaluate checkpoints through the original integrator |
+| `official_math_rollout.py` | Evaluate explicit reference/math exports in the original runtime |
+| `physics_alignment.py` | Capture matched-input physics/version comparisons |
+| `trajectory_closeness.py` | Measure kinematic motion differences in physical units |
 
 `_portable_reference.py` and `_historical_physics.py` are private support modules
 for the isolated original runtime.

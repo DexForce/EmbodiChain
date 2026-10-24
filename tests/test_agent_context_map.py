@@ -75,6 +75,7 @@ def test_map_registers_the_supported_context_domains() -> None:
         "scene-expansion",
         "scene-services",
         "differentiable-env",
+        "neural-dynamics",
     }
 
     assert set(topics) == expected_topic_ids

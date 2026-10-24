@@ -61,8 +61,9 @@ Task authors implement three required hooks and may override one state hook:
   `NewtonStepFunc`.
 
 There is no public `_apply_dynamics_action_kernel` or
-`differentiable_step_mode` extension point. Differentiable dynamics are a
-future feature, not a `DifferentiableEnv` capability.
+`differentiable_step_mode` extension point. Registered solver dynamics use the
+separate `DifferentiableDynamicsEnv` and `FunctionalDynamics` interfaces; see
+[neural dynamics](../neural-dynamics/neural-dynamics.md).
 
 ## Autograd and reset rules
 
@@ -89,9 +90,12 @@ Newton dynamics.
 
 ## Dynamics boundary
 
-The public differentiable package exposes no solver stepper, trajectory, or
-gradient-rollout API. Add those capabilities as a separate future design when
-Newton dynamics are ready for end-to-end validation.
+`sim.diff.FunctionalDynamics` exposes registered solver dynamics through the
+public manager/Scene path. It does not change `NewtonStepFunc` or this
+kinematic environment's callbacks. Functional physical/history tensors own
+backward storage independently of detached live publication. Read the
+[neural dynamics lifecycle](../neural-dynamics/neural-dynamics.md) before
+changing resets, parameter updates or native/functional mode transitions.
 
 ## Source of truth
 

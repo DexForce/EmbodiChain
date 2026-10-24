@@ -730,6 +730,19 @@ embodichain.lab.gym.envs.demo
    execute_demo_episode
    resolve_demo_segments
 
+embodichain.lab.gym.envs.differentiable_dynamics_env
+----------------------------------------------------
+
+Graph-connected dynamics environments use explicit action/control and output
+hooks, preserve terminal reward graphs during partial reset, and expose an
+explicit detach boundary for rollout optimization.
+
+.. currentmodule:: embodichain.lab.gym.envs.differentiable_dynamics_env
+
+.. autosummary::
+
+   DifferentiableDynamicsEnv
+
 embodichain.lab.gym.envs.embodied_env
 -------------------------------------
 
@@ -739,6 +752,49 @@ embodichain.lab.gym.envs.embodied_env
 
    EmbodiedEnvCfg
    EmbodiedEnv
+
+embodichain.lab.sim.diff.dynamics
+---------------------------------
+
+Advance immutable functional state through SimulationManager public methods.
+The host owns substep scheduling, live publication and simulation time.
+
+.. currentmodule:: embodichain.lab.sim.diff.dynamics
+
+.. autosummary::
+
+   FunctionalDynamics
+   detach_dynamics_state
+
+embodichain.lab.sim.physics.solvers.collection
+----------------------------------------------
+
+Collect reference trajectories through SimulationManager and the public Scene.
+Analytical teacher and neural deployments use separate scene instances; rollout
+accuracy reports are distinct from official training qualification.
+
+.. currentmodule:: embodichain.lab.sim.physics.solvers.collection
+
+.. autosummary::
+
+   DynamicsGenerationCfg
+   DynamicsSimulation
+   generate_dataset
+   evaluate_rollouts
+
+embodichain.lab.sim.physics.solvers.nerd
+----------------------------------------
+
+The nerd entry-point provider validates its trained physical contract and shares
+one transition between native and functional execution. Cartpole is contact-free;
+Ant uses fixed plane features and exposes no contact-force report.
+
+.. currentmodule:: embodichain.lab.sim.physics.solvers.nerd
+
+.. autosummary::
+
+   NeRDProvider
+   NeuralRobotDynamicSolver
 
 embodichain.lab.sim.scene.expansion.layout
 ------------------------------------------
@@ -1440,8 +1496,9 @@ embodichain.lab.sim.atomic_actions.transports
 embodichain.lab.sim.diff
 ------------------------
 
-Public bridge from task-defined Newton kinematics and Warp tapes into PyTorch
-autograd. It does not advance the Newton dynamics solver.
+Task-defined Newton kinematics and registered solver dynamics have separate
+autograd boundaries. Functional dynamics own physical/history tensors and publish
+detached state through the Scene; the kinematics bridge never steps a solver.
 
 .. currentmodule:: embodichain.lab.sim.diff
 
@@ -1449,6 +1506,12 @@ autograd. It does not advance the Newton dynamics solver.
 
    NewtonStepFunc
    tape_context
+
+
+.. autosummary::
+
+   FunctionalDynamics
+   detach_dynamics_state
 
 embodichain.lab.sim.diff.bridge
 -------------------------------
@@ -2876,6 +2939,19 @@ embodichain.toolkits.urdf_assembly.urdf_assembly_manager
 
    URDFAssemblyManager
 
+embodichain_tasks.classic_control.ant
+-------------------------------------
+
+Free-base Ant dynamics task with explicit effort controls and differentiable
+state ownership, registered with Gym and the APG learning-environment catalog.
+
+.. currentmodule:: embodichain_tasks.classic_control.ant
+
+.. autosummary::
+
+   AntDynamicsEnv
+   make_ant_dynamics_env
+
 embodichain_tasks.classic_control.cart_pole
 --------------------------------------------
 
@@ -2886,6 +2962,19 @@ Cart-pole environment registration under the task-first import path.
 .. autosummary::
 
    CartPoleEnv
+
+embodichain_tasks.classic_control.cartpole
+------------------------------------------
+
+Contact-free Cartpole dynamics task sharing the native and functional NeRD
+transition, with Gym and APG learning-environment factories.
+
+.. currentmodule:: embodichain_tasks.classic_control.cartpole
+
+.. autosummary::
+
+   CartpoleDynamicsEnv
+   make_cartpole_dynamics_env
 
 embodichain_tasks.classic_control.point_mass
 ---------------------------------------------

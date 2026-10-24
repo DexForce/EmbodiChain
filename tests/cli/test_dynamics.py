@@ -40,16 +40,62 @@ def test_help_and_dispatcher_are_simulation_free():
     )
 
 
-def test_generate_routing_and_path_resolution(tmp_path, monkeypatch):
-    host = ModuleType("embodichain.data_pipeline.dynamics.generation")
+def test_generate_rollout_routing_and_path_resolution(tmp_path, monkeypatch):
+    host = ModuleType("embodichain.lab.sim.physics.solvers.collection")
     host.generate_dataset = Mock(return_value={"status": "ok"})
+    host.evaluate_rollouts = Mock(return_value={"status": "ok"})
     monkeypatch.setitem(sys.modules, host.__name__, host)
     config = tmp_path / "generate.yaml"
-    config.write_text("robot: cartpole\noutput_dir: data\ndevice: cpu\nresume: false\n")
+    config.write_text(
+        "robot: cartpole\ncollector: scene\noutput_dir: data\ndevice: cpu\nresume: false\n"
+    )
     main(["generate", "--config", str(config), "--seed", "7", "--resume"])
     received = host.generate_dataset.call_args.args[0]
     assert received["output_dir"] == str(tmp_path / "data")
     assert received["seed"] == 7 and received["resume"] is True
+    (tmp_path / "export").mkdir()
+    config.write_text(
+        "mode: rollout\nrobot: ant\nmodel: export\nmotion_mode: passive\noutput: report.json\n"
+    )
+    main(["eval", "--config", str(config)])
+    received = host.evaluate_rollouts.call_args.args[0]
+    assert "mode" not in received
+    assert received["motion_mode"] == "passive"
+    assert received["model"] == str(tmp_path / "export")
+
+
+def test_rollout_teacher_and_policy_paths_are_config_relative(tmp_path, monkeypatch):
+    host = ModuleType("embodichain.lab.sim.physics.solvers.collection")
+    host.evaluate_rollouts = Mock(return_value={"status": "ok"})
+    monkeypatch.setitem(sys.modules, host.__name__, host)
+    for name in ("export", "teacher"):
+        (tmp_path / name).mkdir()
+    for name in ("actor.yaml", "actor.pt"):
+        (tmp_path / name).write_text("mock artifact")
+    config = tmp_path / "eval.yaml"
+    config.write_text(
+        yaml.safe_dump(
+            {
+                "mode": "rollout",
+                "model": "export",
+                "teacher_dataset": "teacher",
+                "policy": {
+                    "kind": "actor_only",
+                    "config": "actor.yaml",
+                    "checkpoint": "actor.pt",
+                },
+            }
+        )
+    )
+    main(["eval", "--config", str(config)])
+    received = host.evaluate_rollouts.call_args.args[0]
+    assert received["teacher_dataset"] == str(tmp_path / "teacher")
+    assert received["policy"]["config"] == str(tmp_path / "actor.yaml")
+    assert received["policy"]["checkpoint"] == str(tmp_path / "actor.pt")
+    (tmp_path / "actor.pt").unlink()
+    with pytest.raises(SystemExit) as error:
+        main(["eval", "--config", str(config)])
+    assert error.value.code == 2
 
 
 def test_invalid_paths_and_conversion_requires_explicit_trust(tmp_path):
@@ -178,8 +224,9 @@ def test_packaged_workflow_configs_decode_through_cli(tmp_path, monkeypatch):
     from embodichain.learning.dynamics.trainer import DynamicsTrainCfg
     from embodichain.learning.models.nerd import NeRDModelCfg
 
-    host = ModuleType("embodichain.data_pipeline.dynamics.generation")
+    host = ModuleType("embodichain.lab.sim.physics.solvers.collection")
     host.generate_dataset = Mock(return_value={"status": "not_run"})
+    host.evaluate_rollouts = Mock(return_value={"status": "not_run"})
     monkeypatch.setitem(sys.modules, host.__name__, host)
 
     def train(config):
@@ -208,6 +255,9 @@ def test_packaged_workflow_configs_decode_through_cli(tmp_path, monkeypatch):
         "dynamics.eval.smoke.yaml",
         "dynamics.eval.full.yaml",
         "dynamics.eval.pretrained.yaml",
+        "dynamics.rollout.smoke.yaml",
+        "dynamics.rollout.full.yaml",
+        "dynamics.rollout.pretrained.yaml",
     }
     for robot in ("cartpole", "ant"):
         robot_configs = list(
@@ -237,7 +287,7 @@ def test_packaged_workflow_configs_decode_through_cli(tmp_path, monkeypatch):
         copied = tmp_path / source.name
         copied.write_text(yaml.safe_dump(config, sort_keys=False))
         operation = source.name.split(".")[1]
-        main([operation, "--config", str(copied)])
+        main(["eval" if operation == "rollout" else operation, "--config", str(copied)])
 
 
 def test_build_py_packages_reference_assets_and_workflow_resources(tmp_path):

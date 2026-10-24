@@ -41,6 +41,58 @@ def test_simulation_manager_cfg_uses_default_physics_cfg() -> None:
     assert type(cfg.physics_cfg) is DefaultPhysicsCfg
 
 
+def test_contact_free_manager_explicitly_disables_physical_ground() -> None:
+    config = SimulationManagerCfg(enable_ground_plane=False)
+    assert config.to_dict()["enable_ground_plane"] is False
+    manager = object.__new__(SimulationManager)
+    manager.sim_config = config
+    manager._spawn_scene = MagicMock()
+    manager._declare_spawn_default_plane()
+    manager._spawn_scene.declare.assert_not_called()
+    with pytest.raises(TypeError, match="boolean"):
+        SimulationManagerCfg(enable_ground_plane="false")
+
+
+def test_registered_newton_solver_preserves_name_and_options() -> None:
+    from dexsim.engine.newton_physics import RegisteredNewtonSolverCfg
+
+    config = NewtonPhysicsCfg(
+        solver_cfg={
+            "solver_type": "nerd",
+            "options": {"checkpoint": "/models/example"},
+        },
+        requires_grad=True,
+    )
+    native = config.to_dexsim_cfg(gpu_id=0)
+    assert isinstance(native.solver_cfg, RegisteredNewtonSolverCfg)
+    assert native.solver_cfg.solver_type == "nerd"
+    assert native.solver_cfg.options == {"checkpoint": "/models/example"}
+    assert not native.use_cuda_graph
+    with pytest.raises(ValueError, match="belong in options"):
+        NewtonPhysicsCfg(
+            solver_cfg={"solver_type": "nerd", "checkpoint": "model"}
+        ).to_dexsim_cfg(gpu_id=0)
+
+
+def test_registered_config_cannot_bypass_builtin_gradient_restriction() -> None:
+    from dexsim.engine.newton_physics import RegisteredNewtonSolverCfg
+
+    config = NewtonPhysicsCfg(
+        requires_grad=True,
+        solver_cfg=RegisteredNewtonSolverCfg(
+            solver_type="mjwarp", options={"use_mujoco_cpu": True}
+        ),
+    )
+    with pytest.raises(RuntimeError, match="gradient mode"):
+        config.to_dexsim_cfg(gpu_id=0)
+    with pytest.raises(ValueError, match="cannot override"):
+        NewtonPhysicsCfg(
+            solver_cfg=RegisteredNewtonSolverCfg(
+                solver_type="mujoco_warp", options={"solver_type": "xpbd"}
+            )
+        ).to_dexsim_cfg(gpu_id=0)
+
+
 @pytest.mark.no_sim
 def test_newton_physics_cfg_owns_backend_device_default() -> None:
     """The concrete Newton default shadows the generic backend default."""

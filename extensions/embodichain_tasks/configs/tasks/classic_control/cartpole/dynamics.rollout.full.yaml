@@ -1,0 +1,21 @@
+# Dynamics workflow configuration; not a runnable Gym deployment.
+mode: rollout
+robot: cartpole
+model: ../../../../../../outputs/dynamics/cartpole/full/export
+device: cuda:0
+num_envs: 512
+trajectories: 2048
+horizons:
+- 1
+- 10
+- 100
+- 1000
+seed: 123
+teacher_solver:
+  solver_type: mujoco_warp
+  use_mujoco_cpu: false
+num_substeps: 10
+motion_mode: random_effort
+initial_states: sample
+effort_scale: 1.0
+output: ../../../../../../outputs/dynamics/cartpole/full/rollout.json

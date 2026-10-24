@@ -66,6 +66,75 @@ DEFAULT_LOOK_AT = (
     (0.0, 0.0, 1.0),
 )
 
+
+def test_procedural_object_descriptor_retains_global_material_and_scene_owner(
+    monkeypatch,
+):
+    from dexsim.spawn import (
+        CollisionDesc,
+        GeometryDesc,
+        NewtonCollisionDesc,
+        ObjectDesc,
+        RigidBodyPhysicsDesc,
+    )
+
+    collision = CollisionDesc.from_geometry(GeometryDesc.plane(1000.0))
+    collision.newton = NewtonCollisionDesc(ke=1e5, kd=1e3, mu=0.5, margin=0.0)
+    descriptor = ObjectDesc(
+        name="reference_ground",
+        collisions=[collision],
+        physics=RigidBodyPhysicsDesc.static(),
+        per_env=False,
+    )
+    facade = object()
+    monkeypatch.setattr(sim_manager_module, "RigidObject", lambda **kwargs: facade)
+    manager = SimpleNamespace(
+        asset_uids=[],
+        device=torch.device("cpu"),
+        spawn_result=None,
+        _spawn_scene=MagicMock(),
+        _rigid_objects={},
+        notify_visualization_topology_changed=MagicMock(),
+        prepare=MagicMock(),
+    )
+    result = SimulationManager.add_rigid_object_descriptor(manager, descriptor)
+    assert result is facade
+    manager._spawn_scene.declare.assert_called_once_with(
+        "rigid_object", "reference_ground", descriptor, facade=facade
+    )
+    assert not descriptor.per_env and descriptor.collisions[0].newton.ke == 1e5
+    assert manager._rigid_objects["reference_ground"] is facade
+    manager.prepare.assert_not_called()
+    manager.asset_uids.append("reference_ground")
+    with pytest.raises(ValueError, match="already exists"):
+        SimulationManager.add_rigid_object_descriptor(manager, descriptor)
+    with pytest.raises(TypeError, match="physical"):
+        SimulationManager.add_rigid_object_descriptor(
+            manager, ObjectDesc(name="visual")
+        )
+
+
+@pytest.mark.parametrize("mask_size", [2, 3])
+def test_empty_functional_reset_preserves_graph_without_native_publication(mask_size):
+    manager = SimpleNamespace(
+        prepare=MagicMock(),
+        is_newton_backend=True,
+        device=torch.device("cpu"),
+        num_envs=2,
+        spawn_result=MagicMock(),
+    )
+    initial = torch.tensor([1.0, 2.0], requires_grad=True)
+    state = SimpleNamespace(physical={"joint_q": initial * 2})
+    result = SimulationManager.reset_functional_state(
+        manager, state, torch.zeros(mask_size, dtype=torch.bool)
+    )
+    assert result is state
+    result.physical["joint_q"].sum().backward()
+    torch.testing.assert_close(initial.grad, torch.full_like(initial, 2))
+    manager.spawn_result.create_functional_state.assert_not_called()
+    manager.spawn_result.reset_functional_state.assert_not_called()
+
+
 pytestmark = pytest.mark.no_sim
 
 
@@ -2036,6 +2105,7 @@ def test_robot_mounted_camera_backend_lifecycle(tmp_path: Path, backend: str) ->
 
 def test_default_plane_authors_repeated_uv_before_spawn() -> None:
     sim = object.__new__(SimulationManager)
+    sim.sim_config = SimulationManagerCfg()
     sim._spawn_scene = MagicMock()
     sim._spawn_scene.handles.return_value = []
     sim._spawn_default_plane_material = object()

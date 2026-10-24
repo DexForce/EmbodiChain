@@ -1,5 +1,6 @@
 # Bounded parameter-alignment collection; not full accuracy qualification.
 robot: cartpole
+collector: scene
 output_dir: ../../../../../../outputs/dynamics/cartpole/warp-reference/data
 device: cpu
 num_envs: 64

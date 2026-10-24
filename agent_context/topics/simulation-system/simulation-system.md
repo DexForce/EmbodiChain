@@ -26,6 +26,9 @@ and readiness for each committed topology revision. DexSim `SceneBuilder` and
 `Scene` own descriptor revisions, native materialization, replicated arenas,
 and backend handles. `add_*()` returns a declared facade; `prepare()` binds
 that same object in place. UIDs identify resources in the manager registry.
+Procedural articulation/object descriptors enter through the manager's public
+descriptor methods. Spawn owns their replication count: `per_env=False` binds
+one global facade instance even in a replicated scene.
 
 `VisualObject` owns render-only root poses, visibility and material assignments,
 with no rigid-body buffers or collision API. Its config lives in
@@ -104,8 +107,9 @@ tests need non-symmetric rotations to expose component-order mistakes.
 - Configure arenas, devices, renderer and backend before manager construction.
 - Keep `prepare()` convergent and retryable; a committed scene is not ready
   until binding, render publication and camera attachment all succeed.
-- Physics advances through `update()` only. Rendering, diagnostics and marker
-  publication must not step or finalize an empty standalone scene.
+- Physics advances through `update()` or registered-solver `functional_step()`.
+  Functional evaluation with `publish=False` does not change live state/time.
+  Rendering, diagnostics and marker publication must not step or finalize an empty scene.
 - Keep physics timesteps fixed during trajectory playback; retime planner
   samples to the command grid. See [motion execution](../motion-planning/motion-planning.md).
 - Use Scene batch adapters for state selection. Preserve untouched rows/DOFs
