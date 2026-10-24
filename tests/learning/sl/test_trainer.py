@@ -19,6 +19,8 @@
 from __future__ import annotations
 
 import copy
+import random
+import numpy as np
 import json
 import sys
 import subprocess
@@ -160,3 +162,71 @@ def test_optimizer_incompatibility_rejected_before_model_mutation():
             torch.testing.assert_close(
                 candidate.state_dict()[key], value, rtol=0, atol=0
             )
+
+
+def test_source_identity_retains_key_and_container_types():
+    value = torch.ones(2, 1)
+    trees = [{1: value}, {"1": value}, (value,), [value]]
+    identifiers = [
+        TensorBatchSource(SupervisedBatch(tree, value)).source_id for tree in trees
+    ]
+    assert len(set(identifiers)) == len(trees)
+
+
+def test_scheduler_type_rejected_before_learner_mutation(tmp_path):
+    first = build(tmp_path / "first")
+    first.scheduler = torch.optim.lr_scheduler.StepLR(
+        first.learner.optimizer, step_size=2, gamma=0.5
+    )
+    first.fit(stop_after=2)
+    second = build(tmp_path / "second")
+    second.scheduler = torch.optim.lr_scheduler.ExponentialLR(
+        second.learner.optimizer, gamma=0.5
+    )
+    before = copy.deepcopy(second.learner.model.state_dict())
+    with pytest.raises(ValueError, match="scheduler type"):
+        second.resume(tmp_path / "first/last.pt")
+    for key, value in before.items():
+        torch.testing.assert_close(
+            second.learner.model.state_dict()[key], value, rtol=0, atol=0
+        )
+
+
+@pytest.mark.parametrize("callback_fails", [False, True])
+def test_validation_restores_rng_and_mode_even_on_failure(tmp_path, callback_fails):
+    def reset_rng():
+        random.seed(17)
+        np.random.seed(17)
+
+    reset_rng()
+    baseline = build(tmp_path / "baseline")
+    count = 1 if callback_fails else 3
+    baseline.fit(stop_after=count)
+    expected = copy.deepcopy(baseline.learner.model.state_dict())
+    expected_random = (random.random(), np.random.rand(), torch.rand(4))
+    reset_rng()
+    candidate = build(tmp_path / "candidate")
+    candidate.cfg.validation_interval = 1
+
+    def evaluate(learner):
+        random.random()
+        np.random.rand(5)
+        torch.rand(9)
+        if callback_fails:
+            raise RuntimeError("validation failed")
+        return {"probe": 0.0}
+
+    candidate.evaluate = evaluate
+    if callback_fails:
+        with pytest.raises(RuntimeError, match="validation failed"):
+            candidate.fit(stop_after=count)
+    else:
+        candidate.fit(stop_after=count)
+    assert candidate.learner.model.training
+    for key, value in expected.items():
+        torch.testing.assert_close(
+            candidate.learner.model.state_dict()[key], value, rtol=0, atol=0
+        )
+    assert random.random() == expected_random[0]
+    assert np.random.rand() == expected_random[1]
+    torch.testing.assert_close(torch.rand(4), expected_random[2], rtol=0, atol=0)

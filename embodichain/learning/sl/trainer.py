@@ -197,6 +197,11 @@ class SupervisedTrainer:
             "signature": self.signature,
             "source_id": self.source.source_id,
             "config": self.cfg.to_dict(),
+            "scheduler_type": (
+                None
+                if self.scheduler is None
+                else f"{type(self.scheduler).__module__}.{type(self.scheduler).__qualname__}"
+            ),
             "scheduler": (
                 None if self.scheduler is None else self.scheduler.state_dict()
             ),
@@ -224,6 +229,13 @@ class SupervisedTrainer:
             saved.pop(key, None)
         if current != saved or (state["scheduler"] is None) != (self.scheduler is None):
             raise ValueError("Supervised checkpoint training configuration differs")
+        scheduler_type = (
+            None
+            if self.scheduler is None
+            else f"{type(self.scheduler).__module__}.{type(self.scheduler).__qualname__}"
+        )
+        if state.get("scheduler_type") != scheduler_type:
+            raise ValueError("Supervised checkpoint scheduler type differs")
         self.learner.load_state_dict(state["learner"])
         if self.scheduler is not None:
             self.scheduler.load_state_dict(state["scheduler"])

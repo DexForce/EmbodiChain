@@ -81,13 +81,31 @@ class TensorBatchSource:
         if not sizes or min(sizes) < 1 or len(set(sizes)) != 1:
             raise ValueError("All corpus tensors require the same nonempty batch axis")
 
+        def key_signature(key: Any) -> Any:
+            if isinstance(key, tuple):
+                return {"kind": "tuple", "items": [key_signature(item) for item in key]}
+            if key is None or type(key) in (str, int, float, bool):
+                return {"kind": type(key).__name__, "value": key}
+            raise ValueError(
+                "Tensor-tree mapping keys must be scalar primitives or tuples"
+            )
+
         def structure(value: Any) -> Any:
             if isinstance(value, torch.Tensor):
                 return {"shape": list(value.shape), "dtype": str(value.dtype)}
             if isinstance(value, Mapping):
-                return {str(key): structure(item) for key, item in value.items()}
+                return {
+                    "kind": "mapping",
+                    "items": [
+                        [key_signature(key), structure(item)]
+                        for key, item in value.items()
+                    ],
+                }
             if isinstance(value, (tuple, list)):
-                return [structure(item) for item in value]
+                return {
+                    "kind": "tuple" if isinstance(value, tuple) else "list",
+                    "items": [structure(item) for item in value],
+                }
             return value
 
         digest.update(
