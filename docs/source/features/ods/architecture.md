@@ -17,7 +17,7 @@ flowchart TB
     Stored["Resident tensors / LeRobot files"] --> Source
     Source --> Learner["Learner<br/>Direct sampling or SequenceDataset"]
     Learner --> Eval["Independent student evaluation"]
-    Host["Application owner<br/>configure_ods, pacing, refill and shutdown"]
+    Host["Application owner<br/>Plan, optional flow control and shutdown"]
     Host -.-> Engine
     Host -.-> Learner
 ```
@@ -40,6 +40,7 @@ that requests targeted collection from the producer.
 | Production and shared state | `engine/data.py`: lifecycle, worker health, publication, sampling, generation accounting, provenance and optional live delivery ledger. |
 | Language metadata | `engine/language.py`: append-only engine-local task/subtask dictionaries used by copied numeric language IDs. |
 | Planning | `configuration.py`: typed reuse/runtime inputs, measured-rate calculations and immutable `ODSConfiguration`. The host applies the plan. |
+| Owner-side flow control | `runtime.py`: opt-in `ODSFlowController` for manual refill, bounded waits, lifecycle draining and plan-based batch pacing. The application starts/stops the engine and owns training. |
 | Contract and schema | `datasets/sequence.py`, `schema.py`: `BatchSource`, `SequenceSpecCfg`, typed sampling errors, semantic declaration validation and schema fingerprints. |
 | Live/resident adaptation | `datasets/sources.py`: `OnlineDataSource` delegates to its caller-owned engine; `TensorDataSource` owns resident numeric data and its optional separate ledger. |
 | Numeric SDK loading | `datasets/lerobot.py`: `LeRobotDataSource`, explicit field mapping, bounded reads and a resident allocation limit. |
@@ -58,7 +59,8 @@ origin IDs also do not establish portable dataset content identity.
 **Live:** the owner starts the engine and waits for initial fill. The worker
 accepts task rollouts and publishes complete episodes. `OnlineDataSource`
 delegates to the engine's locked sampler and returns canonical owned contexts.
-The host schedules further fills and training; shutdown belongs to the creator.
+The host schedules further fills and training, optionally through
+`ODSFlowController`; shutdown belongs to the engine creator.
 Refill publishes batches of rows incrementally: readable rows can temporarily
 belong to different generations. A generation filter is explicit;
 `wait_for_generation()` reports completion of the entire requested fill.
@@ -84,7 +86,9 @@ training-efficiency advantage.
 
 - `configure_ods()` is a static planner. It does not run calibration, mutate a
   live engine, choose a learning-safe profile or invoke the optimizer. The
-  application enforces active/average pacing and planned refill thresholds.
+  application can explicitly select `ODSFlowController` to enforce the plan's
+  refill threshold and batch-start pacing with bounded waits. The controller
+  is creator-process/thread only and does not start or stop the engine.
 - `request_refill()` is owner-only and coalesces an outstanding request.
   `wait_for_generation()` waits for a complete fill. Optional bounded lifecycle
   logging must be drained during production and waits.
@@ -94,8 +98,9 @@ training-efficiency advantage.
   there is no distributed global quota across independent sources/runs.
 - `DataUnavailableError` means no eligible window exists;
   `DataBudgetExhaustedError` means eligible data cannot fund the requested batch.
-  Worker/read failures remain terminal errors. Dataset iteration adds no hidden
-  retry, refill or budget reset.
+  The opt-in controller retries only these transient live errors up to its
+  deadline while draining events and checking health. Worker/read failures
+  propagate. Dataset iteration adds no hidden retry, refill or budget reset.
 - Model/optimizer/RNG recovery belongs to the application. The demo recreates a
   live cache with a new run ID; exact replay-cache or protected offline-ledger
   recovery is not implemented.

@@ -44,6 +44,12 @@ require a DatasetManager.
 ``request_refill()`` and observe publication with ``wait_for_generation()``.
 The default remains sample-threshold refill. ``get_stats()`` returns detached
 counters and excludes the active write window from valid-frame counts.
+``check_health()`` requires READY and surfaces worker failures without sampling
+or refill. ``get_flow_status()`` supplies compact generation, accepted-episode
+and optional quota counters for frequent scheduling checks. Its producer and
+quota counters use separate lock snapshots; unlocked quota is a coarse bound
+that does not apply every sequence/filter requirement. Use
+``get_sampling_budget_snapshot()`` for the retained-source audit.
 ``shutdown_timeout`` is the finite, positive graceful-close wait in seconds
 (default ``5.0``). Increasing it allows longer worker teardown; it does not
 change forced terminate/kill waits or their terminal failure semantics.

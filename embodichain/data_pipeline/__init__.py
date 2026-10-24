@@ -27,7 +27,15 @@ from types import ModuleType
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from . import configuration, datasets, depth_video, dynamics, engine, recording
+    from . import (
+        configuration,
+        datasets,
+        depth_video,
+        dynamics,
+        engine,
+        recording,
+        runtime,
+    )
 
 __all__ = [
     "configuration",
@@ -36,6 +44,7 @@ __all__ = [
     "dynamics",
     "engine",
     "recording",
+    "runtime",
 ]
 
 
