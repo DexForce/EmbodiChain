@@ -113,8 +113,8 @@ class SupervisedLearner:
             observed = (
                 torch.stack(
                     (
-                        result.loss.detach().float(),
-                        torch.as_tensor(norm).detach().float(),
+                        result.loss.detach(),
+                        torch.as_tensor(norm, device=result.loss.device).detach(),
                     )
                 )
                 .cpu()
@@ -162,6 +162,8 @@ class SupervisedLearner:
                 or value.dtype != saved[key].dtype
             ):
                 raise ValueError(f"Supervised checkpoint model tensor differs: {key}")
+            elif not isinstance(value, torch.Tensor) and value != saved[key]:
+                raise ValueError(f"Supervised checkpoint model metadata differs: {key}")
         count = state["num_updates"]
         if type(count) is not int or count < 0:
             raise ValueError("Invalid committed update count")

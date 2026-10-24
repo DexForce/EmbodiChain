@@ -38,6 +38,11 @@ class Command:
 
 COMMANDS = (
     Command(
+        name="train-sl",
+        target="embodichain.learning.sl.workflow:cli",
+        help="Train a supervised policy or dynamics recipe from YAML or JSON.",
+    ),
+    Command(
         name="data",
         target="embodichain.data.download:main",
         help="List and download EmbodiChain data assets.",
@@ -111,6 +116,11 @@ COMMANDS = (
         name="dataset",
         target="embodichain.cli.dataset:main",
         help="Validate, split, and recover recorded expert datasets.",
+    ),
+    Command(
+        name="dynamics",
+        target="embodichain.cli.dynamics:main",
+        help="Generate data, train and evaluate neural dynamics models.",
     ),
     Command(
         name="preview_lerobot_data",
