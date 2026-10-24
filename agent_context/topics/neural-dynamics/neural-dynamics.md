@@ -10,6 +10,8 @@
 | Reference assets and physical profiles | `data_pipeline/dynamics/_reference_assets.py`; packaged files in `data/nerd/` |
 | Committed shards and sequence windows | `data_pipeline/dynamics/shards.py` |
 | Training, resume, evaluation and export | `learning/dynamics/trainer.py`, `workflow.py` |
+| Shared SL objective and encoded batches | `learning/dynamics/supervised.py` |
+| Common offline trainer recipe | `learning/dynamics/sl_recipe.py`; `embodichain train-sl` |
 | Original-repository comparisons | `learning/dynamics/reference.py`, `comparison.py`, `report.py` |
 | Command dispatch | `cli/dynamics.py`: `embodichain dynamics` |
 
@@ -51,6 +53,15 @@ Training checkpoints preserve optimizer, scheduler, RNG and committed sample
 progress. Portable exports contain tensors and JSON, including normalizers and
 attention policy. Resume restores the same run; fine-tuning starts a new one.
 Only explicitly trusted legacy conversion may deserialize Python model objects.
+
+`DynamicsTrainer` delegates optimizer updates to `learning.sl.SupervisedLearner`
+while retaining its historical sampling, numerical profiles, LR schedule and
+training-checkpoint format. The standalone `sl_recipe.build_supervised_trainer`
+instead composes the common trainer and uses SL checkpoints. Both reuse the
+same codec and normalized physical-target objective. Models and datasets do not
+depend on either trainer. The paired acceptance runner under
+`scripts/experiments/supervised/nerd_acceptance.py` compares independent reference
+and candidate processes; fixed-budget parity is separate from full convergence.
 
 Optional shared sample-order/statistics artifacts support controlled original
 trainer comparisons; equal seeds alone do not prove identical batches or physics.
