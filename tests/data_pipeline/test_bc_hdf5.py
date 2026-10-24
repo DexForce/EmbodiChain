@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from copy import deepcopy
 
 import h5py
 import numpy as np
@@ -27,7 +28,11 @@ import pytest
 import torch
 
 from embodichain.data_pipeline.datasets.bc_hdf5 import BCWindowDataset
-from embodichain.learning.sl.bc import HDF5BCSource
+from embodichain.learning.sl.bc import HDF5BCSource, PrefetchedBCSource
+from embodichain.learning.models.chunk_bc import ChunkBCModel, ChunkBCModelCfg
+from embodichain.learning.sl import SupervisedLearner
+from embodichain.learning.sl.bc import ChunkBCObjective
+from embodichain.learning.sl.trainer import SupervisedTrainer, SupervisedTrainerCfg
 
 
 def _corpus(tmp_path, *, cameras=True):
@@ -36,7 +41,7 @@ def _corpus(tmp_path, *, cameras=True):
         path = tmp_path / f"episode{ordinal}.h5"
         with h5py.File(path, "w") as handle:
             values = np.arange(length, dtype=np.float32)[:, None] + ordinal * 100
-            handle["observations"] = np.tile(values, (1, 2))
+            handle["observations"] = np.concatenate((values, values + 10), 1)
             handle["targets"] = values * 2
             if cameras:
                 rgb = np.broadcast_to(
@@ -110,6 +115,7 @@ def test_sampling_rng_and_transformed_targets_are_reproducible(tmp_path):
         prediction_horizon=2,
         target_encoder=lambda fields: fields["targets"] + 7,
         target_fields=("targets",),
+        target_encoder_id="targets-plus7@1",
     )
     try:
         first = dataset.sample(8, generator=torch.Generator().manual_seed(3))
@@ -139,3 +145,106 @@ def test_partial_or_modified_corpus_is_rejected(tmp_path):
         handle["targets"][0] = -999
     with pytest.raises(ValueError, match="checksum"):
         dataset.read_episode(0, ("targets",))
+
+
+def test_view_identity_rejects_changed_feature_slice_before_resume_mutation(tmp_path):
+    manifest = _corpus(tmp_path, cameras=False)
+    left = BCWindowDataset(manifest, observation_slice=slice(0, 1))
+    right = BCWindowDataset(manifest, observation_slice=slice(1, 2))
+    assert left.dataset_id == right.dataset_id and left.source_id != right.source_id
+    assert not torch.equal(
+        left.sample(1, generator=torch.Generator().manual_seed(3))["inputs"]["history"],
+        right.sample(1, generator=torch.Generator().manual_seed(3))["inputs"][
+            "history"
+        ],
+    )
+    cfg = SupervisedTrainerCfg(
+        total_updates=2,
+        batch_size=2,
+        output_dir=str(tmp_path / "run"),
+        checkpoint_interval=0,
+    )
+
+    def trainer(dataset):
+        model = ChunkBCModel(
+            ChunkBCModelCfg(observation_dim=1, target_dim=1, hidden_dims=(4,))
+        )
+        learner = SupervisedLearner(
+            model, ChunkBCObjective(), torch.optim.Adam(model.parameters(), lr=1e-3)
+        )
+        return SupervisedTrainer(learner, HDF5BCSource(dataset), cfg)
+
+    original = trainer(left)
+    original.fit(stop_after=1)
+    candidate = trainer(right)
+    before = deepcopy(candidate.learner.model.state_dict())
+    with pytest.raises(ValueError, match="dataset"):
+        candidate.resume(tmp_path / "run" / "last.pt")
+    assert candidate.learner.num_updates == 0
+    for name, value in before.items():
+        if isinstance(value, torch.Tensor):
+            torch.testing.assert_close(
+                candidate.learner.model.state_dict()[name], value, atol=0, rtol=0
+            )
+    left.close()
+    right.close()
+
+
+def test_target_transform_and_window_contract_are_bound_to_source_identity(tmp_path):
+    manifest = _corpus(tmp_path, cameras=False)
+    encode = lambda fields: fields["targets"]
+    with pytest.raises(ValueError, match="transform identity"):
+        BCWindowDataset(manifest, target_encoder=encode, target_fields=("targets",))
+    first = BCWindowDataset(
+        manifest,
+        target_encoder=encode,
+        target_fields=("targets",),
+        target_encoder_id="position-targets@1",
+    )
+    second = BCWindowDataset(
+        manifest,
+        target_encoder=encode,
+        target_fields=("targets",),
+        target_encoder_id="effort-targets@1",
+    )
+    future = BCWindowDataset(
+        manifest,
+        history_length=2,
+        prediction_horizon=2,
+        target_encoder=encode,
+        target_fields=("targets",),
+        target_encoder_id="position-targets@1",
+    )
+    assert len({first.source_id, second.source_id, future.source_id}) == 3
+
+
+def test_one_batch_prefetch_preserves_sampling_cursor_and_retry_batches(tmp_path):
+    manifest = _corpus(tmp_path, cameras=False)
+    direct = HDF5BCSource(BCWindowDataset(manifest, prediction_horizon=2))
+    prefetched = PrefetchedBCSource(
+        HDF5BCSource(BCWindowDataset(manifest, prediction_horizon=2))
+    )
+    expected_rng = torch.Generator().manual_seed(9)
+    actual_rng = torch.Generator().manual_seed(9)
+    try:
+        for size in (3, 3, 5):
+            before = actual_rng.get_state().clone()
+            expected = direct.sample(size, generator=expected_rng)
+            actual = prefetched.sample(size, generator=actual_rng)
+            torch.testing.assert_close(
+                actual.inputs["history"], expected.inputs["history"], atol=0, rtol=0
+            )
+            torch.testing.assert_close(actual.targets, expected.targets, atol=0, rtol=0)
+            torch.testing.assert_close(
+                actual_rng.get_state(), expected_rng.get_state(), atol=0, rtol=0
+            )
+            # A rejected optimizer update retries its old committed cursor.
+            actual_rng.set_state(before)
+            retry = prefetched.sample(size, generator=actual_rng)
+            torch.testing.assert_close(retry.targets, actual.targets, atol=0, rtol=0)
+            torch.testing.assert_close(
+                actual_rng.get_state(), expected_rng.get_state(), atol=0, rtol=0
+            )
+    finally:
+        direct.close()
+        prefetched.close()

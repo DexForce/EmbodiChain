@@ -159,3 +159,45 @@ assert 'torchvision' not in sys.modules
 assert not any(name == 'dexsim' or name.startswith('dexsim.') or name.startswith('embodichain.lab.') for name in sys.modules)
 """
     subprocess.run([sys.executable, "-c", code], check=True)
+
+
+@pytest.mark.gpu
+def test_visual_bc_cuda_backward_and_target_execution():
+    torch.manual_seed(31)
+    model = ChunkBCModel(
+        ChunkBCModelCfg(
+            observation_dim=27,
+            target_dim=10,
+            history_length=2,
+            prediction_horizon=32,
+            cameras=("high", "wrist"),
+        )
+    ).cuda()
+    history = torch.randn(1, 2, 27, device="cuda")
+    images = {
+        name: torch.rand(1, 2, 3, 256, 256, device="cuda") for name in model.cfg.cameras
+    }
+    batch = SupervisedBatch(
+        {"history": history, "images": images},
+        torch.randn(1, 32, 10, device="cuda"),
+        {"target_valid": torch.ones(1, 32, dtype=torch.bool, device="cuda")},
+    )
+    learner = SupervisedLearner(
+        model,
+        ChunkBCObjective(),
+        torch.optim.AdamW(model.parameters(), lr=3e-4),
+        max_grad_norm=1,
+    )
+    result = learner.update(batch)
+    assert result["num_updates"] == 1 and result["grad_norm"] > 0
+    assert all(
+        parameter.grad is not None and torch.isfinite(parameter.grad).all()
+        for parameter in model.parameters()
+    )
+    executor = ChunkBCExecutor(model.eval(), action_horizon=8)
+    targets = executor.action(
+        history[:, -1], {name: value[:, -1] for name, value in images.items()}
+    )
+    assert (
+        targets.shape == (1, 10) and targets.is_cuda and torch.isfinite(targets).all()
+    )

@@ -18,13 +18,15 @@
 
 from __future__ import annotations
 
+from concurrent.futures import Future, ThreadPoolExecutor
+
 import torch
 
 from embodichain.data_pipeline.datasets.bc_hdf5 import BCWindowDataset
 from embodichain.learning.models.chunk_bc import ChunkBCModel
 from .types import LossResult, SupervisedBatch
 
-__all__ = ["ChunkBCObjective", "HDF5BCSource"]
+__all__ = ["ChunkBCObjective", "HDF5BCSource", "PrefetchedBCSource"]
 
 
 class ChunkBCObjective:
@@ -93,3 +95,74 @@ class HDF5BCSource:
     def close(self) -> None:
         """Close cached dataset handles."""
         self.dataset.close()
+
+
+class PrefetchedBCSource:
+    """Prepare at most one future fixed-corpus batch with private sampling RNG.
+
+    Args:
+        source: Fixed, deterministic HDF5 adapter with no random augmentation.
+
+    A worker owns all sampling and HDF5 access. Its future RNG state is published
+    to the supplied generator only when that batch is delivered. Checkpoints
+    therefore preserve the committed sampler cursor; an unused future batch is
+    reproducible from that cursor after restart. Changing the requested cursor
+    or batch size discards an incompatible pending batch. Closing joins the
+    worker before releasing HDF5 handles. This adapter does not acquire data.
+    """
+
+    def __init__(self, source: HDF5BCSource) -> None:
+        self.source = source
+        self.source_id = source.source_id
+        self._pool = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="bc-offline-read"
+        )
+        self._future: Future[tuple[SupervisedBatch, torch.Tensor]] | None = None
+        self._expected: torch.Tensor | None = None
+        self._batch_size = 0
+        self._closed = False
+
+    def _submit(self, batch_size: int, state: torch.Tensor) -> None:
+        self._expected = state.clone()
+        self._batch_size = batch_size
+
+        def draw() -> tuple[SupervisedBatch, torch.Tensor]:
+            rng = torch.Generator(device="cpu")
+            rng.set_state(state)
+            return self.source.sample(batch_size, generator=rng), rng.get_state()
+
+        self._future = self._pool.submit(draw)
+
+    def sample(self, batch_size: int, *, generator: torch.Generator) -> SupervisedBatch:
+        """Deliver one ordered batch and prepare one bounded successor.
+
+        Args:
+            batch_size: Number of complete history/target windows.
+            generator: Caller-owned committed CPU sampling state.
+
+        Returns:
+            The same batch and next RNG state as direct synchronous sampling.
+        """
+        if self._closed:
+            raise RuntimeError("BC prefetch source is closed")
+        state = generator.get_state()
+        if self._future is not None and (
+            batch_size != self._batch_size or not torch.equal(state, self._expected)
+        ):
+            self._future.cancel()
+            if not self._future.cancelled():
+                self._future.result()
+            self._future = None
+        if self._future is None:
+            self._submit(batch_size, state)
+        batch, after = self._future.result()
+        generator.set_state(after)
+        self._submit(batch_size, after)
+        return batch
+
+    def close(self) -> None:
+        """Drain/cancel the single pending batch and then close file handles."""
+        if not self._closed:
+            self._closed = True
+            self._pool.shutdown(wait=True, cancel_futures=True)
+            self.source.close()

@@ -42,8 +42,11 @@ class BCWindowDataset:
         observation_key: Numeric HDF5 dataset containing measured observations.
         observation_slice: Optional feature slice selected before model input.
         target_key: HDF5 physical targets, when no encoder is supplied.
-        target_encoder: Optional task-owned transform of aligned numeric fields.
+        target_encoder: Optional task-owned transform of aligned numeric fields
+            with leading ``[batch,prediction_horizon]`` axes.
         target_fields: HDF5 inputs required by the target encoder.
+        target_encoder_id: Explicit versioned target-transform identity, required
+            when an encoder is supplied. Change it when transform semantics change.
         max_open_files: Positive bound on cached HDF5 handles.
         verify_checksums: Verify each file once before first reading it.
 
@@ -65,6 +68,7 @@ class BCWindowDataset:
             Callable[[Mapping[str, torch.Tensor]], torch.Tensor] | None
         ) = None,
         target_fields: tuple[str, ...] = (),
+        target_encoder_id: str | None = None,
         max_open_files: int = 32,
         verify_checksums: bool = True,
     ) -> None:
@@ -92,6 +96,12 @@ class BCWindowDataset:
         )
         if target_encoder is not None and not target_fields:
             raise ValueError("Encoded BC targets require explicit numeric fields")
+        if target_encoder is not None and (
+            not isinstance(target_encoder_id, str) or not target_encoder_id.strip()
+        ):
+            raise ValueError(
+                "Encoded BC targets require an explicit versioned transform identity"
+            )
         self.cameras = tuple(self.manifest.get("cameras", ()))
         if len(set(self.cameras)) != len(self.cameras):
             raise ValueError("Offline camera names must be distinct and ordered")
@@ -106,7 +116,30 @@ class BCWindowDataset:
         # The manifest binds content hashes and all physical/camera metadata;
         # source identity cannot be changed by reusing a display source_id.
         canonical = json.dumps(self.manifest, sort_keys=True, allow_nan=False)
-        self.source_id = "bc-hdf5:" + hashlib.sha256(canonical.encode()).hexdigest()
+        self.dataset_id = hashlib.sha256(canonical.encode()).hexdigest()
+        selection = (
+            None
+            if observation_slice is None
+            else (
+                observation_slice.start,
+                observation_slice.stop,
+                observation_slice.step,
+            )
+        )
+        view = {
+            "history_length": history_length,
+            "prediction_horizon": prediction_horizon,
+            "observation_key": observation_key,
+            "observation_slice": selection,
+            "target_key": target_key if target_encoder is None else None,
+            "target_fields": target_fields,
+            "target_encoder_id": target_encoder_id,
+            "cameras": self.cameras,
+        }
+        self.view_id = hashlib.sha256(
+            json.dumps(view, sort_keys=True, allow_nan=False).encode()
+        ).hexdigest()
+        self.source_id = f"bc-hdf5:{self.dataset_id}:{self.view_id}"
         self.max_open_files, self.verify_checksums = max_open_files, verify_checksums
         self._handles: OrderedDict[int, h5py.File] = OrderedDict()
         self._verified: set[int] = set()
@@ -168,8 +201,16 @@ class BCWindowDataset:
         anchor_draws = torch.rand(batch_size, generator=generator)
         anchors = []
         observations, targets = [], []
-        images: dict[str, list[torch.Tensor]] = {camera: [] for camera in self.cameras}
-        for ordinal, draw in zip(ordinals.tolist(), anchor_draws.tolist()):
+        fields: dict[str, list[torch.Tensor]] = {
+            name: [] for name in self.target_fields
+        }
+        images = {
+            camera: torch.empty(batch_size, self.history_length, 3, 256, 256)
+            for camera in self.cameras
+        }
+        for row, (ordinal, draw) in enumerate(
+            zip(ordinals.tolist(), anchor_draws.tolist())
+        ):
             length = self.episodes[ordinal]["length"]
             count = length - self.history_length - self.prediction_horizon + 2
             anchor = self.history_length - 1 + int(draw * count)
@@ -185,13 +226,12 @@ class BCWindowDataset:
             observations.append(observation.float())
             if self.target_encoder is None:
                 target = torch.from_numpy(handle[self.target_key][anchor:stop]).float()
+                targets.append(target)
             else:
-                fields = {
-                    name: torch.from_numpy(handle[name][anchor:stop]).float()
-                    for name in self.target_fields
-                }
-                target = self.target_encoder(fields)
-            targets.append(target)
+                for name in self.target_fields:
+                    fields[name].append(
+                        torch.from_numpy(handle[name][anchor:stop]).float()
+                    )
             for camera in self.cameras:
                 rgb = torch.from_numpy(handle["images"][camera][start : anchor + 1])
                 if rgb.dtype != torch.uint8 or rgb.shape != (
@@ -203,15 +243,21 @@ class BCWindowDataset:
                     raise ValueError(
                         "Offline BC images must be uint8 THWC RGB at 256 pixels"
                     )
-                images[camera].append(rgb.permute(0, 3, 1, 2).float().div_(255))
+                images[camera][row].copy_(rgb.permute(0, 3, 1, 2))
+                images[camera][row].div_(255)
         inputs: dict[str, Any] = {"history": torch.stack(observations)}
         if images:
-            inputs["images"] = {
-                camera: torch.stack(values) for camera, values in images.items()
-            }
+            inputs["images"] = images
+        encoded = (
+            torch.stack(targets)
+            if self.target_encoder is None
+            else self.target_encoder(
+                {name: torch.stack(values) for name, values in fields.items()}
+            )
+        )
         return {
             "inputs": inputs,
-            "targets": torch.stack(targets),
+            "targets": encoded,
             "masks": {
                 "target_valid": torch.ones(
                     batch_size, self.prediction_horizon, dtype=torch.bool

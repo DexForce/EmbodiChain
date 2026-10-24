@@ -38,9 +38,53 @@ import torch
 
 from embodichain.learning.models.chunk_bc import ChunkBCModel, ChunkBCModelCfg
 from embodichain.learning.sl import LossResult, SupervisedBatch, SupervisedLearner
-from embodichain.learning.sl.bc import ChunkBCObjective, HDF5BCSource
+from embodichain.learning.sl.bc import (
+    ChunkBCObjective,
+    HDF5BCSource,
+    PrefetchedBCSource,
+)
 from embodichain.learning.sl.trainer import SupervisedTrainer, SupervisedTrainerCfg
 from .pick_place import CAMERAS, TARGET_SEMANTICS, frozen_statistics, source
+
+FORMAL_OPTIMIZER = {
+    "type": "adamw",
+    "learning_rate": 3e-4,
+    "weight_decay": 1e-6,
+    "warmup_updates": 500,
+    "final_learning_rate": 3e-5,
+    "max_grad_norm": 1,
+}
+
+
+def _validate_recipe(config: dict[str, Any]) -> None:
+    if config.get("optimizer") != FORMAL_OPTIMIZER:
+        raise ValueError(
+            "Formal BC optimizer/schedule differs from the pinned AdamW recipe"
+        )
+    if config.get("objective") != {"type": "masked_normalized_target_mse"}:
+        raise ValueError("Formal BC objective differs from the pinned recipe")
+    model = ChunkBCModelCfg(**config["model"])
+    if (
+        model.observation_dim,
+        model.target_dim,
+        model.history_length,
+        model.prediction_horizon,
+        tuple(model.hidden_dims),
+        tuple(model.cameras),
+        model.target_semantics,
+        model.normalization_clip,
+    ) != (27, 10, 2, 32, (512, 512), CAMERAS, TARGET_SEMANTICS, 10.0):
+        raise ValueError("Formal BC model differs from the pinned visual recipe")
+    expected = {
+        "development_scenes": 20,
+        "development_threshold": 0.9,
+        "test_scenes": 100,
+        "test_threshold": 0.8,
+    }
+    if any(config["evaluation"].get(key) != value for key, value in expected.items()):
+        raise ValueError("Formal BC evaluation panel or learning target differs")
+    if config["data"].get("prefetch_batches", 1) not in (0, 1):
+        raise ValueError("Offline BC supports zero or one prefetched batch")
 
 
 def _write(path: Path, value: dict[str, Any]) -> None:
@@ -51,10 +95,15 @@ def _write(path: Path, value: dict[str, Any]) -> None:
 
 
 def _rate(step: int, updates: int = 20000) -> float:
-    if step <= 500:
-        return 3e-4 * max(1, step) / 500
-    progress = min(1.0, (step - 500) / (updates - 500))
-    return 3e-5 + (3e-4 - 3e-5) * (1 + math.cos(math.pi * progress)) / 2
+    warmup = FORMAL_OPTIMIZER["warmup_updates"]
+    initial, final = (
+        FORMAL_OPTIMIZER["learning_rate"],
+        FORMAL_OPTIMIZER["final_learning_rate"],
+    )
+    if step <= warmup:
+        return initial * max(1, step) / warmup
+    progress = min(1.0, (step - warmup) / (updates - warmup))
+    return final + (initial - final) * (1 + math.cos(math.pi * progress)) / 2
 
 
 class _DeadlineObjective(ChunkBCObjective):
@@ -140,6 +189,7 @@ def _evaluate(
 
 def build_trainer(config: dict[str, Any]) -> SupervisedTrainer:
     """Build the pinned offline acceptance recipe for ``train-sl``."""
+    _validate_recipe(config)
     deadline = time.monotonic() + 21600
     data = source(config["data"]["manifest"])
     if len(data.episodes) != 1024:
@@ -176,12 +226,21 @@ def build_trainer(config: dict[str, Any]) -> SupervisedTrainer:
     model = ChunkBCModel(ChunkBCModelCfg(**config["model"]))
     model.set_normalization(**statistics)
     model.to(cfg.device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, weight_decay=1e-6)
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=FORMAL_OPTIMIZER["learning_rate"],
+        weight_decay=FORMAL_OPTIMIZER["weight_decay"],
+    )
     scheduler = torch.optim.lr_scheduler.LambdaLR(
-        optimizer, lambda index: _rate(index + 1, cfg.total_updates) / 3e-4
+        optimizer,
+        lambda index: _rate(index + 1, cfg.total_updates)
+        / FORMAL_OPTIMIZER["learning_rate"],
     )
     learner = SupervisedLearner(
-        model, _DeadlineObjective(deadline), optimizer, max_grad_norm=1
+        model,
+        _DeadlineObjective(deadline),
+        optimizer,
+        max_grad_norm=FORMAL_OPTIMIZER["max_grad_norm"],
     )
     development_path = output / "development.json"
     development = (
@@ -225,10 +284,24 @@ def build_trainer(config: dict[str, Any]) -> SupervisedTrainer:
 
     trainer = SupervisedTrainer(
         learner,
-        HDF5BCSource(data),
+        (
+            PrefetchedBCSource(HDF5BCSource(data))
+            if config["data"].get("prefetch_batches", 1)
+            else HDF5BCSource(data)
+        ),
         cfg,
         signature={
             "recipe": "sl-bc-offline-pickplace-v1",
+            "objective": config["objective"],
+            "optimizer": FORMAL_OPTIMIZER,
+            "schedule": {
+                "type": "linear_warmup_cosine",
+                "one_based_update_index": True,
+                "total_updates": cfg.total_updates,
+                "warmup_updates": FORMAL_OPTIMIZER["warmup_updates"],
+                "initial_learning_rate": FORMAL_OPTIMIZER["learning_rate"],
+                "final_learning_rate": FORMAL_OPTIMIZER["final_learning_rate"],
+            },
             "model": model.get_extra_state(),
             "camera_profile_version": "pick-place-v2",
             "action_horizon": 8,
@@ -274,16 +347,9 @@ def main() -> None:
             "cameras": list(CAMERAS),
             "target_semantics": TARGET_SEMANTICS,
         },
-        "data": {"manifest": str(args.manifest.resolve())},
+        "data": {"manifest": str(args.manifest.resolve()), "prefetch_batches": 1},
         "objective": {"type": "masked_normalized_target_mse"},
-        "optimizer": {
-            "type": "adamw",
-            "learning_rate": 3e-4,
-            "weight_decay": 1e-6,
-            "warmup_updates": 500,
-            "final_learning_rate": 3e-5,
-            "max_grad_norm": 1,
-        },
+        "optimizer": dict(FORMAL_OPTIMIZER),
         "trainer": {
             "total_updates": 20000,
             "batch_size": 64,

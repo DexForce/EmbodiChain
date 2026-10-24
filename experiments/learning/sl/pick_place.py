@@ -119,6 +119,7 @@ def source(manifest_path: str | Path, *, max_open_files: int = 32) -> BCWindowDa
         observation_slice=slice(0, 27),
         target_encoder=encode_targets,
         target_fields=("geometry", "actions"),
+        target_encoder_id=TARGET_SEMANTICS + ":relative-scales-0.02m-0.1rad@1",
         max_open_files=max_open_files,
     )
 

@@ -29,6 +29,15 @@ training rejects `complete=false`. HDF5 handles are bounded and checked files
 are immutable during a run; only two historical RGB frames enter each sample.
 Future geometry is used to construct supervision only.
 
+Dataset identity binds both the manifest and its model-facing view: observation
+field/slice, target fields and explicit transform version, camera order and H/F
+windows. Changing that view rejects recovery before model state is modified.
+The fixed reader preallocates NCHW image output and batches the pure target
+transform; a frozen real-data fixture verifies bitwise-identical sampled values.
+One optional prefetched batch overlaps CPU decoding with GPU work. Its worker
+uses a private RNG, and only delivered batches advance the caller's sampling
+cursor, so an unused pending batch need not be serialized for exact recovery.
+
 The formal recipe uses exactly 1,024 accepted training episodes, with input and
 target statistics frozen from the first 32. Qualification, training generation,
 development and final test have separate declared seed populations. Corpus
