@@ -113,3 +113,14 @@ def test_source_snapshots_and_sampled_batches_own_storage():
 def test_sl_import_does_not_load_simulation():
     code = "import sys; import embodichain.learning.sl; assert not any(k.startswith(('dexsim', 'embodichain.lab', 'embodichain.learning.rl')) for k in sys.modules)"
     subprocess.run([sys.executable, "-c", code], check=True)
+
+
+def test_unified_cli_routes_sl_help():
+    result = subprocess.run(
+        [sys.executable, "-m", "embodichain", "train-sl", "--help"],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    assert "--config" in result.stdout
+    assert "--resume" in result.stdout
