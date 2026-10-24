@@ -56,6 +56,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+rigidformer = [
+  "rigidformer @ git+https://github.com/lucidrains/rigidformer.git@4ab4edac7271b49484748d6bf8086a497f13272d",
+  "box2d-py",
+  "fire",
+]
 policy-deploy = [
   # ORT 1.27+ defaults to CUDA 13; EmbodiChain's supported stack uses CUDA 12.
   "onnxruntime-gpu>=1.20,<1.27",

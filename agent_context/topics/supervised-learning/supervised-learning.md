@@ -31,3 +31,18 @@ may select checkpoints. Acquisition and producer lifecycles remain application-o
 nonfinite update boundaries, owned samples, simulator-free imports and exact
 CPU recovery with dropout, optimizer and sampling state. Model-specific
 qualification belongs to each model's acceptance recipe.
+
+## Rigid-body geometry models
+
+`learning/models/rigidformer.py` lazily constructs a pinned optional upstream
+model. `learning/sl/rigidformer.py` adapts its position/acceleration objective
+and builds a `train-sl` recipe. `data_pipeline/datasets/rigid_body.py` samples
+owned previous/current/next point windows with an explicit reference frame,
+object/point lengths and bounded resident/returned payloads. Points correspond
+across frames; units and step duration belong to the recorded corpus.
+
+The optional `rigidformer` extra is isolated from ordinary SL imports. The
+adapter supplies forward prediction and supervised parameter training; it does
+not qualify action/state gradients for APG or bind a native simulation solver.
+The fixed Box2D friction/collision comparison in `scripts/experiments/rigidformer/`
+retains upstream numerical behavior, baseline limitations and full seed results.
