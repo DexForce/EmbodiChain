@@ -194,6 +194,15 @@ def execute_bundle(
         )
         env = gymnasium.make(id=gym_config["id"], cfg=env_cfg, **action_config)
         env.reset(seed=args.seed, options={"save_data": False})
+        from ._task_program.acceptance_observation import install_contact_timeline
+
+        try:
+            contacts = install_contact_timeline(env, deployment, graph)
+            if contacts is not None:
+                env.unwrapped._gen_sim_acceptance_contacts = contacts
+        except (AttributeError, TypeError, ValueError, RuntimeError) as error:
+            # Missing observations must not alter commands or disable execution.
+            print(f"[TaskSpec] Contact timeline unavailable: {error}", file=sys.stderr)
         from ._task_program.cargo import capture_cargo, check_cargo
 
         cargo = capture_cargo(env, load_config(root / "components/scene.yaml"), graph)
@@ -227,79 +236,17 @@ def execute_bundle(
                 result = execute_demo_episode(env, episode_index=0, attempt_id=0)
             result_metadata = result.to_metadata()
             if task_spec_contract is not None:
-                from embodichain.gen_sim.task_spec import TaskSpec
-                from ._task_program.task_spec_runtime import (
-                    capture_final_goals,
-                    capture_placement_milestones,
-                    evaluate_runtime_evidence,
-                )
-                from ._task_program.control_evidence import capture_control_operations
-                from ._task_program.handover_evidence import capture_handover_operations
-                from ._task_program.coordinated_evidence import (
-                    capture_coordinated_holds,
-                )
+                from ._task_program.acceptance_audit import evaluate_episode_observers
 
-                spec = TaskSpec.from_dict(_read_json(root / "task_spec.json"))
-                try:
-                    final_goals = capture_final_goals(
-                        env,
-                        deployment,
-                        root,
-                        graph,
-                        task_spec_contract,
-                        len(result.success),
-                        runtime=result_metadata,
-                    )
-                except (AttributeError, TypeError, ValueError, KeyError) as error:
-                    final_goals = {p.id: {"unavailable": str(error)} for p in spec.goal}
-                placement_milestones = capture_placement_milestones(
+                evaluation = evaluate_episode_observers(
                     env,
                     deployment,
+                    root,
                     graph,
-                    task_spec_contract,
                     result_metadata,
+                    task_spec_contract,
                     len(result.success),
-                    spec=spec,
-                )
-                evaluation = evaluate_runtime_evidence(
-                    spec,
-                    task_spec_contract,
-                    graph,
-                    result_metadata,
-                    final_goals,
-                    num_envs=len(result.success),
-                    run_id=output.as_posix(),
-                    program=load_config(program_path),
-                    constraints=load_config(root / "task_program/constraints.json"),
-                    placement_milestones=placement_milestones,
-                    control_milestones=capture_control_operations(
-                        deployment,
-                        graph,
-                        result_metadata,
-                        load_config(program_path),
-                        len(result.success),
-                    )
-                    or None,
-                    handover_milestones=capture_handover_operations(
-                        env,
-                        deployment,
-                        graph,
-                        result_metadata,
-                        load_config(program_path),
-                        load_config(root / "task_program/constraints.json"),
-                        len(result.success),
-                    )
-                    or None,
-                    coordinated_milestones=capture_coordinated_holds(
-                        env,
-                        deployment,
-                        graph,
-                        result_metadata,
-                        load_config(program_path),
-                        load_config(root / "task_program/constraints.json"),
-                        len(result.success),
-                    )
-                    or None,
+                    output,
                 )
                 result_metadata["task_spec_evaluation"] = evaluation
                 (output / "task_spec_evaluation.json").write_text(

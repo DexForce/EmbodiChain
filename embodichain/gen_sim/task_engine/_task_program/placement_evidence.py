@@ -24,8 +24,9 @@ import math
 from typing import Any
 
 import numpy as np
-from shapely.geometry import MultiPoint
+from shapely.geometry import MultiPoint, Polygon
 from shapely.geometry.base import BaseGeometry
+from shapely.ops import unary_union
 import torch
 import trimesh
 
@@ -35,6 +36,17 @@ __all__: list[str] = []
 
 SUPPORT_TOLERANCE_M = 0.05
 PENETRATION_TOLERANCE_M = 0.01
+
+
+class UnqualifiedContainment(ValueError):
+    """A planar-floor rejection is not proof of a 3D container violation."""
+
+    def __init__(self, measurements: dict[str, Any]) -> None:
+        super().__init__(
+            "Planar floor projection cannot decide this nonplanar container; "
+            "a qualified three-dimensional cavity observation is required."
+        )
+        self.measurements = measurements
 
 
 def _support_gap_valid(gap: float) -> bool:
@@ -138,6 +150,7 @@ def measure_planar_placement(
     reference_pose: torch.Tensor,
     *,
     _geometry: _PlacementGeometry | None = None,
+    exact_silhouette: bool = False,
 ) -> tuple[list[bool], dict[str, Any]]:
     """Check the full footprint against actual floor triangles, including holes.
 
@@ -165,18 +178,36 @@ def measure_planar_placement(
             "Placement geometry cache differs from its native bindings or batch."
         )
     vertices = geometry.vertices
+    faces = None
+    reference_vertices = None
+    if exact_silhouette:
+        vertices, faces = _native_mesh(simulation, object_binding, batch_size)
+        reference_vertices, _ = _native_mesh(simulation, reference_binding, batch_size)
     relative = torch.linalg.solve(reference_pose, object_pose)
     local = (
         vertices.to(relative) @ relative[:, :3, :3].transpose(-1, -2)
         + relative[:, None, :3, 3]
     )
     accepted, footprints, gaps, areas = [], [], [], []
+    outside, nonplanar, overlapping = [], [], []
     for row in range(batch_size):
         if reference_pose[row, 2, 2] < math.cos(math.radians(5.0)):
             raise ValueError("Placement reference lacks a qualified near-level floor.")
         polygon, height = geometry.floors[row]
         points = local[row].numpy()
-        footprint = MultiPoint(points[:, :2]).convex_hull
+        if exact_silhouette:
+            # Project real triangles: the convex hull invents occupied material
+            # across concavities and holes in a payload's silhouette.
+            triangles = points[faces[row].numpy(), :2]
+            footprint = unary_union(
+                [
+                    triangle_polygon
+                    for triangle in triangles
+                    if (triangle_polygon := Polygon(triangle)).area > 0
+                ]
+            )
+        else:
+            footprint = MultiPoint(points[:, :2]).convex_hull
         if footprint.is_empty or footprint.area <= 0:
             raise ValueError("Placement object has no finite area footprint.")
         inside = bool(polygon.covers(footprint))
@@ -185,7 +216,22 @@ def measure_planar_placement(
         footprints.append(inside)
         gaps.append(gap)
         areas.append(float(footprint.area))
-    return accepted, {
+        if exact_silhouette:
+            outside.append(float(footprint.difference(polygon).area))
+            bounds = reference_vertices[row].numpy()
+            scale = max(float(np.ptp(bounds, axis=0).max()), 1.0)
+            nonplanar.append(
+                bool(bounds[:, 2].max() > height + 8 * np.finfo(np.float32).eps * scale)
+            )
+            overlapping.append(
+                bool(
+                    (
+                        (points[:, :2].max(0) >= bounds[:, :2].min(0))
+                        & (points[:, :2].min(0) <= bounds[:, :2].max(0))
+                    ).all()
+                )
+            )
+    metrics = {
         "scope": "measured_planar_landing_region",
         "object_pose": object_pose.tolist(),
         "reference_pose": reference_pose.tolist(),
@@ -195,6 +241,12 @@ def measure_planar_placement(
         "support_tolerance_m": SUPPORT_TOLERANCE_M,
         "penetration_tolerance_m": PENETRATION_TOLERANCE_M,
     }
+    if exact_silhouette:
+        metrics["footprint_kind"] = "native_triangle_projection/v1"
+        metrics["outside_floor_area_m2"] = outside
+        metrics["reference_has_raised_geometry"] = nonplanar
+        metrics["reference_aabb_overlap"] = overlapping
+    return accepted, metrics
 
 
 def _placement_predicate(predicate: Any) -> bool:
@@ -202,7 +254,7 @@ def _placement_predicate(predicate: Any) -> bool:
     return predicate.name == "semantic_goal" and (
         predicate.arguments.get("task_type") == "E1"
         or (
-            predicate.arguments.get("task_type") == "E4"
+            predicate.arguments.get("task_type") in {"E4", "E5"}
             and predicate.arguments.get("terminal_behavior") == "place"
             and predicate.arguments.get("relation") in {"on", "inside"}
         )

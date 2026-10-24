@@ -187,6 +187,8 @@ TaskSpec owns the reusable normative task identity and evidence contract across
 these boundaries; its schemas, predicate rules, and cache behavior are owned by
 `embodichain/gen_sim/task_spec/` and detailed in the
 [GenSim/TaskSpec design](../../../docs/architecture/gen-sim-taskspec-design.md).
+Read [acceptance evidence](acceptance-evidence.md) for historical events, stage
+and final-state observation, the legacy/current audit and native evidence gaps.
 Long-horizon specifications keep the terminal state in `goal` and represent
 ordered intermediate achievements as acyclic `milestones`.
 Interpretation checks explicit held-resource conflicts before grounding using

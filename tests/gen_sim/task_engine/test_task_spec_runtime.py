@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import json
 import pytest
 from types import SimpleNamespace
 import torch
@@ -654,12 +655,242 @@ def _observe_placement(tmp_path, data):
     )["environments"][0]
 
 
+def test_triangle_silhouette_does_not_invent_material_across_a_concavity():
+    import numpy as np
+    import trimesh
+    from embodichain.gen_sim.task_engine._task_program.placement_evidence import (
+        measure_planar_placement,
+    )
+
+    def u_mesh(x, y):
+        vertices = np.array([(a, b, 0.0) for b in y for a in x])
+        faces = []
+        for row, column in ((0, 0), (0, 1), (0, 2), (1, 0), (1, 2)):
+            first = row * 4 + column
+            faces.extend(((first, first + 1, first + 5), (first, first + 5, first + 4)))
+        return trimesh.Trimesh(vertices, faces, process=False)
+
+    # Both are U-shaped; the smaller U fits, but its convex hull crosses the notch.
+    meshes = {
+        "floor": u_mesh((-0.3, -0.1, 0.1, 0.3), (-0.3, -0.1, 0.3)),
+        "object": u_mesh((-0.25, -0.13, 0.13, 0.25), (-0.25, -0.13, 0.25)),
+    }
+    natives = {
+        name: SimpleNamespace(
+            get_vertices=lambda mesh=mesh, **_kw: torch.tensor(
+                mesh.vertices.copy()
+            ).float()[None],
+            get_triangles=lambda mesh=mesh, **_kw: torch.tensor(
+                mesh.faces.copy()
+            ).long()[None],
+        )
+        for name, mesh in meshes.items()
+    }
+    sim = SimpleNamespace(get_rigid_object=natives.get)
+    obj, ref = (SimpleNamespace(simulation_uid=name) for name in ("object", "floor"))
+    pose = torch.eye(4)[None]
+    old, _ = measure_planar_placement(sim, obj, ref, pose, pose)
+    current, measured = measure_planar_placement(
+        sim, obj, ref, pose, pose, exact_silhouette=True
+    )
+    assert old == [False]
+    assert current == [True]
+    assert measured["footprint_kind"] == "native_triangle_projection/v1"
+
+
 def test_empty_legacy_presets_do_not_block_measured_e1_final_and_milestone(
     tmp_path,
 ) -> None:
     result = _observe_placement(tmp_path, _placement_evidence(tmp_path))
     assert result["certificate_ready"] is True
     assert result["milestones"][0]["status"] == "satisfied"
+
+
+@pytest.mark.parametrize(
+    "x,z,expected",
+    [
+        (0.24, 0.045, "unavailable"),
+        (0.0, -0.1, "failed"),
+        (0.0, 0.5, "failed"),
+        (1.0, 0.045, "failed"),
+    ],
+)
+def test_unqualified_cavity_does_not_hide_penetration_hovering_or_clear_miss(
+    tmp_path, x, z, expected
+):
+    import numpy as np
+    import trimesh
+
+    data = _placement_evidence(tmp_path, x=x, z=z)
+    native = data[-2].sim.get_rigid_object("region")
+    floor = trimesh.creation.box(extents=[0.5, 0.3, 0.01])
+    wall = trimesh.creation.box(extents=[0.01, 0.3, 0.06])
+    wall.apply_translation([0.245, 0.0, 0.035])
+    mesh = trimesh.util.concatenate([floor, wall])
+    native.get_vertices = lambda **_kw: torch.tensor(np.asarray(mesh.vertices)).float()[
+        None
+    ]
+    native.get_triangles = lambda **_kw: torch.tensor(np.asarray(mesh.faces)).long()[
+        None
+    ]
+    assert _observe_placement(tmp_path, data)["status"] == expected
+
+
+def _rigid_side_evidence(tmp_path, *, x=0.35):
+    from embodichain.gen_sim.task_engine._task_program.services import (
+        _RelativePlaceRoute,
+    )
+    from embodichain.gen_sim.task_engine._task_program.stability import (
+        StabilityConstraint,
+        TaskStabilityPort,
+    )
+    from embodichain.lab.task_program.compiler.program import CompiledPostPolicy
+    from embodichain.lab.task_program.semantics.scene import SceneObjectRef
+    from embodichain.lab.task_program.language.schema import WaitStablePostCfg
+
+    data = _placement_evidence(
+        tmp_path, relation="behind", reference_uid="reference", x=x
+    )
+    plan, contract, runtime, program, constraints, env, deployment = data
+    node = next(
+        n
+        for n in plan.graph["nodes"]
+        if n["call"].get("call_id") == "simulation.place_relative"
+    )
+    registration = deployment.integration.registration
+    scene = registration.scene_binding
+    scene.articulations, scene.links = (), ()
+    scene.rigid_objects += (SimpleNamespace(entity_id="table", simulation_uid="table"),)
+    original = env.sim.get_rigid_object
+    reference = original("reference")
+    # The tabletop must contain the complete object, unlike the side reference.
+    import trimesh
+
+    table_mesh = trimesh.creation.box(extents=[2.0, 2.0, 0.01])
+    table = SimpleNamespace(
+        get_local_pose=reference.get_local_pose,
+        get_vertices=lambda **_kw: torch.tensor(table_mesh.vertices.copy()).float()[
+            None
+        ],
+        get_triangles=lambda **_kw: torch.tensor(table_mesh.faces.copy()).long()[None],
+    )
+    env.sim.get_rigid_object = lambda uid: table if uid == "table" else original(uid)
+    env._traj_buffer["states"]["rigid_objects"]["table"] = env._traj_buffer["states"][
+        "rigid_objects"
+    ]["reference"]
+    from embodichain.gen_sim.task_engine.task_program_bundle import (
+        _LATERAL_RELEASE_CLEARANCE,
+        _PLACEMENT_CLEARANCE,
+    )
+
+    settled = (x, 0.0, 0.02)
+    route = _RelativePlaceRoute(
+        "cube",
+        "reference",
+        "behind",
+        (
+            *settled[:2],
+            settled[2] + (_LATERAL_RELEASE_CLEARANCE - _PLACEMENT_CLEARANCE),
+        ),
+    )
+    registration.registered_semantic_lowerer_factories = (
+        SimpleNamespace(call_id="simulation.place_relative", routes=(route,)),
+    )
+    preset = f"gen_sim.{node['id']}.stable"
+    cfg = StabilityConstraint(
+        kind="placement",
+        entity="cube",
+        reference="reference",
+        displacement=settled,
+        duration=0.1,
+    )
+    deployment.integration.adapter_factory = SimpleNamespace(
+        constraints=((preset, cfg),)
+    )
+    terminal = runtime["segments"][-1]
+    prefix = ["program", "items", len(program["program"]["items"]) - 1]
+    policy = CompiledPostPolicy(
+        WaitStablePostCfg(entity="cube", preset=preset),
+        SceneObjectRef("cube"),
+        (*prefix, "post", 0),
+    )
+    segment = SimpleNamespace(post_policies=(policy,))
+    port = TaskStabilityPort(
+        SimpleNamespace(),
+        env.sim,
+        SimpleNamespace(get_qpos=lambda **_kw: torch.zeros(1, 2)),
+        scene,
+        {preset: cfg},
+        step_dt=0.1,
+    )
+    list(port.actions(policy, segment=segment, active_mask=torch.tensor([True])))
+    terminal["metadata"].update(
+        program_segment_source_path=prefix,
+        post_policies=[
+            {
+                "kind": "wait_stable",
+                "policy_index": 0,
+                "source_path": [*prefix, "post", 0],
+                "result_mask": port.post_policy_result(
+                    policy, segment=segment
+                ).tolist(),
+                "result": port.post_policy_metadata(policy, segment=segment),
+            }
+        ],
+    )
+    return data
+
+
+def test_rigid_side_relation_certifies_measured_release_and_table_landing(tmp_path):
+    result = _observe_placement(tmp_path, _rigid_side_evidence(tmp_path))
+    assert result["certificate_ready"] is True
+    assert result["milestones"][0]["status"] == "satisfied"
+
+
+@pytest.mark.parametrize("damage", [None, "x", "z", "unauthorized_task"])
+def test_rigid_side_release_route_matches_its_distinct_json_settled_target(
+    tmp_path, damage
+):
+    from dataclasses import asdict, replace
+    from embodichain.gen_sim.task_engine._task_program.stability import (
+        StabilityConstraint,
+    )
+
+    data = _rigid_side_evidence(tmp_path)
+    factory = data[-1].integration.adapter_factory
+    preset, cfg = factory.constraints[0]
+    cfg = StabilityConstraint.decode(json.loads(json.dumps(asdict(cfg))))
+    if damage in {"x", "z"}:
+        displacement = list(cfg.displacement)
+        displacement[0 if damage == "x" else 2] += 0.001
+        cfg = replace(cfg, displacement=tuple(displacement))
+    elif damage == "unauthorized_task":
+        for node in data[0].graph["nodes"]:
+            node["task_type"] = "E2"
+    factory.constraints = ((preset, cfg),)
+    if damage == "unauthorized_task":
+        with pytest.raises(ValueError, match="identity mismatch"):
+            _observe_placement(tmp_path, data)
+        return
+    result = _observe_placement(tmp_path, data)
+    assert result["certificate_ready"] is (damage is None)
+
+
+@pytest.mark.parametrize("damage", ["overlap", "missing_release", "stale_reference"])
+def test_rigid_side_relation_never_uses_center_or_unmeasured_success(tmp_path, damage):
+    data = _rigid_side_evidence(tmp_path, x=0.28 if damage == "overlap" else 0.35)
+    if damage == "missing_release":
+        for segment in data[2]["segments"]:
+            for call in segment["metadata"]["runtime"]["calls"]:
+                call["effects"] = []
+    elif damage == "stale_reference":
+        pose = data[2]["segments"][-1]["metadata"]["post_policies"][0]["result"][
+            "measurements"
+        ]["reference_pose"]
+        pose[0][0][3] += 0.1
+    result = _observe_placement(tmp_path, data)
+    assert result["certificate_ready"] is False
+    assert result["milestones"][0]["status"] != "satisfied"
 
 
 @pytest.mark.parametrize(

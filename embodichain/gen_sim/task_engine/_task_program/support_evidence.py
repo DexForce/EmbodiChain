@@ -39,6 +39,20 @@ _OBSERVATION_ERRORS = (
 )
 
 
+def _native_contact_revision(simulation: Any) -> int:
+    """Read the pinned Default SDK contact source revision without sampling."""
+    if simulation.spawn_result.backend != "dexsim":
+        raise ValueError("Native support source revision requires Default physics.")
+    physics = simulation.get_world().get_physics_scene()
+    getter = getattr(physics, "_get_contact_data_revision", None)
+    if not callable(getter):
+        raise ValueError("Native support source revision is unavailable.")
+    revision = int(getter())
+    if revision < 0:
+        raise ValueError("Native support source revision is invalid.")
+    return revision
+
+
 class ContactWitness:
     """Keep an actual contact patch only while its physical configuration persists."""
 
@@ -227,17 +241,7 @@ class NativeSupportObservation:
             self._reset_rows(None)
 
     def _revision(self) -> int:
-        # Pinned Default SDK dependency: public ContactBuffer has no source tick.
-        if self._simulation.spawn_result.backend != "dexsim":
-            raise ValueError("Native support source revision requires Default physics.")
-        physics = self._simulation.get_world().get_physics_scene()
-        getter = getattr(physics, "_get_contact_data_revision", None)
-        if not callable(getter):
-            raise ValueError("Native support source revision is unavailable.")
-        revision = int(getter())
-        if revision < 0:
-            raise ValueError("Native support source revision is invalid.")
-        return revision
+        return _native_contact_revision(self._simulation)
 
     def _revision_or_none(self) -> int | None:
         if self._clock is None:

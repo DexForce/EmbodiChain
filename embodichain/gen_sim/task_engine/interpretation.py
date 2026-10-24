@@ -293,6 +293,14 @@ def interpret_instruction_draft(
                 _coerce_instruction_response(response)
             )
             intent = validate_instruction_intent(normalized)
+            if any(
+                step["task_type"] == "E3" and "pour_goal_mode" not in step
+                for step in intent["steps"]
+            ):
+                raise ValueError(
+                    "New E3 instructions require explicit pour_goal_mode: "
+                    "motion for an action-only request, fluid for liquid transfer."
+                )
             _validate_instruction_placements(instruction_text, intent)
             return InstructionDraftResult(
                 intent=intent,
@@ -900,9 +908,10 @@ def _instruction_prompt(instruction: str) -> str:
         "receive_arm, orientation_goal, target_state, target_setting, layout, "
         "axis, direction, terminal_behavior, depends_on; each selector has kind, "
         "step_id, reference, quantifier, count.\n\n"
-        "For E3 only, the optional pour_goal_mode may be 'motion' when the user "
+        "For each new E3 instruction, explicitly declare pour_goal_mode. Use "
+        "'motion' when the user "
         "explicitly requires only a tilt-and-restore action without actual liquid "
-        "transfer. Use 'fluid' or omit the field for actual fluid-transfer intent "
+        "transfer. Use 'fluid' for actual fluid-transfer intent "
         "or an unspecified evidence mode. Never weaken fluid-transfer intent to "
         "motion merely because fluid simulation may be unavailable. Do not emit "
         "pour_goal_mode for other E types.\n\n"
