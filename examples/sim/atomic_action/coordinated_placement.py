@@ -61,7 +61,7 @@ from embodichain_benchmarks.motion_generation.scenarios._placement_geometry impo
     build_support_object_target_pose,
     build_placing_object_target_pose,
 )
-from scripts.tutorials.atomic_action.scenario_utils import (
+from examples.sim.atomic_action.scenario import (
     add_dual_tutorial_robot,
     compute_local_bounds,
     create_manual_object_semantics,
@@ -71,7 +71,7 @@ from scripts.tutorials.atomic_action.scenario_utils import (
     resolve_cached_data_path,
     settle_object,
 )
-from scripts.tutorials.atomic_action.tutorial_utils import (
+from examples.sim.atomic_action.support import (
     TutorialRobot,
     broadcast_pose_batch,
     clone_local_pose_from_first_env,

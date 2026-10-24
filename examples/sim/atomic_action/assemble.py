@@ -53,12 +53,12 @@ from embodichain.data import get_data_path
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
 from embodichain.utils import logger
-from scripts.tutorials.atomic_action.scenario_utils import (
+from examples.sim.atomic_action.scenario import (
     add_dual_tutorial_robot,
     add_support_surface,
     settle_object,
 )
-from scripts.tutorials.atomic_action.tutorial_utils import (
+from examples.sim.atomic_action.support import (
     TutorialRobot,
     broadcast_pose_batch,
     clone_local_pose_from_first_env,

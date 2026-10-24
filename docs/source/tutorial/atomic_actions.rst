@@ -114,54 +114,123 @@ This extension contract is intentionally strict: a subclass that defines
 custom actions must rename that implementation to ``_plan()`` so the
 framework-owned collision-scene preparation cannot be bypassed.
 
-Runnable examples
------------------
+Two executable walkthroughs
+---------------------------
 
-Focused examples live under ``scripts/tutorials/atomic_action``:
-
-* ``move_end_effector.py``
-* ``move_joints.py``
-* ``axis_align.py``
-* ``control_dt.py``
-* ``pickup.py``
-* ``move_held_object.py``
-* ``pour.py``
-* ``place.py``
-* ``assemble.py``
-* ``press.py``
-* ``slide.py``
-* ``twist.py``
-* ``coordinated_pickment.py``
-* ``coordinated_placement.py``
-* ``hand_over.py``
-* ``open_door.py``
-* ``moving_target_recovery.py``
-* ``dynamic_obstacle_recovery.py``
-
-The scripts are interactive by default. Add ``--auto_play`` to skip prompts;
-combine it with ``--headless --device cpu`` for a headless run that records
-video under ``outputs/videos``:
+``scripts/tutorials/atomic_action`` contains exactly two teaching scripts.
+Their robot, asset, TCP and recording helpers come from
+``examples/sim/atomic_action``. The complete runnable scene catalog, including
+recovery and coordinated manipulation, lives in that examples directory and is
+installed with the package. Browse it with:
 
 .. code-block:: bash
 
-   python scripts/tutorials/atomic_action/move_end_effector.py --headless --auto_play --device cpu
-   python scripts/tutorials/atomic_action/control_dt.py --headless --auto_play --device cpu
-   python scripts/tutorials/atomic_action/pickup.py --headless --auto_play --device cpu
-   python scripts/tutorials/atomic_action/pour.py --headless --auto_play --device cpu
-   python scripts/tutorials/atomic_action/assemble.py --headless --auto_play --device cpu
-   python scripts/tutorials/atomic_action/hand_over.py --headless --auto_play --device cpu
+   embodichain run-example --list
+   embodichain run-example sim/atomic_action --help
+   embodichain run-example sim/atomic_action/coordinated_pickment --help
 
-``control_dt.py`` compiles the same 40-waypoint ``ik_interp`` path twice. The
-positions stay identical, while changing ``PlanningContext.control_dt`` from
-``2 * physics_dt`` to ``8 * physics_dt`` makes every arrival interval and the
-total trajectory duration four times longer. The script checks that relationship
-before replaying the fast and slow trajectories in sequence.
+Single arm: PickUp followed by Place
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Run the single-arm walkthrough from a source checkout:
+
+.. code-block:: bash
+
+   python scripts/tutorials/atomic_action/single_arm.py --headless --auto_play --device cpu
+
+``single_arm.py`` creates the same cube and calibrated robot as the runnable
+Place example. It then declares the hand's semantic ``open`` and ``grasp``
+commands and gives the engine an object-backed scene provider and grasp-pose
+generator. The ``primary`` participant binds to the concrete ``arm`` and
+``eef`` control parts. A ``GraspGoal`` requests acquisition; a subsequent
+``PlaceGoal`` supplies the desired tool-pose waypoints:
+
+.. literalinclude:: ../../../scripts/tutorials/atomic_action/single_arm.py
+   :language: python
+   :start-after: # -- Resources --
+   :end-before: # -- Planning --
+   :dedent: 4
+
+The observed robot and scene state enter through an explicit control period.
+``compile()`` projects the first action's expected attachment into the next
+planning context, allowing Place to plan its held-object motion. It does not
+step physics or establish that the real grasp succeeded:
+
+.. literalinclude:: ../../../scripts/tutorials/atomic_action/single_arm.py
+   :language: python
+   :start-after: # -- Planning --
+   :end-before: # -- Playback --
+   :dedent: 4
+
+The host subsequently passes ``compiled.trajectory`` to the shared
+``replay_trajectory()`` helper. Its arrival intervals determine the simulation
+steps. The source script shows the complete setup, lift-boundary callback,
+terminal hold and ``run_tutorial()`` resource-cleanup boundary.
+
+Two arms: one HandOver invocation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The dual-arm walkthrough binds two motion/grasp pairs to one skill. Its default
+can fixture uses Robotiq 2F-140; ``--is_horizontal`` selects the stick and
+matching PGC-140-50 asset, TCP, grasp model and closing commands:
+
+.. code-block:: bash
+
+   python scripts/tutorials/atomic_action/dual_arm.py --headless --auto_play --device cpu
+   python scripts/tutorials/atomic_action/dual_arm.py --is_horizontal --headless --auto_play --device cpu
+
+``dual_arm.py`` obtains physical setup and fixture calibration from the
+canonical HandOver example. It registers an ``open``/``grasp`` profile for each
+hand and supplies both grasp-pose generators to the engine. The application
+then constructs one goal and binds both participants:
+
+.. literalinclude:: ../../../scripts/tutorials/atomic_action/dual_arm.py
+   :language: python
+   :start-after: # -- Goal and binding --
+   :end-before: # -- Planning --
+   :dedent: 4
+
+``source`` and ``destination`` are skill-local candidate participants.
+HandOver chooses the nearer pickup arm, plans pickup and receiving grasps, and
+coordinates hand closure, transfer, source release and final transport. The
+application does not split that transfer into unrelated single-arm calls.
+Both motion/hand resources must satisfy the skill's disjointness contract.
+
+As in the single-arm case, compile and playback remain separate. The same
+``control_dt`` governs both arms. A successful compile reports planned
+feasibility; use measured effect verification when physical task success must
+be certified. The observed-execution and recovery sections below describe that
+alternative to offline compilation.
+
+Runnable demonstrations
+~~~~~~~~~~~~~~~~~~~~~~~
+
+All per-skill and specialist demonstrations run from ``examples``:
+
+.. code-block:: bash
+
+   embodichain run-example sim/atomic_action --skill pickup --headless
+   embodichain run-example sim/atomic_action --skill place --planner toppra --headless
+   embodichain run-example sim/atomic_action/handover --is_horizontal --headless --auto_play
+   embodichain run-example sim/atomic_action/assemble --headless --auto_play
+   embodichain run-example sim/atomic_action/coordinated_placement --headless --auto_play
+   embodichain run-example sim/atomic_action/moving_target_recovery --headless --auto_play
+
+The ``examples/sim/atomic_action/README.md`` lists fixed-scene selectors,
+standalone demonstrations, supported backends and recording options. The cube
+MoveHeldObject scene uses ``--skill move_held_object``; the distinct paper-cup
+sequence is ``sim/atomic_action/move_held_object_cup``.
+
+``sim/atomic_action/control_dt`` demonstrates two explicit command periods.
+It chooses a minimum sample count that permits the faster interpolation under
+its motion limits, checks that both geometric paths agree, then checks that the
+slower arrival intervals and duration scale with the requested period.
 
 The ``motion_generator`` variable in the snippets below is a configured
 :class:`~embodichain.lab.sim.motion.motion_generator.MotionGenerator`; its robot, planner,
 device, cache, and collision world become the resources owned by the engine.
 
-All atomic-action tutorials use the shared scene setup, which creates exactly
+The teaching scripts and runnable examples use the shared scene setup, which creates exactly
 one global ``sun`` light (``main_light``) for the whole simulation. The sun
 uses a common downward direction and is not duplicated for each vectorized
 arena; tutorial-specific light positions are no longer needed.
@@ -169,7 +238,7 @@ arena; tutorial-specific light positions are no longer needed.
 Selecting a motion planner
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Every runnable atomic-action tutorial accepts the shared ``--planner`` switch.
+The teaching scripts and runnable examples accept the shared ``--planner`` switch.
 It selects the non-neural backend used to construct its
 ``MotionGenerator``:
 
@@ -187,14 +256,12 @@ It selects the non-neural backend used to construct its
    * - ``trapezoidal``
      - :class:`~embodichain.lab.sim.motion.planners.TrapezoidalPlanner`
      - Deterministic trapezoidal joint-space timing and the default for atomic
-       action tutorials. Cartesian targets are
-       converted through the shared IK/interpolation path before planning;
-       quantity sampling retains every converted waypoint. When options are
-       resolved from the backend-neutral request, ``MotionGenerator`` treats
-       the requested count as a lower bound; an explicitly supplied
-       ``TrapezoidalPlanOptions.sample_interval`` remains authoritative.
-       Fixed-length composite skill phases resample that position path back to
-       their requested phase count before combining arm and hand commands.
+       examples. Free Cartesian goals become sparse IK waypoints; explicit
+       ``is_linear`` requests retain a dense Cartesian path. Required waypoints
+       remain exact. Backend-neutral sample counts are minima, and control-grid
+       retiming preserves native phase duration when combining arm and hand
+       commands. Explicit ``TrapezoidalPlanOptions.sample_interval`` stays
+       authoritative at the backend boundary.
    * - ``curobo``
      - :class:`~embodichain.lab.sim.motion.planners.CuroboPlanner`
      - CUDA-backed Cartesian/joint planning with collision-world support when
@@ -210,24 +277,23 @@ Unless noted below, omitting ``--planner`` selects ``trapezoidal``.
 
 .. code-block:: bash
 
-   python scripts/tutorials/atomic_action/move_end_effector.py --device cpu
-   python scripts/tutorials/atomic_action/move_end_effector.py --device cpu --planner toppra
-   python scripts/tutorials/atomic_action/move_end_effector.py --device cuda --planner curobo
+   embodichain run-example sim/atomic_action/move_end_effector --device cpu
+   embodichain run-example sim/atomic_action/move_end_effector --device cpu --planner toppra
+   embodichain run-example sim/atomic_action/move_end_effector --device cuda --planner curobo
 
 The selector does not override a skill's explicit motion contract. In
 particular, ``dynamic_obstacle_recovery.py`` is deliberately cuRobo-only because
 it updates a live collision world; ``coordinated_pickment.py``,
-``coordinated_placement.py``, and ``hand_over.py`` use dual-arm planning that
+``coordinated_placement.py``, and ``handover.py`` use dual-arm planning that
 currently rejects cuRobo. ``control_dt.py`` intentionally uses
 ``strategy="ik_interp"`` to compare control periods, so its planner choice is
 constructed for consistency but does not change that interpolation experiment.
 ``coordinated_pickment.py`` likewise retains its synchronized multi-arm
 IK/keyframe implementation; its selector validates the backend but does not
 replace those custom synchronized phases.
-The exact Cartesian-linear portions of ``OpenDoor``, ``Press``, and ``Slide``
-likewise remain IK-grounded; their planner choice applies to the other
-motion-generation portions. ``Twist`` uses the selected planner for each of
-its pose segments.
+The ``OpenDoor``, ``Press``, ``Slide`` and ``Twist`` examples select
+``ik_interp`` to preserve their exact Cartesian/contact paths. Selecting a
+backend does not replace those constrained IK phases.
 
 Control-part commands
 ---------------------
@@ -490,7 +556,7 @@ and regenerated goal axes remain visible for comparison:
 
 .. code-block:: bash
 
-   python scripts/tutorials/atomic_action/moving_target_recovery.py --headless --auto_play --device cpu
+   embodichain run-example sim/atomic_action/moving_target_recovery --headless --auto_play --device cpu
 
 For collision-aware execution, register each pose-updatable obstacle with
 ``SceneCollisionRole.DYNAMIC`` and configure the same canonical registry IDs as
@@ -514,7 +580,7 @@ eventually reported:
 
 .. code-block:: bash
 
-   python scripts/tutorials/atomic_action/dynamic_obstacle_recovery.py --headless --auto_play
+   embodichain run-example sim/atomic_action/dynamic_obstacle_recovery --headless --auto_play
 
 ``MotionPolicy.dynamic_collision_mode`` defaults to
 ``DynamicCollisionMode.AUTO``. Use ``DynamicCollisionMode.REQUIRED`` when

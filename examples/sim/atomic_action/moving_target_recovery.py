@@ -58,7 +58,7 @@ from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
-from scripts.tutorials.atomic_action.tutorial_utils import (
+from examples.sim.atomic_action.support import (
     add_tutorial_robot,
     create_curobo_motion_generator,
     create_tutorial_argument_parser,

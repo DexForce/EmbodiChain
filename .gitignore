@@ -192,7 +192,7 @@ outputs
 /output/
 test_configs/*
 embodichain_data/
-scripts/tutorials/atomic_action/*.glb
+examples/sim/atomic_action/*.glb
 
 wandb/
 *.mp4

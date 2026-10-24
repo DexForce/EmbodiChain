@@ -34,7 +34,7 @@ from embodichain.lab.sim.atomic_actions import (
     MotionPolicy,
 )
 from embodichain.utils import logger
-from scripts.tutorials.atomic_action.tutorial_utils import (
+from examples.sim.atomic_action.support import (
     add_tutorial_robot,
     create_toppra_motion_generator,
     create_tutorial_argument_parser,
@@ -44,7 +44,10 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     run_tutorial,
 )
 
-SAMPLE_COUNT = 40
+# At 20 ms, 100 samples leave 1.98 s for the 0.30 rad move, sufficient for
+# the default 0.5 rad/s² minimum-jerk acceleration budget. Both periods can
+# therefore use the same geometric samples without limit-driven expansion.
+SAMPLE_COUNT = 100
 FAST_CONTROL_STEPS = 2
 SLOW_CONTROL_STEPS = 8
 RESET_STEPS = 20

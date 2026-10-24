@@ -25,7 +25,7 @@ consequences drive this tutorial:
 * :class:`~embodichain.lab.sim.objects.Articulation` has no whole-body
   ``get_vertices()``; grasp geometry is read per link with
   ``get_link_vert_face()``, the same source
-  ``scripts/tutorials/atomic_action/slide.py`` uses for its handle affordance.
+  ``examples/sim/atomic_action/slide.py`` uses for its handle affordance.
   Grasps are then sampled by the shared parallel-jaw generator.
 
 The turn joint is locked with a stiff position drive so the cube behaves as a
@@ -56,7 +56,7 @@ from embodichain.lab.sim.atomic_actions import (
 from embodichain.lab.sim.cfg import ArticulationCfg, ArticulationRootPropertiesCfg
 from embodichain.lab.sim.objects import Articulation
 from embodichain.utils import logger
-from scripts.tutorials.atomic_action.tutorial_utils import (
+from examples.sim.atomic_action.support import (
     add_tutorial_robot,
     create_curobo_motion_generator,
     create_parallel_jaw_grasp_pose_generator,

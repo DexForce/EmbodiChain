@@ -26,8 +26,8 @@ variant selects two DH PGC-140-50 grippers, their short-pad TCPs and a 50 mm
 grasp model. Run it with either planner:
 
 ```bash
-python scripts/tutorials/atomic_action/hand_over.py --is_horizontal --planner trapezoidal --headless --auto_play
-python scripts/tutorials/atomic_action/hand_over.py --is_horizontal --planner toppra --headless --auto_play
+embodichain run-example sim/atomic_action/handover --is_horizontal --planner trapezoidal --headless --auto_play
+embodichain run-example sim/atomic_action/handover --is_horizontal --planner toppra --headless --auto_play
 ```
 
 PGC uses a 25 mm inward command per finger. Its TCP rotates the grasp-frame
@@ -44,6 +44,41 @@ MoveJoint and PushObject support trajectory expansion only; explicitly selecting
 `affordance` for either is an error. `--num-envs` remains a compatibility check
 and must equal N; `--no-expansion` requires N = 1. The old fixed-bank
 `--recipe-indices` selector has been removed.
+
+## Standalone demonstrations
+
+All Atomic Skill demonstrations live in this directory. The selector above
+owns the twelve fixed scenes and their expansion/output host. Specialized
+workflows also run directly through the generic example launcher:
+
+| Example path after `embodichain run-example` | Demonstration |
+| --- | --- |
+| `sim/atomic_action/move_end_effector` | Required multi-waypoint tool poses |
+| `sim/atomic_action/control_dt` | Compare explicit control periods |
+| `sim/atomic_action/pickup_rubiks_cube` | Grasp a locked articulation link |
+| `sim/atomic_action/move_held_object_cup` | Approach, pick up, and transport a paper cup |
+| `sim/atomic_action/assemble` | Place a can on a base object |
+| `sim/atomic_action/coordinated_pickment` | Two arms grasp and transport one shared object |
+| `sim/atomic_action/coordinated_placement` | Pick two objects and coordinate their placement |
+| `sim/atomic_action/moving_target_recovery` | Observed PickUp recovery after a target moves |
+| `sim/atomic_action/dynamic_obstacle_recovery` | cuRobo collision-world invalidation and replanning |
+
+```bash
+embodichain run-example sim/atomic_action/coordinated_pickment --object plastic_tray --headless --auto_play
+embodichain run-example sim/atomic_action/coordinated_placement --headless --auto_play
+embodichain run-example sim/atomic_action/move_held_object_cup --headless --auto_play
+```
+
+Standalone demonstrations keep their own arguments; use their `--help` rather
+than passing fixed-scene expansion options such as `--variants`. Their
+`--auto_play` option skips prompts and records a native video. `--headless`
+alone skips the viewer and prompts without enabling recording.
+
+The two teaching scripts in `scripts/tutorials/atomic_action/single_arm.py` and
+`dual_arm.py` explain PickUp→Place and HandOver using the typed engine API.
+They reuse this directory's physical setup and calibration. The tutorial
+chapter at `docs/source/tutorial/atomic_actions.rst` walks through their code;
+per-skill commands, additional scenes, recovery and shared helpers belong here.
 
 ## Fixed-scene expansion
 
@@ -139,5 +174,5 @@ calibrations, not measured guarantees for another physical fixture.
 Sample scenes select named tool points instead of embedding a generic
 `tcp_z`. Python helpers still accept explicit PGI `tcp_z` overrides, including
 Franka; an override changes local Z while preserving the fixture's rotation
-and lateral offsets. Robotiq and PGC keep their full mounting poses. TCP calibration
-changes the FK/IK tool reference, not the gripper mesh or physical length.
+and lateral offsets. Robotiq and PGC keep their full mounting poses. TCP
+calibration changes the FK/IK tool reference, not the gripper mesh or physical length.
