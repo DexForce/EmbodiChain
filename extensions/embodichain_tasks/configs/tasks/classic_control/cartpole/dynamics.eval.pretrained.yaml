@@ -1,0 +1,8 @@
+# Offline evaluation of the published NeRD model and dataset.
+mode: offline
+dataset: ../../../../../../outputs/datasets/neural_dynamics/nerd/cartpole/v1
+model: ../../../../../../outputs/models/neural_dynamics/nerd/cartpole/v1
+split: test
+batch_size: 256
+device: cpu
+output: ../../../../../../outputs/dynamics/cartpole/pretrained/offline.json
