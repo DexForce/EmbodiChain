@@ -490,7 +490,7 @@ def test_snapshot_rejects_incomplete_joint_state() -> None:
         {"controlled_joint_indices": (0, 0)},
         {"representation": "eef_delta"},
         {"phases": (TrajectoryPhase("transit", 0, 4),)},
-        {"phases": (TrajectoryPhase("a", 0, 2), TrajectoryPhase("b", 1, 3))},
+        {"phases": (TrajectoryPhase("a", 0, 2), TrajectoryPhase("b", 0, 3))},
     ],
 )
 def test_template_rejects_invalid_representation_timing_and_indices(

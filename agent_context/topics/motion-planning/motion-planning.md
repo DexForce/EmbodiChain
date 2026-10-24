@@ -17,6 +17,8 @@
 | Standalone playback and B=1 expansion host lifecycle | `embodichain/lab/sim/motion/execution.py` |
 | Expansion Profile loading, source adapters, candidate coordination and coverage | `embodichain/lab/sim/motion/expansion/` |
 | Distinct trajectory variants for fixed waypoints | `embodichain/lab/sim/motion/expansion/variants.py` |
+| Endpoint-preserving task-space deformation and trajectory IK | `embodichain/lab/sim/motion/expansion/task_space.py` |
+| Phase-aligned demonstration banks, stitching and bridges | `embodichain/lab/sim/motion/expansion/stitching.py` |
 
 ## Choose the layer
 
@@ -149,20 +151,47 @@ explicitly enabled factor that cannot produce a qpos variant raises rather than
 disappearing: `ik` without Jacobians, and `approach`, which owns Cartesian
 standoff poses the caller must replan. The resolved config is reported on the result.
 
-`scripts/tutorials/atomic_action/place.py` is the demonstration host, hooked
-the way the Affordance sampling tutorials are: shared helpers live in
-`examples/sim/atomic_action/support.py` through the `tutorial_utils.py` adapter;
-the tutorial declares only which named segments may move,
-and one variant replays per simulation row. Phases come from the action's own
-`TrajectorySegment` ranges; only motion at or after the lift is retimed so the
-shared `clear_dynamics()` step stays aligned. `--variant_plot_dir` writes a
-joint-trajectory figure and a tool-path figure with waypoint markers. Task
-Program, Gym lifecycle, dataset persistence and `ExpansionSession` collection
-bookkeeping are deliberately out of scope; this is a direct-simulation
-contract. Keep `joint_dedup_normalized_tol` below `joint_offset_scale`, or
-genuinely different variants are discarded as duplicates; an enabled spatial
-factor at or below the tolerance now fails configuration decoding instead of
-silently keeping the nominal variant alone.
+`task_space.py` is the host-independent route when fixed joint waypoints are too
+restrictive. It evaluates one controlled frame through an injected batched
+kinematics callable, applies bounded root-frame translation/rotation residuals
+only to explicitly authorized free phases, and preserves each phase endpoint.
+`project_task_space_trajectory` solves all editable interior samples with the
+shared fixed-step DLS compute API and returns a normal full-joint
+`TrajectoryTemplate` plus per-sample pose residuals and success evidence.
+Locked samples keep the reference qpos. The caller still owns frame binding,
+collision/dynamics checks, task validation and rejection of unsuccessful rows.
+
+`stitching.py` extracts annotated phases as source-owned, local-time
+`TrajectorySegment` values. `TrajectorySegmentBank` admits replacements only
+when semantic phase, motion kind, joint layout, controlled joints and tensor
+contracts agree; selection is deterministic. Stitching de-duplicates shared
+boundaries while adjacent output phases share that one endpoint index, so every
+phase remains independently extractable and augmentable. It gives every output
+phase a unique identity and retains multi-source lineage. A discontinuous
+boundary must go through an injected
+`TrajectoryBridgePlanner`; `MinimumJerkBridgePlanner` is only a sampled
+velocity/acceleration-limited geometric fallback and makes no collision claim.
+The resulting template enters the existing `TemplateSourceAdapter` path, so
+execution, reset, validation and persistence remain host responsibilities.
+`examples/expansion/trajectory/pure_trajectory_augmentation_showcase.py`
+renders both paths analytically on CPU and records IK residuals, source lineage
+and bridge phases without constructing a simulator.
+
+`examples/sim/atomic_action/place.py` is the demonstration host. Shared helpers
+in `examples/sim/atomic_action/support.py` convert the compiled action's named
+segments to the expansion contracts and replay one variant per simulation row.
+The default `joint_space` mode retains the earlier residual/via/null-space and
+retiming behavior. The optional `task_space` mode deforms only selected free
+lift/transport/retract segments, projects them through the production
+trajectory-IK API, and requires every requested row to be distinct and IK-valid.
+`examples/expansion/trajectory/task_environment_augmentation_showcase.py`
+selects that mode and defaults to one nominal plus eight variants in nine
+parallel arenas; recording frames the complete arena grid. `--variant_plot_dir`
+writes joint and tool-path figures with waypoint markers. Task Program, Gym
+lifecycle, dataset persistence and `ExpansionSession` collection bookkeeping
+remain out of scope; this is a direct-simulation contract. In joint-space mode,
+keep `joint_dedup_normalized_tol` below `joint_offset_scale`, or genuinely
+different variants are discarded as duplicates.
 
 The twelve-scene Atomic CLI uses the same variant operators through the
 shared Atomic plan adapter and owns its replay provenance; see the
