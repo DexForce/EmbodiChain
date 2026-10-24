@@ -78,7 +78,7 @@ _STEP_KEYS = frozenset(
         "depends_on",
     }
 )
-_OPTIONAL_STEP_KEYS = frozenset({"pour_goal_mode"})
+_OPTIONAL_STEP_KEYS = frozenset({"pour_goal_mode", "twist_goal_mode"})
 _INTENT_TASK_FIELD_REGISTRY = {
     task_type: contract.applicable_intent_fields
     for task_type, contract in TASK_CONTRACTS.items()
@@ -217,6 +217,7 @@ _INTENT_OUTPUT_SCHEMA = {
                     },
                     "target_setting": {"type": "integer"},
                     "pour_goal_mode": {"type": "string", "enum": ["fluid", "motion"]},
+                    "twist_goal_mode": {"type": "string", "enum": ["coarse"]},
                     "layout": {"type": "string", "enum": sorted(_LAYOUTS)},
                     "axis": {"type": "string", "enum": sorted(_AXES)},
                     "direction": {
@@ -519,6 +520,12 @@ def validate_instruction_intent(value: Mapping[str, Any]) -> dict[str, Any]:
             step["pour_goal_mode"] = _choice(
                 step["pour_goal_mode"], {"fluid", "motion"}, f"{context}.pour_goal_mode"
             )
+        if "twist_goal_mode" in step:
+            if step["task_type"] != "E8":
+                raise ValueError(f"{context}.twist_goal_mode is only valid for E8.")
+            step["twist_goal_mode"] = _choice(
+                step["twist_goal_mode"], {"coarse"}, f"{context}.twist_goal_mode"
+            )
         step["object"] = _validate_selector(step["object"], f"{context}.object")
         step["target"] = _validate_selector(step["target"], f"{context}.target")
         step["relation"] = _canonical_relation(step["relation"], f"{context}.relation")
@@ -732,6 +739,10 @@ def _validate_task_fields(step: Mapping[str, Any], context: str) -> None:
     target_setting = int(step["target_setting"])
     if task_type != "E8" and target_setting != 0:
         raise ValueError(f"{context} target_setting is only valid for E8.")
+    if step.get("twist_goal_mode") == "coarse" and target_setting != 0:
+        raise ValueError(
+            f"{context} coarse twist uses target_setting=0 as a placeholder, not a numeric goal."
+        )
     if task_type != "E1" and step["axis"] != "none":
         raise ValueError(f"{context} axis is only valid for E1 line arrangement.")
     if task_type == "E1" and step["layout"] != "line" and step["axis"] != "none":
@@ -910,6 +921,12 @@ def _instruction_prompt(instruction: str) -> str:
         "or an unspecified evidence mode. Never weaken fluid-transfer intent to "
         "motion merely because fluid simulation may be unavailable. Do not emit "
         "pour_goal_mode for other E types.\n\n"
+        "For E8 only, when the user asks for a coarse turn without a printed-label "
+        "target, set optional twist_goal_mode='coarse' and target_setting=0 as a "
+        "placeholder. This does not request label 0: execution selects a source-calibrated "
+        "planning reference, not a new task goal. Omit twist_goal_mode for an explicit "
+        "printed-label target and retain that exact numeric target_setting. Do not "
+        "weaken an explicit label request into a coarse turn.\n\n"
         "Use orientation_goal=none unless the instruction explicitly requests "
         "upright orientation or preserving the original orientation. Spatial "
         "placement and handover alone do not imply preserve. "

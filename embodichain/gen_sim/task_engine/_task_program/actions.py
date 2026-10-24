@@ -831,7 +831,7 @@ class GenSimPickUp(PickUp):
         """Use the shared builder only after qualifying this exact Pick branch."""
         from .articulation_collision import check_free_motion
         from .pick_candidate_path import trajectory
-        from .pick_continuation import preview_place
+        from .pick_continuation import preview_place, requires_full_place_preview
 
         exact, receipt = trajectory(self, request, context, pose, direction)
         record = {"trajectory": receipt}
@@ -870,7 +870,7 @@ class GenSimPickUp(PickUp):
             if not record["approach_scene"]["valid"]:
                 return None, record
             preview = (self.continuation_previews or {}).get(request.invocation_id)
-            if preview is not None:
+            if preview is not None and requires_full_place_preview(preview):
                 record["place_preview"] = preview_place(
                     self, request, context, candidate, preview, safety=True
                 )
@@ -1118,7 +1118,7 @@ class GenSimPickUp(PickUp):
         if first.plan_success.any() or not selection.candidate_routes or not budget:
             return first
         from .pick_path import rebuild
-        from .pick_continuation import preview_place
+        from .pick_continuation import preview_place, requires_full_place_preview
 
         key = request.binding.endpoint("primary", "motion").task_state_key
         original = first.expected_effects.held_object_updates.get(key)
@@ -1212,7 +1212,7 @@ class GenSimPickUp(PickUp):
                 attempts.append(record)
                 if not candidate.plan_success.all():
                     continue
-                if preview is not None:
+                if preview is not None and requires_full_place_preview(preview):
                     record["place_preview"] = preview_place(
                         self, selected, context, candidate, preview, safety=True
                     )

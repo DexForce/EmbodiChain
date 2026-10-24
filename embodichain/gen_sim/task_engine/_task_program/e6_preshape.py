@@ -29,7 +29,7 @@ import torch
 from .e6_clearance import HandClearance, PRESHAPE_FRACTION
 
 __all__: list[str] = []
-E6_PRESHAPE_REVISION = 1
+E6_PRESHAPE_REVISION = 2
 
 
 @dataclass
@@ -74,8 +74,8 @@ def plan_with_preshape(
 ) -> Any:
     """Keep nominal plans exact; widen only an aperture-rejected bound Slide.
 
-    Measure at most five one-percent opening increments, within the calibrated
-    80-85% closure band. Rebuild only once, with the smallest sufficient opening.
+    Measure at most ten one-percent opening increments within the 75-85% closure
+    band. Rebuild only once, with the smallest sufficient measured opening.
     Full hand/table screening and the original planner/runner remain authoritative.
     """
     from embodichain.lab.sim.atomic_actions import JointPositionTarget, SlideOptions
@@ -125,7 +125,7 @@ def plan_with_preshape(
         after_nominal = _RandomState.capture(devices)
         accepted = False
         try:
-            for percent in range(84, 79, -1):
+            for percent in range(84, 74, -1):
                 fraction = percent / 100
                 clearance = provider._clearance_factory(fraction)
                 measured.append(

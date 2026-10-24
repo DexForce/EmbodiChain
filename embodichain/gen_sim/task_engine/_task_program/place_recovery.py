@@ -189,11 +189,27 @@ def inspect(action: Any, request: Any, context: Any, plan: Any) -> dict[str, Any
     lower, upper = world.amin(2), world.amax(2)
     minimum_gap = None
     convex_checks = []
+    support_owner = None
+    if request.invocation_id in getattr(action, "ordinary_on_invocations", ()):
+        reference = getattr(request.goal.xpos, "entity_id", None)
+        support_owner = (getattr(action, "support_surface_owners", None) or {}).get(
+            reference, reference
+        )
+    deferred_supports = []
     try:
         for uid, component, mesh, pose in scene_components(
             meshes, context, excluded_owner=held.semantics.entity_id
         ):
             other_lower, other_upper = world_bounds(mesh, pose.to(poses))
+            if uid == support_owner:
+                # Landing on this owner requires contact, not free-space clearance.
+                # Native release/support observations remain the physical evidence.
+                deferred_supports.append(uid)
+                if uid == "table":
+                    minimum_gap = float(
+                        (lower[:, :, 2] - other_upper[:, None, 2]).min()
+                    )
+                continue
             margin = _SCENE_CLEARANCE_M + _DISTANCE_TOLERANCE_M
             overlap = (
                 (upper >= other_lower[:, None] - margin)
@@ -222,7 +238,11 @@ def inspect(action: Any, request: Any, context: Any, plan: Any) -> dict[str, Any
         }
     return {
         "valid": True,
-        "scope": "discrete_robot_self_meshes_and_bound_scene_component_envelopes",
+        "scope": (
+            "discrete_robot_self_meshes_and_noncontact_scene_component_envelopes"
+            if deferred_supports
+            else "discrete_robot_self_meshes_and_bound_scene_component_envelopes"
+        ),
         "geometry_sources": "legacy_rigid_visual_vertices_and_articulation_collision_components",
         "not_certified": "continuous_collision_contact_or_robot_scene_clearance",
         "minimum_table_gap_m": minimum_gap,
@@ -230,6 +250,14 @@ def inspect(action: Any, request: Any, context: Any, plan: Any) -> dict[str, Any
         "rotation_path_rad": rotation_path,
         "orientation_preserved": rotation_max <= rot_eps,
         "convex_clearance": convex_checks,
+        **(
+            {
+                "intended_support_contact_deferred": sorted(set(deferred_supports)),
+                "physical_evidence": False,
+            }
+            if deferred_supports
+            else {}
+        ),
     }
 
 

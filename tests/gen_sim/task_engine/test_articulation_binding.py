@@ -19,6 +19,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
+from types import SimpleNamespace as NS
 
 from pxr import Usd, UsdGeom, UsdPhysics
 import pytest
@@ -69,3 +71,42 @@ def test_handleless_noncontrol_remains_an_error(tmp_path: Path) -> None:
 def test_named_control_with_a_real_pull_handle_is_not_discarded(tmp_path: Path) -> None:
     parts = discover_prismatic_parts(_asset(tmp_path, "switch", with_handle=True))
     assert {part.link for part in parts} == {"rack", "switch"}
+
+
+@pytest.mark.parametrize("qualified", [True, False])
+def test_mass_only_lineage_preserves_part_identity_but_not_asset_hash(
+    tmp_path: Path, monkeypatch, qualified: bool
+) -> None:
+    from embodichain.gen_sim.task_engine._task_program import (
+        articulation_binding as binding,
+    )
+    from embodichain.gen_sim.task_engine._task_program import twist_mass_source
+
+    config = _asset(tmp_path, "button")
+    runtime = Path(config["fpath"])
+    source = tmp_path / "pristine.usda"
+    source.write_bytes(runtime.read_bytes())
+    original = discover_prismatic_parts({**config, "fpath": str(source)})
+    source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+    stage = Usd.Stage.Open(str(runtime))
+    UsdPhysics.MassAPI.Apply(stage.GetPrimAtPath("/base")).CreateMassAttr(0.1)
+    stage.GetRootLayer().Save()
+    runtime.with_suffix(".mass.json").write_text("{}")
+
+    def qualify(path):
+        assert Path(path) == runtime
+        if not qualified:
+            raise ValueError("stale mass lineage")
+        return NS(source_sha256=source_hash)
+
+    monkeypatch.setattr(twist_mass_source, "qualify_mass_source_copy", qualify)
+    if not qualified:
+        with pytest.raises(ValueError, match="stale mass lineage"):
+            discover_prismatic_parts(config)
+        return
+    parts = discover_prismatic_parts(config)
+    assert [p.part_id for p in parts] == [p.part_id for p in original]
+    monkeypatch.setattr(binding, "handle_mesh", lambda *args: None)
+    bound = binding._binding_from_candidate({**config, "uid": "control"}, parts[0])
+    assert bound.source_sha256 == hashlib.sha256(runtime.read_bytes()).hexdigest()
+    assert bound.source_sha256 != source_hash

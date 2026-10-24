@@ -19,9 +19,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from typing import Any
 
 import torch
+from embodichain.utils import logger
 
 __all__: list[str] = []
 
@@ -49,6 +51,7 @@ class HandClearance:
         if self.max_retreat < 0.020:
             return result, widths, torch.full_like(costs, torch.inf)
         accepted = torch.zeros_like(costs, dtype=torch.bool)
+        best_z = torch.full_like(costs, -torch.inf)
         finite = torch.isfinite(costs) & torch.isfinite(widths)
         finite &= torch.isfinite(poses).all(dim=-1).all(dim=-1)
         finite &= (widths >= 0.0) & (widths <= self.aperture)
@@ -59,9 +62,34 @@ class HandClearance:
             shifted = poses.clone()
             shifted[:, :3, 3] -= float(retreat) * poses[:, :3, 2]
             min_z = (points @ shifted[:, 2, :3].T).amin(dim=0) + shifted[:, 2, 3]
+            best_z = torch.maximum(best_z, min_z)
             clear = finite & ~accepted & (min_z >= self.table_z + 0.007)
             result[clear] = shifted[clear]
             accepted |= clear
+        if not accepted.any():
+            raw = torch.isfinite(costs) & torch.isfinite(widths) & (widths >= 0)
+            raw &= torch.isfinite(poses).all(dim=-1).all(dim=-1)
+            logger.log_info(
+                "GenSim E6 grasp screen: "
+                + json.dumps(
+                    {
+                        "raw_count": costs.numel(),
+                        "finite_source_candidates": int(raw.sum()),
+                        "opening_pass": int(finite.sum()),
+                        "table_pass": int(accepted.sum()),
+                        "required_width_min_m": (
+                            float(widths[raw].min()) if raw.any() else None
+                        ),
+                        "usable_aperture_m": self.aperture,
+                        "max_retreat_m": self.max_retreat,
+                        "best_hand_min_z_m": (
+                            float(best_z[finite].max()) if finite.any() else None
+                        ),
+                        "required_hand_min_z_m": self.table_z + 0.007,
+                        "scope": "geometric_rejection_counts_not_physical_success",
+                    }
+                )
+            )
         return result, widths, torch.where(accepted, costs, torch.inf)
 
 

@@ -247,8 +247,8 @@ TASK_CONTRACTS: Mapping[str, TaskContract] = MappingProxyType(
         ),
         "E8": _contract(
             "E8",
-            "Turn one knob to a requested setting.",
-            frozenset({"required_arm", "target_setting"}),
+            "Turn one knob coarsely or toward a requested printed setting.",
+            frozenset({"required_arm", "target_setting", "twist_goal_mode"}),
             "articulation",
             frozenset({"turnable"}),
             "semantic_goal",

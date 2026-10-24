@@ -482,6 +482,8 @@ def _semantic_step_arguments(step: Mapping[str, Any]) -> dict[str, Any]:
         value = step.get(name, default)
         if value != default:
             result[name] = value
+    if step.get("twist_goal_mode") == "coarse":
+        result["twist_goal_mode"] = "coarse"
     for field in ("required_arm", "transfer_arm", "receive_arm"):
         required_arm = str(step.get(field, "none"))
         if required_arm in {"none", "auto"}:

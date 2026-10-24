@@ -192,6 +192,54 @@ def _merge_passive_prismatic_drive(
             drive["friction"] = {joint: PASSIVE_FRICTION for joint in joints}
 
 
+def _merge_prismatic_link_mass(
+    articulation: dict[str, Any],
+    links: Sequence[str],
+    *,
+    preserve_source_mass: bool = False,
+) -> None:
+    """Compose the E6 moving-link calibration with an existing mass owner."""
+    if preserve_source_mass:
+        return
+    link_attrs = articulation.setdefault("link_attrs", {})
+    group = "gen_sim_prismatic_link_mass"
+    if group in link_attrs:
+        raise ValueError(f"Generated E6 articulation reserves {group!r}.")
+    link_attrs[group] = {
+        "link_names_expr": sorted(set(links)),
+        "attrs": {"mass_props": {"mass": PRISMATIC_LINK_MASS}},
+    }
+
+
+def _coarse_twist_routes(
+    routes: tuple[Any, ...],
+    candidate: Mapping[str, Any] | None,
+    lineage: Mapping[str, Any] | None,
+) -> tuple[Any, ...]:
+    """Give explicit coarse turns one continuous command, not a printed goal."""
+    steps = () if candidate is None else candidate["draft"]["steps"]
+    coarse = {
+        s["id"]
+        for s in steps
+        if s["task_type"] == "E8" and s.get("twist_goal_mode") == "coarse"
+    }
+    if not coarse:
+        return routes
+    if lineage is None:
+        raise ValueError("Coarse Twist motion requires explicit expansion lineage.")
+    groups = {entry["group_id"] for sid in coarse for entry in lineage[sid]}
+    if groups - {route.operation_id for route in routes}:
+        raise ValueError("Coarse Twist lineage does not name its control routes.")
+    return tuple(
+        (
+            replace(route, chunk_angle=math.radians(20.0))
+            if route.operation_id in groups
+            else route
+        )
+        for route in routes
+    )
+
+
 def generate_task_program_bundle(
     graph: SemanticTaskGraph,
     prepared_scene: Any,
@@ -523,12 +571,28 @@ def generate_task_program_bundle(
 
     _collect_scene_refs(selected_graph)
     eligible_table_children: set[str] = set()
+    source_control_payloads: set[tuple[str, str]] = set()
     if source_twist_routes and frozen is None:
         graph_path = scene.source_config_path.with_name("scene_graph.json")
         if graph_path.is_file():
             source_graph = load_config(graph_path)
             nodes = source_graph.get("nodes", ())
             uid_map = scene.uid_map
+            rigid_uids = {str(item["uid"]) for item in scene.rigid_objects}
+            articulation_uids = {str(item["uid"]) for item in scene.articulations}
+            source_control_payloads = {
+                (
+                    uid_map.get(node.get("parent_id"), node.get("parent_id")),
+                    uid_map.get(node.get("object_id"), node.get("object_id")),
+                )
+                for node in nodes
+                if isinstance(node, dict)
+                and node.get("parent_relation") in {"on", "inside"}
+                and uid_map.get(node.get("parent_id"), node.get("parent_id"))
+                in articulation_uids
+                and uid_map.get(node.get("object_id"), node.get("object_id"))
+                in rigid_uids
+            }
             support_uids = {
                 uid_map.get(node.get("parent_id"), node.get("parent_id"))
                 for node in nodes
@@ -573,6 +637,7 @@ def generate_task_program_bundle(
                 (route,),
                 interaction="E8",
                 relayout_uids=movable_e8_uids,
+                source_payloads=source_control_payloads,
                 interaction_scale=twist_scale,
                 interaction_scale_qualified=twist_scale is not None,
                 support_lift_m=twist_support_lift_m,
@@ -671,6 +736,27 @@ def generate_task_program_bundle(
                 raise ValueError(
                     "E8 derived mass source changed its numeric binding or roles."
                 )
+    if frozen is None:
+        original_twist_routes = twist_routes
+        twist_routes = _coarse_twist_routes(twist_routes, task_candidate, step_lineage)
+        changes = [
+            {
+                "operation_id": after.operation_id,
+                "previous_chunk_angle_rad": before.chunk_angle,
+                "command_chunk_angle_rad": after.chunk_angle,
+                "native_contact_acceptance_unchanged": True,
+            }
+            for before, after in zip(original_twist_routes, twist_routes, strict=True)
+            if before.chunk_angle != after.chunk_angle
+        ]
+        if changes:
+            _write_json(
+                root / "twist_coarse_motion.json",
+                {
+                    "scope": "explicit_coarse_intent_motion_only_not_physical_success",
+                    "routes": changes,
+                },
+            )
     if press_adaptation:
         _write_json(
             root / "press_adaptation.json",
@@ -907,6 +993,7 @@ def generate_task_program_bundle(
         pour_proxy_position_tolerance_m=pour_proxy_position_tolerance_m,
         idle_clearance_routes=idle_clearance_routes,
         press_extra_distance=press_extra_distance,
+        twist_routes=twist_routes,
     )
     if runtime_profile == CONTACT_PROFILE:
         from .experiment_policy import apply_contact_options
@@ -937,19 +1024,17 @@ def generate_task_program_bundle(
         if press_calibration:
             _write_json(root / "press_calibration.json", {"routes": press_calibration})
         bound_uids = {binding.object_id for binding in articulation_bindings.values()}
+        source_mass_owned_uids = {route.binding.object_id for route in twist_routes}
         for articulation in scene_payload["simulation"]["articulation"]:
             if articulation["uid"] not in bound_uids:
                 continue
             articulation.setdefault("asset_physics_mode", "overlay")
             parts = discover_prismatic_parts(articulation)
-            link_attrs = articulation.setdefault("link_attrs", {})
-            mass_group = "gen_sim_prismatic_link_mass"
-            if mass_group in link_attrs:
-                raise ValueError(f"Generated E6 articulation reserves {mass_group!r}.")
-            link_attrs[mass_group] = {
-                "link_names_expr": sorted({part.link for part in parts}),
-                "attrs": {"mass_props": {"mass": PRISMATIC_LINK_MASS}},
-            }
+            _merge_prismatic_link_mass(
+                articulation,
+                [part.link for part in parts],
+                preserve_source_mass=articulation["uid"] in source_mass_owned_uids,
+            )
             drive = articulation.setdefault("joint_drive_props", {})
             _merge_passive_prismatic_drive(drive, [part.joint for part in parts])
     save_config(paths.scene, scene_payload)
@@ -2005,6 +2090,7 @@ def _integration_payload(
     pour_proxy_position_tolerance_m: float | None = None,
     idle_clearance_routes: Sequence[Mapping[str, Any]] | None = None,
     press_extra_distance: float | None = None,
+    twist_routes: tuple[Any, ...] | None = None,
 ) -> dict[str, Any]:
     from dataclasses import asdict
     from ._task_program.idle_clearance import CALL_ID as IDLE_CALL, decode_routes
@@ -2032,7 +2118,8 @@ def _integration_payload(
         TWIST_CALL,
     )
 
-    twist_routes = twist_graph_routes(graph, scene)
+    if twist_routes is None:
+        twist_routes = twist_graph_routes(graph, scene)
     from ._task_program.drawer_binding import drawer_routes, inside_parts
 
     drawers = {route.affordance: route for route in drawer_routes(graph, scene)}

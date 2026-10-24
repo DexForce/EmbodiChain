@@ -247,6 +247,8 @@ def _candidate_contact_decision(
         # A completed public Twist opens and retracts before this policy.
         # Contact alone must not lock an ineffective grasp for every chunk.
         state.locked = False
+    elif recovery_safe:
+        state.locked = False
     if (
         state.locked
         or not recovery_safe

@@ -26,6 +26,7 @@ import pytest
 
 from embodichain.gen_sim.task_engine.task_program_bundle import (
     _merge_passive_prismatic_drive,
+    _merge_prismatic_link_mass,
 )
 from embodichain.lab.sim.cfg import ArticulationCfg, JointDrivePropertiesCfg
 from embodichain.lab.sim.spawn.descriptors import _compile_joint_properties
@@ -97,3 +98,19 @@ def test_scalar_target_mode_is_not_overridden() -> None:
     drive = {"target_mode": "position"}
     _merge_passive_prismatic_drive(drive, ["drawer_slide"])
     assert drive == {"target_mode": "position", "friction": {"drawer_slide": 0.01}}
+
+
+def test_shared_e8_mass_owner_keeps_source_mass_without_e6_overlay() -> None:
+    config = {"uid": "assembly", "link_attrs": {"authored": {"source": True}}}
+    original = deepcopy(config)
+    _merge_prismatic_link_mass(config, ["rack"], preserve_source_mass=True)
+    assert config == original
+
+
+def test_ordinary_e6_keeps_its_one_kg_moving_link_calibration() -> None:
+    config = {"uid": "drawer"}
+    _merge_prismatic_link_mass(config, ["rack", "rack"])
+    assert config["link_attrs"]["gen_sim_prismatic_link_mass"] == {
+        "link_names_expr": ["rack"],
+        "attrs": {"mass_props": {"mass": 1.0}},
+    }

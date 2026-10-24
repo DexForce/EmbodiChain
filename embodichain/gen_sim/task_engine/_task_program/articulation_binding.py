@@ -264,7 +264,13 @@ def discover_prismatic_parts(
     ):
         raise ValueError("GenSim E6 requires positive uniform body_scale.")
     stage = _stage(config["fpath"])
-    source_hash = hashlib.sha256(Path(config["fpath"]).read_bytes()).hexdigest()
+    source_path = Path(config["fpath"])
+    source_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    if source_path.with_suffix(".mass.json").is_file():
+        from .twist_mass_source import qualify_mass_source_copy
+
+        # Physics-only copies retain geometric IDs; bindings still seal runtime bytes.
+        source_hash = qualify_mass_source_copy(source_path).source_sha256
     fixed_children: dict[str, set[str]] = {}
     for prim in stage.Traverse():
         if not prim.IsA(UsdPhysics.FixedJoint):

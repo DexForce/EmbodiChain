@@ -711,12 +711,34 @@ class SemanticTaskPlanner:
                     else _resource(requested, field="required_arm")
                 )
                 setting = step["target_setting"]
-                calibrated_angle = (
+                labels = (
                     objects[object_id]
                     .get("attributes", {})
                     .get("twist_setting_labels", {})
-                    .get(str(setting))
                 )
+                if step.get("twist_goal_mode") == "coarse":
+                    references = []
+                    for label, angle in labels.items():
+                        if (
+                            type(angle) not in (int, float)
+                            or not math.isfinite(angle)
+                            or abs(angle) <= 1e-8
+                        ):
+                            continue
+                        try:
+                            required_chunk_count(angle)
+                        except ValueError:
+                            continue
+                        references.append((int(label), angle))
+                    if not references:
+                        raise UnsupportedSemanticCapabilityError(
+                            "Coarse E8 needs a bounded source-calibrated nonzero planning reference."
+                        )
+                    # Keep contact-travel headroom without introducing a label goal.
+                    setting, _ = max(
+                        references, key=lambda item: (abs(item[1]), item[0])
+                    )
+                calibrated_angle = labels.get(str(setting))
                 if calibrated_angle is None:
                     raise UnsupportedSemanticCapabilityError(
                         "E8 chunk coverage requires the source-calibrated setting angle."
