@@ -25,9 +25,35 @@ Newton `solver_cfg=None` preserves DexSim's scene-aware `AutoSolverCfg`.
 The concrete solver is resolved from the complete Spawn scene, then exposed
 through `NewtonPhysicsBackend.solver_type`. Do not guess a solver-specific robot
 preset while it is unresolved. Gradient mode requires an explicit
-`semi_implicit` solver. Read exact solver options/defaults in
+`semi_implicit` solver or a direct/named provider supporting the requested native
+gradient mode. Functional Scene calls additionally require its functional
+dynamics service. Python callers pass DexSim's `ProviderNewtonSolverCfg` with a
+provider class/zero-argument factory directly through `solver_cfg`; this path
+does not inspect installed metadata. DexSim creates fresh instances per model
+build. Installed `dexsim.newton_solvers` names optionally pass through to DexSim's
+`RegisteredNewtonSolverCfg`; missing SDK capabilities fail at selection or
+provider loading rather than breaking ordinary backend imports. Read exact solver options/defaults in
 `cfg/simulation.py` and the installed DexSim config types; do not substitute a
 hardcoded fallback when an expected DexSim API is absent.
+
+`physics/solvers/simple.py` owns the optional spring-slider provider;
+`examples/simple_newton_solver/` demonstrates it through the public
+`SimulationManager.spawn_result` Scene. The installed SDK must include the
+direct-factory and service APIs. The example uses direct factory configuration;
+the `simple` entry point remains optional for name-based configurations.
+DexSim owns physical state, clocks and publication; the provider
+owns its model-scoped parameters and functional transition. Independent
+rollout uses `publish=False`; publishing advances the live clock once and must
+not be paired with a manager update for the same transition. Scene functional
+reset selects arena names, including the separate global `default` arena.
+
+Articulation initialization also calls `reset(clear_dynamics=False)` without a
+later coordinated clear. Preserve its position hold targets and mimic target
+propagation when the solver accepts them. Query the finalized public
+`Scene.dynamics_capabilities().supported_control_fields`; only an explicit
+exclusion of `joint_target_q` suppresses that command. Released SDKs predating
+extensions retain their unrestricted target behavior. Extension SDKs missing
+the query require an upgrade instead of guessing support from solver names.
 
 `collision_cfg` owns the external Newton contact pipeline. Its
 `update_interval=None` updates at the first local solver substep; positive `k`

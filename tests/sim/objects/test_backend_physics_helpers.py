@@ -49,6 +49,7 @@ from embodichain.lab.sim.objects.backends.rigid_physics import (
 )
 from embodichain.lab.sim.objects.backends.newton import (
     _stabilize_newton_mimic_target_write,
+    _supports_newton_position_targets,
 )
 from embodichain.lab.sim.objects.backends.lifecycle import (
     apply_rigid_initial_state,
@@ -64,6 +65,29 @@ from embodichain.lab.sim.objects.backends.controls import (
     set_gravity_enabled,
     set_visible,
 )
+
+
+@pytest.mark.parametrize(
+    "fields, expected",
+    [(None, True), (("joint_f",), False), (("joint_target_q",), True)],
+)
+def test_newton_hold_targets_follow_declared_channels(fields, expected) -> None:
+    scene = SimpleNamespace(
+        dynamics_capabilities=lambda: SimpleNamespace(supported_control_fields=fields)
+    )
+    assert _supports_newton_position_targets(scene) is expected
+
+
+def test_newton_hold_targets_distinguish_legacy_and_incomplete_sdks(
+    monkeypatch,
+) -> None:
+    from dexsim.engine import newton_physics
+
+    monkeypatch.delattr(newton_physics, "NewtonSolverExtension", raising=False)
+    assert _supports_newton_position_targets(SimpleNamespace())
+    monkeypatch.setattr(newton_physics, "NewtonSolverExtension", object, raising=False)
+    with pytest.raises(RuntimeError, match="Scene.dynamics_capabilities"):
+        _supports_newton_position_targets(SimpleNamespace())
 
 
 class _RigidEntity:
