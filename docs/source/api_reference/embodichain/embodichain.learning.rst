@@ -10,6 +10,7 @@ embodichain.learning
       layers
       models
       rl
+      dynamics
 
 Reinforcement Learning
 ----------------------

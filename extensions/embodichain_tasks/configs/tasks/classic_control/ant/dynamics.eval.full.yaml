@@ -1,0 +1,8 @@
+# Dynamics workflow configuration; not a runnable Gym deployment.
+mode: offline
+dataset: ../../../../../../outputs/dynamics/ant/full/data
+model: ../../../../../../outputs/dynamics/ant/full/export
+split: test
+batch_size: 512
+device: cuda:0
+output: ../../../../../../outputs/dynamics/ant/full/offline.json

@@ -113,6 +113,11 @@ COMMANDS = (
         help="Validate, split, and recover recorded expert datasets.",
     ),
     Command(
+        name="dynamics",
+        target="embodichain.cli.dynamics:main",
+        help="Generate data, train and evaluate neural dynamics models.",
+    ),
+    Command(
         name="preview_lerobot_data",
         target="embodichain.lab.scripts.preview_lerobot_data:cli",
         help="Print and validate a recorded LeRobot dataset episode.",
