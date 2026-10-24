@@ -146,16 +146,6 @@ STATIC_POSE_TUTORIAL_MODULES = (
     "slide",
     "twist",
 )
-EXPLICIT_SCENE_LIFECYCLE_TUTORIAL_MODULES = (
-    "dynamic_obstacle_recovery",
-    "moving_target_recovery",
-    "open_door",
-)
-SCENE_FREE_TUTORIAL_MODULES = (
-    "control_dt",
-    "move_end_effector",
-    "move_joints",
-)
 TUTORIAL_PRISMATIC_JOINT_AXIS = torch.tensor([2.0, 2.0, 1.0])
 TUTORIAL_REVOLUTE_JOINT_AXIS = torch.tensor([-1.0, 2.0, 2.0])
 TUTORIAL_REVOLUTE_AXIS_ORIGIN = torch.tensor([0.75, -0.5, 0.25])
@@ -961,15 +951,6 @@ def test_handover_tutorial_defaults_to_cpu_for_grasp_planning() -> None:
         args = module.parse_arguments()
 
     assert args.device == "cpu"
-
-
-def test_assemble_tutorial_uses_center_grasp_for_laid_soda_can() -> None:
-    module = importlib.import_module("scripts.tutorials.atomic_action.assemble")
-
-    assert module.PICKUP_OBJECT_PART == "center"
-    assert "pick_object_part=PICKUP_OBJECT_PART" in inspect.getsource(
-        module.run_assemble_demo
-    )
 
 
 def test_arm_direction_uses_selected_robot_solver_roots() -> None:

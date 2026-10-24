@@ -306,6 +306,7 @@ class _Robot:
 
     def __init__(self) -> None:
         self.qpos = torch.zeros(_BATCH_SIZE, _ROBOT_DOF)
+        self.target_qpos = self.qpos.clone()
 
     def get_qpos(
         self,
@@ -313,8 +314,8 @@ class _Robot:
         target: bool = False,
     ) -> torch.Tensor:
         """Return full or control-part positions."""
-        del target
-        return self.qpos if name is None else self.qpos[:, :1]
+        qpos = self.target_qpos if target else self.qpos
+        return qpos if name is None else qpos[:, :1]
 
     def get_qvel(
         self,
@@ -1151,6 +1152,7 @@ def test_bridge_reuses_real_workflow_across_pick_and_place(
     original_analyze, original_ground = compiler.analyze, compiler.ground
     analyses = []
     grounded_indices = []
+    execution_ids = []
 
     def analyze(calls, **kwargs):
         workflow = original_analyze(calls, **kwargs)
@@ -1160,6 +1162,10 @@ def test_bridge_reuses_real_workflow_across_pick_and_place(
     def ground(workflow, index, context, **kwargs):
         value = original_ground(workflow, index, context, **kwargs)
         grounded_indices.append(index)
+        execution_ids.append(value.invocation.invocation_id)
+        assert value.effect_spec.invocation_id == value.invocation.invocation_id
+        for boundary in (*value.effect_guards, *value.effect_gates):
+            assert boundary.effect_spec.invocation_id == value.invocation.invocation_id
         return value
 
     monkeypatch.setattr(compiler, "analyze", analyze)
@@ -1185,6 +1191,11 @@ def test_bridge_reuses_real_workflow_across_pick_and_place(
     assert len(analyses) == 1
     assert grounded_indices == [0, 1]
     assert local_indices == [[0], [0]]
+    assert execution_ids == [
+        f"{compiled.program_id}/{segment.segment_id}:{call.segment_call_index}"
+        for segment in compiled.iter_segments()
+        for call in segment.calls
+    ]
     assert len(analyses[0].calls[0].downstream_object_targets) == 1
 
 
@@ -1515,6 +1526,11 @@ def test_simulation_factory_builds_shared_observation_and_evidence_ports() -> No
     assert context.robot.timestamp == pytest.approx(0.0)
     assert context.control_dt == pytest.approx(_STEP_DT)
     assert torch.equal(observation.current_qpos(context.env_ids), robot.qpos)
+    robot.target_qpos.fill_(0.25)
+    assert torch.equal(
+        observation.hold_qpos(context.env_ids),
+        robot.target_qpos,
+    )
     assert len(providers) == 2
     assert all(
         getattr(provider, "_scene_provider") is observation.scene_provider
@@ -1872,9 +1888,10 @@ def test_pick_place_effects_require_physical_constraint_and_live_pose() -> None:
         analyzed: Any,
         effect_spec: Any,
         *,
+        registered_effect: Any = None,
         path: tuple[Any, ...],
     ) -> tuple[()]:
-        del self, analyzed, effect_spec, path
+        del self, analyzed, effect_spec, registered_effect, path
         return ()
 
     def without_in_flight_guards(
@@ -1883,9 +1900,10 @@ def test_pick_place_effects_require_physical_constraint_and_live_pose() -> None:
         effect_spec: Any,
         context: Any,
         *,
+        registered_effect: Any = None,
         path: tuple[Any, ...],
     ) -> tuple[()]:
-        del self, analyzed, effect_spec, context, path
+        del self, analyzed, effect_spec, context, registered_effect, path
         return ()
 
     assembly.compiler._ground_phase_effect_gates = MethodType(

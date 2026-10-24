@@ -90,6 +90,14 @@ Held-object guards and phase-effect gates are observational:
 Pick gates attachment before lift. Place gates detachment before retract.
 HandOver owns independent source/destination transfer boundaries.
 
+An established held-object relation does not determine the hand's actuator
+target. Shared HandOver preserves the measured source-hand posture for an
+existing hold. Its protected `_existing_hold_hand_qpos` hook lets an application
+specialization retain a bound closing command instead. Contact can keep a
+position-controlled hand short of that target; replacing it with measured angles
+removes closing drive. Target specialization does not replace the shared
+measured attachment, transfer and release verification.
+
 ## Row-local state
 
 Vector environments share a synchronized call and command cursor, but success,

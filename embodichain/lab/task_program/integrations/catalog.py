@@ -27,6 +27,7 @@ import math
 from _thread import LockType
 from threading import Lock
 from types import MappingProxyType
+from typing import cast
 import torch
 
 from embodichain.lab.gym.envs.settling import DynamicSettleMonitorCfg
@@ -127,6 +128,7 @@ _POST_POLICY_KINDS = frozenset({"wait_stable"})
 _VALIDATOR_KINDS = frozenset(
     {
         "articulation_joint_position",
+        "object_near_relative_target",
         "object_near_target",
         "object_lifted",
         "object_relative_position",
@@ -322,6 +324,36 @@ def _builtin_relation_grounders(
     if scene_binding.containers:
         values.append(ContainerRelationTargetGrounder())
     return tuple(values)
+
+
+def _configured_relation_grounders(
+    scene_binding: SimulationSceneBinding,
+    values: tuple[RelationTargetGrounder, ...],
+) -> tuple[RelationTargetGrounder, ...]:
+    """Remove standard grounders already materialized on a registration.
+
+    ``SimulationTaskProgramRegistration`` exposes the complete grounder tuple,
+    including the scene-derived standard entries.  Immutable registration
+    transforms commonly use :func:`dataclasses.replace`, which feeds that
+    exposed tuple back through the constructor.  Treat one exact instance of a
+    standard grounder as already installed so those transforms remain
+    idempotent while duplicate custom declarations still fail below.
+    """
+    builtins = _builtin_relation_grounders(scene_binding)
+    builtin_by_key = {
+        _relation_grounder_key(grounder): grounder for grounder in builtins
+    }
+    consumed: set[tuple[str, type[Affordance], str]] = set()
+    configured: list[RelationTargetGrounder] = []
+    for grounder in values:
+        key = _relation_grounder_key(grounder)
+        builtin = builtin_by_key.get(key)
+        if builtin is not None and type(grounder) is type(builtin):
+            if key not in consumed:
+                consumed.add(key)
+                continue
+        configured.append(grounder)
+    return tuple(configured)
 
 
 def _snapshot_relation_grounder_keys(
@@ -1129,8 +1161,9 @@ class SimulationTaskProgramRegistration:
             raise TypeError("call_catalog must be exactly SemanticCallCatalog.")
         settle_presets = _snapshot_settle_presets(self.settle_presets)
         object.__setattr__(self, "settle_presets", settle_presets)
-        configured_relation_grounders = _snapshot_relation_grounders(
-            self.relation_grounders
+        configured_relation_grounders = _configured_relation_grounders(
+            self.scene_binding,
+            _snapshot_relation_grounders(self.relation_grounders),
         )
         relation_grounders = _snapshot_relation_grounders(
             (
@@ -1255,8 +1288,7 @@ class SimulationTaskProgramRegistration:
         """Return the canonical registration fingerprint."""
         return self.catalog.fingerprint
 
-    def assert_unchanged(self) -> None:
-        """Reject nested declaration drift before live component creation."""
+    def _checked_fingerprint_payload(self) -> dict[str, object]:
         scene = self.scene_binding.declare()
         profile = self.robot_profile_binding.declare()
         try:
@@ -1283,27 +1315,26 @@ class SimulationTaskProgramRegistration:
             handover_pose_providers = _snapshot_handover_pose_providers(
                 self.handover_pose_providers
             )
-            current = _digest(
-                _registration_payload(
-                    scene_binding=self.scene_binding,
-                    scene=scene,
-                    robot_profile_binding=self.robot_profile_binding,
-                    robot_profile=profile,
-                    call_catalog=self.call_catalog,
-                    settle_presets=self.settle_presets,
-                    relation_grounder_keys=relation_grounder_keys,
-                    relation_grounders=relation_grounders,
-                    handover_pose_providers=handover_pose_providers,
-                    extensions=extensions,
-                    endpoint_adapters=self.endpoint_adapters,
-                    runtime_transports=self.runtime_transports,
-                    parallel_safety_factory=self.parallel_safety_factory,
-                    control_part_evidence_factory=self.control_part_evidence_factory,
-                    registered_semantic_lowerer_factories=(
-                        self.registered_semantic_lowerer_factories
-                    ),
-                )
+            payload = _registration_payload(
+                scene_binding=self.scene_binding,
+                scene=scene,
+                robot_profile_binding=self.robot_profile_binding,
+                robot_profile=profile,
+                call_catalog=self.call_catalog,
+                settle_presets=self.settle_presets,
+                relation_grounder_keys=relation_grounder_keys,
+                relation_grounders=relation_grounders,
+                handover_pose_providers=handover_pose_providers,
+                extensions=extensions,
+                endpoint_adapters=self.endpoint_adapters,
+                runtime_transports=self.runtime_transports,
+                parallel_safety_factory=self.parallel_safety_factory,
+                control_part_evidence_factory=self.control_part_evidence_factory,
+                registered_semantic_lowerer_factories=(
+                    self.registered_semantic_lowerer_factories
+                ),
             )
+            current = _digest(payload)
         except (TypeError, ValueError) as exc:
             raise IntegrationFingerprintMismatch(
                 "Task Program integration provider declaration changed after "
@@ -1314,6 +1345,37 @@ class SimulationTaskProgramRegistration:
                 "Task Program integration declaration changed after task "
                 "registration."
             )
+        return payload
+
+    def assert_unchanged(self) -> None:
+        """Reject nested declaration drift before live component creation."""
+        self._checked_fingerprint_payload()
+
+    def fingerprint_payload(self) -> dict[str, object]:
+        """Snapshot the complete validated registration declaration as JSON data.
+
+        Returns:
+            Independently owned canonical data whose SHA-256 equals
+            :attr:`fingerprint`. Changing the returned data does not change the
+            registration or its runtime identity.
+
+        Raises:
+            IntegrationFingerprintMismatch: A registered declaration has drifted.
+        """
+        try:
+            payload = cast(
+                dict[str, object], _canonical_value(self._checked_fingerprint_payload())
+            )
+            current = _digest(payload)
+        except (TypeError, ValueError) as exc:
+            raise IntegrationFingerprintMismatch(
+                "Task Program integration declaration changed during snapshot."
+            ) from exc
+        if current != self.fingerprint:
+            raise IntegrationFingerprintMismatch(
+                "Task Program integration declaration changed during snapshot."
+            )
+        return payload
 
     @property
     def endpoint_adapter_map(

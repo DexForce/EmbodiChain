@@ -216,14 +216,7 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
         success = result.success & eligible
 
         base_qpos = state.last_qpos.clone()
-        # Preserve the configured closing effort, not the contact-blocked
-        # measured position, throughout held-object transport.
-        base_qpos[:, hand_joint_ids] = grasp.joint_positions(
-            GRASP_COMMAND,
-            num_envs=context.batch_size,
-            device=self.device,
-            dtype=context.robot.qpos.dtype,
-        )
+        base_qpos[:, hand_joint_ids] = self._held_hand_qpos(request, context)
         _, timed = to_full_robot_trajectory(
             result,
             base_qpos=base_qpos,
@@ -249,6 +242,23 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
                 else None
             ),
             segment_lengths={"transport": timed.waypoint_count},
+        )
+
+    def _held_hand_qpos(
+        self,
+        request: ResolvedActionRequest[HeldObjectPoseGoal, MoveHeldObjectOptions],
+        context: PlanningContext,
+    ) -> torch.Tensor:
+        """Resolve the transport hand target without changing observed state.
+
+        A specialization may select an invocation-owned holding target. The
+        default preserves the bound grasp command, including control overrides.
+        """
+        return request.binding.endpoint("primary", "grasp").joint_positions(
+            GRASP_COMMAND,
+            num_envs=context.batch_size,
+            device=self.device,
+            dtype=context.robot.qpos.dtype,
         )
 
 

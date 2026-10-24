@@ -66,6 +66,7 @@ from embodichain.lab.sim.atomic_actions import (
     StateDelta,
     TaskState,
     TimedCommandSequence,
+    TimedTrajectory,
     TrackingFeedbackSourceRef,
     TrackingProjectorRef,
 )
@@ -89,6 +90,8 @@ from embodichain.lab.task_program.compiler.lowering import (
     GroundedHeldObjectGuard,
     GroundedPhaseEffectGate,
     HeldObjectGuardBaseline,
+    RegisteredHeldObjectEffect,
+    RegisteredSemanticEffect,
     SemanticCallCompiler,
 )
 from embodichain.lab.task_program.semantics.effects import (
@@ -103,6 +106,7 @@ from embodichain.lab.task_program.semantics.effects import (
     EffectMonitor,
     EffectMonitorDecision,
     EffectMonitorParam,
+    EffectMonitorRef,
     HeldObjectRelation,
     HeldObjectStateExpectation,
     JOINT_STATE_EFFECT_CHANNEL,
@@ -329,6 +333,29 @@ class _EffectAction(AtomicAction[_EffectGoal, ActionOptions]):
         )
 
 
+class _EffectlessAction(_EffectAction):
+    """Zero-frame action whose successful completion has no task-state effect."""
+
+    skill_id: ClassVar[str] = "runtime_test_effectless"
+    open_loop: ClassVar[bool] = True
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract()
+
+    def _plan(
+        self,
+        request: ResolvedActionRequest[_EffectGoal, ActionOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        goal = self.require_goal(request)
+        self.plan_count += 1
+        return self.build_command_plan(
+            request,
+            context,
+            success=goal.plan_success,
+            commands=TimedCommandSequence((), context.env_ids),
+            replannable=False,
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class _WorkflowEffectGoal:
     """Test-only held-object effect for workflow recovery."""
@@ -489,6 +516,8 @@ class _Compiler(SemanticCallCompiler):
         runner_cfg: ExecutionRunnerCfg,
         *,
         install_effect_monitor: bool,
+        effect_assurance: EffectAssurance | None = None,
+        skill_id: str = _EffectAction.skill_id,
     ) -> None:
         self._test_integration = _Integration(engine, SceneRegistry())
         self._decisions = tuple(
@@ -510,6 +539,8 @@ class _Compiler(SemanticCallCompiler):
         self._plan_success = plan_success
         self._runner_cfg = runner_cfg
         self._install_effect_monitor = install_effect_monitor
+        self._effect_assurance = effect_assurance
+        self._skill_id = skill_id
         self.analyze_count = 0
         self.ground_count = 0
         self.ground_timestamps: list[float] = []
@@ -539,6 +570,7 @@ class _Compiler(SemanticCallCompiler):
         context: PlanningContext,
         *,
         eligible_mask: torch.Tensor | None = None,
+        invocation_id: str | None = None,
         revision: int = 0,
         path: tuple[object, ...] = ("workflow",),
     ) -> _Grounded:
@@ -550,13 +582,13 @@ class _Compiler(SemanticCallCompiler):
         self.ground_task_masks.append(None if state is None else state.env_mask.clone())
         call = workflow.calls[call_index]
         invocation = ActionInvocation(
-            skill_id=_EffectAction.skill_id,
+            skill_id=self._skill_id,
             goal=_EffectGoal(
                 self._plan_success[call_index].clone(),
                 float(call_index + 1),
             ),
             binding=self.integration.engine.bind_control_parts(
-                _EffectAction.skill_id,
+                self._skill_id,
                 {},
             ),
             motion_policy=MotionPolicy(
@@ -568,7 +600,7 @@ class _Compiler(SemanticCallCompiler):
                 max_action_retries=0,
                 action_timeout=100.0,
             ),
-            invocation_id=f"{workflow.workflow_id}:{call_index}",
+            invocation_id=invocation_id or f"{workflow.workflow_id}:{call_index}",
             revision=revision,
         )
         target = torch.full((BATCH_SIZE, 1), float(call_index + 1))
@@ -608,9 +640,13 @@ class _Compiler(SemanticCallCompiler):
         analyzed = SimpleNamespace(
             call=call,
             effect_assurance=(
-                EffectAssurance.VERIFIED
-                if self._install_effect_monitor
-                else EffectAssurance.PROJECTED
+                self._effect_assurance
+                if self._effect_assurance is not None
+                else (
+                    EffectAssurance.VERIFIED
+                    if self._install_effect_monitor
+                    else EffectAssurance.PROJECTED
+                )
             ),
             effect_monitor_ref=None,
             bound=SimpleNamespace(
@@ -676,6 +712,7 @@ class _WorkflowRecoveryCompiler(SemanticCallCompiler):
         context: PlanningContext,
         *,
         eligible_mask: torch.Tensor | None = None,
+        invocation_id: str | None = None,
         revision: int = 0,
         path: tuple[object, ...] = ("workflow",),
     ) -> _Grounded:
@@ -745,7 +782,7 @@ class _WorkflowRecoveryCompiler(SemanticCallCompiler):
             motion_policy=motion_policy,
             tracking_policy=tracking_policy,
             recovery_policy=recovery_policy,
-            invocation_id=f"{workflow.workflow_id}:{decision_index}",
+            invocation_id=invocation_id or f"{workflow.workflow_id}:{decision_index}",
             revision=revision,
         )
         expectation = HeldObjectStateExpectation(
@@ -940,6 +977,8 @@ def _system(
     preset_runner_cfg: ExecutionRunnerCfg | None = None,
     runtime_runner_cfg: ExecutionRunnerCfg | None = None,
     install_effect_monitor: bool = True,
+    effect_assurance: EffectAssurance | None = None,
+    effectless_action: bool = False,
     plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
 ) -> _System:
     robot = Mock()
@@ -953,7 +992,7 @@ def _system(
     generator.device = torch.device("cpu")
     generator.planner.cfg.planner_type = "runtime_test"
     engine = AtomicActionEngine(generator, load_builtins=False)
-    action = _EffectAction()
+    action = _EffectlessAction() if effectless_action else _EffectAction()
     engine.register(action)
     selected_plan_success = plan_success or tuple(_mask(True, True) for _ in decisions)
     selected_runner_cfg = (
@@ -965,6 +1004,8 @@ def _system(
         selected_plan_success,
         selected_runner_cfg,
         install_effect_monitor=install_effect_monitor,
+        effect_assurance=effect_assurance,
+        skill_id=action.skill_id,
     )
     observation = _ObservationProvider()
     sink = _CommandSink()
@@ -1134,6 +1175,22 @@ def test_runtime_projects_planned_effect_when_grounded_call_has_no_monitor() -> 
     assert joint is not None
     assert torch.equal(joint.env_mask, _mask(True, True))
     assert torch.allclose(joint.position, torch.ones(BATCH_SIZE, 1))
+
+
+def test_verified_runtime_accepts_an_effectless_motion_without_a_monitor() -> None:
+    """Tracking completion is sufficient when no effect claim exists to verify."""
+    system = _system(
+        (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
+        install_effect_monitor=False,
+        effect_assurance=EffectAssurance.VERIFIED,
+        effectless_action=True,
+    )
+
+    result = system.runtime.run(_call("park"))
+
+    assert result.status is SemanticExecutionStatus.COMPLETED
+    assert result.effects == ()
+    assert result.task_state.get_articulation_joint_state("fixture", "joint") is None
 
 
 def test_runtime_uses_selected_preset_runner_cfg_without_override(
@@ -1407,7 +1464,9 @@ def test_runtime_retries_directly_when_verified_source_relation_remains() -> Non
     assert result.task_state.get_held_object("left_gripper") is None
 
 
-def test_runtime_partitions_retained_and_lost_source_rows_in_one_barrier() -> None:
+def test_runtime_partitions_retained_and_lost_source_rows_in_one_barrier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     poses = torch.eye(4).unsqueeze(0).repeat(BATCH_SIZE, 1, 1)
     initial_state = TaskState(
         batch_size=BATCH_SIZE,
@@ -1440,6 +1499,22 @@ def test_runtime_partitions_retained_and_lost_source_rows_in_one_barrier() -> No
         task_state=initial_state,
     )
 
+    ground = system.compiler.ground
+    identities = []
+
+    def record_ground(workflow, *args, **kwargs):
+        grounded = ground(workflow, *args, **kwargs)
+        identities.append(
+            (
+                workflow.workflow_id,
+                kwargs.get("invocation_id"),
+                grounded.invocation.invocation_id,
+            )
+        )
+        return grounded
+
+    monkeypatch.setattr(system.compiler, "ground", record_ground)
+
     result = system.runtime.run(
         HandOver(
             object=SceneObjectRef("cube"),
@@ -1467,6 +1542,15 @@ def test_runtime_partitions_retained_and_lost_source_rows_in_one_barrier() -> No
         SkillWorkflowRecoveryRole.RETRY_REACQUIRED,
     ]
     assert [trace.attempt_index for trace in result.workflow_recoveries] == [1, 1, 1]
+    assert identities[0] == (
+        "semantic_workflow",
+        "semantic_workflow:0",
+        "semantic_workflow:0",
+    )
+    for i, (workflow_id, override, identity) in enumerate(identities[1:]):
+        assert override is None
+        assert workflow_id == f"semantic_workflow:workflow_recovery:{i}"
+        assert identity.startswith(workflow_id + ":")
     assert result.task_state.get_held_object("left_gripper") is None
 
 
@@ -1968,6 +2052,195 @@ def test_phase_effect_gate_uses_independent_monitor_and_records_boundary_trace()
     assert trace.gate_id == "destination_acquired"
     assert trace.segment_name == "lift"
     assert torch.equal(system.collector.calls[0][2], torch.tensor([0, 1]))
+
+
+@pytest.mark.parametrize(
+    "lost_during_lift", [False, True], ids=["not_acquired", "lost_during_lift"]
+)
+def test_registered_acquisition_scheduler_stops_within_action_retry_budget(
+    monkeypatch: pytest.MonkeyPatch, lost_during_lift: bool
+) -> None:
+    poses = torch.eye(4).repeat(BATCH_SIZE, 1, 1)
+    unrelated = HeldObjectState(
+        semantics=ObjectSemantics(
+            affordance=Affordance(), geometry={}, entity_id="other_cube"
+        ),
+        object_to_eef=poses,
+        grasp_xpos=poses,
+        env_mask=_mask(True, True),
+    )
+    system = _workflow_recovery_system(
+        (_workflow_decision(_mask(True, True), _mask(False, False)),),
+        max_recovery_attempts=0,
+        task_state=TaskState(
+            batch_size=BATCH_SIZE,
+            device="cpu",
+            held_objects={"other_gripper": unrelated},
+        ),
+    )
+    plans = 0
+    original_plan = _WorkflowEffectAction._plan
+
+    def phased_plan(self, request, context):
+        nonlocal plans
+        plans += 1
+        original = original_plan(self, request, context)
+        return self.build_plan(
+            request,
+            context,
+            success=True,
+            trajectory=TimedTrajectory.from_uniform_step(
+                torch.tensor([0.0, 1.0, 2.0, 3.0])
+                .view(1, 4, 1)
+                .repeat(BATCH_SIZE, 1, 1),
+                env_ids=context.env_ids,
+                step_dt=0.01,
+            ),
+            expected_effects=original.expected_effects,
+            effect_candidates=original.expected_effects,
+            segment_lengths={"close": 1, "lift": 3},
+            replannable=False,
+        )
+
+    monkeypatch.setattr(_WorkflowEffectAction, "_plan", phased_plan)
+    call = RegisteredSemanticCall("test.registered_pick")
+    original_ground = system.compiler.ground
+    monitors = []
+
+    def decision(satisfied: bool) -> EffectMonitorDecision:
+        success, failure = _mask(satisfied, satisfied), _mask(
+            not satisfied, not satisfied
+        )
+        return EffectMonitorDecision(
+            success,
+            failure,
+            (EffectExpectationDecision("primary", success, failure, failure),),
+        )
+
+    def ground_registered(self, workflow, call_index, context, **kwargs):
+        grounded = original_ground(
+            replace(workflow, calls=(Pick(SceneObjectRef("cube")),)),
+            call_index,
+            context,
+            **kwargs,
+        )
+        spec = replace(
+            grounded.effect_spec,
+            semantic_id=call.semantic_id,
+            state_expectations=(
+                replace(
+                    grounded.effect_spec.state_expectations[0], expectation_id="primary"
+                ),
+            ),
+            clauses=(
+                replace(
+                    grounded.effect_spec.clauses[0],
+                    expectation_id="primary",
+                    clause_id="primary.constraint",
+                ),
+            ),
+        )
+        analyzed = SimpleNamespace(
+            **{
+                **vars(grounded.analyzed),
+                "call": call,
+                "effect_monitor_ref": EffectMonitorRef("test.monitor", "1"),
+            }
+        )
+        declaration = RegisteredSemanticEffect(
+            SemanticEffectKind.ATTACH,
+            (
+                RegisteredHeldObjectEffect(
+                    "primary",
+                    HeldObjectRelation.ATTACHED,
+                    "cube",
+                    "primary",
+                    acquire_before_segment="lift",
+                    retain_during_segments=("lift",),
+                ),
+            ),
+        )
+        self._effect_monitor_registry = SimpleNamespace(
+            create=lambda value, ref: _DecisionMonitor(value, decision(True))
+        )
+        gates = self._ground_phase_effect_gates(
+            analyzed, spec, registered_effect=declaration, path=("test",)
+        )
+        guards = self._ground_held_object_guards(
+            analyzed, spec, context, registered_effect=declaration, path=("test",)
+        )
+        gate_monitor, guard_monitor = gates[0].effect_monitor, guards[0].effect_monitor
+        if not lost_during_lift:
+            gate_monitor._decision = decision(False)
+        else:
+            original_observe = guard_monitor.observe
+
+            def lose_after_first_lift(request, evidence):
+                if guard_monitor.calls:
+                    guard_monitor._decision = decision(False)
+                return original_observe(request, evidence)
+
+            monkeypatch.setattr(guard_monitor, "observe", lose_after_first_lift)
+        terminal = _DecisionMonitor(spec, decision(True))
+        monitors.append((gate_monitor, guard_monitor, terminal))
+        return replace(
+            grounded,
+            analyzed=analyzed,
+            invocation=replace(
+                grounded.invocation,
+                phase_effect_gates=tuple(g.requirement for g in gates),
+                recovery_policy=replace(
+                    grounded.invocation.recovery_policy, max_action_retries=1
+                ),
+            ),
+            effect_spec=spec,
+            effect_monitor=terminal,
+            effect_gates=gates,
+            effect_guards=guards,
+        )
+
+    monkeypatch.setattr(
+        system.compiler, "ground", MethodType(ground_registered, system.compiler)
+    )
+    sent = []
+    original_send = system.sink.send
+
+    def record_send(command, *, timeout):
+        sent.append(float(command.commands[0].payload.positions[0, 0]))
+        return original_send(command, timeout=timeout)
+
+    monkeypatch.setattr(system.sink, "send", record_send)
+    invalidations = []
+    original_guard = system.runtime._held_object_guard_verifier
+
+    def record_guard(context, request):
+        result = original_guard(context, request)
+        if result is not None and result.failure_mask.any():
+            invalidations.append(result.state_invalidation.held_object_updates)
+        return result
+
+    monkeypatch.setattr(system.runtime, "_held_object_guard_verifier", record_guard)
+    result = system.runtime.run(call, max_steps=50)
+
+    assert result.status is SemanticExecutionStatus.FAILED
+    assert torch.equal(result.failure_mask, _mask(True, True))
+    assert plans == 2
+    assert len(monitors) == 1
+    gate_monitor, guard_monitor, terminal_monitor = monitors[0]
+    assert terminal_monitor.calls == 0
+    assert result.task_state.get_held_object("left_gripper") is None
+    assert result.task_state.get_held_object("other_gripper") is not None
+    if lost_during_lift:
+        assert 1.0 in sent and 3.0 not in sent
+        assert invalidations and all(
+            value == {"left_gripper": None} for value in invalidations
+        )
+        assert guard_monitor.calls >= 2
+    else:
+        assert sent == [0.0, 0.0]
+        assert gate_monitor.calls == 2
+        assert guard_monitor.calls == 0
+        assert invalidations == []
 
 
 def test_runtime_invokes_step_observer() -> None:

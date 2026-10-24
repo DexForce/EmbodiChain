@@ -920,10 +920,13 @@ class CuroboPlanner(BasePlanner):
 
         The samples are not replanned or replaced. They are mapped from the
         simulator's control-part order into the exact cuRobo model, then checked
-        against joint bounds and the live world collision model. Self-collision
-        is disabled consistently with motion planning. Each sample uses cuRobo's
-        kinematics and public costs directly to accommodate its 0.8 state and
-        buffer contracts while retaining batched environments.
+        against joint bounds, any configured self-collision cost, and the live
+        world collision checker. Each horizon sample uses SDK bound, self and
+        scene costs directly: scene collision consumes a ``KinematicsState``,
+        while self collision consumes its sphere tensor. Cost feature axes are
+        reduced only after checking their complete batch/horizon/feature schema.
+        Standard checker construction disables self-collision consistently with
+        motion planning; an already configured checker retains its own costs.
 
         Args:
             trajectory: Joint positions with shape ``(B, T, D)``.
@@ -1010,6 +1013,19 @@ class CuroboPlanner(BasePlanner):
             if self.cfg.world.multi_env
             else None
         )
+
+        def reduce_cost(value: torch.Tensor, width: int, name: str) -> torch.Tensor:
+            expected = (batch_size, 1, width)
+            if (
+                not isinstance(value, torch.Tensor)
+                or not value.is_floating_point()
+                or value.shape != expected
+            ):
+                raise ValueError(
+                    f"cuRobo {name} cost must have floating shape {expected}."
+                )
+            return value.sum(dim=-1)
+
         samples: list[torch.Tensor] = []
         device_context = (
             torch.cuda.device(self._curobo_device)
@@ -1022,22 +1038,31 @@ class CuroboPlanner(BasePlanner):
                     :, sample_index : sample_index + 1
                 ].contiguous()
                 checker = backend.collision_checker
+                checker.setup_batch_tensors(batch_size, 1)
                 state = checker.get_kinematics(sample)
-                valid = checker.get_bound(sample).sum(dim=-1) == 0.0
-                # cuRobo 0.8's validate() passes raw sphere tensors to a cost
-                # that now expects KinematicsState. Use its public costs with
-                # that state and the same world/limits as the planner.
-                if checker.collision_constraint is not None:
-                    if sample_index == 0:
-                        checker.collision_constraint.update_num_spheres(
-                            state.robot_spheres.shape[-2],
-                            batch_size=batch_size,
-                            horizon=1,
+                costs = [reduce_cost(checker.get_bound(sample), dof, "bound")]
+                if checker.self_collision_cost is not None:
+                    costs.append(
+                        reduce_cost(
+                            checker.get_self_collision(state.robot_spheres), 1, "self"
                         )
-                    world_cost = checker.collision_constraint.forward(
-                        state, idxs_env_query=env_query_idx
                     )
-                    valid &= (world_cost == 0.0).reshape(batch_size, 1, -1).all(dim=-1)
+                if checker.collision_constraint is not None:
+                    checker.collision_constraint.update_num_spheres(
+                        state.robot_spheres.shape[-2],
+                        batch_size=batch_size,
+                        horizon=1,
+                    )
+                    costs.append(
+                        reduce_cost(
+                            checker.collision_constraint.forward(
+                                state, idxs_env_query=env_query_idx
+                            ),
+                            state.robot_spheres.shape[-2],
+                            "world",
+                        )
+                    )
+                valid = torch.stack(costs, dim=-1).sum(dim=-1) == 0.0
                 samples.append(valid[:, 0].to(torch.bool))
         return torch.stack(samples, dim=1).to(trajectory.device)
 
