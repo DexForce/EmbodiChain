@@ -20,9 +20,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shlex
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Sequence
@@ -38,6 +40,12 @@ _LANE_ORDER = ("docs", "fast", "distributed", "gpu", "sim")
 _SLOW_LANE_PREFIX = "slow-"
 _DISTRIBUTED_TEST = "tests/learning/test_rl_distributed.py"
 _PLAN_MODES = {"partial", "docs-only", "full-pr", "full"}
+_CPU_THREAD_ENVIRONMENTS = (
+    "OMP_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+)
 
 
 def _load_plan(path: Path) -> dict[str, Any]:
@@ -215,6 +223,79 @@ def build_commands(
     return [*commands, *slow_commands]
 
 
+def _resource_collection_nodes(manifest: Path) -> list[str]:
+    """Validate the actual ordered collection before selecting its exact nodes."""
+    try:
+        selected = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError(
+            f"cannot read resource collection {manifest}: {error}"
+        ) from error
+    if not isinstance(selected, dict) or selected.get("version") != 1:
+        raise RuntimeError("unsupported resource collection manifest")
+    files = selected.get("files")
+    nodes = selected.get("nodeids")
+    markers = selected.get("markers")
+    if (
+        not isinstance(files, list)
+        or not all(isinstance(path, str) for path in files)
+        or not isinstance(nodes, list)
+        or not all(isinstance(node, str) and "::" in node for node in nodes)
+        or not isinstance(markers, dict)
+        or set(markers) != set(nodes)
+        or not all(
+            isinstance(values, list)
+            and all(isinstance(value, str) for value in values)
+            and values == sorted(set(values))
+            for values in markers.values()
+        )
+    ):
+        raise RuntimeError("malformed resource collection manifest")
+    for path in files:
+        if _safe_selector(path) != path or "::" in path:
+            raise RuntimeError(f"invalid resource collection file: {path!r}")
+    if files != list(dict.fromkeys(node.split("::", 1)[0] for node in nodes)):
+        raise RuntimeError("resource collection files do not match ordered nodes")
+    return nodes
+
+
+def _resource_command_for_nodes(command: list[str], nodes: list[str]) -> list[str]:
+    """Keep the original pytest options and select only discovered ordered nodes."""
+    marker_index = command.index("-m", 3)
+    return [*command[:4], *nodes, *command[marker_index:]]
+
+
+def _run_resource_lane(lane: str, command: list[str], repository_root: Path) -> int:
+    """Discover selected nodes, then run the same ordered collection freshly."""
+    with tempfile.TemporaryDirectory(prefix="embodichain-test-selection-") as directory:
+        manifest = Path(directory) / "selection.json"
+        discovery = [
+            *command,
+            "--collect-only",
+            "-q",
+            f"--ci-collect-manifest={manifest}",
+        ]
+        print(
+            f"[CI] {lane}: discover selected nodes: {shlex.join(discovery)}", flush=True
+        )
+        result = subprocess.run(discovery, cwd=repository_root, check=False, env=None)
+        if result.returncode not in (0, 5):
+            return result.returncode
+        nodes = _resource_collection_nodes(manifest)
+        if not nodes:
+            return 5
+        if result.returncode == 5:
+            raise RuntimeError(
+                "nonempty resource collection returned pytest exit code 5"
+            )
+        narrowed = _resource_command_for_nodes(command, nodes)
+        narrowed.append(f"--ci-expected-collection={manifest}")
+        print(f"[CI] {lane}: selected nodes: {shlex.join(narrowed)}", flush=True)
+        return subprocess.run(
+            narrowed, cwd=repository_root, check=False, env=None
+        ).returncode
+
+
 def run_plan(
     plan: dict[str, Any],
     *,
@@ -228,6 +309,13 @@ def run_plan(
     Pytest exit code 5 means that a marker-filtered lane had no matching tests;
     an empty optional lane is reported and treated as successful. Collection
     errors and test failures retain their non-zero exit code.
+
+    Parallel CPU lanes default native thread pools to one thread per worker,
+    preserving caller overrides and the parent process environment.
+
+    Serial GPU and simulation lanes discover their selected nodes in a fresh
+    collection-only process before execution. Discovery and execution are both
+    included in the reported lane time; ordered nodes and markers must match.
     """
     repository_root = Path(root).resolve()
     commands = build_commands(
@@ -244,21 +332,31 @@ def run_plan(
         print(f"\n[CI] {lane}: {shlex.join(command)}", flush=True)
         if dry_run:
             continue
+        environment = None
+        if lane in {"fast", "slow-fast"}:
+            environment = os.environ.copy()
+            for variable in _CPU_THREAD_ENVIRONMENTS:
+                environment.setdefault(variable, "1")
         started = time.monotonic()
-        result = subprocess.run(command, cwd=repository_root, check=False)
+        if lane.removeprefix(_SLOW_LANE_PREFIX) in {"gpu", "sim"}:
+            returncode = _run_resource_lane(lane, command, repository_root)
+        else:
+            returncode = subprocess.run(
+                command, cwd=repository_root, check=False, env=environment
+            ).returncode
         elapsed = time.monotonic() - started
         print(
-            f"[CI] {lane}: completed in {elapsed:.1f}s (exit {result.returncode}).",
+            f"[CI] {lane}: completed in {elapsed:.1f}s (exit {returncode}).",
             flush=True,
         )
-        if result.returncode == 5:
+        if returncode == 5:
             if lane in {"docs", "slow-docs"}:
                 print("[CI] docs: no documentation tests were collected.")
-                return result.returncode
+                return returncode
             print(f"[CI] {lane}: no tests matched its marker expression; continuing.")
             continue
-        if result.returncode:
-            return result.returncode
+        if returncode:
+            return returncode
     return 0
 
 

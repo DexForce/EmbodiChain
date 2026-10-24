@@ -19,7 +19,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Union
 
 from embodichain.utils.string import string_to_callable, resolve_matching_names
-from embodichain.utils.utility import class_to_dict
+from embodichain.utils.configclass import class_to_dict
 from embodichain.utils import logger
 
 from .cfg import FunctorCfg, SceneEntityCfg
@@ -68,10 +68,18 @@ class Functor(ABC):
         # store the inputs
         self.cfg = cfg
         self._env = env
+        self._manager_name: str | None = None
 
     """
     Properties.
     """
+
+    @property
+    def name(self) -> str:
+        """Return the manager-bound, read-only configuration name."""
+        if self._manager_name is None:
+            raise RuntimeError("Functor has not been bound to a manager name.")
+        return self._manager_name
 
     @property
     def num_envs(self) -> int:
@@ -467,3 +475,10 @@ class ManagerBase(ABC):
                 functor_cfg.func = functor_cfg.func(cfg=functor_cfg, env=self._env)
             except Exception as e:
                 logger.log_error(f"Failed to initialize functor '{functor_name}': {e}")
+        if isinstance(functor_cfg.func, Functor):
+            previous = getattr(functor_cfg.func, "_manager_name", None)
+            if previous is not None and previous != functor_name:
+                raise ValueError(
+                    "A class functor cannot be rebound to a different configuration name."
+                )
+            functor_cfg.func._manager_name = functor_name

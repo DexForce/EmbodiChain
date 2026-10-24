@@ -10,6 +10,7 @@ Lightweight RL environments have a separate owner in
 | Request | Owning file / resolution path |
 |---|---|
 | Command dispatch | `embodichain/cli/main.py`; `embodichain/__main__.py` is the module entry wrapper |
+| Example discovery / launch | `embodichain/cli/run_example.py` → script path in the ordinary `examples/` tree → `_example_runner.py`; see [running and adding examples](../../../examples/README.md) |
 | Task discovery / gallery / `show-task` | `embodichain/cli/_task_catalog.py` → shared logical-task/deployment records; `list_task.py` and `show_task.py` render them |
 | Launch / CLI overrides | `embodichain/lab/scripts/run_task.py` → `build_env_cfg_from_args()` → `config_to_cfg()` |
 | Generic component expansion | `embodichain/lab/gym/utils/_component_composition.py` |
@@ -135,11 +136,13 @@ Optional physical objectives publish separate measured results; they do not
 change termination, program acceptance or persistence. Read [execution](execution.md)
 for snapshot/reset ordering and expert-versus-replay qualification.
 
-A trusted B=1 host can pass a zero-argument `scene_expansion_prepare` reset
+A trusted B=1 host can pass a zero-argument `episode_prepare` reset
 callback. `BaseEnv.reset` consumes it after ordinary reset events and before
 physical-objective initialization and final observations; it is not forwarded
-to functors. `EmbodiedEnv.reset` then clears the previous bridge and seeds
-recording from the final state. The concrete preparation/restore host and
+to functors. `BaseEnv` owns `EpisodeContext`; successful initialization seeds recording from
+the final observation. `EmbodiedEnv` consumes old records before physical reset.
+Failed checks remain attached to buffers until the selected rows are consumed
+and a new episode begins. Info and recorder metadata carry owned context snapshots. The concrete preparation/restore host and
 snapshot limitations belong to [scene expansion](../scene-expansion/scene-expansion.md).
 
 ## Change sites and focused validation

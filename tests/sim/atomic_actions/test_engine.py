@@ -928,3 +928,115 @@ def test_rebuild_plan_validates_source_plan_identity() -> None:
             replace(plan, invocation_id="different"),
             plan.joint_trajectory,
         )
+
+
+def test_compile_transforms_plans_before_projecting_following_invocations() -> None:
+    engine = _engine(batch_size=1)
+    action = ThreeFrameStubAction()
+    engine.register(action)
+    observed_starts = []
+
+    def transform(request, context, plan):
+        observed_starts.append(context.robot.qpos.clone())
+        positions = plan.joint_trajectory.positions.clone()
+        if len(observed_starts) == 1:
+            positions[:, -1] = 2.0
+        return engine.rebuild_plan_from_trajectory(
+            request,
+            context,
+            plan,
+            TimedTrajectory.from_positions(
+                positions, dt=plan.joint_trajectory.dt, env_ids=context.env_ids
+            ),
+        )
+
+    compiled = engine.compile(
+        (
+            _invocation(engine, torch.ones(1, 3)),
+            _invocation(engine, torch.full((1, 3), 3.0)),
+        ),
+        plan_transform=transform,
+    )
+    assert compiled.plan_success.all()
+    assert torch.equal(observed_starts[1], torch.full((1, 3), 2.0))
+    assert torch.equal(
+        compiled.action_plans[0].joint_trajectory.positions[:, -1], observed_starts[1]
+    )
+    assert torch.equal(compiled.projected_context.robot.qpos, torch.full((1, 3), 3.0))
+
+
+def test_adapter_can_export_an_explicit_successful_batch_row() -> None:
+    engine = _engine(batch_size=2)
+    engine.register(ThreeFrameStubAction())
+    plan = engine.plan(
+        _invocation(engine, torch.tensor([[1.0, 1.0, 1.0], [0.5, 0.5, 0.5]]))
+    )
+    adapter = ActionPlanTemplateAdapter(
+        joint_names=("j0", "j1", "j2"),
+        phase_permissions={"stub": ("joint_residual",)},
+        phase_kinds={"stub": "free"},
+    )
+    source = SourceContext(
+        "source",
+        "revision",
+        "logical_variant_7",
+        SceneCase("case", "initial", "signature", "task", "robot"),
+        ACTION_DT,
+    )
+    template = adapter.export_template(plan, context=source, row_index=1)
+    assert torch.equal(template.positions, plan.joint_trajectory.positions[1])
+    assert template.template_id == "logical_variant_7"
+
+
+def test_adapter_restores_protected_phases_gripper_and_near_equal_zero_time_joins() -> (
+    None
+):
+    from dataclasses import replace
+    from embodichain.lab.sim.atomic_actions.plans import TrajectorySegment
+
+    class NineFrameAction(ThreeFrameStubAction):
+        sample_count = 9
+        binding_contract = ThreeFrameStubAction.binding_contract
+
+    engine = _engine(batch_size=1)
+    engine.register(NineFrameAction())
+    plan = engine.plan(_invocation(engine, torch.ones(1, 3)))
+    positions = plan.joint_trajectory.positions.clone()
+    positions[:, 4] = positions[:, 3] + 5e-6
+    dt = plan.joint_trajectory.dt.clone()
+    dt[:, 4] = 0
+    source = replace(
+        plan,
+        joint_trajectory=replace(plan.joint_trajectory, positions=positions, dt=dt),
+        segments=(
+            TrajectorySegment("approach", 0, 3),
+            TrajectorySegment("release", 3, 6),
+            TrajectorySegment("retract", 6, 9),
+        ),
+    )
+    adapter = ActionPlanTemplateAdapter(
+        joint_names=("j0", "j1", "j2"),
+        controlled_joint_indices=(0, 1),
+        phase_permissions={
+            "approach": ("joint_residual",),
+            "release": (),
+            "retract": ("joint_residual",),
+        },
+        phase_kinds={"approach": "free", "release": "contact", "retract": "free"},
+    )
+    identity = SourceContext(
+        "source",
+        "revision",
+        "variant_1",
+        SceneCase("case", "initial", "signature", "task", "robot"),
+        ACTION_DT,
+    )
+    template = adapter.export_template(source, context=identity)
+    assert len(template.dt) == 8
+    restored = adapter.restore_positions(source, template.positions + 0.1)
+    assert torch.equal(restored[:, 2], positions[0, :, 2])
+    assert torch.equal(restored[3:6], positions[0, 3:6])
+    for endpoint in (0, 2, 3, 5, 6, 8):
+        assert torch.equal(restored[endpoint], positions[0, endpoint])
+    assert not torch.equal(restored[1, :2], positions[0, 1, :2])
+    assert not torch.equal(restored[7, :2], positions[0, 7, :2])

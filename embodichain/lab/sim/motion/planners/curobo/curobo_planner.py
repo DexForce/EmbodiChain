@@ -357,10 +357,17 @@ class CuroboPlannerCfg(BasePlannerCfg):
 
     planner_type: str = "curobo"
 
-    max_acceleration: float | None = field(default=None, kw_only=True)
+    max_velocity: float | list[float] | None = field(default=None, kw_only=True)
+    """Optional speed request intersected with effective Robot velocity caps.
+
+    Lists follow ``robot.active_joint_ids`` order; ``None`` uses Robot caps.
+    """
+
+    max_acceleration: float | list[float] | None = field(default=None, kw_only=True)
     """Planning acceleration budget [rad/s^2 or m/s^2].
 
-    ``None`` preserves cuRobo's default budget of 15.0.
+    Lists follow ``robot.active_joint_ids`` order. ``None`` preserves cuRobo's
+    default budget of 15.0.
     """
 
     log_level: str = "error"
@@ -497,6 +504,12 @@ class CuroboPlanOptions(PlanOptions):
 
     max_attempts: int | None = None
     """Per-plan override of ``CuroboPlannerCfg.max_attempts``."""
+
+    max_velocity: float | list[float] | None = None
+    """Per-plan joint velocity budget, intersected by the motion facade."""
+
+    max_acceleration: float | list[float] | None = None
+    """Per-plan joint acceleration budget, intersected by the motion facade."""
 
 
 # =============================================================================
@@ -1031,6 +1044,8 @@ class CuroboPlanner(BasePlanner):
     def __init__(self, cfg: CuroboPlannerCfg) -> None:
         super().__init__(cfg)
         self.cfg: CuroboPlannerCfg = cfg
+        self._configured_max_velocity = cfg.max_velocity
+        self._configured_max_acceleration = cfg.max_acceleration
         self.device = torch.device(self.robot.device)
         self._curobo_device = _resolve_curobo_device(
             cfg.cuda_device,
@@ -1209,6 +1224,21 @@ class CuroboPlanner(BasePlanner):
                 success=torch.zeros(0, dtype=torch.bool, device=self.device),
                 positions=None,
             )
+        # MotionGenOptions carries backend-neutral per-invocation limits. Keep
+        # the planner-owned baseline so a later call without overrides does not
+        # inherit a previous invocation's stricter budget. The backend cache key
+        # includes these values and therefore rebuilds the CUDA planner/YAML when
+        # the effective limits change.
+        self.cfg.max_velocity = (
+            self._configured_max_velocity
+            if options.max_velocity is None
+            else options.max_velocity
+        )
+        self.cfg.max_acceleration = (
+            self._configured_max_acceleration
+            if options.max_acceleration is None
+            else options.max_acceleration
+        )
         control_part = self._resolve_control_part(options)
         start = self._resolve_start_qpos(options.start_qpos, control_part)
         move_types = {target.move_type for target in target_states}
@@ -1838,6 +1868,7 @@ class CuroboPlanner(BasePlanner):
             surface_radius=auto.surface_radius,
             iterations=auto.iterations,
             collision_sphere_buffer=auto.collision_sphere_buffer,
+            max_velocity=self.cfg.max_velocity,
             max_acceleration=self.cfg.max_acceleration,
             device=str(self._curobo_device),
         )
@@ -1851,7 +1882,7 @@ class CuroboPlanner(BasePlanner):
     ) -> str:
         """Hash the URDF path/content and fit parameters into a stable cache key."""
         hasher = hashlib.md5()
-        hasher.update(b"absolute-motion-limits-v1")
+        hasher.update(b"absolute-motion-limits-v2")
         hasher.update(urdf_path.encode("utf-8"))
         try:
             with open(urdf_path, "rb") as urdf_file:
@@ -1868,7 +1899,9 @@ class CuroboPlanner(BasePlanner):
         hasher.update(
             repr(
                 _curobo_joint_limits(
-                    self.robot, max_acceleration=self.cfg.max_acceleration
+                    self.robot,
+                    max_velocity=self.cfg.max_velocity,
+                    max_acceleration=self.cfg.max_acceleration,
                 )
             ).encode("utf-8")
         )
@@ -2431,6 +2464,17 @@ class CuroboPlanner(BasePlanner):
             else:
                 positions[b, :1] = start[b]
                 positions[b, 1:] = start[b]
+
+        # cuRobo interpolation can round its first sample by a few float32
+        # ulps. Preserve the requested boundary exactly at that precision:
+        # Atomic action concatenation gives a repeated start zero arrival time,
+        # so even one ulp otherwise appears to be an instantaneous joint jump.
+        # Keep larger mismatches visible to callers and external validation.
+        roundoff = 4 * torch.finfo(positions.dtype).eps * start.abs().clamp_min(1)
+        same_start = ((positions[:, 0] - start).abs() <= roundoff).all(
+            dim=-1, keepdim=True
+        )
+        positions[:, 0] = torch.where(same_start, start, positions[:, 0])
 
         def assemble_derivative(
             parts: list[list[torch.Tensor | None]] | None,

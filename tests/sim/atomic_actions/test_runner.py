@@ -18,7 +18,9 @@
 
 from __future__ import annotations
 
+import math
 from collections import deque
+from dataclasses import replace
 from typing import ClassVar
 from unittest.mock import Mock
 
@@ -53,6 +55,10 @@ from embodichain.lab.sim.atomic_actions import (
     PhaseEffectGateRequest,
     PhaseEffectGateRequirement,
     PhaseEffectGateResult,
+    PhysicalEvidenceBatch,
+    PhysicalEvidenceFrame,
+    PhysicalEvidenceProvider,
+    PhysicalEvidenceRequest,
     PlanningContextTrackingFeedbackProvider,
     PlanningContext,
     RecoveryPolicy,
@@ -151,6 +157,21 @@ class FakeClock:
         self.time += duration
 
 
+class QuantizedFakeClock(FakeClock):
+    """Clock that rejects sleeps outside its representable time grid."""
+
+    def __init__(self, sleep_quantum: float) -> None:
+        super().__init__()
+        self.sleep_quantum = sleep_quantum
+
+    def sleep(self, duration: float) -> None:
+        """Advance only by an integer number of clock quanta."""
+        ratio = duration / self.sleep_quantum
+        if not math.isclose(ratio, round(ratio), rel_tol=1.0e-6, abs_tol=1.0e-9):
+            raise ValueError("duration must align to the clock quantum")
+        super().sleep(duration)
+
+
 class FakeObservationProvider:
     """In-memory robot observation provider."""
 
@@ -172,6 +193,71 @@ class FakeObservationProvider:
             task=task_state,
             scene=SceneSnapshot(timestamp=self.clock.now(), version=0),
             env_ids=torch.arange(self.qpos.shape[0], dtype=torch.long),
+        )
+
+
+class FakePhysicalEvidenceProvider:
+    """Evidence provider aligned with the in-memory observation provider."""
+
+    def __init__(self) -> None:
+        self.requests: list[PhysicalEvidenceRequest] = []
+
+    def collect(
+        self,
+        context: PlanningContext,
+        request: PhysicalEvidenceRequest,
+    ) -> PhysicalEvidenceFrame:
+        self.requests.append(request.snapshot())
+        values = context.robot.qpos[:, :1].clone()
+        return PhysicalEvidenceFrame(
+            timestamp=request.timestamp,
+            observation_revision=request.observation_revision,
+            env_ids=request.env_ids,
+            batches={
+                "arm_qpos": PhysicalEvidenceBatch(
+                    evidence_id="arm_qpos",
+                    values=values,
+                    valid=torch.ones(context.batch_size, dtype=torch.bool),
+                    acquisition_errors=(None,) * context.batch_size,
+                    timestamp=request.timestamp,
+                    env_ids=request.env_ids,
+                    observation_revision=request.observation_revision,
+                )
+            },
+        )
+
+
+class MismatchedPhysicalEvidenceProvider(FakePhysicalEvidenceProvider):
+    """Evidence provider that returns one well-formed but unrelated frame."""
+
+    def __init__(self, mismatch: str) -> None:
+        super().__init__()
+        self.mismatch = mismatch
+
+    def collect(
+        self,
+        context: PlanningContext,
+        request: PhysicalEvidenceRequest,
+    ) -> PhysicalEvidenceFrame:
+        del context
+        self.requests.append(request.snapshot())
+        timestamp = (
+            request.timestamp + 1.0
+            if self.mismatch == "timestamp"
+            else request.timestamp
+        )
+        revision = (
+            request.observation_revision + 1
+            if self.mismatch == "observation_revision"
+            else request.observation_revision
+        )
+        env_ids = (
+            request.env_ids.flip(0) if self.mismatch == "env_ids" else request.env_ids
+        )
+        return PhysicalEvidenceFrame(
+            timestamp=timestamp,
+            observation_revision=revision,
+            env_ids=env_ids,
         )
 
 
@@ -327,10 +413,12 @@ class TimedAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]):
         *,
         with_effect: bool = False,
         with_phase_gate: bool = False,
+        timing_fault: str | None = None,
     ) -> None:
         super().__init__()
         self.with_effect = with_effect
         self.with_phase_gate = with_phase_gate
+        self.timing_fault = timing_fault
         self.plan_count = 0
 
     def _plan(
@@ -350,8 +438,12 @@ class TimedAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]):
             [[0.0, FIRST_INTERVAL, SECOND_INTERVAL]],
             dtype=torch.float32,
         ).repeat(context.batch_size, 1)
-        if context.batch_size > 1:
-            dt[1, 1:] *= 2.0
+        if self.timing_fault == "first_mismatch":
+            dt[1, 1] *= 2.0
+        elif self.timing_fault == "later_mismatch":
+            dt[1, 2] *= 2.0
+        elif self.timing_fault == "later_short":
+            dt[:, 2] = MINIMUM_CYCLE_TIME / 2.0
         trajectory = TimedTrajectory.from_positions(
             positions,
             env_ids=context.env_ids,
@@ -402,6 +494,10 @@ def _make_runner(
     tracking_runtime: TrackingRuntime | None = None,
     hold_on_completion: bool = True,
     hold_during_effect_verification: bool = True,
+    physical_evidence_provider: PhysicalEvidenceProvider | None = None,
+    clock: FakeClock | None = None,
+    minimum_cycle_time: float = MINIMUM_CYCLE_TIME,
+    timing_fault: str | None = None,
 ) -> tuple[
     ExecutionRunner,
     FakeClock,
@@ -409,8 +505,8 @@ def _make_runner(
     FakeCommandSink,
     TimedAction,
 ]:
-    clock = FakeClock()
-    provider = FakeObservationProvider(clock, batch_size)
+    active_clock = FakeClock() if clock is None else clock
+    provider = FakeObservationProvider(active_clock, batch_size)
     sink = FakeCommandSink(provider)
     robot = Mock()
     robot.device = torch.device("cpu")
@@ -427,6 +523,7 @@ def _make_runner(
     action = TimedAction(
         with_effect=with_effect,
         with_phase_gate=with_phase_gate,
+        timing_fault=timing_fault,
     )
     engine = AtomicActionEngine(generator, tracking_runtime=tracking_runtime)
     engine.register(action)
@@ -460,14 +557,15 @@ def _make_runner(
         session,
         provider,
         sink,
-        clock=clock,
+        clock=active_clock,
         cfg=ExecutionRunnerCfg(
-            minimum_cycle_time=MINIMUM_CYCLE_TIME,
+            minimum_cycle_time=minimum_cycle_time,
             hold_on_completion=hold_on_completion,
             hold_during_effect_verification=hold_during_effect_verification,
         ),
+        physical_evidence_provider=physical_evidence_provider,
     )
-    return runner, clock, provider, sink, action
+    return runner, active_clock, provider, sink, action
 
 
 def _successful_effect_result(
@@ -728,15 +826,77 @@ def test_session_active_commands_return_an_owned_endpoint_snapshot() -> None:
     assert torch.all(current_payload.positions >= 0.0)
 
 
-def test_runner_uses_the_longest_active_batch_interval_as_a_barrier() -> None:
-    runner, clock, _, _, _ = _make_runner(batch_size=2)
+def test_session_effect_inspection_owns_data_without_copying_commands(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, _, _, _, _ = _make_runner(with_effect=True)
+    session = runner.session
+    assert session._plan is not None
+    session._plan = replace(
+        session._plan, effect_candidates=session._plan.expected_effects
+    )
+    copy_plan = Mock(side_effect=AssertionError("Full trajectory copied"))
+    monkeypatch.setattr(type(session._plan), "snapshot", copy_plan)
+    effects = session.active_expected_effects
+    candidates = session.active_effect_candidates
+    effects.held_object_updates["arm"].object_to_eef.fill_(-1.0)
+    candidates.held_object_updates["arm"].grasp_xpos.fill_(-1.0)
+    assert torch.all(
+        session.active_expected_effects.held_object_updates["arm"].object_to_eef >= 0
+    )
+    assert torch.all(
+        session.active_effect_candidates.held_object_updates["arm"].grasp_xpos >= 0
+    )
+    copy_plan.assert_not_called()
+    session._plan = replace(session._plan, expected_effects=StateDelta())
+    assert not session.active_expected_effects.held_object_updates
+    assert effects.held_object_updates["arm"] is not None
+
+
+def test_runner_rejects_mismatched_active_batch_intervals_before_dispatch() -> None:
+    runner, _, _, sink, _ = _make_runner(
+        batch_size=2,
+        timing_fault="first_mismatch",
+    )
+
+    failed = runner.step()
+
+    assert failed.status is RunnerStatus.FAILED
+    assert sink.sent == []
+    assert [item.operation for item in failed.dispatches] == [
+        CommandOperation.CANCEL,
+        CommandOperation.HOLD,
+    ]
+
+
+@pytest.mark.parametrize("timing_fault", ["later_mismatch", "later_short"])
+def test_runner_safely_stops_after_later_interval_validation_failure(
+    timing_fault: str,
+) -> None:
+    runner, clock, _, sink, _ = _make_runner(
+        batch_size=2,
+        timing_fault=timing_fault,
+    )
 
     first = runner.step()
-    clock.advance(2.0 * FIRST_INTERVAL)
-    second = runner.step()
+    clock.advance(FIRST_INTERVAL)
+    failed = runner.step()
+    repeated = runner.step()
 
-    assert first.wait_duration == pytest.approx(2.0 * FIRST_INTERVAL)
-    assert second.wait_duration == pytest.approx(2.0 * SECOND_INTERVAL)
+    assert first.status is RunnerStatus.RUNNING
+    assert failed.status is RunnerStatus.FAILED
+    assert failed.command_count == 1
+    assert len(sink.sent) == 1
+    assert [item.operation for item in failed.dispatches] == [
+        CommandOperation.CANCEL,
+        CommandOperation.HOLD,
+    ]
+    assert sink.cancel_count == 1
+    assert [target.target_id for target in sink.cancelled[0]] == ["arm"]
+    assert [target.target_id for target in sink.held[0][0]] == ["arm"]
+    assert repeated.status is RunnerStatus.FAILED
+    assert repeated.dispatches == ()
+    assert len(sink.sent) == 1
 
 
 def test_runner_completes_and_holds_after_last_command_settles() -> None:
@@ -1078,6 +1238,34 @@ def test_blocking_runner_verifies_effect_before_committing_task_state() -> None:
     assert completed.tick.task_state.get_held_object("arm") is not None
 
 
+def test_blocking_runner_aligns_passive_polling_to_clock_quantum() -> None:
+    clock = QuantizedFakeClock(0.01)
+    runner, _, _, _, _ = _make_runner(
+        with_effect=True,
+        clock=clock,
+        minimum_cycle_time=0.001,
+    )
+
+    completed = runner.run_until_blocked(
+        effect_verifier=_successful_effect_result,
+    )
+
+    assert completed.status is RunnerStatus.COMPLETED
+    assert any(
+        math.isclose(duration, 0.01, rel_tol=1.0e-6, abs_tol=1.0e-9)
+        for duration in clock.sleeps
+    )
+    assert all(
+        math.isclose(
+            duration / clock.sleep_quantum,
+            round(duration / clock.sleep_quantum),
+            rel_tol=1.0e-6,
+            abs_tol=1.0e-9,
+        )
+        for duration in clock.sleeps
+    )
+
+
 def test_blocking_runner_resumes_a_stored_effect_verification_boundary() -> None:
     runner, _, _, _, _ = _make_runner(with_effect=True)
 
@@ -1096,6 +1284,129 @@ def test_blocking_runner_resumes_a_stored_effect_verification_boundary() -> None
     assert completed.status is RunnerStatus.COMPLETED
     assert completed.tick is not None
     assert completed.tick.task_state.get_held_object("arm") is not None
+
+
+@pytest.mark.parametrize("resume_boundary", [False, True])
+def test_runner_collects_evidence_for_an_effect_aware_verifier(
+    resume_boundary: bool,
+) -> None:
+    evidence_provider = FakePhysicalEvidenceProvider()
+    runner, _, _, _, _ = _make_runner(
+        with_effect=True,
+        physical_evidence_provider=evidence_provider,
+    )
+
+    if resume_boundary:
+        blocked = runner.run_until_blocked()
+        assert blocked.status is RunnerStatus.RUNNING
+        assert blocked.evidence is not None
+        assert blocked.evidence.get("arm_qpos").values.shape == (1, 1)
+        assert evidence_provider.requests
+
+    seen: list[PhysicalEvidenceFrame] = []
+
+    def verify(
+        context: PlanningContext,
+        frame: PhysicalEvidenceFrame,
+        request: EffectVerificationRequest,
+    ) -> EffectVerificationResult:
+        assert frame.batch_size == context.batch_size
+        assert (
+            frame.observation_revision
+            == evidence_provider.requests[-1].observation_revision
+        )
+        seen.append(frame.snapshot())
+        return _successful_effect_result(context, request)
+
+    completed = runner.run_until_blocked(physical_effect_verifier=verify)
+
+    assert completed.status is RunnerStatus.COMPLETED
+    assert seen
+    assert seen[0].get("arm_qpos").evidence_id == "arm_qpos"
+
+
+@pytest.mark.parametrize(
+    ("mismatch", "message"),
+    [
+        ("timestamp", "timestamp"),
+        ("observation_revision", "observation_revision"),
+        ("env_ids", "env_ids"),
+    ],
+)
+def test_runner_rejects_evidence_from_a_different_observation(
+    mismatch: str,
+    message: str,
+) -> None:
+    evidence_provider = MismatchedPhysicalEvidenceProvider(mismatch)
+    runner, _, _, sink, _ = _make_runner(
+        with_effect=True,
+        batch_size=2,
+        physical_evidence_provider=evidence_provider,
+    )
+    verifier = Mock()
+
+    failed = runner.run_until_blocked(physical_effect_verifier=verifier)
+
+    assert failed.status is RunnerStatus.FAILED
+    assert failed.message is not None and message in failed.message
+    assert verifier.call_count == 0
+    assert [dispatch.operation for dispatch in failed.dispatches] == [
+        CommandOperation.CANCEL,
+        CommandOperation.HOLD,
+    ]
+    assert sink.cancel_count == 1
+
+
+def test_blocking_runner_polls_an_evidence_aware_phase_gate_until_ready() -> None:
+    runner, _, _, _, _ = _make_runner(
+        with_phase_gate=True,
+        physical_evidence_provider=FakePhysicalEvidenceProvider(),
+    )
+    seen: list[PhysicalEvidenceFrame] = []
+
+    def verify(
+        context: PlanningContext,
+        frame: PhysicalEvidenceFrame,
+        request: PhaseEffectGateRequest,
+    ) -> PhaseEffectGateResult:
+        assert frame.timestamp == context.robot.timestamp
+        seen.append(frame.snapshot())
+        return _phase_gate_result(
+            request, success=len(seen) == 2, batch_size=context.batch_size
+        )
+
+    completed = runner.run_until_blocked(physical_phase_effect_gate_verifier=verify)
+
+    assert completed.status is RunnerStatus.COMPLETED
+    assert len(seen) == 2
+    assert seen[0].observation_revision < seen[1].observation_revision
+
+
+def test_blocking_runner_checks_physical_hold_evidence_before_each_command() -> None:
+    runner, _, _, sink, _ = _make_runner(
+        physical_evidence_provider=FakePhysicalEvidenceProvider(),
+    )
+    seen: list[tuple[int, PhysicalEvidenceFrame]] = []
+
+    def verify(
+        context: PlanningContext,
+        frame: PhysicalEvidenceFrame,
+        request: HeldObjectGuardRequest,
+    ) -> None:
+        assert frame.timestamp == context.robot.timestamp
+        seen.append((len(sink.sent), frame.snapshot()))
+
+    completed = runner.run_until_blocked(physical_held_object_guard_verifier=verify)
+
+    assert completed.status is RunnerStatus.COMPLETED
+    assert len(sink.sent) == 3
+    # The final feedback cycle may check retention again without sending.
+    assert {count for count, _ in seen if count < len(sink.sent)} == set(
+        range(len(sink.sent))
+    )
+    assert [frame.observation_revision for _, frame in seen] == sorted(
+        {frame.observation_revision for _, frame in seen}
+    )
 
 
 def test_runner_holds_while_effect_verification_is_pending_by_default() -> None:
@@ -1269,6 +1580,43 @@ def test_effect_result_and_effect_verifier_are_mutually_exclusive() -> None:
 
     assert action.plan_count == 1
     assert sink.sent == []
+
+
+def test_explicit_effect_result_cannot_be_combined_with_physical_verifier() -> None:
+    runner, _, _, sink, action = _make_runner(with_effect=True)
+    result = _effect_result(
+        verification_id=0,
+        success_mask=torch.tensor([True]),
+        failure_mask=torch.tensor([False]),
+    )
+
+    with pytest.raises(ValueError, match="effect_result and physical_effect_verifier"):
+        runner.step(effect_result=result, physical_effect_verifier=Mock())
+
+    assert action.plan_count == 1
+    assert sink.sent == []
+
+
+def test_explicit_phase_gate_result_cannot_be_combined_with_physical_verifier() -> None:
+    runner, _, _, sink, _ = _make_runner(with_phase_gate=True)
+    blocked = runner.run_until_blocked()
+    assert (
+        blocked.tick is not None and blocked.tick.pending_phase_effect_gate is not None
+    )
+    request = blocked.tick.pending_phase_effect_gate
+    result = _phase_gate_result(request, success=True, batch_size=BATCH_SIZE)
+    sent_before = list(sink.sent)
+
+    with pytest.raises(
+        ValueError,
+        match="phase_effect_gate_result and physical_phase_effect_gate_verifier",
+    ):
+        runner.step(
+            phase_effect_gate_result=result,
+            physical_phase_effect_gate_verifier=Mock(),
+        )
+
+    assert sink.sent == sent_before
 
 
 @pytest.mark.parametrize(

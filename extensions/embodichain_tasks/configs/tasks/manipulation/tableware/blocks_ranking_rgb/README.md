@@ -42,3 +42,9 @@ and dynamic action replay for seeds 0, 1 and 2. Final checks used measured relat
 XY placement and linear/angular stability, independently of program completion.
 These observations cover those seeds and execution settings, not every randomized
 scene or renderer.
+
+The dual-UR5 and Tianji Marvin deployments reuse this same program,
+reset distribution and measured acceptance gates. Their task-local integrations
+select the corresponding calibrated grasp and dual-arm policy. See the
+[deployment matrix](../../../../../README.md#dual-arm-task-deployments) for
+configuration selection and sensor differences.

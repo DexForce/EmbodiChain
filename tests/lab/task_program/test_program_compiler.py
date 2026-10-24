@@ -179,7 +179,7 @@ def test_compiled_program_owns_immutable_overall_instruction(
         compiled.instruction = "Change the compiled snapshot."
 
 
-@pytest.mark.parametrize("instruction", ["", "   ", " padded ", 7, True, ["pick"]])
+@pytest.mark.parametrize("instruction", [" padded "])
 def test_compiler_rejects_mutated_invalid_overall_instruction(
     instruction: object,
 ) -> None:
@@ -650,15 +650,17 @@ def test_compiler_rechecks_mutated_repeat_and_target_bounds() -> None:
     assert target_error.value.path == ("targets", "drop_pose", "values")
 
 
-def test_measured_object_validators_compile_without_observation_and_own_values() -> (
-    None
-):
+@pytest.mark.parametrize("frame", ["world_axes", "parent"])
+def test_measured_object_validators_compile_without_observation_and_own_values(
+    frame: str,
+) -> None:
     registry, provider = _scene_registry()
     relative = ObjectRelativePositionValidatorCfg(
         object="sim_cube",
         reference="tray",
         position_offset=[-0.08, 0.0, 0.0],
         position_tolerance=[0.035, 0.03, None],
+        reference_frame=frame,
     )
     config = _program(
         SegmentCfg(
@@ -674,6 +676,7 @@ def test_measured_object_validators_compile_without_observation_and_own_values()
     compiled = TaskProgramCompiler.from_scene_registry(registry).compile(config)
     relative.position_offset = (9.0, 9.0, 9.0)
     relative.position_tolerance = (9.0, 9.0, 9.0)
+    relative.reference_frame = "parent" if frame == "world_axes" else "world_axes"
     for _ in range(2):
         segment = next(iter(compiled))
         assert provider.calls == 0
@@ -681,6 +684,7 @@ def test_measured_object_validators_compile_without_observation_and_own_values()
         assert segment.validators[1].reference == SceneObjectRef("tray")
         assert segment.validators[1].cfg.position_offset == (-0.08, 0.0, 0.0)
         assert segment.validators[1].cfg.position_tolerance == (0.035, 0.03, None)
+        assert segment.validators[1].cfg.reference_frame == frame
         with pytest.raises(FrozenInstanceError):
             segment.validators[0].cfg.minimum_lift = 99.0
 

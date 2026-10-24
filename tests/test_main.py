@@ -16,12 +16,13 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
 import shutil
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -44,10 +45,13 @@ EXPECTED_COMMANDS = {
     "show-task",
     "preview-asset",
     "preview-robot",
+    "preview-material",
     "preview_lerobot_data",
     "run-task",
+    "run-example",
     "run-atomic-action",
     "scene-engine",
+    "scene-randomization",
     "simready",
     "train-rl",
     "preview-scene",
@@ -132,6 +136,39 @@ def test_run_task_dispatches_to_task_launcher(
 
     assert loaded_targets == ["embodichain.lab.scripts.run_task:cli"]
     assert received == ["--gym_config", "task.yaml", "--headless"]
+
+
+@pytest.mark.parametrize("layout_format", ["json", "packed"])
+def test_scene_randomization_dispatch_preserves_generation_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+    layout_format: str,
+) -> None:
+    """The scene layout command forwards its workspace, policy and storage options."""
+    loaded_targets: list[str] = []
+    received: list[str] = []
+    arguments = [
+        "--output_root",
+        "outputs/tabletop scene",
+        "--config",
+        "configs/layout policy.yaml",
+        "--layout-format",
+        layout_format,
+        "--rebuild",
+    ]
+
+    def fake_handler(argv: Sequence[str] | None = None) -> None:
+        received.extend(argv or [])
+
+    def load_handler(target: str) -> Callable[[Sequence[str] | None], None]:
+        loaded_targets.append(target)
+        return fake_handler
+
+    monkeypatch.setattr(cli, "_load_handler", load_handler)
+
+    cli.main(["scene-randomization", *arguments])
+
+    assert loaded_targets == ["embodichain.gen_sim.scene_engine.cli.randomization:main"]
+    assert received == arguments
 
 
 def test_run_env_is_rejected_without_loading_a_handler(
@@ -529,3 +566,147 @@ def test_nested_benchmark_help_uses_suite_parser(
     assert "--tasks" in output
     assert "--algorithms" in output
     assert "--rebuild-report-only" in output
+
+
+def test_benchmark_help_distinguishes_benchmark_domains(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Benchmark categories remain discoverable at the shared command root."""
+    cli.main(["benchmark", "--help"])
+
+    output = " ".join(capsys.readouterr().out.split())
+    assert "motion-generation" in output
+    assert "Motion Planning or Atomic Skills suites" in output
+    assert "atomic-action-profile" in output
+    assert not re.search(r"\batomic-action\b(?!-profile)", output)
+    assert "Profile individual atomic actions" in output
+    assert "robotics-kinematic-solver" in output
+    assert "rendering" in output
+
+
+@pytest.mark.parametrize(
+    ("suite_args", "expected_suite"),
+    [
+        ([], "motion_panda_free_space_smoke"),
+        (
+            ["--suite", "motion_ur5_free_space_coverage"],
+            "motion_ur5_free_space_coverage",
+        ),
+        (["--suite", "atomic_franka_pgi_smoke"], "atomic_franka_pgi_smoke"),
+    ],
+)
+def test_motion_generation_dispatch_selects_suite(
+    monkeypatch: pytest.MonkeyPatch,
+    suite_args: list[str],
+    expected_suite: str,
+) -> None:
+    """The domain command forwards either family and its canonical default."""
+    from embodichain_benchmarks.motion_generation import cli as run_benchmark
+
+    received: dict[str, object] = {}
+
+    def fake_run_all_benchmarks(**kwargs: object) -> None:
+        received.update(kwargs)
+
+    monkeypatch.setattr(run_benchmark, "run_all_benchmarks", fake_run_all_benchmarks)
+
+    cli.main(["benchmark", "motion-generation", *suite_args, "--algorithms", "toppra"])
+
+    assert received["suite_name"] == expected_suite
+    assert received["algorithms"] == ["toppra"]
+
+
+def test_atomic_action_profile_help_uses_complete_parser(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Profiling help exposes the selected action and workload profile."""
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["benchmark", "atomic-action-profile", "--help"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "usage: embodichain benchmark atomic-action-profile" in output
+    assert "--action" in output
+    assert "--profile" in output
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_atomic_action_profile_forwards_arguments_and_restores_argv(
+    monkeypatch: pytest.MonkeyPatch,
+    fail: bool,
+) -> None:
+    """Delegated parsing preserves arguments and restores argv on either exit."""
+    from scripts.benchmark.atomic_action import run_benchmark
+
+    received: dict[str, object] = {}
+    original_argv = ["caller", "--unrelated-option"]
+    monkeypatch.setattr(sys, "argv", original_argv)
+
+    def fake_run_action_subprocess(action_name: str, args: argparse.Namespace) -> Path:
+        received.update(
+            action=action_name,
+            profile=args.profile,
+            argv=list(sys.argv),
+        )
+        if fail:
+            raise RuntimeError("profiling failed")
+        return Path("profile.md")
+
+    monkeypatch.setattr(
+        run_benchmark, "_run_action_subprocess", fake_run_action_subprocess
+    )
+    forwarded = ["--action", "move_joints", "--profile", "full"]
+
+    if fail:
+        with pytest.raises(SystemExit, match="profiling failed"):
+            cli.main(["benchmark", "atomic-action-profile", *forwarded])
+    else:
+        cli.main(["benchmark", "atomic-action-profile", *forwarded])
+
+    assert received == {
+        "action": "move_joints",
+        "profile": "full",
+        "argv": ["embodichain benchmark atomic-action-profile", *forwarded],
+    }
+    assert sys.argv is original_argv
+
+
+def test_atomic_action_benchmark_name_is_rejected(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The former command is removed rather than retained as an alias."""
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["benchmark", "atomic-action", "--smoke"])
+
+    assert exc_info.value.code == 2
+    assert "invalid choice: 'atomic-action'" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "arguments", [["--help"], ["robotics-kinematic-solver", "--solvers", "pytorch"]]
+)
+def test_benchmark_dispatch_loads_extension_only_for_motion_generation(
+    monkeypatch, arguments
+):
+    """Other benchmark commands remain usable without importing the extension."""
+    import builtins
+    from embodichain.cli import benchmark
+
+    original_import = builtins.__import__
+
+    def reject_extension(name, *args, **kwargs):
+        if name == "embodichain_benchmarks" or name.startswith(
+            "embodichain_benchmarks."
+        ):
+            raise AssertionError("An unrelated benchmark command loaded the extension")
+        return original_import(name, *args, **kwargs)
+
+    received = []
+    monkeypatch.setattr(
+        benchmark,
+        "_run_robotics_kinematic_solver_cli",
+        lambda args: received.extend(args.solvers),
+    )
+    monkeypatch.setattr(builtins, "__import__", reject_extension)
+    benchmark.main(arguments)
+    assert received == ([] if arguments == ["--help"] else ["pytorch"])

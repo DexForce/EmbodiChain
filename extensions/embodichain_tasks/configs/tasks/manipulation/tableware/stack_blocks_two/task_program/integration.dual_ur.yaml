@@ -1,0 +1,79 @@
+# DH finger tips extend 10 mm beyond the TCP; leave 5 mm above the support.
+integration_id: stack_blocks_two_dual_ur_v1
+program_id: stack_two_blocks
+requires:
+  scene_contract: stack_blocks_two_scene_v1
+  embodiment_contract: dual_arm_parallel_gripper
+scene_binding:
+  contract_id: stack_blocks_two_scene_v1
+  registry_id: task_program_stack_blocks_two
+  rigid_objects:
+  - entity_id: block_1
+    simulation_uid: block_1
+    dynamics: dynamic
+    semantic_type: block
+    affordances:
+    - entity_id: block_1_top
+      kind: support_surface
+      native_name: top
+      object_target_frame: world_axes
+      object_target_pose:
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0
+      - 0.0
+      - 1.0
+      - 0.0
+      - 0
+      - 0.0
+      - 0.0
+      - 1.0
+      - 0.05
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+  - entity_id: block_2
+    simulation_uid: block_2
+    dynamics: dynamic
+    semantic_type: block
+    affordances:
+    - entity_id: block_2_grasp
+      kind: antipodal_grasp
+profile:
+  defaults:
+    pick_up:
+      primary: primary_manipulator
+    place:
+      primary: primary_manipulator
+  action_options:
+    pick:
+      kind: pick_up
+      pre_grasp_distance: 0.12
+      lift_height: 0.15
+      hand_interp_steps: 10
+      grasp_settle_steps: 45
+      fixed_object_to_eef:
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - -1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - -1.0
+      - -0.01
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+    place:
+      kind: place
+      lift_height: 0.1
+      hand_interp_steps: 10
+      preserve_current_object_orientation: true
+  effect_monitors: {}

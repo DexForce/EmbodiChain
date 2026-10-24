@@ -9,8 +9,10 @@
 | Strategy, IK preparation, result normalization | `embodichain/lab/sim/motion/motion_generator.py` → `MotionGenerator` |
 | Joint-path timing | `embodichain/lab/sim/motion/planners/toppra_planner.py`, `trapezoidal_planner.py` in that directory |
 | Cartesian geometry and scalar timing | `embodichain/lab/sim/motion/planners/se3.py`, `bezier.py`, `_scalar_time_law.py`, `_blend_constraints.py` in that directory |
+| Sampled Cartesian geometry → timing → robot IK | `embodichain/lab/sim/motion/planners/_cartesian_profiles.py` (internal adapter) |
 | Collision planning and scene conversion | `embodichain/lab/sim/motion/planners/curobo/` |
 | NMG policy rollout and export metadata | `embodichain/lab/sim/motion/planners/neural_planner.py` |
+| Installable evaluation suites and external planner adapters | `extensions/embodichain_benchmarks/motion_generation/api.py`, `planners/base.py` in that package |
 | Pure interpolation, resampling and retiming | `embodichain/compute/trajectory/` |
 | Standalone playback and B=1 expansion host lifecycle | `embodichain/lab/sim/motion/execution.py` |
 | Expansion Profile loading, source adapters, candidate coordination and coverage | `embodichain/lab/sim/motion/expansion/` |
@@ -48,8 +50,10 @@ Whenever positions exist, `dt` contains per-sample arrival intervals `(B, N)`;
 Timing does not alter simulator `physics_dt`.
 
 `MotionGenOptions.strategy` selects the timing owner. `motion_gen` invokes the
-backend; `ik_interp` requires explicit start/count/dt, rejects backend options
-and derivative limits, and supports joint/EEF moves. Required Cartesian IK
+backend; `ik_interp` requires explicit start/count/dt, rejects backend-specific
+options, consumes optional scalar velocity/acceleration limits, and supports
+joint/EEF moves. Limited interpolation uses minimum-jerk rest-to-rest segments
+and treats the requested count as a lower bound. Required Cartesian IK
 failures fail the row; waypoints are never discarded to salvage success.
 Unsupported routes raise instead of silently selecting another strategy.
 
@@ -66,6 +70,14 @@ warping. New consumers import it directly; `lab.sim.utility.action_utils` keeps
 solver-dependent pose/IK adaptation and compatibility re-exports. Trapezoidal/
 Double-S Warp profiles live in `compute/kinematics/_warp/trapezoidal.py`; compute
 must not import simulation objects.
+
+The internal Cartesian profile adapter accepts caller-owned endpoint poses and
+optional Bézier geometry, times distance before batched IK, and derives joint
+references using the root-frame Jacobian. Its pure derivative and joint-wrap
+calculations live in `compute/kinematics/_path_derivatives.py`; tests target those
+owners rather than tutorial functions. Tutorial geometry, CLI and plots remain
+sample-owned. This adapter is not a new planner backend or a collision/joint-limit
+compliance certificate.
 
 `retime_to_control_grid()` maps source trajectories onto a fixed command clock
 without shortening their durations and recomputes velocity references.
@@ -139,7 +151,7 @@ standoff poses the caller must replan. The resolved config is reported on the re
 
 `scripts/tutorials/atomic_action/place.py` is the demonstration host, hooked
 the way the Affordance sampling tutorials are: shared helpers live in
-`lab/scripts/_atomic_action/support.py` through the `tutorial_utils.py` adapter;
+`examples/sim/atomic_action/support.py` through the `tutorial_utils.py` adapter;
 the tutorial declares only which named segments may move,
 and one variant replays per simulation row. Phases come from the action's own
 `TrajectorySegment` ranges; only motion at or after the lift is retimed so the
@@ -152,8 +164,8 @@ genuinely different variants are discarded as duplicates; an enabled spatial
 factor at or below the tolerance now fails configuration decoding instead of
 silently keeping the nominal variant alone.
 
-The configured ten-scene CLI uses the same variant operators and owns its
-compiled-plan adaptation and replay provenance; see the
+The twelve-scene Atomic CLI uses the same variant operators through the
+shared Atomic plan adapter and owns its replay provenance; see the
 [Atomic host boundary](../atomic-actions/atomic-actions.md). It does not extend
 the Gym Task Program collection lifecycle.
 
@@ -172,6 +184,49 @@ collection budget; and `ExpansionSession` classifies bands from the measured
 postures only: path, dynamic and task validation stay separate.
 
 ## Focused validation
+
+The installed benchmark host lives in `embodichain_benchmarks.motion_generation`.
+`run_benchmark()` accepts a packaged suite, external YAML or assembled `SuiteCfg`,
+optional explicit planner specs and a run-local adapter mapping. It copies caller
+configuration; explicit planners replace the suite list and are enabled.
+`PlannerAdapter` owns build/prepare/plan/close and returns `PlanResult` for
+free-space evaluation; Atomic Skills also require an exposed `MotionGenerator`.
+The host owns simulation lifetime, seeded cases, evaluation, and artifacts.
+Canonical case tensors and nested parameters stay independent of adapter
+mutations through untimed copies at capacity, preparation and plan boundaries.
+Free-space Cartesian populations, bounded FK-only numerical reachability screening,
+measured difficulty and batch semantics live in
+`scenarios/_free_space_sampling.py`. Optional mask projections reuse screened
+Cartesian bases, retain `base_case_id`, and share independent maximum-joint/constrained
+matching in `metrics/_constraints.py`. Homogeneous Joint/FullPose cases keep
+classical input contracts; partial/mixed cases require `masked_constraints`.
+Validation preserves native samples with deterministic joint subdivisions.
+`NeuralPlanOptions.waypoint_modalities` supplies explicit meanings, and
+position-only goals require coincident runtime/policy TCP origins. The public
+API accepts a hashed `case_manifest` to replay fixed inputs without regeneration;
+scenario `bind_cases()` restores runtime bindings for both generated and loaded
+inputs, including Atomic skill providers and grasp resources. Experiment owners
+keep repeated timing subsets out of quality denominators. The
+configuration retains explicit legacy joint templates. Reports preserve workload strata and provide seed-cluster intervals at both
+condition and workload levels; balanced geometry allocations must not hide the
+independent seed count. Measured difficulty partitions batch rows by conditioning
+and joint margin separately. The screener's solver and selection condition stay
+explicit; decoupling runtime IK does not remove solver-conditioned sampling.
+Distances can use an explicit robot-reach reference. Waypoint layouts do not
+promise path following; sampled polyline deviations and native start-error
+quantiles remain diagnostics.
+Geometry validation includes the requested initial joint state. Atomic providers
+declare gripper requirements; typed pose settings flow through generation rather
+than being expanded into private configuration keys. Built-in Atomic suites
+compile and replay on their declared command clock; compiled replay consumes
+arrival intervals on physics ticks and preserves observation segment indices.
+Legacy fixed-sample replay remains explicit in trial metadata. The benchmark
+README and design contract own population and protocol details.
+Run calls serially within a process. Suite resources ship in the wheel; the
+installed CLI dispatches through `embodichain/cli/benchmark.py`. Source launchers
+under `scripts/benchmark/` only forward motion-generation evaluation.
+`tests/benchmark/motion_generation/` covers contracts and lifecycle, while
+`tests/test_benchmark_package.py` builds and installs the wheel outside the checkout.
 
 | Changed boundary | Existing coverage |
 |---|---|

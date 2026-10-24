@@ -1,0 +1,202 @@
+schema_version: 1
+name: atomic_franka_pgi_door_pour_align_push
+suite_version: atomic_franka_pgi_door_pour_align_push_v3
+profile: smoke
+
+# OpenDoor, Pour, AxisAlign and PushObject on the Franka + PGI embodiment.
+# Replay follows the Atomic Skill measurement standard: 16 physics steps per
+# waypoint.  Motion validity resamples at 512 points because AxisAlign and
+# OpenDoor paths are long and turn sharply at the grasp.
+robot:
+  id: franka_pgi
+  provider: franka_pgi
+  config:
+    attrs:
+      material_props:
+        static_friction: 1.0
+        dynamic_friction: 1.0
+    solver_cfg:
+      arm:
+        tcp:
+          - [1.0, 0.0, 0.0, 0.0]
+          - [0.0, 1.0, 0.0, 0.0]
+          - [0.0, 0.0, 1.0, 0.15]
+          - [0.0, 0.0, 0.0, 1.0]
+
+planners:
+  - id: curobo
+    adapter: curobo
+    role: primary_baseline
+    enabled: true
+    config:
+      max_attempts: 5
+      max_planning_time: null
+      interpolation_dt: 0.025
+      collision_activation_distance: 0.01
+      use_cuda_graph: true
+      cuda_graph_fallback: true
+      warmup_iterations: 1
+      preserve_plan_samples: false
+      world:
+        obstacle_representation: sphere
+        multi_env: false
+      auto_gen:
+        sphere_density: 0.1
+        collision_sphere_buffer: 0.0
+  - id: toppra
+    adapter: toppra
+    role: diagnostic_baseline
+    enabled: true
+    config: {}
+
+protocol:
+  report_schema_version: "3"
+  # Preserve the existing Atomic motion budget for every timed planner.
+  joint_velocity_limit_rad_s: 0.2
+  joint_acceleration_limit_rad_s2: 0.5
+  warmup_trials: 1
+  measured_trials: 1
+  sample_interval: 80
+  validation_samples: 512
+  position_threshold_m: 0.01
+  rotation_threshold_rad: 0.1
+  joint_limit_tolerance_rad: 0.00001
+
+tracks:
+  - id: atomic-skill
+    scenario: atomic_skill
+    enabled: true
+    config:
+      batch_sizes: [1]
+      seeds: [11]
+      physics:
+        clock: compiled
+        steps_per_waypoint: 16
+        hold_steps: 80
+        hold_sim_steps: 2
+        joint_tracking_tolerance_rad: 0.05
+      gripper:
+        control_part: eef
+        open_qpos: [0.0]
+        grasp_qpos: [0.040]
+      articulations:
+        # The OpenDoor tutorial's microwave: an undriven hinge and handle
+        # friction, placed where the Franka can open the door to 90 degrees.
+        - id: microwave
+          asset_path: Microwave/microwave.urdf
+          position: [-1.0, 0.10, 0.4]
+          rotation_deg: [0.0, 0.0, 90.0]
+          init_qpos: [0.0, 0.0, 0.0, 0.0]
+          drive:
+            drive_type: none
+          attrs:
+            material_props:
+              static_friction: 1.0
+              dynamic_friction: 1.0
+          fix_base: true
+          settle_steps: 10
+      objects:
+        - id: cube_50mm
+          kind: cube
+          size: [0.05, 0.05, 0.05]
+          position: [-0.42, -0.08, 0.05]
+          mass: 0.05
+          dynamic_friction: 0.97
+          static_friction: 0.99
+          contact_offset: 0.003
+          rest_offset: 0.001
+          enable_ccd: true
+          settle_steps: 10
+      skills:
+        - id: open_door
+          sample_count: 240
+          hand_interp_steps: 12
+          door_waypoint_count: 20
+          approach_distance_m: 0.10
+          retract_distance_m: 0.10
+          articulation: microwave
+          target_link: handle_link
+          target_joint: door_hinge
+          grasp_source: antipodal
+          grasp_sample_count: 10000
+          grasp_max_candidates: 128
+          grasp_alignment_max_angle_deg: 10.0
+          cases:
+            - name: microwave_door_30deg
+              task_difficulty: simple
+              open_angle_rad: 0.5236
+            - name: microwave_door_60deg
+              task_difficulty: medium
+              open_angle_rad: 1.0472
+            - name: microwave_door_90deg
+              task_difficulty: hard
+              open_angle_rad: 1.5708
+        - id: pour
+          sample_count: 80
+          pick_sample_count: 120
+          hand_interp_steps: 12
+          pre_grasp_distance_m: 0.15
+          lift_height_m: 0.16
+          approach_direction: [-0.7071, 0.0, -0.7071]
+          internal_axis: [1.0, 0.0, 0.0]
+          grasp_source: antipodal
+          grasp_sample_count: 10000
+          grasp_max_candidates: 128
+          grasp_alignment_max_angle_deg: 10.0
+          cases:
+            - name: cube_pour_30deg
+              object: cube_50mm
+              task_difficulty: simple
+              rotate_angle_rad: 0.5236
+            - name: cube_pour_45deg
+              object: cube_50mm
+              task_difficulty: simple
+              rotate_angle_rad: 0.7854
+            - name: cube_pour_90deg
+              object: cube_50mm
+              task_difficulty: medium
+              rotate_angle_rad: 1.5708
+        - id: axis_align
+          sample_count: 180
+          hand_interp_steps: 12
+          pre_grasp_distance_m: 0.15
+          lift_height_m: 0.16
+          pre_pick_height_m: 0.36
+          approach_direction: [0.0, 0.0, -1.0]
+          internal_axis: [1.0, 0.0, 0.0]
+          grasp_source: antipodal
+          grasp_sample_count: 10000
+          grasp_max_candidates: 128
+          grasp_alignment_max_angle_deg: 10.0
+          cases:
+            - name: cube_upright
+              object: cube_50mm
+              task_difficulty: medium
+              target_axis: [0.0, 0.0, 1.0]
+            - name: cube_horizontal
+              object: cube_50mm
+              task_difficulty: simple
+              target_axis: [0.0, 1.0, 0.0]
+        - id: push_object
+          sample_count: 160
+          hand_interp_steps: 12
+          approach_height_m: 0.10
+          retract_height_m: 0.10
+          push_overshoot_m: 0.0
+          # Push 1 cm below the cube centre so the closed fingers do not tip it.
+          object_contact_offset_m: [0.0, 0.0, -0.01]
+          # contact_distance_m is the cube half-size plus the distance from the
+          # TCP to the closed PGI finger face at the push height, measured on
+          # this asset (about 15 mm for the lateral push and 24 mm for the push
+          # toward the base), plus 2-3 mm of clearance.
+          cases:
+            - name: cube_push_lateral_10cm
+              object: cube_50mm
+              task_difficulty: simple
+              contact_distance_m: 0.042
+              target_object_offset_m: [0.0, 0.10, 0.0]
+            - name: cube_push_toward_base_8cm
+              object: cube_50mm
+              task_difficulty: simple
+              contact_distance_m: 0.052
+              target_object_offset_m: [0.08, 0.0, 0.0]

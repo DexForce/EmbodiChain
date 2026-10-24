@@ -30,7 +30,9 @@ def look_at_to_pose(
     target: torch.Tensor | list,
     up: torch.Tensor | list = [0, 0, 1],
 ) -> torch.Tensor:
-    """Return batched camera poses on the eye tensor's device.
+    """Return independent camera poses on the eye tensor's device.
+
+    Collinear view and up directions use a fallback for that camera only.
 
     Args:
         eye: Camera positions with shape (N, 3).
@@ -72,13 +74,17 @@ def look_at_to_pose(
     )  # Normalize camera_z
     camera_x = torch.cross(camera_z, up, dim=1)
     camera_x_norm = torch.norm(camera_x, dim=1, keepdim=True)
-    if torch.any(camera_x_norm < 1e-6):  # Handle degenerate cases
-        up = (
-            torch.tensor([0, 1, 0], dtype=eye.dtype, device=eye.device)
-            .unsqueeze(0)
-            .repeat(eye.shape[0], 1)
-        )
-        camera_x = torch.cross(up, camera_z, dim=1)
+    # Pick the less-aligned X/Y axis, keeping the existing Y-up pole fallback.
+    fallback_up = torch.where(
+        camera_z[:, 1:2].abs() > camera_z[:, 0:1].abs(),
+        camera_z.new_tensor([1.0, 0.0, 0.0]),
+        camera_z.new_tensor([0.0, 1.0, 0.0]),
+    )
+    camera_x = torch.where(
+        camera_x_norm < 1e-6,
+        torch.cross(fallback_up, camera_z, dim=1),
+        camera_x,
+    )
     camera_x = camera_x / torch.norm(
         camera_x, dim=1, keepdim=True
     )  # Normalize camera_x

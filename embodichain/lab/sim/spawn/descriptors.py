@@ -33,10 +33,13 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import MISSING, dataclass, field, fields, replace
 import math
+import hashlib
 import numbers
 import os
 import warnings
 from typing import TYPE_CHECKING
+
+from embodichain.lab.sim.cfg.source import _asset_file_path
 
 import numpy as np
 from dexsim.spawn import (
@@ -87,11 +90,13 @@ from embodichain.utils.string import (
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.material import VisualMaterialCfg
+    from embodichain.lab.sim.cfg import VisualObjectCfg
 
 __all__ = [
     "articulation_desc_from_cfg",
     "configure_articulation_desc",
     "rigid_desc_from_cfg",
+    "visual_desc_from_cfg",
     "surface_deformable_desc_from_cfg",
     "volume_deformable_desc_from_cfg",
 ]
@@ -278,6 +283,59 @@ def _with_procedural_collision_defaults(
     ).merged(physics)
 
 
+def visual_desc_from_cfg(
+    cfg: VisualObjectCfg, *, per_env: bool = True
+) -> tuple[ObjectDesc, dict[str, MaterialDesc]]:
+    """Compile visual geometry without creating physics or collision descriptors.
+
+    Args:
+        cfg: Appearance and initial transform.
+        per_env: Replicate the visual in each environment.
+
+    Returns:
+        Render-only descriptor and referenced material templates.
+    """
+    cfg.validate()
+    uid = _required_uid(cfg.uid, "Visual object")
+    if _is_usd_path(_asset_file_path(cfg)):
+        raise NotImplementedError(
+            "USD files describe typed scenes; use visual_desc_from_usd() to "
+            "select a visual object's appearance."
+        )
+    shape = cfg.shape
+    if isinstance(shape, MeshCfg):
+        geometry = _mesh_geometry_from_cfg(shape, segment_name=uid)
+    elif isinstance(shape, CubeCfg):
+        if len(shape.size) != 3 or any(value <= 0 for value in shape.size):
+            raise ValueError("CubeCfg.size must contain three positive values.")
+        geometry = GeometryDesc.cube(shape.size)
+    elif isinstance(shape, SphereCfg):
+        if shape.radius <= 0:
+            raise ValueError("SphereCfg.radius must be positive.")
+        geometry = GeometryDesc.sphere(shape.radius)
+    else:
+        raise NotImplementedError(
+            "Visual objects support MeshCfg, CubeCfg and SphereCfg."
+        )
+    scale = _vector3(cfg.body_scale, field_name="body_scale")
+    material_ref, material_entry = _compile_visual_material(uid, shape.visual_material)
+    return ObjectDesc(
+        name=uid,
+        pose=_pose_from_cfg(cfg),
+        renders=[
+            RenderDesc.from_geometry(
+                geometry,
+                load_option=_compile_load_option(shape),
+                material_ref=material_ref,
+            )
+        ],
+        physics=None,
+        collisions=[],
+        per_env=per_env,
+        body_scale=scale,
+    ), ({} if material_entry is None else {material_entry[0]: material_entry[1]})
+
+
 def rigid_desc_from_cfg(
     cfg: RigidObjectCfg,
     *,
@@ -286,14 +344,10 @@ def rigid_desc_from_cfg(
 ) -> tuple[ObjectDesc, dict[str, MaterialDesc]]:
     """Translate a rigid-object config into a DexSim Spawn descriptor."""
     uid = _required_uid(cfg.uid, "Rigid object")
-    if (
-        isinstance(cfg.shape, MeshCfg)
-        and not _is_missing(cfg.shape.fpath)
-        and _is_usd_path(cfg.shape.fpath)
-    ):
+    if _is_usd_path(_asset_file_path(cfg)):
         raise NotImplementedError(
             "USD files describe typed scenes; use rigid_desc_from_usd() to "
-            "select the sole rigid object."
+            "select one rigid object."
         )
 
     physics = _with_procedural_collision_defaults(
@@ -604,7 +658,8 @@ def articulation_desc_from_cfg(
     newton_solver_type: str | None = None,
 ) -> ArticulationDesc:
     """Translate an articulation config into a DexSim Spawn descriptor."""
-    path = source_path if source_path is not None else cfg.fpath
+    configured_path = _asset_file_path(cfg)
+    path = source_path if source_path is not None else configured_path
     if path is None or not str(path).strip():
         raise ValueError(
             "No articulation source path is available. Assemble the robot URDF "
@@ -613,7 +668,7 @@ def articulation_desc_from_cfg(
     if _is_usd_path(path):
         raise NotImplementedError(
             "USD files describe typed scenes; use articulation_desc_from_usd() "
-            "to select the sole articulation."
+            "to select one articulation."
         )
     if cfg.resolve_asset_physics_mode() == "overlay":
         _validate_articulation_rigid_physics(
@@ -759,7 +814,7 @@ def configure_articulation_desc(
         cfg.attrs,
         newton_solver_type=newton_solver_type,
     )
-    author_newton_shape_defaults = not _is_usd_path(cfg.fpath)
+    author_newton_shape_defaults = not _is_usd_path(_asset_file_path(cfg))
     default_link_properties = _compile_link_properties(
         default_physics,
         newton_solver_type=newton_solver_type,
@@ -1669,28 +1724,16 @@ def _compile_visual_material(
 ) -> tuple[str | None, tuple[str, MaterialDesc] | None]:
     if cfg is None:
         return None, None
-    key = str(cfg.uid or f"{object_uid}_material")
-    base_color = tuple(float(value) for value in cfg.base_color)
-    if len(base_color) != 4:
-        raise ValueError("VisualMaterialCfg.base_color must be RGBA.")
-    emissive_rgb = tuple(
-        float(value) * float(cfg.emissive_intensity) for value in cfg.emissive
-    )
-    if len(emissive_rgb) != 3:
-        raise ValueError("VisualMaterialCfg.emissive must be RGB.")
-    desc = MaterialDesc(
-        name=key,
-        base_color=base_color,
-        base_color_map=cfg.base_color_texture,
-        normal_map=cfg.normal_texture,
-        emissive=(*emissive_rgb, 1.0),
-        roughness=float(cfg.roughness),
-        roughness_map=cfg.roughness_texture,
-        metallic=float(cfg.metallic),
-        metallic_map=cfg.metallic_texture,
-        ao_map=cfg.ao_texture,
-        ior=float(cfg.ior),
-    )
+    from embodichain.lab.sim.material import _material_desc_from_cfg
+
+    key = cfg.uid or f"{object_uid}_material"
+    desc = _material_desc_from_cfg(cfg, key)
+    if not cfg.uid:
+        # Replacements may keep the object UID while changing appearance. Reuse
+        # an implicit template only for the same normalized material definition.
+        digest = hashlib.sha256(repr(desc).encode("utf-8")).hexdigest()[:16]
+        key = f"{key}_{digest}"
+        desc.name = key
     return key, (key, desc)
 
 

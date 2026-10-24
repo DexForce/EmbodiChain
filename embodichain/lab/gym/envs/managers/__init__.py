@@ -19,6 +19,8 @@
 Each manager owns a typed ``@configclass`` config whose attributes are ``FunctorCfg`` instances; the config attribute name becomes the functor's unique identifier.
 """
 
+from __future__ import annotations
+
 from .cfg import (
     FunctorCfg,
     SceneEntityCfg,
@@ -64,6 +66,7 @@ __all__ = [
     "JointPositionToLimitsAction",
     "JointVelocityAction",
     "ParallelGripperAction",
+    "RelativeEefPoseAction",
     "RelativeJointPositionAction",
     "register_action_contract",
     "resolve_action_contract",

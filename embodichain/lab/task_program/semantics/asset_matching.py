@@ -16,9 +16,10 @@
 
 """Bounded, deterministic matching of prepared assets to task roles.
 
-Relation checks use explicitly annotated axis-aligned regions in normalized
-local meter/+Z frames. They certify geometric fit for upright placement, not
-collision-free insertion, grasp feasibility, stability, or physical success.
+Relation checks use explicitly annotated local geometry in normalized
+meter/+Z frames: axis-aligned placement regions or pouring-aperture radii.
+They certify geometric compatibility, not collision-free insertion, grasp
+feasibility, fluid transfer, stability, or physical success.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 import hashlib
 import json
+import math
 from types import MappingProxyType
 from typing import Any
 
@@ -211,6 +213,57 @@ def _relation_rejection(
             continue
         source = assigned[relation.object_role].descriptor
         target = assigned[relation.target_role].descriptor
+        if relation.kind == "pours_into":
+            if (
+                not {"pour_source", "antipodal_grasp"}.issubset(source.capabilities)
+                or "container" not in target.capabilities
+            ):
+                return AssetRejection(
+                    relation.object_role,
+                    source.asset_id,
+                    "relation_missing_capability",
+                    "pours_into requires source pour_source/antipodal_grasp and target container capabilities.",
+                    relation.target_role,
+                )
+            radii = []
+            for descriptor, key in (
+                (source, "mouth_radius_m"),
+                (target, "opening_radius_m"),
+            ):
+                annotation = descriptor.provenance.get("pouring")
+                radius = (
+                    annotation.get(key) if isinstance(annotation, Mapping) else None
+                )
+                evidence = (
+                    annotation.get("evidence")
+                    if isinstance(annotation, Mapping)
+                    else None
+                )
+                if (
+                    isinstance(radius, bool)
+                    or not isinstance(radius, (int, float))
+                    or not math.isfinite(radius)
+                    or radius <= 0
+                    or not isinstance(evidence, str)
+                    or not evidence.strip()
+                ):
+                    return AssetRejection(
+                        relation.object_role,
+                        source.asset_id,
+                        "missing_pouring_geometry",
+                        f"Asset {descriptor.asset_id!r} needs positive finite pouring.{key} and nonempty evidence.",
+                        relation.target_role,
+                    )
+                radii.append(radius)
+            if radii[0] + relation.clearance_m > radii[1]:
+                return AssetRejection(
+                    relation.object_role,
+                    source.asset_id,
+                    "pouring_aperture_too_small",
+                    f"Bottle mouth radius {radii[0]} m plus clearance {relation.clearance_m} m exceeds cup opening radius {radii[1]} m.",
+                    relation.target_role,
+                )
+            continue
         region = (
             target.container_region
             if relation.kind == "fits_inside"

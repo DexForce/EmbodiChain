@@ -31,8 +31,22 @@ from embodichain.lab.sim.objects import (
     Robot,
 )
 from embodichain.lab.sim.spawn.scene import SpawnScene
+from dexsim.spawn import MaterialDesc
 
 pytestmark = pytest.mark.no_sim
+
+
+def test_material_resolution_rejects_conflicting_explicit_definitions():
+    scene = object.__new__(SpawnScene)
+    original = MaterialDesc(name="shared", roughness=0.2)
+    scene.builder = SimpleNamespace(materials={"shared": original})
+    scene._usd_texture_files = SimpleNamespace(resolve=lambda materials: materials)
+
+    assert scene._resolve_materials({"shared": original}) == {"shared": original}
+    with pytest.raises(ValueError, match="Conflicting visual material"):
+        scene._resolve_materials({"shared": MaterialDesc(name="shared", roughness=0.9)})
+
+    assert scene.builder.materials["shared"] is original
 
 
 def _make_scene(handles: dict[str, object]) -> SpawnScene:
@@ -44,6 +58,110 @@ def _make_scene(handles: dict[str, object]) -> SpawnScene:
     )
     scene._assets = {}
     return scene
+
+
+def _material_assignment_scene(kind: str):
+    originals = [MagicMock(name=f"original_{i}") for i in range(2)]
+    stale = MagicMock(name="stale_descriptor_material")
+    for i, material in enumerate([*originals, stale]):
+        material.get_name.return_value = str(i)
+        material.get_template.return_value.get_name.return_value = "template"
+    current = list(originals)
+    body = MagicMock(name="render_body")
+    body.get_mesh_count.return_value = len(current)
+    body.get_material.side_effect = lambda mesh_id: current[mesh_id]
+    body.set_material.side_effect = lambda mesh_id, material: current.__setitem__(
+        mesh_id, material
+    )
+    entity = SimpleNamespace(get_render_body=lambda *args: body)
+    scene = _make_scene({"asset": entity})
+    facade = SimpleNamespace(
+        is_spawn_bound=True,
+        is_declared=False,
+        link_names=["link"],
+        attach_spawn_handles=lambda handles: None,
+    )
+    scene.track(
+        kind, "asset", SimpleNamespace(name="asset", per_env=False), facade=facade
+    )
+    result = scene.builder.result
+    result.needs_rebuild = True
+    scene.builder.has_pending_changes = True
+
+    def rebuild(builder):
+        current[:] = [stale] * len(current)
+        builder.has_pending_changes = False
+        result.needs_rebuild = False
+        return result
+
+    result.rebuild = rebuild
+    return scene, body, current, originals
+
+
+@pytest.mark.parametrize(
+    "kind", ["rigid_object", "articulation", "soft_object", "cloth_object"]
+)
+def test_rebuild_preserves_current_per_segment_materials_over_stale_descriptors(kind):
+    scene, _, current, originals = _material_assignment_scene(kind)
+
+    scene.commit()
+    assert (
+        current != originals
+    )  # Model the native rebuild consuming stale descriptions.
+    scene.bind()
+
+    assert current == originals
+    assert scene._pending_material_assignments is None
+
+
+def test_material_replay_retries_after_partial_native_failure():
+    scene, body, current, originals = _material_assignment_scene("rigid_object")
+    scene.commit()
+    body.set_material.side_effect = RuntimeError("native assignment failed")
+
+    with pytest.raises(RuntimeError, match="native assignment failed"):
+        scene.bind()
+
+    assert scene._pending_material_assignments is not None
+    body.set_material.side_effect = lambda mesh_id, material: current.__setitem__(
+        mesh_id, material
+    )
+    scene.bind()
+    assert current == originals
+    assert scene._pending_material_assignments is None
+
+
+def test_removing_failed_replay_discards_materials_before_same_uid_replacement():
+    scene, body, _, _ = _material_assignment_scene("rigid_object")
+    scene.commit()
+    body.set_material.side_effect = RuntimeError("native assignment failed")
+    with pytest.raises(RuntimeError, match="native assignment failed"):
+        scene.bind()
+
+    scene.builder.remove_object = lambda name: scene._assets[name].descriptor
+    scene.remove("asset")
+    replacement_material = MagicMock(name="replacement_material")
+    replacement_body = MagicMock()
+    replacement_body.get_mesh_count.return_value = (
+        1  # Different topology from the removed object.
+    )
+    replacement_body.get_material.return_value = replacement_material
+    scene.builder.result.handles["asset"] = SimpleNamespace(
+        get_render_body=lambda: replacement_body
+    )
+    facade = _RetryableFacade()
+    scene.track(
+        "rigid_object",
+        "asset",
+        SimpleNamespace(name="asset", per_env=False),
+        facade=facade,
+    )
+
+    scene.bind()
+
+    assert facade.bind_attempts == 1
+    replacement_body.set_material.assert_not_called()
+    assert scene._pending_material_assignments is None
 
 
 class _RetryableFacade:
@@ -526,3 +644,23 @@ def test_replacement_declaration_does_not_attach_uncommitted_old_handle() -> Non
     scene.builder.has_pending_changes = False
     scene.bind()
     assert facade._entities == [new_handle]
+
+
+def test_no_render_retains_visual_declaration_without_native_transform_binding():
+    scene = _make_scene({})
+    scene._material_resources = SimpleNamespace(renderer="no-render")
+    facade = MagicMock()
+    facade.is_declared = True
+    scene.builder.add_object = MagicMock()
+    scene.declare(
+        "visual_object", "visual", SimpleNamespace(name="visual"), facade=facade
+    )
+
+    scene.bind()
+
+    facade.bind_spawn.assert_not_called()
+    facade.attach_spawn_handles.assert_not_called()
+    scene.builder.add_object.assert_not_called()
+    assert "visual" in scene._assets
+    scene.remove("visual")
+    assert "visual" not in scene._assets

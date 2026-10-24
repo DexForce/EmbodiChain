@@ -347,6 +347,50 @@ class TestNormalizeRobotJointData:
         assert result[0, 1] == pytest.approx(0.5, abs=0.01)
         assert result[0, 2] == pytest.approx(1.0, abs=0.01)
 
+    @pytest.mark.parametrize("include_mimic", [False, True])
+    def test_named_parts_follow_reordered_observation_columns(
+        self, include_mimic: bool
+    ) -> None:
+        """Normalize observed fingers without relying on arm DOFs or state order."""
+        env = MockEnv(num_envs=1, num_joints=6)
+        env.active_joint_ids = [4, 0, 3, 2, 1] if include_mimic else [4, 0, 3, 1]
+        # UR-style fingers close toward positive qpos; Marvin closes negative.
+        env.robot.body_data.qpos_limits[0, 0] = torch.tensor([0.0, 0.04])
+        env.robot.body_data.qpos_limits[0, 2] = torch.tensor([0.0, 0.04])
+        env.robot.body_data.qpos_limits[0, 3] = torch.tensor([-0.05, 0.0])
+        parts = {"left_eef": [3], "right_eef": [0, 2]}
+        env.robot.get_joint_ids = lambda *, name: parts[name]
+        values = (
+            [9.0, 0.02, -0.025, 0.04, 8.0]
+            if include_mimic
+            else [9.0, 0.02, -0.025, 8.0]
+        )
+        data = torch.tensor([values])
+
+        result = normalize_robot_joint_data(
+            env, data, control_parts=["left_eef", "right_eef"]
+        )
+
+        expected = (
+            [[9.0, 0.5, 0.5, 1.0, 8.0]] if include_mimic else [[9.0, 0.5, 0.5, 8.0]]
+        )
+        torch.testing.assert_close(result, torch.tensor(expected))
+
+    @pytest.mark.parametrize(
+        "selectors", [{}, {"joint_ids": [0], "control_parts": ["eef"]}]
+    )
+    def test_requires_one_joint_selector(self, selectors: dict) -> None:
+        env = MockEnv(num_envs=1, num_joints=6)
+        with pytest.raises(ValueError, match="exactly one"):
+            normalize_robot_joint_data(env, torch.zeros(1, 6), **selectors)
+
+    def test_rejects_control_parts_without_observed_joints(self) -> None:
+        env = MockEnv(num_envs=1, num_joints=6)
+        env.active_joint_ids = [0, 1]
+        env.robot.get_joint_ids = lambda *, name: [4, 5]
+        with pytest.raises(ValueError, match="no observed joints"):
+            normalize_robot_joint_data(env, torch.zeros(1, 2), control_parts=["eef"])
+
 
 class TestGetSensorIntrinsics:
     """Tests for get_sensor_intrinsics functor."""

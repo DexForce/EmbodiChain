@@ -59,6 +59,7 @@ from embodichain.lab.sim.atomic_actions.trajectory_ops import (
 )
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     assemble_full_robot_trajectory,
+    pad_trajectory_to_length,
     plan_named_arm_trajectory,
     require_shared_task_state_key,
     repeat_qpos,
@@ -343,14 +344,27 @@ class CoordinatedPlacement(
                 request, context, message="Support approach failed."
             )
 
+        approach_count = max(
+            placing_approach_traj.shape[1], support_approach_traj.shape[1]
+        )
+        placing_approach_traj = pad_trajectory_to_length(
+            placing_approach_traj, approach_count
+        )
+        support_approach_traj = pad_trajectory_to_length(
+            support_approach_traj, approach_count
+        )
+        segments["approach"] = approach_count
+
         placing_place_qpos = placing_approach_traj[:, -1]
         support_place_qpos = support_approach_traj[:, -1]
+        placing_hand_qpos = state.last_qpos[:, list(resources.placing_hand.joint_ids)]
+        support_hand_qpos = state.last_qpos[:, list(resources.support_hand.joint_ids)]
         approach_trajectory = self._assemble_segment(
             state.last_qpos,
             placing_approach_traj,
             support_approach_traj,
-            self._repeat_qpos(resources.placing_hand_close_qpos, segments["approach"]),
-            self._repeat_qpos(resources.support_hand_close_qpos, segments["approach"]),
+            self._repeat_qpos(placing_hand_qpos, segments["approach"]),
+            self._repeat_qpos(support_hand_qpos, segments["approach"]),
             resources=resources,
         )
 
@@ -360,8 +374,8 @@ class CoordinatedPlacement(
                 state.last_qpos,
                 self._repeat_qpos(placing_place_qpos, segments["hold"]),
                 self._repeat_qpos(support_place_qpos, segments["hold"]),
-                self._repeat_qpos(resources.placing_hand_close_qpos, segments["hold"]),
-                self._repeat_qpos(resources.support_hand_close_qpos, segments["hold"]),
+                self._repeat_qpos(placing_hand_qpos, segments["hold"]),
+                self._repeat_qpos(support_hand_qpos, segments["hold"]),
                 resources=resources,
             )
 
@@ -372,13 +386,11 @@ class CoordinatedPlacement(
                 self._repeat_qpos(placing_place_qpos, segments["release"]),
                 self._repeat_qpos(support_place_qpos, segments["release"]),
                 interpolate_hand_qpos(
-                    resources.placing_hand_close_qpos,
+                    placing_hand_qpos,
                     resources.placing_hand_open_qpos,
                     n_waypoints=segments["release"],
                 ),
-                self._repeat_qpos(
-                    resources.support_hand_close_qpos, segments["release"]
-                ),
+                self._repeat_qpos(support_hand_qpos, segments["release"]),
                 resources=resources,
             )
 
@@ -400,18 +412,17 @@ class CoordinatedPlacement(
         if not success_mask.any():
             logger.log_warning("CoordinatedPlacement failed to plan placing retreat.")
             return self.failed_plan(request, context, message="Placing retreat failed.")
+        segments["retreat"] = placing_retreat_traj.shape[1]
 
         placing_hand_retreat_qpos = (
-            resources.placing_hand_open_qpos
-            if release
-            else resources.placing_hand_close_qpos
+            resources.placing_hand_open_qpos if release else placing_hand_qpos
         )
         retreat_trajectory = self._assemble_segment(
             state.last_qpos,
             placing_retreat_traj,
             self._repeat_qpos(support_place_qpos, segments["retreat"]),
             self._repeat_qpos(placing_hand_retreat_qpos, segments["retreat"]),
-            self._repeat_qpos(resources.support_hand_close_qpos, segments["retreat"]),
+            self._repeat_qpos(support_hand_qpos, segments["retreat"]),
             resources=resources,
         )
 

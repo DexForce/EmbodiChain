@@ -107,6 +107,21 @@ Ownership is explicit rather than a generic deep merge:
   effect-assurance policy. Planner collision objects are attached from the
   selected live scene and are not serialized in the policy.
 
+Configured `motion` policies accept optional finite, strictly positive
+`velocity_limit` and `acceleration_limit` values. Configured Pour action options
+accept a finite, non-negative `dwell_duration`; unknown timing keys still fail
+the closed-field decoder. Omitting `velocity_limit` preserves the Robot's
+ordered per-joint speed caps; an explicit scalar request is intersected with
+those caps rather than replacing them.
+
+`motion.plan_opts.kind: trapezoidal` selects typed backend options for
+`stop_at_waypoints`, `blend_tolerance`, and `collinearity_tolerance`. It requires
+`strategy: motion_gen` and selects the Trapezoidal planner contract; incompatible
+planner requirements fail during decoding. Policy scalar velocity/acceleration
+limits are carried into these explicit options, while omitted limits retain
+Robot speed caps and the planner's acceleration default. Sampling count remains
+owned by `motion.sample_count`.
+
 Grasp generators select toolkit-owned geometry with a string `model` ID;
 an inline mapping is a custom calibration and its `model_id` does not trigger
 catalog lookup. The catalog is owned by
@@ -177,6 +192,11 @@ parent's measured position while its offset and orientation stay in world axes.
 This distinction matters for left/right sorting after reference-object rotation.
 World-axis targets fingerprint both their frame and declared pose; static
 manifests and live registries retain the same identity.
+
+`object_relative_position` validators default to `reference_frame: world_axes`,
+so reference rotation does not rotate their offset or per-axis tolerances.
+Select `reference_frame: parent` to measure both in the live reference frame,
+matching a target whose relative pose composes the complete parent transform.
 
 
 ## Asset role requirements

@@ -467,18 +467,19 @@ class ObjectLiftedValidatorCfg:
 
 @configclass
 class ObjectRelativePositionValidatorCfg:
-    """Require an object's position near a live reference plus world-axis offsets.
+    """Require an object's position near a live reference plus a declared offset.
 
     Each tolerance is exclusive; ``None`` disables checking that axis.
-    At least one axis must be checked. Reference rotation does not rotate
-    ``position_offset``.
+    At least one axis must be checked. ``world_axes`` preserves world-oriented
+    offsets and tolerances; ``parent`` measures them in the live reference frame.
 
     Args:
         object: Logical scene object to validate.
         reference: Logical scene object whose live position defines the origin.
-        position_offset: Desired XYZ displacement in world axes, in meters.
+        position_offset: Desired XYZ displacement in the selected frame, in meters.
         position_tolerance: Exclusive XYZ error bounds in meters; ``None``
             disables the corresponding axis.
+        reference_frame: ``world_axes`` (default) or the live reference's ``parent`` frame.
         kind: Fixed ``object_relative_position`` discriminator.
     """
 
@@ -491,11 +492,17 @@ class ObjectRelativePositionValidatorCfg:
         0.03,
     )
     kind: str = "object_relative_position"
+    reference_frame: str = "world_axes"
 
     def __post_init__(self) -> None:
         """Validate two object references and three per-axis bounds."""
         _validate_identifier(self.object, field_name="object")
         _validate_identifier(self.reference, field_name="reference")
+        if type(self.reference_frame) is not str or self.reference_frame not in (
+            "world_axes",
+            "parent",
+        ):
+            raise ValueError("reference_frame must be 'world_axes' or 'parent'.")
         for field_name in ("position_offset", "position_tolerance"):
             values = getattr(self, field_name)
             if type(values) not in (tuple, list) or len(values) != 3:

@@ -128,6 +128,9 @@ DEFAULT_PACKAGE_ROOTS = (
     PackageRoot("embodichain", REPO_ROOT / "embodichain"),
     PackageRoot("embodichain_robots", REPO_ROOT / "extensions" / "embodichain_robots"),
     PackageRoot(
+        "embodichain_benchmarks", REPO_ROOT / "extensions" / "embodichain_benchmarks"
+    ),
+    PackageRoot(
         "embodichain_tasks",
         REPO_ROOT / "extensions" / "embodichain_tasks" / "embodichain_tasks",
     ),

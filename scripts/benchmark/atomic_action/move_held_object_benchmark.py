@@ -18,7 +18,7 @@
 
 Measures MoveHeldObject-only planning latency and memory usage once a held
 object state has been produced by PickUp.
-Run: embodichain benchmark atomic-action --action move_held_object
+Run: embodichain benchmark atomic-action-profile --action move_held_object
 """
 
 from __future__ import annotations

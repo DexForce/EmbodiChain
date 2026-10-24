@@ -91,9 +91,11 @@ def test_invalid_tcp_update_preserves_numerical_solver_state(solver_type, tcp):
 
 def test_continuous_batch_ik_is_an_optional_solver_capability() -> None:
     # Capability discovery must not initialize kinematics or simulator resources.
-    ordinary = object.__new__(PytorchSolver)
+    ordinary = object.__new__(DifferentialSolver)
+    pytorch = object.__new__(PytorchSolver)
     opw = object.__new__(OPWSolver)
     assert not ordinary.supports_continuous_batch_ik
+    assert pytorch.supports_continuous_batch_ik
     assert opw.supports_continuous_batch_ik
     with pytest.raises(NotImplementedError, match="continuous batch IK"):
         ordinary._select_continuous_ik_path(
@@ -225,3 +227,50 @@ def test_solver_cfg_from_dict_ignores_unknown_fields(monkeypatch):
 
     assert not hasattr(cfg, "unsupported_field")
     assert warnings == ["Key 'unsupported_field' not found in URSolverCfg."]
+
+
+@pytest.mark.parametrize("compiler_failure", [True, False])
+def test_runtime_fk_compile_fallback_preserves_values_gradients_and_real_errors(
+    compiler_failure,
+):
+    from types import SimpleNamespace
+    from torch._dynamo import exc as dynamo_exc
+
+    solver = object.__new__(OPWSolver)
+    solver.device = torch.device("cpu")
+    solver.root_link_name = "base"
+    solver.end_link_name = "tcp"
+    solver.tcp_xpos = np.eye(4)
+    solver.tcp_xpos[2, 3] = 0.2
+    compiled_calls = []
+    eager_calls = []
+
+    def eager(q):
+        eager_calls.append(q.shape[0])
+        out = torch.eye(4).expand(1, q.shape[0], 4, 4).clone()
+        out[0, :, :3, 3] = q[:, :3]
+        return out
+
+    def compiled(q):
+        compiled_calls.append(q.shape[0])
+        if compiler_failure:
+            raise getattr(
+                dynamo_exc, "FailOnRecompileLimitHit", dynamo_exc.TorchDynamoException
+            )("fullgraph cache exhausted")
+        raise ValueError("invalid FK input")
+
+    solver.pk_serial_chain = SimpleNamespace(forward_kinematics_tensor=eager)
+    solver.compiled_fk = compiled
+    q = torch.tensor([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]], requires_grad=True)
+    if not compiler_failure:
+        with pytest.raises(ValueError, match="invalid FK input"):
+            solver.get_fk(q)
+        assert not eager_calls
+        return
+    out = solver.get_fk(q)
+    assert torch.allclose(out[:, :3, 3], q + torch.tensor([0.0, 0.0, 0.2]))
+    out[:, :3, 3].sum().backward()
+    assert torch.equal(q.grad, torch.ones_like(q))
+    solver.get_fk(torch.zeros(3, 3))
+    assert compiled_calls == [2]
+    assert eager_calls == [2, 3]

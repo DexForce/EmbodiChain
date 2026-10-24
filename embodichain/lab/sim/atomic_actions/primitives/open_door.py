@@ -28,6 +28,7 @@ steps per update.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 from numbers import Real
 from typing import ClassVar
@@ -64,6 +65,7 @@ from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
 )
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     arm_qpos_from_state,
+    hold_inactive_cartesian_rows,
     resample_planned_trajectory,
 )
 from embodichain.lab.sim.atomic_actions.requirements import (
@@ -81,7 +83,7 @@ from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     resolve_pose_target,
     translate_pose_world,
 )
-from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
+from embodichain.compute.geometry import rotate_rigid_grasp
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -183,6 +185,11 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
         context: PlanningContext,
     ) -> ActionPlan:
         """Plan the complete six-stage door-opening motion without side effects."""
+        if request.motion_policy.strategy != "ik_interp":
+            raise ValueError(
+                "OpenDoor requires strategy='ik_interp' because reach, hinge, "
+                "and retract phases must preserve every Cartesian path sample."
+            )
         target = self.require_goal(request)
         affordance = self._require_open_door_affordance(target.semantics)
         options = request.skill_options
@@ -309,8 +316,9 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
             affordance.rotation_axis,
             affordance.axis_origin,
             hinge_rotation,
-            options.door_waypoint_count,
+            n_open - 1,
         )
+
         rotated_approach_direction = torch.matmul(
             opened_link_poses[:, -1, :3, :3],
             approach_direction_local,
@@ -328,11 +336,28 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
             n_approach,
             interpolation_dt=interpolation_dt,
         )
-        reach_keyframes = axis_translation_keyframes(
-            approach_xpos,
-            grasp_xpos,
-            approach_direction_world,
-            n_waypoints=n_reach - 1,
+        # Reach and retract remain explicit straight-line Cartesian samples.
+        linear_contact = True
+        reach_keyframes = (
+            axis_translation_keyframes(
+                approach_xpos,
+                grasp_xpos,
+                approach_direction_world,
+                n_waypoints=n_reach - 1,
+            )
+            if linear_contact
+            else grasp_xpos
+        )
+        reach_active = actionable_grasp & approach_success
+        reach_hold_pose = self.robot.compute_fk(
+            qpos=approach_arm[:, -1],
+            name=control_part,
+            to_matrix=True,
+        ).to(reach_keyframes)
+        reach_keyframes = hold_inactive_cartesian_rows(
+            reach_keyframes,
+            active_mask=reach_active,
+            hold_pose=reach_hold_pose,
         )
         reach_success, reach_arm = self._plan_pose_segment(
             reach_keyframes,
@@ -341,21 +366,65 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
             request,
             n_reach,
             interpolation_dt=interpolation_dt,
-            cartesian_linear=True,
+            cartesian_linear=linear_contact,
         )
-        open_success, open_arm = self._plan_pose_segment(
+        open_active = reach_active & reach_success
+        open_hold_pose = self.robot.compute_fk(
+            qpos=reach_arm[:, -1],
+            name=control_part,
+            to_matrix=True,
+        ).to(opened_grasp_xpos)
+        open_keyframes = hold_inactive_cartesian_rows(
             opened_grasp_xpos,
+            active_mask=open_active,
+            hold_pose=open_hold_pose,
+        )
+
+        def sample_open_path(progress: torch.Tensor) -> torch.Tensor:
+            sampled = self._opened_link_and_eef_poses_at_fractions(
+                link_pose,
+                grasp_xpos,
+                affordance.rotation_axis,
+                affordance.axis_origin,
+                hinge_rotation,
+                progress,
+            )[1]
+            return hold_inactive_cartesian_rows(
+                sampled,
+                active_mask=open_active,
+                hold_pose=open_hold_pose,
+            )
+
+        open_success, open_arm = self._plan_pose_segment(
+            open_keyframes,
             reach_arm[:, -1],
             control_part,
             request,
             n_open,
             interpolation_dt=interpolation_dt,
+            cartesian_linear=True,
+            cartesian_path_sampler=sample_open_path,
         )
-        retract_keyframes = axis_translation_keyframes(
-            opened_grasp_xpos[:, -1],
-            retract_xpos,
-            rotated_approach_direction,
-            n_waypoints=n_retract - 1,
+        retract_keyframes = (
+            axis_translation_keyframes(
+                opened_grasp_xpos[:, -1],
+                retract_xpos,
+                rotated_approach_direction,
+                n_waypoints=n_retract - 1,
+            )
+            if linear_contact
+            else retract_xpos
+        )
+        retract_active = open_active & open_success
+        retract_hold_pose = self.robot.compute_fk(
+            qpos=open_arm[:, -1],
+            name=control_part,
+            to_matrix=True,
+        ).to(retract_keyframes)
+        retract_keyframes = hold_inactive_cartesian_rows(
+            retract_keyframes,
+            active_mask=retract_active,
+            hold_pose=retract_hold_pose,
         )
         retract_success, retract_arm = self._plan_pose_segment(
             retract_keyframes,
@@ -364,7 +433,7 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
             request,
             n_retract,
             interpolation_dt=interpolation_dt,
-            cartesian_linear=True,
+            cartesian_linear=linear_contact,
         )
         planned_success = (
             actionable_grasp
@@ -385,6 +454,14 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
             hand_open_qpos,
             n_waypoints=options.hand_interp_steps,
         )
+        segment_lengths = {
+            "approach": approach_arm.shape[1],
+            "reach": reach_arm.shape[1],
+            "close": hand_close.shape[1],
+            "open": open_arm.shape[1],
+            "release": hand_open.shape[1],
+            "retract": retract_arm.shape[1],
+        }
         full = torch.empty(
             (self.num_envs, sum(segment_lengths.values()), self.robot_dof),
             dtype=context.robot.qpos.dtype,
@@ -392,10 +469,18 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
         )
         full[:] = context.last_qpos.unsqueeze(1)
         offset = 0
-        for arm in (approach_arm, reach_arm):
+        for index, arm in enumerate((approach_arm, reach_arm)):
             stop = offset + arm.shape[1]
             full[:, offset:stop, arm_joint_ids] = arm
-            full[:, offset:stop, hand_joint_ids] = hand_open_qpos.unsqueeze(1)
+            full[:, offset:stop, hand_joint_ids] = (
+                interpolate_hand_qpos(
+                    context.last_qpos[:, hand_joint_ids],
+                    hand_open_qpos,
+                    n_waypoints=arm.shape[1],
+                )
+                if index == 0
+                else hand_open_qpos.unsqueeze(1)
+            )
             offset = stop
         stop = offset + hand_close.shape[1]
         full[:, offset:stop, arm_joint_ids] = reach_arm[:, -1].unsqueeze(1)
@@ -686,6 +771,7 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
         *,
         interpolation_dt: float,
         cartesian_linear: bool = False,
+        cartesian_path_sampler: Callable[[torch.Tensor], torch.Tensor] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         result = self.motion_generator.generate(
             build_pose_plan_states(target_pose),
@@ -695,12 +781,17 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
                 sample_count=sample_count,
                 interpolation_dt=interpolation_dt,
                 cartesian_linear=cartesian_linear,
+                cartesian_path_sampler=cartesian_path_sampler,
             ),
         )
         assert isinstance(result.success, torch.Tensor)
         assert result.positions is not None
+        assert result.dt is not None
         return result.success, resample_planned_trajectory(
-            result.positions, sample_count
+            result.positions,
+            sample_count,
+            dt=result.dt,
+            control_dt=interpolation_dt,
         )
 
     def _opened_link_and_eef_poses(
@@ -713,8 +804,6 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
         waypoint_count: int,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Rotate link poses about the hinge and recover corresponding EEF poses."""
-        axis = rotation_axis.to(device=self.device, dtype=torch.float32)
-        axis = axis / torch.linalg.vector_norm(axis)
         fractions = torch.linspace(
             1.0 / waypoint_count,
             1.0,
@@ -722,29 +811,32 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
             dtype=torch.float32,
             device=self.device,
         )
-        angles = hinge_rotation.to(device=self.device, dtype=torch.float32)[:, None]
-        angles = angles * fractions[None]
-        rotations = (
-            torch.eye(4, dtype=torch.float32, device=self.device)
-            .reshape(1, 1, 4, 4)
-            .repeat(link_pose.shape[0], waypoint_count, 1, 1)
+        return self._opened_link_and_eef_poses_at_fractions(
+            link_pose,
+            grasp_xpos,
+            rotation_axis,
+            axis_origin,
+            hinge_rotation,
+            fractions,
         )
-        rotations[:, :, :3, :3] = axis_angle_to_rotation_matrix(
-            angles[:, :, None] * axis
+
+    def _opened_link_and_eef_poses_at_fractions(
+        self,
+        link_pose: torch.Tensor,
+        grasp_xpos: torch.Tensor,
+        rotation_axis: torch.Tensor,
+        axis_origin: tuple[float, float, float],
+        hinge_rotation: torch.Tensor,
+        fractions: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Sample the rigid handle path at normalized hinge-angle fractions."""
+        angles = (
+            hinge_rotation.to(device=self.device, dtype=torch.float32)[:, None]
+            * fractions.to(device=self.device, dtype=torch.float32)[None]
         )
-        origin = torch.tensor(axis_origin, dtype=torch.float32, device=self.device)
-        to_origin = torch.eye(4, dtype=torch.float32, device=self.device)
-        from_origin = torch.eye(4, dtype=torch.float32, device=self.device)
-        to_origin[:3, 3] = origin
-        from_origin[:3, 3] = -origin
-        local_rotations = torch.matmul(
-            torch.matmul(to_origin.reshape(1, 1, 4, 4), rotations),
-            from_origin.reshape(1, 1, 4, 4),
+        return rotate_rigid_grasp(
+            link_pose, grasp_xpos, rotation_axis, axis_origin, angles
         )
-        opened_link_poses = torch.matmul(link_pose[:, None], local_rotations)
-        link_to_eef = torch.bmm(pose_inv(link_pose), grasp_xpos)
-        opened_eef_poses = torch.matmul(opened_link_poses, link_to_eef[:, None])
-        return opened_link_poses, opened_eef_poses
 
 
 __all__ = ["OpenDoor", "OpenDoorGoal", "OpenDoorOptions"]

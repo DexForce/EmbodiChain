@@ -10,6 +10,7 @@
 | Manager-level backend hooks and capabilities | `embodichain/lab/sim/physics/` |
 | Object-level Scene batch adapters | `embodichain/lab/sim/objects/backends/scene.py`, `newton.py` |
 | Object, renderer and physics configuration | `embodichain/lab/sim/cfg/` (`cfg/__init__.py` is the public facade) |
+| Visual material configuration, templates and native instances | `embodichain/lab/sim/material.py`; [material identity and lifetime](materials.md) |
 | Gym lifecycle and task scene construction | `embodichain/lab/gym/envs/base_env.py`, `embodied_env.py` |
 
 `embodichain.cli.sim` owns standalone simulation arguments without importing
@@ -28,6 +29,31 @@ that same object in place. UIDs identify resources in the manager registry.
 Procedural articulation/object descriptors enter through the manager's public
 descriptor methods. Spawn owns their replication count: `per_env=False` binds
 one global facade instance even in a replicated scene.
+
+`VisualObject` owns render-only root poses, visibility and material assignments,
+with no rigid-body buffers or collision API. Its config lives in
+`cfg/visual_object.py`; mesh files use `MeshCfg.fpath`, as for rigid objects.
+`cfg/source.py:UsdSourceCfg` owns the source file and exact `source_prim_path`;
+visual, rigid and articulation configs accept it through `source`, exclusively
+with their existing shape/file input. `ObjectBaseCfg` keeps runtime identity
+and initial pose independent of file formats. `add_visual_object()` compiles mesh/primitive appearance or
+selects a USD object's appearance. Whole-scene `add_usd()`
+preserves physical types and wraps only objects without physics and colliders
+as visuals. Conflicting visual UIDs receive the scene-name prefix while returned
+keys preserve source prim paths. Other import UID conflicts fail before declaration.
+Imported facades retain their source address in `cfg.source`. This metadata
+does not request a second spawn or bind an unrelated existing scene entity.
+Visuals retain facade-owned pose/visibility/material-assignment state across native
+topology rebuilds, with separate reset baselines. They use the same prepare,
+replication, selective reset, removal and teardown owners as physical assets. They do not enter physical scene snapshots or planners.
+Pose I/O uses pure-visual `World.fetch_object_transform` / `apply_object_transform`
+tensor batches through the private Scene visual adapter. That boundary converts
+world matrices to arena-local poses and refreshes parent transforms and native
+IDs after topology changes.
+
+`spawn/_usd_assets.py` materializes package textures into `SpawnScene`-owned
+files. They survive topology rebuilds and are deleted after native Scene closure;
+facade source configs retain the original package address.
 
 `BaseEnv` owns Gym reset/step timing; `EmbodiedEnv` translates task composition
 into manager declarations. Scene replication and collision isolation belong

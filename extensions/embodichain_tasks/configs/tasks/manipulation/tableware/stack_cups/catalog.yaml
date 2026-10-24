@@ -1,8 +1,14 @@
 task_key: stack_cups
 title: Stack Cups
 summary: A tableware environment with cup alignment and uprightness success checks.
-tags: [tableware, stacking]
+tags:
+- tableware
+- stacking
 default_deployment: default
 deployments:
   default:
     config: env.json
+  dual_ur5_dh_pgi_140_80:
+    config: task.dual_ur5_dh_pgi_140_80.yaml
+  tianji_marvin:
+    config: task.tianji_marvin.yaml

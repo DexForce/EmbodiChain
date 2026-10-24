@@ -2983,6 +2983,7 @@ def test_replace_missing_rigid_object_does_not_mutate_scene() -> None:
 
 def test_replace_invalid_shape_preserves_existing_object(monkeypatch) -> None:
     from embodichain.lab.sim.cfg import RigidObjectCfg
+    from embodichain.lab.sim.shapes import CubeCfg
     import embodichain.lab.sim.sim_manager as manager_module
 
     sim = object.__new__(SimulationManager)
@@ -2996,7 +2997,9 @@ def test_replace_invalid_shape_preserves_existing_object(monkeypatch) -> None:
 
     monkeypatch.setattr(manager_module, "rigid_desc_from_cfg", reject)
     with pytest.raises(ValueError, match="invalid geometry"):
-        sim.replace_rigid_object(RigidObjectCfg(uid="box"))
+        sim.replace_rigid_object(
+            RigidObjectCfg(uid="box", shape=CubeCfg(size=(0.0, 0.0, 0.0)))
+        )
     assert sim._rigid_objects["box"] is old
     sim._spawn_scene.remove.assert_not_called()
 

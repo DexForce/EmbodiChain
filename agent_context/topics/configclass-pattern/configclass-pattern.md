@@ -47,6 +47,7 @@ domain-contract validator. Domain loaders add their own checks.
 | Custom `to_dict()` | A custom method anywhere in the MRO is preserved, including on decorated subclasses |
 | `replace(**kwargs)` / `copy(**kwargs)` | Construct a replacement through the dataclass helper and initialization hooks |
 | Custom `__post_init__` | Runs before configclass's copying hook |
+| Computed properties | Excluded from initialization copying without evaluating getters, including inherited properties |
 | `is_configclass(value)` | Checks for a `validate` attribute; it is a convenience heuristic |
 
 `update_class_from_dict(obj, data)` updates in place:
