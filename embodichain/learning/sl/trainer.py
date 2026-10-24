@@ -102,6 +102,11 @@ class SupervisedTrainer:
         self.output = Path(self.cfg.output_dir)
         self.output.mkdir(parents=True, exist_ok=True)
         self.learner.model.to(self.cfg.device)
+        self._output_was_used = (
+            (self.output / "metrics.jsonl").exists()
+            or (self.output / "last.pt").exists()
+            or next(self.output.glob("step_*.pt"), None) is not None
+        )
         self._fit_started = False
         self._restored = False
 
@@ -121,16 +126,10 @@ class SupervisedTrainer:
         )
         if end < self.learner.num_updates:
             raise ValueError("stop_after precedes the restored update cursor")
-        if not self._fit_started and not self._restored:
-            prior_artifacts = (
-                (self.output / "metrics.jsonl").exists()
-                or (self.output / "last.pt").exists()
-                or next(self.output.glob("step_*.pt"), None) is not None
+        if not self._fit_started and not self._restored and self._output_was_used:
+            raise FileExistsError(
+                "SL output contains a run; restore a checkpoint or use a fresh output directory"
             )
-            if prior_artifacts:
-                raise FileExistsError(
-                    "SL output contains a run; restore a checkpoint or use a fresh output directory"
-                )
         self._fit_started = True
         metrics = {}
         while self.learner.num_updates < end:

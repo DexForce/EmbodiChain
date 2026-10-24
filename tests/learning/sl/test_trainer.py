@@ -263,3 +263,9 @@ def test_older_checkpoint_cannot_append_to_a_later_run_history(tmp_path):
     branch = build(tmp_path / "branch")
     branch.resume(tmp_path / "step2.pt")
     assert branch.fit(stop_after=3)["num_updates"] == 3
+
+
+def test_same_trainer_may_save_an_initial_policy_before_fitting(tmp_path):
+    trainer = build(tmp_path / "run")
+    trainer.save(trainer.output / "step_000000.pt")
+    assert trainer.fit(stop_after=1)["num_updates"] == 1
