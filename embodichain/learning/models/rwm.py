@@ -224,7 +224,11 @@ class RobotWorldModel(nn.Module):
         )
 
     def get_extra_state(self) -> dict[str, Any]:
-        """Return model layout and action identity saved beside tensor weights."""
+        """Return model layout and action identity saved beside tensor weights.
+
+        Returns:
+            Versioned configuration including state, joint and action semantics.
+        """
         return {"format": "robot-world-model-v1", "config": self.cfg.to_dict()}
 
     def set_extra_state(self, state: dict[str, Any]) -> None:

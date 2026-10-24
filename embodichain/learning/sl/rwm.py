@@ -74,6 +74,7 @@ class RobotWorldModelObjective:
     Loss is the mean squared normalized error over valid transitions and state
     increment features. Invalid suffixes are excluded. This supervised objective
     does not create rewards, continuation probabilities or policy gradients.
+    The last-step diagnostic weights each window by its valid transition count.
     """
 
     def __init__(self, error_floor: float = 1e-2) -> None:
@@ -138,11 +139,12 @@ class RobotWorldModelObjective:
             loss = squared[valid].mean()
             final_index = valid.sum(1) - 1
             final = squared[torch.arange(len(state), device=state.device), final_index]
+            final = (final * valid.sum(1)).sum() / valid.sum()
             position_error = (predicted[..., :3] - target[..., :3]).norm(dim=-1)
         return LossResult(
             loss,
             metrics={
-                "last_step_mse": final.mean().detach(),
+                "last_step_mse": final.detach(),
                 "position_error_m": position_error[valid].mean().detach(),
             },
             weight=float(valid.sum()),
@@ -232,7 +234,12 @@ class RWMPredictor:
         return self._state
 
     def state_dict(self) -> dict[str, Any]:
-        """Return an owned graph-free prediction-state snapshot."""
+        """Return an owned graph-free prediction-state snapshot.
+
+        Returns:
+            Canonical state and model identity; model weights remain owned by
+            the learning checkpoint.
+        """
         return {
             "format": "rwm-predictor-v1",
             "contract": self.model.get_extra_state(),

@@ -32,7 +32,11 @@ from embodichain.learning.models.rwm import (
     frozen_world_model,
 )
 from embodichain.learning.sl import SupervisedBatch, SupervisedLearner
-from embodichain.learning.sl.rwm import RobotWorldModelObjective, RWMPredictor
+from embodichain.learning.sl.rwm import (
+    RobotWorldModelObjective,
+    RWMPredictor,
+    build_rwm_trainer,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -234,6 +238,52 @@ import embodichain.data_pipeline.datasets.transition_replay
 assert not any(name == 'dexsim' or name.startswith('dexsim.') or name.startswith('embodichain.lab.') for name in sys.modules)
 """
     subprocess.run([sys.executable, "-c", code], check=True)
+
+
+def test_offline_recipe_preserves_committed_updates_on_resume(tmp_path):
+    corpus = _controlled_batch(16, 2)
+    path = tmp_path / "training.pt"
+    torch.save(
+        {
+            "inputs": corpus.inputs,
+            "targets": corpus.targets,
+            "masks": corpus.masks,
+            "metadata": {
+                "split": "train",
+                "action_semantics": "generalized_effort",
+                "step_dt": 0.02,
+            },
+        },
+        path,
+    )
+    config = {
+        "model": {"hidden_dims": [16]},
+        "data": {"path": str(path)},
+        "trainer": {
+            "total_updates": 4,
+            "batch_size": 8,
+            "output_dir": str(tmp_path / "run"),
+            "seed": 17,
+        },
+    }
+    full = build_rwm_trainer(config)
+    full.fit(stop_after=2)
+    resumed = build_rwm_trainer(
+        {
+            **config,
+            "trainer": {**config["trainer"], "output_dir": str(tmp_path / "resumed")},
+        }
+    )
+    resumed.resume(tmp_path / "run" / "last.pt")
+    assert resumed.learner.num_updates == 2
+    resumed.fit()
+    full.fit()
+    for name, expected in full.learner.model.state_dict().items():
+        actual = resumed.learner.model.state_dict()[name]
+        if isinstance(expected, torch.Tensor):
+            torch.testing.assert_close(actual, expected, atol=0, rtol=0)
+        else:
+            assert actual == expected
 
 
 @pytest.mark.gpu
