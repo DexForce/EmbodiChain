@@ -55,6 +55,8 @@ class TensorBatchSource:
         source_id: Optional durable corpus identity. A content hash is always
             retained so reusing an ID cannot silently replace training data.
 
+    Batch metadata must be finite JSON data so units and feature declarations
+    enter content identity. Mapping keys in tensor trees retain their types.
     Construction takes a detached owned snapshot. This source has no simulator,
     action-schema, sequence-length or image-layout assumption.
     """
