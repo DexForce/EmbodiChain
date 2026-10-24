@@ -151,7 +151,9 @@ def _case(
     )
     start = pour_index * 5
     angles = [0.0, tilt / 2, tilt, tilt, restore, restore]
-    rotations = Rotation.from_euler(rotation_axis, angles, degrees=True)
+    rotations = Rotation.from_euler(
+        rotation_axis, np.asarray(angles)[:, None], degrees=True
+    )
     poses = state["cube"]["pose"][0, start : start + 6]
     poses[:, 3:] = torch.tensor(rotations.as_quat()).float()
     pivot = np.array([0.0, 0.0, 0.04])
