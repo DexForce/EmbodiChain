@@ -1,0 +1,141 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+"""Fixed episode boundaries, causal camera reads and stable sampling."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+
+import h5py
+import numpy as np
+import pytest
+import torch
+
+from embodichain.data_pipeline.datasets.bc_hdf5 import BCWindowDataset
+from embodichain.learning.sl.bc import HDF5BCSource
+
+
+def _corpus(tmp_path, *, cameras=True):
+    episodes = []
+    for ordinal, length in enumerate((8, 11)):
+        path = tmp_path / f"episode{ordinal}.h5"
+        with h5py.File(path, "w") as handle:
+            values = np.arange(length, dtype=np.float32)[:, None] + ordinal * 100
+            handle["observations"] = np.tile(values, (1, 2))
+            handle["targets"] = values * 2
+            if cameras:
+                rgb = np.broadcast_to(
+                    np.arange(length, dtype=np.uint8)[:, None, None, None],
+                    (length, 256, 256, 3),
+                )
+                handle.create_dataset(
+                    "images/front", data=rgb, chunks=(1, 256, 256, 3), compression="lzf"
+                )
+        episodes.append(
+            {
+                "path": path.name,
+                "length": length,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+        )
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "complete": True,
+                "cameras": ["front"] if cameras else [],
+                "episodes": episodes,
+            }
+        )
+    )
+    return manifest
+
+
+def test_fixed_source_reads_only_causal_camera_history_and_matching_targets(tmp_path):
+    manifest = _corpus(tmp_path)
+    dataset = BCWindowDataset(
+        manifest, history_length=2, prediction_horizon=3, max_open_files=1
+    )
+    try:
+        source = HDF5BCSource(dataset)
+        batch = source.sample(12, generator=torch.Generator().manual_seed(4))
+        assert batch.inputs["history"].shape == (12, 2, 2)
+        assert batch.inputs["images"]["front"].shape == (12, 2, 3, 256, 256)
+        for row, (ordinal, anchor) in enumerate(
+            zip(batch.metadata["episode_ids"], batch.metadata["anchors"])
+        ):
+            expected = torch.arange(
+                int(anchor) - 1, int(anchor) + 1
+            ).float() + 100 * int(ordinal)
+            torch.testing.assert_close(batch.inputs["history"][row, :, 0], expected)
+            torch.testing.assert_close(
+                batch.targets[row, :, 0],
+                (
+                    torch.arange(int(anchor), int(anchor) + 3) + 100 * int(ordinal)
+                ).float()
+                * 2,
+            )
+            torch.testing.assert_close(
+                batch.inputs["images"]["front"][row, :, 0, 0, 0],
+                (expected - 100 * int(ordinal)) / 255,
+            )
+        copy = batch.inputs["images"]["front"].clone()
+        source.sample(2, generator=torch.Generator().manual_seed(5))
+        dataset.close()
+        torch.testing.assert_close(batch.inputs["images"]["front"], copy)
+    finally:
+        dataset.close()
+
+
+def test_sampling_rng_and_transformed_targets_are_reproducible(tmp_path):
+    manifest = _corpus(tmp_path, cameras=False)
+    dataset = BCWindowDataset(
+        manifest,
+        history_length=1,
+        prediction_horizon=2,
+        target_encoder=lambda fields: fields["targets"] + 7,
+        target_fields=("targets",),
+    )
+    try:
+        first = dataset.sample(8, generator=torch.Generator().manual_seed(3))
+        second = dataset.sample(8, generator=torch.Generator().manual_seed(3))
+        torch.testing.assert_close(
+            first["inputs"]["history"], second["inputs"]["history"], atol=0, rtol=0
+        )
+        torch.testing.assert_close(first["targets"], second["targets"], atol=0, rtol=0)
+        torch.testing.assert_close(
+            first["targets"][:, 0], first["inputs"]["history"][:, 0, :1] * 2 + 7
+        )
+    finally:
+        dataset.close()
+
+
+def test_partial_or_modified_corpus_is_rejected(tmp_path):
+    manifest = _corpus(tmp_path, cameras=False)
+    data = json.loads(manifest.read_text())
+    data["complete"] = False
+    manifest.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="completed"):
+        BCWindowDataset(manifest)
+    data["complete"] = True
+    manifest.write_text(json.dumps(data))
+    dataset = BCWindowDataset(manifest)
+    with h5py.File(tmp_path / data["episodes"][0]["path"], "a") as handle:
+        handle["targets"][0] = -999
+    with pytest.raises(ValueError, match="checksum"):
+        dataset.read_episode(0, ("targets",))
