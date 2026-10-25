@@ -117,7 +117,7 @@ Pika 的张开指令为正向移动的米制坐标，DH_AG95 为带 mimic 的转
 
 ARX5 使用 50 mm 高的工作台、向外展开的肘部和不翻转的腕部逆解分支，
 初始姿态和自碰撞设置继承扩展包的
-[`ARX5Cfg`](../../../extensions/embodichain_robots/arx5.py)。台面、目标和该场景的
+[`ARX5Cfg`](../../../extensions/embodichain_robots/arx/arx5/cfg.py)。台面、目标和该场景的
 IK 分支范围仍由示例配置管理。旧的高工作台与折叠腕部组合会让腕部网格与前臂相交。
 调整位于物理配置层，PickUp → Place 的调用、抬升距离与物体目标定义保持一致。
 

@@ -21,7 +21,7 @@ command reference and :doc:`/guides/robot_catalog` for variant selection.
      - ``ARX5Cfg``
      - Six-joint arm with two independent parallel fingers and numerical IK.
    * - :doc:`Franka Panda <franka_panda>`
-     - ``FrankaPandaCfg``, ``FrankaPandaPgiCfg``
+     - ``FrankaPandaCfg``
      - Panda arm with the Panda hand or a DH PGI gripper, with numerical FK/IK.
    * - :doc:`UR family <ur_robot>`
      - ``URRobotCfg``

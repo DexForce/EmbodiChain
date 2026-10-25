@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import os
-from typing import ClassVar
 import open3d as o3d
 from embodichain.data.dataset import EmbodiChainDataset
 from embodichain.data.constants import (
@@ -49,43 +48,6 @@ __all__ = [
     "TianjiMarvin",
     "FlexivRizon4S",
 ]
-
-
-class CobotMagicArm(EmbodiChainDataset):
-    """Dataset class for the Cobot Magic Arm robot.
-
-    Reference:
-        https://global.agilex.ai/products/cobot-magic
-
-    Directory structure:
-        CobotMagicArm/
-            CobotMagicNoGripper.urdf
-            CobotMagicWithGripperV70.urdf
-            CobotMagicWithGripperV70NewUV.urdf
-            CobotMagicWithGripperV70NoMaterial.urdf
-            CobotMagicWithGripperV100.urdf
-            CobotMagicWithGripperV100NewUV.urdf
-            CobotMagicWithGripperV100NoMaterial.urdf
-
-    Example usage:
-        >>> from embodichain.data.robot_dataset import CobotMagicArm
-        >>> dataset = CobotMagicArm()
-        or
-        >>> from embodichain.data import get_data_path
-        >>> print(get_data_path("CobotMagicArm/CobotMagicWithGripperV100.urdf"))
-    """
-
-    def __init__(self, data_root: str = None):
-        data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(
-                EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "CobotMagicArmV4.zip"
-            ),
-            "8cc54c240c2f26e84e22250c8364b0ec",
-        )
-        prefix = type(self).__name__
-        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
-
-        super().__init__(prefix, data_descriptor, path)
 
 
 class RidgeBack(EmbodiChainDataset):
@@ -300,56 +262,6 @@ class Fanuc(EmbodiChainDataset):
         super().__init__(prefix, data_descriptor, path)
 
 
-class UniversalRobots(EmbodiChainDataset):
-    """Dataset class for the Universal Robots.
-
-    V4 corrects the legacy UR3/UR3e material palette without changing robot
-    geometry, collision meshes, kinematics or inertial properties.
-
-    Reference:
-        https://www.universal-robots.com/products/ur-series/
-
-    Directory structure:
-        UniversalRobots/
-            UR3/UR3.urdf
-            UR3e/UR3e.urdf
-            UR5/UR5.urdf
-            UR5e/UR5e.urdf
-            UR10/UR10.urdf
-            UR10e/UR10e.urdf
-
-    Example usage:
-        >>> from embodichain.data.robot_dataset import UniversalRobots
-        >>> dataset = UniversalRobots()
-        or
-        >>> from embodichain.data import get_data_path
-        >>> print(get_data_path("UniversalRobots/UR3/UR3.urdf"))
-        >>> print(get_data_path("UniversalRobots/UR3e/UR3e.urdf"))
-        >>> print(get_data_path("UniversalRobots/UR5/UR5.urdf"))
-        >>> print(get_data_path("UniversalRobots/UR5e/UR5e.urdf"))
-        >>> print(get_data_path("UniversalRobots/UR10/UR10.urdf"))
-        >>> print(get_data_path("UniversalRobots/UR10e/UR10e.urdf"))
-    """
-
-    def __init__(self, data_root: str = None):
-        filename = f"{robot_assets}/UniversalRobots_v4.zip"
-        hub_prefix = (
-            "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/main/"
-        )
-        urls = [f"{EMBODICHAIN_DOWNLOAD_PREFIX}{filename}"]
-        if EMBODICHAIN_DOWNLOAD_PREFIX != hub_prefix:
-            urls.append(f"{hub_prefix}{filename}")
-        data_descriptor = o3d.data.DataDescriptor(
-            urls, "a92eda28a1d2f9034252cdb2936ceffc"
-        )
-        # Assembly signatures include URDF paths, not referenced mesh contents.
-        # A versioned source directory also invalidates old assembled materials.
-        prefix = f"{type(self).__name__}V4"
-        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
-
-        super().__init__(prefix, data_descriptor, path)
-
-
 class Rokae(EmbodiChainDataset):
     """Dataset class for the Rokae robots.
 
@@ -374,40 +286,6 @@ class Rokae(EmbodiChainDataset):
         data_descriptor = o3d.data.DataDescriptor(
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "Rokae.zip"),
             "fbfb852d6139e94b7c422771542f988f",
-        )
-        prefix = type(self).__name__
-        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
-
-        super().__init__(prefix, data_descriptor, path)
-
-
-class Franka(EmbodiChainDataset):
-    """Dataset class for the Franka robots.
-
-    Reference:
-        https://franka.de/franka-research-3
-
-    Directory structure:
-        Franka/
-            Panda/
-                Panda.urdf
-                PandaWithHand.urdf
-            FR3/
-                fr3.urdf
-
-    Example usage:
-        >>> from embodichain.data.robot_dataset import Franka
-        >>> dataset = Franka()
-        or
-        >>> from embodichain.data import get_data_path
-        >>> print(get_data_path("Franka/Panda/Panda.urdf"))
-        >>> print(get_data_path("Franka/PandaWithHand/PandaWithHand.urdf"))
-    """
-
-    def __init__(self, data_root: str = None):
-        data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "FrankaV4.zip"),
-            "0c613d884798e8b084604381641cc8e1",
         )
         prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
@@ -565,112 +443,26 @@ class CartPole(EmbodiChainDataset):
         super().__init__(prefix, data_descriptor, path)
 
 
-class ARX5(EmbodiChainDataset):
-    """Dataset class for the ARX5 robot.
+from importlib import import_module
 
-    Reference:
-        https://arx-x.com/
-
-    Directory structure:
-        ARX5/
-            X5A.urdf
-
-    Example usage:
-        >>> from embodichain.data.robot_dataset import ARX5
-        >>> dataset = ARX5()
-        or
-        >>> from embodichain.data import get_data_path
-        >>> print(get_data_path("ARX5/X5A.urdf"))
-    """
-
-    def __init__(self, data_root: str = None):
-        data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "ARX5_2.zip"),
-            "6fc1d6a5a35b7926ba6325c0d20f5bc3",
-        )
-        prefix = type(self).__name__
-        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
-
-        super().__init__(prefix, data_descriptor, path)
+_ASSET_EXPORTS = {
+    "CobotMagicArm": "embodichain_robots.agilex.cobotmagic.assets",
+    "ARX5": "embodichain_robots.arx.arx5.assets",
+    "AlohaMini": "embodichain_robots.alohamini.aloha_mini.assets",
+    "TianjiMarvin": "embodichain_robots.tianji.marvin.assets",
+    "FlexivRizon4S": "embodichain_robots.flexiv.rizon4s.assets",
+    "Franka": "embodichain_robots.franka.assets",
+    "UniversalRobots": "embodichain_robots.universal_robots.assets",
+}
 
 
-class AlohaMini(EmbodiChainDataset):
-    """Dataset class for the Aloha Mini robot.
-
-    Reference:
-        https://github.com/annncatto/alohamini_ros2/tree/main/src/alohamini_description
-
-    Directory structure:
-        AlohaMini/
-            alohamini2pro.urdf
-
-    Example usage:
-        >>> from embodichain.data.robot_dataset import AlohaMini
-        >>> dataset = AlohaMini()
-        or
-        >>> from embodichain.data import get_data_path
-        >>> print(get_data_path("AlohaMini/alohamini2pro.urdf"))
-    """
-
-    def __init__(self, data_root: str = None):
-        data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "AlohaMini.zip"),
-            "9727759a9276dcb2ee89eaa5319808c4",
-        )
-        prefix = type(self).__name__
-        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
-
-        super().__init__(prefix, data_descriptor, path)
+def __getattr__(name: str) -> type:
+    if name not in _ASSET_EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(_ASSET_EXPORTS[name]), name)
+    globals()[name] = value
+    return value
 
 
-class TianjiMarvin(EmbodiChainDataset):
-    """Dataset class for the Tianji Marvin robot.
-
-    Directory structure:
-        TianjiMarvin/
-            robot_acd.urdf
-            robot_with_ee_acd.urdf
-    Example usage:
-        >>> from embodichain.data.assets.robot_assets import TianjiMarvin
-        >>> dataset = TianjiMarvin()
-        or
-        >>> from embodichain.data import get_data_path
-        >>> print(get_data_path("TianjiMarvin/robot_with_ee_acd.urdf"))
-    """
-
-    def __init__(self, data_root: str = None):
-        data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "TianjiMarvin.zip"),
-            "af91dbcc352fae3469a3190d0c6e1756",
-        )
-        prefix = type(self).__name__
-        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
-
-        super().__init__(prefix, data_descriptor, path)
-
-
-class FlexivRizon4S(EmbodiChainDataset):
-    """Download the Apache-2.0 Flexiv Rizon 4S description from Hugging Face.
-
-    The pinned official URDF, meshes, original parameter files, license and
-    provenance share the standard locked download and extraction cache.
-    The normal data registry resolves ``FlexivRizon4S/rizon4s.urdf``.
-
-    Args:
-        data_root: Optional root for the standard locked asset cache.
-    """
-
-    cache_prefix: ClassVar[str] = "FlexivRizon4S_v1"
-    """Revision-specific extraction identity used by the data CLI."""
-
-    def __init__(self, data_root: str | None = None) -> None:
-        filename = f"{robot_assets}/FlexivRizon4S_v1.zip"
-        hub_prefix = (
-            "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/main/"
-        )
-        urls = [f"{EMBODICHAIN_DOWNLOAD_PREFIX}{filename}"]
-        if EMBODICHAIN_DOWNLOAD_PREFIX != hub_prefix:
-            urls.append(f"{hub_prefix}{filename}")
-        descriptor = o3d.data.DataDescriptor(urls, "5464472433d57328e7711e2a94b46279")
-        root = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
-        super().__init__(self.cache_prefix, descriptor, root)
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))
