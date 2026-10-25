@@ -8,6 +8,12 @@ runtime registry. Shared MLPs and feature normalization stay in core
 `embodichain.learning.models`; generic supervised orchestration stays in
 [SL](../supervised-learning/supervised-learning.md).
 
+The [model catalog contract](../../../extensions/embodichain_models/README.md)
+owns domain and public-import naming. Policy models predict actions; dynamics
+models predict future state or geometry. RWM and RigidFormer follow-ups use
+`dynamics.rwm` and `dynamics.rigidformer`; only `dynamics.nerd` is implemented here.
+World-model naming does not introduce a parallel `world_models` domain.
+
 | Request | Owner |
 |---|---|
 | NeRD network, portable checkpoint, physical codec | `extensions/embodichain_models/embodichain_models/dynamics/nerd/{model,checkpoint,codec}.py` |
