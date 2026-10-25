@@ -72,7 +72,9 @@ class RigidFormerModel(nn.Module):
     Reference geometry and point identities must remain aligned with the
     current/previous point clouds. The adapter exposes forward prediction and
     parameter training; action gradients and a physics-solver interface are
-    outside its contract.
+    outside its contract. Finite padding with unequal point lengths is supported
+    only when the padded point axis is at most 128; the pinned upstream
+    hierarchical encoder does not preserve masking beyond that boundary.
     """
 
     action_conditioned: bool = False
@@ -113,6 +115,49 @@ class RigidFormerModel(nn.Module):
         if not torch.isfinite(delta_times).all() or (delta_times <= 0).any():
             raise ValueError("delta_times must be finite and positive")
         batch, objects, points = current.shape[:3]
+        object_lens = values.get("object_lens")
+        point_lens = values.get("object_point_lens")
+        for name, lengths, shape, maximum, minimum in (
+            ("object_lens", object_lens, (batch,), objects, 1),
+            (
+                "object_point_lens",
+                point_lens,
+                (batch, objects),
+                points,
+                self.cfg.num_anchors,
+            ),
+        ):
+            if lengths is not None and (
+                lengths.shape != shape
+                or lengths.dtype != torch.long
+                or lengths.device != current.device
+                or (lengths < minimum).any()
+                or (lengths > maximum).any()
+            ):
+                raise ValueError(
+                    f"{name} must be int64 {shape} counts in [{minimum}, {maximum}] "
+                    "on the geometry device, including padded objects"
+                )
+        if point_lens is not None and points > 128 and (point_lens != points).any():
+            raise ValueError(
+                "Unequal object_point_lens requires a padded point axis <= 128; "
+                "the pinned upstream PointNet FPS/KNN leaks finite padding above 128"
+            )
+        anchors = values.get("anchor_indices")
+        if anchors is not None:
+            valid_points = points if point_lens is None else point_lens[..., None]
+            if (
+                anchors.ndim != 3
+                or anchors.shape[:2] != (batch, objects)
+                or anchors.shape[-1] < 1
+                or anchors.dtype != torch.long
+                or anchors.device != current.device
+                or (anchors < 0).any()
+                or (anchors >= valid_points).any()
+            ):
+                raise ValueError(
+                    "anchor_indices must index valid points in every object"
+                )
         distance_bytes = batch * (objects * points) ** 2 * current.element_size()
         if distance_bytes > self.cfg.max_pairwise_bytes:
             raise ValueError(
@@ -143,7 +188,9 @@ class RigidFormerModel(nn.Module):
             delta_times: Positive integration intervals in seconds, ``[B]``.
             object_pos_next: Optional training target, never a model input.
             anchor_indices: Optional fixed per-object anchor indices.
-            object_point_lens: Optional valid point counts, ``[B, O]``.
+            object_point_lens: Optional valid point counts, ``[B, O]``, each at
+                least ``cfg.num_anchors`` including padded objects. Unequal
+                counts require a padded point axis of at most 128.
             object_lens: Optional valid object counts, ``[B]``.
 
         Returns:
@@ -182,7 +229,8 @@ class RigidFormerModel(nn.Module):
             delta_times: Fixed positive time interval per batch row.
             num_steps: Number of new frames, excluding the supplied history.
             anchor_indices: Optional initial anchors reused throughout rollout.
-            object_point_lens: Optional valid point counts.
+            object_point_lens: Optional valid point counts with the same masking
+                limits as :meth:`forward`.
             object_lens: Optional valid object counts.
 
         Returns:
@@ -196,6 +244,9 @@ class RigidFormerModel(nn.Module):
                 object_pos_prev=object_positions[-2],
                 object_first_frame_pos=object_positions[0],
                 delta_times=delta_times,
+                anchor_indices=anchor_indices,
+                object_point_lens=object_point_lens,
+                object_lens=object_lens,
             )
         )
         from rigidformer import RigidformerRolloutWrapper

@@ -49,3 +49,9 @@ adapter supplies forward prediction and supervised parameter training; it does
 not qualify action/state gradients for APG or bind a native simulation solver.
 The fixed Box2D friction/collision comparison in `scripts/experiments/rigidformer/`
 retains upstream numerical behavior, baseline limitations and full seed results.
+Finite unequal-length point padding is supported only with a padded point axis
+of at most 128; the pinned hierarchical encoder leaks padding above that size,
+so the adapter rejects that layout. Supplied point counts, including placeholder
+objects, must be at least `num_anchors`, and fixed anchors index valid points.
+The acceptance runner verifies dataset/recipe/model source bytes against pinned
+Git blobs and gates every paired loss, in addition to rollout endpoint metrics.

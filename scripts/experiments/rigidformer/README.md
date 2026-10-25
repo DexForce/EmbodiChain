@@ -3,8 +3,11 @@
 This runner compares the shared SL learner with the unmodified optimization
 recipe from `lucidrains/rigidformer` revision
 `4ab4edac7271b49484748d6bf8086a497f13272d`. The external model and Box2D
-generator retain their MIT license; the runner verifies the checkout revision
-and installed model source bytes before training. No upstream source or
+generator retain their MIT license; the runner verifies the checkout revision,
+the Box2D dataset and training recipe, and every model-package Python file
+against the pinned Git blobs. Installed package Python files must match those
+same blobs before the optional package is imported. A dirty checkout with the
+correct HEAD is rejected. No upstream source or
 generated dataset/checkpoint is vendored here.
 
 Use the `py311` environment with the optional pinned RigidFormer dependency,
@@ -35,12 +38,18 @@ upstream example labeling it RMSE. Constant-velocity and stationary baselines,
 point/center errors and intra-object rigidity errors are retained. The one-sided
 95% seed-paired bootstrap upper bound allows at most 5% relative degradation;
 near-zero references use an absolute tolerance of 1e-5. Numerical comparisons
-use atol1e-5/rtol1e-4. Fewer than five seeds or fewer than 1,000 updates report
-pending acceptance and exit nonzero.
+use atol1e-5/rtol1e-4. Every paired training loss must also satisfy
+`abs(sl_loss - reference_loss) <= 1e-5 + 1e-4 * abs(reference_loss)` at every
+update; both complete curves must contain the requested number of finite
+values. A matching final loss alone cannot qualify a run. Fewer than five
+seeds or fewer than 1,000 updates report pending acceptance and exit nonzero.
 
 Outputs include a frozen manifest, source/data hashes, dependency versions,
-per-seed immutable results/checkpoints, curves and `summary.json`. Any failure
-is retained in `failure.json`. A completed reference comparison establishes
+per-seed immutable results/checkpoints, curves and `summary.json`. Once a fresh
+output directory is admitted, setup, dependency, revision, training and failed
+or pending qualification failures are retained in `failure.json`. An existing
+output directory is rejected without modifying its artifacts. A completed
+reference comparison establishes
 adapter/trainer agreement, not paper accuracy, action gradients or physics
 solver qualification. The reference's collision limitations remain visible.
 `training_seconds` includes the two periodic reference-trajectory evaluations;
@@ -60,3 +69,15 @@ Importing the adapter does not load the optional model or simulation. The
 current upstream nearest-neighbour feature uses a dense pairwise distance
 tensor, so the adapter checks its estimated byte size before forwarding. This
 bound is for that tensor alone, not total process/accelerator memory.
+
+Finite padding is supported with unequal object counts and unequal point
+counts when the padded point axis is at most 128. Each supplied point count
+must be at least `num_anchors` (four by default), including placeholder objects
+outside `object_lens`; fixed anchors must index valid points. Nonfinite padding
+is unsupported. The pinned PointNet hierarchy uses unmasked gathered KNN
+neighbors when the padded point axis exceeds 128, so unequal point counts in
+that layout are explicitly rejected by both the objective path and rollout.
+Full point lengths above 128 remain available with unchanged upstream math.
+The 48-point Box2D reference does not enter the restricted layout. Focused
+optional-model tests change finite padded geometry, attributes and targets and
+check objective loss/gradients and valid rollout points at 48 and 128 points.

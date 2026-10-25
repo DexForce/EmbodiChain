@@ -166,6 +166,108 @@ def test_rigidformer_rollout_matches_reference_and_retains_rigidity(geometry):
     )
 
 
+@pytest.mark.parametrize("points", [48, 128])
+def test_rigidformer_unequal_lengths_ignore_finite_padding_in_objective_and_rollout(
+    points,
+):
+    pytest.importorskip("rigidformer")
+    torch.set_num_threads(2)
+    torch.manual_seed(31)
+    model = RigidFormerModel(
+        RigidFormerCfg(
+            dim=16,
+            dim_head=6,
+            heads=2,
+            object_self_attn_depth=1,
+            anchor_cross_attn_depth=2,
+            object_hidden_layers=(0, 1),
+        )
+    ).eval()
+    previous = torch.randn(2, 3, points, 3) * 0.1 + torch.tensor([0.0, 0.0, 0.4])
+    values = dict(
+        object_pos_prev=previous,
+        object_pos=previous + 0.01,
+        object_first_frame_pos=previous.clone(),
+        object_pos_next=previous + 0.025,
+        vertex_properties=torch.randn(2, 3, points, 3),
+        delta_times=torch.full((2,), 0.1),
+        object_lens=torch.tensor([2, 3]),
+        object_point_lens=torch.tensor([[16, 32, points], [32, points, 16]]),
+    )
+    valid = (torch.arange(3)[None, :, None] < values["object_lens"][:, None, None]) & (
+        torch.arange(points)[None, None, :] < values["object_point_lens"][..., None]
+    )
+    changed = {key: value.clone() for key, value in values.items()}
+    for key in (
+        "object_pos_prev",
+        "object_pos",
+        "object_first_frame_pos",
+        "object_pos_next",
+        "vertex_properties",
+    ):
+        changed[key][~valid] = torch.randn_like(changed[key][~valid]) * 3
+    rng = torch.get_rng_state()
+    objective = RigidFormerObjective()
+    expected = objective.compute_loss(model, rigidformer_batch(values))
+    expected.loss.backward()
+    gradients = {
+        name: parameter.grad.clone()
+        for name, parameter in model.named_parameters()
+        if parameter.grad is not None
+    }
+    model.zero_grad(set_to_none=True)
+    torch.set_rng_state(rng)
+    actual = objective.compute_loss(model, rigidformer_batch(changed))
+    actual.loss.backward()
+    torch.testing.assert_close(actual.loss, expected.loss, atol=0, rtol=0)
+    for name, parameter in model.named_parameters():
+        if name in gradients:
+            torch.testing.assert_close(parameter.grad, gradients[name], atol=0, rtol=0)
+    trajectories = []
+    for inputs in (values, changed):
+        torch.set_rng_state(rng)
+        with torch.no_grad():
+            trajectories.append(
+                model.rollout(
+                    [inputs["object_pos_prev"], inputs["object_pos"]],
+                    vertex_properties=inputs["vertex_properties"],
+                    delta_times=inputs["delta_times"],
+                    object_lens=inputs["object_lens"],
+                    object_point_lens=inputs["object_point_lens"],
+                    num_steps=3,
+                )
+            )
+    torch.testing.assert_close(
+        torch.stack(trajectories[0])[:, valid],
+        torch.stack(trajectories[1])[:, valid],
+        atol=0,
+        rtol=0,
+    )
+
+
+def test_rigidformer_rejects_unsupported_point_masking_and_invalid_anchors(geometry):
+    pytest.importorskip("rigidformer")
+    model = RigidFormerModel()
+    values = {
+        key: value.repeat_interleave(5, dim=2) if value.ndim == 4 else value
+        for key, value in geometry.items()
+    }
+    values["object_point_lens"] = torch.tensor([[16, 160], [64, 160]])
+    with pytest.raises(ValueError, match="PointNet FPS/KNN leaks finite padding"):
+        RigidFormerObjective().compute_loss(model, rigidformer_batch(values))
+    with pytest.raises(ValueError, match="PointNet FPS/KNN leaks finite padding"):
+        model.rollout(
+            [values["object_pos_prev"], values["object_pos"]],
+            vertex_properties=values["vertex_properties"],
+            delta_times=values["delta_times"],
+            object_point_lens=values["object_point_lens"],
+            num_steps=1,
+        )
+    geometry["object_point_lens"] = torch.tensor([[16, 32], [32, 16]])
+    with pytest.raises(ValueError, match="anchor_indices must index valid points"):
+        model(**geometry)
+
+
 def test_rigidformer_offline_recipe_restores_the_shared_training_boundary(tmp_path):
     pytest.importorskip("rigidformer")
     torch.set_num_threads(2)

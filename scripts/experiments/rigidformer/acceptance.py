@@ -47,20 +47,68 @@ from embodichain.learning.sl.rigidformer import RigidFormerObjective, rigidforme
 
 __all__: list[str] = []
 
+_NUMERICAL_ATOL = 1e-5
+_NUMERICAL_RTOL = 1e-4
 
-def _load_reference(path: Path) -> Any:
+
+def _verify_sources(path: Path, installed: Path) -> dict[str, Any]:
+    """Check source bytes against Git objects, including a dirty checkout."""
     revision = subprocess.check_output(
         ["git", "-C", str(path), "rev-parse", "HEAD"], text=True
     ).strip()
     if revision != RIGIDFORMER_REVISION:
         raise ValueError(f"Expected reference revision {RIGIDFORMER_REVISION}")
+    package_files = subprocess.check_output(
+        [
+            "git",
+            "-C",
+            str(path),
+            "ls-tree",
+            "-r",
+            "--name-only",
+            revision,
+            "rigidformer",
+        ],
+        text=True,
+    ).splitlines()
+    sources = ["examples/box2d_dataset.py", "examples/train_box2d.py"]
+    sources += [name for name in package_files if name.endswith(".py")]
+    verified = {}
+    for name in sources:
+        pinned = subprocess.check_output(
+            ["git", "-C", str(path), "show", f"{revision}:{name}"]
+        )
+        if (path / name).read_bytes() != pinned:
+            raise ValueError(f"Reference source differs from pinned Git blob: {name}")
+        if name.startswith("rigidformer/"):
+            destination = installed / Path(name).relative_to("rigidformer")
+            if destination.read_bytes() != pinned:
+                raise ValueError(
+                    f"Installed source differs from pinned Git blob: {name}"
+                )
+        verified[name] = {
+            "git_blob": subprocess.check_output(
+                ["git", "-C", str(path), "rev-parse", f"{revision}:{name}"], text=True
+            ).strip(),
+            "sha256": hashlib.sha256(pinned).hexdigest(),
+        }
+    return verified
+
+
+def _load_reference(path: Path) -> tuple[Any, dict[str, Any]]:
+    # Locate the package without importing it before its source is verified.
+    package = importlib.util.find_spec("rigidformer")
+    if package is None or package.origin is None:
+        raise ImportError("The optional rigidformer dependency is unavailable")
+    verified = _verify_sources(path, Path(package.origin).parent)
     source = path / "examples" / "box2d_dataset.py"
     spec = importlib.util.spec_from_file_location("rigidformer_box2d_reference", source)
     if spec is None or spec.loader is None:
         raise ValueError("Reference Box2D data module is unavailable")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    # Execute the checked bytes directly rather than accepting a cached bytecode file.
+    exec(compile(source.read_bytes(), str(source), "exec"), module.__dict__)
+    return module, verified
 
 
 def _digest(values: Any) -> str:
@@ -354,34 +402,40 @@ def _gate(reference: list[float], candidate: list[float]) -> dict[str, Any]:
     }
 
 
-def _main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--reference", required=True, type=Path)
-    parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--steps", type=int, default=1000)
-    parser.add_argument("--seeds", type=int, nargs="+", default=list(range(42, 47)))
-    parser.add_argument(
-        "--modes",
-        choices=("friction", "collision"),
-        nargs="+",
-        default=["friction", "collision"],
+def _loss_curve_gate(
+    reference: list[float], candidate: list[float], *, steps: int
+) -> dict[str, Any]:
+    """Require every paired optimization loss to match at the stated tolerance."""
+    baseline = np.asarray(reference, dtype=np.float64)
+    actual = np.asarray(candidate, dtype=np.float64)
+    complete = baseline.shape == actual.shape == (steps,)
+    finite = bool(np.isfinite(baseline).all() and np.isfinite(actual).all())
+    matching = (
+        np.isclose(actual, baseline, atol=_NUMERICAL_ATOL, rtol=_NUMERICAL_RTOL)
+        if complete and finite
+        else np.zeros(steps, dtype=bool)
     )
-    parser.add_argument("--device", default="cpu")
-    parser.add_argument("--threads", type=int, default=4)
-    args = parser.parse_args()
-    if args.steps < 1 or args.threads < 1 or len(set(args.seeds)) != len(args.seeds):
-        parser.error("Use positive steps/threads and distinct seeds")
-    args.output.mkdir(parents=True, exist_ok=False)
-    torch.set_num_threads(args.threads)
-    reference = _load_reference(args.reference)
-    import rigidformer
+    return {
+        "passed": bool(complete and finite and matching.all()),
+        "expected_steps": steps,
+        "reference_steps": len(reference),
+        "candidate_steps": len(candidate),
+        "finite": finite,
+        "mismatched_steps": int((~matching).sum()),
+        "first_mismatched_step": (
+            int(np.flatnonzero(~matching)[0]) + 1 if (~matching).any() else None
+        ),
+        "max_absolute_difference": (
+            float(np.abs(actual - baseline).max()) if complete and finite else None
+        ),
+        "atol": _NUMERICAL_ATOL,
+        "rtol": _NUMERICAL_RTOL,
+    }
 
-    installed_model = Path(rigidformer.__file__).parent / "rigidformer.py"
-    reference_model = args.reference / "rigidformer" / "rigidformer.py"
-    if installed_model.read_bytes() != reference_model.read_bytes():
-        raise ValueError(
-            "Installed RigidFormer source differs from the pinned checkout"
-        )
+
+def _run(args: argparse.Namespace) -> None:
+    torch.set_num_threads(args.threads)
+    reference, verified = _load_reference(args.reference)
     versions = {
         name: importlib.metadata.version(name)
         for name in (
@@ -397,9 +451,8 @@ def _main() -> None:
     }
     manifest = {
         "reference_revision": RIGIDFORMER_REVISION,
-        "reference_dataset_sha256": hashlib.sha256(
-            (args.reference / "examples/box2d_dataset.py").read_bytes()
-        ).hexdigest(),
+        "reference_dataset_sha256": verified["examples/box2d_dataset.py"]["sha256"],
+        "verified_sources": verified,
         "device": args.device,
         "threads": args.threads,
         "versions": versions,
@@ -414,91 +467,129 @@ def _main() -> None:
     }
     _write(args.output / "manifest.json", manifest)
     summary: dict[str, Any] = {"passed": False, "modes": {}}
-    try:
-        for mode in args.modes:
-            collision = mode == "collision"
-            train = reference.Box2DDataset(
-                [reference.trajectory(seed, collision) for seed in range(64)], collision
-            )
-            validation = reference.Box2DDataset(
-                [reference.trajectory(seed, collision) for seed in range(1000, 1016)],
-                collision,
-            )
-            corpus_hash = _digest(
-                [
-                    value
-                    for row in (*train.trajectories, *validation.trajectories)
-                    for value in row
-                ]
-            )
-            paired: list[dict[str, Any]] = []
-            for seed in args.seeds:
-                output = args.output / mode / str(seed)
-                output.mkdir(parents=True)
-                np.random.seed(seed)
-                torch.manual_seed(seed)
-                parity = _step_parity(train, args.device)
-                _write(output / "step-parity.json", parity)
-                baseline = _fit(
-                    train,
-                    validation,
-                    seed=seed,
-                    collision=collision,
-                    steps=args.steps,
-                    device=args.device,
-                    use_sl=False,
-                    output=output,
-                )
-                candidate = _fit(
-                    train,
-                    validation,
-                    seed=seed,
-                    collision=collision,
-                    steps=args.steps,
-                    device=args.device,
-                    use_sl=True,
-                    output=output,
-                )
-                paired.append(
-                    {"reference": baseline, "candidate": candidate, "parity": parity}
-                )
-                _write(
-                    args.output / "progress.json",
-                    {
-                        "mode": mode,
-                        "completed_seeds": [row["reference"]["seed"] for row in paired],
-                    },
-                )
-            gates = {
-                key: _gate(
-                    [row["reference"][key] for row in paired],
-                    [row["candidate"][key] for row in paired],
-                )
-                for key in (
-                    "mean_rollout_endpoint_center_error_m",
-                    "mean_rollout_endpoint_point_error_m",
-                )
-            }
-            summary["modes"][mode] = {
-                "corpus_sha256": corpus_hash,
-                "gates": gates,
-                "step_parity_passed": all(row["parity"]["passed"] for row in paired),
-            }
-            _write(args.output / "summary.json", summary)
-        summary["passed"] = args.steps >= 1000 and all(
-            row["step_parity_passed"]
-            and all(gate["status"] == "passed" for gate in row["gates"].values())
-            for row in summary["modes"].values()
+    for mode in args.modes:
+        collision = mode == "collision"
+        train = reference.Box2DDataset(
+            [reference.trajectory(seed, collision) for seed in range(64)], collision
         )
+        validation = reference.Box2DDataset(
+            [reference.trajectory(seed, collision) for seed in range(1000, 1016)],
+            collision,
+        )
+        corpus_hash = _digest(
+            [
+                value
+                for row in (*train.trajectories, *validation.trajectories)
+                for value in row
+            ]
+        )
+        paired: list[dict[str, Any]] = []
+        for seed in args.seeds:
+            output = args.output / mode / str(seed)
+            output.mkdir(parents=True)
+            np.random.seed(seed)
+            torch.manual_seed(seed)
+            parity = _step_parity(train, args.device)
+            _write(output / "step-parity.json", parity)
+            baseline = _fit(
+                train,
+                validation,
+                seed=seed,
+                collision=collision,
+                steps=args.steps,
+                device=args.device,
+                use_sl=False,
+                output=output,
+            )
+            candidate = _fit(
+                train,
+                validation,
+                seed=seed,
+                collision=collision,
+                steps=args.steps,
+                device=args.device,
+                use_sl=True,
+                output=output,
+            )
+            paired.append(
+                {
+                    "reference": baseline,
+                    "candidate": candidate,
+                    "parity": parity,
+                    "loss_curve": _loss_curve_gate(
+                        baseline["losses"], candidate["losses"], steps=args.steps
+                    ),
+                }
+            )
+            _write(
+                args.output / "progress.json",
+                {
+                    "mode": mode,
+                    "completed_seeds": [row["reference"]["seed"] for row in paired],
+                },
+            )
+        gates = {
+            key: _gate(
+                [row["reference"][key] for row in paired],
+                [row["candidate"][key] for row in paired],
+            )
+            for key in (
+                "mean_rollout_endpoint_center_error_m",
+                "mean_rollout_endpoint_point_error_m",
+            )
+        }
+        summary["modes"][mode] = {
+            "corpus_sha256": corpus_hash,
+            "gates": gates,
+            "step_parity_passed": all(row["parity"]["passed"] for row in paired),
+            "loss_curves": {
+                str(row["reference"]["seed"]): row["loss_curve"] for row in paired
+            },
+        }
         _write(args.output / "summary.json", summary)
-    except Exception as exc:
+    summary["passed"] = args.steps >= 1000 and all(
+        row["step_parity_passed"]
+        and all(gate["passed"] for gate in row["loss_curves"].values())
+        and all(gate["status"] == "passed" for gate in row["gates"].values())
+        for row in summary["modes"].values()
+    )
+    _write(args.output / "summary.json", summary)
+    if not summary["passed"]:
+        raise SystemExit("Acceptance incomplete or failed; inspect summary.json")
+
+
+def _main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--reference", required=True, type=Path)
+    parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--steps", type=int, default=1000)
+    parser.add_argument("--seeds", type=int, nargs="+", default=list(range(42, 47)))
+    parser.add_argument(
+        "--modes",
+        choices=("friction", "collision"),
+        nargs="+",
+        default=["friction", "collision"],
+    )
+    parser.add_argument("--device", default="cpu")
+    parser.add_argument("--threads", type=int, default=4)
+    args = parser.parse_args()
+    if (
+        args.steps < 1
+        or args.threads < 1
+        or len(set(args.seeds)) != len(args.seeds)
+        or len(set(args.modes)) != len(args.modes)
+    ):
+        parser.error("Use positive steps/threads and distinct seeds/modes")
+    # Admission stays outside the failure guard: never write into an existing run.
+    args.output.mkdir(parents=True, exist_ok=False)
+    try:
+        _run(args)
+    except BaseException as exc:
         _write(
             args.output / "failure.json",
             {"type": type(exc).__name__, "message": str(exc)},
         )
         raise
-    if not summary["passed"]:
-        raise SystemExit("Acceptance incomplete or failed; inspect summary.json")
 
 
 if __name__ == "__main__":
