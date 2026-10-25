@@ -35,6 +35,12 @@ __all__ = [
     "FlexivRizon4SCfg",
     "URRobotCfg",
     "SO101FollowerCfg",
+    "UnitreeGo1Cfg",
+    "UnitreeGo2Cfg",
+    "UnitreeG1Cfg",
+    "UnitreeH12Cfg",
+    "ANYmalCCfg",
+    "MicroDuckCfg",
 ]
 
 _EXPORTS = {
@@ -47,6 +53,12 @@ _EXPORTS = {
     "FlexivRizon4SCfg": ".flexiv_rizon4s",
     "URRobotCfg": ".ur_robot",
     "SO101FollowerCfg": ".so101",
+    "UnitreeGo1Cfg": ".unitree_go1",
+    "UnitreeGo2Cfg": ".unitree_go2",
+    "UnitreeG1Cfg": ".unitree_g1",
+    "UnitreeH12Cfg": ".unitree_h1_2",
+    "ANYmalCCfg": ".anymal_c",
+    "MicroDuckCfg": ".microduck",
 }
 
 

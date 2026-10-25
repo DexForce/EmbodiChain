@@ -178,6 +178,7 @@ def main():
         package_data={
             "embodichain": ["VERSION"],
             "embodichain.data": ["default_materials.json"],
+            "embodichain_robots": ["_locomotion_profiles.json"],
             "embodichain_benchmarks.motion_generation": ["suites/*.yaml"],
             "embodichain.gen_sim.simready_pipeline.configs": ["*.json"],
             "embodichain_tasks.configs": [

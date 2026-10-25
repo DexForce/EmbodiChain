@@ -86,6 +86,7 @@ def test_main_distribution_stages_robot_package_without_legacy_modules(tmp_path)
         {
             "packages": packages,
             "package_dir": get_package_dir(),
+            "package_data": {"embodichain_robots": ["_locomotion_profiles.json"]},
             "script_name": "setup.py",
         }
     )
@@ -104,6 +105,15 @@ def test_main_distribution_stages_robot_package_without_legacy_modules(tmp_path)
         "embodichain_robots/so101.py",
         "embodichain_robots/dexforce_w1/cfg.py",
         "embodichain_robots/dexforce_w1/types.py",
+        "embodichain_robots/_locomotion.py",
+        "embodichain_robots/_locomotion_profiles.json",
+        "embodichain_robots/locomotion_profiles.py",
+        "embodichain_robots/unitree_go1.py",
+        "embodichain_robots/unitree_go2.py",
+        "embodichain_robots/unitree_g1.py",
+        "embodichain_robots/unitree_h1_2.py",
+        "embodichain_robots/anymal_c.py",
+        "embodichain_robots/microduck.py",
         "embodichain/lab/sim/robots/dual_arm.py",
         "embodichain/robot_registry.py",
     ):
@@ -115,3 +125,24 @@ def test_main_distribution_stages_robot_package_without_legacy_modules(tmp_path)
         "dual_arm.py",
     }
     assert not (legacy / "dexforce_w1").exists()
+
+    script = """
+import sys
+sys.path.insert(0, sys.argv[1])
+from embodichain_robots.locomotion_profiles import load_locomotion_robot_profile
+profile = load_locomotion_robot_profile('UnitreeGo2')
+assert profile['robot']['joint_names'][0] == 'FL_hip_joint'
+assert profile['robot']['stiffness'][0] == 20.0
+profile['robot']['stiffness'][0] = 999.0
+assert load_locomotion_robot_profile('UnitreeGo2')['robot']['stiffness'][0] == 20.0
+assert 'torch' not in sys.modules
+assert 'embodichain.lab.sim' not in sys.modules
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", script, str(output)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

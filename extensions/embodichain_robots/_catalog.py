@@ -30,6 +30,12 @@ _CONFIG_CLASSES = {
     "FlexivRizon4S": "embodichain_robots.flexiv_rizon4s:FlexivRizon4SCfg",
     "URRobot": "embodichain_robots.ur_robot:URRobotCfg",
     "SO101Follower": "embodichain_robots.so101:SO101FollowerCfg",
+    "UnitreeGo1": "embodichain_robots.unitree_go1:UnitreeGo1Cfg",
+    "UnitreeGo2": "embodichain_robots.unitree_go2:UnitreeGo2Cfg",
+    "UnitreeG1": "embodichain_robots.unitree_g1:UnitreeG1Cfg",
+    "UnitreeH1_2": "embodichain_robots.unitree_h1_2:UnitreeH12Cfg",
+    "ANYmalC": "embodichain_robots.anymal_c:ANYmalCCfg",
+    "MicroDuck": "embodichain_robots.microduck:MicroDuckCfg",
 }
 
 _DEFAULT_CONTROL_INFO = {
@@ -85,6 +91,12 @@ _DEFAULT_CONTROL_INFO = {
     "URRobot": {"dof": 6, "control_parts": {"arm": 6}},
     "SO101Follower": {"dof": 6, "control_parts": {"arm": 5, "eef": 1}},
     "FlexivRizon4S": {"dof": 7, "control_parts": {"arm": 7}},
+    "UnitreeGo1": {"dof": 12, "control_parts": {"locomotion": 12}},
+    "UnitreeGo2": {"dof": 12, "control_parts": {"locomotion": 12}},
+    "UnitreeG1": {"dof": 29, "control_parts": {"locomotion": 29}},
+    "UnitreeH1_2": {"dof": 27, "control_parts": {"locomotion": 27}},
+    "ANYmalC": {"dof": 12, "control_parts": {"locomotion": 12}},
+    "MicroDuck": {"dof": 14, "control_parts": {"locomotion": 14}},
 }
 
 _MIMIC_JOINTS = {

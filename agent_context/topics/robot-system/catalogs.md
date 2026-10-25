@@ -35,3 +35,23 @@ the passive follower remains in `mimic_joints` outside that group. The stock
 `resolve_robot_cfg(..., variant=...)` selects a declared profile's defaults
 between catalog defaults and caller overrides. Omitting the variant keeps
 existing construction behavior; `default_variant` remains display metadata.
+
+## Locomotion model profiles
+
+The locomotion catalog IDs are `UnitreeGo1`, `UnitreeGo2`, `UnitreeG1`,
+`UnitreeH1_2`, `ANYmalC` and `MicroDuck`. They select the bundled simulation
+assets, including the 29-joint G1 and 27-joint H1_2 models, through ordinary
+`RobotCfg` subclasses. Model descriptions and catalog listing remain independent
+of task imports and asset downloads. The main wheel includes
+`embodichain_robots/_locomotion_profiles.json`; keep its packaging coverage when
+changing the resource layout.
+
+`locomotion_profiles.load_locomotion_robot_profile()` shares asset, standing-pose,
+drive and reference-frame data without importing simulation backends. Velocity
+task contracts use the same model data while action scaling, observations,
+rewards and fall-contact rules stay task-owned. The presets use the generic
+`Robot`, retain the `locomotion` group and `build_pk_chain=False`, and expose no
+serial-chain IK solver. Task initialization does not reapply model drive defaults,
+so explicit Gym robot overrides survive. Keep source-ordered `asset.init_qpos`
+separate from `robot.joint_names` / `robot.default_joint_position`. These are
+simulation PD presets, without external learned actuator implementations.

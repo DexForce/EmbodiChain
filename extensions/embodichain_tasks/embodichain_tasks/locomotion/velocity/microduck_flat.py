@@ -55,8 +55,10 @@ class MicroDuckFlatEnv(EmbodiChainVelocityEnv):
     build_observations_fn = staticmethod(build_observations)
     compute_rewards_fn = staticmethod(compute_rewards)
     compute_termination_fn = staticmethod(compute_termination)
-    foot_link_names = ("ankle_left", "ankle_right")
-    foot_offsets = ((0.0, -0.0238146, -0.0140852), (0.0, -0.0238146, -0.0140852))
+    foot_link_names = tuple(_CONFIG.data["robot"]["frames"]["foot_link_names"])
+    foot_offsets = tuple(
+        tuple(offset) for offset in _CONFIG.data["robot"]["frames"]["foot_offsets"]
+    )
     # Every tracked link except the two feet: ground contact on any of these
     # (trunk, shins, neck/head, jaw) means the robot is dragging its body,
     # which the task treats as a fall. Without this the Newton backend learns
@@ -76,7 +78,7 @@ class MicroDuckFlatEnv(EmbodiChainVelocityEnv):
         "upper_leg_right",
         "leg_2",
     )
-    orientation_link_name = "trunk_base"
+    orientation_link_name = _CONFIG.data["robot"]["frames"]["orientation_link_name"]
 
     @staticmethod
     def corrupt_actor_fn(

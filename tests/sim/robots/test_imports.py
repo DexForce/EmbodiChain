@@ -52,6 +52,12 @@ _CONFIG_CLASSES = (
     "URRobotCfg",
     "DexforceW1Cfg",
     "SO101FollowerCfg",
+    "UnitreeGo1Cfg",
+    "UnitreeGo2Cfg",
+    "UnitreeG1Cfg",
+    "UnitreeH12Cfg",
+    "ANYmalCCfg",
+    "MicroDuckCfg",
 )
 
 
@@ -85,6 +91,7 @@ def test_concrete_robot_class_uses_canonical_package(class_name: str) -> None:
     "first_module",
     (
         "embodichain_robots._catalog",
+        "embodichain_robots.locomotion_profiles",
         "embodichain.robot_registry",
         "embodichain_robots.dexforce_w1.types",
         "embodichain.lab.sim.robots",
@@ -101,6 +108,7 @@ importlib.import_module(module)
 for name in (
     "aloha_mini", "tianji_marvin", "cobotmagic", "franka_panda", "ur_robot",
     "dexforce_w1.cfg", "so101", "flexiv_rizon4s",
+    "unitree_go1", "unitree_go2", "unitree_g1", "unitree_h1_2", "anymal_c", "microduck",
 ):
     assert "embodichain_robots." + name not in sys.modules, name
 if module.startswith("embodichain_robots") or module == "embodichain.robot_registry":

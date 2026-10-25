@@ -31,6 +31,13 @@ component ownership, path resolution, config-owned IDs, and task listing.
 Read [execution](execution.md) for hooks, bridge acceptance, reset ordering,
 wrappers, and replay. Read [profiling](profiling.md) only for instrumentation.
 
+Velocity locomotion deployments select catalog robot IDs in both backends.
+Their `contracts/_config.py` expands the task JSON's matching model selection
+using the backend-free robot profile reader. Task-specific actions, observations,
+rewards and contact termination rules remain in the task package; robot defaults
+and the distinct asset/contract joint orders are owned by
+[robot-system](../robot-system/robot-system.md).
+
 ## Launcher argument ownership
 
 `embodichain run-task` is the sole task execution command, dispatched to

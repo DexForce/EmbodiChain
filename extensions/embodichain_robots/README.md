@@ -18,6 +18,49 @@ remain in `embodichain.lab.sim`. Assets continue to use the core download/cache
 registry. Task deployments, sensor suites, and Task Program skill profiles keep
 their existing owners.
 
+## Locomotion defaults
+
+The catalog includes `UnitreeGo1`, `UnitreeGo2`, `UnitreeG1`, `UnitreeH1_2`,
+`ANYmalC` and `MicroDuck`. G1 selects the bundled 29-joint model; H1_2 selects
+the 27-joint model. Each preset owns its asset, floating base, standing pose,
+`locomotion` control group and default PD drive parameters. Both physics backends
+use the same model definition. These are the existing task simulation defaults,
+not manufacturer-verified hardware parameters or Isaac Lab actuator networks.
+
+![Six locomotion robot presets rendered with DexSim OfflineRT](../../docs/source/_static/robots/locomotion_offline_rt.png)
+
+DexSim OfflineRT (`rt`), 1 sample per pixel with DLSS denoising, shared preview
+lighting, tone mapping disabled and exposure 1. Models use their default joint
+poses and are framed independently; the preview does not show a common physical
+scale. Captured RGB has no additional gamma or color correction.
+
+```python
+from embodichain.robot_registry import resolve_robot_cfg
+
+cfg = resolve_robot_cfg("UnitreeGo2", {"uid": "robot"})
+robot = sim.add_robot(cfg=cfg)
+```
+
+```bash
+embodichain list-robot
+embodichain preview-robot --robot UnitreeGo2
+```
+
+Task deployments select `robot.class_type` and can explicitly override ordinary
+RobotCfg fields, including `joint_drive_props`. Task initialization preserves
+these overrides. Action scaling, observation layout, rewards and illegal-contact
+rules remain task-owned. Contact sensors remain environment-owned.
+
+The backend-free `locomotion_profiles.load_locomotion_robot_profile()` reader
+provides fresh copies of the packaged model description to both robot configs
+and pure Torch task contracts. `asset.init_qpos` follows source asset order;
+`robot.default_joint_position` follows `robot.joint_names`. Keep these orders
+distinct when modifying assets. Foot reference points and the orientation/IMU
+reference links are model data; their use in observations is task behavior.
+
+The presets retain `build_pk_chain=False` and do not provide limb IK solvers.
+New kinematic consumers need explicit limb control groups and validated chains.
+
 ## Tianji Marvin defaults
 
 Both Marvin variants start in the shared compact ready pose: lowered elbows

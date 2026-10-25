@@ -61,3 +61,10 @@ command reference and :doc:`/guides/robot_catalog` for variant selection.
 
 To add another model, follow :doc:`/guides/add_robot` and include its page in
 this catalog and toctree.
+
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Locomotion robots
+
+   locomotion

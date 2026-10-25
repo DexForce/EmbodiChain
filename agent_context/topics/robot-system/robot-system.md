@@ -7,6 +7,7 @@
 | Runtime control parts, FK/IK adaptation, joint ordering | `embodichain/lab/sim/objects/robot.py` → `Robot` |
 | Config decoding, construction hooks, backend alternatives | `embodichain/lab/sim/cfg/robot.py` → `RobotCfg`, `RobotPresetCfg` |
 | Available robot configs and variants | `extensions/embodichain_robots/_catalog.py`; `extensions/embodichain_robots/__init__.py` owns lazy exports |
+| Locomotion assets, standing poses, drives and reference frames | `extensions/embodichain_robots/locomotion_profiles.py`; `_locomotion_profiles.json` owns the shared model descriptions |
 | Shared Gym/CLI/dual-arm selection | `embodichain/robot_registry.py` → `list_robot_cfgs`, `resolve_robot_cfg` |
 | Robot listing CLI | `embodichain/cli/list_robot.py` → `embodichain list-robot` |
 | Generic robot preview and standalone RobotCfg files | `embodichain/lab/scripts/preview_robot.py` → `embodichain preview-robot` |
@@ -36,6 +37,10 @@ Selectors use exact registered IDs; aliases and `Cfg` suffixes are not accepted.
 An explicit `variant` applies profile defaults before caller overrides, while
 omission preserves existing construction behavior. See
 [catalog contracts](catalogs.md) for entry points, metadata and model profiles.
+
+Locomotion presets and pure Torch task contracts share backend-free model
+profiles. For source/contract joint ordering, drive ownership and solver limits,
+see [locomotion model profiles](catalogs.md#locomotion-model-profiles).
 
 `preview-robot` accepts a catalog ID or a standalone JSON/YAML RobotCfg file.
 File `class_type` optionally selects the catalog; local asset paths, including

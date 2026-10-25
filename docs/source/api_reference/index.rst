@@ -92,3 +92,10 @@ documentation. CI runs this same checker after style checks and before tests.
    :maxdepth: 2
 
    robot_catalogs
+
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Locomotion robots
+
+   locomotion_robots
