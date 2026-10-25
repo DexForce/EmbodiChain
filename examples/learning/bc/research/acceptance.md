@@ -147,7 +147,7 @@ returns `target_valid`. It binds a different source/recipe identity; cross-mode
 checkpoint recovery is rejected. Model, loss formula, normalization and formal
 acceptance thresholds are unchanged.
 
-## Pending candidate: one window-mode variable
+## Preregistered candidate: one window-mode variable
 
 The runnable configuration is
 [`tail-conditioning.candidate.yaml`](../configs/tail-conditioning.candidate.yaml).
@@ -170,10 +170,13 @@ start. It does not introduce a trainer or alter the formal acceptance driver.
 
 The exploratory gate is not the formal 18/20 then 80/100 acceptance protocol.
 No sealed test or original formal development panel is used. No checkpoint
-selection is allowed on this new auxiliary panel. Both prepare-only commands
-have built the actual recipes on CPU at **zero updates**. Their planned
-configurations differ only in output directory and the window flag. Training,
-held-panel evaluation and learning acceptance are **pending**.
+selection is allowed on this new auxiliary panel. The historical prepare-only
+commands built both recipes on CPU at **zero updates**. Their resolved
+configurations differed only in output directory and the window flag. Those
+zero-update files remain unchanged historical preparation records. The training
+and held-panel evaluation have since completed and failed the auxiliary gate;
+a next recipe remains pending. The original execution instructions below are
+retained as the preregistered protocol, not a request to repeat the stopped pair.
 
 From the repository root, prepare fresh outputs with:
 
@@ -203,3 +206,64 @@ later learning change requires a new single-variable protocol. Even a passing
 auxiliary pair would require a separately frozen review before broader formal
 evaluation. The failed original seeds, budgets, thresholds and test seal stay
 unchanged.
+
+
+## Completed tail-conditioning comparison: auxiliary gate failed
+
+The actual execution source remains
+`f881407ff2e8b0f233f816d52fabaea36e3b9226`. This subsequent documentation update
+records the result and does not change the source identity of the executed
+models or claim a rerun at the documentation revision.
+
+- Fixed configuration SHA256:
+  `58e943d5ecc37bc62549f4b0f7b0530cdd19e749dbb14b50b6e604a0e3333e73`.
+- Pre-execution manifest SHA256:
+  `789b73b8fafda35b6d4c542cc9382d9fdbd865aeca722f3693224c4087fb7e3b`.
+- Frozen preregistration Markdown SHA256: `e41cc76e7116d8a1b4eb7cc1b0dd3ce7e538307c50e652487cd6c0179136c93f`.
+  Its original bytes remain in the run's `protocol.md`; `protocol.yaml`, all
+  frozen inputs and the 43 indexed artifacts remain unchanged.
+
+Both arms used the same H32 execution, fixed 20k initialization checkpoint,
+original statistics, fresh AdamW and training seed `20298025`. Each completed
+exactly 2,000 new optimizer updates × batch64 (128,000 chunks). Both training
+arms finished before either final checkpoint was evaluated. Only each arm's
+`last.pt` was evaluated on the same four held auxiliary states (seed `20300025`);
+all eight episodes reached the 600-step limit. There was no intermediate
+checkpoint selection, seed change, retry or rule-based release/withdraw policy.
+
+| Window mode | New updates | Success | Lift | Mean final goal error | Last100 mean target MSE | Train seconds | Evaluation seconds |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Full control | 2,000 | 0/4 | 2/4 | 0.180703 m | 0.00019117 | 550.26 | 68.79 |
+| Partial | 2,000 | 0/4 | 3/4 | 0.099315 m | 0.00017464 | 555.22 | 72.29 |
+
+The partial arm had **zero paired success gain** and failed the predeclared
+≥3/4 successes plus gain ≥2 auxiliary gate. Lifting and mean goal error improved
+on this small pair, but neither arm achieved full physical task success.
+Training losses use different window/mask distributions and do not substitute
+for the task predicate. Valid target positions were 4,096,000 for control and
+3,975,986 for partial; all six input/target/ImageNet normalization buffers
+remained bitwise equal to initialization.
+
+Increasing terminal conditioning coverage from 0 to 256 anchors in the
+first-32 audit was a verified data precondition, not a sufficient explanation
+or solution for task success. The held traces still show intermittent
+release/withdraw geometry; the recorded necessary geometric conditions do not
+reconstruct every velocity/stability condition. No implementation bug was
+confirmed. A next recipe remains pending: first review action-increment
+signal-to-noise, phase transitions and the closed-loop state distribution,
+without proposing unvalidated model changes or expanding this stopped run.
+
+Execution completed in about 21 minutes. All four owned workers exited,
+environment close/flush completed, GPU4 returned to no compute processes, and
+source/input hashes matched the manifest. The historical prepare-only records
+still show zero updates with their original hashes. The original three-seed
+formal failures, budgets, thresholds and sealed test remain unchanged. These
+new same-H32 auxiliary arms must not be treated as a single-variable comparison
+against the original H8 formal results. Keep the PR draft and stop under the
+predeclared negative-result rule.
+
+The complete immutable run is under
+`/root/outputs/sl-convergence-20261026/bc/tail-conditioning-run-v1/`:
+`REPORT.md`, `summary.json`, `paired-results.json`, `manifest.json`,
+`artifact-sha256.json`, both `training/last.pt` files, complete metrics/logs,
+held step traces, `learning-curves.png` and `phase-traces.png`.

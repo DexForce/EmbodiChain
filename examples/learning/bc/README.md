@@ -6,6 +6,16 @@ The production model, objective and HDF5 reader do not import this task or any
 ODS example. The evaluation adapter reuses the original task measurements and
 success predicate; it never constructs an expert during student execution.
 
+Current status: the same-H32 tail-conditioning comparison completed 2,000 new
+updates per arm and evaluated only the final checkpoints on the same four held
+auxiliary states. Full control scored 0/4 successes (2/4 lifts, mean goal error
+0.180703 m); partial scored 0/4 (3/4 lifts, 0.099315 m). The predeclared ≥3/4
+successes plus paired gain ≥2 gate failed. Keep the PR draft; the original
+three-seed formal failures and sealed test remain unchanged. Execution source
+is `f881407ff2e8b0f233f816d52fabaea36e3b9226`; this documentation update does
+not relabel the execution source. See the [actual results and preserved
+preregistration](research/acceptance.md). A next recipe remains pending.
+
 ## Numerical migration
 
 From the repository root in `py311`:
@@ -126,8 +136,11 @@ The reader's explicit `include_partial_targets=False` default preserves the
 frozen full-future sampling/view. Generic recipes may opt in to complete-history
 tail conditioning, finite zero right padding and `target_valid` masks; the
 source/recipe identity changes. The formal driver continues using the default.
-The pending [tail-conditioning candidate](configs/tail-conditioning.candidate.yaml)
-uses a private `window-candidate` host adapter that passes geometry targets to
-the installable generic recipe. Its `--prepare-only` command constructs both
-arms on CPU without fitting; `--train` is an explicit separate operation. See
-the [predeclared protocol](research/acceptance.md) before running either arm.
+The [tail-conditioning configuration](configs/tail-conditioning.candidate.yaml)
+and its private `window-candidate` adapter are preserved from the completed
+comparison. Historical `--prepare-only` reports remain unchanged at zero
+updates; actual training and held evaluation now have separate immutable
+records. The paired run stopped after failing its auxiliary gate. Coverage of
+terminal conditioning alone did not produce task success. Review the [result
+and stop rule](research/acceptance.md) before considering a separately declared
+next recipe; do not repeat or enlarge this run.
