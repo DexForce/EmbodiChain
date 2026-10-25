@@ -184,6 +184,14 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Add the prepared Rizon4S CUDA RR backend to the selected CUDA workload.",
     )
+    parser.add_argument(
+        "--ssik-rr-search", choices=("fixed", "seed_local"), default="fixed"
+    )
+    parser.add_argument(
+        "--ssik-robot-e2e",
+        action="store_true",
+        help="Also measure real Robot.compute_ik in isolated engine-backed workers.",
+    )
     return parser.parse_args()
 
 
@@ -268,7 +276,11 @@ def _build_leaderboard_rows(
         is_ssik = row.get("component") == "ssik_ik"
         if is_ssik:
             impl += ":" + str(row["model"])
-            if row.get("scenario") in ("unreachable", "streaming_control"):
+            if row.get("scenario") in (
+                "unreachable",
+                "streaming_control",
+                "robot_streaming_control",
+            ):
                 continue
         if impl not in aggregate:
             aggregate[impl] = {
@@ -1673,6 +1685,8 @@ if __name__ == "__main__":
             geometry_mode=args.ssik_geometry_mode,
             axis_alignment_tolerance=args.ssik_axis_alignment_tolerance,
             srs_search=args.ssik_srs_search,
+            rr_search=args.ssik_rr_search,
+            robot_e2e=args.ssik_robot_e2e,
             cuda_rr=args.ssik_cuda_rr,
         ),
     )

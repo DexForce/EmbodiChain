@@ -37,6 +37,7 @@ import os
 from pathlib import Path
 import platform
 import subprocess
+import sys
 import time
 from typing import Any
 import xml.etree.ElementTree as ET
@@ -88,7 +89,9 @@ class SSIKBenchmarkOptions:
     geometry_mode: str = "strict"
     axis_alignment_tolerance: float = 1e-5
     srs_search: str = "uniform"
+    rr_search: str = "fixed"
     cuda_rr: bool = False
+    robot_e2e: bool = False
 
 
 @dataclass
@@ -504,6 +507,74 @@ def _measure_streaming_control(
     return _ControlMeasurement(latency, samples, valid, qpos)
 
 
+def _worker_json_value(value: Any) -> Any:
+    """Preserve numerical configuration values when writing a worker spec."""
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    raise TypeError(
+        f"Unsupported Robot worker configuration value: {type(value).__name__}"
+    )
+
+
+def _measure_robot_interface(
+    model: _Model,
+    solver: Any,
+    device: torch.device,
+    directory: Path,
+    options: SSIKBenchmarkOptions,
+    partner: tuple[_Model, Any] | None = None,
+) -> dict[str, Any]:
+    """Measure a real engine-backed Robot in an isolated worker process."""
+    name = model.name if partner is None else model.name.removesuffix("left") + "pair"
+    stem = f"{name}_{solver.cfg.backend}_{device.type}_robot_e2e"
+    spec_path, output = directory / f"{stem}_spec.json", directory / f"{stem}.json"
+    spec = {
+        "model": model.name,
+        "solver_cfg": solver.cfg.to_dict(),
+        "device": str(device),
+        "cpu_threads": options.cpu_threads,
+        "fixture": str((directory / f"{model.name}.npz").resolve()),
+        "repeats": 3 if options.smoke else 10000,
+        "warmup": 20,
+    }
+    if partner is not None:
+        other_model, other_solver = partner
+        spec["partner"] = {
+            "model": other_model.name,
+            "solver_cfg": other_solver.cfg.to_dict(),
+            "fixture": str((directory / f"{other_model.name}.npz").resolve()),
+        }
+    spec_path.write_text(json.dumps(spec, indent=2, default=_worker_json_value) + "\n")
+    repository = Path(__file__).resolve().parents[4]
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "scripts.benchmark.robotics.kinematic_solver._ssik_robot_e2e",
+            "--spec",
+            str(spec_path.resolve()),
+            "--output",
+            str(output.resolve()),
+        ],
+        cwd=repository,
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    log = directory / f"{stem}.log"
+    log.write_text(completed.stdout + completed.stderr)
+    if completed.returncode or not output.is_file():
+        raise RuntimeError(f"Robot end-to-end worker failed; inspect {log}")
+    result = json.loads(output.read_text())
+    if result.get("status") not in ("completed", "unavailable"):
+        raise RuntimeError(
+            f"Robot end-to-end worker returned an invalid status: {output}"
+        )
+    return result
+
+
 def _throughput(
     operation: Callable[[], Any], device: torch.device, count: int, repeats: int
 ) -> float:
@@ -546,7 +617,7 @@ def _memory(
     tensors = getattr(buffers, "arrays", {}) if buffers is not None else {}
     numerical_workspaces = [
         getattr(getattr(solver, name, None), "_workspace", {})
-        for name in ("_near", "_rr")
+        for name in ("_near", "_rr", "_geometric")
     ]
     seen: set[int] = set()
     scratch = 0
@@ -655,6 +726,7 @@ def _make_solver(
             **common,
             **geometry,
             backend=backend,
+            rr_search=selected.rr_search if backend == "cuda_rr" else "fixed",
             num_samples=128,
             chunk_size=512,
             position_tolerance=1e-5,
@@ -728,11 +800,17 @@ def _evaluate_trajectories(
                 )
                 seeds = previous.expand(len(block), -1)
                 torch.manual_seed(2531 + offset)
-                target_aware = getattr(solver.cfg, "backend", None) == "warp" and (
-                    getattr(solver, "family", None) == "near_parallel"
-                    or (
-                        getattr(solver.cfg, "srs_search", "uniform") == "seed_local"
-                        and getattr(solver, "family", None) == "srs"
+                target_aware = (
+                    getattr(solver.cfg, "backend", None) == "cuda_rr"
+                    and getattr(solver.cfg, "rr_search", "fixed") == "seed_local"
+                ) or (
+                    getattr(solver.cfg, "backend", None) == "warp"
+                    and (
+                        getattr(solver, "family", None) == "near_parallel"
+                        or (
+                            getattr(solver.cfg, "srs_search", "uniform") == "seed_local"
+                            and getattr(solver, "family", None) == "srs"
+                        )
                     )
                 )
                 if target_aware:
@@ -838,23 +916,37 @@ def _versions() -> dict[str, Any]:
     repository = Path(__file__).resolve().parents[4]
     sources = (
         "embodichain/compute/kinematics/_ssik_model.py",
+        "embodichain/compute/kinematics/_ssik_geometric.py",
         "embodichain/compute/kinematics/_ssik_near.py",
         "embodichain/compute/kinematics/_ssik_rr.py",
+        "embodichain/compute/kinematics/_ssik_rr_parametric.py",
         "embodichain/compute/kinematics/_warp/ssik.py",
         "embodichain/compute/kinematics/_warp/ssik_6r.py",
         "embodichain/compute/kinematics/_warp/ssik_7r.py",
         "embodichain/compute/kinematics/_warp/ssik_near.py",
         "embodichain/compute/kinematics/_warp/ssik_rr.py",
         "embodichain/compute/kinematics/_warp/ssik_rr_cuda.py",
+        "embodichain/compute/kinematics/_warp/ssik_rr_parametric.py",
+        "embodichain/compute/kinematics/_warp/ssik_rr_parametric_cuda.py",
         "embodichain/compute/kinematics/_warp/ssik_srs_path.py",
         "embodichain/compute/kinematics/_warp/ssik_srs_search.py",
+        "embodichain/compute/kinematics/_warp/ssik_legacy.py",
+        "embodichain/compute/kinematics/_warp/ssik_strict_6r.py",
+        "embodichain/compute/kinematics/_warp/ssik_srs_geometry.py",
+        "embodichain/compute/kinematics/_warp/ssik_srs_optimize.py",
+        "embodichain/compute/kinematics/_warp/ssik_srs_parallel.py",
         "embodichain/compute/kinematics/_warp/data/ssik_rr_rizon4.npz",
         "embodichain/compute/kinematics/_warp/data/ssik_rr_rizon4.json",
+        "embodichain/compute/kinematics/_warp/data/ssik_rr_rizon4_parametric.npz",
+        "embodichain/compute/kinematics/_warp/data/ssik_rr_rizon4_parametric.json",
         "embodichain/lab/sim/motion/solvers/ssik_solver.py",
+        "embodichain/lab/sim/motion/solvers/base_solver.py",
+        "embodichain/lab/sim/objects/robot.py",
         "embodichain/lab/sim/motion/solvers/_ssik_reference.py",
         "scripts/benchmark/robotics/kinematic_solver/ssik_benchmark.py",
         "scripts/benchmark/robotics/kinematic_solver/run_benchmark.py",
         "scripts/benchmark/robotics/kinematic_solver/prepare_ssik_rr_rizon4.py",
+        "scripts/benchmark/robotics/kinematic_solver/_ssik_robot_e2e.py",
     )
     result["source_sha256"] = {
         name: (
@@ -918,6 +1010,18 @@ def _versions() -> dict[str, Any]:
     return result
 
 
+def _implementation_name(
+    backend: str, device: str, options: SSIKBenchmarkOptions
+) -> str:
+    """Keep fixed RR records compatible while distinguishing adaptive search."""
+    suffix = (
+        "_seed_local"
+        if backend == "cuda_rr" and options.rr_search == "seed_local"
+        else ""
+    )
+    return f"ssik_{backend}{suffix}_{device}"
+
+
 def _gate_notes(
     perf: list[dict[str, Any]],
     metrics: list[dict[str, Any]],
@@ -926,7 +1030,12 @@ def _gate_notes(
     notes = []
     for model in options.models:
         for device in options.devices:
-            backend = f"ssik_warp_{device}"
+            selected_backend = (
+                "cuda_rr"
+                if options.cuda_rr and model == "flexiv_rizon4s" and device == "cuda"
+                else "warp"
+            )
+            backend = _implementation_name(selected_backend, device, options)
             quality = {
                 row["scenario"]: row
                 for row in metrics
@@ -987,6 +1096,49 @@ def _gate_notes(
             notes.append(
                 f"Single-arm continuous-control latency gate {model}/{device}: {control_status}."
             )
+            if options.robot_e2e:
+                robot = next(
+                    (
+                        row
+                        for row in perf
+                        if row.get("model") == model
+                        and row["impl"] == backend
+                        and row.get("scope") == "robot_streaming_control"
+                    ),
+                    None,
+                )
+                if robot is None or robot["repeats"] < 10000:
+                    robot_status = "UNVALIDATED (requires 10,000 real Robot calls)"
+                elif (
+                    control is None
+                    or control["repeats"] < 10000
+                    or any(
+                        "validated_success_rate" not in row for row in (robot, control)
+                    )
+                ):
+                    robot_status = "UNVALIDATED (requires validated coverage for matching standalone streaming calls)"
+                else:
+                    passed = robot["p99_ms"] <= 5.0 and not any(
+                        robot.get(key, 0)
+                        for key in (
+                            "false_successes",
+                            "step_violations",
+                            "failed_hold_violations",
+                        )
+                    )
+                    coverage = (
+                        robot["validated_success_rate"]
+                        >= control["validated_success_rate"]
+                    )
+                    robot_status = (
+                        f"{'PASS' if passed and coverage else 'FAIL'} "
+                        f"(p99 {robot['p99_ms']:.4f} ms; validated coverage "
+                        f"{robot['validated_success_rate']:.4%}, standalone "
+                        f"{control['validated_success_rate']:.4%})"
+                    )
+                notes.append(
+                    f"Robot end-to-end control gate {model}/{device}: {robot_status}."
+                )
             if len(quality) == 5:
                 passed = (
                     quality["wide"]["success_rate"] >= 0.999
@@ -1100,6 +1252,41 @@ def _gate_notes(
             notes.append(
                 f"Paired continuous-control latency gate {family}pair/{device}: {status}."
             )
+            if options.robot_e2e:
+                robot = next(
+                    (
+                        row
+                        for row in perf
+                        if row.get("model") == family + "pair"
+                        and row["impl"] == f"ssik_warp_{device}"
+                        and row.get("scope") == "robot_paired_streaming_control"
+                    ),
+                    None,
+                )
+                if options.smoke or any(
+                    row is None or row["repeats"] < 10000 for row in (robot, pair)
+                ):
+                    status = "UNVALIDATED (requires matching 10,000 paired Robot and standalone calls)"
+                elif any("validated_success_rate" not in row for row in (robot, pair)):
+                    status = "UNVALIDATED (missing paired validated coverage)"
+                else:
+                    passed = robot["p99_ms"] <= 8.0 and not any(
+                        robot.get(key, 0)
+                        for key in (
+                            "false_successes",
+                            "step_violations",
+                            "failed_hold_violations",
+                        )
+                    )
+                    passed = (
+                        passed
+                        and robot["validated_success_rate"]
+                        >= pair["validated_success_rate"]
+                    )
+                    status = f"{'PASS' if passed else 'FAIL'} (p99 {robot['p99_ms']:.4f} ms; coverage {robot['validated_success_rate']:.4%}, standalone {pair['validated_success_rate']:.4%})"
+                notes.append(
+                    f"Paired Robot end-to-end control gate {family}pair/{device}: {status}."
+                )
     return notes
 
 
@@ -1130,6 +1317,10 @@ def _benchmark_ssik_solver(
         raise ValueError("SSIK axis alignment tolerance must be in (0, 1e-3]")
     if options.srs_search not in ("uniform", "seed_local"):
         raise ValueError("SSIK SRS search must be uniform or seed_local")
+    if options.rr_search not in ("fixed", "seed_local"):
+        raise ValueError("SSIK RR search must be fixed or seed_local")
+    if options.rr_search != "fixed" and not options.cuda_rr:
+        raise ValueError("--ssik-rr-search seed_local requires --ssik-cuda-rr")
     if options.cuda_rr and (
         "flexiv_rizon4s" not in options.models or "cuda" not in options.devices
     ):
@@ -1160,6 +1351,8 @@ def _benchmark_ssik_solver(
         )
     if options.quality_only and options.timing_only:
         raise ValueError("quality_only and timing_only are mutually exclusive")
+    if options.robot_e2e and options.quality_only:
+        raise ValueError("--ssik-robot-e2e requires timing measurements")
     if options.batch_sizes is not None and any(
         count not in (1, 8, 100, 1000, 10000) for count in options.batch_sizes
     ):
@@ -1181,6 +1374,8 @@ def _benchmark_ssik_solver(
         "geometry_mode": options.geometry_mode,
         "axis_alignment_tolerance": options.axis_alignment_tolerance,
         "srs_search": options.srs_search,
+        "rr_search": options.rr_search,
+        "robot_e2e": options.robot_e2e,
         "cuda_rr": options.cuda_rr,
     }
     versions["reference_artifacts"] = {
@@ -1216,7 +1411,7 @@ def _benchmark_ssik_solver(
         "SSIK leaderboard entries retain model identity, weight standard reachable/trajectory success by attempted count, and exclude deliberately unreachable controls and the separate streaming-control certificate. Timing-only algorithms remain listed as UNMEASURED rather than receiving fabricated success scores. Rankings across different robot models do not establish unconditional algorithm superiority.",
         "Reference adapter uses its documented rescue policy; upstream default-rescue comparison is not measured by this harness and remains unvalidated.",
         "The upstream ssik logger is temporarily set to WARNING during this benchmark and restored afterward; candidate trace logging is excluded from the measured reference scope.",
-        "Explicit near_parallel mode always evaluates eight analytical surrogate slots and one original-seed initialization, with bounded original-model polishing on the selected device. These nine candidates are not a pure closed-form solution or complete enumeration of general 6R roots. CUDA RR evaluates only its prepared finite locked-joint grid, without a CPU or numerical fallback.",
+        "Explicit near_parallel mode always evaluates eight analytical surrogate slots and one original-seed initialization, with bounded original-model polishing on the selected device. These nine candidates are not a pure closed-form solution or complete enumeration of general 6R roots. Fixed CUDA RR evaluates16 prepared joint-lock charts (384 slots). RR seed_local reevaluates one parameterized coefficient system at16 global and9 local lock angles (600 slots); two local angles are scalar tangent predictions, while every returned joint solution remains an algebraic RR root. Neither RR mode invokes CPU solving or a numerical IK fallback.",
     ]
     raw_timings: dict[str, list[float]] = {}
     solvers_for_pairs: dict[
@@ -1272,7 +1467,7 @@ def _benchmark_ssik_solver(
                         f"Skipped {model_name}/reference: missing artifact source or adjacent manifest at {artifact}. Explicitly build a matching offline artifact, then pass --ssik-reference-artifacts {model_name}=PATH."
                     )
                     continue
-                impl = f"ssik_{backend}_{device.type}"
+                impl = _implementation_name(backend, device.type, options)
                 common = {"model": model_name, "impl": impl, "component": "ssik_ik"}
                 print(
                     f"SSIK {model_name}/{backend}/{device.type}: building", flush=True
@@ -1473,6 +1668,39 @@ def _benchmark_ssik_solver(
                         f"  n={count}: resident median={resident_median_ms:.3f} ms",
                         flush=True,
                     )
+                if options.robot_e2e and backend in ("warp", "cuda_rr"):
+                    print(f"  real Robot end-to-end: {model_name}/{impl}", flush=True)
+                    robot_result = _measure_robot_interface(
+                        model, solver, device, directory, options
+                    )
+                    if robot_result["status"] == "unavailable":
+                        notes.append(
+                            f"Robot end-to-end {model_name}/{impl}: UNMEASURED "
+                            f"(engine setup unavailable: {robot_result['reason']})."
+                        )
+                    else:
+                        robot_quality = robot_result["quality"]
+                        perf.append(
+                            {
+                                **common,
+                                "scope": "robot_streaming_control",
+                                "sample_size": 1,
+                                **robot_result["latency"],
+                                "false_successes": robot_quality["false_successes"],
+                                "validated_success_rate": robot_quality["success_rate"],
+                                "step_violations": robot_quality["step_violations"],
+                                "failed_hold_violations": robot_quality[
+                                    "failed_hold_violations"
+                                ],
+                            }
+                        )
+                        metrics.append(
+                            {
+                                **common,
+                                "scenario": "robot_streaming_control",
+                                **robot_quality,
+                            }
+                        )
     for model_name, impl in list(solvers_for_pairs):
         if not model_name.endswith("left"):
             continue
@@ -1518,6 +1746,11 @@ def _benchmark_ssik_solver(
                 "scope": "paired_streaming_control",
                 **control.latency,
                 "false_successes": sum(row["false_successes"] for row in pair_quality),
+                "validated_success_rate": (
+                    control.latency["both_reported_success_rate"]
+                    if not any(row["false_successes"] for row in pair_quality)
+                    else 0.0
+                ),
                 "latency_gate": (
                     "unvalidated: smoke"
                     if options.smoke
@@ -1538,6 +1771,41 @@ def _benchmark_ssik_solver(
             left_reported=control.valid[0].numpy(),
             right_reported=control.valid[1].numpy(),
         )
+        if options.robot_e2e:
+            robot_result = _measure_robot_interface(
+                left_model,
+                first,
+                device,
+                directory,
+                options,
+                partner=(right_model, second),
+            )
+            if robot_result["status"] == "unavailable":
+                notes.append(
+                    f"Paired Robot end-to-end {model_name}/{impl}: UNMEASURED "
+                    f"(engine setup unavailable: {robot_result['reason']})."
+                )
+            else:
+                quality = robot_result["quality"]
+                perf.append(
+                    {
+                        "model": model_name.removesuffix("left") + "pair",
+                        "impl": impl,
+                        "component": "ssik_ik",
+                        "sample_size": 2,
+                        "scope": "robot_paired_streaming_control",
+                        **robot_result["latency"],
+                        "validated_success_rate": quality["success_rate"],
+                        **{
+                            key: quality[key]
+                            for key in (
+                                "false_successes",
+                                "step_violations",
+                                "failed_hold_violations",
+                            )
+                        },
+                    }
+                )
     notes.extend(_gate_notes(perf, metrics, options))
     (directory / "timings.json").write_text(json.dumps(raw_timings) + "\n")
     (directory / "measurements.json").write_text(

@@ -19,11 +19,13 @@
 from __future__ import annotations
 
 import logging
+import json
 from pathlib import Path
 import sys
 from types import SimpleNamespace
 
 import pytest
+import numpy as np
 import torch
 
 from scripts.benchmark.robotics.kinematic_solver.ssik_benchmark import (
@@ -112,6 +114,81 @@ def test_fixed_pose_samples_cannot_certify_continuous_control() -> None:
     notes = _gate_notes([{**streamed, "false_successes": 1}], [], options)
     control = [note for note in notes if "continuous-control latency gate" in note]
     assert "FAIL" in control[0]
+
+
+@pytest.mark.parametrize("rr_search", ["fixed", "seed_local"])
+def test_real_robot_gate_uses_selected_rr_backend_and_quality(
+    rr_search: str,
+) -> None:
+    options = SSIKBenchmarkOptions(
+        models=("flexiv_rizon4s",),
+        devices=("cuda",),
+        cuda_rr=True,
+        rr_search=rr_search,
+        robot_e2e=True,
+    )
+    suffix = "_seed_local" if rr_search == "seed_local" else ""
+    record = {
+        "model": "flexiv_rizon4s",
+        "impl": f"ssik_cuda_rr{suffix}_cuda",
+        "scope": "robot_streaming_control",
+        "sample_size": 1,
+        "repeats": 10000,
+        "p99_ms": 1.0,
+        "validated_success_rate": 0.95,
+    }
+    standalone = {**record, "scope": "streaming_control"}
+
+    def gate(rows: list[dict]) -> str:
+        return next(
+            note
+            for note in _gate_notes(rows, [], options)
+            if "Robot end-to-end control gate" in note
+        )
+
+    assert "UNVALIDATED" in gate([])
+    assert "UNVALIDATED" in gate([{**record, "repeats": 3}])
+    assert "UNVALIDATED" in gate([record])
+    assert "PASS" in gate([record, standalone])
+    for key in ("false_successes", "step_violations", "failed_hold_violations"):
+        assert "FAIL" in gate([{**record, key: 1}, standalone])
+    assert "FAIL" in gate([{**record, "p99_ms": 5.01}, standalone])
+    assert "FAIL" in gate([{**record, "validated_success_rate": 0.0}, standalone])
+
+
+def test_paired_robot_gate_requires_coverage_and_uses_eight_ms_bound() -> None:
+    options = SSIKBenchmarkOptions(
+        models=("aloha_left", "aloha_right"),
+        devices=("cpu",),
+        robot_e2e=True,
+    )
+    record = {
+        "model": "aloha_pair",
+        "impl": "ssik_warp_cpu",
+        "scope": "robot_paired_streaming_control",
+        "repeats": 10000,
+        "p99_ms": 7.9,
+        "validated_success_rate": 1.0,
+    }
+    standalone = {**record, "scope": "paired_streaming_control"}
+
+    def gate(rows: list[dict]) -> str:
+        return next(
+            note
+            for note in _gate_notes(rows, [], options)
+            if "Paired Robot end-to-end control gate" in note
+        )
+
+    assert "UNVALIDATED" in gate([record])
+    assert "PASS" in gate([record, standalone])
+    for change in (
+        {"p99_ms": 8.01},
+        {"validated_success_rate": 0.0},
+        {"step_violations": 1},
+        {"failed_hold_violations": 1},
+        {"false_successes": 1},
+    ):
+        assert "FAIL" in gate([{**record, **change}, standalone])
 
 
 @pytest.mark.parametrize("arm_count", [1, 2])
@@ -280,7 +357,20 @@ def test_explicit_cuda_rr_cannot_silently_skip_an_unsupported_workload(
         )
 
 
-def test_seed_local_continuity_uses_the_public_path_hook() -> None:
+@pytest.mark.parametrize(
+    ("backend", "family", "srs_search", "rr_search"),
+    [
+        ("warp", "srs", "seed_local", "fixed"),
+        ("warp", "near_parallel", "uniform", "fixed"),
+        ("cuda_rr", "unsupported", "uniform", "seed_local"),
+    ],
+)
+def test_seed_local_continuity_uses_the_public_path_hook(
+    backend: str,
+    family: str,
+    srs_search: str,
+    rr_search: str,
+) -> None:
     joints = torch.tensor([[0.01, 0.0], [0.02, 0.0], [0.03, 0.0]])
     targets = _planar_fk(joints)
     called = []
@@ -295,9 +385,12 @@ def test_seed_local_continuity_uses_the_public_path_hook() -> None:
 
     solver = SimpleNamespace(
         cfg=SimpleNamespace(
-            max_joint_step=None, backend="warp", srs_search="seed_local"
+            max_joint_step=None,
+            backend=backend,
+            srs_search=srs_search,
+            rr_search=rr_search,
         ),
-        family="srs",
+        family=family,
         _get_continuous_ik_path=path_hook,
         _get_continuous_ik_candidates=no_fixed_seed_candidates,
     )
@@ -312,14 +405,21 @@ def test_seed_local_continuity_uses_the_public_path_hook() -> None:
     assert solver.cfg.max_joint_step is None
 
 
-def test_memory_attribution_includes_borrowed_numerical_workspace_once() -> None:
+@pytest.mark.parametrize("provider", ["_near", "_rr", "_geometric"])
+def test_memory_attribution_includes_borrowed_numerical_workspace_once(
+    provider: str,
+) -> None:
     normal = torch.empty(64, dtype=torch.float64)
     flags = torch.empty(32, dtype=torch.int32)
     solver = SimpleNamespace(
         cfg=SimpleNamespace(class_type="SSIKSolver", backend="warp"),
         dof=6,
         _ik_buffers=SimpleNamespace(arrays={"flags": flags}),
-        _near=SimpleNamespace(_workspace={"normal": normal, "alias": normal}),
+    )
+    setattr(
+        solver,
+        provider,
+        SimpleNamespace(_workspace={"normal": normal, "alias": normal}),
     )
     result = _memory(
         lambda: (torch.ones(1, dtype=torch.bool), torch.zeros(1, 6)),
@@ -329,3 +429,70 @@ def test_memory_attribution_includes_borrowed_numerical_workspace_once() -> None
     # One 64-double numerical workspace plus32 flags, regardless of aliasing.
     assert result["solver_buffer_mb"] == (512 + 128) / 2**20
     assert result["tensor_scratch_gate"] == "PASS"
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        SSIKBenchmarkOptions(rr_search="seed_local"),
+        SSIKBenchmarkOptions(robot_e2e=True, quality_only=True),
+    ],
+)
+def test_invalid_optional_scopes_reject_before_runtime_setup(
+    monkeypatch: pytest.MonkeyPatch,
+    options: SSIKBenchmarkOptions,
+) -> None:
+    monkeypatch.setitem(
+        sys.modules,
+        "warp",
+        SimpleNamespace(init=lambda: pytest.fail("Runtime must not initialize")),
+    )
+    with pytest.raises(ValueError, match="requires"):
+        benchmark_ssik_solver(options)
+
+
+@pytest.mark.parametrize("paired", [False, True])
+def test_real_robot_worker_serializes_numpy_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    paired: bool,
+) -> None:
+    from scripts.benchmark.robotics.kinematic_solver import ssik_benchmark as module
+
+    captured = {}
+
+    def run_worker(command: list[str], **kwargs: object):
+        spec = Path(command[command.index("--spec") + 1])
+        captured.update(json.loads(spec.read_text()))
+        output = Path(command[command.index("--output") + 1])
+        output.write_text(json.dumps({"status": "completed"}))
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(module.subprocess, "run", run_worker)
+    cfg = SimpleNamespace(
+        backend="warp",
+        to_dict=lambda: {
+            "tcp": np.eye(4),
+            "ik_nearest_weight": np.ones(6, dtype=np.float32),
+        },
+    )
+    result = module._measure_robot_interface(
+        SimpleNamespace(name="aloha_left"),
+        SimpleNamespace(cfg=cfg),
+        torch.device("cpu"),
+        tmp_path,
+        SSIKBenchmarkOptions(smoke=True),
+        partner=(
+            (SimpleNamespace(name="aloha_right"), SimpleNamespace(cfg=cfg))
+            if paired
+            else None
+        ),
+    )
+    assert result["status"] == "completed"
+    assert captured["solver_cfg"]["tcp"] == np.eye(4).tolist()
+    assert captured["solver_cfg"]["ik_nearest_weight"] == [1.0] * 6
+    assert captured["repeats"] == 3 and captured["warmup"] == 20
+    assert ("partner" in captured) == paired
+    if paired:
+        assert captured["partner"]["model"] == "aloha_right"
+        assert captured["partner"]["solver_cfg"]["tcp"] == np.eye(4).tolist()

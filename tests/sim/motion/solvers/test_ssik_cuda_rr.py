@@ -24,7 +24,7 @@ import numpy as np
 import pytest
 import torch
 
-from embodichain.lab.sim.motion.solvers import SSIKSolverCfg
+from embodichain.lab.sim.motion.solvers import SSIKSolverCfg, SolverCfg
 from embodichain_robots import FlexivRizon4SCfg
 
 
@@ -72,13 +72,32 @@ def test_cuda_rr_rejects_cpu_device_before_loading_optional_reference() -> None:
         SSIKSolverCfg(backend="cuda_rr").init_solver("cpu")
 
 
+@pytest.mark.parametrize("search", ["fixed", "seed_local"])
+def test_cuda_rr_search_configuration_round_trips_without_loading_gpu(
+    search: str,
+) -> None:
+    cfg = SSIKSolverCfg(backend="cuda_rr", rr_search=search)
+    restored = SolverCfg.from_dict(cfg.to_dict())
+    assert isinstance(restored, SSIKSolverCfg)
+    assert restored.backend == "cuda_rr" and restored.rr_search == search
+    assert SSIKSolverCfg().rr_search == "fixed"
+
+
+@pytest.mark.parametrize("backend", ["warp", "reference"])
+def test_rr_seed_local_requires_the_explicit_cuda_rr_backend(backend: str) -> None:
+    with pytest.raises(ValueError, match="rr_search"):
+        SSIKSolverCfg(backend=backend, rr_search="seed_local")
+
+
 @pytest.mark.gpu
+@pytest.mark.parametrize("search", ["fixed", "seed_local"])
 def test_cuda_rr_original_urdf_tcp_all_candidates_and_failure_hold(
     monkeypatch: pytest.MonkeyPatch,
+    search: str,
 ) -> None:
     # CUDA preparation and solve must work without the optional reference.
     monkeypatch.setitem(sys.modules, "ssik", None)
-    solver = _make_solver()
+    solver = _make_solver(rr_search=search)
     source = torch.tensor(
         [[0.2, 0.4, -0.7, 1.2, 0.6, 0.8, -1.0], [-0.5, -0.3, 1.1, -0.6, 0.7, 1.0, 0.2]],
         device="cuda",
@@ -92,7 +111,8 @@ def test_cuda_rr_original_urdf_tcp_all_candidates_and_failure_hold(
     ).all()
     snapshot = result.clone()
     mask, candidates = solver.get_ik(target[:1], source[:1], return_all_solutions=True)
-    assert mask.shape == (1, 384) and candidates.shape == (1, 384, 7)
+    slots = 384 if search == "fixed" else 600
+    assert mask.shape == (1, slots) and candidates.shape == (1, slots, 7)
     assert bool(mask.any())
     assert _pose_matches(
         target[:1].expand(int(mask.sum()), -1, -1), _fk(solver, candidates[mask])
@@ -110,6 +130,26 @@ def test_cuda_rr_original_urdf_tcp_all_candidates_and_failure_hold(
     valid, result = solver.get_ik(target, source)
     assert bool(valid.all())
     assert _pose_matches(target, _fk(solver, result)).all()
+
+
+@pytest.mark.gpu
+def test_rr_seed_local_nearest_and_all_use_the_same_current_sample_pool() -> None:
+    solver = _make_solver(rr_search="seed_local", max_joint_step=0.05)
+    seed = torch.tensor([[0.2, 0.4, 0.137, 1.2, 0.6, 0.8, -1]], device="cuda")
+    moving = seed.clone()
+    moving[0, 0] += 0.001
+    moving[0, 2] += 0.0005
+    target = _fk(solver, moving)
+    valid, result = solver.get_ik(target, seed)
+    mask, candidates = solver.get_ik(target, seed, return_all_solutions=True)
+    assert valid.all() and mask.shape == (1, 600)
+    score = ((candidates - seed[:, None]) * solver.ik_nearest_weight).square().sum(-1)
+    best = score.masked_fill(~mask, float("inf")).argmin(-1)
+    torch.testing.assert_close(
+        result, candidates[torch.arange(1, device="cuda"), best], atol=1e-6, rtol=0
+    )
+    assert _pose_matches(target, _fk(solver, result)).all()
+    assert ((result - seed).abs() <= 0.05).all()
 
 
 @pytest.mark.gpu

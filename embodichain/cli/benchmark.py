@@ -139,6 +139,14 @@ def _add_kinematic_solver_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Add the prepared Rizon4S CUDA RR backend to the selected CUDA workload.",
     )
+    parser.add_argument(
+        "--ssik-rr-search", choices=("fixed", "seed_local"), default="fixed"
+    )
+    parser.add_argument(
+        "--ssik-robot-e2e",
+        action="store_true",
+        help="Also measure real Robot.compute_ik in isolated engine-backed workers.",
+    )
 
 
 def _run_rl_cli(_: argparse.Namespace) -> None:

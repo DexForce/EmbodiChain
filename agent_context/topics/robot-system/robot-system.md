@@ -131,6 +131,10 @@ Provide complete root/end/TCP configuration for replacements. Partial
 dictionaries without `class_type` update the selected default's attributes.
 
 Robot owns arena/root frame conversion; solvers consume chain-root poses.
+Native root poses are rigid transforms. Single and batch IK use the existing
+`pose_inv` rigid inverse, preserving gradients and avoiding the additional
+CUDA/CPU synchronization of a general matrix inverse. Native state retrieval
+has its own backend synchronization boundary.
 `RobotCfg.from_dict()` resolves configured solver types through
 `embodichain.lab.sim.motion.solvers`. For batch/candidate shapes and continuous
 IK support, read [IK contracts](../ik-solvers/ik-solvers.md). Pose conventions

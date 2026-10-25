@@ -74,6 +74,7 @@ __all__: list[str] = []
     for (int k = 0; k < 8; ++k) {
         double value = (lane >= k && lane < 14) ? q[lane * 8 + k] : 0.0;
         if (lane < 14) v[lane] = value;
+        __syncwarp(mask); // Shuffle reductions do not order shared-memory writes.
         value *= value;
         for (int offset = 16; offset > 0; offset /= 2) value += __shfl_down_sync(mask, value, offset);
         double norm = sqrt(__shfl_sync(mask, value, 0));
@@ -188,6 +189,7 @@ __all__: list[str] = []
     for (int k = 0; k < 22; ++k) {
         double value = lane > k && lane < 24 ? h[lane * 24 + k] : 0.0;
         if (lane < 24) v[lane] = value;
+        __syncwarp(mask); // Publish Householder coordinates before lane0 reads.
         value *= value;
         for (int offset = 16; offset > 0; offset /= 2) value += __shfl_down_sync(mask, value, offset);
         double norm = sqrt(__shfl_sync(mask, value, 0));
@@ -269,6 +271,9 @@ def rr_prepare_cooperative(
     if (lane == 0) { n = wp::index(valid, target, sample, 0) ? 24 : 0; iteration = 0; }
     __syncwarp(mask);
     while (n > 0 && iteration < 1600) {
+        // All lanes must finish reading the loop guard before lane0 changes it.
+        // Uniform control flow alone does not order shared reads and writes.
+        __syncwarp(mask);
         if (lane == 0) {
             ++iteration;
             const int d = (n - 1) * 24 + n - 1;

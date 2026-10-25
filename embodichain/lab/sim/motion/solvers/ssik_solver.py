@@ -50,6 +50,7 @@ class SSIKSolverCfg(SolverCfg):
     geometry_mode: Literal["strict", "near_parallel"] = "strict"
     axis_alignment_tolerance: float = 1e-5
     srs_search: Literal["uniform", "seed_local"] = "uniform"
+    rr_search: Literal["fixed", "seed_local"] = "fixed"
     num_samples: int = 128
     position_tolerance: float = 1e-5
     rotation_tolerance: float = 1e-5
@@ -64,6 +65,10 @@ class SSIKSolverCfg(SolverCfg):
             raise ValueError("geometry_mode must be 'strict' or 'near_parallel'")
         if self.srs_search not in ("uniform", "seed_local"):
             raise ValueError("srs_search must be 'uniform' or 'seed_local'")
+        if self.rr_search not in ("fixed", "seed_local"):
+            raise ValueError("rr_search must be 'fixed' or 'seed_local'")
+        if self.rr_search != "fixed" and self.backend != "cuda_rr":
+            raise ValueError("rr_search='seed_local' requires backend='cuda_rr'")
         if not math.isfinite(self.axis_alignment_tolerance) or not (
             0 < self.axis_alignment_tolerance <= 1e-3
         ):
@@ -104,8 +109,9 @@ class SSIKSolver(BaseSolver):
 
     SRS candidates condition on the seed swivel and a fixed global swivel
     grid, plus a seed-local redundancy search when requested. Prepared RR
-    candidates condition on a fixed joint-lock grid. Sampling failure does
-    not establish global unreachability. The
+    candidates condition on a fixed joint-lock grid, optionally extended by
+    seed-local algebraic lock samples. Sampling failure does not establish
+    global unreachability. The
     nearest result uses weighted distance to the limit-projected caller seed.
     Public tensors remain owned by the caller across subsequent calls.
 
@@ -158,6 +164,7 @@ class SSIKSolver(BaseSolver):
         self._reference = None
         self._rr = None
         self._near = None
+        self._geometric = None
         if cfg.backend == "reference":
             from ._ssik_reference import _Reference
 
@@ -190,6 +197,18 @@ class SSIKSolver(BaseSolver):
             self._offsets = torch.tensor(
                 model.offsets, dtype=torch.float64, device=self.device
             )
+            if (
+                self.device.type == "cuda"
+                and cfg.backend == "warp"
+                and model.family in ("three_parallel", "srs")
+            ):
+                from embodichain.compute.kinematics._ssik_geometric import (
+                    _GeometricCandidates,
+                )
+
+                self._geometric = _GeometricCandidates(
+                    model, self.device, cfg.num_samples, cfg.srs_search
+                )
             if model.family == "near_parallel" and cfg.backend == "warp":
                 from embodichain.compute.kinematics._ssik_near import (
                     _NearParallelCandidates,
@@ -203,7 +222,9 @@ class SSIKSolver(BaseSolver):
                     _PreparedRRCandidates,
                 )
 
-                self._rr = _PreparedRRCandidates(model, self.device)
+                self._rr = _PreparedRRCandidates(
+                    model, self.device, search=cfg.rr_search
+                )
         self.set_tcp(resolved._get_tcp_as_numpy())
 
     def _wait_ready(self) -> None:
@@ -283,6 +304,7 @@ class SSIKSolver(BaseSolver):
             xpos: Valid end-link-to-TCP rigid transform.
         """
         super().set_tcp(xpos)
+        self._tcp_translation = tuple(float(value) for value in self.tcp_xpos[:3, 3])
         self._tcp_inverse = inv_transform(np.asarray(xpos, dtype=np.float64))
         self._tcp_inverse_tensor = torch.tensor(
             self._tcp_inverse, dtype=torch.float64, device=self.device
@@ -302,6 +324,8 @@ class SSIKSolver(BaseSolver):
             max_batch: Expected positive target count.
         """
         provider = self._rr if self._rr is not None else self._near
+        if provider is None:
+            provider = self._geometric
         capacity = min(max_batch, self.cfg.chunk_size)
         if provider is not None:
             capacity = min(capacity, provider.max_chunk_size)
@@ -330,6 +354,7 @@ class SSIKSolver(BaseSolver):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         if not (
             self._near is not None
+            or (self._rr is not None and self.cfg.rr_search == "seed_local")
             or (
                 self.cfg.backend == "warp"
                 and self.family == "srs"
@@ -460,7 +485,6 @@ class SSIKSolver(BaseSolver):
         import warp as wp
         from embodichain.compute.kinematics._warp.ssik import (
             accept_raw,
-            generate,
             select_nearest,
         )
 
@@ -469,6 +493,8 @@ class SSIKSolver(BaseSolver):
             torch.cuda.current_stream(self.device).wait_event(self._ready)
         samples = self.cfg.num_samples if self.dof == 7 and self._rr is None else 0
         provider = self._rr if self._rr is not None else self._near
+        if provider is None:
+            provider = self._geometric
         local_search = int(self.dof == 7 and self.cfg.srs_search == "seed_local")
         sample_count = samples + 1 + local_search
         count = provider.candidate_count if provider is not None else 8 * sample_count
@@ -496,7 +522,7 @@ class SSIKSolver(BaseSolver):
                     goal,
                     torch.eye(4, device=self.device, dtype=torch.float64)[None],
                 ).contiguous()
-                if self._rr is not None:
+                if self._rr is not None and self.cfg.rr_search == "fixed":
                     raw_flags, raw = self._rr.generate(safe)
                 else:
                     projected_seed = torch.where(
@@ -504,7 +530,27 @@ class SSIKSolver(BaseSolver):
                         seed[start:end],
                         (lower + upper) / 2,
                     ).clamp(min=lower, max=upper)
-                    raw_flags, raw = self._near.generate(safe, projected_seed)
+                    if self._rr is not None:
+                        raw_flags, raw = self._rr.generate(
+                            safe, projected_seed, lower, upper, max_step
+                        )
+                    elif self._near is not None:
+                        raw_flags, raw = self._near.generate(
+                            safe,
+                            projected_seed,
+                            self._tcp_translation,
+                            self.cfg.position_tolerance,
+                            self.cfg.rotation_tolerance,
+                        )
+                    else:
+                        raw_flags, raw = self._geometric.generate(
+                            safe,
+                            projected_seed,
+                            lower,
+                            upper,
+                            weights,
+                            self.cfg.position_tolerance,
+                        )
                 wp.launch(
                     accept_raw,
                     dim=(m, count),
@@ -525,6 +571,8 @@ class SSIKSolver(BaseSolver):
                     device=str(self.device),
                 )
             else:
+                from embodichain.compute.kinematics._warp.ssik_legacy import generate
+
                 wp.launch(
                     generate,
                     dim=(m, sample_count),

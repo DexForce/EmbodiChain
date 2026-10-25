@@ -24,6 +24,7 @@ selection remain with the caller. Preparation imports neither SSIK nor SymPy.
 from __future__ import annotations
 
 import hashlib
+import math
 from pathlib import Path
 
 import numpy as np
@@ -51,7 +52,7 @@ _W_TRIG_TO_X = np.array(
 )
 
 
-class _PreparedRRCandidates:
+class _FixedRRCandidates:
     """Verify a prepared joint prefix and enumerate every fixed-grid RR slot.
 
     The first prepared bundle is the pinned Flexiv Rizon4 geometry. Matching is
@@ -329,3 +330,76 @@ class _PreparedRRCandidates:
                 stream=stream,
             )
         return validity, candidates
+
+
+class _PreparedRRCandidates:
+    """Select a prepared fixed or parameterized algebraic RR candidate pool.
+
+    ``fixed`` retains the original sixteen-chart implementation. ``seed_local``
+    evaluates a separately derived POE polynomial system at sixteen global and
+    nine seed-local locked-joint coordinates. Both return every current sample's
+    twenty-four pencil slots; callers retain the original-model acceptance gate.
+    """
+
+    def __init__(
+        self,
+        model: _SSIKModel,
+        device: torch.device | str,
+        search: str = "fixed",
+    ) -> None:
+        if search == "fixed":
+            self._provider = _FixedRRCandidates(model, device)
+        elif search == "seed_local":
+            from ._ssik_rr_parametric import _ParametricRRCandidates
+
+            self._provider = _ParametricRRCandidates(model, device)
+        else:
+            raise ValueError("RR search must be 'fixed' or 'seed_local'")
+        self.search = search
+
+    @property
+    def candidate_count(self) -> int:
+        return self._provider.candidate_count
+
+    @property
+    def max_chunk_size(self) -> int:
+        return self._provider.max_chunk_size
+
+    @property
+    def device(self) -> torch.device:
+        return self._provider.device
+
+    @property
+    def source_to_artifact(self) -> np.ndarray:
+        return self._provider.source_to_artifact
+
+    @property
+    def _workspace(self) -> dict[str, torch.Tensor]:
+        return self._provider._workspace
+
+    @property
+    def _owned(self) -> list[torch.Tensor]:
+        return self._provider._owned
+
+    @property
+    def _capacity(self) -> int:
+        return self._provider._capacity
+
+    @property
+    def _data(self) -> object:
+        return self._provider._data
+
+    def prepare_buffers(self, size: int) -> None:
+        self._provider.prepare_buffers(size)
+
+    def generate(
+        self,
+        target_end: torch.Tensor,
+        seed: torch.Tensor | None = None,
+        lower: torch.Tensor | None = None,
+        upper: torch.Tensor | None = None,
+        max_step: float = math.inf,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if self.search == "fixed":
+            return self._provider.generate(target_end)
+        return self._provider.generate(target_end, seed, lower, upper, max_step)

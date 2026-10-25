@@ -334,11 +334,11 @@ class BaseSolver(metaclass=ABCMeta):
 
             # Set specific weights for joint_ids to the provided ik_weight
             for i, joint_id in enumerate(joint_ids):
-                self.ik_nearest_weight[joint_id] = ik_weight[i]
+                self.ik_nearest_weight[joint_id] = float(ik_weight[i])
         else:
             # If ik_nearest_weight is not None, only fill joint_ids
             for i, joint_id in enumerate(joint_ids):
-                self.ik_nearest_weight[joint_id] = ik_weight[i]
+                self.ik_nearest_weight[joint_id] = float(ik_weight[i])
 
         return True
 

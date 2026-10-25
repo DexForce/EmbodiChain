@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from unittest.mock import patch
@@ -203,6 +204,66 @@ def test_continuous_batch_reseeds_across_the_near_parallel_wrist(device: str) ->
 
 
 @pytest.mark.parametrize("device", _DEVICES)
+def test_tangent_control_uses_actual_tcp_and_separate_pose_tolerances(
+    device: str,
+) -> None:
+    solver = _solver(device, geometry_mode="near_parallel", max_joint_step=0.05)
+    # Seed2531 line7 frames43/44 admit these independently verified float32
+    # poses inside both acceptance balls. Flange-space L2 polishing rejected
+    # frame43 with position1.01e-5m even though rotation retained ample slack.
+    seed = torch.tensor(
+        [
+            [
+                2.2403149605,
+                -0.4634959400,
+                2.9168815613,
+                2.9063024521,
+                -1.3069185019,
+                1.3950436115,
+            ]
+        ],
+        device=device,
+    )
+    target = torch.tensor(
+        [
+            [0.0711401105, -0.3881445825, -0.9188485742, 0.0721772239],
+            [-0.1633595377, 0.9042108655, -0.3946090341, -0.3609723747],
+            [0.9839983582, 0.1781752110, 0.0009185353, -0.1294952929],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        device=device,
+    ).repeat(2, 1, 1)
+    target[1, 0, 3] = 0.0721791536
+    witness = torch.tensor(
+        [
+            [
+                2.2403213978,
+                -0.4634903371,
+                2.9168827534,
+                2.9062840939,
+                -1.3069145679,
+                1.3950216770,
+            ],
+            [
+                2.2403254509,
+                -0.4634888470,
+                2.9168827534,
+                2.9062829018,
+                -1.3069109917,
+                1.3950191736,
+            ],
+        ],
+        device=device,
+    )
+    _assert_source_pose(solver, target, witness)
+    assert bool((torch.cat((seed, witness)).diff(dim=0).abs() < 0.05).all())
+    valid, result = solver._get_continuous_ik_path(target[None], seed)
+    assert bool(valid.all())
+    _assert_source_pose(solver, target, result[0])
+    assert bool((torch.cat((seed, result[0])).diff(dim=0).abs() <= 0.05).all())
+
+
+@pytest.mark.parametrize("device", _DEVICES)
 def test_near_parallel_hot_path_has_no_host_copy_and_unreachable_failure(
     device: str,
 ) -> None:
@@ -292,12 +353,42 @@ def test_first_solver_in_a_fresh_process_can_initialize_cuda() -> None:
     # constructor's stream access before its runtime existed. Exercise the
     # actual first-CUDA-constructor contract in an independent interpreter.
     program = """
+import faulthandler
+import json
+import os
+import sys
+import time
+
+started = time.monotonic()
+def stage(phase, **details):
+    print(json.dumps({"phase": phase, "elapsed_seconds": time.monotonic() - started,
+                      "pid": os.getpid(), **details}), flush=True)
+
+# PK temporarily redirects fd2 while constructing a chain. Keep the crash
+# and timeout stack destination independent of that suppression context.
+trace_output = os.fdopen(os.dup(sys.stderr.fileno()), "w", buffering=1)
+faulthandler.enable(file=trace_output)
+faulthandler.dump_traceback_later(60, repeat=True, file=trace_output)
+stage("before_torch_import", executable=sys.executable, cwd=os.getcwd(),
+      native_threads={name: os.environ.get(name) for name in
+                      ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS",
+                       "NUMEXPR_NUM_THREADS")},
+      warp_cache_override=os.environ.get("WARP_CACHE_PATH"))
 import torch
+torch.set_num_threads(1)
+torch.set_num_interop_threads(1)
+stage("torch_imported", version=torch.__version__,
+      intraop_threads=torch.get_num_threads(), interop_threads=torch.get_num_interop_threads())
 from embodichain.lab.sim.motion.solvers import SSIKSolverCfg
 from embodichain_robots import ARX5Cfg
+stage("solver_imported", source=sys.modules[SSIKSolverCfg.__module__].__file__)
 preset = ARX5Cfg.from_dict({})
 original = preset.solver_cfg["arm"]
+stage("preset_resolved", urdf=preset.fpath)
+stage("before_cuda_chain")
 chain = preset.build_pk_serial_chain(torch.device("cuda"))["arm"]
+stage("cuda_chain_ready")
+stage("before_first_solver_constructor")
 solver = SSIKSolverCfg(
     urdf_path=preset.fpath,
     root_link_name=original.root_link_name,
@@ -306,20 +397,58 @@ solver = SSIKSolverCfg(
     tcp=original.tcp,
     geometry_mode="near_parallel",
 ).init_solver(device="cuda", pk_serial_chain=chain)
+import warp as wp
+stage("solver_ready", warp_version=wp.__version__, warp_cache=wp.config.kernel_cache_dir)
 seed = solver.get_default_qpos_seed()[None]
+stage("before_target_fk")
 target = chain.forward_kinematics(seed).get_matrix() @ torch.as_tensor(
     original.tcp, device="cuda", dtype=torch.float32
 )
+stage("target_ready")
+stage("before_first_ik")
 success, joints = solver.get_ik(target, seed)
+stage("ik_returned")
+torch.cuda.synchronize()
+stage("cuda_completed")
 assert success.shape == (1,) and success.all()
 assert joints.shape == (1, 6) and joints.is_cuda
-torch.cuda.synchronize()
+faulthandler.cancel_dump_traceback_later()
+stage("passed")
 """
-    completed = subprocess.run(
-        [sys.executable, "-c", program],
-        capture_output=True,
-        text=True,
-        timeout=240,
-        check=False,
-    )
+    # The GPU lane does not use the fast lane's native-thread defaults.
+    # Bound this correctness subprocess independently, preserve its inherited
+    # Warp cache, and leave the first solver responsible for Warp initialization.
+    environment = os.environ.copy()
+    for name in (
+        "OMP_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+    ):
+        environment[name] = "1"
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-u", "-c", program],
+            capture_output=True,
+            text=True,
+            timeout=240,
+            check=False,
+            env=environment,
+        )
+    except subprocess.TimeoutExpired as error:
+
+        def decoded(value: str | bytes | None) -> str:
+            return (
+                value.decode(errors="replace")
+                if isinstance(value, bytes)
+                else value or ""
+            )
+
+        pytest.fail(
+            "Fresh CUDA constructor/IK exceeded240seconds. Last subprocess stages and stacks:\n"
+            + decoded(error.stdout)
+            + "\n"
+            + decoded(error.stderr),
+            pytrace=False,
+        )
     assert completed.returncode == 0, completed.stdout + completed.stderr

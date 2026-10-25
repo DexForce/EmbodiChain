@@ -93,7 +93,12 @@ class _NearParallelCandidates:
         self._capacity = capacity
 
     def generate(
-        self, targets: torch.Tensor, seeds: torch.Tensor
+        self,
+        targets: torch.Tensor,
+        seeds: torch.Tensor,
+        tcp_translation: tuple[float, float, float] = (0.0, 0.0, 0.0),
+        position_tolerance: float = 1e-5,
+        rotation_tolerance: float = 1e-5,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Return borrowed flags and joints for flange goals and projected seeds."""
         from ._warp.ssik_near import generate_near
@@ -134,6 +139,9 @@ class _NearParallelCandidates:
                     wp.from_torch(targets, dtype=wp.mat44d),
                     wp.from_torch(seeds),
                     self._axis_tolerance,
+                    wp.vec3d(tcp_translation),
+                    position_tolerance,
+                    rotation_tolerance,
                     wp.from_torch(self._workspace["work"]),
                     wp.from_torch(valid),
                     wp.from_torch(raw),

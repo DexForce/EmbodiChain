@@ -148,8 +148,14 @@ SRS all-candidate results enumerate sampled swivels only. Opt-in seed-local
 search adds one geometric redundancy optimum to the unchanged global/seed pool.
 Its target-aware path hook uses the preceding result for both generation and
 selection. Near-parallel mode also regenerates its corrected candidates and
-periodic representatives from each preceding result on CPU/CUDA. Other modes
-use `_get_continuous_ik_candidates` and the shared
+periodic representatives from each preceding result on CPU/CUDA. Prepared RR's
+opt-in seed-local mode uses a separate parameterized POE coefficient bundle;
+local and Jacobian-predicted lock angles generate algebraic roots, never returned
+linearized joint solutions. Its path hook regenerates the full global/local
+pool from the preceding result. Fixed RR retains the original cached lock grid.
+Parameterized RR conditions small valid-pose rotation roundoff only for its
+SO(3) coefficient identities; original targets still own final FK acceptance.
+Other modes use `_get_continuous_ik_candidates` and the shared
 selector. Hard step bounds apply relative to the preceding selected posture;
 failed waypoints retain that posture and a false validity mask.
 

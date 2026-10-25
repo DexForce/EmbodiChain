@@ -39,6 +39,7 @@ def _source_pose(
     frames: wp.array2d(dtype=wp.float64),
     axes: wp.array2d(dtype=wp.float64),
     q: vec7d,
+    tcp_translation: wp.vec3d,
     work: wp.array2d(dtype=wp.float64),
     index: int,
     jacobian: bool,
@@ -64,6 +65,7 @@ def _source_pose(
             magnitude = wp.length(local)
             rotation = rotation @ _rot(local / magnitude, q[joint] * magnitude)
         joint += 1
+    position += rotation @ tcp_translation
     if jacobian:
         for j in range(6):
             origin = wp.vec3d(
@@ -137,20 +139,51 @@ def _polish_branch(
     axes: wp.array2d(dtype=wp.float64),
     initial: vec7d,
     goal: wp.mat44d,
+    tcp_translation: wp.vec3d,
+    position_tolerance: wp.float64,
+    rotation_tolerance: wp.float64,
     work: wp.array2d(dtype=wp.float64),
     index: int,
 ) -> vec7d:
     q = initial
+    goal_rotation = wp.mat33d()
+    for row in range(3):
+        for column in range(3):
+            goal_rotation[row, column] = goal[row, column]
+    goal_position = (
+        wp.vec3d(goal[0, 3], goal[1, 3], goal[2, 3]) + goal_rotation @ tcp_translation
+    )
+    normalization = wp.max(position_tolerance, rotation_tolerance)
     iteration = int(0)
     while iteration < 12:
-        position, rotation = _source_pose(frames, axes, q, work, index, True)
-        displacement = wp.vec3d(goal[0, 3], goal[1, 3], goal[2, 3]) - position
-        orientation = _orientation_residual(rotation, goal)
-        previous_error = wp.dot(displacement, displacement) + wp.dot(
-            orientation, orientation
+        position, rotation = _source_pose(
+            frames, axes, q, tcp_translation, work, index, True
         )
-        if previous_error <= wp.float64(1e-18):
+        displacement = goal_position - position
+        orientation = _orientation_residual(rotation, goal)
+        position_error = wp.length(displacement) / position_tolerance
+        rotation_error = wp.length(orientation) / rotation_tolerance
+        previous_error = wp.max(position_error, rotation_error)
+        if previous_error <= wp.float64(1e-4):
             break
+        # Independent position/rotation acceptance uses a product of balls,
+        # not a single L2 ball. Balance the active error blocks, retaining a
+        # strictly positive weight for both. Backtracking below decreases the
+        # actual worst normalized error, rather than only a quadratic proxy.
+        position_ratio = wp.max(wp.float64(0.25), position_error / previous_error)
+        rotation_ratio = wp.max(wp.float64(0.25), rotation_error / previous_error)
+        position_weight = (
+            wp.pow(position_ratio, wp.float64(8.0))
+            * normalization
+            * normalization
+            / (position_tolerance * position_tolerance)
+        )
+        rotation_weight = (
+            wp.pow(rotation_ratio, wp.float64(8.0))
+            * normalization
+            * normalization
+            / (rotation_tolerance * rotation_tolerance)
+        )
         for j in range(3):
             work[index, 114 + j] = displacement[j]
             work[index, 117 + j] = orientation[j]
@@ -159,13 +192,21 @@ def _polish_branch(
             for column in range(6):
                 value = wp.float64(0.0)
                 for k in range(6):
-                    value += work[index, k * 6 + row] * work[index, k * 6 + column]
+                    weight = position_weight
+                    if k >= 3:
+                        weight = rotation_weight
+                    value += (
+                        work[index, k * 6 + row] * work[index, k * 6 + column] * weight
+                    )
                 if row == column:
-                    value += wp.float64(1e-12)
+                    value += wp.float64(1e-8) * wp.max(position_weight, rotation_weight)
                 work[index, 72 + row * 6 + column] = value
             value = wp.float64(0.0)
             for k in range(6):
-                value += work[index, k * 6 + row] * work[index, 114 + k]
+                weight = position_weight
+                if k >= 3:
+                    weight = rotation_weight
+                value += work[index, k * 6 + row] * work[index, 114 + k] * weight
             work[index, 108 + row] = value
             row += 1
         regular = _solve_system(work, index)
@@ -175,20 +216,29 @@ def _polish_branch(
         scale = wp.min(
             wp.float64(1.0), wp.float64(0.025) / wp.max(largest, wp.float64(1e-30))
         )
-        next_q = q
-        if regular:
+        improved = bool(False)
+        attempt = int(0)
+        while regular and attempt < 6:
+            next_q = q
             for j in range(6):
                 next_q[j] += work[index, 108 + j] * scale
-        next_position, next_rotation = _source_pose(
-            frames, axes, next_q, work, index, False
-        )
-        next_displacement = wp.vec3d(goal[0, 3], goal[1, 3], goal[2, 3]) - next_position
-        next_orientation = _orientation_residual(next_rotation, goal)
-        next_error = wp.dot(next_displacement, next_displacement) + wp.dot(
-            next_orientation, next_orientation
-        )
-        if regular and next_error < previous_error:
-            q = next_q
+            next_position, next_rotation = _source_pose(
+                frames, axes, next_q, tcp_translation, work, index, False
+            )
+            next_displacement = goal_position - next_position
+            next_orientation = _orientation_residual(next_rotation, goal)
+            next_error = wp.max(
+                wp.length(next_displacement) / position_tolerance,
+                wp.length(next_orientation) / rotation_tolerance,
+            )
+            if next_error < previous_error:
+                q = next_q
+                improved = True
+                break
+            scale *= wp.float64(0.5)
+            attempt += 1
+        if not improved:
+            break
         iteration += 1
     return q
 
@@ -203,6 +253,9 @@ def generate_near(
     targets: wp.array(dtype=wp.mat44d),
     seeds: wp.array2d(dtype=wp.float64),
     axis_tolerance: wp.float64,
+    tcp_translation: wp.vec3d,
+    position_tolerance: wp.float64,
+    rotation_tolerance: wp.float64,
     work: wp.array2d(dtype=wp.float64),
     validity: wp.array2d(dtype=wp.int32),
     candidates: wp.array3d(dtype=wp.float64),
@@ -229,7 +282,15 @@ def generate_near(
             valid = valid and wp.isfinite(seed[j])
     if valid:
         q = _polish_branch(
-            frames, local_axes, q, goal, work, target * CANDIDATE_COUNT + branch
+            frames,
+            local_axes,
+            q,
+            goal,
+            tcp_translation,
+            position_tolerance,
+            rotation_tolerance,
+            work,
+            target * CANDIDATE_COUNT + branch,
         )
     validity[target, branch] = wp.int32(valid)
     for j in range(6):

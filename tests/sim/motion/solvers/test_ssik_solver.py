@@ -394,13 +394,20 @@ def test_continuous_candidates_defer_step_bounds_until_previous_frame(
     assert float((result[0, -1] - initial[0]).abs().max()) > 0.05
 
 
-def _synthetic_srs(device: str, axes: np.ndarray) -> SSIKSolver:
+def _synthetic_srs(
+    device: str,
+    axes: np.ndarray,
+    *,
+    offsets: np.ndarray | None = None,
+    srs_search: str = "uniform",
+) -> SSIKSolver:
     # All shoulder axes intersect at the origin, all wrist axes at the
     # elbow-plus-forearm point. The elbow origin need not lie on an outer
     # shoulder axis, nor be straight at home.
-    offsets = np.zeros((7, 3))
-    offsets[3] = [0.25, 0.06, -0.02]
-    offsets[4] = [0.19, -0.03, 0.07]
+    if offsets is None:
+        offsets = np.zeros((7, 3))
+        offsets[3] = [0.25, 0.06, -0.02]
+        offsets[4] = [0.19, -0.03, 0.07]
     links = "".join(f'<link name="l{i}"/>' for i in range(8))
     joints = "".join(
         f'<joint name="j{i}" type="revolute"><parent link="l{i}"/>'
@@ -412,7 +419,9 @@ def _synthetic_srs(device: str, axes: np.ndarray) -> SSIKSolver:
     chain = pk.build_serial_chain_from_urdf(
         f'<robot name="synthetic_srs">{links}{joints}</robot>', "l7"
     ).to(device=device)
-    return SSIKSolverCfg().init_solver(device=device, pk_serial_chain=chain)
+    return SSIKSolverCfg(srs_search=srs_search).init_solver(
+        device=device, pk_serial_chain=chain
+    )
 
 
 @pytest.mark.parametrize("device", _DEVICE_CASES)
@@ -429,6 +438,61 @@ def test_srs_supports_nonorthogonal_concurrent_axis_triples(device: str) -> None
     assert bool(valid.all())
     _assert_pose(target, _pk_fk(solver, result))
     torch.testing.assert_close(result, seed, atol=1e-4, rtol=0)
+
+
+@pytest.mark.parametrize("device", _DEVICE_CASES)
+def test_srs_seed_local_skips_an_elbow_without_a_shoulder_decomposition(
+    device: str,
+) -> None:
+    # A narrow five-degree shoulder triple can represent the second elbow
+    # sheet at the seeded swivel while the first sheet has no decomposition.
+    tilt = np.deg2rad(5)
+    axes = np.array(
+        [
+            [0, 0, 1],
+            [0, np.sin(tilt), np.cos(tilt)],
+            [0, 0, 1],
+            [0, 1, 0],
+            [0, 0, 1],
+            [0, 1, 0],
+            [0, 0, 1],
+        ]
+    )
+    offsets = np.zeros((7, 3))
+    offsets[3:5, 0] = 0.3
+    solver = _synthetic_srs(device, axes, offsets=offsets, srs_search="seed_local")
+    generating = torch.tensor([[0.1, 0.2, 0.3, -1.0, 0.2, 0.4, 0.1]], device=device)
+    target = _pk_fk(solver, generating).expand(2, -1, -1)
+    seed = generating.expand(2, -1).clone()
+    seed[1, 0] += 0.03
+    valid, candidates = solver.get_ik(target, seed, return_all_solutions=True)
+    assert valid.shape == (2, 1040)
+    assert not bool(valid[:, 1024:1028].any())
+    assert bool(valid[:, 1028:1032].any(-1).all())
+    assert bool(valid[:, -8:].any(-1).all())
+    _assert_pose(
+        target[:, None].expand(-1, 1040, -1, -1)[valid],
+        _pk_fk(solver, candidates[valid]),
+    )
+    _assert_limits(solver, candidates[valid])
+    nearest_valid, nearest = solver.get_ik(target, seed)
+    assert bool(nearest_valid.all())
+    distances = ((candidates - seed[:, None]) ** 2).sum(-1)
+    distances = torch.where(valid, distances, torch.inf)
+    expected = candidates[torch.arange(2, device=device), distances.argmin(-1)]
+    torch.testing.assert_close(nearest, expected, atol=1e-6, rtol=0)
+    if device == "cuda":
+        reference = _synthetic_srs(
+            "cpu", axes, offsets=offsets, srs_search="seed_local"
+        )
+        expected_valid, expected = reference.get_ik(
+            target.cpu(), seed.cpu(), return_all_solutions=True
+        )
+        torch.testing.assert_close(valid.cpu(), expected_valid)
+        delta = (candidates.cpu().double() - expected.double() + torch.pi) % (
+            2 * torch.pi
+        ) - torch.pi
+        assert bool((delta[expected_valid].abs() < 1e-4).all())
 
 
 @pytest.mark.parametrize("device", _DEVICE_CASES)
@@ -745,8 +809,9 @@ def test_reference_artifact_cli_build_and_load_roundtrip(
 
 
 @pytest.mark.parametrize("geometry", ["marvin_left", "marvin_right", "nonorthogonal"])
+@pytest.mark.parametrize("cached", [False, True])
 def test_srs_fixed_swivel_branch_sets_match_pinned_reference(
-    pinned_reference: None, geometry: str
+    pinned_reference: None, geometry: str, cached: bool
 ) -> None:
     from ssik.kinematics.poe_fk import poe_forward_kinematics
     from ssik.kinematics.predicates import _classify_srs_7r_geometric
@@ -786,6 +851,69 @@ def test_srs_fixed_swivel_branch_sets_match_pinned_reference(
         device="cpu",
     )
     actual, valid = candidates.numpy(), validity.numpy().astype(bool)
+    if cached:
+        from embodichain.compute.kinematics._warp.ssik_srs_geometry import (
+            CONTEXT_SIZE,
+            prepare_srs_context,
+            reconstruct_srs_context,
+        )
+
+        count = len(qpos) * len(swivels)
+        context = wp.empty((count, CONTEXT_SIZE), dtype=wp.float64, device="cpu")
+        raw = wp.empty((count, 8, 7), dtype=wp.float64, device="cpu")
+        raw_valid = wp.empty((count, 8), dtype=wp.int32, device="cpu")
+        axes = wp.array(model.axes, dtype=wp.vec3d, device="cpu")
+        wp.launch(
+            prepare_srs_context,
+            count,
+            inputs=[
+                axes,
+                wp.array(model.offsets, dtype=wp.vec3d, device="cpu"),
+                wp.mat33d(kb.joints[-1].T_right[:3, :3]),
+                wp.vec3d(classification.shoulder_pivot),
+                wp.vec3d(classification.wrist_pivot),
+                wp.array(
+                    np.repeat(targets, len(swivels), axis=0),
+                    dtype=wp.mat44d,
+                    device="cpu",
+                ),
+                wp.mat44d(np.eye(4)),
+                wp.array(
+                    np.repeat(qpos, len(swivels), axis=0),
+                    dtype=wp.float64,
+                    device="cpu",
+                ),
+                wp.array(
+                    solver.lower_qpos_limits.numpy().astype(np.float64),
+                    dtype=wp.float64,
+                    device="cpu",
+                ),
+                wp.array(
+                    solver.upper_qpos_limits.numpy().astype(np.float64),
+                    dtype=wp.float64,
+                    device="cpu",
+                ),
+                1e-5,
+                0,
+            ],
+            outputs=[context],
+            device="cpu",
+        )
+        wp.launch(
+            reconstruct_srs_context,
+            (count, 8),
+            inputs=[
+                context,
+                axes,
+                wp.array(np.tile(swivels, len(qpos)), dtype=wp.float64, device="cpu"),
+                wp.zeros(count, dtype=wp.float64, device="cpu"),
+            ],
+            outputs=[raw_valid, raw],
+            device="cpu",
+        )
+        actual = raw.numpy().reshape(len(qpos), len(swivels), 8, 7)
+        valid = raw_valid.numpy().astype(bool).reshape(len(qpos), len(swivels), 8)
+
     compared = 0
     raw_compared = 0
     for target_index, target in enumerate(targets):
@@ -903,3 +1031,69 @@ def test_float32_target_roundoff_at_geometric_boundaries(
     assert bool(success.all())
     _assert_limits(solver, joints)
     _assert_pose(target, _pk_fk(solver, joints))
+
+
+@pytest.mark.parametrize("device", _DEVICE_CASES)
+@pytest.mark.parametrize(
+    "robot,side",
+    [("aloha", "left"), ("aloha", "right"), ("marvin", "left"), ("marvin", "right")],
+)
+def test_isolated_geometric_provider_preserves_complete_accepted_slots(
+    device: str, robot: str, side: str
+) -> None:
+    """Isolated kernels retain CPU legacy slots and independent PK closure."""
+    from embodichain.compute.kinematics._ssik_geometric import _GeometricCandidates
+    from embodichain.compute.kinematics._warp.ssik import accept_raw
+
+    solver = _make_solver(device, robot=robot, side=side, srs_search="seed_local")
+    reference = (
+        solver
+        if device == "cpu"
+        else _make_solver(robot=robot, side=side, srs_search="seed_local")
+    )
+    solver.set_ik_nearest_weight(np.arange(1, solver.dof + 1, dtype=np.float32) / 3)
+    qpos = _sample(reference)
+    targets = _pk_fk(reference, qpos).double().to(device)
+    seed = qpos.flip(0).double().to(device)
+    lower, upper = solver.lower_qpos_limits.double(), solver.upper_qpos_limits.double()
+    weights = solver.ik_nearest_weight.float()
+    reference.set_ik_nearest_weight(weights.cpu().numpy())
+    provider = _GeometricCandidates(solver._model, device, srs_search="seed_local")
+    flange = targets @ torch.as_tensor(
+        np.linalg.inv(solver.tcp_xpos), device=targets.device
+    )
+    raw_valid, raw = provider.generate(flange, seed, lower, upper, weights, 1e-5)
+    valid = torch.empty_like(raw_valid)
+    result = torch.empty_like(raw, dtype=torch.float32)
+    wp.launch(
+        accept_raw,
+        dim=raw_valid.shape,
+        inputs=[
+            solver._warp_model,
+            wp.from_torch(raw),
+            wp.from_torch(raw_valid),
+            wp.from_torch(targets, dtype=wp.mat44d),
+            wp.mat44d(solver.tcp_xpos),
+            wp.from_torch(seed),
+            wp.from_torch(lower),
+            wp.from_torch(upper),
+            1e-5,
+            1e-5,
+            float("inf"),
+        ],
+        outputs=[wp.from_torch(valid), wp.from_torch(result)],
+        device=device,
+    )
+    expected_valid, expected = reference.get_ik(
+        targets.cpu(), seed.cpu(), return_all_solutions=True
+    )
+    mask = valid.bool()
+    torch.testing.assert_close(mask.cpu(), expected_valid)
+    delta = (result.double() - expected.to(device).double() + torch.pi) % (
+        2 * torch.pi
+    ) - torch.pi
+    assert bool((delta[mask].abs() < 1e-4).all())
+    _assert_pose(
+        targets[:, None].expand(-1, mask.shape[1], -1, -1)[mask],
+        _pk_fk(reference, result[mask].cpu()).to(device),
+    )

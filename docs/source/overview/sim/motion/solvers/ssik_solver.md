@@ -29,11 +29,11 @@ Aloha's torso keeps its position-only Pytorch solver. Select SSIK explicitly
 and use `srs_search="seed_local"` for Marvin continuous control. All finite
 searches can miss solutions.
 
-Default switching is held behind the full acceptance gates. Fresh-process
-measurements currently exceed the 128 MiB CUDA scratch budget for the common
-Aloha/Marvin candidate kernel because driver allocations are not included in
-Torch-only counters. Precision and continuity results do not certify that
-resource gate; see the current delivery benchmark report for measured limits.
+Default switching is held behind the full acceptance gates, including changing
+target single/dual-arm latency and fresh-process CUDA memory. Driver allocations
+are included alongside Torch/Warp counters. Precision and continuity results
+alone do not certify those gates; the benchmark reports record each measured
+configuration separately.
 
 ## Configuration
 
@@ -83,6 +83,7 @@ and is outside this solver's supported chain types.
 | `geometry_mode` | `"strict"` | `"near_parallel"` explicitly permits bounded 6R axis deviations and numerical polishing |
 | `axis_alignment_tolerance` | `1e-5` | Maximum normalized-axis deviation in near-parallel mode; does not relax FK acceptance |
 | `srs_search` | `"uniform"` | `"seed_local"` adds scalar geometric redundancy optimization near the current seed |
+| `rr_search` | `"fixed"` | For `cuda_rr`, `"seed_local"` adds local and analytically predicted lock samples using the parameterized RR bundle |
 | `num_samples` | `128` | Global SRS swivel samples, in addition to a defined seed swivel |
 | `position_tolerance` | `1e-5` | Maximum accepted position error, metres |
 | `rotation_tolerance` | `1e-5` | Maximum accepted orientation error, radians |
@@ -112,8 +113,9 @@ nearest to the limit-projected seed using the configured `ik_nearest_weight`.
 
 The strict Warp candidate axis has eight slots for 6R, or
 `8 * (num_samples + 1)` slots for uniform SRS 7R, or
-`8 * (num_samples + 2)` with seed-local search. Prepared RR returns all 384
-slots from its 16 locked-joint samples and 24 pencil-root slots per sample.
+`8 * (num_samples + 2)` with seed-local search. Fixed prepared RR returns all
+384 slots from its 16 locked-joint samples and 24 pencil-root slots per sample.
+RR `seed_local` returns 600 slots from the same 16 global and nine local samples.
 These are conditional candidates, not a complete continuous 7R manifold.
 Near-parallel mode returns nine slots: eight geometric initializations and one
 always-computed seed initialization for bounded original-model correction.
@@ -267,17 +269,31 @@ closed-form result. Failure is returned without trying another solver.
 
 The Rizon4S device path evaluates the prepared polynomial tensors, solves their
 24-by-24 complex matrix pencils using cooperative Warp QR, and back-substitutes
-roots entirely on CUDA. Workspaces are chunked to at most 32 targets; all 384
-root slots pass through the original-model FK gate after float32 conversion.
+roots entirely on CUDA. Workspaces are chunked to at most 32 targets; every
+root slot passes through the original-model FK gate after float32 conversion.
 It neither invokes CPU LAPACK nor generates coefficients during a query.
-The fixed grid can miss a feasible lock value, especially under a small step
-bound; increase of this grid requires another offline derivation and validation.
+The default `rr_search="fixed"` preserves the 16-lock coefficient bundle.
+For continuous control, select `rr_search="seed_local"` explicitly. Its
+parameterized bundle evaluates arbitrary lock angles without runtime symbolic
+derivation. Nine extra samples include the preceding lock, symmetric local
+offsets and two original-model Jacobian predictions. The predictions select
+only a lock angle: all returned joint solutions still come from algebraic RR
+roots. They are not iterative Cartesian IK or a numerical fallback. The same
+global pool remains present, and hard limits, step bounds and FK acceptance
+mask every slot.
+The parameterized path checks that the input is a finite rigid pose, then
+applies two fixed polar-conditioning steps to the internal rotation used for
+coefficient evaluation. This prevents float32 frame-conversion roundoff from
+violating the exact SO(3) polynomial identities. It does not repair malformed
+targets, change the target used for final original-model FK validation, or
+relax either acceptance tolerance.
 ARX5's target-aware batch path hook regenerates its nine candidates and their
 periodic representatives from each preceding result on CPU and CUDA. For
-single-target streaming, pass the preceding result explicitly. Rizon4S's
-finite-grid batch selector uses candidates generated from the initial path
-seed. Neither mode's bounded continuous coverage is certified to match Pytorch.
-Successful static IK and low single-call latency do not establish that gate.
+single-target streaming, pass the preceding result explicitly. Rizon4S's fixed
+grid batch selector uses the initial path seed. Its `seed_local` path hook
+regenerates the full pool using each preceding selected posture. Finite lock
+sampling can still miss a feasible interval. Successful static IK and low
+single-call latency alone do not establish bounded continuous coverage.
 
 The bundled coefficient manifest records the source revision, hashes and an
 independent DH/POE consistency certificate for every locked-joint chart. The
@@ -286,6 +302,13 @@ geometry before offline rederivation. Reproduce the bundle with
 `scripts/benchmark/robotics/kinematic_solver/prepare_ssik_rr_rizon4.py` and the
 pinned SSIK source. CPU reference artifacts below preserve upstream behavior;
 their zero-lock output is not an oracle for this corrected chart.
+
+The separate parameterized bundle uses POE joint-frame factors and affine
+sin/cos lock coefficients. Its manifest includes exact reconstruction identities,
+coefficient hashes and an independent original-PK pose certificate. Rebuild it
+with the same maintained builder, adding `--parameterized --urdf PATH` and
+`--ssik-source PINNED_SOURCE`. Both bundles are packaged independently; loading
+validates the selected bundle and actual model before device execution.
 
 The bundled robot package contains explicit offline reference artifacts for
 `ARX5` (the registered X5A source) and `FlexivRizon4S`. Both presets retain
@@ -369,10 +392,29 @@ are opt-in; the existing default six-model benchmark remains unchanged.
 Unsupported Warp geometry and missing reference preparation are reported as
 unmeasured with a reason, while an incompatible supplied artifact is rejected.
 Device experiments select `--ssik-geometry-mode near_parallel`,
-`--ssik-srs-search seed_local` or `--ssik-cuda-rr`. These flags do not change
+`--ssik-srs-search seed_local` or `--ssik-cuda-rr`. Add
+`--ssik-rr-search seed_local` for parameterized RR. These flags do not change
 the default six-model benchmark or robot presets. Allocation counters and
 fresh-process driver memory observations must both be considered when
 certifying CUDA scratch; Torch allocator statistics alone omit driver stacks.
+
+Add `--ssik-robot-e2e` to run an isolated, engine-backed `Robot` benchmark with
+the native `no-render` renderer. This preserves native physics and state
+retrieval; headless mode alone can still initialize Hybrid rendering. The
+result certifies this control context, not simultaneous GUI/rendering load.
+It measures 10,000 changing-target calls with previous-result seeds through
+the real root-state query, arena/root conversion and `Robot.compute_ik`.
+Setup, physical simulation stepping and external-device transport are excluded.
+Outputs undergo independent original-PK FK, effective-limit, step and failure-hold
+checks, and validated coverage is compared with the same standalone streaming
+targets. An unavailable engine or missing coverage comparison is unmeasured;
+neither can pass the gate.
+When both arms of a preset are selected, the same entry point also measures
+10,000 paired calls through one actual Robot and checks the 8 ms paired gate.
+Formal timing also requires a quiet measurement window. Record other GPU
+compute processes during the run and retain contended measurements separately;
+a successful short diagnostic does not replace the 10,000-call tail-latency
+certificate.
 
 ## How it works
 
