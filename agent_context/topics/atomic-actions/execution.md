@@ -1,4 +1,4 @@
-# Atomic Action planning and execution
+# Atomic Skill planning and execution
 
 Read this when the request needs these details. [Topic overview](atomic-actions.md).
 
@@ -6,13 +6,13 @@ Read this when the request needs these details. [Topic overview](atomic-actions.
 
 ### 1. Construct the engine
 
-`AtomicActionEngine` owns one `ActionPlanningServices` snapshot: robot, motion
+`AtomicSkillEngine` owns one `SkillPlanningServices` snapshot: robot, motion
 generator, device, planner backend, trajectory builder, and command profiles.
 Built-ins are installed through the engine catalog. An engine is not a global
 process registry.
 
 The standard simulation composition root is
-`create_simulation_atomic_action_engine()` in `sim_adapter.py`.
+`create_simulation_atomic_skill_engine()` in `sim_adapter.py`.
 
 ### 2. Bind resources
 
@@ -26,7 +26,7 @@ targets. They do not contain live planners or mutable controller state.
 
 ### 3. Build an invocation
 
-`ActionInvocation` contains:
+`SkillInvocation` contains:
 
 - exact action `skill_id`;
 - an action-owned frozen goal;
@@ -35,13 +35,13 @@ targets. They do not contain live planners or mutable controller state.
 - motion, tracking, and recovery policy; and
 - a monotonic revision when replacing a compatible in-flight request.
 
-The engine resolves the invocation into `ResolvedActionRequest`. The action's
+The engine resolves the invocation into `ResolvedSkillRequest`. The action's
 framework-owned `plan()` validates exact goal/options types and then calls the
 implementation `_plan(request, context)` hook.
 
 ### 4. Choose planning or execution
 
-- `engine.plan(invocation, context)` returns one `ActionPlan`.
+- `engine.plan(invocation, context)` returns one `SkillPlan`.
 - `engine.compile(invocations, context)` performs a fixed offline projection.
 - `engine.start(invocations, context)` creates an observed `ExecutionSession`.
 - `ExecutionRunner` drives that session against observation, command, and clock
@@ -64,8 +64,8 @@ object guards, phase gates, retries, or later calls.
 
 Focused regression coverage:
 
-- `tests/sim/atomic_actions/test_engine_per_env.py`
-- `tests/sim/atomic_actions/test_endpoint_runtime_e2e.py`
+- `tests/sim/atomic_skills/test_engine_per_env.py`
+- `tests/sim/atomic_skills/test_endpoint_runtime_e2e.py`
 
 ## Execution and verification
 
@@ -163,7 +163,7 @@ it in every command-cycle guard copies the complete command stream repeatedly.
 
 Tracking recovery is separate from task-level semantic recovery:
 
-- Atomic Actions owns planning failure, target/collision revision, transport
+- Atomic Skills owns planning failure, target/collision revision, transport
   acknowledgement, tracking error, timeout, retry, and safe stop.
 - Task Program may perform bounded workflow recovery after the action reaches
 a semantic effect boundary.
@@ -181,7 +181,7 @@ physically qualified task needs a lower speed than the selected robot's limits.
 `MotionPolicy.velocity_targets` selects `auto` (use trajectory velocities,
 default) or `zero` (explicit position-only control).
 Configured execution policies decode the same field under `motion`.
-`AtomicAction.build_plan` derives missing velocities after composite skills
+`AtomicSkill.build_plan` derives missing velocities after composite skills
 have assembled their final full-robot positions and timing. The first command,
 both ends of every stationary joint interval, and terminal settling commands
 use zero velocity; failed rows remain held.

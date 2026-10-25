@@ -25,7 +25,7 @@
 ### v0.2.0
 
 - Platform upgrade release.
-- Focus: DexSim v0.4.0 migration, atomic action abstraction, benchmarking, multi-version docs, PyPI release workflow fixes, and dependency bumps.
+- Focus: DexSim v0.4.0 migration, atomic skill abstraction, benchmarking, multi-version docs, PyPI release workflow fixes, and dependency bumps.
 
 ### v0.2.1
 

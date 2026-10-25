@@ -175,7 +175,7 @@ def test_manipulation_grasp_dwell_and_placement_use_shared_atomic_options(
     """Grasp preload lives in PickUp options and does not mutate object dynamics."""
     deployment, _, _ = _deployment(task_name)
     (preset,) = deployment.integration.registration.robot_profile_binding.presets
-    options = preset.action_option_templates
+    options = preset.skill_option_templates
     assert options["pick"].grasp_settle_steps == 45
     assert options["pick"].hand_interp_steps == 10
     assert options["place"].preserve_current_object_orientation is True

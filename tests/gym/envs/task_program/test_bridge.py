@@ -40,31 +40,31 @@ from embodichain.lab.gym.envs.task_program.bridge import (
 )
 import embodichain.lab.gym.envs.task_program.bridge as bridge_module
 from embodichain.lab.gym.envs.types import ControllerAction
-from embodichain.lab.sim.atomic_actions.bindings import (
+from embodichain.lab.sim.atomic_skills.bindings import (
     JointPositionTarget,
     RuntimeEndpointTarget,
 )
-from embodichain.lab.sim.atomic_actions.execution import (
+from embodichain.lab.sim.atomic_skills.execution import (
     ExecutionEvent,
     ExecutionEventKind,
 )
-from embodichain.lab.sim.atomic_actions.policies import MotionPolicy, RecoveryPolicy
-from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUpOptions
-from embodichain.lab.sim.atomic_actions.primitives.place import PlaceOptions
-from embodichain.lab.sim.atomic_actions.runner import ExecutionRunnerCfg
-from embodichain.lab.sim.atomic_actions.runtime_commands import (
+from embodichain.lab.sim.atomic_skills.policies import MotionPolicy, RecoveryPolicy
+from embodichain.lab.sim.atomic_skills.primitives.pick_up import PickUpOptions
+from embodichain.lab.sim.atomic_skills.primitives.place import PlaceOptions
+from embodichain.lab.sim.atomic_skills.runner import ExecutionRunnerCfg
+from embodichain.lab.sim.atomic_skills.runtime_commands import (
     EndpointCommand,
     JointPositionPayload,
     RuntimeCommandFrame,
     RuntimeCommandPayload,
 )
-from embodichain.lab.sim.atomic_actions.state import (
+from embodichain.lab.sim.atomic_skills.state import (
     PlanningContext,
     RobotObservation,
     SceneSnapshot,
     TaskState,
 )
-from embodichain.lab.sim.atomic_actions.tracking import TrackingPolicy
+from embodichain.lab.sim.atomic_skills.tracking import TrackingPolicy
 from embodichain.lab.task_program.semantics.calls import (
     Pick,
     Place,
@@ -517,7 +517,7 @@ class _TerminalFailedRuntime(_FakeRuntime):
             task_state=running.task_state,
             events=(
                 ExecutionEvent(
-                    kind=ExecutionEventKind.ACTION_PLANNING_FAILED,
+                    kind=ExecutionEventKind.SKILL_PLANNING_FAILED,
                     timestamp=self.clock.now(),
                     skill_id="slide",
                     invocation_id="open-drawer-call",
@@ -954,7 +954,7 @@ def test_bridge_progress_counts_only_fixed_pick_place_calls(
     )
     policies = {
         "motion_policy": MotionPolicy(sample_count=PROGRESS_SAMPLE_COUNT),
-        "recovery_policy": RecoveryPolicy(max_replans=0, max_action_retries=0),
+        "recovery_policy": RecoveryPolicy(max_replans=0, max_skill_retries=0),
         "tracking_policy": TrackingPolicy.timed(),
         **overrides,
     }
@@ -962,7 +962,7 @@ def test_bridge_progress_counts_only_fixed_pick_place_calls(
     compiler.integration.link_call.return_value.preset = SkillPolicyPreset(
         "progress",
         effect_assurance=EffectAssurance.PROJECTED,
-        action_option_templates={"pick": PickUpOptions(), "place": PlaceOptions()},
+        skill_option_templates={"pick": PickUpOptions(), "place": PlaceOptions()},
         **policies,
     )
     runtime.compiler = compiler
@@ -1696,7 +1696,7 @@ def test_zero_command_terminal_runtime_failure_preserves_trace_and_validates_onc
     )
     assert runtime_trace["events"] == [
         {
-            "kind": "action_planning_failed",
+            "kind": "skill_planning_failed",
             "timestamp": 0.0,
             "skill_id": "slide",
             "invocation_id": "open-drawer-call",

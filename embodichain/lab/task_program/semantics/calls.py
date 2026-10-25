@@ -27,7 +27,7 @@ from typing import ClassVar, TypeAlias
 
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     DisjointResourceSlots,
     DisjointSlotEndpoints,
     SkillBindingContract,
@@ -781,16 +781,16 @@ def _builtin_call_target(
     spec_type: type[SemanticCallSpec],
 ) -> SkillDescriptor:
     """Return the non-overridable atomic target for one curated call type."""
-    from embodichain.lab.sim.atomic_actions.primitives.hand_over import (
-        HandOver as HandOverAction,
+    from embodichain.lab.sim.atomic_skills.primitives.hand_over import (
+        HandOver as HandOverSkill,
     )
-    from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUp
-    from embodichain.lab.sim.atomic_actions.primitives.place import Place as PlaceAction
+    from embodichain.lab.sim.atomic_skills.primitives.pick_up import PickUp
+    from embodichain.lab.sim.atomic_skills.primitives.place import Place as PlaceSkill
 
     targets = {
         Pick: PickUp.descriptor(),
-        Place: PlaceAction.descriptor(),
-        HandOver: HandOverAction.descriptor(),
+        Place: PlaceSkill.descriptor(),
+        HandOver: HandOverSkill.descriptor(),
     }
     try:
         return targets[spec_type]

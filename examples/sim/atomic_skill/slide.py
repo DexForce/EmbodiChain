@@ -1,0 +1,310 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+"""Demonstrate Slide on a translating drawer."""
+
+from __future__ import annotations
+
+import argparse
+from typing import Literal
+
+import torch
+
+from embodichain.data import get_data_path
+from embodichain.lab.sim import SimulationManager
+from embodichain.lab.sim.atomic_skills import (
+    SkillInvocation,
+    AtomicSkillEngine,
+    ControlPartCommandProfile,
+    MotionPolicy,
+    ObjectSemantics,
+    SlideAffordance,
+    SlideGoal,
+    SlideOptions,
+    sample_initial_articulation_geometry,
+)
+from embodichain.lab.sim.cfg import (
+    ArticulationCfg,
+    JointDrivePropertiesCfg,
+)
+from embodichain.lab.sim.objects import Articulation
+from embodichain.utils import logger
+from examples.sim.atomic_skill.support import (
+    add_ur5_gripper_robot,
+    configure_newton_link_contacts,
+    create_affordance_sampling_context,
+    create_parallel_jaw_grasp_pose_generator,
+    create_toppra_motion_generator,
+    create_tutorial_argument_parser,
+    create_tutorial_rigid_body_physics,
+    create_tutorial_simulation,
+    draw_axis_marker,
+    get_hand_open_close_qpos,
+    log_affordance_branch_diagnostics,
+    parse_affordance_sampling_arguments,
+    prepare_tutorial_scene,
+    replay_trajectory,
+    _compile_demo,
+    run_tutorial,
+)
+
+DRAWER_ASSET = "Drawer/model_split_links_with_inertials.urdf"
+HANDLE_LINK_NAME = "large_handle_bar"
+DRAWER_POSITION = (-1.1, 0.0, 0.0)
+DRAWER_ORIENTATION = (0.0, 0.0, 90.0)  # degrees
+TRAJECTORY_SAMPLE_COUNT = 140
+HAND_INTERP_STEPS = 12
+POST_TRAJECTORY_STEPS = 240
+HANDLE_SCENE_ENTITY_ID = "drawer-large-handle"
+
+
+def parse_arguments() -> argparse.Namespace:
+    """Parse command-line arguments for the drawer pull/push tutorial."""
+    parser = create_tutorial_argument_parser(
+        "Pull a drawer open, then push it closed with Slide.",
+        features=("affordance_sampling", "grasp_sampling", "visualize_axes"),
+    )
+    parser.add_argument("--translation_distance", type=float, default=0.18)
+    parser.add_argument("--approach_distance", type=float, default=0.10)
+    return parse_affordance_sampling_arguments(parser)
+
+
+def create_drawer(
+    sim: SimulationManager,
+) -> Articulation:
+    """Create the fixed-base drawer in its closed initial state."""
+    drawer_cfg = ArticulationCfg(
+        uid="drawer",
+        fpath=get_data_path(DRAWER_ASSET),
+        asset_physics_mode="overlay",
+        init_pos=DRAWER_POSITION,
+        init_rot=DRAWER_ORIENTATION,
+        init_qpos=(0.0,),
+        joint_drive_props=JointDrivePropertiesCfg(drive_type="none"),
+        attrs=create_tutorial_rigid_body_physics(
+            static_friction=1.0,
+            dynamic_friction=1.0,
+        ),
+    )
+    configure_newton_link_contacts(
+        sim,
+        drawer_cfg,
+        group_name="newton_handle_contacts",
+        link_names_expr=[HANDLE_LINK_NAME],
+    )
+    drawer = sim.add_articulation(cfg=drawer_cfg)
+    sim.update(step=10)
+    return drawer
+
+
+def create_drawer_semantics(drawer: Articulation) -> ObjectSemantics:
+    """Create sampled-grasp translation semantics for the drawer handle.
+
+    Args:
+        drawer: Drawer articulation that owns the target handle link.
+    Returns:
+        Pure target-local semantics for the handle's pull/push affordance.
+    """
+    vertices, triangles = drawer.get_link_vert_face(HANDLE_LINK_NAME)
+    geometry = sample_initial_articulation_geometry(
+        drawer,
+        HANDLE_LINK_NAME,
+        initial_qpos=drawer.cfg.init_qpos,
+        initial_qpos_joint_names=drawer.joint_names,
+        body_scale=drawer.cfg.body_scale,
+    ).to_object_geometry()
+    return ObjectSemantics(
+        label="drawer_large_handle",
+        geometry=geometry,
+        entity_id=HANDLE_SCENE_ENTITY_ID,
+        affordance=SlideAffordance(
+            mesh_vertices=torch.as_tensor(vertices),
+            mesh_triangles=torch.as_tensor(triangles),
+        ),
+    )
+
+
+def create_invocation(
+    engine: AtomicSkillEngine,
+    semantics: ObjectSemantics,
+    target_pose: torch.Tensor,
+    *,
+    direction: Literal["pull", "push"],
+    approach_distance: float,
+    translation_distance: float,
+) -> SkillInvocation:
+    """Create one pull or push invocation for the shared drawer target.
+
+    Args:
+        engine: Engine used to resolve the slide control-part binding.
+        semantics: Drawer-handle semantics shared by both operations.
+        target_pose: Latest observed world pose of the drawer handle.
+        direction: Whether this invocation pulls open or pushes closed.
+        approach_distance: Pre-grasp offset opposite the approach axis.
+        translation_distance: Drawer travel distance for this operation.
+
+    Returns:
+        A grounded pull/push invocation for the tutorial UR5.
+    """
+    return engine.make_invocation(
+        "slide",
+        SlideGoal(
+            semantics,
+            target_pose,
+        ),
+        control_parts={"primary": {"motion": "arm", "grasp": "eef"}},
+        motion_policy=MotionPolicy(
+            # Contact/path segments require exact Cartesian samples.
+            strategy="ik_interp",
+            sample_count=TRAJECTORY_SAMPLE_COUNT,
+        ),
+        skill_options=SlideOptions(
+            direction=direction,
+            hand_interp_steps=HAND_INTERP_STEPS,
+            approach_distance=approach_distance,
+            translation_distance=translation_distance,
+        ),
+    )
+
+
+def run(args: argparse.Namespace) -> None:
+    """Plan and replay a drawer pull followed by a push.
+
+    Args:
+        args: Resolved standalone or configured host arguments.
+    """
+    if args.translation_distance <= 0.0:
+        raise ValueError("--translation_distance must be positive.")
+    if args.translation_distance > 0.285:
+        raise ValueError(
+            "--translation_distance must not exceed the drawer limit 0.285."
+        )
+
+    sim = create_tutorial_simulation(args)
+    robot = add_ur5_gripper_robot(
+        sim,
+        init_qpos=[0.0, -1.57, 1.57, -3.14, -1.57, 0.0, 0.0, 0.0],
+        tcp_point="grasp",
+    )
+    drawer = create_drawer(sim)
+    sim.prepare()
+    hand_open, hand_close = get_hand_open_close_qpos(robot)
+    motion_gen = create_toppra_motion_generator(
+        robot,
+        planner=getattr(args, "planner", "trapezoidal"),
+    )
+    semantics = create_drawer_semantics(drawer)
+    affordance = semantics.affordance
+    assert isinstance(affordance, SlideAffordance)
+    if not args.no_vis_eef_axis:
+        draw_axis_marker(
+            sim,
+            "drawer_handle_link_pose",
+            drawer.get_link_pose(HANDLE_LINK_NAME, to_matrix=True),
+        )
+
+    engine = AtomicSkillEngine(
+        motion_generator=motion_gen,
+        control_profiles={
+            "eef": ControlPartCommandProfile.joint_positions(
+                open=hand_open,
+                grasp=hand_close,
+            )
+        },
+        grasp_pose_generators={
+            "eef": create_parallel_jaw_grasp_pose_generator(
+                n_sample=args.n_sample,
+                force_refresh=args.force_reannotate,
+                approach_direction_samples=getattr(args, "grasp_approach_samples", 4),
+            )
+        },
+    )
+    wait_for_user = prepare_tutorial_scene(
+        sim,
+        args,
+        "Inspect the closed drawer, then press Enter to plan the pull...",
+    )
+
+    for direction in ("pull", "push"):
+        if direction == "push" and wait_for_user:
+            input(
+                "Pull replay finished. Press Enter to read the moved handle "
+                "pose and plan the push..."
+            )
+
+        handle_pose = drawer.get_link_pose(HANDLE_LINK_NAME, to_matrix=True)
+        compiled = _compile_demo(
+            engine,
+            args,
+            (
+                create_invocation(
+                    engine,
+                    semantics,
+                    handle_pose,
+                    direction=direction,
+                    approach_distance=args.approach_distance,
+                    translation_distance=args.translation_distance,
+                ),
+            ),
+            context=engine.initial_context(
+                control_dt=sim.sim_config.physics_dt,
+                affordance_sampling=create_affordance_sampling_context(args),
+            ),
+        )
+        log_affordance_branch_diagnostics(compiled.skill_plans[0])
+        if not compiled.plan_success.all():
+            if getattr(args, "run", None) is not None:
+                raise RuntimeError(
+                    f"Atomic planning failed: {compiled.plan_success.tolist()}"
+                )
+            logger.log_warning(f"Failed to plan the Slide {direction} trajectory.")
+            return
+
+        if wait_for_user:
+            input(f"Press Enter to replay the drawer {direction}...")
+        focus_pose = drawer.get_link_pose(HANDLE_LINK_NAME, to_matrix=True)
+        focus_position = [focus_pose[0, 0, 3], focus_pose[0, 1, 3], focus_pose[0, 2, 3]]
+        camera_position = [
+            focus_position[0] + 0.5,
+            focus_position[1] + 0.5,
+            focus_position[2] + 0.5,
+        ]
+        look_at = [camera_position, focus_position, [0, 0, 1]]
+        replay_trajectory(
+            sim,
+            robot,
+            compiled.trajectory,
+            args,
+            video_prefix=f"{direction}_drawer_auto_play",
+            hold_steps=POST_TRAJECTORY_STEPS,
+            look_at=look_at,
+            compiled=compiled,
+        )
+
+    if wait_for_user:
+        input("Press Enter to exit the simulation...")
+
+
+def main() -> None:
+    """Run the standalone example with its original arguments."""
+    run(parse_arguments())
+
+
+if __name__ == "__main__":
+    run_tutorial(main)
+
+
+__all__: list[str] = []

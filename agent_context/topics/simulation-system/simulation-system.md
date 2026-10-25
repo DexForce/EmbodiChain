@@ -132,7 +132,7 @@ tests need non-symmetric rotations to expose component-order mistakes.
 | Camera attachment resolution or contact sensors | [Sensor system](../sensor-system/sensor-system.md) |
 | Browser export or native gizmos | [Visualization](../sim-visualization/sim-visualization.md), [native gizmos](../sim-visualization/native-gizmos.md) |
 | Solvers, planners, workspace, augmentation | [IK](../ik-solvers/ik-solvers.md), [motion](../motion-planning/motion-planning.md), [workspace](../robot-workspace/robot-workspace.md) |
-| Semantic geometry and action execution | [Atomic Actions](../atomic-actions/atomic-actions.md), [Task Programs](../task-programs/task-programs.md) |
+| Semantic geometry and action execution | [Atomic Skills](../atomic-actions/atomic-actions.md), [Task Programs](../task-programs/task-programs.md) |
 
 `motion/__init__.py` and workspace analyzer exports remain lazy: Robot imports
 solver/workspace types while planners resolve robots through the manager.

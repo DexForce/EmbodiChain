@@ -26,18 +26,18 @@ from unittest.mock import Mock, patch
 import pytest
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
-    ActionInvocation,
-    ActionOptions,
-    ActionPlan,
-    ActionPlanTemplateAdapter,
-    AtomicAction,
-    AtomicActionEngine,
+from embodichain.lab.sim.atomic_skills import (
+    SkillInvocation,
+    SkillOptions,
+    SkillPlan,
+    SkillPlanTemplateAdapter,
+    AtomicSkill,
+    AtomicSkillEngine,
     JointPositionGoal,
     JOINT_POSITION_CAPABILITY,
     MotionPolicy,
     PlanningContext,
-    ResolvedActionRequest,
+    ResolvedSkillRequest,
     SkillBindingContract,
     SkillEndpointRequirement,
     SkillResourceSlot,
@@ -60,7 +60,7 @@ from embodichain.lab.task_program.semantics.calls import RegisteredSemanticCall
 CONTROL_DT = 0.1
 
 
-class _ThreePhasePlaceAction(AtomicAction[JointPositionGoal, ActionOptions]):
+class _ThreePhasePlaceAction(AtomicSkill[JointPositionGoal, SkillOptions]):
     """Seven-sample Place stand-in with one editable retract interior sample."""
 
     skill_id: ClassVar[str] = "place"
@@ -81,9 +81,9 @@ class _ThreePhasePlaceAction(AtomicAction[JointPositionGoal, ActionOptions]):
 
     def _plan(
         self,
-        request: ResolvedActionRequest[JointPositionGoal, ActionOptions],
+        request: ResolvedSkillRequest[JointPositionGoal, SkillOptions],
         context: PlanningContext,
-    ) -> ActionPlan:
+    ) -> SkillPlan:
         samples = torch.tensor(
             [0.0, 0.2, 0.4, 0.4, 0.6, 0.8, 1.0],
             device=context.robot.qpos.device,
@@ -118,9 +118,9 @@ class _WaypointHandOverAction(_ThreePhasePlaceAction):
 
     def _plan(
         self,
-        request: ResolvedActionRequest[JointPositionGoal, ActionOptions],
+        request: ResolvedSkillRequest[JointPositionGoal, SkillOptions],
         context: PlanningContext,
-    ) -> ActionPlan:
+    ) -> SkillPlan:
         lengths = {
             "pickup_approach": 25,
             "pickup_reach": 10,
@@ -151,7 +151,7 @@ class _WaypointHandOverAction(_ThreePhasePlaceAction):
         )
 
 
-def _engine(batch_size: int = 1) -> tuple[AtomicActionEngine, _ThreePhasePlaceAction]:
+def _engine(batch_size: int = 1) -> tuple[AtomicSkillEngine, _ThreePhasePlaceAction]:
     robot = Mock()
     robot.device = torch.device("cpu")
     robot.dof = 3
@@ -165,16 +165,16 @@ def _engine(batch_size: int = 1) -> tuple[AtomicActionEngine, _ThreePhasePlaceAc
     generator.robot = robot
     generator.device = torch.device("cpu")
     generator.planner.cfg.planner_type = "stub_planner"
-    engine = AtomicActionEngine(generator, load_builtins=False)
+    engine = AtomicSkillEngine(generator, load_builtins=False)
     action = _ThreePhasePlaceAction()
     engine.register(action)
     return engine, action
 
 
 def _place_invocation(
-    engine: AtomicActionEngine, batch_size: int = 1
-) -> ActionInvocation:
-    return ActionInvocation(
+    engine: AtomicSkillEngine, batch_size: int = 1
+) -> SkillInvocation:
+    return SkillInvocation(
         skill_id="place",
         goal=JointPositionGoal(torch.ones(batch_size, 3)),
         binding=engine.bind_control_parts(
@@ -187,11 +187,11 @@ def _place_invocation(
 
 
 def _planned_place() -> tuple[
-    AtomicActionEngine,
-    ActionInvocation,
-    ResolvedActionRequest,
+    AtomicSkillEngine,
+    SkillInvocation,
+    ResolvedSkillRequest,
     PlanningContext,
-    ActionPlan,
+    SkillPlan,
 ]:
     engine, action = _engine()
     invocation = _place_invocation(engine)
@@ -201,7 +201,7 @@ def _planned_place() -> tuple[
 
 
 def _plan_request(
-    invocation: ActionInvocation,
+    invocation: SkillInvocation,
     *,
     skill_id: str = "place",
 ) -> TaskProgramPlanRequest:
@@ -454,11 +454,11 @@ def test_combined_factory_allows_padded_recipe_indices_for_discarded_rows() -> N
 
 
 def _planned_place_batch(*, batch_size: int) -> tuple[
-    AtomicActionEngine,
-    ActionInvocation,
-    ResolvedActionRequest,
+    AtomicSkillEngine,
+    SkillInvocation,
+    ResolvedSkillRequest,
     PlanningContext,
-    ActionPlan,
+    SkillPlan,
 ]:
     engine, action = _engine(batch_size=batch_size)
     invocation = _place_invocation(engine, batch_size=batch_size)
@@ -587,7 +587,7 @@ def test_handover_variants_fix_waypoints_held_phases_and_stationary_arm(
     engine.robot.body_data.qpos_limits = torch.tensor([[[-2.0, 2.0]] * 5])
     action = _WaypointHandOverAction()
     engine.register(action)
-    invocation = ActionInvocation(
+    invocation = SkillInvocation(
         skill_id="hand_over",
         goal=JointPositionGoal(torch.ones(2, 5)),
         binding=engine.bind_control_parts("hand_over", {"primary": {"motion": "all"}}),
@@ -674,7 +674,7 @@ def test_handover_expansion_skips_failed_rows_and_keeps_valid_row_provenance(
     engine.robot.body_data.qpos_limits = torch.tensor([[[-2.0, 2.0]] * 5])
     action = PartiallyFailedHandOver()
     engine.register(action)
-    invocation = ActionInvocation(
+    invocation = SkillInvocation(
         skill_id="hand_over",
         goal=JointPositionGoal(torch.ones(2, 5)),
         binding=engine.bind_control_parts("hand_over", {"primary": {"motion": "all"}}),

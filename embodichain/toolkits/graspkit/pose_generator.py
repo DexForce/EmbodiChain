@@ -204,7 +204,7 @@ def get_parallel_jaw_gripper_model(model_id: str) -> ParallelJawGripperModelCfg:
 class GraspPoseGenerator(ABC):
     """Standalone service that generates grasp poses from target geometry.
 
-    The contract has no dependency on Gym, simulation, atomic actions, or
+    The contract has no dependency on Gym, simulation, atomic skills, or
     Task Program. Application code may call it directly or install the same
     service instance alongside a motion generator in a higher-level runtime.
     """

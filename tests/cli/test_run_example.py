@@ -200,12 +200,15 @@ def test_missing_example_data_reports_installation_error(
     assert "Reinstall EmbodiChain" in capsys.readouterr().err
 
 
-def test_existing_atomic_command_forwards_to_ordinary_example(monkeypatch) -> None:
+@pytest.mark.parametrize("command", ["run-atomic-skill", "run-atomic-action"])
+def test_existing_atomic_command_forwards_to_ordinary_example(
+    monkeypatch, command: str
+) -> None:
     run = Mock()
     monkeypatch.setattr(launcher, "main", run)
-    cli.main(["run-atomic-action", "--skill", "place", "--variants", "2"])
+    cli.main([command, "--skill", "place", "--variants", "2"])
     run.assert_called_once_with(
-        ["sim/atomic_action", "--skill", "place", "--variants", "2"]
+        ["sim/atomic_skill", "--skill", "place", "--variants", "2"]
     )
 
 
@@ -407,3 +410,18 @@ def test_nested_namespace_directories_need_no_initializers(
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "53"
+
+
+def test_legacy_example_selector_resolves_to_canonical_files(tmp_path: Path) -> None:
+    directory = tmp_path / "sim/atomic_skill"
+    directory.mkdir(parents=True)
+    (directory / "__main__.py").write_text("")
+    (directory / "place.py").write_text("")
+    assert (
+        launcher._example_path(tmp_path, "sim/atomic_action")
+        == directory / "__main__.py"
+    )
+    assert (
+        launcher._example_path(tmp_path, "sim/atomic_action/place")
+        == directory / "place.py"
+    )

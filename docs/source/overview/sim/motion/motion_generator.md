@@ -199,7 +199,7 @@ period. Position-only playback is the default; the example opts into velocity
 targets, with zero velocity at the first, terminal, and padded hold samples.
 
 Atomic Skills and Gym experts own their execution cadence and holds. See
-{doc}`Atomic actions </overview/sim/atomic_actions/index>` and the
+{doc}`Atomic actions </overview/sim/atomic_skills/index>` and the
 {doc}`expert data expansion tutorial </tutorial/data_expansion>` for those
 workflows. Teleporting through samples, as the cuRobo visualization demo does,
 shows a path but does not measure physical tracking.

@@ -33,8 +33,8 @@ import torch
 
 from embodichain.compute.geometry import nearest_half_turn_pose, rotate_rigid_grasp
 
-from embodichain.lab.sim.atomic_actions import (
-    ActionInvocation,
+from embodichain.lab.sim.atomic_skills import (
+    SkillInvocation,
     Affordance,
     AxisAlignAffordance,
     AxisAlignGoal,
@@ -53,7 +53,7 @@ from embodichain.lab.sim.atomic_actions import (
     PushObjectOptions,
     SceneSnapshot,
 )
-from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory
+from embodichain.lab.sim.atomic_skills.plans import CompiledTrajectory
 from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
 
 from ..atomic_skill import AtomicSkillCaseProvider
@@ -823,7 +823,7 @@ class _OpenDoorCases(AtomicSkillCaseProvider):
         scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
-    ) -> ActionInvocation:
+    ) -> SkillInvocation:
         del adapter
         device = scenario.robot.device
         semantics = ObjectSemantics(
@@ -1081,7 +1081,7 @@ class _PourCases(AtomicSkillCaseProvider):
 
     def prefix_invocations(
         self, scenario: "AtomicSkillScenario", case: BenchmarkCase
-    ) -> tuple[ActionInvocation, ...]:
+    ) -> tuple[SkillInvocation, ...]:
         """Acquire the object with the frozen grasp before pouring."""
         device = scenario.robot.device
         handle = scenario.object_handle(case.object_id)
@@ -1127,7 +1127,7 @@ class _PourCases(AtomicSkillCaseProvider):
         scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
-    ) -> ActionInvocation:
+    ) -> SkillInvocation:
         del adapter
         return scenario.require_engine().make_invocation(
             self.skill_id,
@@ -1417,7 +1417,7 @@ class _AxisAlignCases(AtomicSkillCaseProvider):
         scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
-    ) -> ActionInvocation:
+    ) -> SkillInvocation:
         del adapter
         device = scenario.robot.device
         parameters = case.case_parameters
@@ -1774,7 +1774,7 @@ class _PushObjectCases(AtomicSkillCaseProvider):
         scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
-    ) -> ActionInvocation:
+    ) -> SkillInvocation:
         del adapter
         device = scenario.robot.device
         parameters = case.case_parameters

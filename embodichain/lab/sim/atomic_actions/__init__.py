@@ -14,261 +14,20 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Typed planning contracts and built-in atomic actions.
+"""Deprecated import compatibility for :mod:`embodichain.lab.sim.atomic_skills`.
 
-The engine resolves an :class:`ActionInvocation` into a
-:class:`ResolvedActionRequest`, which an action combines with a
-:class:`PlanningContext` through :meth:`AtomicAction.plan`. Planning is
-side-effect free: it returns an :class:`ActionPlan` with timed motion,
-completion criteria, diagnostics, and uncommitted expected task-state effects.
-:class:`AtomicActionEngine` can compile a static sequence. For closed-loop use,
-:class:`ExecutionSession` owns recovery and invocation-revision state while
-:class:`ExecutionRunner` connects it to observations, commands, and time.
+The old package and every submodule reuse canonical module objects. This keeps
+class identity, registry state and exception types intact during migration.
+Legacy imports are retained for the 0.x migration window; new code should use
+``atomic_skills``. Removal requires a separately announced breaking release.
 """
 
 from __future__ import annotations
 
-from .articulation_geometry import (
-    ArticulationAffordanceGeometry,
-    ArticulationGeometryProvider,
-    ArticulationJointGeometry,
-    create_rigidized_articulation_antipodal_affordance,
-    sample_initial_articulation_geometry,
-)
-from .affordance import (
-    Affordance,
-    AntipodalAffordance,
-    AxisAlignAffordance,
-    AssembleAffordance,
-    InteractionPoints,
-    OpenDoorAffordance,
-    PressAffordance,
-    SlideAffordance,
-    TwistAffordance,
-)
-from .affordance_sampling import (
-    AffordancePoseCandidates,
-    AffordanceSample,
-    AffordanceSamplingContext,
-)
-from .bindings import (
-    ActionBinding,
-    EndpointBinding,
-    JointPositionTarget,
-    RuntimeEndpointTarget,
-)
-from .control import (
-    ActionControlOverrides,
-    ControlCommand,
-    ControlPartCommandProfile,
-    GRASP_COMMAND,
-    JointPositionCommand,
-    OPEN_COMMAND,
-    PARK_COMMAND,
-)
-from .core import AtomicAction, ObjectSemantics, SkillDescriptor
-from .effects import StateDelta
-from .evidence import (
-    PhysicalEvidenceBatch,
-    PhysicalEvidenceFrame,
-    PhysicalEvidenceProvider,
-    PhysicalEvidenceRequest,
-)
-from .engine import AtomicActionEngine, PlanTransform
-from .execution import (
-    ExecutionEvent,
-    ExecutionEventKind,
-    ExecutionPlanAttempt,
-    ExecutionSession,
-    ExecutionStatus,
-    ExecutionTick,
-)
-from .verification import (
-    EffectExpectationResult,
-    EffectVerificationRequest,
-    EffectVerificationResult,
-    HeldObjectGuardRequest,
-    HeldObjectGuardResult,
-    PhaseEffectGateRequest,
-    PhaseEffectGateResult,
-)
-from .goals import (
-    ObjectActionGoal,
-    PoseGoalValue,
-    SceneEntityPose,
-)
-from .invocation import (
-    ActionInvocation,
-    ActionOptions,
-    PhaseEffectGateRequirement,
-    ResolvedActionRequest,
-)
-from .plans import (
-    ActionPlan,
-    CompiledTrajectory,
-    EffectVerificationRequirement,
-    PlannerDiagnostics,
-    PlanningFailure,
-    TimedTrajectory,
-    TrajectorySegment,
-)
-from .policies import DynamicCollisionMode, MotionPolicy, RecoveryPolicy
-from .requirements import (
-    BATCH_INVERSE_KINEMATICS_CAPABILITY,
-    CARTESIAN_POSE_CAPABILITY,
-    DisjointResourceSlots,
-    DisjointSlotEndpoints,
-    FORWARD_KINEMATICS_CAPABILITY,
-    GRASP_CAPABILITY,
-    INVERSE_KINEMATICS_CAPABILITY,
-    JOINT_POSITION_CAPABILITY,
-    SkillBindingContract,
-    SkillEndpointRequirement,
-    SkillResourceSlot,
-)
-from .runtime import ActionPlanningServices
-from .runtime_commands import (
-    EndpointCommand,
-    JointPositionPayload,
-    RuntimeCommandFrame,
-    RuntimeCommandPayload,
-    TimedCommandSequence,
-)
-from .transports import EndpointCommandRouter, EndpointCommandTransport
-from .trajectory_adapter import ActionPlanTemplateAdapter
-from .tracking import (
-    BASE_POSE_CHANNEL,
-    JOINT_POSITION_CHANNEL,
-    WHOLE_BODY_POSE_CHANNEL,
-    EndpointTrackingChannelBinding,
-    EndpointTrackingFeedbackAddress,
-    FeedbackTerminalAcceptance,
-    InFlightTrackingPolicy,
-    JointPositionTrackingEvaluator,
-    JointPositionTrackingMetric,
-    JointPositionTrackingProjector,
-    JointPositionTrackingState,
-    PlanningContextTrackingFeedbackProvider,
-    PoseTrackingEvaluator,
-    PoseTrackingMetric,
-    PoseTrackingState,
-    TerminalAcceptance,
-    TimedTerminalAcceptance,
-    TimedTrackingSequence,
-    TrackingCommandProjector,
-    TrackingEvaluation,
-    TrackingEvaluatorRegistry,
-    TrackingFeedbackAddress,
-    TrackingFeedbackBatch,
-    TrackingFeedbackProvider,
-    TrackingFeedbackProviderRegistry,
-    TrackingFeedbackSourceRef,
-    TrackingFrame,
-    TrackingMetricCfg,
-    TrackingMetricEvaluator,
-    TrackingPolicy,
-    TrackingProjectorRef,
-    TrackingProjectorRegistry,
-    TrackingRuntime,
-    TrackingSetpoint,
-    TrackingState,
-    WholeBodyPoseTrackingEvaluator,
-    WholeBodyPoseTrackingMetric,
-    WholeBodyPoseTrackingState,
-)
-from .primitives import (
-    AssembleGoal,
-    AxisAlign,
-    AxisAlignGoal,
-    AxisAlignOptions,
-    BUILTIN_ACTION_TYPES,
-    CoordinatedPickGoal,
-    CoordinatedPickment,
-    CoordinatedPickmentOptions,
-    CoordinatedPlacement,
-    CoordinatedPlacementGoal,
-    CoordinatedPlacementOptions,
-    EndEffectorPoseGoal,
-    GraspGoal,
-    HandOver,
-    HandOverGoal,
-    HandOverOptions,
-    HeldObjectPoseGoal,
-    JointPositionGoal,
-    MoveEndEffector,
-    MoveEndEffectorOptions,
-    MoveHeldObject,
-    MoveHeldObjectOptions,
-    MoveJoints,
-    MoveJointsOptions,
-    OpenDoor,
-    OpenDoorGoal,
-    OpenDoorOptions,
-    PickUp,
-    PickUpOptions,
-    Place,
-    PlaceGoal,
-    PlaceOptions,
-    Pour,
-    PourGoal,
-    PourOptions,
-    Press,
-    PressGoal,
-    PressOptions,
-    PushObject,
-    PushObjectGoal,
-    PushObjectOptions,
-    PushObjectToolCalibration,
-    Slide,
-    SlideGoal,
-    SlideJointTarget,
-    SlideOptions,
-    Twist,
-    TwistGoal,
-    TwistOptions,
-)
-from .runner import (
-    CommandAcknowledgement,
-    CommandAckStatus,
-    CommandDispatch,
-    CommandOperation,
-    CommandSink,
-    EffectVerifier,
-    ExecutionClock,
-    ExecutionRunner,
-    ExecutionRunnerCfg,
-    HeldObjectGuardVerifier,
-    MonotonicExecutionClock,
-    ObservationProvider,
-    PhysicalEffectVerifier,
-    PhysicalHeldObjectGuardVerifier,
-    PhysicalPhaseEffectGateVerifier,
-    PhaseEffectGateVerifier,
-    RunnerStatus,
-    RunnerStep,
-    RunnerStepCallback,
-)
-from .scene import SceneProvider
-from .sim_adapter import (
-    SceneEntity,
-    create_rigidized_articulation_antipodal_semantics,
-    create_simulation_atomic_action_engine,
-    RigidObjectSceneProvider,
-    RigidObjectSceneProviderCfg,
-    SceneSnapshotSupplier,
-    SimulationExecutionAdapter,
-)
-from .state import (
-    ArticulationJointState,
-    CoordinatedHeldObjectState,
-    EntityState,
-    HeldObjectState,
-    ObservedArticulationJointState,
-    PlanningContext,
-    RobotObservation,
-    SceneSnapshot,
-    TaskState,
-)
+from importlib import import_module as _import_module
+from pkgutil import walk_packages as _walk_packages
+import sys as _sys
+import warnings as _warnings
 
 __all__ = [
     "ActionBinding",
@@ -483,3 +242,48 @@ __all__ = [
     "WholeBodyPoseTrackingState",
     "TwistAffordance",
 ]
+
+_RENAMES = {
+    "AtomicAction": "AtomicSkill",
+    "AtomicActionEngine": "AtomicSkillEngine",
+    "ActionInvocation": "SkillInvocation",
+    "ResolvedActionRequest": "ResolvedSkillRequest",
+    "ActionPlan": "SkillPlan",
+    "ActionOptions": "SkillOptions",
+    "ActionBinding": "SkillBinding",
+    "ActionControlOverrides": "SkillControlOverrides",
+    "ActionPlanningServices": "SkillPlanningServices",
+    "ActionPlanTemplateAdapter": "SkillPlanTemplateAdapter",
+    "ObjectActionGoal": "ObjectSkillGoal",
+    "BUILTIN_ACTION_TYPES": "BUILTIN_SKILL_TYPES",
+    "create_simulation_atomic_action_engine": "create_simulation_atomic_skill_engine",
+}
+
+_warnings.warn(
+    "embodichain.lab.sim.atomic_actions is deprecated; use "
+    "embodichain.lab.sim.atomic_skills. See the Atomic Skill migration guide.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+_canonical = _import_module("embodichain.lab.sim.atomic_skills")
+# Import through canonical names before registering aliases, so Python never
+# evaluates a module twice under different package names.
+_modules = [_canonical] + [
+    _import_module(info.name)
+    for info in _walk_packages(_canonical.__path__, _canonical.__name__ + ".")
+]
+for _module in _modules:
+    for _old_name, _new_name in _RENAMES.items():
+        if hasattr(_module, _new_name):
+            setattr(_module, _old_name, getattr(_module, _new_name))
+    if _module is not _canonical:
+        _sys.modules[_module.__name__.replace("atomic_skills", "atomic_actions", 1)] = (
+            _module
+        )
+for _name in __all__:
+    globals()[_name] = getattr(_canonical, _RENAMES.get(_name, _name))
+# Preserve package attribute access such as atomic_actions.primitives as well
+# as direct imports of the corresponding aliased submodule.
+for _module in _modules[1:]:
+    if _module.__name__.rpartition(".")[0] == _canonical.__name__:
+        globals()[_module.__name__.rpartition(".")[2]] = _module

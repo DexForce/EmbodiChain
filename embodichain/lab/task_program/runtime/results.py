@@ -27,16 +27,16 @@ from typing import Generic, TypeVar
 
 import torch
 
-from embodichain.lab.sim.atomic_actions.bindings import EndpointBinding
-from embodichain.lab.sim.atomic_actions.execution import (
+from embodichain.lab.sim.atomic_skills.bindings import EndpointBinding
+from embodichain.lab.sim.atomic_skills.execution import (
     ExecutionEvent,
     ExecutionPlanAttempt,
 )
-from embodichain.lab.sim.atomic_actions.plans import PlanningFailure, TrajectorySegment
-from embodichain.lab.sim.atomic_actions.policies import MotionPolicy, RecoveryPolicy
-from embodichain.lab.sim.atomic_actions.runner import RunnerStatus
-from embodichain.lab.sim.atomic_actions.state import TaskState
-from embodichain.lab.sim.atomic_actions.tracking import (
+from embodichain.lab.sim.atomic_skills.plans import PlanningFailure, TrajectorySegment
+from embodichain.lab.sim.atomic_skills.policies import MotionPolicy, RecoveryPolicy
+from embodichain.lab.sim.atomic_skills.runner import RunnerStatus
+from embodichain.lab.sim.atomic_skills.state import TaskState
+from embodichain.lab.sim.atomic_skills.tracking import (
     FeedbackTerminalAcceptance,
     TimedTrackingSequence,
     TrackingMetricCfg,
@@ -431,12 +431,12 @@ def _recovery_policy_to_metadata(policy: RecoveryPolicy) -> dict[str, object]:
     """Serialize all bounded-recovery settings."""
     return {
         "max_replans": policy.max_replans,
-        "max_action_retries": policy.max_action_retries,
+        "max_skill_retries": policy.max_skill_retries,
         "goal_translation_threshold": _metadata_value(
             policy.goal_translation_threshold
         ),
         "goal_rotation_threshold": _metadata_value(policy.goal_rotation_threshold),
-        "action_timeout": _metadata_value(policy.action_timeout),
+        "skill_timeout": _metadata_value(policy.skill_timeout),
     }
 
 
@@ -627,7 +627,7 @@ class SkillPlanAttemptTrace:
     planned_at: float
     invocation_index: int
     planned_mask: torch.Tensor
-    action_retry_counts: tuple[int, ...]
+    skill_retry_counts: tuple[int, ...]
     replan_counts: tuple[int, ...]
     skill_id: str
     invocation_id: str | None
@@ -672,7 +672,7 @@ class SkillPlanAttemptTrace:
         if self.planned_mask.device != self.plan_success_mask.device:
             raise ValueError("Plan-attempt masks must share a device.")
         batch_size = int(self.planned_mask.numel())
-        retries = tuple(self.action_retry_counts)
+        retries = tuple(self.skill_retry_counts)
         replans = tuple(self.replan_counts)
         if len(retries) != batch_size or len(replans) != batch_size:
             raise ValueError("Recovery counters must contain one value per row.")
@@ -760,7 +760,7 @@ class SkillPlanAttemptTrace:
             raise TypeError("planner_messages must contain strings.")
         object.__setattr__(self, "planned_mask", self.planned_mask.clone())
         object.__setattr__(self, "plan_success_mask", self.plan_success_mask.clone())
-        object.__setattr__(self, "action_retry_counts", retries)
+        object.__setattr__(self, "skill_retry_counts", retries)
         object.__setattr__(self, "replan_counts", replans)
         object.__setattr__(self, "trajectory_segments", segments)
         object.__setattr__(
@@ -817,7 +817,7 @@ class SkillPlanAttemptTrace:
             planned_at=attempt.planned_at,
             invocation_index=attempt.invocation_index,
             planned_mask=attempt.planned_mask,
-            action_retry_counts=attempt.action_retry_counts,
+            skill_retry_counts=attempt.skill_retry_counts,
             replan_counts=attempt.replan_counts,
             skill_id=plan.skill_id,
             invocation_id=plan.invocation_id,
@@ -860,7 +860,7 @@ class SkillPlanAttemptTrace:
             planned_at=self.planned_at,
             invocation_index=self.invocation_index,
             planned_mask=self.planned_mask,
-            action_retry_counts=self.action_retry_counts,
+            skill_retry_counts=self.skill_retry_counts,
             replan_counts=self.replan_counts,
             skill_id=self.skill_id,
             invocation_id=self.invocation_id,
@@ -903,7 +903,7 @@ class SkillPlanAttemptTrace:
             "invocation_index": self.invocation_index,
             "planned_mask": _metadata_value(self.planned_mask),
             "recovery_counters": {
-                "action_retries": list(self.action_retry_counts),
+                "skill_retries": list(self.skill_retry_counts),
                 "replans": list(self.replan_counts),
             },
             "skill_id": self.skill_id,

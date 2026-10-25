@@ -31,10 +31,10 @@ import torch
 
 from embodichain.utils.math import pose_inv
 
-from embodichain.lab.sim.atomic_actions import (
-    ActionControlOverrides,
-    ActionInvocation,
-    ActionOptions,
+from embodichain.lab.sim.atomic_skills import (
+    SkillControlOverrides,
+    SkillInvocation,
+    SkillOptions,
     Affordance,
     GraspGoal,
     HandOverGoal,
@@ -49,7 +49,7 @@ from embodichain.lab.sim.atomic_actions import (
     SceneEntityPose,
     SkillDescriptor,
 )
-from embodichain.lab.sim.atomic_actions.goals import resolve_pose_goal
+from embodichain.lab.sim.atomic_skills.goals import resolve_pose_goal
 from embodichain.lab.task_program.semantics.calls import (
     HandOver,
     Pick,
@@ -103,7 +103,7 @@ from embodichain.lab.task_program.semantics._validation import (
     validate_identifier as _validate_identifier,
 )
 
-OptionT = TypeVar("OptionT", bound=ActionOptions)
+OptionT = TypeVar("OptionT", bound=SkillOptions)
 
 
 def _diagnostic(
@@ -420,18 +420,18 @@ class SemanticLowering:
     """Registered-lowerer output wrapped by compiler-owned invocation policy."""
 
     goal: object
-    skill_options: ActionOptions | None = None
-    control_overrides: ActionControlOverrides = field(
-        default_factory=ActionControlOverrides
+    skill_options: SkillOptions | None = None
+    control_overrides: SkillControlOverrides = field(
+        default_factory=SkillControlOverrides
     )
 
     def __post_init__(self) -> None:
         if self.skill_options is not None and not isinstance(
-            self.skill_options, ActionOptions
+            self.skill_options, SkillOptions
         ):
-            raise TypeError("skill_options must be an ActionOptions or None.")
-        if type(self.control_overrides) is not ActionControlOverrides:
-            raise TypeError("control_overrides must be exactly ActionControlOverrides.")
+            raise TypeError("skill_options must be an SkillOptions or None.")
+        if type(self.control_overrides) is not SkillControlOverrides:
+            raise TypeError("control_overrides must be exactly SkillControlOverrides.")
 
 
 class RegisteredSemanticLowerer(ABC):
@@ -477,7 +477,7 @@ class RegisteredSemanticLowerer(ABC):
         *,
         context: PlanningContext,
         bound: BoundSemanticCall,
-        option_template: ActionOptions,
+        option_template: SkillOptions,
     ) -> SemanticLowering:
         """Lower a registered value with one owned typed option template.
 
@@ -538,7 +538,7 @@ class GroundedHeldObjectGuard:
 
     Named trajectory segments only activate observation of the invariant; they
     do not create an independent planning, timeout, or recovery boundary.  The
-    enclosing atomic action continues to own the recovery budget.
+    enclosing atomic skill continues to own the recovery budget.
     """
 
     guard_id: str
@@ -658,7 +658,7 @@ class GroundedSemanticCall:
     """Factory-owned call lowered from the latest observed context."""
 
     analyzed: AnalyzedSemanticCall
-    invocation: ActionInvocation
+    invocation: SkillInvocation
     effect_spec: SemanticEffectSpec | None
     effect_monitor: EffectMonitor | None = field(repr=False, compare=False)
     effect_guards: tuple[GroundedHeldObjectGuard, ...]
@@ -678,7 +678,7 @@ class GroundedSemanticCall:
         cls,
         *,
         analyzed: AnalyzedSemanticCall,
-        invocation: ActionInvocation,
+        invocation: SkillInvocation,
         effect_spec: SemanticEffectSpec | None,
         effect_monitor: EffectMonitor | None,
         effect_guards: tuple[GroundedHeldObjectGuard, ...],
@@ -700,8 +700,8 @@ class GroundedSemanticCall:
     def __post_init__(self) -> None:
         if type(self.analyzed) is not AnalyzedSemanticCall:
             raise TypeError("analyzed must be exactly AnalyzedSemanticCall.")
-        if type(self.invocation) is not ActionInvocation:
-            raise TypeError("invocation must be exactly ActionInvocation.")
+        if type(self.invocation) is not SkillInvocation:
+            raise TypeError("invocation must be exactly SkillInvocation.")
         if self.invocation.skill_id != self.analyzed.bound.linked.descriptor.skill_id:
             raise ValueError("invocation skill_id must match the analyzed call.")
         if (self.effect_spec is None) != (self.effect_monitor is None):
@@ -1251,10 +1251,10 @@ class SemanticCallCompiler:
                 "Semantic lowering must resolve a non-None action-options value."
             )
         bound = analyzed.bound
-        invocation = ActionInvocation(
+        invocation = SkillInvocation(
             skill_id=bound.linked.descriptor.skill_id,
             goal=lowering.goal,
-            binding=bound.binding.action_binding,
+            binding=bound.binding.skill_binding,
             motion_policy=bound.preset.motion_policy,
             tracking_policy=bound.preset.tracking_policy,
             recovery_policy=bound.preset.recovery_policy,
@@ -1491,7 +1491,7 @@ class SemanticCallCompiler:
             if type(call) is HandOver:
                 break
             if type(call) is Place:
-                place_options = bound.preset.action_option_template(call.semantic_id)
+                place_options = bound.preset.skill_option_template(call.semantic_id)
                 if type(place_options) is not PlaceOptions:
                     raise AssertionError(
                         "Linked place call has a non-PlaceOptions template."
@@ -1526,7 +1526,7 @@ class SemanticCallCompiler:
             call.object,
             affordance=grasp_ref,
         )
-        option_template = self._action_option_template(analyzed, PickUpOptions)
+        option_template = self._skill_option_template(analyzed, PickUpOptions)
         downstream_targets: list[PoseGoalValue] = []
         for target in analyzed.downstream_object_targets:
             grounded_target = self._ground_object_target(target, context)
@@ -1564,7 +1564,7 @@ class SemanticCallCompiler:
             path=(*path, analyzed.index, "call", "object"),
         )
         del task_state_key
-        option_template = self._action_option_template(analyzed, PlaceOptions)
+        option_template = self._skill_option_template(analyzed, PlaceOptions)
         if call.at is not None:
             object_target = self._broadcast_pose(
                 call.at.to_matrix(),
@@ -1600,7 +1600,7 @@ class SemanticCallCompiler:
         *,
         path: tuple[PathPart, ...],
     ) -> SemanticLowering:
-        """Lower the unified pickup-to-release handover atomic action."""
+        """Lower the unified pickup-to-release handover atomic skill."""
         call = analyzed.call
         assert type(call) is HandOver
         del eligible
@@ -1630,7 +1630,7 @@ class SemanticCallCompiler:
         final = self._ground_object_target(final_target, context)
         return SemanticLowering(
             goal=HandOverGoal(semantics=semantics, target_pose=final),
-            skill_options=self._action_option_template(analyzed, HandOverOptions),
+            skill_options=self._skill_option_template(analyzed, HandOverOptions),
         )
 
     def _lower_registered(
@@ -1654,7 +1654,7 @@ class SemanticCallCompiler:
         descriptor = analyzed.bound.linked.descriptor
         target = descriptor.target_descriptor
         assert target is not None
-        option_template = self._action_option_template(
+        option_template = self._skill_option_template(
             analyzed,
             target.options_type,
         )
@@ -1687,14 +1687,14 @@ class SemanticCallCompiler:
         return replace(lowering, skill_options=deepcopy(option_template))
 
     @staticmethod
-    def _action_option_template(
+    def _skill_option_template(
         analyzed: AnalyzedSemanticCall,
         expected_type: type[OptionT],
     ) -> OptionT:
         """Return one owned exact template selected by semantic call ID."""
         semantic_id = analyzed.call.semantic_id
         try:
-            template = analyzed.bound.preset.action_option_template(semantic_id)
+            template = analyzed.bound.preset.skill_option_template(semantic_id)
         except KeyError as exc:  # pragma: no cover - static linking owns this check
             raise AssertionError(
                 f"Linked call {semantic_id!r} has no action-option template."
@@ -1709,7 +1709,7 @@ class SemanticCallCompiler:
     def _ground_effect_spec(
         self,
         analyzed: AnalyzedSemanticCall,
-        invocation: ActionInvocation,
+        invocation: SkillInvocation,
         context: PlanningContext,
         *,
         path: tuple[PathPart, ...],

@@ -257,7 +257,7 @@ def write_markdown_report(
         if view == "atomic_skills":
             lines.extend(
                 [
-                    "`cost_time_ms` measures Atomic Action compilation; it is reported as `compile_time_ms` and never ranked with bare planner-call latency. "
+                    "`cost_time_ms` measures Atomic Skill compilation; it is reported as `compile_time_ms` and never ranked with bare planner-call latency. "
                     "Physical execution, end-to-end latency, physical stage success, and end-to-end success remain distinct. "
                     "Scenario-owned motion is attributed to its effective algorithm.",
                     "",

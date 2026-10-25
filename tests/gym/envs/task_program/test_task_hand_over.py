@@ -41,7 +41,7 @@ from embodichain.lab.task_program.integrations._configured_composition import (
 from embodichain.lab.gym.utils._component_composition import _resolve_gym_components
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     AntipodalAffordance,
     EntityState,
     HandOverOptions,
@@ -430,14 +430,14 @@ def test_hand_over_profile_binds_unified_left_to_right_transfer() -> None:
     assert preset.tracking_policy.in_flight is not None
     assert preset.tracking_policy.in_flight.metrics[0].tolerance == pytest.approx(1.0)
     assert preset.tracking_policy.terminal.metrics[0].tolerance == pytest.approx(1.0)
-    assert preset.recovery_policy.max_action_retries == 0
+    assert preset.recovery_policy.max_skill_retries == 0
     assert preset.recovery_policy.goal_rotation_threshold == pytest.approx(0.5)
     assert preset.workflow_recovery_policy.max_recovery_attempts == 2
     assert preset.runner_cfg.minimum_cycle_time == pytest.approx(0.04)
     assert preset.runner_cfg.hold_during_effect_verification is False
     assert preset.runner_cfg.hold_on_completion is False
     assert preset.effect_monitors["hand_over"].params["consecutive_samples"] == 10
-    hand_over_options = preset.action_option_templates["hand_over"]
+    hand_over_options = preset.skill_option_templates["hand_over"]
     assert type(hand_over_options) is HandOverOptions
     assert hand_over_options.pre_grasp_distance == pytest.approx(0.08)
     assert hand_over_options.lift_height == pytest.approx(0.08)

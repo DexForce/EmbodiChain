@@ -77,7 +77,7 @@ def _prepare_catalogs(output: Path) -> tuple[Path, Path]:
     source = Path(get_data_path("PourWaterAssets/bottle.glb")).parent
     integration = _yaml(TASK / "task_program/integration.yaml")
     grasp = np.asarray(
-        integration["profile"]["action_options"]["pick"]["fixed_object_to_eef"]
+        integration["profile"]["skill_options"]["pick"]["fixed_object_to_eef"]
     ).reshape(4, 4)
     axis = integration["scene_binding"]["rigid_objects"][1]["affordances"][0][
         "internal_axis"

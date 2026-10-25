@@ -57,9 +57,9 @@ import torch
 from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.envs.demo import execute_demo_episode
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.atomic_actions import (
-    ActionOptions,
-    AtomicActionEngine,
+from embodichain.lab.sim.atomic_skills import (
+    SkillOptions,
+    AtomicSkillEngine,
     EndEffectorPoseGoal,
     JointPositionTarget,
     MotionPolicy,
@@ -123,7 +123,7 @@ class _MoveEndEffectorLowerer(RegisteredSemanticLowerer):
         *,
         context: PlanningContext,
         bound: BoundSemanticCall,
-        option_template: ActionOptions,
+        option_template: SkillOptions,
     ) -> SemanticLowering:
         """Resolve a relative Cartesian target without stepping the environment."""
         if set(call.arguments) != {"position_offset"}:
@@ -137,7 +137,7 @@ class _MoveEndEffectorLowerer(RegisteredSemanticLowerer):
             raise ValueError("position_offset must contain three finite numbers.")
         if type(option_template) is not MoveEndEffectorOptions:
             raise TypeError("MoveEndEffector requires its typed action options.")
-        target = bound.binding.action_binding.endpoint(
+        target = bound.binding.skill_binding.endpoint(
             "primary", "motion"
         ).require_target(JointPositionTarget)
         if self._origin is None:
@@ -169,7 +169,7 @@ class _MoveEndEffectorFactory:
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> RegisteredSemanticLowerer:
         """Create episode-local motion grounding for the adapter's exact robot."""
         del simulation, scene_registry
@@ -197,7 +197,7 @@ def build_registration() -> SimulationTaskProgramRegistration:
         presets=(
             SkillPolicyPreset(
                 "trajectory",
-                action_option_templates={_CALL_ID: MoveEndEffectorOptions()},
+                skill_option_templates={_CALL_ID: MoveEndEffectorOptions()},
                 effect_assurance=EffectAssurance.PROJECTED,
                 motion_policy=MotionPolicy(sample_count=80),
                 tracking_policy=TrackingPolicy.joint_position(

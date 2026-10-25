@@ -47,13 +47,13 @@ from embodichain.lab.gym.envs.task_program.bridge import (
 )
 from embodichain.lab.gym.envs.types import ControllerAction
 from embodichain.lab.gym.envs.wrapper.no_fail import NoFailWrapper
-from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
-from embodichain.lab.sim.atomic_actions.runtime_commands import (
+from embodichain.lab.sim.atomic_skills.bindings import JointPositionTarget
+from embodichain.lab.sim.atomic_skills.runtime_commands import (
     EndpointCommand,
     JointPositionPayload,
     RuntimeCommandFrame,
 )
-from embodichain.lab.sim.atomic_actions.state import (
+from embodichain.lab.sim.atomic_skills.state import (
     PlanningContext,
     RobotObservation,
     SceneSnapshot,

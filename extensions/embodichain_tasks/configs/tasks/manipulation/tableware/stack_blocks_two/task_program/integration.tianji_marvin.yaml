@@ -47,7 +47,7 @@ profile:
       primary: left
     place:
       primary: left
-  action_options:
+  skill_options:
     pick:
       kind: pick_up
       pre_grasp_distance: 0.08

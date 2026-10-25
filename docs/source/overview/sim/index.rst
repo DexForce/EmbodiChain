@@ -97,7 +97,7 @@ Core components
        playback, and bounded trajectory augmentation.
      - Import from ``embodichain.lab.sim.motion`` and its owning subpackages;
        the parent package loads them lazily and does not flatten their APIs.
-   * - Atomic Actions
+   * - Atomic Skills
      - Typed manipulation plans and runtime commands such as move, pick, place,
        and coordinated actions.
      - Actions compose robot and motion resources but return plans/commands;
@@ -310,14 +310,14 @@ expansion package deliberately does not step Gym or persist datasets.
 Physical initial-state restoration, rollout execution, task validation, and
 durable storage belong to an explicit host integration.
 
-For higher-level manipulation, Atomic Actions provide a typed boundary:
+For higher-level manipulation, Atomic Skills provide a typed boundary:
 
 .. code-block:: text
 
     grounded goal / Semantic Call
-        -> AtomicActionEngine
+        -> AtomicSkillEngine
         -> MotionGenerator and planner/solver resources
-        -> ActionPlan or RuntimeCommandFrame
+        -> SkillPlan or RuntimeCommandFrame
         -> application endpoint / simulation controller
         -> sim.update() and measured state
 
@@ -390,7 +390,7 @@ Choosing where to start
    * - Record/replay expert trajectories or evaluate a policy
      - :doc:`/overview/gym/index` and :doc:`/guides/policy_evaluation`
    * - Build reusable scripted manipulation
-     - :doc:`atomic actions <atomic_actions/index>`
+     - :doc:`atomic skills <atomic_skills/index>`
    * - Share canonical scene identity with semantic calls and planner obstacles
      - :doc:`/overview/task_program/scene_registry`
    * - Bind an embodiment, motion resources, and execution policies
@@ -418,4 +418,4 @@ See Also
    sensors/index
    viser_visualization.md
    motion/index
-   atomic_actions/index
+   atomic_skills/index

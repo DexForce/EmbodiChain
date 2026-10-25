@@ -1,0 +1,3 @@
+name: add-atomic-skill
+canonical_skill: .agents/skills/add-atomic-skill/SKILL.md
+project: EmbodiChain

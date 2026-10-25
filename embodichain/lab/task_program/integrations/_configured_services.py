@@ -30,10 +30,10 @@ from .extensions import (
     ControlPartEvidenceProviderFactory,
     RegisteredSemanticLowererFactory,
 )
-from embodichain.lab.sim.atomic_actions import (
-    ActionOptions,
+from embodichain.lab.sim.atomic_skills import (
+    SkillOptions,
     Affordance,
-    AtomicActionEngine,
+    AtomicSkillEngine,
     AxisAlignAffordance,
     HeldObjectPoseGoal,
     MoveHeldObject,
@@ -249,7 +249,7 @@ class _ArticulationLinkSlideLowerer(RegisteredSemanticLowerer):
         *,
         context: PlanningContext,
         bound: BoundSemanticCall,
-        option_template: ActionOptions,
+        option_template: SkillOptions,
     ) -> SemanticLowering:
         """Validate the configured payload and construct one typed Slide goal."""
         del bound
@@ -321,7 +321,7 @@ class _ArticulationLinkSlideLowererFactory(RegisteredSemanticLowererFactory):
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> RegisteredSemanticLowerer:
         """Build one fresh lowerer from the configured live link."""
         if engine.robot is not robot:
@@ -428,7 +428,7 @@ class _MoveHeldObjectLowerer(RegisteredSemanticLowerer):
         *,
         context: PlanningContext,
         bound: BoundSemanticCall,
-        option_template: ActionOptions,
+        option_template: SkillOptions,
     ) -> SemanticLowering:
         """Construct one late-bound object-space transport goal."""
         del context, bound
@@ -496,7 +496,7 @@ class _MoveHeldObjectLowererFactory(RegisteredSemanticLowererFactory):
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> RegisteredSemanticLowerer:
         """Build one lowerer after validating its live reference entity."""
         del simulation
@@ -538,7 +538,7 @@ class _PourLowerer(RegisteredSemanticLowerer):
         *,
         context: PlanningContext,
         bound: BoundSemanticCall,
-        option_template: ActionOptions,
+        option_template: SkillOptions,
     ) -> SemanticLowering:
         """Construct the typed goal while policy presets own the tilt angle."""
         del context, bound
@@ -565,7 +565,7 @@ class _PourLowerer(RegisteredSemanticLowerer):
             or previous_target.pose.relative_pose is None
         ):
             return ()
-        options = bound.preset.action_option_template(call.semantic_id)
+        options = bound.preset.skill_option_template(call.semantic_id)
         if type(options) is not PourOptions:
             raise TypeError(
                 "Configured Pour look-ahead requires an exact PourOptions template."
@@ -617,7 +617,7 @@ class _PourLowererFactory(RegisteredSemanticLowererFactory):
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> RegisteredSemanticLowerer:
         """Validate the object's selected grasp semantics before construction."""
         del simulation
@@ -670,7 +670,7 @@ class _PushObjectLowerer(RegisteredSemanticLowerer):
         *,
         context: PlanningContext,
         bound: BoundSemanticCall,
-        option_template: ActionOptions,
+        option_template: SkillOptions,
     ) -> SemanticLowering:
         """Construct a late-bound object and target push goal."""
         del context, bound
@@ -738,7 +738,7 @@ class _PushObjectLowererFactory(RegisteredSemanticLowererFactory):
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> RegisteredSemanticLowerer:
         """Validate configured scene entities and create one fresh lowerer."""
         del simulation
@@ -935,7 +935,7 @@ class _JointPositionConstraintEvidenceProviderFactory(
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
         scene_provider: SceneProvider,
     ) -> EffectEvidenceProvider:
         """Bind a fresh evidence provider to the exact assembled robot."""

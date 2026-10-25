@@ -177,7 +177,7 @@ def test_usdc_drawer_supports_named_kinematics_and_affordance_geometry(
     physics: str,
 ) -> None:
     """The three-drawer asset supports geometry and a one-joint Jacobian."""
-    from embodichain.lab.sim.atomic_actions.articulation_geometry import (
+    from embodichain.lab.sim.atomic_skills.articulation_geometry import (
         sample_initial_articulation_geometry,
     )
 

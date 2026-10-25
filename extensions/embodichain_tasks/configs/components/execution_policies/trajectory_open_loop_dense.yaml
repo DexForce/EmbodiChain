@@ -13,7 +13,7 @@ tracking:
 
 recovery:
   max_replans: 0
-  max_action_retries: 0
+  max_skill_retries: 0
   goal_rotation_threshold: 3.141592653589793
 
 workflow_recovery:

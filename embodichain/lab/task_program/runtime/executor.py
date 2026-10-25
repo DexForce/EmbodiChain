@@ -27,14 +27,14 @@ import torch
 
 from embodichain.utils.math import pose_inv
 
-from embodichain.lab.sim.atomic_actions.bindings import EndpointBinding
-from embodichain.lab.sim.atomic_actions.engine import AtomicActionEngine
-from embodichain.lab.sim.atomic_actions.effects import StateDelta
-from embodichain.lab.sim.atomic_actions.execution import (
+from embodichain.lab.sim.atomic_skills.bindings import EndpointBinding
+from embodichain.lab.sim.atomic_skills.engine import AtomicSkillEngine
+from embodichain.lab.sim.atomic_skills.effects import StateDelta
+from embodichain.lab.sim.atomic_skills.execution import (
     ExecutionEvent,
     ExecutionEventKind,
 )
-from embodichain.lab.sim.atomic_actions.verification import (
+from embodichain.lab.sim.atomic_skills.verification import (
     EffectExpectationResult,
     EffectVerificationRequest,
     EffectVerificationResult,
@@ -43,10 +43,10 @@ from embodichain.lab.sim.atomic_actions.verification import (
     PhaseEffectGateRequest,
     PhaseEffectGateResult,
 )
-from embodichain.lab.sim.atomic_actions.requirements import (
+from embodichain.lab.sim.atomic_skills.requirements import (
     FORWARD_KINEMATICS_CAPABILITY,
 )
-from embodichain.lab.sim.atomic_actions.runner import (
+from embodichain.lab.sim.atomic_skills.runner import (
     CommandSink,
     ExecutionClock,
     ExecutionRunner,
@@ -56,7 +56,7 @@ from embodichain.lab.sim.atomic_actions.runner import (
     RunnerStatus,
     RunnerStep,
 )
-from embodichain.lab.sim.atomic_actions.state import (
+from embodichain.lab.sim.atomic_skills.state import (
     HeldObjectState,
     PlanningContext,
     TaskState,
@@ -291,10 +291,8 @@ class SemanticCallExecutor:
             )
         integration = compiler.integration
         engine = integration.engine
-        if not isinstance(engine, AtomicActionEngine):
-            raise TypeError(
-                "compiler.integration.engine must be an AtomicActionEngine."
-            )
+        if not isinstance(engine, AtomicSkillEngine):
+            raise TypeError("compiler.integration.engine must be an AtomicSkillEngine.")
         initial_task = (
             engine.initial_context().task if task_state is None else task_state
         )
@@ -362,8 +360,8 @@ class SemanticCallExecutor:
         return self._compiler
 
     @property
-    def engine(self) -> AtomicActionEngine:
-        """Return the atomic-action engine owned by this runtime."""
+    def engine(self) -> AtomicSkillEngine:
+        """Return the atomic-skill engine owned by this runtime."""
         return self._engine
 
     @property
@@ -2153,8 +2151,8 @@ class SemanticCallExecutor:
         try:
             profile = bound.robot_profile
             preset = bound.preset
-            action_binding = (
-                bound.binding.action_binding
+            skill_binding = (
+                bound.binding.skill_binding
                 if invocation is None
                 else invocation.binding
             )
@@ -2176,7 +2174,7 @@ class SemanticCallExecutor:
                     if invocation is None
                     else invocation.recovery_policy
                 ),
-                endpoints=action_binding.endpoints,
+                endpoints=skill_binding.endpoints,
             )
             skill_id = bound.linked.descriptor.skill_id
         except (AttributeError, TypeError, ValueError):

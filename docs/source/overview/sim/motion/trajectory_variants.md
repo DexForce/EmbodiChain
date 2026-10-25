@@ -6,7 +6,7 @@ reinforcement-learning post-training starts from a policy that has never been
 shown an alternative. Variant expansion keeps the waypoints a plan has already
 committed to and varies only the motion between them.
 
-This is narrower than [Affordance sampling](../atomic_actions/affordance_sampling.md),
+This is narrower than [Affordance sampling](../atomic_skills/affordance_sampling.md),
 which changes *where* the robot makes contact. Here every grasp, placement and
 dwell stays exactly where planning put it, and only the free motion in between
 differs. The two compose: a sampled affordance produces a new set of waypoints,
@@ -79,7 +79,7 @@ environment where EmbodiChain is installed (see
 [Installation](../../../quick_start/install.md)):
 
 ```bash
-embodichain run-example sim/atomic_action/place --num_envs 6 --device cuda
+embodichain run-example sim/atomic_skill/place --num_envs 6 --device cuda
 ```
 
 The tutorial declares only which of the action's own named segments may move:
@@ -114,7 +114,7 @@ replay them; ask for a hundred and run a single environment if you only want
 the figures:
 
 ```bash
-embodichain run-example sim/atomic_action/place --headless --num_envs 1 --device cuda --trajectory_variants 100 --variant_plot_dir outputs/variants
+embodichain run-example sim/atomic_skill/place --headless --num_envs 1 --device cuda --trajectory_variants 100 --variant_plot_dir outputs/variants
 ```
 
 The first figure plots every variant's arm joints against time. Curves separate

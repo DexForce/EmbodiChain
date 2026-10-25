@@ -29,7 +29,7 @@ profile:
       primary: right
     place:
       primary: right
-  action_options:
+  skill_options:
     pick:
       kind: pick_up
       hand_interp_steps: 44

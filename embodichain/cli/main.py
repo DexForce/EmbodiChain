@@ -89,8 +89,13 @@ COMMANDS = (
     ),
     Command(
         name="run-atomic-action",
-        target="embodichain.cli.run_example:atomic_action_cli",
-        help="Alias for run-example sim/atomic_action.",
+        target="embodichain.cli.run_example:atomic_skill_cli",
+        help="Deprecated alias for run-atomic-skill.",
+    ),
+    Command(
+        name="run-atomic-skill",
+        target="embodichain.cli.run_example:atomic_skill_cli",
+        help="Alias for run-example sim/atomic_skill.",
     ),
     Command(
         name="list-task",

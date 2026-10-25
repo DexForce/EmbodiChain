@@ -64,6 +64,6 @@ Next steps
 
 - :doc:`/tutorial/trajectory_planning` for trajectory diagnostics.
 - :doc:`/overview/sim/motion/planners/index` for alternative planning backends.
-- :doc:`/overview/sim/atomic_actions/index` for task-level planning and execution.
+- :doc:`/overview/sim/atomic_skills/index` for task-level planning and execution.
 - :doc:`MotionGenerator API </api_reference/embodichain/embodichain.lab.sim.motion.motion_generator>`
   for complete options and helper methods.

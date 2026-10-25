@@ -45,12 +45,12 @@ class ToppraAdapter(PlannerAdapter):
 
     TOPPRA is the dual-arm Atomic Skill backend: the coordinated skills reject
     cuRobo, so the adapter also exposes its MotionGenerator to
-    :class:`AtomicActionEngine` and plans joint-space cases from their frozen
+    :class:`AtomicSkillEngine` and plans joint-space cases from their frozen
     reference configurations.
     """
 
     capabilities = frozenset(
-        {"eef_waypoint", "joint_waypoint", "batched", "empty_world", "atomic_action"}
+        {"eef_waypoint", "joint_waypoint", "batched", "empty_world", "atomic_skill"}
     )
     timing_is_solved = True
     """TOPPRA solves the time parameterization under velocity and acceleration

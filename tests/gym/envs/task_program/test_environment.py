@@ -53,9 +53,9 @@ from embodichain.lab.task_program.integrations.environment import (
     PlanningObservationPort,
 )
 from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     AntipodalAffordance,
-    AtomicActionEngine,
+    AtomicSkillEngine,
     BATCH_INVERSE_KINEMATICS_CAPABILITY,
     CARTESIAN_POSE_CAPABILITY,
     ControlPartCommandProfile,
@@ -214,7 +214,7 @@ def _robot_profile(
         presets={
             "safe": SkillPolicyPreset(
                 "safe",
-                action_option_templates={
+                skill_option_templates={
                     "pick": PickUpOptions(),
                     "place": PlaceOptions(),
                     "hand_over": HandOverOptions(),
@@ -232,7 +232,7 @@ def _robot_profile(
     )
 
 
-def _engine(profile: RobotSkillProfile) -> AtomicActionEngine:
+def _engine(profile: RobotSkillProfile) -> AtomicSkillEngine:
     """Build a CPU-only engine around a minimal typed robot surface."""
     robot = Mock()
     robot.device = torch.device("cpu")
@@ -246,7 +246,7 @@ def _engine(profile: RobotSkillProfile) -> AtomicActionEngine:
     generator.robot = robot
     generator.device = torch.device("cpu")
     generator.planner.cfg.planner_type = "fake_planner"
-    return AtomicActionEngine(
+    return AtomicSkillEngine(
         generator,
         control_profiles=profile.action_control_profiles(),
     )
@@ -282,10 +282,10 @@ class _FakeEnvironmentFactory:
             effect_monitors=self.effect_monitors,
         )
 
-    def create_atomic_action_engine(
+    def create_atomic_skill_engine(
         self,
         profile: RobotSkillProfile,
-    ) -> AtomicActionEngine:
+    ) -> AtomicSkillEngine:
         """Create an engine for exactly the supplied profile."""
         self.calls["engine"] += 1
         return _engine(profile)
@@ -294,7 +294,7 @@ class _FakeEnvironmentFactory:
         self,
         *,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
         clock: EnvironmentStepClock,
     ) -> GymPlanningObservationProvider:
         """Create a callback-backed Gym observation port."""
@@ -326,7 +326,7 @@ class _FakeEnvironmentFactory:
         self,
         *,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
         observation_provider: PlanningObservationPort,
     ) -> tuple[EffectEvidenceProvider, ...]:
         """Return the fake environment's explicit evidence-provider set."""
@@ -341,7 +341,7 @@ class _DynamicCollisionFactory(_FakeEnvironmentFactory):
     def __init__(self) -> None:
         super().__init__()
         self.pose_provider = _PoseProvider()
-        self.last_engine: AtomicActionEngine | None = None
+        self.last_engine: AtomicSkillEngine | None = None
 
     def create_scene_registry(self) -> SceneRegistry:
         self.calls["scene"] += 1
@@ -356,10 +356,10 @@ class _DynamicCollisionFactory(_FakeEnvironmentFactory):
             safe_motion_policy=MotionPolicy(strategy="motion_gen"),
         )
 
-    def create_atomic_action_engine(
+    def create_atomic_skill_engine(
         self,
         profile: RobotSkillProfile,
-    ) -> AtomicActionEngine:
+    ) -> AtomicSkillEngine:
         self.calls["engine"] += 1
         engine = _engine(profile)
         engine.motion_generator.supports_dynamic_collision_world = False

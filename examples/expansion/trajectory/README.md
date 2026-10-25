@@ -99,7 +99,7 @@ python examples/expansion/trajectory/task_environment_augmentation_showcase.py \
   --headless
 ```
 
-The showcase uses the existing Atomic Action task scene and MotionGenerator
+The showcase uses the existing Atomic Skill task scene and MotionGenerator
 planning path. By default it builds the augmentation reference with bounded IK
 interpolation on a 40 ms command grid, while simulation continues to integrate
 at its 10 ms physics period. This avoids turning the planner's internal 2 mm

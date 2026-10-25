@@ -24,7 +24,7 @@ profile:
   defaults:
     slide:
       primary: primary_manipulator
-  action_options:
+  skill_options:
     simulation.articulation_link_slide:
       kind: slide
       direction: pull

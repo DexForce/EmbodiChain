@@ -30,7 +30,7 @@ import numpy as np
 import torch
 
 from embodichain.data import get_data_path
-from embodichain.lab.sim.atomic_actions import AntipodalAffordance, ObjectSemantics
+from embodichain.lab.sim.atomic_skills import AntipodalAffordance, ObjectSemantics
 from embodichain.lab.sim.cfg import RobotCfg
 from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.robots import build_dual_arm_cfg
@@ -175,7 +175,7 @@ def create_ur5_gripper_robot_cfg(
     The arm is taken from :class:`~embodichain_robots.ur_robot.URRobotCfg`
     so the URDF, joint names and drive defaults match the canonical UR family
     config. The gripper and tool-center-point offset are added on top to match
-    the existing atomic-action tutorial setups.
+    the existing atomic-skill tutorial setups.
 
     .. attention::
         :class:`~embodichain.lab.sim.cfg.URDFCfg` defaults to upper-casing joint

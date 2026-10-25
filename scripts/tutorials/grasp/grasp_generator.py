@@ -255,7 +255,7 @@ if __name__ == "__main__":
     start_time = time.time()
 
     # Construct one standalone generator. The same instance can also be passed
-    # to AtomicActionEngine(grasp_pose_generators={"hand": grasp_generator}).
+    # to AtomicSkillEngine(grasp_pose_generators={"hand": grasp_generator}).
     grasp_generator = AntipodalGraspPoseGenerator(
         ParallelJawGripperModelCfg(
             model_id="tutorial_parallel_jaw",

@@ -40,7 +40,7 @@ Choose an Expert-Authoring Paradigm
        environment, embodiment, execution policy, and runnable task deployment.
    * - Planning level
      - Call ``MotionGenerator`` for task-specific waypoints, or construct typed
-       ``ActionInvocation`` values for ``AtomicActionEngine``.
+       ``SkillInvocation`` values for ``AtomicSkillEngine``.
      - Declare Pick, Place, HandOver, registered Semantic Calls, control flow,
        post-policies, and validators; the adapter lowers them to Atomic Skills.
    * - Best fit
@@ -171,10 +171,10 @@ These are two abstraction levels, not two unrelated planning engines:
   ``PlanResult.positions`` as a ``DemoSegment`` action iterable and combine
   ``PlanResult.success`` with a physical validator. See :doc:`motion_gen` for
   the complete planning API.
-* Use ``AtomicActionEngine`` when the behavior matches reusable skills such as
+* Use ``AtomicSkillEngine`` when the behavior matches reusable skills such as
   PickUp, Place, MoveEndEffector, Pour, or HandOver. The engine owns the shared
   motion generator, command profiles, typed goals, and projected semantic
-  context. See :doc:`atomic_actions` for the action contracts.
+  context. See :doc:`atomic_skills` for the action contracts.
 
 When using ``MotionGenerator`` directly, its planned positions are ordered for
 the selected ``control_part``. The actions yielded to the environment must
@@ -211,7 +211,7 @@ The planner must merge arm, gripper and hold commands into the environment's
 active action layout. Keep release settling in the placement iterable and
 measure its physical outcome independently of planning success. For a
 multi-object episode, yield lazily so later planning reads the updated scene.
-See :doc:`atomic_actions` for reusable Atomic Skill planning and execution.
+See :doc:`atomic_skills` for reusable Atomic Skill planning and execution.
 
 Legacy tasks implementing ``create_demo_action_list()`` remain supported and
 are wrapped as one segment named ``legacy``. New handwritten experts should

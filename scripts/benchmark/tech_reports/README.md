@@ -63,7 +63,7 @@ Start with the R-04 and G-03 end-to-end slices. Other experiment folders are
 reserved for incremental implementation. Empty directories are tracked with
 `.gitkeep`; they contain no runnable placeholder scripts or invented results.
 
-Existing `../motion_generation/`, `../atomic_action/`, `../rl/`,
+Existing `../motion_generation/`, `../atomic_skill/`, `../rl/`,
 `../task_program/`, [offscreen rendering](../rendering/README.md), and other
 benchmarks keep their entry points and outputs. Reuse their domain
 execution and adapt legacy results as the shared framework is implemented.

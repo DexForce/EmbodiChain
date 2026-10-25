@@ -476,15 +476,17 @@ class _SourceCfg:
     phase_kinds: dict[str, str] = {}
 
     def __post_init__(self) -> None:
+        if self.kind == "atomic_action":
+            self.kind = "atomic_skill"
         if self.kind not in (
             "handwritten",
             "motion_generator",
-            "atomic_action",
+            "atomic_skill",
             "task_program",
         ):
             raise ValueError(
                 "source.kind must be handwritten, motion_generator, "
-                "atomic_action, or task_program"
+                "atomic_skill, or task_program"
             )
         for name in ("source_id", "source_revision", "template_id"):
             _id(getattr(self, name), name)
@@ -722,7 +724,7 @@ class TrajectoryExpansionCfg:
 
     This contract deliberately excludes source identity, Task Program
     selection, environment ownership, and reset policy. Handwritten,
-    MotionGenerator, Atomic Action, and Task Program adapters can all consume
+    MotionGenerator, Atomic Skill, and Task Program adapters can all consume
     the same expansion settings.
     """
 

@@ -241,7 +241,7 @@
     },
     {
       "id": "atomic-engine",
-      "label": "AtomicActionEngine",
+      "label": "AtomicSkillEngine",
       "kind": "class",
       "topic_ids": [
         "atomic-actions"
@@ -252,21 +252,21 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/lab/sim/atomic_actions/engine.py",
-          "symbol": "AtomicActionEngine",
+          "path": "embodichain/lab/sim/atomic_skills/engine.py",
+          "symbol": "AtomicSkillEngine",
           "start_line": 45,
           "end_line": 45,
-          "excerpt": "class AtomicActionEngine:"
+          "excerpt": "class AtomicSkillEngine:"
         }
       ],
       "documentation": [
         {
-          "docname": "overview/sim/atomic_actions/index",
+          "docname": "overview/sim/atomic_skills/index",
           "label": "Atomic Skills guide"
         },
         {
-          "docname": "api_reference/embodichain/embodichain.lab.sim.atomic_actions",
-          "label": "AtomicActionEngine documentation"
+          "docname": "api_reference/embodichain/embodichain.lab.sim.atomic_skills",
+          "label": "AtomicSkillEngine documentation"
         }
       ],
       "details": "Atomic Skills form the typed boundary between semantic intent and executable action plans. The engine owns planning resources and creates execution sessions. A runner and command sink dispatch commands; the engine itself does not advance the environment."
@@ -345,7 +345,7 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/lab/sim/atomic_actions/runner.py",
+          "path": "embodichain/lab/sim/atomic_skills/runner.py",
           "symbol": "ExecutionRunner",
           "start_line": 335,
           "end_line": 335,
@@ -354,11 +354,11 @@
       ],
       "documentation": [
         {
-          "docname": "overview/sim/atomic_actions/index",
+          "docname": "overview/sim/atomic_skills/index",
           "label": "Atomic Skills execution guide"
         },
         {
-          "docname": "api_reference/embodichain/embodichain.lab.sim.atomic_actions",
+          "docname": "api_reference/embodichain/embodichain.lab.sim.atomic_skills",
           "label": "ExecutionRunner documentation"
         }
       ],
@@ -3450,10 +3450,10 @@
       "evidence": [
         {
           "path": "embodichain/lab/task_program/integrations/simulation/environment.py",
-          "symbol": "SimulationTaskProgramFactory.create_atomic_action_engine",
+          "symbol": "SimulationTaskProgramFactory.create_atomic_skill_engine",
           "start_line": 647,
           "end_line": 651,
-          "excerpt": "        engine = AtomicActionEngine(\n            motion_generator,\n            control_profiles=profile.action_control_profiles(),\n            grasp_pose_generators=self._grasp_pose_generators,\n        )"
+          "excerpt": "        engine = AtomicSkillEngine(\n            motion_generator,\n            control_profiles=profile.action_control_profiles(),\n            grasp_pose_generators=self._grasp_pose_generators,\n        )"
         }
       ]
     },
@@ -3482,11 +3482,11 @@
       "relation": "holds",
       "description": "Expose the engine-owned generator through its planning services.",
       "provenance": "source-reviewed",
-      "scope": "Indirect reference through ActionPlanningServices.",
+      "scope": "Indirect reference through SkillPlanningServices.",
       "evidence": [
         {
-          "path": "embodichain/lab/sim/atomic_actions/engine.py",
-          "symbol": "AtomicActionEngine.motion_generator",
+          "path": "embodichain/lab/sim/atomic_skills/engine.py",
+          "symbol": "AtomicSkillEngine.motion_generator",
           "start_line": 92,
           "end_line": 92,
           "excerpt": "        return self._planning_services.motion_generator"
@@ -3776,7 +3776,7 @@
       "scope": "In the shown Gym assembly the port is BufferedGymCommandSink; other runtimes may supply another sink.",
       "evidence": [
         {
-          "path": "embodichain/lab/sim/atomic_actions/runner.py",
+          "path": "embodichain/lab/sim/atomic_skills/runner.py",
           "symbol": "ExecutionRunner._dispatch",
           "start_line": 944,
           "end_line": 948,

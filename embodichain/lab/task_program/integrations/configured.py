@@ -59,8 +59,8 @@ from .simulation.environment import (
 from .simulation.handover import (
     ConfiguredHandOverPoseProvider,
 )
-from embodichain.lab.sim.atomic_actions import (
-    ActionOptions,
+from embodichain.lab.sim.atomic_skills import (
+    SkillOptions,
     DynamicCollisionMode,
     ExecutionRunnerCfg,
     HandOverOptions,
@@ -914,8 +914,8 @@ def _decode_command_preset(
     )
 
 
-def _decode_action_options(value: object, *, path: str) -> ActionOptions:
-    """Decode one allowlisted atomic-action option template."""
+def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
+    """Decode one allowlisted atomic-skill option template."""
     common = _mapping(
         value,
         path=path,
@@ -1502,15 +1502,25 @@ def _decode_tracking_policy(value: object, *, path: str) -> TrackingPolicy:
 
 def _decode_recovery_policy(value: object, *, path: str) -> RecoveryPolicy:
     """Decode one bounded local recovery policy."""
+    if isinstance(value, Mapping):
+        value = dict(value)
+        for old, new in (
+            ("max_action_retries", "max_skill_retries"),
+            ("action_timeout", "skill_timeout"),
+        ):
+            if old in value:
+                if new in value:
+                    raise ValueError(f"{path} cannot specify both {old!r} and {new!r}.")
+                value[new] = value.pop(old)
     config = _mapping(
         value,
         path=path,
-        required=frozenset({"max_replans", "max_action_retries"}),
+        required=frozenset({"max_replans", "max_skill_retries"}),
         optional=frozenset(
             {
                 "goal_translation_threshold",
                 "goal_rotation_threshold",
-                "action_timeout",
+                "skill_timeout",
             }
         ),
     )
@@ -1520,16 +1530,16 @@ def _decode_recovery_policy(value: object, *, path: str) -> RecoveryPolicy:
             path=f"{path}.max_replans",
             minimum=0,
         ),
-        "max_action_retries": _integer(
-            config["max_action_retries"],
-            path=f"{path}.max_action_retries",
+        "max_skill_retries": _integer(
+            config["max_skill_retries"],
+            path=f"{path}.max_skill_retries",
             minimum=0,
         ),
     }
     for field_name in (
         "goal_translation_threshold",
         "goal_rotation_threshold",
-        "action_timeout",
+        "skill_timeout",
     ):
         if field_name in config:
             kwargs[field_name] = _real(
@@ -1607,15 +1617,28 @@ def _decode_effect_monitors(
     return monitors
 
 
+def _normalize_skill_options_key(value: object, *, path: str) -> object:
+    """Normalize the former policy key before either strict loading boundary."""
+    if isinstance(value, Mapping) and "action_options" in value:
+        value = dict(value)
+        if "skill_options" in value:
+            raise ValueError(
+                f"{path} cannot specify both 'action_options' and 'skill_options'."
+            )
+        value["skill_options"] = value.pop("action_options")
+    return value
+
+
 def _decode_policy_preset(value: object, *, path: str) -> SkillPolicyPreset:
     """Decode one complete skill policy preset."""
+    value = _normalize_skill_options_key(value, path=path)
     config = _mapping(
         value,
         path=path,
         required=frozenset(
             {
                 "preset_id",
-                "action_options",
+                "skill_options",
                 "motion",
                 "tracking",
                 "recovery",
@@ -1627,17 +1650,17 @@ def _decode_policy_preset(value: object, *, path: str) -> SkillPolicyPreset:
         ),
         optional=frozenset({"required_planner"}),
     )
-    action_options_value = config["action_options"]
-    if not isinstance(action_options_value, Mapping):
-        raise TypeError(f"{path}.action_options must be a mapping.")
-    action_options = {
-        _identifier(semantic_id, path=f"{path}.action_options keys"): (
-            _decode_action_options(
+    skill_options_value = config["skill_options"]
+    if not isinstance(skill_options_value, Mapping):
+        raise TypeError(f"{path}.skill_options must be a mapping.")
+    skill_options = {
+        _identifier(semantic_id, path=f"{path}.skill_options keys"): (
+            _decode_skill_options(
                 item,
-                path=f"{path}.action_options.{semantic_id}",
+                path=f"{path}.skill_options.{semantic_id}",
             )
         )
-        for semantic_id, item in action_options_value.items()
+        for semantic_id, item in skill_options_value.items()
     }
     workflow = _mapping(
         config["workflow_recovery"],
@@ -1656,7 +1679,7 @@ def _decode_policy_preset(value: object, *, path: str) -> SkillPolicyPreset:
         required_planner = "trapezoidal"
     return SkillPolicyPreset(
         _identifier(config["preset_id"], path=f"{path}.preset_id"),
-        action_option_templates=action_options,
+        skill_option_templates=skill_options,
         effect_assurance=_enum(
             config["effect_assurance"],
             EffectAssurance,
