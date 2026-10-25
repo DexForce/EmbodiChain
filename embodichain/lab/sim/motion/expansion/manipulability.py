@@ -29,7 +29,7 @@ any other proposal.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 import math
 
@@ -41,7 +41,7 @@ from embodichain.compute.kinematics import (
 )
 
 from .contracts import TrajectoryPhase, TrajectoryTemplate
-from .operators import allowed_phases, joint_residual
+from .operators import ProposalRejected, allowed_phases, joint_residual
 
 __all__ = [
     "ManipulabilityProfile",
@@ -242,6 +242,39 @@ class GuidedResidual:
     proposals_scored: int
 
 
+def _select_guided_candidate(
+    candidates: Iterable[TrajectoryTemplate],
+    *,
+    jacobian_fn: Callable[[torch.Tensor], torch.Tensor],
+    bands: ManipulabilityBands,
+    target_band: int,
+    rows: str | Sequence[int],
+) -> GuidedResidual:
+    """Select from bounded, already generated joint or Cartesian proposals."""
+    best: GuidedResidual | None = None
+    scored = 0
+    for candidate in candidates:
+        jacobians = jacobian_fn(candidate.positions)
+        if (
+            not isinstance(jacobians, torch.Tensor)
+            or jacobians.ndim != 3
+            or jacobians.shape[0] != candidate.positions.shape[0]
+        ):
+            raise ValueError(
+                "jacobian_fn must return one (R, DOF) Jacobian per candidate sample."
+            )
+        scored += 1
+        profile = describe_manipulability(jacobians, phases=candidate.phases, rows=rows)
+        band = bands.band_of(profile.bottleneck)
+        if best is None or abs(band - target_band) < abs(best.band - target_band):
+            best = GuidedResidual(candidate, profile, band, band == target_band, scored)
+        if best.matched:
+            break
+    if best is None:
+        raise ProposalRejected("manipulability: no valid proposals")
+    return GuidedResidual(best.template, best.profile, best.band, best.matched, scored)
+
+
 def manipulability_guided_residual(
     template: TrajectoryTemplate,
     *,
@@ -292,37 +325,30 @@ def manipulability_guided_residual(
         raise ValueError("proposals must be an integer of at least one.")
     if not callable(jacobian_fn):
         raise ValueError("jacobian_fn must be callable.")
-    best: GuidedResidual | None = None
-    scored, rejection = 0, None
-    for _ in range(proposals):
-        try:
-            candidate = joint_residual(
-                template,
-                joint_limits=joint_limits,
-                normalized_scale=normalized_scale,
-                generator=generator,
-            )
-        except ValueError as error:
-            rejection = error
-            continue
-        jacobians = jacobian_fn(candidate.positions)
-        if (
-            not isinstance(jacobians, torch.Tensor)
-            or jacobians.ndim != 3
-            or jacobians.shape[0] != candidate.positions.shape[0]
-        ):
-            raise ValueError(
-                "jacobian_fn must return one (R, DOF) Jacobian per candidate sample."
-            )
-        scored += 1
-        profile = describe_manipulability(jacobians, phases=candidate.phases, rows=rows)
-        band = bands.band_of(profile.bottleneck)
-        # Keep the first proposal reaching the requested band; otherwise keep
-        # the nearest band, breaking ties by proposal order for determinism.
-        if best is None or abs(band - target_band) < abs(best.band - target_band):
-            best = GuidedResidual(candidate, profile, band, band == target_band, scored)
-        if best.matched:
-            break
-    if best is None:
-        raise rejection
-    return GuidedResidual(best.template, best.profile, best.band, best.matched, scored)
+
+    def candidates() -> Iterable[TrajectoryTemplate]:
+        rejection = None
+        produced = False
+        for _ in range(proposals):
+            try:
+                candidate = joint_residual(
+                    template,
+                    joint_limits=joint_limits,
+                    normalized_scale=normalized_scale,
+                    generator=generator,
+                )
+            except ValueError as error:
+                rejection = error
+                continue
+            produced = True
+            yield candidate
+        if not produced and rejection is not None:
+            raise rejection
+
+    return _select_guided_candidate(
+        candidates(),
+        jacobian_fn=jacobian_fn,
+        bands=bands,
+        target_band=target_band,
+        rows=rows,
+    )

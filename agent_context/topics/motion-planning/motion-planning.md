@@ -127,27 +127,34 @@ poses that callers must replan, and neither certifies the contact. Grasp
 grasp generation itself belongs to `embodichain.toolkits.graspkit`, composed by
 Atomic Skills/Task Program rather than embedded in `MotionGenerator`.
 
-`variants.py` varies execution when waypoints are already fixed. Its qpos
-operators (`joint_residual`, `via_points`, `nullspace_residual`, `retime`
-profiles) vanish with
+`variants.py` is the common candidate-generation path for joint-space,
+task-space and manipulability-guided expansion; `CandidateCoordinator` supplies
+the same host-owned kinematics callable to these factors. Its qpos operators
+(`joint_residual`, `via_points`, `nullspace_residual`, `retime` profiles) vanish with
 zero derivative at every phase endpoint and never touch `contact`/`hold`
 phases, so annotated waypoints stay exact. Joint-limit rejection covers only
 the joints an operator moved; an observed reference can hold an untouched joint
 microradians outside its range, and checking it would reject every proposal.
 `nullspace_residual` holds the caller's declared task rows to first order only;
 the caller owns the Jacobian frame and column order, and a fully constrained
-task raises. At most one joint-path operator runs per variant, though `spatial.method`
+task raises. At most one joint-path operator runs per proposal, though `spatial.method`
 may name several so each becomes its own variant; a single name is still
-accepted.
+accepted. A task-space proposal projects before joint edits and re-projects
+after them; null-space edits use Jacobians of the projected path. Retiming runs
+last. Reference FK and guidance normalization are cached per expansion call.
 `expand_trajectory_variants` deduplicates one fixed scene on measured
 geometry/timing and counts every rejection under a key naming its reason. Only
 `ProposalRejected` is a rejection; malformed arguments stay plain `ValueError`
-and propagate rather than hiding in a rejection count.
+and propagate rather than hiding in a rejection count. `max_attempts` bounds all
+numerical draws, including guidance's inner proposals; valid unselected draws
+are counted as `guidance_unselected`. The nominal branch remains unchanged.
 Configuration is optional: omitting it resolves `default_variant_factors`,
-which enables every implemented factor the inputs support and drops the ik
-factor when no Jacobians are supplied. An explicit config is never overridden, and an
+which enables the joint-path factors the inputs support and drops the ik
+factor when neither Jacobians nor kinematics are supplied. Task-space and
+manipulability guidance remain explicit opt-ins. An explicit config is never overridden, and an
 explicitly enabled factor that cannot produce a qpos variant raises rather than
-disappearing: `ik` without Jacobians, and `approach`, which owns Cartesian
+disappearing: `ik` without Jacobians or kinematics, task-space/guidance without
+kinematics, and `approach`, which owns Cartesian
 standoff poses the caller must replan. The resolved config is reported on the result.
 
 `task_space.py` is the host-independent route when fixed joint waypoints are too
@@ -157,7 +164,11 @@ only to explicitly authorized free phases, and preserves each phase endpoint.
 `project_task_space_trajectory` solves all editable interior samples with the
 shared fixed-step DLS compute API and returns a normal full-joint
 `TrajectoryTemplate` plus per-sample pose residuals and success evidence.
-Locked samples keep the reference qpos. The caller still owns frame binding,
+Locked samples keep the reference qpos. Task-space permissions must be present
+globally and on each editable phase. Conversion only grants new permissions
+when the caller explicitly names `editable_phase_ids`; segment extraction
+retains the intersection of source template and phase permissions.
+The caller still owns frame binding,
 collision/dynamics checks, task validation and rejection of unsuccessful rows.
 
 `stitching.py` extracts annotated phases as source-owned, local-time
@@ -202,14 +213,20 @@ the Gym Task Program collection lifecycle.
 Jacobians, so the module stays host-independent. `ManipulabilityBands`
 normalizes scores against a reference bottleneck held per initial state, and
 `manipulability_guided_residual` keeps whichever of several `joint_residual`
-draws from one local generator lands nearest a requested band. The factor is
-opt-in through `augmentation.factors.manipulability` and disabled by default.
+draws from one local generator lands nearest a requested band. The shared
+selector also accepts task-space and combined proposals from `variants.py`.
+The factor is opt-in through `augmentation.factors.manipulability` and disabled
+by default. `guided_proposals > 1` enables bounded guided sampling;
+`guided_proposals == 1` retains coverage-only behavior.
 Once enabled, `register_case` requires a positive `manipulability_reference`
 for each initial state, which may differ within one case; `CoverageIndex`
 enforces a per-band quota so one well-conditioned posture cannot absorb the
 collection budget; and `ExpansionSession` classifies bands from the measured
 `manipulability` observation rather than any planned score. Band guidance ranks
-postures only: path, dynamic and task validation stay separate.
+postures only: path, dynamic and task validation stay separate. The coordinator
+uses `ExpansionSession.manipulability_reference(case)` for proposal guidance so
+its normalization agrees with the registered initial state. Selection scores,
+actual bands and scored-proposal counts remain candidate metadata.
 
 ## Focused validation
 

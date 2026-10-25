@@ -81,7 +81,10 @@ from .tcp_presets import (
 )
 
 if TYPE_CHECKING:
-    from embodichain.lab.sim.motion.expansion import TrajectoryVariantSet
+    from embodichain.lab.sim.motion.expansion import (
+        TrajectoryVariant,
+        TrajectoryVariantSet,
+    )
     from embodichain.lab.sim.atomic_actions import (
         AtomicActionEngine,
         ActionInvocation,
@@ -741,21 +744,15 @@ def expand_tutorial_task_space_variants(
     Returns:
         Exactly ``args.trajectory_variants`` distinct replay rows.
     """
-    from embodichain.compute.kinematics import DifferentiableIKCfg
+    from dataclasses import replace
     from embodichain.lab.sim.motion.expansion import (
-        CandidateIdentity,
-        CandidateTrajectoryBatch,
-        NOMINAL_OPERATOR,
         TASK_SPACE_RESIDUAL_OPERATOR,
-        TaskSpaceDeformationConstraint,
-        TrajectoryVariant,
-        TrajectoryVariantSet,
-        deform_task_space_trajectory,
-        project_task_space_trajectory,
-        task_space_from_joint_template,
+        SceneCase,
+        TrajectoryAugmentationCfg,
+        expand_trajectory_variants,
     )
 
-    template, _ = _tutorial_trajectory_template(
+    template, control_dt = _tutorial_trajectory_template(
         compiled,
         robot,
         phase_kinds=phase_kinds,
@@ -768,7 +765,18 @@ def expand_tutorial_task_space_variants(
     known_free = {phase.phase_id for phase in template.phases if phase.kind == "free"}
     if not selected_names or not selected_names <= known_free:
         raise ValueError("editable task-space segments must name known free phases")
-
+    template = replace(
+        template,
+        phases=tuple(
+            (
+                replace(phase, allowed_operators=(TASK_SPACE_RESIDUAL_OPERATOR,))
+                if phase.phase_id in selected_names
+                else phase
+            )
+            for phase in template.phases
+        ),
+        allowed_operators=(TASK_SPACE_RESIDUAL_OPERATOR,),
+    )
     solver = robot.get_solver(control_part)
     if solver is None:
         raise RuntimeError(f"No kinematic solver is available for {control_part!r}.")
@@ -776,154 +784,71 @@ def expand_tutorial_task_space_variants(
     def kinematics(qpos: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         poses = solver.get_fk(qpos).to(qpos)
         tcp = torch.as_tensor(solver.get_tcp(), device=qpos.device, dtype=qpos.dtype)
-        jacobians = solver.get_jacobian(
+        return poses, solver.get_jacobian(
             qpos,
             locations=tcp[:3, 3],
             jac_type="full",
         ).to(qpos)
-        return poses, jacobians
 
-    task_reference = task_space_from_joint_template(
-        template,
-        frame_id=f"{control_part}_tcp",
-        kinematics=kinematics,
-        editable_phase_ids=tuple(
-            phase.phase_id
-            for phase in template.phases
-            if phase.phase_id in selected_names
-        ),
+    # Controller columns belong to the host and may use an authored command
+    # range wider than raw simulated state limits. They are copied exactly.
+    limits = robot.get_qpos_limits()[0].to(template.positions).clone()
+    uncontrolled = sorted(
+        set(range(template.positions.shape[1])) - set(template.controlled_joint_indices)
     )
-    constraints = {
-        phase_id: TaskSpaceDeformationConstraint(
-            phase_id=phase_id,
-            translation_axes=(True, True, False),
-            rotation_axes=(True, True, True),
-            max_translation_m=args.task_space_translation_m,
-            max_rotation_rad=args.task_space_rotation_rad,
-        )
-        for phase_id in selected_names
-    }
-    limits = robot.get_qpos_limits()[0].to(template.positions)
-    ik_cfg = DifferentiableIKCfg(
-        max_iterations=32,
-        damping=0.05,
-        step_size=0.5,
-        pos_eps=1e-3,
-        rot_eps=1e-3,
-    )
-    requested = args.trajectory_variants
-    seed = args.variant_seed or 0
-    accepted = [template]
-    variants = [TrajectoryVariant(0, NOMINAL_OPERATOR, 1.0, "uniform")]
-    evidence: list[dict[str, float | int | str]] = [variants[0].factors]
-    rejected: dict[str, int] = {}
-    attempts = 0
-    attempt_budget = max(16 * requested, requested)
-    controlled = list(template.controlled_joint_indices)
-    uncontrolled = sorted(set(range(template.positions.shape[1])) - set(controlled))
-    projection_limits = limits.clone()
     if uncontrolled:
-        # Trajectory IK owns only the selected arm columns. Preserve copied
-        # gripper/controller values even when their authored command range is
-        # wider than the simulator's raw joint-state limits.
         copied = template.positions[:, uncontrolled]
         margin = torch.finfo(copied.dtype).eps
-        projection_limits[uncontrolled, 0] = torch.minimum(
-            projection_limits[uncontrolled, 0], copied.min(dim=0).values - margin
+        limits[uncontrolled, 0] = torch.minimum(
+            limits[uncontrolled, 0], copied.min(0).values - margin
         )
-        projection_limits[uncontrolled, 1] = torch.maximum(
-            projection_limits[uncontrolled, 1], copied.max(dim=0).values + margin
+        limits[uncontrolled, 1] = torch.maximum(
+            limits[uncontrolled, 1], copied.max(0).values + margin
         )
-    spans = (limits[controlled, 1] - limits[controlled, 0]).clamp_min(1e-12)
-    dedup_tolerance = args.dedup_tolerance or 1e-4
-
-    while len(accepted) < requested and attempts < attempt_budget:
-        attempts += 1
-        generator = torch.Generator(device="cpu").manual_seed(
-            (seed + attempts) % (2**63)
-        )
-        target = deform_task_space_trajectory(
-            task_reference,
-            constraints=constraints,
-            generator=generator,
-        )
-        projection = project_task_space_trajectory(
-            target,
-            template,
-            kinematics=kinematics,
-            joint_limits=projection_limits,
-            ik_cfg=ik_cfg,
-        )
-        if not projection.accepted:
-            rejected["trajectory_ik"] = rejected.get("trajectory_ik", 0) + 1
-            continue
-        normalized = projection.template.positions[:, controlled] / spans
-        if any(
-            float((normalized - candidate.positions[:, controlled] / spans).abs().max())
-            <= dedup_tolerance
-            for candidate in accepted
-        ):
-            rejected["duplicate"] = rejected.get("duplicate", 0) + 1
-            continue
-        ordinal = len(accepted)
-        variant = TrajectoryVariant(
-            ordinal,
-            TASK_SPACE_RESIDUAL_OPERATOR,
-            1.0,
-            "uniform",
-        )
-        accepted.append(projection.template)
-        variants.append(variant)
-        evidence.append(
-            {
-                **variant.factors,
-                "max_position_error_m": float(
-                    projection.position_error.norm(dim=-1).max()
-                ),
-                "max_rotation_error_rad": float(
-                    projection.rotation_error.norm(dim=-1).max()
-                ),
-            }
-        )
-
-    if len(accepted) != requested:
-        raise RuntimeError(
-            f"Only {len(accepted)} of {requested} distinct task-space variants "
-            f"survived {attempts} attempts: {dict(sorted(rejected.items()))}."
-        )
-    positions = torch.stack([candidate.positions for candidate in accepted])
-    intervals = torch.stack([candidate.dt for candidate in accepted])
-    identities = tuple(
-        CandidateIdentity(
-            scene_case_id="atomic_action_tutorial",
-            initial_state_id="tutorial_initial_state",
-            candidate_id=f"task_space_candidate_{index:03d}",
-            geometry_family_id=f"task_space_geometry_{index:03d}",
-            source_id=template.source_id,
-            source_revision=template.source_revision,
-            template_id=template.template_id,
-        )
-        for index in range(requested)
+    cfg = TrajectoryAugmentationCfg.from_mapping(
+        {
+            "seed": args.variant_seed or 0,
+            "factors": {
+                "task_space": {
+                    "enabled": True,
+                    "frame_id": f"{control_part}_tcp",
+                    "translation_axes": [True, True, False],
+                    "max_translation_m": args.task_space_translation_m,
+                    "max_rotation_rad": args.task_space_rotation_rad,
+                    "ik": {
+                        "max_iterations": 32,
+                        "damping": 0.05,
+                        "step_size": 0.5,
+                        "pos_eps": 1e-3,
+                        "rot_eps": 1e-3,
+                    },
+                }
+            },
+            "coverage": {"joint_dedup_normalized_tol": args.dedup_tolerance or 1e-4},
+        }
     )
-    return TrajectoryVariantSet(
-        candidates=CandidateTrajectoryBatch(
-            positions=positions,
-            dt=intervals,
-            valid_length=torch.full(
-                (requested,),
-                positions.shape[1],
-                dtype=torch.int64,
-                device=positions.device,
-            ),
-            identities=identities,
-            joint_names=template.joint_names,
-            phases=tuple(candidate.phases for candidate in accepted),
-            factors=tuple(evidence),
+    result = expand_trajectory_variants(
+        template,
+        case=SceneCase(
+            "atomic_action_tutorial",
+            "tutorial_initial_state",
+            str(robot.uid),
+            "place",
+            getattr(args, "robot", "ur5"),
         ),
-        variants=tuple(variants),
-        attempted=attempts + 1,
-        rejected=rejected,
+        count=args.trajectory_variants,
+        cfg=cfg,
+        joint_limits=limits,
+        control_dt=control_dt,
+        kinematics=kinematics,
+        max_attempts=max(16 * args.trajectory_variants, args.trajectory_variants),
     )
+    if len(result.variants) != args.trajectory_variants:
+        raise RuntimeError(
+            f"Only {len(result.variants)} of {args.trajectory_variants} distinct task-space variants "
+            f"survived {result.attempted} attempts: {result.rejected}."
+        )
+    return result
 
 
 def log_trajectory_variant_diagnostics(
@@ -938,7 +863,7 @@ def log_trajectory_variant_diagnostics(
     batch = result.candidates
     for row, variant in enumerate(result.variants):
         logger.log_info(
-            f"Trajectory variant {row}: operator={variant.spatial_operator}, "
+            f"Trajectory variant {row}: operator={_variant_operator_name(variant)}, "
             f"duration_scale={variant.duration_scale}, "
             f"profile={variant.timing_profile}, "
             f"samples={int(batch.valid_length[row])}, "
@@ -1194,6 +1119,18 @@ def _timing_key(variant) -> str:
     return f"{variant.timing_profile} x{variant.duration_scale:g}"
 
 
+def _variant_operator_name(variant: TrajectoryVariant) -> str:
+    """Keep tool-path and combined factors visible in plot/log provenance."""
+    operator = variant.spatial_operator
+    if variant.task_space:
+        return (
+            "task_space_residual"
+            if operator == "none"
+            else f"task_space_residual+{operator}"
+        )
+    return operator
+
+
 def _variant_styles(result) -> tuple[list, dict | None]:
     """Return per-variant plot keywords, grouping the legend when crowded.
 
@@ -1222,7 +1159,7 @@ def _variant_styles(result) -> tuple[list, dict | None]:
                 "label": (
                     "reference"
                     if variant.is_nominal
-                    else f"{variant.spatial_operator} {_timing_key(variant)}"
+                    else f"{_variant_operator_name(variant)} {_timing_key(variant)}"
                 ),
             }
             for variant in result.variants
@@ -1231,13 +1168,13 @@ def _variant_styles(result) -> tuple[list, dict | None]:
 
     timings = sorted({_timing_key(variant) for variant in result.variants})
     dashes = dict(zip(timings, _timing_linestyles(len(timings))))
-    operators = sorted({variant.spatial_operator for variant in result.variants})
+    operators = sorted({_variant_operator_name(variant) for variant in result.variants})
     styles = []
     for variant in result.variants:
         nominal = variant.is_nominal
         styles.append(
             {
-                "color": OPERATOR_COLOURS.get(variant.spatial_operator),
+                "color": OPERATOR_COLOURS.get(_variant_operator_name(variant)),
                 "linewidth": 2.6 if nominal else 0.9,
                 "linestyle": "-" if nominal else dashes[_timing_key(variant)],
                 "alpha": 1.0 if nominal else 0.35,
