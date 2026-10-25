@@ -119,6 +119,39 @@ The actor export is checked against eager inference for multiple batch sizes.
 It contains normalization and deterministic action means; actuator scaling and
 limits remain owned by the task/controller.
 
+Run the validation-selected checkpoint through the production deterministic
+episode evaluator with fresh strict native-state and capacity checks:
+
+```bash
+python -m scripts.benchmark.assembly.eval_peg RUN --checkpoint best \
+  --episodes 8192 --num-envs 1024 --seed 20000 --output outputs/peg_heldout
+```
+
+Use a held-out seed only after selecting the checkpoint from validation. This
+runner preserves the bundled task geometry and reset support; it does not
+substitute a different distribution or silently select the latest checkpoint.
+Final assessment assigns fixed per-arena episode quotas before stepping:
+8,192 episodes over 1,024 arenas scores eight episodes from every arena.
+Rows finishing early keep stepping/resetting, but their extra episodes are
+unscored. This avoids favoring fast successes over slow failures. Historical
+training validation retains its loaded first-completed default; its curve is
+separate from this balanced final assessment.
+
+Preview three fixed seeded outcomes in an actual DexSim rendering window:
+
+```bash
+DISPLAY=:1 embodichain run-example learning/blind_assembly/preview RUN \
+  --checkpoint best --episodes 3 --seed 30000 --output outputs/peg_preview
+```
+
+The preview uses the same production checkpoint loader and deterministic policy
+inference. It writes native-camera MP4/GIF recordings, an initial/terminal
+contact sheet and a trace with checkpoint SHA-256, actions, joint positions and
+outcomes. All requested episodes are included. Terminal frames are captured
+before the next reset; camera reads never advance the physics. This small visual
+preview is separate from the held-out success-rate measurement. A display,
+native rendering dependencies and `ffmpeg` are required.
+
 See [CAPACITY.md](CAPACITY.md) for measured synthetic 12,288-environment policy
 capacity, and [the implementation report](../../sim/assembly/IMPLEMENTATION.md)
 for actual task smoke checkpoints, evaluation results and outstanding gates.
