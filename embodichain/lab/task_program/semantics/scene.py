@@ -29,7 +29,7 @@ from typing import Any, Protocol, TYPE_CHECKING, TypeVar, runtime_checkable
 import torch
 
 from embodichain.lab.sim.common import BatchEntity
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     Affordance,
     AntipodalAffordance,
     EntityState,
@@ -1326,7 +1326,7 @@ class SceneRegistry:
         *,
         affordance: str | SceneAffordanceRef,
     ) -> ObjectSemantics:
-        """Build one owned atomic-action semantic snapshot.
+        """Build one owned atomic-skill semantic snapshot.
 
         Args:
             object_ref: Canonical object ID, alias, or typed reference.

@@ -6,8 +6,8 @@ Use the path of any Python script under this directory, with or without `.py`:
 embodichain run-example --list
 embodichain run-example sim/motion/planners/curobo_planner --help
 embodichain run-example ods/simple_bc_demo/train --help
-embodichain run-example sim/atomic_action --skill place --variants 8
-embodichain run-example sim/atomic_action/coordinated_pickment --help
+embodichain run-example sim/atomic_skill --skill place --variants 8
+embodichain run-example sim/atomic_skill/coordinated_pickment --help
 ```
 
 A directory with `__main__.py` can be selected by its directory path. All arguments
@@ -30,7 +30,7 @@ distributions preserve this same tree and its resources; wheels install it under
 distribution metadata and works outside the repository. Example code is not
 installed inside the `embodichain` Python package.
 
-The [Atomic Skill example catalog](sim/atomic_action/README.md) owns all per-skill,
+The [Atomic Skill example catalog](sim/atomic_skill/README.md) owns all per-skill,
 coordinated-manipulation and recovery demonstrations. The two source-checkout
-walkthroughs under `scripts/tutorials/atomic_action/` teach single-arm and dual-arm
+walkthroughs under `scripts/tutorials/atomic_skill/` teach single-arm and dual-arm
 API composition; they reuse the canonical example setup.

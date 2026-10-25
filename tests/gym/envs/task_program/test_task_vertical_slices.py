@@ -57,10 +57,10 @@ from embodichain.lab.gym.envs.task_program.bridge import (
     EnvironmentStepClock,
     RuntimeCommandFrameEncoder,
 )
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     Affordance,
     ArticulationAffordanceGeometry,
-    AtomicActionEngine,
+    AtomicSkillEngine,
     DynamicCollisionMode,
     EntityState,
     ObjectSemantics,
@@ -568,7 +568,7 @@ def test_open_drawer_config_owns_registered_lowerer_factory() -> None:
         )
     )
     robot = object()
-    engine = AtomicActionEngine.__new__(AtomicActionEngine)
+    engine = AtomicSkillEngine.__new__(AtomicSkillEngine)
     engine._planning_services = SimpleNamespace(  # type: ignore[attr-defined]
         robot=robot,
         device=torch.device("cpu"),
@@ -693,7 +693,7 @@ def test_explicit_slide_axis_bypasses_sampling_with_non_unit_scale() -> None:
         )
     )
     robot = object()
-    engine = AtomicActionEngine.__new__(AtomicActionEngine)
+    engine = AtomicSkillEngine.__new__(AtomicSkillEngine)
     engine._planning_services = SimpleNamespace(  # type: ignore[attr-defined]
         robot=robot,
         device=torch.device("cpu"),
@@ -862,7 +862,7 @@ def test_example_profiles_execute_only_open_loop_trajectories(
     assert isinstance(preset.tracking_policy.terminal, TimedTerminalAcceptance)
     assert preset.tracking_policy.terminal.settle_duration == 0.0
     assert preset.recovery_policy.max_replans == 0
-    assert preset.recovery_policy.max_action_retries == 0
+    assert preset.recovery_policy.max_skill_retries == 0
     assert preset.workflow_recovery_policy.max_recovery_attempts == 0
     assert dict(preset.effect_monitors) == {}
     assert preset.runner_cfg.hold_on_completion is False

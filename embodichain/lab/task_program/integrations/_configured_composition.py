@@ -31,6 +31,7 @@ from .configured import (
     _ConfiguredTaskProgramIntegration,
     _decode_configured_task_program_integration,
     _identifier,
+    _normalize_skill_options_key,
     _mapping,
 )
 
@@ -379,14 +380,14 @@ def _compose_integration_payload(
         )
 
     profile = _mapping(
-        task["profile"],
+        _normalize_skill_options_key(task["profile"], path="task integration.profile"),
         path="task integration.profile",
-        required=frozenset({"defaults", "action_options", "effect_monitors"}),
+        required=frozenset({"defaults", "skill_options", "effect_monitors"}),
         optional=frozenset({"skill_presets", "grounding_providers"}),
     )
     preset = {
         "preset_id": deepcopy(policy["preset_id"]),
-        "action_options": deepcopy(profile["action_options"]),
+        "skill_options": deepcopy(profile["skill_options"]),
         "motion": deepcopy(policy["motion"]),
         "tracking": deepcopy(policy["tracking"]),
         "recovery": deepcopy(policy["recovery"]),

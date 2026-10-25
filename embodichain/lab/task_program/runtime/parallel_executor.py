@@ -27,7 +27,7 @@ from typing import Protocol, runtime_checkable
 
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     CommandAcknowledgement,
     CommandSink,
     ExecutionClock,

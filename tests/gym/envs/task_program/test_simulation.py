@@ -40,7 +40,7 @@ from embodichain.lab.task_program.integrations.simulation import (
     SimulationSceneBinding,
     SupportSurfaceAffordanceBinding,
 )
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     AntipodalAffordance,
     AxisAlignAffordance,
     CARTESIAN_POSE_CAPABILITY,
@@ -588,7 +588,7 @@ def _profile_binding() -> SimulationRobotSkillProfileBinding:
         presets=(
             SkillPolicyPreset(
                 "safe",
-                action_option_templates={"pick": PickUpOptions()},
+                skill_option_templates={"pick": PickUpOptions()},
                 effect_assurance=EffectAssurance.PROJECTED,
             ),
         ),

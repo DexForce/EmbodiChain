@@ -29,11 +29,11 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     ArticulationAffordanceGeometry,
     MotionPolicy,
 )
-from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory, TimedTrajectory
+from embodichain.lab.sim.atomic_skills.plans import CompiledTrajectory, TimedTrajectory
 from embodichain.lab.sim.motion.planners.utils import PlanResult
 from embodichain.utils.math import axis_angle_to_rotation_matrix
 from embodichain_benchmarks.motion_generation.aggregation import aggregate_results
@@ -1161,7 +1161,7 @@ def test_contact_benchmarks_use_attributed_ik_interpolation(skill_id: str) -> No
     assert benchmark_motion_attribution(skill_id) == expected
     assert AtomicSkillScenario().trial_metadata(
         replace(_atomic_case(), skill_id=skill_id)
-    ) == {**expected, "timing_scope": "atomic_action_compile", "timing_is_solved": True}
+    ) == {**expected, "timing_scope": "atomic_skill_compile", "timing_is_solved": True}
 
 
 def test_noncontact_benchmarks_retain_selected_planner_attribution() -> None:
@@ -1492,7 +1492,7 @@ def _compiled_replay_batch(
     return CompiledTrajectory(
         plan_success=torch.tensor(plan_success, dtype=torch.bool),
         trajectory=trajectory,
-        action_plans=(),
+        skill_plans=(),
         projected_context=Mock(),
     )
 
@@ -1660,7 +1660,7 @@ def test_atomic_primary_success_and_execution_efficiency_aggregate():
             algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
             adapter="curobo",
             config_hash="abc",
-            capabilities=frozenset({"eef_waypoint", "atomic_action"}),
+            capabilities=frozenset({"eef_waypoint", "atomic_skill"}),
             supported_robots=("franka_pgi",),
         )
     ]
@@ -1729,7 +1729,7 @@ def test_planner_aggregates_report_bypassed_cases_under_effective_algorithm():
             algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
             adapter="curobo",
             config_hash="abc",
-            capabilities=frozenset({"eef_waypoint", "atomic_action"}),
+            capabilities=frozenset({"eef_waypoint", "atomic_skill"}),
             supported_robots=("franka_pgi",),
         )
     ]
@@ -1856,7 +1856,7 @@ def test_runner_preserves_preplan_attribution_after_planner_error(tmp_path):
         algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
         adapter="curobo",
         config_hash="abc",
-        capabilities=frozenset({"eef_waypoint", "atomic_action"}),
+        capabilities=frozenset({"eef_waypoint", "atomic_skill"}),
     )
 
     runner._run_plan_call(

@@ -2,7 +2,7 @@
 
 CuroboPlanner is EmbodiChain's optional, CUDA-accelerated and collision-aware
 motion-planning backend. It implements the normal MotionGenerator and
-atomic-action interfaces while cuRobo performs collision-aware inverse
+atomic-skill interfaces while cuRobo performs collision-aware inverse
 kinematics and trajectory optimization. It supports Cartesian EEF_MOVE and
 joint-space JOINT_MOVE requests for one configured control part at a time.
 
@@ -57,7 +57,7 @@ Lock non-controlled joints (for example gripper joints) in the cuRobo robot
 profile so they are not exposed as active planner joints. The simulator values of
 those joints must remain equal to the V2 profile's `lock_joints` values while a
 plan is executed; the adapter intentionally preserves non-control simulator
-joints in the full-DoF atomic-action output. For example, the Panda V2 profile
+joints in the full-DoF atomic-skill output. For example, the Panda V2 profile
 locks both fingers at `0.04`, so use the same simulated finger state or include
 the fingers in the planned control part. A mismatch means cuRobo validates a
 different collision geometry from the one replayed in DexSim.

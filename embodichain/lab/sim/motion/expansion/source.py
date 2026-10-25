@@ -65,7 +65,7 @@ class SourceContext:
 class SourceAdapter(Protocol, Generic[SourceT]):
     """Convert one expert source unit into a reusable trajectory template.
 
-    Implementations may be handwritten, MotionGenerator, Atomic Action, or
+    Implementations may be handwritten, MotionGenerator, Atomic Skill, or
     Task Program adapters. They must not own environment slots, reset/step a
     simulator, allocate candidate identities, or persist episodes.
     """

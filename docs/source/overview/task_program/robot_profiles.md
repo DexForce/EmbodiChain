@@ -8,7 +8,7 @@
 A {class}`RobotSkillProfile` describes how robot-independent atomic-skill
 requirements map onto one robot embodiment. Configure the robot's resources,
 semantic commands, default choices, and policy presets once; task code can then
-select skill-local participants instead of constructing an `ActionBinding` from
+select skill-local participants instead of constructing an `SkillBinding` from
 robot-specific control-part names.
 
 The model is deliberately generic. It does not define global `arm` and `tool`
@@ -39,19 +39,19 @@ changing a compatible embodiment does not rewrite the source program.
 
 ## Contracts on the two sides
 
-An atomic action owns a
-{class}`~embodichain.lab.sim.atomic_actions.SkillBindingContract`:
+An atomic skill owns a
+{class}`~embodichain.lab.sim.atomic_skills.SkillBindingContract`:
 
-- a {class}`~embodichain.lab.sim.atomic_actions.SkillResourceSlot` names each
+- a {class}`~embodichain.lab.sim.atomic_skills.SkillResourceSlot` names each
   skill-local participant, such as `primary`, `source`, or `destination`;
-- a {class}`~embodichain.lab.sim.atomic_actions.SkillEndpointRequirement`
+- a {class}`~embodichain.lab.sim.atomic_skills.SkillEndpointRequirement`
   declares the all-of capabilities and typed semantic commands needed from that
   participant;
-- {class}`~embodichain.lab.sim.atomic_actions.DisjointSlotEndpoints` declares
+- {class}`~embodichain.lab.sim.atomic_skills.DisjointSlotEndpoints` declares
   endpoint views that must not share physical channels within one participant;
   coupled whole-body views may overlap when the skill does not declare this
   constraint; and
-- {class}`~embodichain.lab.sim.atomic_actions.DisjointResourceSlots` requires
+- {class}`~embodichain.lab.sim.atomic_skills.DisjointResourceSlots` requires
   multi-participant skills to select physically disjoint resources.
 
 The robot side supplies {class}`RobotResource` values. A resource exposes named
@@ -91,7 +91,7 @@ contracts; they are local protocol names, not global robot-resource categories.
 ```python
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     BATCH_INVERSE_KINEMATICS_CAPABILITY,
     CARTESIAN_POSE_CAPABILITY,
     FORWARD_KINEMATICS_CAPABILITY,
@@ -160,7 +160,7 @@ profile = RobotSkillProfile(
     presets={
         "default": SkillPolicyPreset(
             preset_id="default",
-            action_option_templates={"pick": PickUpOptions()},
+            skill_option_templates={"pick": PickUpOptions()},
             effect_assurance=EffectAssurance.PROJECTED,
             motion_policy=MotionPolicy(strategy="ik_interp"),
             runner_cfg=ExecutionRunnerCfg(command_timeout=2.0),
@@ -186,10 +186,10 @@ override.
 
 ## Configure semantic action behavior with the preset
 
-`SkillPolicyPreset.action_option_templates` is the required typed behavior
+`SkillPolicyPreset.skill_option_templates` is the required typed behavior
 table for semantic calls that can select the preset. Each key is the exact
 semantic call ID (`pick`, `place`, `hand_over`, or a registered call ID), and
-each value is the target action's exact frozen `ActionOptions` dataclass.
+each value is the target action's exact frozen `SkillOptions` dataclass.
 Static linking rejects a missing entry or a value of the wrong exact type
 before simulation starts.
 
@@ -203,7 +203,7 @@ runner policy, and effect monitors remain in their dedicated preset fields.
 ## Select semantic grounding providers
 
 Some semantic calls require embodiment knowledge that does not belong in the
-agent-facing call or the atomic action. The built-in semantic HandOver is the
+agent-facing call or the atomic skill. The built-in semantic HandOver is the
 canonical example: the robot profile selects a named provider that supplies a
 safe middle and default final object target for that embodiment. An explicit
 semantic `HandOver.final_target` overrides the provider's final target.
@@ -297,9 +297,9 @@ Construct the atomic engine from the profile's lowered control-part commands,
 install any custom actions, and then bind the profile in the semantic layer:
 
 ```python
-from embodichain.lab.sim.atomic_actions import AtomicActionEngine
+from embodichain.lab.sim.atomic_skills import AtomicSkillEngine
 
-engine = AtomicActionEngine(
+engine = AtomicSkillEngine(
     motion_generator,
     control_profiles=profile.action_control_profiles(),
 )
@@ -310,7 +310,7 @@ assert "pick_up" in bound.skills
 
 resolved = bound.resolve("pick_up")
 assert resolved.resource_ids == {"primary": "left_participant"}
-binding = resolved.action_binding
+binding = resolved.skill_binding
 preset = bound.preset(skill_id="pick_up")
 ```
 
@@ -321,7 +321,7 @@ the engine's catalog revision whenever it performs discovery or resolution.
 {meth}`BoundRobotSkillProfile.resolve` returns a {class}`ResolvedSkillBinding`
 containing the selected logical resources, their adapter-resolved endpoints,
 their combined {class}`ResourceClaim`, and an engine-owned generic
-{class}`~embodichain.lab.sim.atomic_actions.ActionBinding`. A
+{class}`~embodichain.lab.sim.atomic_skills.SkillBinding`. A
 Task Program lowering uses that binding and the selected preset when constructing
 an invocation; profile resolution does not plan or execute the action itself.
 
@@ -340,8 +340,8 @@ than selecting a resource by declaration order. An unsupported selection raises
 {class}`UnsupportedSkillError` with endpoint, capability, command, or claim
 rejection details.
 
-`engine.actions` remains the direct-core implementation registry.
-`engine.skills` is the installed semantic catalog before embodiment filtering,
+`engine.skill_implementations` remains the direct-core implementation registry.
+`engine.skill_catalog` is the installed semantic catalog before embodiment filtering,
 and `bound.skills` is the profile-supported catalog. Registering or replacing an
 action invalidates the bound profile; bind it again before discovery or
 resolution.
@@ -393,7 +393,7 @@ consume these example capabilities.
 
 Non-joint controllers add one endpoint declaration type and one adapter. The
 adapter returns {class}`EndpointResolution` with a typed immutable
-{class}`~embodichain.lab.sim.atomic_actions.RuntimeEndpointTarget`, an optional
+{class}`~embodichain.lab.sim.atomic_skills.RuntimeEndpointTarget`, an optional
 command-profile key, joint IDs when applicable, and adapter-defined claim
 tokens. The generic graph, matching, command, default, and conflict code does
 not change. For example, a twist controller can return a target addressed to a
@@ -426,11 +426,11 @@ factory; it cannot be supplied later as a task-side callback.
 
 A resolved action binding is keyed only by the skill-local
 `(slot_id, endpoint_id)` pair. A reusable non-joint capability supplies a
-matching {class}`~embodichain.lab.sim.atomic_actions.RuntimeCommandPayload`, a
+matching {class}`~embodichain.lab.sim.atomic_skills.RuntimeCommandPayload`, a
 shared atomic skill that emits
-{class}`~embodichain.lab.sim.atomic_actions.RuntimeCommandFrame` values, and an
-{class}`~embodichain.lab.sim.atomic_actions.EndpointCommandTransport` registered
-with {class}`~embodichain.lab.sim.atomic_actions.EndpointCommandRouter`. The
+{class}`~embodichain.lab.sim.atomic_skills.RuntimeCommandFrame` values, and an
+{class}`~embodichain.lab.sim.atomic_skills.EndpointCommandTransport` registered
+with {class}`~embodichain.lab.sim.atomic_skills.EndpointCommandRouter`. The
 core binding, session, runner, and router do not need controller-specific
 changes. Once that shared capability exists, new tasks and robot variants reuse
 it through profile and task configuration rather than task-specific motion
@@ -445,7 +445,7 @@ may retain a full-robot trajectory for feedback and offline compilation, but
 runtime dispatch is scoped to the endpoints in each command frame.
 ```
 
-See {doc}`../sim/atomic_actions/index` for the direct atomic-action core,
+See {doc}`../sim/atomic_skills/index` for the direct atomic-skill core,
 {doc}`index` for declarative semantic contracts,
 {doc}`../task_program/index` for semantic task execution, and
 {doc}`scene_registry` for canonical scene identity and snapshots.

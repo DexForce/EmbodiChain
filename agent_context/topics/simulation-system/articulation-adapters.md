@@ -101,7 +101,7 @@ lifetime ends with the asset. Camera name resolution belongs to sensors.
 
 `get_link_vert_face()` and named-state `compute_fk()` stay deterministic and
 domain-neutral; stochastic affordance sampling and semantic keys belong to
-Atomic Action adapters. Newton link mesh export concatenates every render mesh
+Atomic Skill adapters. Newton link mesh export concatenates every render mesh
 with triangle offsets, and returns empty arrays for zero-mesh links.
 
 USD `build_pk_chain` uses resolved Spawn descriptors in

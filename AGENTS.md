@@ -144,7 +144,7 @@ Keep branches and PRs focused on one logical change and use the PR template.
 | `/add-task-program` | Author, integrate, deploy, validate or repair a program |
 | `/add-embodiment-component` | Reuse a robot, sensors and optional skill profile |
 | `/add-semantic-call` | Expose an Atomic Skill as a Semantic Call |
-| `/add-atomic-action` | Add typed action planning/execution |
+| `/add-atomic-skill` | Add typed action planning/execution |
 | `/add-robot` | Add robot config and kinematic-chain wiring |
 | `/add-solver` | Add IK/FK solver, docs, tests and benchmark |
 | `/add-functor` | Add observation, reward, event, action, dataset or randomization operation |

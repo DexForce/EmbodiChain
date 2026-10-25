@@ -171,8 +171,8 @@ class PickPlaceEnv(EmbodiedEnv):
 
     def _engine(self) -> Any:
         if self._expert_engine is None:
-            from embodichain.lab.sim.atomic_actions import (
-                AtomicActionEngine,
+            from embodichain.lab.sim.atomic_skills import (
+                AtomicSkillEngine,
                 ControlPartCommandProfile,
             )
             from embodichain.lab.sim.motion.motion_generator import (
@@ -181,7 +181,7 @@ class PickPlaceEnv(EmbodiedEnv):
             )
             from embodichain.lab.sim.motion.planners import ToppraPlannerCfg
 
-            self._expert_engine = AtomicActionEngine(
+            self._expert_engine = AtomicSkillEngine(
                 MotionGenerator(
                     MotionGenCfg(
                         planner_cfg=ToppraPlannerCfg(
@@ -238,8 +238,8 @@ class PickPlaceEnv(EmbodiedEnv):
         Yields:
             Two segments with measured acceptance.
         """
-        from embodichain.lab.sim.atomic_actions import (
-            ActionInvocation,
+        from embodichain.lab.sim.atomic_skills import (
+            SkillInvocation,
             Affordance,
             EntityState,
             GraspGoal,
@@ -279,7 +279,7 @@ class PickPlaceEnv(EmbodiedEnv):
         )
         pick = engine.compile(
             (
-                ActionInvocation(
+                SkillInvocation(
                     skill_id="pick_up",
                     goal=GraspGoal(semantics, grasp_xpos=grasp),
                     binding=engine.bind_control_parts("pick_up", endpoints),
@@ -340,7 +340,7 @@ class PickPlaceEnv(EmbodiedEnv):
         object_to_eef = torch.bmm(torch.linalg.inv(measured), tcp)
         place = engine.compile(
             (
-                ActionInvocation(
+                SkillInvocation(
                     skill_id="place",
                     goal=PlaceGoal(torch.bmm(target_object, object_to_eef)),
                     binding=engine.bind_control_parts("place", endpoints),

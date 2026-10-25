@@ -1,0 +1,167 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+"""Optional DexSim end-to-end strategy test for cuRobo through AtomicSkillEngine.
+
+Skipped when cuRobo or CUDA is unavailable. When both are present, it builds a
+single-arm Franka + static cuboid scene, executes ``MoveEndEffector`` with
+a cuRobo-backed ``MotionGenerator`` through the engine, and asserts a full-DoF
+collision-aware trajectory that reaches the target after playback.
+"""
+
+from __future__ import annotations
+
+import pytest
+import torch
+
+# Module-level guards before any cuRobo-only import.
+pytest.importorskip("curobo")
+if not torch.cuda.is_available():
+    pytest.skip("cuRobo V2 requires CUDA", allow_module_level=True)
+
+from embodichain.lab.sim import SimulationManager, SimulationManagerCfg  # noqa: E402
+from embodichain.lab.sim.cfg import RigidBodyPhysicsCfg  # noqa: E402
+from embodichain.lab.sim.objects import RigidObjectCfg  # noqa: E402
+from embodichain_robots import FrankaPandaCfg  # noqa: E402
+from embodichain.lab.sim.shapes import CubeCfg  # noqa: E402
+from embodichain.lab.sim.motion.motion_generator import MotionGenCfg, MotionGenerator
+from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (  # noqa: E402
+    CuroboPlannerCfg,
+    CuroboWorldCfg,
+)
+from embodichain.lab.sim.atomic_skills import (  # noqa: E402
+    SkillInvocation,
+    AtomicSkillEngine,
+    EndEffectorPoseGoal,
+    MotionPolicy,
+)
+
+ROBOT_UID = "curobo_franka"
+CONTROL_PART = "arm"
+DEMO_BLOCK_DIMS = [0.18, 0.40, 0.36]
+DEMO_BLOCK_POS = [0.45, 0.0, 0.18]
+POS_TOL = 0.02
+SAMPLE_INTERVAL = 80
+
+
+def _make_franka_curobo_engine():
+    sim = SimulationManager(
+        SimulationManagerCfg(headless=True, sim_device="cuda", num_envs=1)
+    )
+    robot = sim.add_robot(
+        cfg=FrankaPandaCfg.from_dict({"uid": ROBOT_UID, "robot_type": "panda"})
+    )
+    block = sim.add_rigid_object(
+        cfg=RigidObjectCfg(
+            uid="demo_block",
+            shape=CubeCfg(size=DEMO_BLOCK_DIMS),
+            attrs=RigidBodyPhysicsCfg(),
+            body_type="static",
+            init_pos=DEMO_BLOCK_POS,
+            init_rot=[0.0, 0.0, 0.0],
+        )
+    )
+    sim.prepare()
+    mg = MotionGenerator(
+        MotionGenCfg(
+            planner_cfg=CuroboPlannerCfg(
+                robot_uid=ROBOT_UID,
+                world=CuroboWorldCfg(rigid_objects=[block]),
+            )
+        )
+    )
+    engine = AtomicSkillEngine(mg)
+    return sim, robot, engine
+
+
+def _reachable_target_beyond_demo_block(robot) -> torch.Tensor:
+    """A target beyond the cuboid so the planner must route around it."""
+    qpos = robot.get_qpos(name=CONTROL_PART)
+    fk = robot.compute_fk(qpos=qpos, name=CONTROL_PART, to_matrix=True)
+    target = fk[0].clone()
+    target[:3, 3] = torch.tensor([0.55, 0.30, 0.45], device=robot.device)
+    return target
+
+
+def _play_trajectory(sim, robot, trajectory: torch.Tensor, step_repeat: int = 1):
+    """Replay every waypoint with matching state and drive targets.
+
+    ``target=True`` alone only updates the articulation drive target.  The
+    physics step can therefore still be catching up with the previous sample
+    when the next one is supplied.  Set the current state first so the replay
+    validates the planned configuration rather than the drive controller's
+    tracking transient.
+    """
+    all_joint_ids = list(range(robot.dof))
+    for w in range(trajectory.shape[1]):
+        waypoint = trajectory[:, w]
+        robot.set_qpos(qpos=waypoint, joint_ids=all_joint_ids, target=False)
+        robot.set_qpos(qpos=waypoint, joint_ids=all_joint_ids, target=True)
+        sim.update(step=step_repeat)
+
+
+def _position_error(robot, target: torch.Tensor) -> float:
+    qpos = robot.get_qpos(name=CONTROL_PART)
+    fk = robot.compute_fk(qpos=qpos, name=CONTROL_PART, to_matrix=True)
+    return float(torch.norm(fk[0, :3, 3] - target[:3, 3]))
+
+
+@pytest.mark.requires_sim
+@pytest.mark.slow
+def test_atomic_move_end_effector_uses_curobo_v2():
+    sim, robot, engine = _make_franka_curobo_engine()
+    try:
+        target = _reachable_target_beyond_demo_block(robot)
+        binding = engine.bind_control_parts(
+            "move_end_effector",
+            {"primary": {"motion": CONTROL_PART}},
+        )
+        result = engine.compile(
+            (
+                SkillInvocation(
+                    skill_id="move_end_effector",
+                    goal=EndEffectorPoseGoal(xpos=target),
+                    binding=binding,
+                    motion_policy=MotionPolicy(
+                        strategy="motion_gen",
+                        sample_count=SAMPLE_INTERVAL,
+                    ),
+                ),
+            ),
+            context=engine.initial_context(control_dt=sim.sim_config.physics_dt),
+        )
+        plan = result.skill_plans[0]
+        assert plan.joint_trajectory is not None
+        assert plan.commands.frame_count == plan.joint_trajectory.waypoint_count
+        trajectory = plan.joint_trajectory.positions
+        assert result.plan_success.shape == (1,)
+        assert bool(result.plan_success.item())
+        assert trajectory.shape[2] == robot.dof
+        # Atomic trajectories use the execution grid, so their sample count
+        # depends on the planner duration rather than the requested count.
+        assert trajectory.shape[1] > 1
+        assert torch.count_nonzero(plan.joint_trajectory.dt[:, 0]) == 0
+        torch.testing.assert_close(
+            plan.joint_trajectory.dt[:, 1:],
+            torch.full_like(plan.joint_trajectory.dt[:, 1:], sim.sim_config.physics_dt),
+        )
+        assert plan.joint_trajectory.velocities is not None
+        assert torch.count_nonzero(plan.joint_trajectory.velocities[:, -1]) == 0
+        _play_trajectory(sim, robot, trajectory)
+        assert _position_error(robot, target) < POS_TOL
+    finally:
+        sim.destroy()
+        SimulationManager.flush_cleanup_queue()

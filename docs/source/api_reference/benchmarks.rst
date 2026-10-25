@@ -4,7 +4,7 @@ Motion generation benchmarks
 The bundled ``embodichain_benchmarks.motion_generation`` extension evaluates
 Motion Planning and Atomic Skills suites from another Python project. The
 benchmark owns case generation, simulation, lifecycle timing, evaluation and
-artifact persistence. It consumes the simulation, planning and Atomic Action
+artifact persistence. It consumes the simulation, planning and Atomic Skill
 APIs in ``embodichain`` and ships in the main wheel with the same version and
 dependencies. Callers select a suite and provide planner configuration.
 
@@ -42,7 +42,7 @@ another repository. The mapping applies to one call, including overrides of
 registered adapter names. Implement ``build()``, ``plan(case)`` and ``close()``;
 use ``prepare()`` for distinct lazy initialization. Declare supported
 capabilities and return a canonical batched ``PlanResult``. Atomic Skills also
-require an exposed ``MotionGenerator`` and the ``atomic_action`` capability.
+require an exposed ``MotionGenerator`` and the ``atomic_skill`` capability.
 
 Calls own their simulation and return structured results after teardown. Run
 calls serially within a process. Install the selected backend and resolve its

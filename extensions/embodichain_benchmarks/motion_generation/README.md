@@ -2,7 +2,7 @@
 
 The bundled `embodichain_benchmarks` extension owns evaluation orchestration,
 baseline adapters, scenarios, scoring policies, reports and suite resources.
-It consumes the simulation, planning and Atomic Action APIs in `embodichain`.
+It consumes the simulation, planning and Atomic Skill APIs in `embodichain`.
 The extension ships in the main wheel with the same version and dependencies;
 `extensions/` is a source directory, not an import prefix. After updating a
 source checkout, refresh its editable mappings with `pip install -e . --no-deps`.
@@ -84,7 +84,7 @@ call. Load models in `build()` or `prepare()`, return the canonical batched
 `PlanResult` from `plan(case)`, and release resources in `close()`. Declare
 capabilities such as `eef_waypoint`, `joint_waypoint`, `batched` and `empty_world`
 according to actual support. Timed backends declare `timing_is_solved` and use
-the shared motion budgets. Atomic Skills also require `atomic_action` and an
+the shared motion budgets. Atomic Skills also require `atomic_skill` and an
 adapter-owned `MotionGenerator`; an arbitrary free-space adapter alone does not
 provide that integration.
 
@@ -135,7 +135,7 @@ capture happens after measured evaluation.
 
 Other benchmark domains use separate commands: `rl`,
 `robotics-kinematic-solver`, `grasp-pose-generator`, `workspace-analyzer`, and
-`rendering`. `embodichain benchmark atomic-action-profile --action pick_up
+`rendering`. `embodichain benchmark atomic-skill-profile --action pick_up
 --profile smoke` profiles individual actions over object and position presets;
 its reports do not contribute to this framework's planner rankings.
 
@@ -377,7 +377,7 @@ describes pose, primitive-geometry and composed domains.
 
 - Planner: implement and register [`PlannerAdapter`](./planners/base.py),
   declaring capabilities and timing semantics. Atomic Skills additionally
-  require an exposed `MotionGenerator` and the `atomic_action` capability.
+  require an exposed `MotionGenerator` and the `atomic_skill` capability.
 - Robot: register a [`RobotProvider`](./robots/base.py); gripper-action suites
   also configure the control part and open/grasp joint commands.
 - Object: configure a built-in `cube` / `mesh` entry, or register an object-kind

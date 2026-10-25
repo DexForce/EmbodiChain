@@ -23,7 +23,7 @@ from unittest.mock import Mock
 
 import torch
 
-from embodichain.lab.sim.atomic_actions import TaskState
+from embodichain.lab.sim.atomic_skills import TaskState
 from embodichain.lab.task_program.runtime.results import (
     SemanticExecutionResult,
     SemanticExecutionStatus,

@@ -28,21 +28,21 @@ from typing import ClassVar, Mapping, TYPE_CHECKING
 
 import torch
 
-from embodichain.lab.sim.atomic_actions.bindings import (
-    ActionBinding,
+from embodichain.lab.sim.atomic_skills.bindings import (
+    SkillBinding,
     EndpointBinding,
     JointPositionTarget,
     RuntimeEndpointTarget,
 )
-from embodichain.lab.sim.atomic_actions.control import (
+from embodichain.lab.sim.atomic_skills.control import (
     ControlCommand,
     ControlPartCommandProfile,
     JointPositionCommand,
 )
-from embodichain.lab.sim.atomic_actions.core import SkillDescriptor
-from embodichain.lab.sim.atomic_actions.invocation import ActionOptions
-from embodichain.lab.sim.atomic_actions.policies import MotionPolicy, RecoveryPolicy
-from embodichain.lab.sim.atomic_actions.tracking import (
+from embodichain.lab.sim.atomic_skills.core import SkillDescriptor
+from embodichain.lab.sim.atomic_skills.invocation import SkillOptions
+from embodichain.lab.sim.atomic_skills.policies import MotionPolicy, RecoveryPolicy
+from embodichain.lab.sim.atomic_skills.tracking import (
     JOINT_POSITION_CHANNEL,
     EndpointTrackingChannelBinding,
     EndpointTrackingFeedbackAddress,
@@ -50,7 +50,7 @@ from embodichain.lab.sim.atomic_actions.tracking import (
     TrackingPolicy,
     TrackingProjectorRef,
 )
-from embodichain.lab.sim.atomic_actions.requirements import (
+from embodichain.lab.sim.atomic_skills.requirements import (
     BATCH_INVERSE_KINEMATICS_CAPABILITY,
     DisjointResourceSlots,
     DisjointSlotEndpoints,
@@ -60,7 +60,7 @@ from embodichain.lab.sim.atomic_actions.requirements import (
     SkillBindingContract,
     SkillResourceSlot,
 )
-from embodichain.lab.sim.atomic_actions.runner import ExecutionRunnerCfg
+from embodichain.lab.sim.atomic_skills.runner import ExecutionRunnerCfg
 from .effects import (
     CONTACT_EFFECT_CHANNEL,
     CONSTRAINT_EFFECT_CHANNEL,
@@ -75,7 +75,7 @@ from .effects import (
 )
 
 if TYPE_CHECKING:
-    from embodichain.lab.sim.atomic_actions.engine import AtomicActionEngine
+    from embodichain.lab.sim.atomic_skills.engine import AtomicSkillEngine
 
 
 class ProfileValidationError(ValueError):
@@ -219,12 +219,10 @@ def _snapshot_graph_tokens(
     )
 
 
-def _snapshot_action_options(options: ActionOptions) -> ActionOptions:
+def _snapshot_skill_options(options: SkillOptions) -> SkillOptions:
     """Return one exact action-options snapshot with no mutable aliasing."""
-    if not isinstance(options, ActionOptions):
-        raise TypeError(
-            "action_option_templates values must be ActionOptions instances."
-        )
+    if not isinstance(options, SkillOptions):
+        raise TypeError("skill_option_templates values must be SkillOptions instances.")
     option_type = type(options)
     dataclass_params = option_type.__dict__.get("__dataclass_params__")
     dataclass_fields = option_type.__dict__.get("__dataclass_fields__")
@@ -234,11 +232,11 @@ def _snapshot_action_options(options: ActionOptions) -> ActionOptions:
         or dataclass_params.frozen is not True
     ):
         raise TypeError(
-            "action_option_templates values must be exact frozen @dataclass "
-            "declarations, not inherited undecorated ActionOptions subclasses."
+            "skill_option_templates values must be exact frozen @dataclass "
+            "declarations, not inherited undecorated SkillOptions subclasses."
         )
     if hasattr(options, "__dict__"):
-        raise TypeError("action_option_templates values must not carry __dict__ state.")
+        raise TypeError("skill_option_templates values must not carry __dict__ state.")
     field_names = {data_field.name for data_field in fields(options)}
     declared_slots: set[str] = set()
     for base in option_type.__mro__:
@@ -250,13 +248,13 @@ def _snapshot_action_options(options: ActionOptions) -> ActionOptions:
     opaque_slots = declared_slots.difference(field_names, {"__weakref__"})
     if opaque_slots:
         raise TypeError(
-            "action_option_templates values must not carry non-dataclass "
+            "skill_option_templates values must not carry non-dataclass "
             f"slot state: {sorted(opaque_slots)}."
         )
     snapshot = deepcopy(options)
     if type(snapshot) is not option_type or snapshot is options:
         raise TypeError(
-            "action_option_templates values must support independent deep-copy "
+            "skill_option_templates values must support independent deep-copy "
             "snapshots of their exact type."
         )
     source_tokens = _snapshot_graph_tokens(
@@ -271,7 +269,7 @@ def _snapshot_action_options(options: ActionOptions) -> ActionOptions:
     )
     if source_tokens.intersection(snapshot_tokens):
         raise TypeError(
-            "action_option_templates values must support independently owned "
+            "skill_option_templates values must support independently owned "
             "snapshots without shared mutable objects or tensor storage."
         )
     return snapshot
@@ -591,7 +589,7 @@ class ResourceEndpointAdapter(ABC):
         self,
         endpoint: ResourceEndpoint,
         *,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> EndpointResolution:
         """Validate and resolve one endpoint against an action engine.
 
@@ -634,7 +632,7 @@ class ControlPartEndpointAdapter(ResourceEndpointAdapter):
         self,
         endpoint: ResourceEndpoint,
         *,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> EndpointResolution:
         """Resolve a robot control part and verify its standard capabilities."""
         if not isinstance(endpoint, ControlPartEndpoint):
@@ -925,7 +923,7 @@ class ResourceBinding:
 class WorkflowRecoveryPolicy:
     """Bound workflow-level recovery for curated semantic effect failures.
 
-    The atomic action remains the owner of replans and whole-action retries.
+    The atomic skill remains the owner of replans and whole-action retries.
     This policy applies only after that action emits ``RECOVERY_REQUIRED`` and
     returns control to the Task Program workflow executor.
 
@@ -964,13 +962,13 @@ class SkillPolicyPreset:
     _workflow_recovery_policy: WorkflowRecoveryPolicy
     _runner_cfg: ExecutionRunnerCfg
     _effect_monitors: Mapping[str, EffectMonitorRef]
-    _action_option_templates: Mapping[str, ActionOptions]
+    _skill_option_templates: Mapping[str, SkillOptions]
 
     def __init__(
         self,
         preset_id: str,
         *,
-        action_option_templates: Mapping[str, ActionOptions],
+        skill_option_templates: Mapping[str, SkillOptions],
         effect_assurance: EffectAssurance,
         effect_monitors: Mapping[str, EffectMonitorRef] = _EMPTY_EFFECT_MONITORS,
         motion_policy: MotionPolicy | None = None,
@@ -1034,15 +1032,15 @@ class SkillPolicyPreset:
                     "effect_monitors values must be EffectMonitorRef instances."
                 )
             normalized_effect_monitors[semantic_id] = monitor_ref.snapshot()
-        if not isinstance(action_option_templates, Mapping):
-            raise TypeError("action_option_templates must be a mapping.")
-        normalized_action_option_templates: dict[str, ActionOptions] = {}
-        for semantic_id, options in action_option_templates.items():
+        if not isinstance(skill_option_templates, Mapping):
+            raise TypeError("skill_option_templates must be a mapping.")
+        normalized_skill_option_templates: dict[str, SkillOptions] = {}
+        for semantic_id, options in skill_option_templates.items():
             _validate_identifier(
                 semantic_id,
                 field_name="SkillPolicyPreset action-option semantic IDs",
             )
-            normalized_action_option_templates[semantic_id] = _snapshot_action_options(
+            normalized_skill_option_templates[semantic_id] = _snapshot_skill_options(
                 options
             )
         object.__setattr__(self, "preset_id", preset_id)
@@ -1064,8 +1062,8 @@ class SkillPolicyPreset:
         )
         object.__setattr__(
             self,
-            "_action_option_templates",
-            MappingProxyType(normalized_action_option_templates),
+            "_skill_option_templates",
+            MappingProxyType(normalized_skill_option_templates),
         )
 
     @property
@@ -1108,16 +1106,16 @@ class SkillPolicyPreset:
         )
 
     @property
-    def action_option_templates(self) -> Mapping[str, ActionOptions]:
+    def skill_option_templates(self) -> Mapping[str, SkillOptions]:
         """Return owned option templates keyed by exact semantic call ID."""
         return MappingProxyType(
             {
-                semantic_id: _snapshot_action_options(options)
-                for semantic_id, options in self._action_option_templates.items()
+                semantic_id: _snapshot_skill_options(options)
+                for semantic_id, options in self._skill_option_templates.items()
             }
         )
 
-    def action_option_template(self, semantic_id: str) -> ActionOptions:
+    def skill_option_template(self, semantic_id: str) -> SkillOptions:
         """Return one owned template for an exact semantic call ID.
 
         Raises:
@@ -1128,13 +1126,13 @@ class SkillPolicyPreset:
             field_name="SkillPolicyPreset action-option semantic ID",
         )
         try:
-            template = self._action_option_templates[semantic_id]
+            template = self._skill_option_templates[semantic_id]
         except KeyError as exc:
             raise KeyError(
                 f"Preset {self.preset_id!r} has no action-option template for "
                 f"semantic call {semantic_id!r}."
             ) from exc
-        return _snapshot_action_options(template)
+        return _snapshot_skill_options(template)
 
     def snapshot(self) -> SkillPolicyPreset:
         """Return an independently owned preset value."""
@@ -1148,7 +1146,7 @@ class SkillPolicyPreset:
             runner_cfg=self.runner_cfg,
             effect_monitors=self.effect_monitors,
             required_planner=self.required_planner,
-            action_option_templates=self.action_option_templates,
+            skill_option_templates=self.skill_option_templates,
         )
 
 
@@ -1314,7 +1312,7 @@ class ResolvedSkillBinding:
 
     skill_id: str
     resources: Mapping[str, ResolvedRobotResource]
-    action_binding: ActionBinding
+    skill_binding: SkillBinding
     claim: ResourceClaim
 
     def __post_init__(self) -> None:
@@ -1331,8 +1329,8 @@ class ResolvedSkillBinding:
                 )
             normalized[slot_id] = resource
         object.__setattr__(self, "resources", MappingProxyType(normalized))
-        if not isinstance(self.action_binding, ActionBinding):
-            raise TypeError("action_binding must be an ActionBinding.")
+        if not isinstance(self.skill_binding, SkillBinding):
+            raise TypeError("skill_binding must be an SkillBinding.")
         if not isinstance(self.claim, ResourceClaim):
             raise TypeError("claim must be a ResourceClaim.")
 
@@ -1629,7 +1627,7 @@ class RobotSkillProfile:
 
     def bind(
         self,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
         *,
         endpoint_adapters: (
             Mapping[type[ResourceEndpoint], ResourceEndpointAdapter] | None
@@ -1638,7 +1636,7 @@ class RobotSkillProfile:
         """Validate this profile against one fully configured action engine.
 
         Args:
-            engine: Installed atomic-action engine for the target robot.
+            engine: Installed atomic-skill engine for the target robot.
             endpoint_adapters: Optional exact endpoint-type adapters. Explicit
                 entries extend the non-overridable built-in control-part adapter.
 
@@ -1658,18 +1656,18 @@ class BoundRobotSkillProfile:
     def __init__(
         self,
         profile: RobotSkillProfile,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
         *,
         endpoint_adapters: (
             Mapping[type[ResourceEndpoint], ResourceEndpointAdapter] | None
         ) = None,
     ) -> None:
-        from embodichain.lab.sim.atomic_actions.engine import AtomicActionEngine
+        from embodichain.lab.sim.atomic_skills.engine import AtomicSkillEngine
 
         if not isinstance(profile, RobotSkillProfile):
             raise TypeError("profile must be a RobotSkillProfile.")
-        if not isinstance(engine, AtomicActionEngine):
-            raise TypeError("engine must be an AtomicActionEngine.")
+        if not isinstance(engine, AtomicSkillEngine):
+            raise TypeError("engine must be an AtomicSkillEngine.")
         self._profile = profile
         self._engine = engine
         self._endpoint_adapters = _normalize_endpoint_adapters(endpoint_adapters)
@@ -1678,7 +1676,7 @@ class BoundRobotSkillProfile:
         self._validate_engine_control_profiles()
         self._validate_leaf_ownership()
         self._skill_catalog_revision = engine.skill_catalog_revision
-        self._installed_skills = MappingProxyType(dict(engine.skills))
+        self._installed_skills = MappingProxyType(dict(engine.skill_catalog))
         self._validate_named_skill_configuration()
         self._validate_defaults()
         self._skills = MappingProxyType(
@@ -1695,7 +1693,7 @@ class BoundRobotSkillProfile:
         return self._profile.profile_id
 
     @property
-    def engine(self) -> AtomicActionEngine:
+    def engine(self) -> AtomicSkillEngine:
         """Return the exact action engine used to validate this profile."""
         return self._engine
 
@@ -1841,7 +1839,7 @@ class BoundRobotSkillProfile:
         """Prevent stale contracts after engine registration or replacement."""
         if self._engine.skill_catalog_revision != self._skill_catalog_revision:
             raise RuntimeError(
-                "AtomicActionEngine skill catalog changed after the robot skill "
+                "AtomicSkillEngine skill catalog changed after the robot skill "
                 "profile was bound; bind the profile again before discovery or "
                 "resolution."
             )
@@ -1897,7 +1895,7 @@ class BoundRobotSkillProfile:
             if installed is None:
                 raise ProfileValidationError(
                     f"Profile command set for control part {control_part!r} is not "
-                    "installed on the AtomicActionEngine."
+                    "installed on the AtomicSkillEngine."
                 )
             for command_name, command in expected.commands.items():
                 installed_command = installed.commands.get(command_name)
@@ -1925,7 +1923,7 @@ class BoundRobotSkillProfile:
                         f"Endpoint command profile "
                         f"{endpoint.command_profile_key!r} for control part "
                         f"{control_part!r} is not installed on the "
-                        "AtomicActionEngine."
+                        "AtomicSkillEngine."
                     )
                 for command_name, command in endpoint.commands.items():
                     installed_command = installed.commands.get(command_name)
@@ -2415,7 +2413,7 @@ class BoundRobotSkillProfile:
         return ResolvedSkillBinding(
             skill_id=skill_id,
             resources=assignment,
-            action_binding=ActionBinding(
+            skill_binding=SkillBinding(
                 owner_id=self._engine.binding_owner_id,
                 endpoints=tuple(endpoints),
             ),

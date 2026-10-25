@@ -237,7 +237,7 @@ def prepare_pour_adaptation(
     ]
     if len(grasps) != 1:
         raise ValueError("Pour bottle needs exactly one antipodal grasp")
-    options = integration["profile"]["action_options"]
+    options = integration["profile"]["skill_options"]
     pick_options = options.get("pick", {})
     pour_options = options.get("simulation.pour", {})
     angle = pour_options.get("rotate_angle")

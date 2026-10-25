@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""cuRobo V2 collision-aware planning through the atomic-action interface.
+"""cuRobo V2 collision-aware planning through the atomic-skill interface.
 
 The demo creates one or more copies of the selected robot and an Open3D box
 mesh stored in a temporary file. Its DexSim collision mesh is reduced to a
@@ -22,7 +22,7 @@ convex hull and converted into a cuRobo ESDF voxel obstacle. With multiple
 environments, each
 obstacle receives a small reproducible XY/yaw perturbation and cuRobo allocates
 an independent collision world for each environment. The demo then executes a
-batched ``MoveEndEffector`` action through :class:`AtomicActionEngine`, replays
+batched ``MoveEndEffector`` action through :class:`AtomicSkillEngine`, replays
 the returned full-robot-DoF trajectories, and reports the final TCP error for
 every environment.
 
@@ -70,7 +70,7 @@ DEFAULT_RANDOM_SEED = 0
 def build_parser() -> argparse.ArgumentParser:
     """Build CLI options without initializing simulation resources."""
     parser = argparse.ArgumentParser(
-        description="Run cuRobo V2 through EmbodiChain AtomicActionEngine."
+        description="Run cuRobo V2 through EmbodiChain AtomicSkillEngine."
     )
     add_sim_args_to_parser(parser)
     # cuRobo requires CUDA independently of the selected physics backend.
@@ -179,9 +179,9 @@ from embodichain.lab.visualization import (
     VisualizationCfg,
     visualization_cfg_from_args,
 )
-from embodichain.lab.sim.atomic_actions import (
-    ActionInvocation,
-    AtomicActionEngine,
+from embodichain.lab.sim.atomic_skills import (
+    SkillInvocation,
+    AtomicSkillEngine,
     EndEffectorPoseGoal,
     MotionPolicy,
 )
@@ -697,7 +697,7 @@ def _replay_full_dof_trajectory(
         )
     if trajectory.shape[-1] != robot.dof:
         raise ValueError(
-            "AtomicActionEngine must return full-robot DoF positions; got "
+            "AtomicSkillEngine must return full-robot DoF positions; got "
             f"{trajectory.shape[-1]} DoF for a {robot.dof}-DoF robot."
         )
 
@@ -830,7 +830,7 @@ def main(args: argparse.Namespace | None = None) -> None:
             # surface used by cuRobo in the DexSim window. Press Enter in the
             # terminal to remove the overlay and continue planner creation.
             motion_generator.planner.visualize_robot_collision_models(control_part)
-        engine = AtomicActionEngine(motion_generator)
+        engine = AtomicSkillEngine(motion_generator)
         binding = engine.bind_control_parts(
             "move_end_effector",
             {"primary": {"motion": control_part}},
@@ -855,7 +855,7 @@ def main(args: argparse.Namespace | None = None) -> None:
         plan_start = time.perf_counter()
         compiled = engine.compile(
             (
-                ActionInvocation(
+                SkillInvocation(
                     "move_end_effector",
                     EndEffectorPoseGoal(xpos=target_xpos),
                     binding,
@@ -867,9 +867,9 @@ def main(args: argparse.Namespace | None = None) -> None:
         trajectory = compiled.trajectory.positions
         planning_duration = time.perf_counter() - plan_start
 
-        print(f"cuRobo atomic-action success by environment: {success.tolist()}")
+        print(f"cuRobo atomic-skill success by environment: {success.tolist()}")
         print(f"full-DoF trajectory shape: {tuple(trajectory.shape)}")
-        print(f"[warm-up] atomic-action planning duration: {planning_duration:.3f} s")
+        print(f"[warm-up] atomic-skill planning duration: {planning_duration:.3f} s")
 
         if not bool(success.all().item()):
             failed_env_ids = torch.nonzero(~success, as_tuple=False).flatten().tolist()
@@ -893,7 +893,7 @@ def main(args: argparse.Namespace | None = None) -> None:
         plan_start = time.perf_counter()
         compiled = engine.compile(
             (
-                ActionInvocation(
+                SkillInvocation(
                     "move_end_effector",
                     EndEffectorPoseGoal(xpos=initial_xpos),
                     binding,
@@ -906,7 +906,7 @@ def main(args: argparse.Namespace | None = None) -> None:
         planning_duration = time.perf_counter() - plan_start
         print(f"cuRobo return-action success by environment: {success.tolist()}")
         print(f"full-DoF trajectory shape: {tuple(trajectory.shape)}")
-        print(f"[Runtime]atomic-action planning duration: {planning_duration:.3f} s")
+        print(f"[Runtime]atomic-skill planning duration: {planning_duration:.3f} s")
         if not bool(success.all().item()):
             failed_env_ids = torch.nonzero(~success, as_tuple=False).flatten().tolist()
             raise RuntimeError(

@@ -60,10 +60,10 @@ from embodichain.lab.task_program.integrations.simulation.environment import (
     SharedTickSceneProvider,
     SimulationPlanningObservationProvider,
 )
-from embodichain.lab.sim.atomic_actions import (
-    ActionInvocation,
+from embodichain.lab.sim.atomic_skills import (
+    SkillInvocation,
     Affordance,
-    AtomicActionEngine,
+    AtomicSkillEngine,
     BATCH_INVERSE_KINEMATICS_CAPABILITY,
     CARTESIAN_POSE_CAPABILITY,
     EntityState,
@@ -81,8 +81,8 @@ from embodichain.lab.sim.atomic_actions import (
     TaskState,
     TimedTrajectory,
 )
-from embodichain.lab.sim.atomic_actions.bindings import RuntimeEndpointTarget
-from embodichain.lab.sim.atomic_actions.runtime_commands import (
+from embodichain.lab.sim.atomic_skills.bindings import RuntimeEndpointTarget
+from embodichain.lab.sim.atomic_skills.runtime_commands import (
     EndpointCommand,
     RuntimeCommandFrame,
     RuntimeCommandPayload,
@@ -420,7 +420,7 @@ class _ConstraintEvidenceFactory:
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
         scene_provider: SceneProvider,
     ) -> ControlPartSimulationEvidenceProvider:
         """Bind the current robot's explicit physical constraint observation."""
@@ -751,7 +751,7 @@ def _profile_binding() -> SimulationRobotSkillProfileBinding:
         presets=(
             SkillPolicyPreset(
                 "safe",
-                action_option_templates={},
+                skill_option_templates={},
                 effect_assurance=EffectAssurance.PROJECTED,
                 motion_policy=MotionPolicy(),
             ),
@@ -808,7 +808,7 @@ def _handover_profile_binding() -> SimulationRobotSkillProfileBinding:
         presets=(
             SkillPolicyPreset(
                 "safe",
-                action_option_templates={"hand_over": HandOverOptions()},
+                skill_option_templates={"hand_over": HandOverOptions()},
                 effect_assurance=EffectAssurance.VERIFIED,
                 effect_monitors=_verified_effect_monitors("hand_over"),
             ),
@@ -948,7 +948,7 @@ def _evidence_profile_binding() -> SimulationRobotSkillProfileBinding:
         presets=(
             SkillPolicyPreset(
                 "evidence",
-                action_option_templates={
+                skill_option_templates={
                     "pick": PickUpOptions(),
                     "place": PlaceOptions(),
                 },
@@ -1074,8 +1074,8 @@ def _evidence_adapter_runtime() -> tuple[
     )
     adapter = factory.create_adapter()
     assembly = adapter.assemble_runtime(_evidence_integration())
-    pick_action = assembly.engine.actions["pick_up"]
-    place_action = assembly.engine.actions["place"]
+    pick_action = assembly.engine.skill_implementations["pick_up"]
+    place_action = assembly.engine.skill_implementations["place"]
     pick_action._plan = MethodType(_pick_evidence_plan, pick_action)
     place_action._plan = MethodType(_place_evidence_plan, place_action)
     return adapter, assembly, robot, cube
@@ -1265,9 +1265,9 @@ def _mllm_pick_place_calls(
 def _capture_grounded_invocations(
     monkeypatch: pytest.MonkeyPatch,
     assembly: TaskProgramRuntimeAssembly,
-) -> list[ActionInvocation[Any, Any]]:
+) -> list[SkillInvocation[Any, Any]]:
     """Record the production compiler's final lowering without replacing it."""
-    invocations: list[ActionInvocation[Any, Any]] = []
+    invocations: list[SkillInvocation[Any, Any]] = []
     ground = assembly.compiler.ground
 
     def recording_ground(*args: Any, **kwargs: Any) -> Any:
@@ -1361,8 +1361,8 @@ def _assert_typed_equivalent(
 
 
 def _assert_invocation_equivalent(
-    actual: ActionInvocation[Any, Any],
-    expected: ActionInvocation[Any, Any],
+    actual: SkillInvocation[Any, Any],
+    expected: SkillInvocation[Any, Any],
 ) -> None:
     """Compare semantic lowering while ignoring engine-instance owner UUIDs."""
     assert actual.skill_id == expected.skill_id
@@ -1401,7 +1401,7 @@ def test_simulation_observation_owns_gym_control_cadence() -> None:
     factory, robot = _factory()
     registry = factory.create_scene_registry()
     profile = factory.create_robot_skill_profile()
-    engine = factory.create_atomic_action_engine(profile)
+    engine = factory.create_atomic_skill_engine(profile)
     observation = factory.create_planning_observation_provider(
         scene_registry=registry,
         engine=engine,
@@ -1495,7 +1495,7 @@ def test_simulation_factory_builds_shared_observation_and_evidence_ports() -> No
     factory, robot = _factory()
     registry = factory.create_scene_registry()
     profile = factory.create_robot_skill_profile()
-    engine = factory.create_atomic_action_engine(profile)
+    engine = factory.create_atomic_skill_engine(profile)
     clock = EnvironmentStepClock(_STEP_DT)
 
     observation = factory.create_planning_observation_provider(
@@ -1824,7 +1824,7 @@ def test_simulation_helper_assembles_mobile_endpoint_and_transport_without_joint
         presets=(
             SkillPolicyPreset(
                 "runtime",
-                action_option_templates={},
+                skill_option_templates={},
                 effect_assurance=EffectAssurance.PROJECTED,
             ),
         ),

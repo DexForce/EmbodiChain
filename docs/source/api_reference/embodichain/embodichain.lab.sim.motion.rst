@@ -4,7 +4,7 @@ embodichain.lab.sim.motion
 .. automodule:: embodichain.lab.sim.motion
 
 The ``motion`` package groups the robot motion capabilities used by simulation
-objects, atomic actions, and environment integrations. Import the required
+objects, atomic skills, and environment integrations. Import the required
 capability from its owning subpackage:
 
 .. code-block:: python

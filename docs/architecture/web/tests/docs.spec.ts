@@ -45,7 +45,7 @@ test('embedded explorer follows document theme and opens the current view full-s
   await expect(frame.locator('.app')).toHaveAttribute('data-theme', 'dark');
   const menu = frame.getByRole('button', { name: 'Show module list', exact: true });
   if (await menu.isVisible()) await menu.click();
-  await frame.getByRole('button', { name: 'Select AtomicActionEngine', exact: true }).click();
+  await frame.getByRole('button', { name: 'Select AtomicSkillEngine', exact: true }).click();
   await frame.getByRole('button', { name: 'Direct neighbours only', exact: true }).click();
   // Exercise the theme's DOM contract, including changes after iframe load.
   await page.locator('html').evaluate((element) => element.setAttribute('data-theme', 'light'));
@@ -63,7 +63,7 @@ test('embedded explorer follows document theme and opens the current view full-s
   await fullScreen.click();
   await expect(page.locator('.app')).toHaveAttribute('data-theme', 'light');
   await expect(
-    page.getByRole('heading', { name: 'AtomicActionEngine', exact: true }),
+    page.getByRole('heading', { name: 'AtomicSkillEngine', exact: true }),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Switch to dark theme' }).click();
   await page.reload();
@@ -108,41 +108,41 @@ for (const prefix of ['/', '/main/', '/v0.2.4/', '/EmbodiChain/main/']) {
     const frame = page.frameLocator('iframe.architecture-frame');
     const menu = frame.getByRole('button', { name: 'Show module list', exact: true });
     if (await menu.isVisible()) await menu.click();
-    await frame.getByRole('button', { name: 'Select AtomicActionEngine', exact: true }).click();
+    await frame.getByRole('button', { name: 'Select AtomicSkillEngine', exact: true }).click();
     await expect(
-      frame.getByRole('heading', { name: 'AtomicActionEngine', exact: true }),
+      frame.getByRole('heading', { name: 'AtomicSkillEngine', exact: true }),
     ).toBeVisible();
     await expect(frame.getByRole('link', { name: 'View source', exact: true })).toHaveAttribute(
       'href',
       new RegExp(`/blob/${snapshot.revision}/`),
     );
     const documentation = frame.getByRole('link', {
-      name: 'AtomicActionEngine documentation',
+      name: 'AtomicSkillEngine documentation',
       exact: true,
     });
     await expect(documentation).toHaveAttribute('target', '_parent');
     await expect(documentation).toHaveAttribute(
       'href',
       new URL(
-        `${prefix}api_reference/embodichain/embodichain.lab.sim.atomic_actions.html`,
+        `${prefix}api_reference/embodichain/embodichain.lab.sim.atomic_skills.html`,
         page.url(),
       ).href,
     );
     await documentation.click();
     await expect(page).toHaveURL(
-      new RegExp(`${prefix}api_reference/embodichain/embodichain.lab.sim.atomic_actions.html$`),
+      new RegExp(`${prefix}api_reference/embodichain/embodichain.lab.sim.atomic_skills.html$`),
     );
     fullUrl.hash = 'view=task-program&node=atomic-engine&focus=1';
     await page.goto(fullUrl.href);
     await expect(
-      page.getByRole('heading', { name: 'AtomicActionEngine', exact: true }),
+      page.getByRole('heading', { name: 'AtomicSkillEngine', exact: true }),
     ).toBeVisible();
     await expect(
       page.getByRole('button', { name: 'Direct neighbours only', exact: true }),
     ).toHaveAttribute('aria-pressed', 'true');
     await page.reload();
     await expect(
-      page.getByRole('heading', { name: 'AtomicActionEngine', exact: true }),
+      page.getByRole('heading', { name: 'AtomicSkillEngine', exact: true }),
     ).toBeVisible();
   });
 }

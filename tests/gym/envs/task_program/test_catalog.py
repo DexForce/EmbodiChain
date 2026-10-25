@@ -46,10 +46,10 @@ from embodichain.lab.task_program.integrations._configured_composition import (
 )
 from embodichain.lab.gym.utils._component_composition import _resolve_gym_components
 from embodichain.lab.gym.utils.registration import EnvSpec
-from embodichain.lab.sim.atomic_actions import (
-    ActionOptions,
+from embodichain.lab.sim.atomic_skills import (
+    SkillOptions,
     Affordance,
-    AtomicActionEngine,
+    AtomicSkillEngine,
     PlanningContext,
     SceneProvider,
     SceneSnapshot,
@@ -88,7 +88,7 @@ from embodichain.lab.task_program.compiler.lowering import (
     SemanticRelationTarget,
     SupportSurfaceRelationTargetGrounder,
 )
-from embodichain.lab.sim.atomic_actions.tracking import (
+from embodichain.lab.sim.atomic_skills.tracking import (
     InFlightTrackingPolicy,
     TimedTerminalAcceptance,
     TrackingMetricCfg,
@@ -157,7 +157,7 @@ class _CatalogRegisteredLowerer(RegisteredSemanticLowerer):
         *,
         context: PlanningContext,
         bound: BoundSemanticCall,
-        option_template: ActionOptions,
+        option_template: SkillOptions,
     ) -> SemanticLowering:
         """Remain unreachable in registration lifecycle tests."""
         del call, context, bound, option_template
@@ -177,7 +177,7 @@ class _CatalogRegisteredLowererFactory:
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> RegisteredSemanticLowerer:
         """Return one fresh stateless lowerer."""
         del simulation, robot, scene_registry, engine
@@ -354,7 +354,7 @@ class _CatalogControlPartEvidenceFactory:
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
         scene_provider: SceneProvider,
     ) -> EffectEvidenceProvider:
         """Return one fresh provider for every integration assembly."""
@@ -392,7 +392,7 @@ class _CatalogParallelSafetyFactory:
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> ParallelCommandSafetyValidator:
         """Return one independent protocol-compatible safety gate."""
         del simulation, robot, scene_registry, engine
@@ -431,7 +431,7 @@ class _SerializedParallelSafetyFactory:
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> ParallelCommandSafetyValidator:
         """Block the first call so a second call can attempt registration entry."""
         del simulation, robot, scene_registry, engine
@@ -490,10 +490,10 @@ def _registration() -> SimulationTaskProgramRegistration:
     )
 
 
-def _parallel_live_inputs() -> tuple[object, SceneRegistry, AtomicActionEngine]:
+def _parallel_live_inputs() -> tuple[object, SceneRegistry, AtomicSkillEngine]:
     """Build minimal identity-consistent inputs for factory lifecycle tests."""
     robot = object()
-    engine = AtomicActionEngine.__new__(AtomicActionEngine)
+    engine = AtomicSkillEngine.__new__(AtomicSkillEngine)
     engine._planning_services = SimpleNamespace(robot=robot)  # type: ignore[attr-defined]
     return robot, SceneRegistry(), engine
 
@@ -745,7 +745,7 @@ def test_parallel_safety_factory_must_return_a_validator() -> None:
             simulation: object,
             robot: object,
             scene_registry: SceneRegistry,
-            engine: AtomicActionEngine,
+            engine: AtomicSkillEngine,
         ) -> object:
             del simulation, robot, scene_registry, engine
             return object()
@@ -853,7 +853,7 @@ def test_standard_registration_rejects_nonbuiltin_effect_monitor() -> None:
     base = create_cube_robot_profile_binding().presets[0]
     preset = SkillPolicyPreset(
         base.preset_id,
-        action_option_templates=base.action_option_templates,
+        skill_option_templates=base.skill_option_templates,
         effect_assurance=EffectAssurance.VERIFIED,
         motion_policy=base.motion_policy,
         tracking_policy=base.tracking_policy,
@@ -873,7 +873,7 @@ def test_standard_registration_rejects_tracking_metric_without_builtin_evaluator
     base = create_cube_robot_profile_binding().presets[0]
     preset = SkillPolicyPreset(
         base.preset_id,
-        action_option_templates=base.action_option_templates,
+        skill_option_templates=base.skill_option_templates,
         effect_assurance=base.effect_assurance,
         motion_policy=base.motion_policy,
         tracking_policy=TrackingPolicy(
@@ -1026,7 +1026,7 @@ def test_fingerprint_covers_workflow_recovery_policy() -> None:
     base = create_cube_robot_profile_binding().presets[0]
     changed = SkillPolicyPreset(
         base.preset_id,
-        action_option_templates=base.action_option_templates,
+        skill_option_templates=base.skill_option_templates,
         effect_assurance=base.effect_assurance,
         motion_policy=base.motion_policy,
         tracking_policy=base.tracking_policy,

@@ -86,7 +86,7 @@ tracks:
     enabled: true
     config:
       # One simulator environment row represents one sampled pose.  All eight
-      # poses below are therefore planned in one batched Atomic Action call.
+      # poses below are therefore planned in one batched Atomic Skill call.
       batch_sizes: [8]
       seeds: [11]
       randomization:

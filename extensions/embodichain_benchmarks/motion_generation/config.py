@@ -78,7 +78,7 @@ class AtomicPoseRandomizationCfg:
 
     The benchmark represents each random pose as one simulator environment
     row.  Consequently ``pose_batch_size`` is both the number of independently
-    perturbed poses sent to a batched Atomic Action goal and the default
+    perturbed poses sent to a batched Atomic Skill goal and the default
     simulator batch size when a track does not declare ``batch_sizes``.
 
     The nested ``randomization`` mapping is intentionally small and limited

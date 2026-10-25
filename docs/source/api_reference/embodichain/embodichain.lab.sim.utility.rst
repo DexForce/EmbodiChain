@@ -33,7 +33,7 @@ Action Utilities
 .. automodule:: embodichain.lab.sim.utility.action_utils
    :members:
 
-Atomic Action Utilities
+Atomic Skill Utilities
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. automodule:: embodichain.lab.sim.utility.atom_action_utils

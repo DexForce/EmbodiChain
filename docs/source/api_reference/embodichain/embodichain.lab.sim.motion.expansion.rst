@@ -119,7 +119,7 @@ under a single slot-independent candidate identity. Observation profiles are
 post-rollout fan-out metadata and do not create additional physical candidates.
 
 ``SourceAdapter`` is the provider-neutral boundary for handwritten,
-MotionGenerator, Atomic Action, and Task Program sources. It exports a complete
+MotionGenerator, Atomic Skill, and Task Program sources. It exports a complete
 qpos template but does not own slots, simulator stepping, candidate identity, or
 persistence.
 

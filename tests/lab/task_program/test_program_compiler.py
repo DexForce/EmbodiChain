@@ -50,7 +50,7 @@ from embodichain.lab.task_program import (
     WaitStablePostCfg,
     load_task_program,
 )
-from embodichain.lab.sim.atomic_actions import Affordance, EntityState
+from embodichain.lab.sim.atomic_skills import Affordance, EntityState
 from embodichain.lab.task_program.semantics.calls import (
     HandOver,
     Pick,

@@ -39,24 +39,24 @@ from embodichain.lab.gym.envs._json import json_safe_copy as _json_safe_copy
 from embodichain.lab.gym.envs.demo import DemoSegment
 from embodichain.lab.gym.envs.expert_trajectory import JointCommandMode
 from embodichain.lab.gym.envs.types import ControllerAction
-from embodichain.lab.sim.atomic_actions.bindings import (
+from embodichain.lab.sim.atomic_skills.bindings import (
     JointPositionTarget,
     RuntimeEndpointTarget,
 )
-from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUpOptions
-from embodichain.lab.sim.atomic_actions.primitives.place import PlaceOptions
-from embodichain.lab.sim.atomic_actions.runner import (
+from embodichain.lab.sim.atomic_skills.primitives.pick_up import PickUpOptions
+from embodichain.lab.sim.atomic_skills.primitives.place import PlaceOptions
+from embodichain.lab.sim.atomic_skills.runner import (
     CommandAcknowledgement,
     ExecutionClock,
     ExecutionRunnerCfg,
 )
-from embodichain.lab.sim.atomic_actions.runtime_commands import (
+from embodichain.lab.sim.atomic_skills.runtime_commands import (
     EndpointCommand,
     JointPositionPayload,
     RuntimeCommandFrame,
     RuntimeCommandPayload,
 )
-from embodichain.lab.sim.atomic_actions.state import PlanningContext, TaskState
+from embodichain.lab.sim.atomic_skills.state import PlanningContext, TaskState
 from embodichain.lab.task_program.runtime.parallel import ParallelTimingPolicy
 from embodichain.lab.task_program.runtime.parallel_executor import (
     ParallelCommandSafetyValidator,
@@ -1258,13 +1258,13 @@ class TaskProgramDemoBridge:
                     or motion.strategy != "ik_interp"
                     or type(motion.sample_count) is not int
                     or recovery.max_replans != 0
-                    or recovery.max_action_retries != 0
+                    or recovery.max_skill_retries != 0
                     or preset.workflow_recovery_policy.max_recovery_attempts != 0
                     or tracking.in_flight is not None
                     or getattr(tracking.terminal, "settle_duration", None) != 0.0
                 ):
                     return None
-                options = preset.action_option_template(call.semantic_id)
+                options = preset.skill_option_template(call.semantic_id)
                 if type(options) is PickUpOptions:
                     total += motion.sample_count + options.grasp_settle_steps
                 elif type(options) is PlaceOptions:

@@ -232,7 +232,7 @@ def test_marvin_stack_open_fingers_clear_the_cube_support() -> None:
     asset = Path(cfg.robot.fpath)
     robot_xml = ET.parse(asset).getroot()
     preset = deployment.integration.registration.robot_profile_binding.presets[0]
-    grasp = preset.action_option_templates["pick"].fixed_object_to_eef.numpy()
+    grasp = preset.skill_option_templates["pick"].fixed_object_to_eef.numpy()
 
     def origin_pose(origin: ET.Element | None) -> np.ndarray:
         result = np.eye(4)
@@ -373,6 +373,6 @@ def test_marvin_pour_lowers_scene_and_targets_without_changing_program_steps(
     assert cfg.target_control_frequency == 100
     preset = deployment.integration.registration.robot_profile_binding.presets[0]
     assert preset.motion_policy.sample_count == 160
-    assert preset.action_option_templates[
+    assert preset.skill_option_templates[
         "simulation.pour"
     ].rotate_angle == pytest.approx(-torch.pi / 3)

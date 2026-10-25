@@ -31,7 +31,7 @@ from embodichain.lab.task_program.compiler.lowering import (
 )
 
 if TYPE_CHECKING:
-    from embodichain.lab.sim.atomic_actions import PlanningContext
+    from embodichain.lab.sim.atomic_skills import PlanningContext
     from embodichain.lab.task_program.semantics import BoundSemanticCall, HandOver
 
 

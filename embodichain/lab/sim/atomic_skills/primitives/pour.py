@@ -1,0 +1,245 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+"""Pour atomic skill implementation."""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+from typing import ClassVar
+
+import torch
+
+from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
+
+from embodichain.lab.sim.atomic_skills.affordance import AxisAlignAffordance
+from embodichain.lab.sim.atomic_skills.bindings import JointPositionTarget
+from embodichain.lab.sim.atomic_skills.control import (
+    GRASP_COMMAND,
+    JointPositionCommand,
+)
+from embodichain.lab.sim.atomic_skills.core import AtomicSkill
+from embodichain.lab.sim.atomic_skills.invocation import (
+    SkillOptions,
+    ResolvedSkillRequest,
+)
+from embodichain.lab.sim.atomic_skills.plans import SkillPlan, TimedTrajectory
+from embodichain.lab.sim.atomic_skills.primitives._binding_contracts import (
+    make_manipulation_slot,
+)
+from embodichain.lab.sim.atomic_skills.primitives._helpers import (
+    arm_qpos_from_state,
+    require_shared_task_state_key,
+    split_joint_trajectory_at_pose,
+)
+from embodichain.lab.sim.atomic_skills.requirements import (
+    CARTESIAN_POSE_CAPABILITY,
+    FORWARD_KINEMATICS_CAPABILITY,
+    SkillBindingContract,
+)
+from embodichain.lab.sim.atomic_skills.state import PlanningContext
+from embodichain.lab.sim.atomic_skills.trajectory_ops import (
+    build_pose_plan_states,
+)
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class PourGoal:
+    """Rotate the object currently held by the bound manipulator."""
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class PourOptions(SkillOptions):
+    """Per-invocation pouring behavior."""
+
+    rotate_angle: float = math.pi / 4.0
+    """Signed rotation about the held object's local internal axis, in radians."""
+
+    dwell_duration: float = 0.5
+    """Minimum time to remain at the poured orientation, in seconds."""
+
+    def __post_init__(self) -> None:
+        if not math.isfinite(self.rotate_angle):
+            raise ValueError("rotate_angle must be finite.")
+        if not math.isfinite(self.dwell_duration) or self.dwell_duration < 0.0:
+            raise ValueError("dwell_duration must be finite and non-negative.")
+
+
+class Pour(AtomicSkill[PourGoal, PourOptions]):
+    """Rotate and return an exclusively held object about its internal axis."""
+
+    skill_id: ClassVar[str] = "pour"
+    GoalType: ClassVar[type] = PourGoal
+    OptionsType: ClassVar[type] = PourOptions
+    open_loop: ClassVar[bool] = True
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+        slots=(
+            make_manipulation_slot(
+                "primary",
+                motion_capabilities=frozenset(
+                    {
+                        CARTESIAN_POSE_CAPABILITY,
+                        FORWARD_KINEMATICS_CAPABILITY,
+                    }
+                ),
+                grasp_commands={GRASP_COMMAND: JointPositionCommand},
+            ),
+        ),
+    )
+
+    def _plan(
+        self,
+        request: ResolvedSkillRequest[PourGoal, PourOptions],
+        context: PlanningContext,
+    ) -> SkillPlan:
+        """Plan a held-object rotation followed by the inverse rotation."""
+        self.require_goal(request)
+        options = request.skill_options
+        motion_endpoint = request.binding.endpoint("primary", "motion")
+        grasp_endpoint = request.binding.endpoint("primary", "grasp")
+        manipulator = motion_endpoint.require_target(JointPositionTarget)
+        end_effector = grasp_endpoint.require_target(JointPositionTarget)
+        control_part = manipulator.control_part
+        arm_joint_ids = list(manipulator.joint_ids)
+        hand_joint_ids = list(end_effector.joint_ids)
+        task_state_key = require_shared_task_state_key(
+            motion_endpoint,
+            grasp_endpoint,
+            participant="Pour primary participant",
+        )
+
+        held_object = context.get_held_object(task_state_key)
+        if held_object is None:
+            raise ValueError(
+                "Pour requires an object held by task-state resource "
+                f"{task_state_key!r} - run PickUp first."
+            )
+        affordance = held_object.semantics.affordance
+        if not isinstance(affordance, AxisAlignAffordance):
+            raise ValueError(
+                "Pour requires the held object to use an AxisAlignAffordance."
+            )
+        eligible = context.task.exclusive_held_object_mask(task_state_key)
+        if not eligible.any():
+            return self.failed_plan(
+                request,
+                context,
+                message="Held object is not exclusive to the task-state resource.",
+            )
+
+        start_arm_qpos = arm_qpos_from_state(context, arm_joint_ids)
+        current_eef_pose = self.robot.compute_fk(
+            qpos=start_arm_qpos,
+            name=control_part,
+            to_matrix=True,
+        )
+        object_to_eef = held_object.object_to_eef.to(
+            device=self.device,
+            dtype=torch.float32,
+        )
+        current_object_pose = torch.bmm(current_eef_pose, pose_inv(object_to_eef))
+
+        internal_axis = affordance.internal_axis.to(
+            device=self.device,
+            dtype=torch.float32,
+        )
+        internal_axis = internal_axis / torch.linalg.vector_norm(internal_axis)
+        world_axis = torch.matmul(current_object_pose[:, :3, :3], internal_axis)
+        rotation_delta = axis_angle_to_rotation_matrix(
+            world_axis * options.rotate_angle
+        )
+        target_object_pose = current_object_pose.clone()
+        target_object_pose[:, :3, :3] = torch.bmm(
+            rotation_delta,
+            current_object_pose[:, :3, :3],
+        )
+        poured_eef_pose = torch.bmm(target_object_pose, object_to_eef)
+
+        # The object remains rigidly attached to the EEF throughout Pour.  The
+        # first target performs the requested rotation about the object's
+        # internal axis; the second target returns to the EEF pose observed by
+        # FK at start_qpos, which is exactly the inverse rotation by the same
+        # signed angle.  Supplying both targets in one call lets planners such
+        # as cuRobo chain the two collision-aware legs without another public
+        # MotionGenerator.generate invocation.
+        eef_targets = torch.stack([poured_eef_pose, current_eef_pose], dim=1)
+
+        result = self.motion_generator.generate(
+            build_pose_plan_states(eef_targets),
+            options=request.motion_policy.to_motion_gen_options(
+                start_qpos=start_arm_qpos,
+                control_part=control_part,
+                interpolation_dt=context.require_control_dt(),
+            ),
+        )
+        assert isinstance(result.success, torch.Tensor)
+        assert result.positions is not None
+        assert result.dt is not None
+        success = result.success & eligible
+
+        control_dt = context.require_control_dt()
+        minimum_pour = max(2, request.motion_policy.sample_count // 2)
+        minimum_return = max(2, request.motion_policy.sample_count - minimum_pour)
+        pour_arm, return_arm = split_joint_trajectory_at_pose(
+            result.positions,
+            poured_eef_pose,
+            robot=self.robot,
+            control_part=control_part,
+            first_sample_count=minimum_pour,
+            second_sample_count=minimum_return,
+            dt=result.dt,
+            control_dt=control_dt,
+        )
+        dwell_steps = math.ceil(options.dwell_duration / control_dt)
+        dwell_arm = pour_arm[:, -1:].expand(-1, dwell_steps, -1)
+        return_arm = return_arm[:, 1:]
+        arm_trajectory = torch.cat((pour_arm, dwell_arm, return_arm), dim=1)
+        full = (
+            context.last_qpos.unsqueeze(1)
+            .expand(-1, arm_trajectory.shape[1], -1)
+            .clone()
+        )
+        full[:, :, arm_joint_ids] = arm_trajectory
+        # A contact-blocked finger measurement is not a holding command.
+        # Retain closing effort while rotating, dwelling and returning.
+        hold_hand_qpos = grasp_endpoint.joint_positions(
+            GRASP_COMMAND,
+            num_envs=context.batch_size,
+            device=self.device,
+            dtype=context.robot.qpos.dtype,
+        )
+        full[:, :, hand_joint_ids] = hold_hand_qpos.unsqueeze(1)
+        timed = TimedTrajectory.from_uniform_step(
+            full,
+            env_ids=context.env_ids,
+            step_dt=control_dt,
+        )
+
+        return self.build_plan(
+            request,
+            context,
+            success=success,
+            trajectory=timed,
+            segment_lengths={
+                "pour": pour_arm.shape[1],
+                "dwell": dwell_steps,
+                "return": return_arm.shape[1],
+            },
+        )
+
+
+__all__ = ["Pour", "PourGoal", "PourOptions"]

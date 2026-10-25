@@ -25,8 +25,8 @@ from typing import ClassVar
 
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
-    AtomicActionEngine,
+from embodichain.lab.sim.atomic_skills import (
+    AtomicSkillEngine,
     JointPositionPayload,
     JointPositionTarget,
     RuntimeCommandFrame,
@@ -105,14 +105,14 @@ class CuroboParallelSafetyValidatorFactory:
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> CuroboParallelCommandSafetyValidator:
         """Create one fresh validator bound to the assembled live runtime."""
         del simulation
         if type(scene_registry) is not SceneRegistry:
             raise TypeError("scene_registry must be exactly SceneRegistry.")
-        if not isinstance(engine, AtomicActionEngine):
-            raise TypeError("engine must be an AtomicActionEngine.")
+        if not isinstance(engine, AtomicSkillEngine):
+            raise TypeError("engine must be an AtomicSkillEngine.")
         if engine.robot is not robot:
             raise ValueError("engine and factory must reference the exact same robot.")
         return CuroboParallelCommandSafetyValidator(

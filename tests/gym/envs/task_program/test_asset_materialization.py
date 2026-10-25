@@ -251,7 +251,7 @@ def test_materialization_rejects_unadapted_calibration(deployment, tmp_path, inv
     integration_path = source.parent / "integration.yaml"
     integration = yaml.safe_load(integration_path.read_text())
     if invalid == "fixed_grasp":
-        integration["profile"]["action_options"]["pick"]["fixed_object_to_eef"] = [
+        integration["profile"]["skill_options"]["pick"]["fixed_object_to_eef"] = [
             1.0
         ] * 16
     elif invalid == "local_axis":

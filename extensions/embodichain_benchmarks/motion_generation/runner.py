@@ -892,7 +892,7 @@ class BenchmarkRunner:
         if "atomic_skill" in enabled_scenarios:
             track_notes.extend(
                 [
-                    "Atomic Skill cost_time_ms measures AtomicActionEngine.compile only; "
+                    "Atomic Skill cost_time_ms measures AtomicSkillEngine.compile only; "
                     "execution_time_ms is common physics-replay wall time and "
                     "end_to_end_time_ms is their sum.",
                     "trajectory_duration_s is available only for solved trajectory timing; "

@@ -217,7 +217,7 @@ def test_pouring_rebinds_selected_bottle_and_cup_geometry(
     program = yaml.safe_load(
         (result.deployment_path.parent / "program.yaml").read_text()
     )
-    options = integration["profile"]["action_options"]
+    options = integration["profile"]["skill_options"]
     assert options["pick"]["fixed_object_to_eef"] == np.eye(4).reshape(-1).tolist()
     bottle = next(
         node

@@ -19,7 +19,7 @@
 This module owns the reusable live wiring between declarative simulation
 bindings and :class:`TaskProgramEnvironmentAdapter`.  A task supplies one
 immutable registration; this factory constructs the motion generator,
-atomic-action engine, planning observation port, effect-evidence providers,
+atomic-skill engine, planning observation port, effect-evidence providers,
 and segment-policy port without task-local motion code.
 
 The resulting runtime is intentionally Gym-only.  Its buffered command sink
@@ -41,8 +41,8 @@ from typing import Protocol, TYPE_CHECKING
 import torch
 
 from embodichain.lab.gym.envs.expert_trajectory import JointCommandMode
-from embodichain.lab.sim.atomic_actions import (
-    AtomicActionEngine,
+from embodichain.lab.sim.atomic_skills import (
+    AtomicSkillEngine,
     EntityState,
     ObservedArticulationJointState,
     PlanningContext,
@@ -707,7 +707,7 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         self,
         *,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> tuple[RegisteredSemanticLowerer, ...]:
         """Create fresh registration-owned lowerers for this runtime assembly."""
         return self._registration.create_registered_semantic_lowerers(
@@ -729,10 +729,10 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         self._registration.validate_robot_profile(profile)
         return profile
 
-    def create_atomic_action_engine(
+    def create_atomic_skill_engine(
         self,
         profile: RobotSkillProfile,
-    ) -> AtomicActionEngine:
+    ) -> AtomicSkillEngine:
         """Create a fresh engine around the selected planner and exact profile."""
         if not isinstance(profile, RobotSkillProfile):
             raise TypeError("profile must be a RobotSkillProfile.")
@@ -746,7 +746,7 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             raise ValueError(
                 "Motion generator must own the exact robot selected by the factory."
             )
-        engine = AtomicActionEngine(
+        engine = AtomicSkillEngine(
             motion_generator,
             control_profiles=profile.action_control_profiles(),
             grasp_pose_generators=self._grasp_pose_generators,
@@ -758,14 +758,14 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         self,
         *,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
         clock: EnvironmentStepClock,
     ) -> PlanningObservationPort:
         """Create one planning port and planner-validated shared scene provider."""
         if type(scene_registry) is not SceneRegistry:
             raise TypeError("scene_registry must be exactly SceneRegistry.")
-        if not isinstance(engine, AtomicActionEngine):
-            raise TypeError("engine must be an AtomicActionEngine.")
+        if not isinstance(engine, AtomicSkillEngine):
+            raise TypeError("engine must be an AtomicSkillEngine.")
         if engine.robot is not self._robot:
             raise ValueError("engine must own the exact factory robot.")
         if type(clock) is not EnvironmentStepClock:
@@ -791,14 +791,14 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         self,
         *,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
         observation_provider: PlanningObservationPort,
     ) -> Iterable[EffectEvidenceProvider]:
         """Create built-in control-part and articulation evidence providers."""
         if type(scene_registry) is not SceneRegistry:
             raise TypeError("scene_registry must be exactly SceneRegistry.")
-        if not isinstance(engine, AtomicActionEngine):
-            raise TypeError("engine must be an AtomicActionEngine.")
+        if not isinstance(engine, AtomicSkillEngine):
+            raise TypeError("engine must be an AtomicSkillEngine.")
         if engine.robot is not self._robot:
             raise ValueError("engine must own the exact factory robot.")
         if type(observation_provider) is not SimulationPlanningObservationProvider:
@@ -837,16 +837,13 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         self,
         *,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
         observation_provider: PlanningObservationPort,
     ) -> ParallelCommandSafetyValidator:
         """Create the registration-owned validator for this runtime assembly."""
         if type(scene_registry) is not SceneRegistry:
             raise TypeError("scene_registry must be exactly SceneRegistry.")
-        if (
-            not isinstance(engine, AtomicActionEngine)
-            or engine.robot is not self._robot
-        ):
+        if not isinstance(engine, AtomicSkillEngine) or engine.robot is not self._robot:
             raise ValueError("engine must own the exact factory robot.")
         if type(observation_provider) is not SimulationPlanningObservationProvider:
             raise TypeError(

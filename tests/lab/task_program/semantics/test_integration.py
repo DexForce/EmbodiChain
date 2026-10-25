@@ -23,10 +23,10 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     Affordance,
     AntipodalAffordance,
-    AtomicActionEngine,
+    AtomicSkillEngine,
     BATCH_INVERSE_KINEMATICS_CAPABILITY,
     CARTESIAN_POSE_CAPABILITY,
     ControlPartCommandProfile,
@@ -86,7 +86,7 @@ _MOTION_CAPABILITIES = frozenset(
 )
 
 
-def _action_option_templates() -> dict[str, object]:
+def _skill_option_templates() -> dict[str, object]:
     """Return exact built-in semantic-call option declarations."""
     return {
         "pick": PickUpOptions(),
@@ -97,7 +97,7 @@ def _action_option_templates() -> dict[str, object]:
 
 def _preset(preset_id: str, **kwargs: object) -> SkillPolicyPreset:
     """Build one complete test preset."""
-    kwargs.setdefault("action_option_templates", _action_option_templates())
+    kwargs.setdefault("skill_option_templates", _skill_option_templates())
     kwargs.setdefault("effect_assurance", EffectAssurance.VERIFIED)
     return SkillPolicyPreset(preset_id, **kwargs)
 
@@ -250,7 +250,7 @@ def _engine_for_integration(
     integration: SemanticIntegrationManifest,
     *,
     supports_dynamic_collision_world: bool = False,
-) -> AtomicActionEngine:
+) -> AtomicSkillEngine:
     """Build a minimal live engine whose resource graph matches the manifest."""
     robot = Mock()
     robot.device = torch.device("cpu")
@@ -270,7 +270,7 @@ def _engine_for_integration(
     generator.device = torch.device("cpu")
     generator.planner.cfg.planner_type = "stub_planner"
     generator.supports_dynamic_collision_world = supports_dynamic_collision_world
-    return AtomicActionEngine(
+    return AtomicSkillEngine(
         generator,
         control_profiles=integration.robot_profile.action_control_profiles(),
     )
@@ -526,14 +526,14 @@ def test_semantic_integration_rejects_unknown_action_option_call() -> None:
             preset=SkillPolicyPreset(
                 "safe",
                 effect_assurance=EffectAssurance.VERIFIED,
-                action_option_templates={"vendor.unknown": PickUpOptions()},
+                skill_option_templates={"vendor.unknown": PickUpOptions()},
             ),
         )
 
     diagnostic = error.value.diagnostic
     assert diagnostic.code == "unknown_action_option_call"
     assert diagnostic.path[-2:] == (
-        "action_option_templates",
+        "skill_option_templates",
         "vendor.unknown",
     )
 
@@ -547,11 +547,11 @@ def test_semantic_integration_validates_exact_action_option_type() -> None:
             preset=SkillPolicyPreset(
                 "safe",
                 effect_assurance=EffectAssurance.VERIFIED,
-                action_option_templates={"pick": PlaceOptions()},
+                skill_option_templates={"pick": PlaceOptions()},
             ),
         )
 
-    assert error.value.diagnostic.code == "incompatible_action_option_template"
+    assert error.value.diagnostic.code == "incompatible_skill_option_template"
     assert error.value.diagnostic.path[-1] == "pick"
 
 
@@ -564,7 +564,7 @@ def test_semantic_integration_rejects_compiler_owned_option_fields() -> None:
             preset=SkillPolicyPreset(
                 "safe",
                 effect_assurance=EffectAssurance.VERIFIED,
-                action_option_templates={
+                skill_option_templates={
                     "pick": PickUpOptions(
                         downstream_object_target_poses=(torch.eye(4),)
                     )
@@ -575,13 +575,13 @@ def test_semantic_integration_rejects_compiler_owned_option_fields() -> None:
     assert pick_error.value.diagnostic.path[-1] == ("downstream_object_target_poses")
 
 
-def test_static_link_requires_selected_preset_action_option_template() -> None:
+def test_static_link_requires_selected_preset_skill_option_template() -> None:
     registry, _ = _scene_registry(with_default=True)
     integration = _semantic_integration(
         registry,
         preset=SkillPolicyPreset(
             "safe",
-            action_option_templates={},
+            skill_option_templates={},
             effect_assurance=EffectAssurance.VERIFIED,
         ),
     )
@@ -589,13 +589,13 @@ def test_static_link_requires_selected_preset_action_option_template() -> None:
     with pytest.raises(SemanticValidationError) as error:
         integration.link_call(Pick(object=SceneObjectRef("cube")))
 
-    assert error.value.diagnostic.code == "missing_action_option_template"
+    assert error.value.diagnostic.code == "missing_skill_option_template"
     assert error.value.diagnostic.path == (
         "integration",
         "robot_profile",
         "presets",
         "safe",
-        "action_option_templates",
+        "skill_option_templates",
         "pick",
     )
     assert "selected at call" in error.value.diagnostic.message
@@ -722,7 +722,7 @@ def test_bound_semantic_call_is_factory_owned_by_installed_profile() -> None:
     result = bound_integration.link_call(Pick(object=SceneObjectRef("cube")))
 
     assert result.robot_profile is bound_integration.robot_profile
-    assert result.binding.action_binding.owner_id == engine.binding_owner_id
+    assert result.binding.skill_binding.owner_id == engine.binding_owner_id
     with pytest.raises(TypeError, match="created by"):
         BoundSemanticCall()
 
@@ -937,7 +937,7 @@ def test_bind_rejects_invalid_engine_before_safe_capability_lookup() -> None:
         ),
     )
 
-    with pytest.raises(TypeError, match="engine must be an AtomicActionEngine"):
+    with pytest.raises(TypeError, match="engine must be an AtomicSkillEngine"):
         integration.bind(registry, object())  # type: ignore[arg-type]
 
     assert provider.calls == 0

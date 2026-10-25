@@ -1433,7 +1433,7 @@ def _view_performance(
             row["planner_construct_ms"] = None
             row["backend_prepare_ms"] = None
         row["timing_scope"] = (
-            "atomic_action_compile" if view == "atomic_skills" else "planner_call"
+            "atomic_skill_compile" if view == "atomic_skills" else "planner_call"
         )
         row["planning_time_ms"] = (
             row["cost_time_ms"] if view == "motion_planning" else None

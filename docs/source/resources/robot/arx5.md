@@ -97,8 +97,8 @@ self-collision setting, adds a 50 mm table and scene-specific IK branch limits,
 and executes the same PickUp → Place invocation code used for UR5 and Franka:
 
 ```bash
-python scripts/tutorials/atomic_action/embodiment_switching.py --task pick_place --robot arx5
+python scripts/tutorials/atomic_skill/embodiment_switching.py --task pick_place --robot arx5
 ```
 
 The tutorial selector is lowercase `arx5`; the robot catalog ID is `ARX5`.
-Its scene calibration lives in `examples/sim/atomic_action/embodiments.py`.
+Its scene calibration lives in `examples/sim/atomic_skill/embodiments.py`.

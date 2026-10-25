@@ -22,7 +22,7 @@ pages are ordered as a progressive learning path.
    ../trajectory_planning
    ../robot_workspace
    ../robot_articulation
-   ../atomic_actions
+   ../atomic_skills
    ../task_program_python
    ../gizmo
 

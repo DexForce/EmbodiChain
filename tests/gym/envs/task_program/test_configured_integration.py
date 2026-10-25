@@ -39,6 +39,8 @@ from embodichain.lab.task_program.integrations.configured import (
     _decode_configured_task_program_integration,
     _decode_grasp_generator,
     _decode_motion_policy,
+    _decode_policy_preset,
+    _decode_recovery_policy,
 )
 from embodichain.lab.task_program.integrations._configured_composition import (
     _compose_integration_payload,
@@ -53,7 +55,7 @@ from embodichain.lab.gym.utils._component_composition import (
 from embodichain.lab.gym.envs.task_program.registration import (
     _register_configured_task_program_integration,
 )
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     HeldObjectPoseGoal,
     MoveHeldObjectOptions,
     PickUpOptions,
@@ -61,8 +63,8 @@ from embodichain.lab.sim.atomic_actions import (
     PourGoal,
     PourOptions,
 )
-from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
-from embodichain.lab.sim.atomic_actions.runtime_commands import (
+from embodichain.lab.sim.atomic_skills.bindings import JointPositionTarget
+from embodichain.lab.sim.atomic_skills.runtime_commands import (
     EndpointCommand,
     JointPositionPayload,
     RuntimeCommandFrame,
@@ -536,7 +538,7 @@ def test_pour_water_integration_declares_live_transport_and_axis_aware_pour() ->
     registration = integration.registration
     grasp = registration.scene_binding.antipodal_grasps[0]
     preset = registration.robot_profile_binding.presets[0]
-    options = preset.action_option_templates
+    options = preset.skill_option_templates
     factories = registration.registered_semantic_lowerer_factories
 
     grasp_rotation = options["pick"].fixed_object_to_eef[:3, :3]
@@ -610,7 +612,7 @@ def test_pour_water_mouth_alignment_and_measured_checkpoints() -> None:
     )
     angle = (
         registration.robot_profile_binding.presets[0]
-        .action_option_templates["simulation.pour"]
+        .skill_option_templates["simulation.pour"]
         .rotate_angle
     )
     mouth = torch.tensor([0.0, 0.0, 0.069724626839], dtype=torch.float64)
@@ -729,7 +731,7 @@ def test_pour_water_registered_lowerers_build_only_typed_goals() -> None:
         picked_object=SceneObjectRef("bottle"),
         bound=SimpleNamespace(
             preset=SimpleNamespace(
-                action_option_template=lambda semantic_id: PourOptions(
+                skill_option_template=lambda semantic_id: PourOptions(
                     rotate_angle=-torch.pi / 3
                 )
             )
@@ -768,7 +770,7 @@ def test_move_held_object_lowerer_rejects_non_se3_relative_pose() -> None:
 def test_pick_option_rejects_malformed_fixed_object_to_eef() -> None:
     """Configured fixed grasps must contain exactly one SE(3) transform."""
     payload = deepcopy(_tableware_integration_payload("pour_water"))
-    pick_options = payload["robot_profile"]["presets"][0]["action_options"]["pick"]
+    pick_options = payload["robot_profile"]["presets"][0]["skill_options"]["pick"]
     pick_options["fixed_object_to_eef"] = [1.0] * 15
 
     with pytest.raises(ValueError, match="exactly 16 values"):
@@ -1579,10 +1581,10 @@ def test_motion_limit_policy_rejects_nonpositive_or_nonfinite_values(
 
 def test_pour_dwell_duration_decodes() -> None:
     from embodichain.lab.task_program.integrations.configured import (
-        _decode_action_options,
+        _decode_skill_options,
     )
 
-    options = _decode_action_options(
+    options = _decode_skill_options(
         {"kind": "pour", "dwell_duration": 0.75},
         path="options",
     )
@@ -1596,11 +1598,11 @@ def test_pour_dwell_duration_rejects_negative_or_nonfinite_values(
     value: float,
 ) -> None:
     from embodichain.lab.task_program.integrations.configured import (
-        _decode_action_options,
+        _decode_skill_options,
     )
 
     with pytest.raises(ValueError, match="dwell_duration"):
-        _decode_action_options(
+        _decode_skill_options(
             {"kind": "pour", "dwell_duration": value},
             path="options",
         )
@@ -1841,3 +1843,72 @@ def test_motion_limits_reach_explicit_blended_planner_options(
     )
     assert TrapezoidalPlanOptions().constraints["velocity"] is None
     assert TrapezoidalPlanOptions().constraints["acceleration"] is None
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_recovery_policy_migration_normalizes_field_names(legacy: bool) -> None:
+    retry_key = "max_action_retries" if legacy else "max_skill_retries"
+    timeout_key = "action_timeout" if legacy else "skill_timeout"
+    policy = _decode_recovery_policy(
+        {"max_replans": 1, retry_key: 4, timeout_key: 12.5}, path="recovery"
+    )
+    assert policy.max_replans == 1
+    assert policy.max_skill_retries == 4
+    assert policy.skill_timeout == 12.5
+
+
+@pytest.mark.parametrize(
+    "legacy, canonical",
+    [("max_action_retries", "max_skill_retries"), ("action_timeout", "skill_timeout")],
+)
+def test_recovery_policy_rejects_mixed_migration_names(
+    legacy: str, canonical: str
+) -> None:
+    config = {"max_replans": 1, "max_skill_retries": 0, legacy: 2, canonical: 2}
+    with pytest.raises(ValueError, match="cannot specify both"):
+        _decode_recovery_policy(config, path="recovery")
+
+
+def test_legacy_skill_options_key_decodes_without_mutating_input() -> None:
+    payload = _integration_payload("repeated_pick_place")["robot_profile"]["presets"][0]
+    payload["action_options"] = payload.pop("skill_options")
+    preset = _decode_policy_preset(payload, path="preset")
+    assert isinstance(preset.skill_option_template("pick"), PickUpOptions)
+    assert "action_options" in payload
+    assert "skill_options" not in payload
+
+
+def test_skill_options_migration_rejects_both_config_keys() -> None:
+    payload = _integration_payload("repeated_pick_place")["robot_profile"]["presets"][0]
+    payload["action_options"] = payload["skill_options"]
+    with pytest.raises(ValueError, match="cannot specify both"):
+        _decode_policy_preset(payload, path="preset")
+
+
+@pytest.mark.parametrize("mixed", [False, True])
+def test_component_composition_normalizes_legacy_skill_options(mixed: bool) -> None:
+    path = _config_path("repeated_pick_place")
+    physical = _physical_components(path, _gym_config("repeated_pick_place"))
+    _, task, policy = _resolve_task_program_components(
+        physical.config["task_program"], base_dir=path.parent
+    )
+    task = deepcopy(task)
+    profile = task["profile"]
+    profile["action_options"] = deepcopy(profile["skill_options"])
+    if not mixed:
+        profile.pop("skill_options")
+    kwargs = dict(
+        task=task,
+        policy=policy,
+        skill_profile=physical.embodiment_skill_profile,
+        scene=task["scene_binding"],
+    )
+    if mixed:
+        with pytest.raises(ValueError, match="cannot specify both"):
+            _compose_integration_payload(**kwargs)
+    else:
+        payload = _compose_integration_payload(**kwargs)
+        _decode_configured_task_program_integration(payload)
+        assert "skill_options" in payload["robot_profile"]["presets"][0]
+        assert "action_options" in profile
+        assert "skill_options" not in profile

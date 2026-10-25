@@ -34,9 +34,9 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
-    ActionInvocation,
-    AtomicActionEngine,
+from embodichain.lab.sim.atomic_skills import (
+    SkillInvocation,
+    AtomicSkillEngine,
     ControlPartCommandProfile,
     CoordinatedPickGoal,
     CoordinatedPickmentOptions,
@@ -48,9 +48,9 @@ from embodichain.lab.sim.atomic_actions import (
     MotionPolicy,
     ObjectSemantics,
     PickUpOptions,
-    create_simulation_atomic_action_engine,
+    create_simulation_atomic_skill_engine,
 )
-from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory
+from embodichain.lab.sim.atomic_skills.plans import CompiledTrajectory
 from embodichain.lab.sim.motion.planners import ToppraPlanOptions
 from embodichain.lab.sim.motion.planners.utils import TrajectorySampleMethod
 from embodichain.toolkits.graspkit import GraspPoseGenerator
@@ -596,7 +596,7 @@ def _record_requests(scenario: "AtomicSkillScenario", plan: _ReferencePlan):
 
 def _compile_reference(
     scenario: "AtomicSkillScenario",
-    build: Callable[[AtomicActionEngine], tuple[ActionInvocation, ...]],
+    build: Callable[[AtomicSkillEngine], tuple[SkillInvocation, ...]],
     *,
     scene_entities: Sequence[object],
     grasp_generators: Mapping[str, GraspPoseGenerator] | None = None,
@@ -611,7 +611,7 @@ def _compile_reference(
         generators[part] = _RecordingGraspPoseGenerator(
             generators[part], part, plan.grasp_requests
         )
-    engine = create_simulation_atomic_action_engine(
+    engine = create_simulation_atomic_skill_engine(
         motion_generator=scenario.reference_motion_generator(),
         scene_entities=tuple(scene_entities),
         control_profiles={
@@ -972,7 +972,7 @@ class _HandOverCases(AtomicSkillCaseProvider):
         scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
-    ) -> ActionInvocation:
+    ) -> SkillInvocation:
         del adapter
         handle = scenario.object_handle(case.object_id)
         return scenario.require_engine().make_invocation(
@@ -1193,7 +1193,7 @@ class _CoordinatedPickmentCases(AtomicSkillCaseProvider):
         scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
-    ) -> ActionInvocation:
+    ) -> SkillInvocation:
         del adapter
         device = scenario.robot.device
         handle = scenario.object_handle(case.object_id)
@@ -1395,16 +1395,16 @@ def _placement_poses(
 
 
 def _pick_invocation(
-    engine: AtomicActionEngine,
+    engine: AtomicSkillEngine,
     handle: AtomicObjectHandle,
     grasp_pose: torch.Tensor,
     object_pose: torch.Tensor,
     parts: Mapping[str, str],
     parameters: Mapping[str, object],
     prefix: str,
-) -> ActionInvocation:
+) -> SkillInvocation:
     """Build the explicit-grasp PickUp that loads one arm before placement."""
-    from embodichain.lab.sim.atomic_actions import Affordance
+    from embodichain.lab.sim.atomic_skills import Affordance
 
     return engine.make_invocation(
         "pick_up",
@@ -1433,10 +1433,10 @@ def _pick_invocation(
 
 
 def _placement_invocation(
-    engine: AtomicActionEngine,
+    engine: AtomicSkillEngine,
     parameters: Mapping[str, object],
     poses: Mapping[str, torch.Tensor],
-) -> ActionInvocation:
+) -> SkillInvocation:
     """Build the coordinated placement of the held object onto the held support."""
     return engine.make_invocation(
         "coordinated_placement",
@@ -1540,7 +1540,7 @@ class _CoordinatedPlacementCases(AtomicSkillCaseProvider):
             "control_parts": parts,
         }
 
-        def invocations(engine: AtomicActionEngine) -> tuple[ActionInvocation, ...]:
+        def invocations(engine: AtomicSkillEngine) -> tuple[SkillInvocation, ...]:
             return (
                 _pick_invocation(
                     engine,
@@ -1604,7 +1604,7 @@ class _CoordinatedPlacementCases(AtomicSkillCaseProvider):
 
     def prefix_invocations(
         self, scenario: "AtomicSkillScenario", case: BenchmarkCase
-    ) -> tuple[ActionInvocation, ...]:
+    ) -> tuple[SkillInvocation, ...]:
         """Load each arm with the frozen explicit-grasp PickUp."""
         device = scenario.robot.device
         parameters = case.case_parameters
@@ -1641,7 +1641,7 @@ class _CoordinatedPlacementCases(AtomicSkillCaseProvider):
         scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
-    ) -> ActionInvocation:
+    ) -> SkillInvocation:
         del adapter
         device = scenario.robot.device
         return _placement_invocation(

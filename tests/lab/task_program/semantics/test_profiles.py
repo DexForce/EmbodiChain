@@ -25,13 +25,13 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
-    ActionOptions,
-    ActionPlan,
-    AtomicAction,
-    AtomicActionEngine,
+from embodichain.lab.sim.atomic_skills import (
+    SkillOptions,
+    SkillPlan,
+    AtomicSkill,
+    AtomicSkillEngine,
     BATCH_INVERSE_KINEMATICS_CAPABILITY,
-    BUILTIN_ACTION_TYPES,
+    BUILTIN_SKILL_TYPES,
     CARTESIAN_POSE_CAPABILITY,
     ControlCommand,
     ControlPartCommandProfile,
@@ -46,17 +46,17 @@ from embodichain.lab.sim.atomic_actions import (
     MotionPolicy,
     OPEN_COMMAND,
     PickUpOptions,
-    ResolvedActionRequest,
+    ResolvedSkillRequest,
     SkillBindingContract,
     SkillEndpointRequirement,
     SkillResourceSlot,
 )
-from embodichain.lab.sim.atomic_actions.bindings import (
+from embodichain.lab.sim.atomic_skills.bindings import (
     JointPositionTarget,
     RuntimeEndpointTarget,
 )
-from embodichain.lab.sim.atomic_actions.state import PlanningContext
-from embodichain.lab.sim.atomic_actions.tracking import (
+from embodichain.lab.sim.atomic_skills.state import PlanningContext
+from embodichain.lab.sim.atomic_skills.tracking import (
     JOINT_POSITION_CHANNEL,
     EndpointTrackingFeedbackAddress,
     JointPositionTrackingMetric,
@@ -124,7 +124,7 @@ def _engine(
     *,
     control_profiles: dict[str, ControlPartCommandProfile] | None = None,
     load_builtins: bool = True,
-) -> AtomicActionEngine:
+) -> AtomicSkillEngine:
     robot = Mock()
     robot.device = torch.device("cpu")
     robot.dof = 9
@@ -139,7 +139,7 @@ def _engine(
     generator.robot = robot
     generator.device = torch.device("cpu")
     generator.planner.cfg.planner_type = "stub_planner"
-    return AtomicActionEngine(
+    return AtomicSkillEngine(
         generator,
         control_profiles=control_profiles,
         load_builtins=load_builtins,
@@ -239,7 +239,7 @@ def _profile(
     )
 
 
-class _WholeBodyAction(AtomicAction[JointPositionGoal, ActionOptions]):
+class _WholeBodyAction(AtomicSkill[JointPositionGoal, SkillOptions]):
     skill_id: ClassVar[str] = "whole_body_reach"
     GoalType: ClassVar[type] = JointPositionGoal
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
@@ -258,13 +258,13 @@ class _WholeBodyAction(AtomicAction[JointPositionGoal, ActionOptions]):
 
     def _plan(
         self,
-        request: ResolvedActionRequest[JointPositionGoal, ActionOptions],
+        request: ResolvedSkillRequest[JointPositionGoal, SkillOptions],
         context: PlanningContext,
-    ) -> ActionPlan:
+    ) -> SkillPlan:
         raise NotImplementedError
 
 
-class _NavigateAction(AtomicAction[JointPositionGoal, ActionOptions]):
+class _NavigateAction(AtomicSkill[JointPositionGoal, SkillOptions]):
     skill_id: ClassVar[str] = "navigate"
     GoalType: ClassVar[type] = JointPositionGoal
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
@@ -283,9 +283,9 @@ class _NavigateAction(AtomicAction[JointPositionGoal, ActionOptions]):
 
     def _plan(
         self,
-        request: ResolvedActionRequest[JointPositionGoal, ActionOptions],
+        request: ResolvedSkillRequest[JointPositionGoal, SkillOptions],
         context: PlanningContext,
-    ) -> ActionPlan:
+    ) -> SkillPlan:
         raise NotImplementedError
 
 
@@ -365,7 +365,7 @@ class _BaseVelocityEndpointAdapter(ResourceEndpointAdapter):
         self,
         endpoint: ResourceEndpoint,
         *,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> EndpointResolution:
         """Resolve one mobile controller to a generic exclusive claim."""
         del engine
@@ -380,7 +380,7 @@ class _BaseVelocityEndpointAdapter(ResourceEndpointAdapter):
         )
 
 
-class _VelocityNavigateAction(AtomicAction[JointPositionGoal, ActionOptions]):
+class _VelocityNavigateAction(AtomicSkill[JointPositionGoal, SkillOptions]):
     """Semantic test skill consuming a non-core controller endpoint."""
 
     skill_id: ClassVar[str] = "navigate_velocity"
@@ -402,9 +402,9 @@ class _VelocityNavigateAction(AtomicAction[JointPositionGoal, ActionOptions]):
 
     def _plan(
         self,
-        request: ResolvedActionRequest[JointPositionGoal, ActionOptions],
+        request: ResolvedSkillRequest[JointPositionGoal, SkillOptions],
         context: PlanningContext,
-    ) -> ActionPlan:
+    ) -> SkillPlan:
         raise NotImplementedError
 
 
@@ -412,19 +412,19 @@ def test_engine_skills_only_exposes_visible_explicit_installed_contracts() -> No
     engine = _engine(control_profiles=_command_profiles())
     expected = {
         action_type.skill_id
-        for action_type in BUILTIN_ACTION_TYPES
+        for action_type in BUILTIN_SKILL_TYPES
         if action_type.agent_visible
     }
 
-    assert set(engine.skills) == expected
-    assert "move_joints" in engine.actions
-    assert "move_joints" in engine.skills
+    assert set(engine.skill_catalog) == expected
+    assert "move_joints" in engine.skill_implementations
+    assert "move_joints" in engine.skill_catalog
 
 
 def test_new_skill_subclass_must_redeclare_binding_contract() -> None:
-    base_contract = BUILTIN_ACTION_TYPES[0].descriptor().binding_contract
+    base_contract = BUILTIN_SKILL_TYPES[0].descriptor().binding_contract
 
-    class Derived(BUILTIN_ACTION_TYPES[0]):
+    class Derived(BUILTIN_SKILL_TYPES[0]):
         skill_id: ClassVar[str] = "derived_without_explicit_contract"
 
     assert base_contract is not None
@@ -654,13 +654,13 @@ def test_custom_endpoint_adapter_resolves_commands_and_physical_claim() -> None:
     )
     resolved = bound.resolve("navigate_velocity")
     endpoint = resolved.resources["body"].endpoints["motion"]
-    binding_endpoint = resolved.action_binding.endpoint("body", "motion")
+    binding_endpoint = resolved.skill_binding.endpoint("body", "motion")
 
     assert endpoint.adapter_id == "test.base_velocity"
     assert isinstance(endpoint.runtime_target, _BaseVelocityTarget)
     assert isinstance(endpoint.commands["stop"], _TwistCommand)
     assert resolved.claim.claim_tokens == frozenset({"controller:base_velocity"})
-    assert resolved.action_binding.owner_id == engine.binding_owner_id
+    assert resolved.skill_binding.owner_id == engine.binding_owner_id
     assert binding_endpoint.resource_id == "mobile_base"
     assert binding_endpoint.require_target(_BaseVelocityTarget).controller_id == (
         "base_velocity"
@@ -678,7 +678,7 @@ def test_custom_endpoint_joint_claim_survives_action_binding_lowering() -> None:
             self,
             endpoint: ResourceEndpoint,
             *,
-            engine: AtomicActionEngine,
+            engine: AtomicSkillEngine,
         ) -> EndpointResolution:
             del engine
             assert isinstance(endpoint, _BaseVelocityEndpoint)
@@ -714,7 +714,7 @@ def test_custom_endpoint_joint_claim_survives_action_binding_lowering() -> None:
         endpoint_adapters={_BaseVelocityEndpoint: JointClaimAdapter()},
     )
 
-    binding_endpoint = bound.resolve("navigate_velocity").action_binding.endpoint(
+    binding_endpoint = bound.resolve("navigate_velocity").skill_binding.endpoint(
         "body", "motion"
     )
 
@@ -729,7 +729,7 @@ def test_custom_endpoint_joint_claim_must_fit_robot_dof() -> None:
             self,
             endpoint: ResourceEndpoint,
             *,
-            engine: AtomicActionEngine,
+            engine: AtomicSkillEngine,
         ) -> EndpointResolution:
             del engine
             assert isinstance(endpoint, _BaseVelocityEndpoint)
@@ -817,7 +817,7 @@ def test_endpoint_adapter_cannot_omit_runtime_target() -> None:
             self,
             endpoint: ResourceEndpoint,
             *,
-            engine: AtomicActionEngine,
+            engine: AtomicSkillEngine,
         ) -> EndpointResolution:
             del endpoint, engine
             return EndpointResolution(
@@ -854,7 +854,7 @@ def test_exclusive_custom_endpoint_requires_a_physical_claim() -> None:
             self,
             endpoint: ResourceEndpoint,
             *,
-            engine: AtomicActionEngine,
+            engine: AtomicSkillEngine,
         ) -> EndpointResolution:
             del endpoint, engine
             return EndpointResolution(
@@ -890,7 +890,7 @@ def test_nonexclusive_custom_endpoint_may_omit_a_physical_claim() -> None:
             self,
             endpoint: ResourceEndpoint,
             *,
-            engine: AtomicActionEngine,
+            engine: AtomicSkillEngine,
         ) -> EndpointResolution:
             del endpoint, engine
             return EndpointResolution(
@@ -922,7 +922,7 @@ def test_endpoint_adapter_registration_validates_declared_type() -> None:
             self,
             endpoint: ResourceEndpoint,
             *,
-            engine: AtomicActionEngine,
+            engine: AtomicSkillEngine,
         ) -> EndpointResolution:
             del endpoint, engine
             return EndpointResolution(
@@ -964,7 +964,7 @@ def test_endpoint_adapter_must_return_endpoint_resolution() -> None:
             self,
             endpoint: ResourceEndpoint,
             *,
-            engine: AtomicActionEngine,
+            engine: AtomicSkillEngine,
         ) -> EndpointResolution:
             del endpoint, engine
             return object()  # type: ignore[return-value]
@@ -1116,12 +1116,12 @@ def test_unique_capability_binding_lowers_to_exact_action_binding() -> None:
     bound = profile.bind(engine)
 
     resolved = bound.resolve("pick_up")
-    motion = resolved.action_binding.endpoint("primary", "motion")
-    grasp = resolved.action_binding.endpoint("primary", "grasp")
+    motion = resolved.skill_binding.endpoint("primary", "motion")
+    grasp = resolved.skill_binding.endpoint("primary", "grasp")
 
     assert resolved.resource_ids == {"primary": "left_actor"}
-    assert resolved.action_binding.owner_id == engine.binding_owner_id
-    assert resolved.action_binding.endpoint_keys == (
+    assert resolved.skill_binding.owner_id == engine.binding_owner_id
+    assert resolved.skill_binding.endpoint_keys == (
         ("primary", "motion"),
         ("primary", "grasp"),
     )
@@ -1251,7 +1251,7 @@ def test_one_participant_cannot_use_overlapping_required_endpoints() -> None:
 
 
 def test_coupled_endpoint_views_are_allowed_without_disjoint_constraint() -> None:
-    class CoupledWholeBodyAction(AtomicAction[JointPositionGoal, ActionOptions]):
+    class CoupledWholeBodyAction(AtomicSkill[JointPositionGoal, SkillOptions]):
         skill_id: ClassVar[str] = "coupled_whole_body"
         GoalType: ClassVar[type] = JointPositionGoal
         binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
@@ -1274,9 +1274,9 @@ def test_coupled_endpoint_views_are_allowed_without_disjoint_constraint() -> Non
 
         def _plan(
             self,
-            request: ResolvedActionRequest[JointPositionGoal, ActionOptions],
+            request: ResolvedSkillRequest[JointPositionGoal, SkillOptions],
             context: PlanningContext,
-        ) -> ActionPlan:
+        ) -> SkillPlan:
             raise NotImplementedError
 
     resources = _resources()
@@ -1333,7 +1333,7 @@ def test_generic_profile_supports_base_and_whole_body_without_arm_tool_fields() 
     assert set(bound.skills) == {"navigate", "whole_body_reach"}
     assert whole_body.resource_ids == {"body": "whole_body"}
     assert (
-        whole_body.action_binding.endpoint("body", "motion")
+        whole_body.skill_binding.endpoint("body", "motion")
         .require_target(JointPositionTarget)
         .control_part
         == "full_body"
@@ -1343,7 +1343,7 @@ def test_generic_profile_supports_base_and_whole_body_without_arm_tool_fields() 
     )
     assert navigation.resource_ids == {"body": "base"}
     assert (
-        navigation.action_binding.endpoint("body", "motion")
+        navigation.skill_binding.endpoint("body", "motion")
         .require_target(JointPositionTarget)
         .control_part
         == "base"
@@ -1354,7 +1354,7 @@ def test_presets_are_versioned_snapshots_and_validate_planner() -> None:
     preset = SkillPolicyPreset(
         "safe",
         effect_assurance=EffectAssurance.PROJECTED,
-        action_option_templates={
+        skill_option_templates={
             "pick": PickUpOptions(pre_grasp_distance=0.08),
         },
         motion_policy=MotionPolicy(sample_count=80),
@@ -1381,11 +1381,11 @@ def test_presets_are_versioned_snapshots_and_validate_planner() -> None:
     assert first.required_planner == "stub_planner"
     assert first.motion_policy.sample_count == 80
     assert first.tracking_policy is not second.tracking_policy
-    assert first.action_option_templates["pick"] is not (
-        second.action_option_templates["pick"]
+    assert first.skill_option_templates["pick"] is not (
+        second.skill_option_templates["pick"]
     )
     assert (
-        first.action_option_templates["pick"].pre_grasp_distance  # type: ignore[attr-defined]
+        first.skill_option_templates["pick"].pre_grasp_distance  # type: ignore[attr-defined]
         == 0.08
     )
     first_tracking = first.tracking_policy.in_flight
@@ -1402,7 +1402,7 @@ def test_presets_are_versioned_snapshots_and_validate_planner() -> None:
     with pytest.raises(ValueError, match="required_planner"):
         SkillPolicyPreset(
             "invalid",
-            action_option_templates={},
+            skill_option_templates={},
             effect_assurance=EffectAssurance.PROJECTED,
             required_planner="",
         )
@@ -1414,7 +1414,7 @@ def test_presets_are_versioned_snapshots_and_validate_planner() -> None:
         presets={
             "other": SkillPolicyPreset(
                 "other",
-                action_option_templates={},
+                skill_option_templates={},
                 effect_assurance=EffectAssurance.PROJECTED,
                 required_planner="other_planner",
             )
@@ -1428,7 +1428,7 @@ def test_workflow_recovery_policy_is_bounded_and_snapshotted() -> None:
     source = WorkflowRecoveryPolicy(max_recovery_attempts=2)
     preset = SkillPolicyPreset(
         "recovering",
-        action_option_templates={},
+        skill_option_templates={},
         effect_assurance=EffectAssurance.PROJECTED,
         workflow_recovery_policy=source,
     )
@@ -1443,7 +1443,7 @@ def test_workflow_recovery_policy_is_bounded_and_snapshotted() -> None:
     assert (
         SkillPolicyPreset(
             "disabled",
-            action_option_templates={},
+            skill_option_templates={},
             effect_assurance=EffectAssurance.PROJECTED,
         ).workflow_recovery_policy.max_recovery_attempts
         == 0
@@ -1459,7 +1459,7 @@ def test_workflow_recovery_policy_is_bounded_and_snapshotted() -> None:
 def test_verified_policy_preset_owns_explicit_builtin_effect_monitor_refs() -> None:
     preset = SkillPolicyPreset(
         "safe",
-        action_option_templates={},
+        skill_option_templates={},
         effect_assurance=EffectAssurance.VERIFIED,
         effect_monitors={
             semantic_id: EffectMonitorRef(
@@ -1484,7 +1484,7 @@ def test_verified_policy_preset_owns_explicit_builtin_effect_monitor_refs() -> N
 def test_projected_policy_preset_requires_empty_effect_monitor_mapping() -> None:
     preset = SkillPolicyPreset(
         "unmonitored",
-        action_option_templates={},
+        skill_option_templates={},
         effect_assurance=EffectAssurance.PROJECTED,
         effect_monitors={},
     )
@@ -1495,7 +1495,7 @@ def test_projected_policy_preset_requires_empty_effect_monitor_mapping() -> None
     with pytest.raises(ValueError, match="Projected presets cannot declare"):
         SkillPolicyPreset(
             "invalid",
-            action_option_templates={},
+            skill_option_templates={},
             effect_assurance=EffectAssurance.PROJECTED,
             effect_monitors={"pick": EffectMonitorRef("test.monitor", "1")},
         )
@@ -1510,7 +1510,7 @@ def test_policy_preset_owns_and_snapshots_effect_monitor_refs() -> None:
     source_mapping = {"pick": source_ref}
     preset = SkillPolicyPreset(
         "custom",
-        action_option_templates={},
+        skill_option_templates={},
         effect_assurance=EffectAssurance.VERIFIED,
         effect_monitors=source_mapping,
     )
@@ -1537,7 +1537,7 @@ def test_policy_preset_owns_and_snapshots_effect_monitor_refs() -> None:
         first["pick"].params["consecutive_samples"] = 4  # type: ignore[index]
 
 
-def test_policy_preset_owns_and_freezes_action_option_templates() -> None:
+def test_policy_preset_owns_and_freezes_skill_option_templates() -> None:
     direction = torch.tensor([0.0, 1.0, 0.0])
     source = PickUpOptions(
         pick_object_part="top",
@@ -1546,16 +1546,16 @@ def test_policy_preset_owns_and_freezes_action_option_templates() -> None:
     source_mapping = {"pick": source}
     preset = SkillPolicyPreset(
         "custom",
-        action_option_templates=source_mapping,
+        skill_option_templates=source_mapping,
         effect_assurance=EffectAssurance.PROJECTED,
     )
 
     direction.fill_(9.0)
     source.approach_direction.fill_(8.0)
     source_mapping.clear()
-    first = preset.action_option_templates
-    second = preset.snapshot().action_option_templates
-    selected = preset.action_option_template("pick")
+    first = preset.skill_option_templates
+    second = preset.snapshot().skill_option_templates
+    selected = preset.skill_option_template("pick")
 
     assert type(first["pick"]) is PickUpOptions
     assert first["pick"] is not source
@@ -1569,11 +1569,11 @@ def test_policy_preset_owns_and_freezes_action_option_templates() -> None:
     with pytest.raises(TypeError):
         first["place"] = PickUpOptions()  # type: ignore[index]
     with pytest.raises(KeyError, match="no action-option template"):
-        preset.action_option_template("place")
+        preset.skill_option_template("place")
 
 
-def test_policy_preset_requires_typed_action_option_templates() -> None:
-    with pytest.raises(TypeError, match="action_option_templates"):
+def test_policy_preset_requires_typed_skill_option_templates() -> None:
+    with pytest.raises(TypeError, match="skill_option_templates"):
         SkillPolicyPreset(  # type: ignore[call-arg]
             "missing",
             effect_assurance=EffectAssurance.PROJECTED,
@@ -1581,21 +1581,21 @@ def test_policy_preset_requires_typed_action_option_templates() -> None:
 
     assert not SkillPolicyPreset(
         "empty",
-        action_option_templates={},
+        skill_option_templates={},
         effect_assurance=EffectAssurance.PROJECTED,
-    ).action_option_templates
+    ).skill_option_templates
 
-    with pytest.raises(TypeError, match="ActionOptions"):
+    with pytest.raises(TypeError, match="SkillOptions"):
         SkillPolicyPreset(
             "invalid",
-            action_option_templates={"pick": object()},  # type: ignore[dict-item]
+            skill_option_templates={"pick": object()},  # type: ignore[dict-item]
             effect_assurance=EffectAssurance.PROJECTED,
         )
 
 
 def test_policy_preset_rejects_deepcopy_with_nested_mutable_aliases() -> None:
     @dataclass(frozen=True, slots=True)
-    class AliasingOptions(ActionOptions):
+    class AliasingOptions(SkillOptions):
         values: list[int]
 
         def __deepcopy__(self, memo: dict[int, object]) -> AliasingOptions:
@@ -1605,14 +1605,14 @@ def test_policy_preset_rejects_deepcopy_with_nested_mutable_aliases() -> None:
     with pytest.raises(TypeError, match="without shared mutable objects"):
         SkillPolicyPreset(
             "invalid",
-            action_option_templates={"vendor.alias": AliasingOptions([1])},
+            skill_option_templates={"vendor.alias": AliasingOptions([1])},
             effect_assurance=EffectAssurance.PROJECTED,
         )
 
 
 def test_policy_preset_rejects_deepcopy_with_shared_tensor_storage() -> None:
     @dataclass(frozen=True, slots=True)
-    class TensorViewOptions(ActionOptions):
+    class TensorViewOptions(SkillOptions):
         values: torch.Tensor
 
         def __deepcopy__(self, memo: dict[int, object]) -> TensorViewOptions:
@@ -1622,7 +1622,7 @@ def test_policy_preset_rejects_deepcopy_with_shared_tensor_storage() -> None:
     with pytest.raises(TypeError, match="tensor storage"):
         SkillPolicyPreset(
             "invalid",
-            action_option_templates={
+            skill_option_templates={
                 "vendor.tensor_alias": TensorViewOptions(torch.ones(2))
             },
             effect_assurance=EffectAssurance.PROJECTED,
@@ -1662,7 +1662,7 @@ def test_profile_configures_engine_before_semantic_binding() -> None:
     source_engine = _engine(control_profiles=_command_profiles())
     profile = _profile(defaults={"pick_up": ResourceBinding({"primary": "left_actor"})})
 
-    engine = AtomicActionEngine(
+    engine = AtomicSkillEngine(
         source_engine.motion_generator,
         control_profiles=profile.action_control_profiles(),
     )
@@ -1675,7 +1675,7 @@ def test_profile_configures_engine_before_semantic_binding() -> None:
 def test_bound_profile_rejects_stale_engine_skill_catalog() -> None:
     engine = _engine(control_profiles=_command_profiles())
     bound = _profile().bind(engine)
-    action_type = BUILTIN_ACTION_TYPES[0]
+    action_type = BUILTIN_SKILL_TYPES[0]
 
     class Replacement(action_type):
         binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
@@ -1703,7 +1703,7 @@ def test_bound_profile_rejects_stale_engine_skill_catalog() -> None:
 def test_bound_profile_rejects_equal_descriptor_implementation_replacement() -> None:
     engine = _engine(control_profiles=_command_profiles())
     bound = _profile().bind(engine)
-    action_type = BUILTIN_ACTION_TYPES[0]
+    action_type = BUILTIN_SKILL_TYPES[0]
 
     class EquivalentReplacement(action_type):
         binding_contract: ClassVar[SkillBindingContract] = action_type.binding_contract

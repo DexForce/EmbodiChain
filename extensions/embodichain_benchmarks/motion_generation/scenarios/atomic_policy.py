@@ -21,7 +21,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Literal
 
-from embodichain.lab.sim.atomic_actions import ActionInvocation, MotionPolicy
+from embodichain.lab.sim.atomic_skills import SkillInvocation, MotionPolicy
 
 from ..config import ProtocolCfg
 
@@ -99,8 +99,8 @@ def policy_motion_budget(protocol: ProtocolCfg) -> dict[str, float]:
 
 
 def with_motion_budget(
-    invocation: ActionInvocation, protocol: ProtocolCfg
-) -> ActionInvocation:
+    invocation: SkillInvocation, protocol: ProtocolCfg
+) -> SkillInvocation:
     """Apply shared scalar budgets to IK paths without overriding backend vectors.
 
     MotionPolicy accepts scalars. Per-joint suite requests use their minimum
@@ -123,8 +123,8 @@ def with_motion_budget(
 
 
 def with_plan_options(
-    invocation: ActionInvocation, plan_opts: object
-) -> ActionInvocation:
+    invocation: SkillInvocation, plan_opts: object
+) -> SkillInvocation:
     """Give a motion-generation invocation planner options it left unset."""
     policy = invocation.motion_policy
     if policy.strategy != "motion_gen" or policy.plan_opts is not None:

@@ -234,7 +234,7 @@ class PlannerAdapter(ABC):
 
     @property
     def motion_policy_planner(self) -> str:
-        """Return the backend name pinned into Atomic Action motion policies."""
+        """Return the backend name pinned into Atomic Skill motion policies."""
         return self.spec.adapter
 
     def require_motion_generator(self) -> "MotionGenerator":
@@ -242,7 +242,7 @@ class PlannerAdapter(ABC):
 
         Atomic Skill scenarios use this boundary instead of reaching into a
         backend implementation.  Every planner that opts into the
-        ``atomic_action`` capability must expose its generator here.
+        ``atomic_skill`` capability must expose its generator here.
         """
         motion_generator = getattr(self, "motion_generator", None)
         if motion_generator is None:

@@ -26,16 +26,16 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
-    ActionInvocation,
+from embodichain.lab.sim.atomic_skills import (
+    SkillBinding,
+    SkillInvocation,
     AxisAlign,
     JointPositionGoal,
     MotionPolicy,
     OpenDoor,
     OpenDoorAffordance,
 )
-from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+from embodichain.lab.sim.atomic_skills.primitives._helpers import (
     find_symmetric_nearest_xpos,
 )
 from embodichain.lab.sim.motion.planners import MoveType, ToppraPlanOptions
@@ -452,7 +452,7 @@ def test_door_geometry_matches_the_open_door_primitive() -> None:
 
 
 def test_door_poses_cover_approach_grasp_every_arc_keyframe_and_retract() -> None:
-    from embodichain.lab.sim.atomic_actions import OpenDoorOptions
+    from embodichain.lab.sim.atomic_skills import OpenDoorOptions
 
     affordance = _door_affordance()
     link_pose = torch.eye(4).unsqueeze(0)
@@ -694,11 +694,11 @@ def test_backend_plan_options_fill_only_unset_motion_generation_policies() -> No
     options = ToppraPlanOptions(sample_interval=40)
     explicit = ToppraPlanOptions(sample_interval=10)
 
-    def invocation(policy: MotionPolicy) -> ActionInvocation:
-        return ActionInvocation(
+    def invocation(policy: MotionPolicy) -> SkillInvocation:
+        return SkillInvocation(
             skill_id="move_joints",
             goal=JointPositionGoal(torch.zeros(1, 7)),
-            binding=Mock(spec=ActionBinding),
+            binding=Mock(spec=SkillBinding),
             motion_policy=policy,
         )
 
@@ -741,7 +741,7 @@ def test_toppra_adapter_serves_atomic_skills_and_joint_cases() -> None:
     adapter.plan(case)
 
     targets, options = adapter.motion_generator.generate.call_args.args
-    assert {"atomic_action", "joint_waypoint"} <= adapter.capabilities
+    assert {"atomic_skill", "joint_waypoint"} <= adapter.capabilities
     assert targets[0].move_type is MoveType.JOINT_MOVE
     assert torch.equal(targets[0].qpos, case.reference_qpos[:, 0])
     assert options.plan_opts.constraints == {

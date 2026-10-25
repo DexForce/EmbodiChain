@@ -700,7 +700,7 @@ embodichain benchmark robotics-kinematic-solver --solvers all
 embodichain benchmark motion-generation --suite smoke
 
 # Atomic actions, grasp generation, and workspace analysis
-embodichain benchmark atomic-action --smoke
+embodichain benchmark atomic-skill-profile --smoke
 embodichain benchmark grasp-pose-generator --device auto
 embodichain benchmark workspace-analyzer
 ```

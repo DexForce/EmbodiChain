@@ -188,8 +188,8 @@ execution, reset, validation and persistence remain host responsibilities.
 renders both paths analytically on CPU and records IK residuals, source lineage
 and bridge phases without constructing a simulator.
 
-`examples/sim/atomic_action/place.py` is the demonstration host. Shared helpers
-in `examples/sim/atomic_action/support.py` convert the compiled action's named
+`examples/sim/atomic_skill/place.py` is the demonstration host. Shared helpers
+in `examples/sim/atomic_skill/support.py` convert the compiled action's named
 segments to the expansion contracts and replay one variant per simulation row.
 The default `joint_space` mode retains the earlier residual/via/null-space and
 retiming behavior. The optional `task_space` mode deforms only selected free

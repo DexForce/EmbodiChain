@@ -12,8 +12,8 @@ start with :doc:`/overview/task_program/quickstart`.
 The optional :doc:`task_program_python` introduces the typed language without
 starting simulation; it is not a prerequisite for the Quickstart.
 
-Use :doc:`atomic_actions` instead when Python code should construct and execute
-typed ``ActionInvocation`` values directly. The architecture and ownership
+Use :doc:`atomic_skills` instead when Python code should construct and execute
+typed ``SkillInvocation`` values directly. The architecture and ownership
 rules are described in :doc:`/overview/task_program/architecture`.
 
 What you will configure
@@ -261,7 +261,7 @@ factory and fingerprints its call ID, revision, and target atomic descriptor.
 
 Do not place a callable, dotted import, simulator object, or task-local motion
 generator in the program. If a reusable behavior is fundamentally a new motion
-primitive, add it to Atomic Actions first and then expose a declarative
+primitive, add it to Atomic Skills first and then expose a declarative
 registered call through Task Program.
 
 Next steps
@@ -273,5 +273,5 @@ Next steps
   command presets, and effect assurance;
 * :doc:`/overview/task_program/index` — schema, compilation,
   parallel safety, and adapter lifecycle;
-* :doc:`/overview/sim/atomic_actions/builtin_actions` — the atomic primitives
+* :doc:`/overview/sim/atomic_skills/builtin_skills` — the atomic primitives
   reached after lowering.

@@ -23,7 +23,7 @@ Usage examples::
     embodichain benchmark robotics-kinematic-solver -s pytorch
     embodichain benchmark motion-generation --suite motion_panda_free_space_smoke
     embodichain benchmark motion-generation --suite atomic_franka_pgi_smoke
-    embodichain benchmark atomic-action-profile --smoke
+    embodichain benchmark atomic-skill-profile --smoke
     embodichain benchmark grasp-pose-generator --device cuda
     embodichain benchmark workspace-analyzer
     embodichain benchmark rendering --camera-count 2 --resolution 1280x720
@@ -59,9 +59,9 @@ def _run_motion_generation_cli(args: argparse.Namespace) -> None:
     run_from_args(args)
 
 
-def _run_atomic_action_profile_cli(_: argparse.Namespace) -> None:
-    """Run individual atomic action profiling over preset scenes."""
-    from scripts.benchmark.atomic_action.run_benchmark import main as atomic_main
+def _run_atomic_skill_profile_cli(_: argparse.Namespace) -> None:
+    """Run individual atomic skill profiling over preset scenes."""
+    from scripts.benchmark.atomic_skill.run_benchmark import main as atomic_main
 
     atomic_main()
 
@@ -136,13 +136,14 @@ def main(argv: Sequence[str] | None = None) -> None:
         add_parser_arguments(motion_generation_parser)
     motion_generation_parser.set_defaults(func=_run_motion_generation_cli)
 
-    # -- atomic-action-profile -----------------------------------------------
-    atomic_action_profile_parser = subparsers.add_parser(
-        "atomic-action-profile",
+    # -- atomic-skill-profile -----------------------------------------------
+    atomic_skill_profile_parser = subparsers.add_parser(
+        "atomic-skill-profile",
+        aliases=["atomic-action-profile"],
         add_help=False,
-        help="Profile individual atomic actions over object presets and positions.",
+        help="Profile individual atomic skills over object presets and positions.",
     )
-    atomic_action_profile_parser.set_defaults(func=_run_atomic_action_profile_cli)
+    atomic_skill_profile_parser.set_defaults(func=_run_atomic_skill_profile_cli)
 
     # -- grasp-pose-generator -----------------------------------------------
     grasp_pose_parser = subparsers.add_parser(
@@ -177,6 +178,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     # that each sub-command's entry point can call ``parse_args()`` normally.
     delegated_commands = {
         "rl",
+        "atomic-skill-profile",
         "atomic-action-profile",
         "grasp-pose-generator",
         "rendering",

@@ -26,8 +26,8 @@ import torch
 
 from embodichain.compute.geometry import nearest_half_turn_pose
 
-from embodichain.lab.sim.atomic_actions import (
-    ActionInvocation,
+from embodichain.lab.sim.atomic_skills import (
+    SkillInvocation,
     ObjectSemantics,
     PressAffordance,
     PressGoal,
@@ -39,7 +39,7 @@ from embodichain.lab.sim.atomic_actions import (
     TwistGoal,
     TwistOptions,
 )
-from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory
+from embodichain.lab.sim.atomic_skills.plans import CompiledTrajectory
 
 from ..atomic_skill import AtomicSkillCaseProvider, register_atomic_skill_provider
 from ..contracts import ReplayObservationWindow
@@ -233,7 +233,7 @@ class PressCases(AtomicSkillCaseProvider):
         scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
-    ) -> ActionInvocation:
+    ) -> SkillInvocation:
         del adapter
         press_axis = torch.tensor(
             case.case_parameters["press_axis"],
@@ -479,7 +479,7 @@ class SlideCases(AtomicSkillCaseProvider):
         scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
-    ) -> ActionInvocation:
+    ) -> SkillInvocation:
         del adapter
         if scenario.end_effector_part is None:
             raise RuntimeError("Slide requires a configured end-effector control part.")
@@ -737,7 +737,7 @@ class TwistCases(AtomicSkillCaseProvider):
         scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
-    ) -> ActionInvocation:
+    ) -> SkillInvocation:
         del adapter
         if scenario.end_effector_part is None:
             raise RuntimeError("Twist requires a configured end-effector control part.")
