@@ -336,6 +336,8 @@ def load_robot_link_meshes(
     path: str | Path,
     link_names: tuple[str, ...],
     scale: tuple[float, float, float] = (1.0, 1.0, 1.0),
+    *,
+    vertices_only: bool = False,
 ) -> dict[str, tuple[LinkMesh, ...]]:
     """Read URDF collision inputs in each robot link's native local frame.
 
@@ -343,6 +345,8 @@ def load_robot_link_meshes(
     robot body scale then affects both vertices and collision-origin translation.
     A consumer applies the observed rigid link pose without any knob-body scale.
     This is source input geometry, not a backend cooked-shape certificate.
+    Vertex-envelope consumers retain every authored vertex and receive no
+    triangle-surface claim. Surface consumers keep strict topology validation.
     """
     import xml.etree.ElementTree as ET
 
@@ -395,9 +399,23 @@ def load_robot_link_meshes(
             else:
                 raise ValueError("E8 robot collision supports only meshes and boxes.")
             faces = np.asarray(shape.faces, dtype=np.int64)
-            if faces.ndim != 2 or faces.shape[1:] != (3,):
-                raise ValueError("E8 robot collision mesh must be triangulated.")
-            faces = _triangles(vertices, np.full(len(faces), 3), faces.reshape(-1))
+            if (
+                vertices.ndim != 2
+                or vertices.shape[1:] != (3,)
+                or not len(vertices)
+                or not np.isfinite(vertices).all()
+                or faces.ndim != 2
+                or faces.shape[1:] != (3,)
+                or not len(faces)
+                or faces.min() < 0
+                or faces.max() >= len(vertices)
+            ):
+                raise ValueError("E8 robot collision mesh has invalid source geometry.")
+            if vertices_only:
+                faces = np.empty((0, 3), dtype=np.int64)
+                approximation = approximation.removesuffix("Input") + "VertexEnvelope"
+            else:
+                faces = _triangles(vertices, np.full(len(faces), 3), faces.reshape(-1))
             origin = collision.find("origin")
             translation, rotation = np.zeros(3), np.eye(3)
             if origin is not None:

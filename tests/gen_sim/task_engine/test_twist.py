@@ -108,6 +108,82 @@ def test_table_clearance_requires_complete_finite_geometry(monkeypatch, mode):
         )
 
 
+def test_robot_vertex_envelope_keeps_extreme_vertices_without_surface_claim(tmp_path):
+    import trimesh
+    from embodichain.gen_sim.task_engine._task_program.twist_geometry import (
+        load_robot_link_meshes,
+    )
+
+    mesh = trimesh.Trimesh(
+        vertices=[[0, 0, 0], [1, 0, 0], [0, 1, 0], [100, 0, 0]],
+        faces=[[0, 1, 2], [0, 1, 3]],
+        process=False,
+    )
+    mesh.export(tmp_path / "collider.stl")
+    source = tmp_path / "robot.urdf"
+    source.write_text(
+        '<robot name="test"><link name="arm"><collision><geometry><mesh filename="collider.stl"/></geometry></collision></link></robot>'
+    )
+    with pytest.raises(ValueError, match="degenerate"):
+        load_robot_link_meshes(source, ("arm",))
+    value = load_robot_link_meshes(source, ("arm",), vertices_only=True)["arm"][0]
+    assert np.array_equal(value.vertices.min(0), [0, 0, 0])
+    assert np.array_equal(value.vertices.max(0), [100, 1, 0])
+    assert value.faces.shape == (0, 3)
+    assert value.approximation == "urdfMeshVertexEnvelope"
+    assert not value.vertices.flags.writeable
+
+
+@pytest.mark.parametrize("mode", ["nan", "empty", "invalid_face"])
+def test_robot_vertex_envelope_rejects_invalid_source_geometry(
+    tmp_path, monkeypatch, mode
+):
+    import trimesh
+    from embodichain.gen_sim.task_engine._task_program.twist_geometry import (
+        load_robot_link_meshes,
+    )
+
+    vertices = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float)
+    faces = np.array([[0, 1, 2]])
+    if mode == "nan":
+        vertices[0, 0] = float("nan")
+    elif mode == "empty":
+        vertices = np.empty((0, 3))
+    else:
+        faces[0, 2] = 99
+    monkeypatch.setattr(
+        trimesh, "load", lambda *a, **kw: NS(vertices=vertices, faces=faces)
+    )
+    source = tmp_path / "robot.urdf"
+    source.write_text(
+        '<robot name="test"><link name="arm"><collision><geometry><mesh filename="collider.stl"/></geometry></collision></link></robot>'
+    )
+    with pytest.raises(ValueError, match="invalid"):
+        load_robot_link_meshes(source, ("arm",), vertices_only=True)
+
+
+@pytest.mark.parametrize("sign", [-1.0, 1.0])
+def test_native_twist_boundary_roundoff_does_not_rewrite_observation(sign):
+    from embodichain.gen_sim.task_engine._task_program.twist_runtime import (
+        _bounded_twist_qpos,
+    )
+
+    bound = 2.5000001290505525
+    observed = torch.tensor(sign * 2.500000476837158, dtype=torch.float32)
+    original = observed.clone()
+    assert _bounded_twist_qpos(observed, (-bound, bound)) == sign * bound
+    assert torch.equal(observed, original)
+
+
+@pytest.mark.parametrize("value", [2.5001, -2.5001, float("nan"), float("inf")])
+def test_native_twist_boundary_still_rejects_overtravel_and_nonfinite(value):
+    from embodichain.gen_sim.task_engine._task_program.twist_runtime import (
+        _bounded_twist_qpos,
+    )
+
+    assert _bounded_twist_qpos(torch.tensor(value), (-2.5, 2.5)) is None
+
+
 @pytest.fixture
 def knob_scene(tmp_path, monkeypatch):
     import trimesh

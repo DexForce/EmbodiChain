@@ -1477,6 +1477,16 @@ the calibrated grip collider, not the full render-link union. Parent screening a
 use owned collider inputs, including non-selected articulation bodies. Default render
 vertices are not collision inputs. Authored convex-cooking policies remain diagnostic;
 these proxies do not certify backend cooked shapes or continuous collision clearance.
+Robot table and rotor-sweep guards consume conservative envelopes of every finite
+authored collision vertex, not triangle surfaces. Their vertex-only URDF loading
+retains points belonging to zero-area STL facets and returns no surface-topology
+claim; indices and finiteness remain validated. Knob USD geometry and default
+URDF surface consumers retain strict triangle validation. Regenerate E8 bundles
+for revision 19; no table margin or native contact criterion is relaxed.
+E8 lowering allows four native-dtype roundoff units at calibrated joint bounds
+for USD/native conversion and constraint projection, then bounds only its
+planning scalar. Geometry freshness and recorded evidence retain the raw native
+observation; substantive overtravel and nonfinite values remain rejected.
 Candidates use final tip bites
 B/3, 2B/3 and B, where B=min(grasp_depth, grip_depth/2). Their TCP shifts are outward-only,
 so no extra inward offset can exceed the requested bite. Depth takes precedence over closed-hand,

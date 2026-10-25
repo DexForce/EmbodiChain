@@ -775,7 +775,8 @@ def _bounded_twist_qpos(
 ) -> float | None:
     """Accept native-dtype boundary roundoff without accepting physical overtravel."""
     value = float(observed)
-    epsilon = torch.finfo(observed.dtype).eps * max(1.0, *(abs(v) for v in limits))
+    # USD/native conversion and constraint projection can span several ULPs.
+    epsilon = 4 * torch.finfo(observed.dtype).eps * max(1.0, *(abs(v) for v in limits))
     if (
         not math.isfinite(value)
         or not limits[0] - epsilon <= value <= limits[1] + epsilon
@@ -923,7 +924,7 @@ class _TwistLowerer(RegisteredSemanticLowerer):
                     geometry={
                         "gen_sim_twist_operation_id": self.route.operation_id,
                         "gen_sim_twist_angle": angle,
-                        "gen_sim_twist_measured_qpos": qpos,
+                        "gen_sim_twist_measured_qpos": float(observed),
                         "gen_sim_twist_target_qpos": b.target_qpos,
                         "gen_sim_twist_axis_sign": b.axis_sign,
                         "gen_sim_twist_articulation_id": b.object_id,
