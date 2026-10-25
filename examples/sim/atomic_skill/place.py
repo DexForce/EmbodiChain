@@ -36,6 +36,7 @@ from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
+from embodichain.utils.math import matrix_from_euler
 from examples.sim.atomic_skill.support import (
     create_affordance_sampling_context,
     add_tutorial_robot,
@@ -136,14 +137,14 @@ def create_pick_object(sim) -> RigidObject:
 
 def make_place_eef_poses(device: torch.device) -> torch.Tensor:
     """Build hover and release waypoints for the multi-waypoint Place target."""
-    rotation = torch.tensor(
-        [
-            [0.0539, 0.9985, -0.0022],
-            [0.9977, -0.0540, -0.0401],
-            [-0.0401, 0.0, -0.9992],
-        ],
-        dtype=torch.float32,
-        device=device,
+    # Construct a rigid rotation from the nearly top-down yaw, pitch and roll.
+    rotation = matrix_from_euler(
+        torch.tensor(
+            [math.atan2(0.9977, 0.0539), math.asin(0.0401), math.pi],
+            dtype=torch.float32,
+            device=device,
+        ),
+        convention="ZYX",
     )
     poses = []
     for position in ((-0.40, 0.48, 0.20), (-0.40, 0.48, 0.10)):
