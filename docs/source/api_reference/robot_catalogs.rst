@@ -114,6 +114,14 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
 
 .. automethod:: embodichain_robots.SO101FollowerCfg.build_pk_serial_chain
 
+.. py:class:: embodichain_robots.FlexivRizon4SCfg
+
+   Seven-axis bare Rizon 4S arm with published Flexiv dynamics, tuned simulation
+   damping and a numerical flange IK solver. Construct with ``from_dict()`` and use
+   ``build_pk_serial_chain()`` for the matching differentiable flange chain.
+   Source inertials are preserved; public dynamics are manufacturer-blurred.
+   See :doc:`/resources/robot/flexiv_rizon4s` for units and pinned provenance.
+
 
 embodichain_robots.aloha_mini
 -----------------------------
@@ -273,6 +281,16 @@ W1 configuration, hardware revisions, calibrated transforms, hand specifications
    Robot hardware configuration and assembly helper.
 
 .. autofunction:: embodichain_robots.dexforce_w1.utils.build_dexforce_w1_assembly_urdf_cfg
+
+
+embodichain_robots.flexiv_rizon4s
+---------------------------------
+
+.. py:class:: embodichain_robots.flexiv_rizon4s.FlexivRizon4SCfg
+   :no-index:
+
+   Implementation of :class:`embodichain_robots.FlexivRizon4SCfg`.
+   An explicit URDF ``fpath`` is shared by simulation and serial-chain FK/IK.
 
 
 embodichain_robots.franka_panda

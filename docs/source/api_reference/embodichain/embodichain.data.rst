@@ -37,6 +37,14 @@ Robot Asset Datasets
 
 Robot dataset classes register the prefixes used by ``get_data_path()`` and
 ``embodichain data``. Most fetch their pinned archives on first construction.
+``FlexivRizon4S`` downloads its versioned official URDF, meshes, license and
+provenance archive from the configured asset source, with Hugging Face as a
+fallback, into the standard revision-specific cache. Asset lookup and robot
+configuration share that same data.
+
+.. automodule:: embodichain.data.assets.robot_assets
+   :members:
+   :show-inheritance:
 
 ``SO101FollowerAssets`` resolves the official follower URDF, STLs and motor
 reference directly from a pinned The Robot Studio revision. File SHA256 checks
