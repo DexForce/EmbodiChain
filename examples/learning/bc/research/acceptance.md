@@ -65,45 +65,84 @@ closed-loop state drift, execution cadence and insufficient supervision around
 recovery/release. The prior privileged-state control also failed and changed
 several factors, so vision alone is not an established cause. Keep the PR draft.
 
-## Next recipe: frozen-checkpoint cadence diagnostic v1
+## Executed paired cadence diagnostic v1
 
-First isolate execution cadence with **zero training updates**, one fixed
-checkpoint and one new auxiliary panel. This is a separately declared research
-recipe, not a revision of the failed acceptance protocol:
+Before execution, `cadence-v1/protocol.json` froze source commit
+`dfca55e92f85a473e20bc770f9a54e7f8517e49a`, source/config hashes, the checkpoint,
+two auxiliary states and budget. Its SHA256 is
+`aa576c9c44fd8de9301a401e95462aa1e299e3dba8ca7c21fdd87f5a04a41b77`.
+The paired scene digest is
+`ee481ae513bb5467a3b795bd4d385933b6327f36a770c253e3a0f000edf58030`.
+Both arms used the frozen seed-20261025 20k checkpoint, reset seeds
+`20296025`/`20296026`, 600 steps/scene and physical GPU4. The only changed
+policy setting was execution horizon 8 versus 1. No training update or formal
+panel was involved. Every step records measured geometry, geometric phase,
+target/request, goal/TCP errors and actual model-forward count.
+
+| Horizon | Auxiliary success | Lift | Mean final goal error | Actual forward calls | Wall time |
+| --- | --- | --- | --- | --- | --- |
+| 8 | 0/2 | 1/2 | 0.1803 m | 150 | 40.92 s |
+| 1 | 0/2 | 0/2 | 0.3393 m | 1,200 | 41.61 s |
+
+Both reports confirm identical checkpoint/panel digests, no expert
+initialization and completed close/flush. Reducing the horizon did not improve
+this pair; two auxiliary states do not estimate a general success rate.
+
+The H8 second scene reached the goal (final error 8.49 mm) but had no withdrawn
+step among its 291 near-goal steps: TCP–cube distance never reached the required
+0.10 m there. Both fingers reached the required 0.035 m opening on only 23 of
+those steps. At the last step they were about 0.0146 m open and TCP–cube distance
+was 0.0553 m. The task therefore never completed release/withdraw. The first H8
+scene remained in approach for all 600 steps (nearest TCP–cube distance 0.361 m).
+Geometric phase labels are diagnostic measurements, not expert states or new
+success criteria. These observations locate distinct failure phases without
+establishing an implementation defect or a unique learning cause.
+
+## Next bounded protocol: sequence execution coherence v2
+
+Test whether longer execution of the already predicted F32 sequence changes
+release/withdraw behavior. Use **zero training updates**, the same immutable
+20k checkpoint and a new auxiliary panel. This tests a specific receding-horizon
+hypothesis after the negative H1 result. It is not a revision of formal v1:
 
 | Item | Fixed value |
 | --- | --- |
 | Checkpoint | seed 20261025, step 20000, SHA256 `61d4df2456727d59fb7e910edb1a2c64116351b85daece911fd8445a33db85ef` |
 | Inputs/model/normalization | Original H2/F32, two 256-pixel cameras, all saved buffers/weights unchanged |
-| Panel | Four auxiliary states, seed `20297025`, same panel in both arms |
-| Only changed factor | Executed target horizon 8 versus 1 |
-| Budget | 600 steps/scene, four scenes/arm, 600 seconds/arm, physical GPU4 only |
-| Measurements | Per-scene success, lift, goal error, termination, checkpoint/panel hashes, cleanup |
+| Panel | Two new auxiliary states, seed `20297025`, same panel in both arms |
+| Only changed factor | Executed target horizon 8 versus 32 |
+| Budget | 600 steps/scene, two scenes/arm, 240 seconds/arm, physical GPU4 only |
+| Measurements | Step traces, success/lift/error, finger opening and TCP withdrawal, actual forward calls, hashes and cleanup |
 | Selection | No checkpoint selection or formal-test access; retain both arms, including failures |
 
-After checking GPU4 is idle, set a fresh output directory and run the two arms
-serially from the installed example runner. The checkpoint and output variables
-below are task-specific; no frozen input is written.
+This protocol has not been executed. After admitting an idle GPU4, copy this
+protocol to a fresh output directory and record its SHA256 before either arm.
+Run the arms serially; save both logs. The checkpoint and task-specific output
+variables below do not write frozen inputs.
 
 ```bash
 BC_CHECKPOINT=/data1/dyc/.codex-artifacts/embodichain-sl-bc-20261025/formal-v1/seed-20261025/training/step_020000.pt
-BC_DIAGNOSTIC_OUTPUT=/root/outputs/sl-convergence-20261026/bc/cadence-v1
+BC_DIAGNOSTIC_OUTPUT=/root/outputs/sl-convergence-20261026/bc/cadence-v2
 mkdir -p "$BC_DIAGNOSTIC_OUTPUT"
-CUDA_VISIBLE_DEVICES=4 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 timeout 600s \
-  embodichain run-example learning/bc evaluate --diagnostic --action-horizon 8 \
-  --checkpoint "$BC_CHECKPOINT" --scenes 4 --seed 20297025 \
-  --sim-device cuda:0 --policy-device cuda:0 --output "$BC_DIAGNOSTIC_OUTPUT/h8.json"
-CUDA_VISIBLE_DEVICES=4 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 timeout 600s \
-  embodichain run-example learning/bc evaluate --diagnostic --action-horizon 1 \
-  --checkpoint "$BC_CHECKPOINT" --scenes 4 --seed 20297025 \
-  --sim-device cuda:0 --policy-device cuda:0 --output "$BC_DIAGNOSTIC_OUTPUT/h1.json"
+cp examples/learning/bc/research/acceptance.md "$BC_DIAGNOSTIC_OUTPUT/protocol.md"
+sha256sum "$BC_DIAGNOSTIC_OUTPUT/protocol.md" > "$BC_DIAGNOSTIC_OUTPUT/protocol.sha256"
+CUDA_VISIBLE_DEVICES=4 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 timeout 240s \
+  embodichain run-example learning/bc evaluate --diagnostic --trace --action-horizon 8 \
+  --checkpoint "$BC_CHECKPOINT" --scenes 2 --seed 20297025 \
+  --sim-device cuda:0 --policy-device cuda:0 --output "$BC_DIAGNOSTIC_OUTPUT/h8.json" \
+  > "$BC_DIAGNOSTIC_OUTPUT/h8.log" 2>&1
+CUDA_VISIBLE_DEVICES=4 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 timeout 240s \
+  embodichain run-example learning/bc evaluate --diagnostic --trace --action-horizon 32 \
+  --checkpoint "$BC_CHECKPOINT" --scenes 2 --seed 20297025 \
+  --sim-device cuda:0 --policy-device cuda:0 --output "$BC_DIAGNOSTIC_OUTPUT/h32.json" \
+  > "$BC_DIAGNOSTIC_OUTPUT/h32.log" 2>&1
 ```
 
-This plan has not been executed. Diagnostic overrides require `--diagnostic`
-and are recorded in the output; the formal driver supplies neither override.
-Require equal checkpoint and scene digests before comparing arms. If cadence
-changes behavior, inspect the failing scene transitions before declaring a new
-learning recipe. If neither arm improves, do not repeat the 3×20k run. The next
-learning design must first specify a single supervision/recovery change, a
-separate development-only budget and new source/data signatures. Preserve the
-original formal seeds, budgets, thresholds and sealed test population.
+Require equal checkpoint and scene digests before comparing arms. Overrides and
+traces require `--diagnostic`; the formal driver supplies neither override. A
+reproducible improvement would require a separately frozen recipe and unchanged
+physical success thresholds before broader evaluation. Do not open the sealed
+test panel or repeat the original 3×20k run. If coherence does not improve
+behavior, the next learning design must declare one supervision/recovery
+change, its development-only budget and new source/data signatures before any
+training. Preserve the original formal seeds, budgets, thresholds and failures.
