@@ -19,11 +19,162 @@
 from __future__ import annotations
 
 from argparse import Namespace
+from importlib import import_module
+from types import ModuleType, SimpleNamespace
+import subprocess
+import sys
 
 import pytest
 
 from embodichain.data import download
 from embodichain.data.dataset import get_data_class
+from embodichain.data import _asset_registry
+
+
+@pytest.fixture
+def asset_catalogs(monkeypatch):
+    original = _asset_registry.metadata.entry_points
+    entries = list(original(group="embodichain.assets"))
+    _asset_registry._asset_specs.cache_clear()
+    monkeypatch.setattr(
+        _asset_registry.metadata,
+        "entry_points",
+        lambda **kwargs: (
+            entries
+            if kwargs.get("group") == "embodichain.assets"
+            else original(**kwargs)
+        ),
+    )
+    yield entries
+    _asset_registry._asset_specs.cache_clear()
+
+
+def test_migrated_robot_assets_keep_legacy_class_identity() -> None:
+    from embodichain_robots._asset_catalog import ROBOT_ASSETS
+    import embodichain.data.assets as assets
+
+    registry = download.get_registry()
+    for name, spec in ROBOT_ASSETS.items():
+        module, _, symbol = spec["class_path"].partition(":")
+        canonical = getattr(import_module(module), symbol)
+        legacy = (
+            "w1_assets"
+            if name.startswith("DexforceW1")
+            else (
+                "locomotion_assets"
+                if name in LOCOMOTION_ASSETS
+                else "so101_assets" if name == "SO101FollowerAssets" else "robot_assets"
+            )
+        )
+        assert (
+            getattr(import_module("embodichain.data.assets." + legacy), name)
+            is canonical
+        )
+        assert getattr(assets, name) is canonical
+        assert get_data_class(name) is canonical
+        assert dict(registry[spec["category"]])[name] is canonical
+        assert canonical.__module__ == module
+        assert (
+            sum(
+                asset_name == name
+                for rows in registry.values()
+                for asset_name, _ in rows
+            )
+            == 1
+        )
+
+
+@pytest.mark.parametrize("name", ["Franka", "franka"])
+def test_asset_catalog_rejects_duplicate_ids(asset_catalogs, name) -> None:
+    asset_catalogs.append(
+        SimpleNamespace(
+            name="duplicate",
+            load=lambda: {
+                name: {"class_path": "unavailable:Dataset", "category": "robot"},
+            },
+        )
+    )
+    with pytest.raises(ValueError, match="Duplicate asset ID"):
+        _asset_registry._asset_specs()
+
+
+def test_external_asset_category_is_available_to_download_cli(
+    asset_catalogs, monkeypatch, capsys
+) -> None:
+    from embodichain.data.dataset import EmbodiChainDataset
+
+    class ExternalAsset(EmbodiChainDataset):
+        def __init__(self):
+            pytest.fail("Listing must not construct or download assets")
+
+    module = ModuleType("test_external_asset_provider")
+    module.ExternalAsset = ExternalAsset
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+    asset_catalogs.append(
+        SimpleNamespace(
+            name="external",
+            load=lambda: {
+                "ExternalAsset": {
+                    "class_path": module.__name__ + ":ExternalAsset",
+                    "category": "external",
+                },
+            },
+        )
+    )
+    assert get_data_class("ExternalAsset") is ExternalAsset
+    download.main(["list", "--category", "external"])
+    assert "ExternalAsset" in capsys.readouterr().out
+
+
+def test_asset_resolution_preserves_explicit_extra_modules(monkeypatch) -> None:
+    module = ModuleType("test_extra_asset_module")
+    module.CustomDataset = type("CustomDataset", (), {})
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+    assert get_data_class("CustomDataset", [module.__name__]) is module.CustomDataset
+    with pytest.raises(AttributeError, match="CustomDataset"):
+        get_data_class("CustomDataset")
+
+
+@pytest.mark.parametrize(
+    "first_module",
+    [
+        "embodichain_robots.arx.arx5.assets",
+        "embodichain_robots.franka.assets",
+        "embodichain_robots.the_robot_studio.so101.assets",
+        "embodichain_robots.unitree.go2.assets",
+        "embodichain_robots.anybotics.anymal_c.assets",
+        "embodichain_robots.pollen_robotics.microduck.assets",
+    ],
+)
+def test_asset_imports_do_not_load_robot_configuration(first_module: str) -> None:
+    script = """
+import importlib.abc
+import sys
+class RejectConfigs(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.startswith('embodichain_robots.') and (fullname.endswith('.cfg') or fullname in ('embodichain_robots.franka.panda', 'embodichain_robots.universal_robots.ur_robot')):
+            raise AssertionError('Asset discovery imported robot config: ' + fullname)
+sys.meta_path.insert(0, RejectConfigs())
+from embodichain_robots._asset_catalog import ROBOT_ASSETS
+assert 'open3d' not in sys.modules
+import importlib
+importlib.import_module(sys.argv[1])
+from embodichain.data.dataset import EmbodiChainDataset, get_data_class
+def reject(*args, **kwargs):
+    raise AssertionError('Asset lookup downloaded data')
+EmbodiChainDataset.__init__ = reject
+for name in ROBOT_ASSETS:
+    assert issubclass(get_data_class(name), EmbodiChainDataset)
+assert 'embodichain.lab.sim' not in sys.modules
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, first_module],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
 
 LOCOMOTION_ASSETS = (
     "ANYmalCLocomotion",

@@ -31,6 +31,10 @@ embodichain preview-robot --robot ANYmalC
 | --- | --- |
 | Catalog ID / UID | `ANYmalC` |
 | Configuration class | `ANYmalCCfg` |
+| Canonical module | `embodichain_robots.anybotics.anymal_c` |
+| Vendor | `anybotics` |
+| Morphology | `quadruped` |
+| Arm count | 0 |
 | Asset | `ANYmalCLocomotion/usd/anymal_c.usda` |
 | Control parts | `locomotion`: 12 joints |
 | Base | Floating |

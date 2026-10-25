@@ -14,11 +14,60 @@ robot = sim.add_robot(cfg=cfg)
 The package owns concrete robot defaults, hardware revisions, calibrated
 transforms, and robot-specific kinematic-chain construction. Generic runtime
 objects, configuration types, solvers, URDF assembly, and dual-arm composition
-remain in `embodichain.lab.sim`. Assets continue to use the core download/cache
-registry. Task deployments, sensor suites, and Task Program skill profiles keep
+remain in `embodichain.lab.sim`. Model-owned asset definitions live with their presets; shared Franka and UR
+archives live at vendor level. The core owns the common download/cache registry. Task deployments, sensor suites, and Task Program skill profiles keep
 their existing owners.
 
+## Vendor/model ownership and migration
+
+Concrete configurations use vendor/model namespaces, such as
+`embodichain_robots.franka.panda` and `embodichain_robots.dexforce.w1`.
+Model-owned archives belong in `<vendor>/<model>/assets.py`, beside `cfg.py`.
+Franka's Panda/FR3 archive and the shared UR archive use vendor-level `assets.py`.
+Vendor/model initializers are lazy so importing an asset never loads robot code.
+
+Root configuration imports and catalog IDs remain stable, except that
+`FrankaPandaPgiCfg` and `FrankaPandaPgi` have been removed. Panda/PGI examples
+and benchmark providers assemble that combination locally. Flat configuration
+submodules such as `embodichain_robots.franka_panda` are retired.
+
+Robot catalogs declare optional `vendor`, `morphology`, and `arm_count` metadata.
+Morphology describes the authored body (for example `wheeled_humanoid`),
+independently of arm count or simulator anchoring. Missing variant fields inherit
+their family values; explicit `None` means unknown, while zero arms is a known
+absence. AlohaMini uses its community project's namespace with unknown vendor.
+
+The separate, metadata-only `_asset_catalog.py` registers resources through:
+
+```toml
+[project.entry-points."embodichain.assets"]
+official_robots = "embodichain_robots._asset_catalog:ROBOT_ASSETS"
+```
+
+Each asset ID maps to a `class_path` (`module:Class`) and a `category`. The core
+combines these with its remaining asset modules for both `get_data_path()` and
+`embodichain data`. Duplicate IDs fail, including case-only collisions. Legacy
+asset imports forward to the same class objects; IDs, URLs, checksums and cache
+prefixes are unchanged. Refresh the editable install and restart after changing
+entry-point metadata. Other robot datasets, EEFs and shared resources retain
+their current core ownership.
+
 ## Locomotion defaults
+
+| Catalog ID | Canonical module | Morphology | Arms |
+| --- | --- | --- | --- |
+| `UnitreeGo1` | `embodichain_robots.unitree.go1` | `quadruped` | 0 |
+| `UnitreeGo2` | `embodichain_robots.unitree.go2` | `quadruped` | 0 |
+| `UnitreeG1` | `embodichain_robots.unitree.g1` | `bipedal_humanoid` | 2 |
+| `UnitreeH1_2` | `embodichain_robots.unitree.h1_2` | `bipedal_humanoid` | 2 |
+| `ANYmalC` | `embodichain_robots.anybotics.anymal_c` | `quadruped` | 0 |
+| `MicroDuck` | `embodichain_robots.pollen_robotics.microduck` | `biped` | 0 |
+
+Each model owns `cfg.py`, `assets.py` and a wheel-packaged `profile.json`.
+The shared profile reader remains backend-free. Root configuration imports
+and catalog IDs remain stable; use these vendor/model paths for submodule
+imports. For example, `embodichain_robots.unitree_go2` is replaced by
+`embodichain_robots.unitree.go2`.
 
 The catalog includes `UnitreeGo1`, `UnitreeGo2`, `UnitreeG1`, `UnitreeH1_2`,
 `ANYmalC` and `MicroDuck`. G1 selects the bundled 29-joint model; H1_2 selects
@@ -57,7 +106,9 @@ embodichain preview-robot --robot UnitreeGo2
 
 Task deployments select `robot.class_type` and can explicitly override ordinary
 RobotCfg fields, including `joint_drive_props`. Task initialization preserves
-these overrides. Action scaling, observation layout, rewards and illegal-contact
+these overrides, including joint-name regex and control-part rules. Matching
+model defaults are replaced while untouched joints retain their defaults.
+Action scaling, observation layout, rewards and illegal-contact
 rules remain task-owned. Contact sensors remain environment-owned.
 
 The backend-free `locomotion_profiles.load_locomotion_robot_profile()` reader
@@ -200,6 +251,9 @@ acme = "acme_robots.catalog:ROBOTS"
 ROBOTS = {
     "acme.arm": {
         "class_path": "acme_robots.arm:ArmCfg",
+        "vendor": "acme",
+        "morphology": "fixed_manipulator",
+        "arm_count": 1,
         "defaults": {"variant": "standard"},
         "dof": 6,
         "control_parts": {"arm": 6},

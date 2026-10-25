@@ -17,8 +17,11 @@ command reference and :doc:`/guides/robot_catalog` for variant selection.
    * - Robot
      - Configuration class
      - Current coverage
+   * - :doc:`ARX5 X5A <arx5>`
+     - ``ARX5Cfg``
+     - Six-joint arm with two independent parallel fingers and numerical IK.
    * - :doc:`Franka Panda <franka_panda>`
-     - ``FrankaPandaCfg``, ``FrankaPandaPgiCfg``
+     - ``FrankaPandaCfg``
      - Panda arm with the Panda hand or a DH PGI gripper, with numerical FK/IK.
    * - :doc:`UR family <ur_robot>`
      - ``URRobotCfg``
@@ -68,6 +71,7 @@ command reference and :doc:`/guides/robot_catalog` for variant selection.
    :hidden:
 
    franka_panda
+   arx5
    ur_robot
    flexiv_rizon4s
    dexforce_w1

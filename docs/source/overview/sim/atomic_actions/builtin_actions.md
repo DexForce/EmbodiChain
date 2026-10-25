@@ -37,7 +37,7 @@ multi-stage in-hand manipulation require additional command types and segments.
 ## Visual catalog
 
 The animations below are the runnable simulator demonstrations under
-`examples/sim/atomic_action/`. The two teaching walkthroughs are described in
+`examples/sim/atomic_action/`. The teaching walkthroughs are described in
 {doc}`/tutorial/atomic_actions`.
 
 ::::{grid} 1 2 2 2

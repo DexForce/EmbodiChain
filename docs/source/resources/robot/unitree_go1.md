@@ -31,6 +31,10 @@ embodichain preview-robot --robot UnitreeGo1
 | --- | --- |
 | Catalog ID / UID | `UnitreeGo1` |
 | Configuration class | `UnitreeGo1Cfg` |
+| Canonical module | `embodichain_robots.unitree.go1` |
+| Vendor | `unitree` |
+| Morphology | `quadruped` |
+| Arm count | 0 |
 | Asset | `UnitreeGo1Locomotion/go1.usda` |
 | Control parts | `locomotion`: 12 joints |
 | Base | Floating |

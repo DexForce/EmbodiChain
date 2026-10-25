@@ -31,6 +31,10 @@ embodichain preview-robot --robot UnitreeH1_2
 | --- | --- |
 | Catalog ID / UID | `UnitreeH1_2` |
 | Configuration class | `UnitreeH12Cfg` |
+| Canonical module | `embodichain_robots.unitree.h1_2` |
+| Vendor | `unitree` |
+| Morphology | `bipedal_humanoid` |
+| Arm count | 2 |
 | Asset | `UnitreeH1_2Locomotion/h1_2.usda` |
 | Control parts | `locomotion`: 27 joints |
 | Base | Floating |

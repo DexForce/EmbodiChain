@@ -31,6 +31,10 @@ embodichain preview-robot --robot UnitreeG1
 | --- | --- |
 | Catalog ID / UID | `UnitreeG1` |
 | Configuration class | `UnitreeG1Cfg` |
+| Canonical module | `embodichain_robots.unitree.g1` |
+| Vendor | `unitree` |
+| Morphology | `bipedal_humanoid` |
+| Arm count | 2 |
 | Asset | `UnitreeG1Locomotion/g1.usda` |
 | Control parts | `locomotion`: 29 joints |
 | Base | Floating |

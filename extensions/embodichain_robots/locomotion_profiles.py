@@ -27,9 +27,19 @@ from typing import Any
 __all__ = ["load_locomotion_robot_profile"]
 
 
-@lru_cache(maxsize=1)
-def _profiles() -> dict[str, dict[str, Any]]:
-    resource = files("embodichain_robots").joinpath("_locomotion_profiles.json")
+_PROFILE_PACKAGES = {
+    "UnitreeGo1": "embodichain_robots.unitree.go1",
+    "UnitreeGo2": "embodichain_robots.unitree.go2",
+    "UnitreeG1": "embodichain_robots.unitree.g1",
+    "UnitreeH1_2": "embodichain_robots.unitree.h1_2",
+    "ANYmalC": "embodichain_robots.anybotics.anymal_c",
+    "MicroDuck": "embodichain_robots.pollen_robotics.microduck",
+}
+
+
+@lru_cache(maxsize=6)
+def _profile(package: str) -> dict[str, Any]:
+    resource = files(package).joinpath("profile.json")
     return json.loads(resource.read_text(encoding="utf-8"))
 
 
@@ -50,6 +60,7 @@ def load_locomotion_robot_profile(robot_id: str) -> dict[str, Any]:
         ValueError: The ID has no bundled locomotion profile.
     """
     try:
-        return deepcopy(_profiles()[robot_id])
+        package = _PROFILE_PACKAGES[robot_id]
     except KeyError as error:
         raise ValueError(f"Unknown locomotion robot profile {robot_id!r}.") from error
+    return deepcopy(_profile(package))

@@ -31,6 +31,10 @@ embodichain preview-robot --robot MicroDuck
 | --- | --- |
 | Catalog ID / UID | `MicroDuck` |
 | Configuration class | `MicroDuckCfg` |
+| Canonical module | `embodichain_robots.pollen_robotics.microduck` |
+| Vendor | `pollen_robotics` |
+| Morphology | `biped` |
+| Arm count | 0 |
 | Asset | `MicroDuckLocomotion/microduck.urdf` |
 | Control parts | `locomotion`: 14 joints |
 | Base | Floating |
