@@ -40,8 +40,16 @@ def _variant_profiles(spec: Mapping[str, Any]) -> list[tuple[str, Mapping[str, A
         )
         return [(defaults or "-", spec)]
     groups: list[tuple[list[str], Mapping[str, Any]]] = []
-    fields = ("dof", "control_parts", "mimic_joints", "control_part_mimics")
+    classification = ("vendor", "morphology", "arm_count")
+    fields = (
+        "dof",
+        "control_parts",
+        "mimic_joints",
+        "control_part_mimics",
+        *classification,
+    )
     for name, profile in variants.items():
+        profile = {**{field: spec.get(field) for field in classification}, **profile}
         for names, existing in groups:
             if all(profile.get(field) == existing.get(field) for field in fields):
                 names.append(name)
@@ -109,29 +117,30 @@ def _format_robot_entries(
     table.field_names = [
         "Robot ID",
         "Variants",
-        "Control DOF",
-        "Control Parts",
-        "Mimic Joints",
+        "Control\nDOF",
+        "Control\nParts",
+        "Mimic\nJoints",
+        "Class",
     ]
     table.align = "l"
-    available_width = width - 16
-    robot_id_width = max(12, min(20, max(map(len, families), default=12)))
-    parts_width = max(17, int(available_width * 0.24))
-    variants_width = max(
-        8,
-        min(
-            int(available_width * 0.23),
-            available_width - robot_id_width - 11 - parts_width - 12,
-        ),
+    available_width = width - 19
+    robot_id_width = max(
+        12, min(20, int(available_width * 0.22), max(map(len, families), default=12))
     )
+    classification_width = max(12, int(available_width * 0.21))
+    parts_width = max(12, int(available_width * 0.20))
+    variants_width = max(8, int(available_width * 0.15))
+    dof_width = 7 if width < 100 else 11
     table.max_width = {
         "Robot ID": robot_id_width,
+        "Class": classification_width,
         "Variants": variants_width,
-        "Control DOF": 11,
-        "Control Parts": parts_width,
-        "Mimic Joints": available_width
+        "Control\nDOF": dof_width,
+        "Control\nParts": parts_width,
+        "Mimic\nJoints": available_width
         - robot_id_width
-        - 11
+        - classification_width
+        - dof_width
         - parts_width
         - variants_width,
     }
@@ -147,6 +156,12 @@ def _format_robot_entries(
             else:
                 mimic_text = "None"
             dof = profile.get("dof")
+            arm_count = profile.get("arm_count")
+            classification_text = (
+                f"Vendor: {profile.get('vendor') or '-'}\n"
+                f"Shape: {profile.get('morphology') or '-'}\n"
+                f"Arms: {arm_count if arm_count is not None else '-'}"
+            )
             table.add_row(
                 [
                     robot_id if profile_index == 0 else "",
@@ -154,6 +169,7 @@ def _format_robot_entries(
                     str(dof) if dof is not None else "-",
                     _format_control_parts(profile),
                     mimic_text,
+                    classification_text,
                 ]
             )
         if index < len(families) - 1:
@@ -165,13 +181,14 @@ def _format_robot_entries(
     if color:
         for index, line in enumerate(lines):
             cells = line.split("│")
-            if len(cells) == 7:
+            if len(cells) == 8:
                 for column, code in (
                     (1, "1;36"),
                     (2, "1;32"),
                     (3, "1;32"),
-                    (4, "1;33"),
+                    (4, "1;32"),
                     (5, "1;33"),
+                    (6, "1;33"),
                 ):
                     if cells[column].strip():
                         cells[column] = f"\033[{code}m{cells[column]}\033[0m"

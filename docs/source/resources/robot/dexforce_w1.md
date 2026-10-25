@@ -160,5 +160,5 @@ an existing assembled robot after a visual-only update, set
 are rebuilt.
 
 Body assets, solvers and mounting offsets are registered in
-`embodichain_robots/dexforce_w1/specs.py`; external hand assets and transforms
+`embodichain_robots/dexforce/w1/specs.py`; external hand assets and transforms
 are registered independently in `hand_specs.py`.

@@ -28,7 +28,7 @@ from embodichain.data.assets.solver_assets import download_neural_ik_checkpoint
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import MarkerCfg
 from embodichain.lab.sim.objects import Robot
-from embodichain_robots.franka_panda import FrankaPandaCfg
+from embodichain_robots.franka.panda import FrankaPandaCfg
 from embodichain.lab.sim.motion.solvers import NeuralIKSolverCfg
 from embodichain.lab.visualization import (
     add_viser_args_to_parser,

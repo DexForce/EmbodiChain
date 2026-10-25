@@ -262,6 +262,11 @@ def test_invalid_catalog_is_rejected(catalogs, catalog):
     "fields",
     [
         {"dof": -1},
+        {"vendor": 1},
+        {"morphology": ""},
+        {"arm_count": -1},
+        {"arm_count": True},
+        {"variants": {"alternate": {"arm_count": 1.5}}},
         {"dof": True},
         {"dof": 1.5},
         {"control_parts": ["arm"]},
@@ -278,7 +283,10 @@ def test_invalid_catalog_is_rejected(catalogs, catalog):
 def test_invalid_control_metadata_is_rejected(catalogs, fields):
     spec = {"class_path": "absent_robots:RobotCfg", **fields}
     catalogs.append(_entry("invalid", {"vendor.arm": spec}))
-    with pytest.raises(TypeError, match="dof|control_parts|mimic|supports_dual_arm"):
+    with pytest.raises(
+        TypeError,
+        match="dof|control_parts|mimic|supports_dual_arm|vendor|morphology|arm_count",
+    ):
         registry.list_robot_cfgs()
 
 
@@ -297,15 +305,15 @@ def local_robot_assets(monkeypatch, tmp_path):
 
     for module_name in (
         "embodichain.data",
-        "embodichain_robots.arx5",
-        "embodichain_robots.aloha_mini",
-        "embodichain_robots.tianji_marvin",
-        "embodichain_robots.cobotmagic",
-        "embodichain_robots.franka_panda",
-        "embodichain_robots.flexiv_rizon4s",
-        "embodichain_robots.so101",
-        "embodichain_robots.ur_robot",
-        "embodichain_robots.dexforce_w1.utils",
+        "embodichain_robots.arx.arx5.cfg",
+        "embodichain_robots.alohamini.aloha_mini.cfg",
+        "embodichain_robots.tianji.marvin.cfg",
+        "embodichain_robots.agilex.cobotmagic.cfg",
+        "embodichain_robots.franka.panda",
+        "embodichain_robots.flexiv.rizon4s.cfg",
+        "embodichain_robots.the_robot_studio.so101.cfg",
+        "embodichain_robots.universal_robots.ur_robot",
+        "embodichain_robots.dexforce.w1.utils",
     ):
         module = import_module(module_name)
         if hasattr(module, "get_data_path"):
@@ -321,7 +329,6 @@ def local_robot_assets(monkeypatch, tmp_path):
         "CobotMagic",
         "DexforceW1",
         "FrankaPanda",
-        "FrankaPandaPgi",
         "FlexivRizon4S",
         "SO101Follower",
         "URRobot",
@@ -359,7 +366,7 @@ def test_default_control_metadata_matches_robot_configuration(
 
 def test_w1_variant_catalog_covers_body_and_independent_hand_registries():
     from embodichain_robots._catalog import ROBOT_CONFIGS, _W1_HANDS, _W1_VERSIONS
-    from embodichain_robots.dexforce_w1.types import (
+    from embodichain_robots.dexforce.w1.types import (
         DexforceW1Version,
         DexforceW1HandBrand,
     )

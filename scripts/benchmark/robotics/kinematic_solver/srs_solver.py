@@ -37,8 +37,8 @@ import psutil
 import torch
 
 from embodichain.data import get_data_path
-from embodichain_robots.dexforce_w1.params import W1ArmKineParams
-from embodichain_robots.dexforce_w1.types import (
+from embodichain_robots.dexforce.w1.params import W1ArmKineParams
+from embodichain_robots.dexforce.w1.types import (
     DexforceW1ArmSide,
     DexforceW1Version,
 )

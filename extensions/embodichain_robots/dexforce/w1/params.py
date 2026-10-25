@@ -20,11 +20,11 @@ import torch
 import numpy as np
 
 from dataclasses import dataclass, field
-from embodichain_robots.dexforce_w1.types import (
+from embodichain_robots.dexforce.w1.types import (
     DexforceW1ArmSide,
     DexforceW1Version,
 )
-from embodichain_robots.dexforce_w1.specs import get_w1_version_spec
+from embodichain_robots.dexforce.w1.specs import get_w1_version_spec
 
 
 @dataclass
