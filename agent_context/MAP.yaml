@@ -270,22 +270,23 @@ topics:
   status: active
 - id: neural-dynamics
   title: Neural Dynamics Models and Training
-  aliases: [neural dynamics, neural robot dynamics, NeRD, 神经动力学, 动力学模型训练]
+  aliases: [neural dynamics, neural robot dynamics, NeRD, 神经动力学, 动力学模型训练, NeRD 示例]
   keywords: [NeRDStateCodec, NeRDModel, DynamicsGenerationCfg,
-    DynamicsShardWriter, DynamicsWindowDataset, DynamicsTrainer,
+    DynamicsShardWriter, DynamicsWindowDataset, DynamicsTrainer, embodichain_models,
+    learning/nerd, nerd reference assets,
     官方训练精度对比]
   paths: [topics/neural-dynamics/neural-dynamics.md]
   source_of_truth:
-  - embodichain/compute/dynamics/
-  - embodichain/learning/models/nerd/
-  - embodichain/learning/dynamics/
-  - embodichain/data_pipeline/dynamics/
-  - embodichain/cli/dynamics.py
-  watch_paths: [embodichain/compute/dynamics/,
-    embodichain/learning/models/nerd/, embodichain/learning/dynamics/,
-    embodichain/data_pipeline/dynamics/,
-    tests/compute/dynamics/, tests/learning/dynamics/, tests/data_pipeline/dynamics/]
-  related_topics: [learning-layers, data-pipeline]
+  - extensions/embodichain_models/embodichain_models/dynamics/nerd/
+  - examples/learning/nerd/__main__.py
+  - examples/learning/nerd/_resources.py
+  - examples/learning/nerd/_support/
+  - examples/learning/nerd/configs/
+  watch_paths: [extensions/embodichain_models/, examples/learning/nerd/,
+    tests/models/dynamics/nerd/, tests/examples/learning/nerd/,
+    tests/test_models_package.py, docs/source/features/neural_dynamics.md,
+    docs/source/api_reference/model_catalogs.rst]
+  related_topics: [supervised-learning, learning-layers, data-pipeline, data-assets]
   status: active
 - id: learning-layers
   title: Differentiable Learning Layers
@@ -502,7 +503,7 @@ topics:
     embodichain/lab/gym/envs/managers/async_datasets.py, embodichain/lab/gym/envs/embodied_env.py, embodichain/lab/scripts/run_task.py,
     tests/data_pipeline/, embodichain/cli/dataset.py, tools/lerobot_export/, examples/ods/simple_bc_demo/,
     docs/source/features/online_data.md, docs/source/features/ods/, docs/architecture/dataset-loading-design.md]
-  related_topics: [manager-functor, env-framework, task-programs, sensor-system]
+  related_topics: [manager-functor, env-framework, task-programs, sensor-system, neural-dynamics, supervised-learning]
   status: active
 - id: robot-workspace
   title: Robot Workspace
@@ -552,5 +553,5 @@ topics:
   - embodichain/learning/sl/
   - embodichain/cli/main.py
   watch_paths: [embodichain/learning/sl/, tests/learning/sl/]
-  related_topics: [learning-layers, data-pipeline, rl-learning]
+  related_topics: [learning-layers, data-pipeline, rl-learning, neural-dynamics]
   status: active

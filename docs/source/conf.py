@@ -36,6 +36,9 @@ os.environ.setdefault(
 os.environ.setdefault("AZURE_OPENAI_API_KEY", "mock-api-key-for-docs-build")
 
 sys.path.insert(0, os.path.abspath("../.."))
+sys.path.insert(
+    0, str(Path(__file__).resolve().parents[2] / "extensions" / "embodichain_models")
+)
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 

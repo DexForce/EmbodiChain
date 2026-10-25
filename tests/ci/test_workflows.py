@@ -343,13 +343,14 @@ def test_test_job_restores_git_access_before_running_selected_tests(
     [
         None,
         "missing_robots",
+        "missing_models",
         "missing_entry_point",
         "wrong_entry_point_group",
         "foreign_package",
         "bytecode",
     ],
 )
-def test_release_guard_validates_bundled_robot_catalog(
+def test_release_guard_validates_bundled_runtime_packages(
     tmp_path: Path, invalid_contents: str | None
 ) -> None:
     """Execute the release guard against wheels, including invalid artifacts."""
@@ -382,6 +383,7 @@ def test_release_guard_validates_bundled_robot_catalog(
         "embodichain_robots/__init__.py": "",
         "embodichain_robots/_catalog.py": "ROBOT_CONFIGS = {}\n",
         "embodichain_benchmarks/__init__.py": "",
+        "embodichain_models/__init__.py": "",
         f"embodichain-{version}.data/data/share/embodichain/examples/__init__.py": "",
         f"embodichain-{version}.dist-info/METADATA": f"Version: {version}\n",
         f"embodichain-{version}.dist-info/entry_points.txt": entry_points,
@@ -391,6 +393,12 @@ def test_release_guard_validates_bundled_robot_catalog(
             path: data
             for path, data in members.items()
             if not path.startswith("embodichain_robots/")
+        }
+    elif invalid_contents == "missing_models":
+        members = {
+            path: data
+            for path, data in members.items()
+            if not path.startswith("embodichain_models/")
         }
     elif invalid_contents == "foreign_package":
         members["foreign/__init__.py"] = ""

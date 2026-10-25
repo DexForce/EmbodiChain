@@ -1,15 +1,16 @@
 # Neural Dynamics Models
 
-A neural dynamics model predicts how a robot's physical state changes under
-applied joint efforts and contact. EmbodiChain provides a simulation-independent NeRD model, trajectory
-storage, training, offline evaluation and portable export workflow. Data generation
-uses Newton's built-in analytical solvers directly and does not require a custom
-DexSim build.
+A neural dynamics model predicts physical state changes under joint efforts and
+contact. EmbodiChain bundles the simulation-independent NeRD network, codec,
+trajectory reader and SL recipe in `embodichain_models.dynamics.nerd`. Shared
+supervised updates and recovery remain in `embodichain.learning.sl`; general
+MLPs remain in `embodichain.learning.models`.
 
-[NeRD (Neural Robot Dynamics)](https://neural-robot-dynamics.github.io/) is the
-first implementation. Its causal Transformer consumes a short history of state,
-efforts and contact features, then predicts the next state. The current reference
-systems are contact-free Cartpole and free-base Ant on a static plane.
+[NeRD (Neural Robot Dynamics)](https://neural-robot-dynamics.github.io/) uses a
+causal Transformer over state, effort and contact histories. The current
+reference systems are contact-free Cartpole and free-base Ant on a static plane.
+The `learning/nerd` showcase owns preparation, collection, training commands and
+reference research. Its default training command uses the common SL recipe.
 
 ## Comparison videos
 
@@ -43,156 +44,131 @@ or [Ant video](https://huggingface.co/DexForceAI/embodichain_model/resolve/main/
 The recordings visualize the released reference models; they are not a claim of
 paper-level accuracy or equivalent behavior in arbitrary robot scenes.
 
-## Published datasets and models
+## Pinned resources
 
-Research datasets live in
-[DexForceAI/embodichain_datasets](https://huggingface.co/datasets/DexForceAI/embodichain_datasets).
-Deployable models live in
-[DexForceAI/embodichain_model](https://huggingface.co/DexForceAI/embodichain_model).
-Both repositories organize assets by model family, implementation and robot:
+The showcase prepares these resources at fixed revisions:
 
-| Reference system | Path in each repository | Deployment profile |
+| Resource | Repository | Revision |
 | --- | --- | --- |
-| Cartpole | `neural_dynamics/nerd/cartpole/v1` | Contact-free, `warp_reference`, 1/60 s |
-| Ant | `neural_dynamics/nerd/ant/v1` | Static plane, `warp_reference`, 1/60 s |
+| Dataset | [DexForceAI/embodichain_datasets](https://huggingface.co/datasets/DexForceAI/embodichain_datasets) | `b9ec58f36da99cc99a93f97adfe74ebc9fd66586` |
+| Portable model | [DexForceAI/embodichain_model](https://huggingface.co/DexForceAI/embodichain_model) | `78e581526570069410bf269b38c0c52c800b24a7` |
+| Raw teacher assets | [DexForceAI/embodichain_data](https://huggingface.co/DexForceAI/embodichain_data/tree/97e202e41fe7fb504656a6b163291305e400780d/demo/nerd/reference_assets/v1) | `97e202e41fe7fb504656a6b163291305e400780d` |
 
-Dataset directories contain a manifest and HDF5 shards with explicit
-train/validation/test trajectory splits. Each trajectory stores T+1 states and T
-efforts/contact inputs. Windows cannot cross trajectory or split boundaries.
-Model directories contain `weights.pt` and `manifest.json`, including network
-configuration, normalization buffers, codec, timestep and physical identity.
-These are inference exports; resumable training checkpoints are local training
-outputs, not part of the published model package.
+Datasets and models use `neural_dynamics/nerd/<robot>/v1`, where `<robot>` is
+`cartpole` or `ant`. Raw assets use `demo/nerd/reference_assets/v1`; the verified
+archive includes the URDF/XML, attribution and license. These downloaded
+payloads are stored outside Git and the wheel. The model implementation and its
+third-party license ship in the main EmbodiChain wheel with the same version.
 
-The dataset and model cards describe the generating solver, supported dependency
-versions, data size and evaluation limits. In particular, long-horizon Ant
-predictions can drift. Assess the model against its matching analytical solver
-for the intended motion and prediction horizon before using it downstream.
+Dataset manifests publish trajectory-level train/validation/test splits and
+physical provenance. Trajectories have T+1 states and T effort/contact inputs;
+windows cannot cross trajectories or splits. Portable models contain
+`weights.pt` and `manifest.json`, with the network, normalization, codec,
+timestep and physical identity. They are inference exports, not resumable
+training checkpoints. Dataset/model cards describe dependency and evaluation
+limits; long-horizon Ant predictions can drift.
 
-## Download and evaluate
+## Prepare and evaluate
 
-Run from the repository root. The Hugging Face client is an EmbodiChain
-dependency. Download one matching dataset/model pair:
+These commands also work from an installed wheel outside the checkout:
+
+```bash
+embodichain run-example learning/nerd prepare --robot cartpole --resource-root ./outputs/nerd-resources
+embodichain run-example learning/nerd eval --robot cartpole --resource-root ./outputs/nerd-resources --device cpu
+```
+
+Use `--robot ant` for Ant. `prepare` verifies pinned manifests, shards, weights
+and reference asset hashes. Add `--assets-only` to prepare only teacher assets,
+or `--local-files-only` to require an existing verified cache without network
+access. Without `--resource-root`, the showcase uses
+`EMBODICHAIN_NERD_RESOURCE_ROOT`, otherwise the cache under `XDG_CACHE_HOME` or
+`~/.cache/embodichain/examples/nerd`. Evaluation writes
+`outputs/nerd/<robot>/offline.json` unless overridden with `--output`.
+
+Offline evaluation measures held-out transitions and does not start a simulator.
+It does not establish accumulated rollout accuracy. Published Scene-generated
+trajectories retain their original physical identity; the independent direct
+Newton collector uses `nerd-direct-newton-builder-v1`. A shared schema or profile
+name does not make different solvers, versions or construction paths identical.
+
+## Train, recover and export
+
+After preparation, train through the default common SL recipe:
+
+```bash
+embodichain run-example learning/nerd train --robot cartpole --resource-root ./outputs/nerd-resources --device cuda:0 --output-dir ./outputs/nerd/cartpole/train
+embodichain run-example learning/nerd export --checkpoint ./outputs/nerd/cartpole/train/last.pt --output ./outputs/nerd/cartpole/export
+embodichain run-example learning/nerd eval --robot cartpole --resource-root ./outputs/nerd-resources --device cpu --model ./outputs/nerd/cartpole/export --output ./outputs/nerd/cartpole/trained-eval.json
+```
+
+`--device cpu` is also supported for training. The shipped `sl.train.yaml`
+configures 1,000 updates; this bounded example does not claim full convergence.
+The default output is `outputs/nerd/<robot>/train`. Resume with the same recipe
+and resources using `train --resume PATH/last.pt`; choose an artifact-free output
+for a new run. Recovery checks data, recipe, feature order and run identity.
+Different or newer metric history is preserved and requires a fresh destination.
+The final SL checkpoint is not a claim of validation-selected accuracy.
+
+The generic entry point accepts the same installable factory without example
+bootstrap. Copy `examples/learning/nerd/configs/<robot>/sl.train.yaml`, set
+`data.path` to the prepared dataset and `trainer.output_dir` to a fresh output,
+then run:
+
+```bash
+embodichain train-sl --config /path/to/recipe.yaml
+embodichain train-sl --config /path/to/recipe.yaml --resume /path/to/train/last.pt
+```
+
+Relative paths in a common SL recipe resolve from the working directory. Its
+factory is `embodichain_models.dynamics.nerd.sl_recipe:build_supervised_trainer`.
+Export accepts both SL checkpoints and historical NeRD checkpoints and preserves
+floating dtype, normalization, ordered features and attention policy. Export
+destinations must be new directories.
+
+## Teacher collection and historical experiments
+
+Prepare reference assets before invoking the independent collector:
+
+```bash
+embodichain run-example learning/nerd prepare --robot cartpole --resource-root ./outputs/nerd-resources --assets-only
+embodichain run-example learning/nerd generate --robot cartpole --resource-root ./outputs/nerd-resources --device cpu --output-dir ./outputs/nerd/cartpole/generated
+```
+
+The default collection preset is a bounded smoke workflow. Generation uses
+Newton's built-in analytical solvers without DexSim's custom solver/Scene
+extension. Its manifest commits the candidate cursor and rejection evidence
+with shards. Rejection-only progress preserves data identity; legacy sidecars
+remain readable, but resuming requires matching collector source and physical
+identity.
+
+Explicit `dynamics.train.*.yaml` configurations in the showcase select the
+historical trainer. It retains its NeRD checkpoint format and comparison
+sampling/scheduling, including historical fine-tuning and shared sample-order
+options. Its `best.pt` is a model-only selected snapshot for export; `last.pt`
+is resumable and retains the selected best weights. These options are separate
+from default SL training. See the showcase's [research protocol](https://github.com/DexForce/EmbodiChain/blob/main/examples/learning/nerd/research/acceptance.md)
+for frozen source revisions, paired-seed gates and historical evidence limits.
+Moving code or rerunning a smoke does not rerun those frozen experiments.
+
+## Use the model in PyTorch
 
 ```python
-from huggingface_hub import snapshot_download
-
-robot = "cartpole"  # or "ant"
-prefix = f"neural_dynamics/nerd/{robot}/v1"
-snapshot_download(
-    repo_id="DexForceAI/embodichain_datasets",
-    repo_type="dataset",
-    allow_patterns=[f"{prefix}/*"],
-    local_dir="outputs/datasets",
-)
-snapshot_download(
-    repo_id="DexForceAI/embodichain_model",
-    allow_patterns=[f"{prefix}/*"],
-    local_dir="outputs/models",
-)
-```
-
-Evaluate the saved test transitions without starting a simulator:
-
-```bash
-embodichain dynamics eval --config extensions/embodichain_tasks/configs/tasks/classic_control/cartpole/dynamics.eval.pretrained.yaml
-```
-
-The pretrained configuration reads the downloaded paths above. Replace
-`cartpole` with `ant` for Ant. Use `--device cpu` or `--device cuda:0` to choose
-the tensor device. Offline evaluation measures held-out transition prediction;
-it does not measure accumulated rollout error.
-
-The released datasets were collected through the matching Newton/Scene
-integration. The independent collector below builds a new Newton model directly;
-its manifests use a separate `nerd-direct-newton-builder-v1` physical identity.
-Both datasets share the same state/contact schema and can be trained and evaluated
-here. Do not treat different model-building paths or solver versions as identical
-physical systems, or use offline transition error as a live rollout measurement.
-
-## Generate data, train and export
-
-The workflow configurations are under
-`extensions/embodichain_tasks/configs/tasks/classic_control/<robot>/`.
-They configure `embodichain dynamics` commands and are separate from runnable
-Gym deployment configs.
-
-For a short local workflow, use the smoke presets:
-
-```bash
-embodichain dynamics generate --config extensions/embodichain_tasks/configs/tasks/classic_control/cartpole/dynamics.generate.smoke.yaml
-embodichain dynamics train --config extensions/embodichain_tasks/configs/tasks/classic_control/cartpole/dynamics.train.smoke.yaml
-embodichain dynamics export --checkpoint outputs/dynamics/cartpole/smoke/train/best.pt --output outputs/dynamics/cartpole/smoke/export
-embodichain dynamics eval --config extensions/embodichain_tasks/configs/tasks/classic_control/cartpole/dynamics.eval.smoke.yaml
-```
-
-Smoke presets use a small network and short budget to exercise the workflow.
-Full presets use the reference network scale and a substantially longer budget.
-Neither preset name is an accuracy qualification.
-
-Collection commits its candidate cursor and rejection records in the same
-manifest update as the shard. Rejection-only progress does not change training
-data identity. Historical progress-file layouts remain readable; continuing a
-collection still requires the recorded collector source and physical identity.
-
-To train on a downloaded dataset, copy `dynamics.train.full.yaml`, then set
-`dataset` to the downloaded robot's `v1` directory and `output_dir` to a new
-training directory. Preserve its model feature dimensions and history length.
-Run the copied configuration with `embodichain dynamics train --config PATH`,
-then export its validation-selected `best.pt` with the `export` command.
-
-Training checkpoints retain model, optimizer, normalization, RNG and committed
-sampling progress. Continue the same run with `train --resume PATH/last.pt`.
-Initialize a new run from an inference export with `train --fine-tune PATH`.
-Each run records its identity in `run.json`; fresh training and fine-tuning require
-an artifact-free destination. Resuming into an occupied directory requires the
-same run identity. If a destination has a different selected best model or newer
-or incomplete metric history, use a fresh directory to preserve that evidence.
-Historical checkpoints without a
-run identity can also recover into a fresh directory.
-
-New `best.pt` files contain the validation-selected model and its own step, and
-support export rather than exact optimizer recovery. `last.pt` retains the best
-weights so recovery into another directory can recreate `best.pt` even without
-later validation improvement. Export and reload preserve the saved floating
-dtype and normalization. Input feature order must remain unchanged when resuming.
-Export destinations must be new directories. Paths written in configuration
-files resolve relative to the file; explicit CLI path overrides resolve relative
-to the working directory.
-
-The same NeRD model/objective also uses the shared supervised trainer:
-
-```bash
-embodichain train-sl --config extensions/embodichain_tasks/configs/tasks/classic_control/cartpole/sl.train.yaml
-embodichain train-sl --config extensions/embodichain_tasks/configs/tasks/classic_control/ant/sl.train.yaml
-```
-
-These bounded recipes use the common SL checkpoint format and resume through
-`train-sl --resume PATH`. The historical `dynamics` CLI keeps its own checkpoint
-format; both use the same supervised optimizer update and physical-target loss.
-
-## Use the exported model in PyTorch
-
-Load tensor weights and their recorded normalization buffers:
-
-```python
-from embodichain.learning.models.nerd import load_model
+from embodichain_models.dynamics.nerd import load_model
 
 model, manifest = load_model(
-    "outputs/models/neural_dynamics/nerd/cartpole/v1", device="cpu"
+    "outputs/nerd-resources/models/neural_dynamics/nerd/cartpole/v1",
+    device="cpu",
 )
 ```
 
-`NeRDStateCodec` and `encode_batch` construct features from the dataset's state,
-effort and contact fields. The model accepts feature windows and valid history
-lengths; the training and evaluation workflows use this same preprocessing.
+The codec and `integration.encode_batch` construct named feature windows from
+state, effort and contact records. `model(inputs)` predicts every token;
+`model.evaluate(inputs, valid_lengths)` selects each row's last valid history
+position. Both preserve input gradients. The [official model API](../api_reference/model_catalogs.rst)
+describes the runtime model, data and objective components.
 
-Live Scene stepping, `solver_type: nerd`, and differentiable Gym integration are
-provided separately by the [neural dynamics solver PR](https://github.com/DexForce/EmbodiChain/pull/822).
-The comparison videos above were produced using that integration; they are
-reference recordings, not a command available in this offline workflow.
-
-Keep state transforms in {mod}`embodichain.compute.dynamics`, model/checkpoint
-code in {mod}`embodichain.learning.models.nerd`, training in
-{mod}`embodichain.learning.dynamics.workflow`, and trajectory storage/generation in
-{mod}`embodichain.data_pipeline.dynamics`.
+Live Scene stepping and differentiable Gym integration are separate consumers,
+tracked in the [neural dynamics solver PR](https://github.com/DexForce/EmbodiChain/pull/822).
+The comparison videos above remain reference recordings from that integration;
+they do not claim that this offline showcase provides a native simulation solver
+or reproduces paper-scale training.

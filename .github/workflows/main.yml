@@ -569,6 +569,7 @@ jobs:
               "embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml",
               "embodichain_robots/__init__.py",
               "embodichain_robots/_catalog.py",
+              "embodichain_models/__init__.py",
           }
           with ZipFile(wheels[0]) as wheel:
               members = set(wheel.namelist())
@@ -603,6 +604,7 @@ jobs:
                       "embodichain_tasks/",
                       "embodichain_robots/",
                       "embodichain_benchmarks/",
+                      "embodichain_models/",
                       f"embodichain-{version}.data/data/share/embodichain/examples/",
                       dist_info,
                   )

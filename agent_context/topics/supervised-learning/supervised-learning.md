@@ -1,8 +1,10 @@
 # Supervised learning (SL)
 
 `embodichain.learning.sl` owns common supervised optimizer updates and offline
-training orchestration. Models remain in `learning.models`; numerical state and
-geometry operations remain in `compute`; source storage belongs to data adapters.
+training orchestration. Shared MLPs and feature normalization remain in
+`learning.models`; concrete model families and their model-specific adapters live
+in the bundled `embodichain_models` extension. Generic numerical state and geometry
+operations remain in `compute`; source storage belongs to data adapters.
 
 ## Entry points
 
@@ -17,6 +19,10 @@ geometry operations remain in `compute`; source storage belongs to data adapters
 - `embodichain train-sl --config FILE [--resume FILE]` lazily resolves a
   `factory: module:function`. The factory receives the full model/data/objective/
   optimizer/trainer/evaluation configuration and returns a `SupervisedTrainer`.
+- The [NeRD recipe](../neural-dynamics/neural-dynamics.md) is an installable factory
+  at `embodichain_models.dynamics.nerd.sl_recipe:build_supervised_trainer`.
+  The core does not import the model extension or example helpers. The NeRD
+  showcase's default `train` command uses this same common recipe.
 
 Objectives own loss masks, normalization, integration and multi-step graph
 construction. The optimizer does not infer action semantics or detach histories.
