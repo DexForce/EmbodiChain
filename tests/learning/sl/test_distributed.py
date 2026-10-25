@@ -196,6 +196,7 @@ def _build_recovery(path: Path, rank: int) -> SupervisedTrainer:
         random.random()
         np.random.random(3)
         torch.rand(5)
+        torch.randint(10, (3,), generator=trainer.sampler)
         # BC-style checkpoint publication inside a rank-zero callback must not hang.
         trainer.save(path / "selected.pt")
         with (path.parent / f"{path.name}-validation-rank{rank}.jsonl").open(
@@ -330,6 +331,71 @@ def _failure_worker(rank: int, directory: Path) -> None:
         dist.barrier()
 
 
+def _artifact_worker(rank: int, directory: Path) -> None:
+    def build(output: Path) -> SupervisedTrainer:
+        trainer = _build_recovery(output, rank)
+        trainer.evaluate = None
+        trainer.cfg.validation_interval = 0
+        return trainer
+
+    source = build(directory / "source")
+    collision = build(source.output)
+    source.fit(stop_after=2)
+    original = {
+        name: (source.output / name).read_bytes()
+        for name in ("metrics.jsonl", "last.pt", "run.json")
+    }
+    with pytest.raises(RuntimeError, match="another run"):
+        collision.fit(stop_after=1)
+    for name, content in original.items():
+        assert (source.output / name).read_bytes() == content
+
+    foreign = build(directory / "foreign")
+    foreign.fit(stop_after=1)
+    candidate = build(foreign.output)
+    before = _snapshot(candidate)
+    with pytest.raises(RuntimeError, match="another run"):
+        candidate.resume(source.output / "last.pt")
+    _assert_tree_equal(_snapshot(candidate), before)
+
+    for history in ("newer", "incomplete"):
+        if rank == 0:
+            (source.output / "metrics.jsonl").write_bytes(
+                original["metrics.jsonl"]
+                + (
+                    b'{"num_updates": 3}\n'
+                    if history == "newer"
+                    else b'{"num_updates":'
+                )
+            )
+        dist.barrier()
+        log = (source.output / "metrics.jsonl").read_bytes()
+        candidate = build(source.output)
+        before = _snapshot(candidate)
+        with pytest.raises(RuntimeError, match="history"):
+            candidate.resume(source.output / "last.pt")
+        _assert_tree_equal(_snapshot(candidate), before)
+        assert (source.output / "metrics.jsonl").read_bytes() == log
+        dist.barrier()
+
+    # Previously published DDP checkpoints have no run ID. They still recover
+    # exactly, but must acquire their new identity in a fresh destination.
+    if rank == 0:
+        state = torch.load(source.output / "last.pt", weights_only=False)
+        state.pop("run_id")
+        torch.save(state, directory / "legacy.pt")
+    dist.barrier()
+    recovered = build(directory / "legacy-recovered")
+    recovered.resume(directory / "legacy.pt")
+    recovered.fit(stop_after=3)
+    saved = torch.load(recovered.output / "last.pt", weights_only=False)
+    assert (
+        saved["run_id"]
+        == json.loads((recovered.output / "run.json").read_text())["run_id"]
+    )
+    assert saved["learner"]["num_updates"] == 3
+
+
 def _distributed_worker(
     rank: int, group_file: str, directory: str, scenario: str
 ) -> None:
@@ -346,6 +412,8 @@ def _distributed_worker(
             _weighted_worker(rank)
         elif scenario == "errors":
             _failure_worker(rank, Path(directory))
+        elif scenario == "artifacts":
+            _artifact_worker(rank, Path(directory))
         else:
             _recovery_worker(rank, Path(directory), scenario)
     finally:
@@ -406,6 +474,12 @@ def test_restart_preserves_rank_rng_sampling_buffers_and_single_writer(
 
 def test_rank_failures_reach_all_workers_without_partial_update(tmp_path: Path) -> None:
     _spawn("errors", tmp_path)
+
+
+def test_output_identity_and_history_admission_reaches_all_ranks(
+    tmp_path: Path,
+) -> None:
+    _spawn("artifacts", tmp_path)
 
 
 def test_torchrun_cli_initializes_cleans_up_and_resumes(tmp_path: Path) -> None:

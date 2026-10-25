@@ -42,6 +42,7 @@ Distributed checkpoints retain each rank's RNG, sampler and buffers and require
 the same world size for exact recovery. Inside rank 0's validation callback only,
 a save uses the previously gathered committed-update snapshot without a new
 collective; ordinary save calls require every rank to participate.
+
 `learning/sl/_artifacts.py` owns run identities and output-history admission for
 both SL and historical NeRD trainers. A fresh run claims `run.json`; resuming an
 occupied directory requires the checkpoint's matching run identity. Checkpoints

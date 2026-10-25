@@ -40,8 +40,9 @@ a separate run, copy `cpu.yaml` to `/tmp/sl-single-cpu.yaml` and set its
 python -m embodichain train-sl --config /tmp/sl-single-cpu.yaml
 ```
 
-Each fresh run needs an artifact-free output directory. The trainer writes
-`metrics.jsonl`, `step_100.pt`, `step_200.pt` and `last.pt` on rank 0; the validation
+Each fresh run needs an artifact-free output directory. Rank 0 claims its durable
+identity in `run.json` and writes `metrics.jsonl`, `step_100.pt`, `step_200.pt` and
+`last.pt`; the validation
 MSE appears every 50 updates as `validation/mse`. These launch commands illustrate
 the execution path, without claiming a multi-GPU speedup for this tiny model.
 
@@ -72,8 +73,28 @@ OMP_NUM_THREADS=1 torchrun --standalone --nnodes=1 --nproc-per-node=2 \
 
 A fresh destination preserves the original 200-update result when restoring its
 older 100-update snapshot. To resume an interrupted run from its latest snapshot,
-use the original directory only if its metric history is not ahead of that
-snapshot. Checkpoints are trusted local PyTorch files.
+use the original directory only when `run.json` matches the checkpoint's run
+identity and its complete metric history is not ahead of that snapshot.
+Checkpoints made before run identities were added require a fresh destination;
+their next save records a run identity. Checkpoints are trusted local PyTorch files.
+
+The installed NeRD factory uses this same launch path. After preparing the data
+and checking the paths in its recipe, launch it with two available GPUs:
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1 OMP_NUM_THREADS=1 \
+  torchrun --standalone --nnodes=1 --nproc-per-node=2 \
+  -m embodichain train-sl \
+  --config examples/learning/nerd/configs/cartpole/sl.train.yaml
+```
+
+Its factory is `embodichain_models.dynamics.nerd.sl_recipe:build_supervised_trainer`.
+The existing precision, causal attention, normalization and loss-mask settings
+remain recipe-owned. Each rank loads the dataset and keeps its own resident
+cache, so budget memory per worker. Validation runs on rank 0 with its unwrapped
+model. If a validation callback calls `trainer.save()`, that save uses the
+committed state captured from all ranks before validation; calling `save()`
+elsewhere requires every rank to participate.
 
 The CLI handles process-group setup and cleanup automatically. Programmatic
 launchers can use `embodichain.learning.sl.distributed_run(device)` around model
