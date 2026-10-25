@@ -35,7 +35,9 @@ Preserve these coupled result rules in `motion_generator.py`:
   and invalidates accelerations. Unchanged samples retain native derivatives.
 - `uses_sparse_joint_waypoints` lets a backend receive `start_qpos` plus goals
   without generic pre-interpolation. `preserve_plan_samples` keeps its native
-  grid and derivatives through normalization. TrapezoidalPlanner declares both.
+  grid and derivatives through normalization. TrapezoidalPlanner declares both;
+  TOPPRA preserves its solved native samples. Explicit native sampling options
+  remain authoritative over a generic facade count.
 - Failed rows hold the supplied start pose unless the backend declares
   `preserve_failed_plan_positions`; NeuralPlanner uses that capability to keep
   partial rollout evidence while reporting failure.
@@ -101,6 +103,17 @@ containing rest. Planner outputs retain float32 and quantity sampling retains
 the existing integer coercion, independently of backend or input precision.
 Interval bounds are conservative; timing need not match the former external
 TOPPRA package. Tiny real moves must retain positive duration.
+A hand hold inserted into a moving path needs a solved rest boundary, not only
+native time sampling. `ToppraPlanOptions.stop_at_waypoints` is an opt-in TIME
+mode owned numerically by `_toppra_stopped.py`: solve adjacent waypoint pairs at
+rest, conservatively extend each segment to exact control intervals, and merge
+valid row prefixes. Shared goals retain zero velocity; failed rows remain zero
+and stationary/tail rows retain endpoint holds. This changes intermediate path
+geometry and timing; default spline/quantity behavior remains unchanged.
+The benchmark adapter enables this mode only when the Atomic host supplies
+`atomic_plan_options(control_dt=...)`. Primitive sample counts remain lower
+bounds, and compiled control-grid checks still decide timing validity. NMG keeps
+its complete request and original rollout budget.
 
 Warp constructs splines, bounds, controllable sets and samples on the input
 device. It honors the current Torch stream and reads a scalar to size output.
@@ -182,6 +195,13 @@ and overshoots a typical arm's velocity limit several times over. Setting
 the shared entry point below; it resamples the path, so positions and poses
 change with the timing, and it cannot reduce the path's own jerk. Default
 remains `None`, which preserves the nominal-timing behavior.
+
+`PlanResult.policy_rollout_positions` and `policy_rollout_lengths` retain the
+original policy states and per-row valid prefixes before retiming. Sample zero
+is the initial state; padded terminal holds do not represent further controls.
+The facade preserves these diagnostics even if output samples change or the
+output plan fails. External completion-step evaluation must match constraints
+on those original states, independently of planner success and retimed output.
 
 Runtime/training frame differences must be expressed through explicit policy
 frame and TCP transforms. Target/FK quaternions follow the shared

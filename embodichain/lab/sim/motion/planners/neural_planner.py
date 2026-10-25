@@ -202,9 +202,16 @@ class _OnnxPolicy:
             ) from exc
 
         options = ort.SessionOptions()
+        # Respect the host's CPU budget, including isolated benchmark workers;
+        # ORT's default otherwise creates its own machine-sized thread pool.
+        options.intra_op_num_threads = torch.get_num_threads()
+        options.inter_op_num_threads = 1
         options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         self.session = ort.InferenceSession(
             str(path), sess_options=options, providers=providers
+        )
+        logger.log_info(
+            "NMG ONNX execution providers: " + ", ".join(self.session.get_providers())
         )
         inputs = self.session.get_inputs()
         outputs = self.session.get_outputs()
@@ -577,13 +584,13 @@ class NeuralPlanner(BasePlanner):
         active_idx = torch.zeros(b, dtype=torch.long, device=self.device)
         positions = [qpos.clone()]
         xpos_list = [self._fk_matrix(qpos, control_part)]
+        ee_pose = self._policy_pose_xyzw(xpos_list[0])
         converged = torch.zeros(b, dtype=torch.bool, device=self.device)
         path_lengths = torch.ones(b, dtype=torch.int32, device=self.device)
         max_steps = int(options.max_steps or self._max_steps)
 
         with torch.no_grad():
             for _ in range(max_steps):
-                ee_pose = self._fk_pose_xyzw(qpos, control_part)
                 obs = self._build_obs(
                     qpos[:, : self._action_dim],
                     ee_pose,
@@ -617,7 +624,9 @@ class NeuralPlanner(BasePlanner):
                 xpos_list.append(self._fk_matrix(qpos, control_part))
                 path_lengths += not_converged.to(path_lengths.dtype)
 
-                ee_pose = self._fk_pose_xyzw(qpos, control_part)
+                # The updated FK supplies both arrival checks and the next
+                # observation; qpos stays unchanged between those consumers.
+                ee_pose = self._policy_pose_xyzw(xpos_list[-1])
                 reached = self._is_active_reached(
                     qpos[:, : self._action_dim],
                     ee_pose,
@@ -674,6 +683,8 @@ class NeuralPlanner(BasePlanner):
             accelerations=accelerations_t,
             xpos_list=xpos_t,
             dt=dt,
+            policy_rollout_positions=positions_t,
+            policy_rollout_lengths=path_lengths,
         )
 
     def _retimed_result(
@@ -747,6 +758,8 @@ class NeuralPlanner(BasePlanner):
             accelerations=retimed.accelerations,
             xpos_list=poses,
             dt=retimed.dt,
+            policy_rollout_positions=positions,
+            policy_rollout_lengths=path_lengths,
         )
 
     def _retimed_is_executable(
@@ -958,10 +971,6 @@ class NeuralPlanner(BasePlanner):
 
     def _fk_matrix(self, qpos: torch.Tensor, control_part: str) -> torch.Tensor:
         return self.robot.compute_fk(qpos=qpos, name=control_part, to_matrix=True)
-
-    def _fk_pose_xyzw(self, qpos: torch.Tensor, control_part: str) -> torch.Tensor:
-        """Return the policy-frame FK pose as ``xyz + xyzw``."""
-        return self._policy_pose_xyzw(self._fk_matrix(qpos, control_part))
 
     def _policy_pose_xyzw(self, fk_matrix: torch.Tensor) -> torch.Tensor:
         """Map ``(M, 4, 4)`` runtime TCP poses to policy-frame ``xyz + xyzw``."""

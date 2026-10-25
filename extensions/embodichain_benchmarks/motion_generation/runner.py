@@ -18,9 +18,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from collections.abc import Mapping
+import os
+import tempfile
+from collections.abc import Iterator, Mapping
+from contextlib import closing
 from copy import deepcopy
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
 
@@ -92,6 +95,7 @@ class BenchmarkRunResult:
     trials_path: Path
     records: tuple[TrialRecord, ...]
     aggregates: dict[str, list[dict[str, object]]]
+    planner_metadata: tuple[PlannerMetadata, ...] = ()
 
 
 def resolve_device(requested: str) -> torch.device:
@@ -125,6 +129,8 @@ class BenchmarkRunner:
         video: VideoRecordCfg | None = None,
         adapters: Mapping[str, type[PlannerAdapter]] | None = None,
         case_manifest: str | Path | None = None,
+        execution: Mapping[str, object] | None = None,
+        quality_batch_size: int = 1,
     ) -> None:
         self.adapters = dict(adapters or {})
         for name, adapter in self.adapters.items():
@@ -137,6 +143,23 @@ class BenchmarkRunner:
         suite = self.suite
         self.device = resolve_device(device)
         self.headless = headless
+        self.execution = {
+            "mode": "serial",
+            "workers": 1,
+            "pid": os.getpid(),
+            "torch_threads": torch.get_num_threads(),
+            "torch_interop_threads": torch.get_num_interop_threads(),
+            "device": str(self.device),
+            "timing_comparable": True,
+            "solver_rng_contract": "backend_owned",
+            **dict(execution or {}),
+        }
+        if type(quality_batch_size) is not int or quality_batch_size < 1:
+            raise ValueError("quality_batch_size must be a positive integer.")
+        self.quality_batch_size = quality_batch_size
+        self.execution["quality_batch_size"] = quality_batch_size
+        if quality_batch_size > 1:
+            self.execution["timing_comparable"] = False
         self.output_root = Path(output_root)
         self.video = VideoRecordCfg() if video is None else video
         self.embodiment_resolution: EmbodimentResolution = resolve_embodiment(
@@ -161,6 +184,22 @@ class BenchmarkRunner:
                 raise ValueError(
                     "Replay population conflicts with suite tracks or version."
                 )
+        if quality_batch_size > 1:
+            if (
+                self.replay_cases is None
+                or any(
+                    track.scenario != "free_space"
+                    for track in suite.evaluation_tracks()
+                )
+                or any(spec.adapter != "nmg_onnx" for spec in self.planner_specs)
+            ):
+                raise ValueError(
+                    "Quality batching requires frozen Free-space NMG-only replay."
+                )
+            from ._quality_batching import case_groups
+
+            # Validate all inputs before creating any simulator.
+            list(case_groups(self.replay_cases, quality_batch_size))
         if suite.embodiment is None:
             self.robot_provider = create_robot_provider(suite.robot)
         else:
@@ -202,6 +241,11 @@ class BenchmarkRunner:
 
     def _append(self, writer: TrialJsonlWriter, record: TrialRecord) -> None:
         """Retain and immediately persist one raw record."""
+        if self.execution["timing_comparable"] is False:
+            record = replace(
+                record,
+                metadata={**record.metadata, "benchmark_execution": self.execution},
+            )
         self.records.append(record)
         writer.append(record)
 
@@ -681,6 +725,47 @@ class BenchmarkRunner:
                 )
                 return
 
+            if self.quality_batch_size > 1:
+                from ._quality_batching import case_groups
+
+                groups = list(case_groups(supported_cases, self.quality_batch_size))
+                self._run_quality_batch(
+                    writer,
+                    sim,
+                    robot,
+                    adapter,
+                    metadata,
+                    groups[0],
+                    provider,
+                    TrialPhase.COLD,
+                    -1,
+                )
+                for group in groups:
+                    for repeat in range(self.suite.protocol.warmup_trials):
+                        self._run_quality_batch(
+                            writer,
+                            sim,
+                            robot,
+                            adapter,
+                            metadata,
+                            group,
+                            provider,
+                            TrialPhase.WARMUP,
+                            repeat,
+                        )
+                    for repeat in range(self.suite.protocol.measured_trials):
+                        self._run_quality_batch(
+                            writer,
+                            sim,
+                            robot,
+                            adapter,
+                            metadata,
+                            group,
+                            provider,
+                            TrialPhase.MEASURED,
+                            repeat,
+                        )
+                return
             self._run_plan_call(
                 writer,
                 sim,
@@ -724,31 +809,131 @@ class BenchmarkRunner:
             finally:
                 adapter.close()
 
-    def run(self) -> BenchmarkRunResult:
-        """Run the suite and write all required artifacts."""
-        run_dir = create_run_directory(self.output_root, self.suite.name)
-        self._run_dir = run_dir
-        write_resolved_suite(run_dir / "resolved_suite.yaml", self.suite)
-        write_json(run_dir / "environment.json", environment_metadata())
-        writer = TrialJsonlWriter(run_dir / "trials.jsonl")
-        planner_config_hashes = {
-            spec.id: stable_hash(spec.config) for spec in self.planner_specs
-        }
+    def _run_quality_batch(
+        self,
+        writer: TrialJsonlWriter,
+        sim: SimulationManager,
+        robot: "Robot",
+        adapter: PlannerAdapter,
+        metadata: PlannerMetadata,
+        cases: list[BenchmarkCase],
+        provider: ScenarioProvider,
+        phase: TrialPhase,
+        repeat: int,
+    ) -> None:
+        """Plan a compatible batch once, then validate every original case."""
+        from ._quality_batching import EvaluationRobotRow, pack_cases, split_result
 
-        print("=" * 60)
-        print("Motion Generation Benchmark")
-        print("=" * 60)
-        enabled_tracks = self.suite.evaluation_tracks()
-        if self.suite.embodiment is not None:
-            for track in enabled_tracks:
-                self.robot_provider.configure_track(track)
-        print(
-            f"suite={self.suite.suite_version} device={self.device} "
-            f"tracks={','.join(track.id for track in enabled_tracks)} "
-            f"planners={','.join(spec.id for spec in self.planner_specs)}"
+        packed = pack_cases(cases, self.quality_batch_size)
+        provider.reset_case(sim, robot, packed, self.control_part)
+        planner_case = deepcopy(packed)
+        measured = timed_call(
+            lambda: _capture(lambda: provider.plan_case(adapter, planner_case))
         )
+        result, error = measured.result
+        contract_error = (
+            None if error is not None else provider.plan_contract_error(result)
+        )
+        for row, case in enumerate(cases):
+            info = self._trial_metadata(provider, case, metadata)
+            info["execution_batch"] = {
+                "id": packed.case_id,
+                "row": row,
+                "source_case_ids": [value.case_id for value in cases],
+                "capacity": self.quality_batch_size,
+                "padding_rows": self.quality_batch_size - len(cases),
+            }
+            if row == 0:
+                # Exactly one batch observation, never fabricated per-case latency.
+                info["batch_measurement"] = {
+                    key: getattr(measured, key)
+                    for key in (
+                        "cost_time_ms",
+                        "cpu_delta_mb",
+                        "gpu_delta_mb",
+                        "peak_gpu_mb",
+                    )
+                }
+            status, failure_code, failure_message = "ok", None, None
+            evaluation = None
+            if error is not None or contract_error is not None:
+                status = "error"
+                failure_code = (
+                    "planner_exception"
+                    if error is not None
+                    else "planner_contract_error"
+                )
+                failure_message = str(error if error is not None else contract_error)
+                outcomes = provider.failure_outcomes(case, failure_code)
+            elif phase in (TrialPhase.COLD, TrialPhase.WARMUP):
+                outcomes = ()
+            else:
+                try:
+                    individual = split_result(
+                        result, row, retimed=adapter.timing_is_solved
+                    )
+                    evaluation = provider.evaluate_case(
+                        individual,
+                        case,
+                        EvaluationRobotRow(robot, row),
+                        self.control_part,
+                        self.suite,
+                        planning_time_ms=0.0,
+                        timing_is_solved=adapter.timing_is_solved,
+                    )
+                    conflicts = {
+                        key
+                        for key, value in evaluation.metadata.items()
+                        if key in info and info[key] != value
+                    }
+                    if conflicts:
+                        raise ValueError(
+                            f"Scenario changed pre-plan metadata: {sorted(conflicts)}"
+                        )
+                    info.update(evaluation.metadata)
+                    outcomes = evaluation.outcomes
+                except (
+                    Exception
+                ) as exc:  # noqa: BLE001 - persist row-local validation errors
+                    status, failure_code, failure_message = (
+                        "error",
+                        "metric_evaluation_error",
+                        str(exc),
+                    )
+                    outcomes = provider.failure_outcomes(case, failure_code)
+            if status == "error":
+                outcomes = tuple(
+                    replace(
+                        outcome,
+                        timed_motion_valid=False if adapter.timing_is_solved else None,
+                    )
+                    for outcome in outcomes
+                )
+            self._append(
+                writer,
+                TrialRecord(
+                    **self._base_record(metadata, case, phase, repeat=repeat),
+                    status=status,
+                    failure_code=failure_code,
+                    failure_message=failure_message,
+                    metadata=info,
+                    outcomes=outcomes,
+                    trajectory_duration_s=(
+                        None if evaluation is None else evaluation.trajectory_duration_s
+                    ),
+                    trajectory_waypoints=(
+                        None if evaluation is None else evaluation.trajectory_waypoints
+                    ),
+                ),
+            )
 
-        for track in enabled_tracks:
+    def _case_batches(
+        self,
+    ) -> Iterator[
+        tuple[SimulationManager, "Robot", ScenarioProvider, list[BenchmarkCase]]
+    ]:
+        """Own each simulator lifetime while yielding immutable resolved inputs."""
+        for track in self.suite.evaluation_tracks():
             provider = create_scenario_provider(track.scenario)
             batch_sizes = (
                 provider.batch_sizes(self.suite, track)
@@ -765,7 +950,11 @@ class BenchmarkRunner:
                 sim: SimulationManager | None = None
                 runtime_configured = False
                 try:
-                    sim, robot = self._create_simulation(batch_size)
+                    sim, robot = self._create_simulation(
+                        self.quality_batch_size
+                        if self.quality_batch_size > 1
+                        else batch_size
+                    )
                     runtime_configured = True
                     provider.create_runtime_entities(sim, self.suite, track)
                     # GPU physics topology must be complete before its first
@@ -824,24 +1013,7 @@ class BenchmarkRunner:
                     cases = resolved_cases
                     provider.bind_cases(cases)
                     self.cases.extend(cases)
-                    # Persist each frozen population before evaluating candidates.
-                    write_case_manifest(
-                        run_dir / "case_manifest.json",
-                        self.cases,
-                        suite=self.suite,
-                        planner_config_hashes=planner_config_hashes,
-                        embodiment_resolution=self.embodiment_resolution,
-                    )
-                    for spec in self.planner_specs:
-                        self._run_adapter(
-                            writer,
-                            sim,
-                            robot,
-                            spec,
-                            cases,
-                            provider.required_capabilities,
-                            provider,
-                        )
+                    yield sim, robot, provider, cases
                 finally:
                     try:
                         if runtime_configured:
@@ -853,6 +1025,83 @@ class BenchmarkRunner:
                                 sim.destroy(exit_process=False)
                             finally:
                                 SimulationManager.flush_cleanup_queue()
+
+    def prepare_case_manifest(self, output: str | Path) -> Path:
+        """Generate inputs without constructing or running a planner.
+
+        Args:
+            output: New case manifest path. Existing files are never replaced.
+
+        Returns:
+            The complete hashed manifest with resolved embodiment provenance.
+        """
+        output = Path(output)
+        if output.exists():
+            raise FileExistsError(output)
+        for _sim, _robot, _provider, _cases in self._case_batches():
+            pass
+        output.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=output.parent, delete=False) as temporary:
+            temporary_path = Path(temporary.name)
+        try:
+            write_case_manifest(
+                temporary_path,
+                self.cases,
+                suite=self.suite,
+                embodiment_resolution=self.embodiment_resolution,
+            )
+            # Publish complete inputs atomically without replacing a concurrent
+            # caller's corpus after the initial existence check.
+            output.hardlink_to(temporary_path)
+        finally:
+            temporary_path.unlink(missing_ok=True)
+        return output
+
+    def run(self) -> BenchmarkRunResult:
+        """Run the suite and write all required artifacts."""
+        run_dir = create_run_directory(self.output_root, self.suite.name)
+        self._run_dir = run_dir
+        write_resolved_suite(run_dir / "resolved_suite.yaml", self.suite)
+        write_json(run_dir / "environment.json", environment_metadata())
+        writer = TrialJsonlWriter(run_dir / "trials.jsonl")
+        write_json(run_dir / "execution.json", self.execution)
+        planner_config_hashes = {
+            spec.id: stable_hash(spec.config) for spec in self.planner_specs
+        }
+
+        print("=" * 60)
+        print("Motion Generation Benchmark")
+        print("=" * 60)
+        enabled_tracks = self.suite.evaluation_tracks()
+        if self.suite.embodiment is not None:
+            for track in enabled_tracks:
+                self.robot_provider.configure_track(track)
+        print(
+            f"suite={self.suite.suite_version} device={self.device} "
+            f"tracks={','.join(track.id for track in enabled_tracks)} "
+            f"planners={','.join(spec.id for spec in self.planner_specs)}"
+        )
+
+        with closing(self._case_batches()) as batches:
+            for sim, robot, provider, cases in batches:
+                # Persist inputs before evaluating any candidate on this batch.
+                write_case_manifest(
+                    run_dir / "case_manifest.json",
+                    self.cases,
+                    suite=self.suite,
+                    planner_config_hashes=planner_config_hashes,
+                    embodiment_resolution=self.embodiment_resolution,
+                )
+                for spec in self.planner_specs:
+                    self._run_adapter(
+                        writer,
+                        sim,
+                        robot,
+                        spec,
+                        cases,
+                        provider.required_capabilities,
+                        provider,
+                    )
 
         write_case_manifest(
             run_dir / "case_manifest.json",
@@ -935,6 +1184,15 @@ class BenchmarkRunner:
                 "cold_plan_ms appears only on the row matching that batch's first measured "
                 "case; other waypoint rows show N/A.",
                 *self.notes,
+                *(
+                    [
+                        "Parallel quality execution: raw wall times and memory are "
+                        "contended and excluded from timing aggregates. Run performance "
+                        "replay serially for comparable latency."
+                    ]
+                    if self.execution["timing_comparable"] is False
+                    else []
+                ),
             ],
         )
         print("=" * 60)
@@ -947,4 +1205,5 @@ class BenchmarkRunner:
             trials_path=writer.path,
             records=tuple(self.records),
             aggregates=aggregates,
+            planner_metadata=tuple(metadata),
         )

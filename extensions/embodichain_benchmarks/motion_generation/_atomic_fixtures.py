@@ -132,6 +132,8 @@ def create_parallel_jaw_grasp_pose_generator(
     *,
     n_sample: int,
     force_refresh: bool,
+    max_candidates: int = 50,
+    approach_alignment_angle: float | None = None,
     opening_margin: float = 0.03,
     gripper_model: ParallelJawGripperModelCfg | None = None,
 ) -> AntipodalGraspPoseGenerator:
@@ -140,6 +142,9 @@ def create_parallel_jaw_grasp_pose_generator(
     Args:
         n_sample: Number of antipodal contact-pair samples.
         force_refresh: Whether to regenerate cached object annotations.
+        max_candidates: Maximum ranked grasp candidates returned per object.
+        approach_alignment_angle: Optional hard TCP-Z angle in radians before
+            candidate deduplication and ranking; proposal cones are unchanged.
         opening_margin: Additional clearance used for grasp collision checks.
         gripper_model: Explicit fixture geometry; omission uses the PGI sample.
 
@@ -148,7 +153,11 @@ def create_parallel_jaw_grasp_pose_generator(
     """
     return AntipodalGraspPoseGenerator(
         TUTORIAL_PARALLEL_JAW_MODEL if gripper_model is None else gripper_model,
-        algorithm_cfg=AntipodalGraspPoseGeneratorCfg(sample_count=n_sample),
+        algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
+            sample_count=n_sample,
+            max_candidates=max_candidates,
+            approach_alignment_angle=approach_alignment_angle,
+        ),
         collision_cfg=ParallelJawGraspCollisionCfg(
             opening_margin=opening_margin,
             point_sample_density=0.012,

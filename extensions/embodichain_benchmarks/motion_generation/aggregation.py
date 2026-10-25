@@ -24,14 +24,14 @@ from collections.abc import Iterable
 from dataclasses import replace
 
 from ._aggregation_policy import (
-    _PopulationIndex,
     _case_rates,
+    _PopulationIndex,
     _report_identity,
     _source_unsupported,
     _unsupported_case_ids,
 )
-from .metrics.stats import nearest_rank_percentile, _seed_cluster_interval
 from .generalization import aggregate_generalization
+from .metrics.stats import _seed_cluster_interval, nearest_rank_percentile
 from .models import BenchmarkCase, CaseOutcome, PlannerMetadata, TrialPhase, TrialRecord
 
 __all__ = ["aggregate_generalization", "aggregate_results"]
@@ -122,6 +122,65 @@ def _dynamic_measurement_status(outcomes: Iterable[CaseOutcome]) -> str:
     ):
         return "finite"
     return "unavailable"
+
+
+def _policy_completion_summary(
+    measured: list[TrialRecord],
+    cases: list[BenchmarkCase],
+    *,
+    measured_trials: int,
+    excluded_case_ids: frozenset[str],
+) -> dict[str, object]:
+    """Summarize original controls with case weights and all-case CDF denominators."""
+    names = (
+        "policy_trace_coverage_rate",
+        "policy_completion_rate",
+        "policy_completion_steps_mean",
+        "policy_steps_used_mean",
+        "policy_completion_curve",
+    )
+    population = [case for case in cases if case.case_id not in excluded_case_ids]
+    by_case: dict[str, list[CaseOutcome]] = defaultdict(list)
+    for record in measured:
+        by_case[record.case_id].extend(record.outcomes)
+    if not population or not any(
+        row.policy_steps_used is not None
+        for case in population
+        for row in by_case[case.case_id]
+    ):
+        return dict.fromkeys(names)
+    completion_mass: Counter[int] = Counter()
+    known_mass = used_sum = 0.0
+    maximum_step = 0
+    for case in population:
+        rows = by_case[case.case_id]
+        denominator = max(len(rows), case.batch_size * measured_trials)
+        weight = 1.0 / (len(population) * denominator)
+        for row in rows:
+            if row.policy_steps_used is None:
+                continue
+            known_mass += weight
+            used_sum += weight * row.policy_steps_used
+            maximum_step = max(maximum_step, row.policy_steps_used)
+            if row.policy_completion_step is not None:
+                completion_mass[row.policy_completion_step] += weight
+    completed_mass = sum(completion_mass.values())
+    cumulative = 0.0
+    curve = []
+    for step in sorted({0, maximum_step, *completion_mass}):
+        cumulative += completion_mass[step]
+        curve.append({"step": step, "completion_rate": cumulative})
+    return {
+        "policy_trace_coverage_rate": known_mass,
+        "policy_completion_rate": completed_mass,
+        "policy_completion_steps_mean": (
+            sum(step * mass for step, mass in completion_mass.items()) / completed_mass
+            if completed_mass
+            else None
+        ),
+        "policy_steps_used_mean": used_sum / known_mass,
+        "policy_completion_curve": curve,
+    }
 
 
 def _case_macro_rate(
@@ -1050,6 +1109,12 @@ def _metric_rows(
                         / max(expected, 1)
                     ),
                     "stage_counts": stage_counts,
+                    **_policy_completion_summary(
+                        measured,
+                        rate_cases,
+                        measured_trials=measured_trials,
+                        excluded_case_ids=excluded_case_ids,
+                    ),
                     "waypoint_completion_rate": _case_macro_mean(
                         measured,
                         rate_cases,
@@ -1612,6 +1677,25 @@ def aggregate_results(
     ``track_scenarios`` must explicitly assign every case and trial track to a
     supported scenario family; report semantics are never inferred from names.
     """
+    # Parallel workers share hardware. Preserve raw timings in trial artifacts,
+    # but never publish them as isolated planner latency or memory measurements.
+    records = [
+        (
+            replace(
+                record,
+                cost_time_ms=None,
+                cpu_delta_mb=None,
+                gpu_delta_mb=None,
+                peak_gpu_mb=None,
+                execution_time_ms=None,
+                end_to_end_time_ms=None,
+            )
+            if record.metadata.get("benchmark_execution", {}).get("timing_comparable")
+            is False
+            else record
+        )
+        for record in records
+    ]
     missing_tracks = set(_track_ids(records, cases)) - track_scenarios.keys()
     if missing_tracks:
         raise ValueError(

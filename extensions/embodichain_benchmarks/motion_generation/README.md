@@ -88,10 +88,42 @@ the shared motion budgets. Atomic Skills also require `atomic_action` and an
 adapter-owned `MotionGenerator`; an arbitrary free-space adapter alone does not
 provide that integration.
 
-Each call owns its simulator and returns after cleanup. Run calls serially in
-one process. The suite resources are installed with the package, so callers can
-run from any directory. Robot assets and optional cuRobo, TOPPRA or ONNX Runtime
-dependencies still follow their normal installation and asset-resolution rules.
+Each call owns its simulator and returns after cleanup. Serial execution is the
+default; host calls in one process must run serially. Optional `workers` and
+`worker_threads` distribute whole quality cases across isolated spawned processes.
+Measure throughput before increasing workers: startup, duplicated initialization
+and contention can outweigh gains. Supply `case_manifest` to reuse frozen inputs,
+or call `prepare_case_manifest(suite, output, device=...)` at a new output path
+without running a planner.
+
+Parallel execution requires installed adapters, headless mode and no video.
+Each worker retains its inputs, raw trials, console log and process outcome;
+the parent checks exact case/method/repeat coverage and recomputes aggregates
+from the complete raw population. Explicit unsupported and lifecycle-error
+records remain in the evidence. Worker failures raise and retain diagnostics.
+`execution.json` records actual concurrency, CPU threads and elapsed wall time.
+
+Parallel wall times and memory remain in raw records but are excluded from
+report timing aggregates. Performance replay requires `workers=1`. ONNX Runtime
+uses the host Torch intra-op thread budget and one inter-op thread. Serial calls
+retain caller thread settings; `worker_threads` only controls spawned workers.
+
+For frozen B=1 Free-space cases and NMG-only planners, the Python API also
+accepts `quality_batch_size=4`. This groups matching K/modality requests into
+physical execution slots and composes with spawned workers. The case manifest,
+case/seed identities, per-case validator grids and quality weights stay intact;
+unused physical slots create no extra trials. Raw valid prefixes and endpoint
+finite-difference stencils are restored before individual validation, while
+retimed zero-dt padding is removed. Shared batch measurements appear once in
+trial metadata; per-case latency fields and timing aggregates are unavailable.
+The default is one. Atomic, other backends and performance replay keep their
+declared batches; quality batching requires a precomputed case manifest.
+Backend-owned random generators are not reset per trial, so stochastic solver
+outcomes may vary with case order or sharding even though frozen inputs match.
+
+The suite resources are installed with the package, so callers can run from
+any directory. Robot assets and optional cuRobo, TOPPRA or ONNX Runtime
+dependencies follow their normal installation and asset-resolution rules.
 
 | Suite | Use |
 | --- | --- |
@@ -177,6 +209,17 @@ population with no applicable cases reports N/A consistently in metric tables
 and leaderboards. Missing supported results and runtime failures count as
 failures. Unsupported cases still reduce coverage and prevent eligibility.
 
+Policy control steps are auxiliary Free-space diagnostics. Raw outcomes retain
+`policy_steps_used`, `policy_completion_step` and strictly ordered
+`policy_waypoint_arrival_steps` on the original pre-retiming valid row prefixes.
+Initial satisfaction is step 0; missed goals and absent traces remain null.
+Raw and retimed share this definition even when retiming fails. These fields
+count policy controls, not physical completion or interpolated samples.
+Tables report trace coverage, completion rate, conditional mean completion steps,
+mean controls used and an all-case completion curve. Failures and missing cases
+stay in its case-weighted denominator; a lower conditional mean alone does not
+establish better overall quality.
+
 ## Configure a suite
 
 Copy the closest suite and change its `suite_version` when altering thresholds,
@@ -255,9 +298,11 @@ screened `sampling_method: cartesian` base cases. Patterns contain `joint`,
 `position`, `orientation`, or `pose`; they repeat to K and are eligible only when
 their length is <=K. `constraint_pattern_design: full` applies every eligible
 pattern. `balanced` applies every singleton plus one rotating pattern per other
-length, using the declared seed order. `base_case_id` retains pairing. There is
-no additional FK random-walk population. A screened witness certifies goal
-reachability, not a collision-free or dynamically feasible path.
+length, using the declared seed order. `base_case_id` retains pairing.
+Patterns that expand to identical modality sequences at a configured K are
+rejected to preserve unique case identities. There is no additional FK random-walk
+population. A screened witness certifies goal reachability, not a collision-free
+or dynamically feasible path.
 
 All projected cases share maximum absolute per-joint error and independent constrained-component
 matching. Validation retains native states and deterministically subdivides
@@ -273,11 +318,13 @@ to NMG; Position requires coincident runtime/policy TCP origins. The common
 Joint/FullPose comparison has its own canonical table. Legacy populations without
 `constraint_patterns` retain their existing scoring contract.
 
-`run_benchmark(..., case_manifest=path)` replays an existing hashed manifest
-instead of generating inputs. It validates schema, case hash, identities and
-shapes; tracks, version and robot must match the suite. Replay can select declared
-performance subsets and batch sizes without another task generator. Keep timing
-replicas separate from quality denominators in the experiment orchestrator.
+`run_benchmark(..., case_manifest=path)` replays a hashed manifest after checking
+schema, case hashes, shapes, tracks, version and robot. Replay requires the
+host-written `resolved_embodiment` identity: `embodiment_id`, `config_hash` and
+provider source. Changed robot configuration or embodiment overrides are rejected
+before simulation even when the public name and DOF match. Declared performance
+subsets and batch sizes retain that identity without regenerating tasks; keep
+timing replicas separate from quality denominators.
 
 Omitting `sampling_method` retains the legacy `joint_templates` population.
 Its L/S/wrist templates describe joint displacements; those labels do not certify
@@ -300,8 +347,9 @@ The measured-difficulty table classifies each environment row independently on
 conditioning (`near_singular_threshold`, default 0.02) and joint margin
 (`near_limit_threshold`, default 0.04); near-limit and near-singular can overlap.
 Missing repeats and unsupported populations follow the same rate policy.
-Declared
-`held_out` domains do not verify a model's training split.
+Declared `held_out` domains do not verify a model's training split.
+
+### Atomic tasks
 
 Atomic tracks own their objects, skill configurations, physics and pose
 randomization. Packaged suites select `physics.clock: compiled`: compilation
@@ -317,6 +365,67 @@ rows. The supplied pose-batch suite uses fixed cube grasps; articulated Slide
 shares one target-local grasp across its translated rows. Track configs may
 select `grippers` for multiple hands and `fixtures` for static supports. Cases
 can retain extra objects through `scene_object_poses`.
+
+With the Atomic control period, TOPPRA enables
+`ToppraPlanOptions.stop_at_waypoints`: adjacent joint-goal pairs stop at rest and
+are conservatively extended onto the exact control grid before composition.
+Shared goals remain explicit, row prefixes merge before terminal padding, and
+`MotionGenerator` preserves solved native samples. This retains stops for gripper
+holds. Non-Atomic calls keep the default continuous spline; NMG's request and
+rollout budget are unchanged. Phase sample counts remain lower bounds, with
+physical execution and independent compiled timing checks determining the result.
+
+The physical standard is `atomic-skill-v2`. Pour checks peak rotation, lift and
+retention, plus return to the initial **full orientation** during terminal settle
+within the existing rotation tolerance. Catalogues intending upright-object tilt
+must choose a horizontal object-local axis. Preserve v1 artifacts and use new
+protocol identities for this changed success definition.
+
+Reference preparation first uses exact sequential IK, then may use bounded
+search inside the original position/rotation arrival region for rejected rows.
+FK and the original joint-bound tolerance check each recovered state against the
+original target; probe poses never replace requests. Successful rows stay frozen,
+while unresolved rows stop preparation with an error. Endpoint evidence does not
+certify a trajectory, execution or physical success; failed search does not prove
+impossibility.
+
+The following optional selection rules change frozen populations and require
+reviewed identities before comparison. Keep rejected proposals and control
+artifacts, and replay identical selected cases for every method:
+
+- **AxisAlign:** `AxisAlignOptions.alignment_twist_rad` selects the free rotation
+  about the target axis, as a scalar or one value per row; zero keeps the
+  historical shortest arc. `alignment_offset_m` supplies a world translation
+  from the lifted object centre, as a vector or one vector per row; zero keeps
+  the fixed-centre target. Instead of an offset, `alignment_inward_candidates_m`
+  accepts finite, nonnegative, strictly increasing distances starting at zero.
+  Preparation samples one original batched grasp pool and tries shifts toward
+  the control-part base in world XY. Each row freezes its first complete
+  independent IK chain in offset and existing grasp/half-turn order. Accepted
+  grasps/offsets stay fixed while unresolved rows continue; resetting the sampler
+  seed separately per row would change the original batched stream.
+- **Pour:** `grasp_approach_candidates` declares ordered
+  `{yaw_offset_rad, max_candidates}` entries. World-Z offsets preserve approach
+  elevation, begin at zero and share the original `grasp_max_candidates` budget.
+  Each direction uses one original batched pool; each row freezes its first
+  complete IK chain and the actual PickUp prefix receives that direction. The
+  relative approach bound is unchanged.
+- **Pour/AxisAlign:** `grasp_filter_before_ranking` applies the hard TCP-z
+  approach bound before NMS, collision, cost ranking and truncation. Omission
+  keeps legacy pool construction. Public
+  `AntipodalGraspPoseGeneratorCfg.approach_alignment_angle` uses radians and is
+  distinct from ray/approach-variant proposal cones. Filtering can change retained
+  grasps even when the final bound is unchanged.
+- **MoveHeldObject/Place:** `target_candidate_count` defaults to 1 and allows up
+  to 32. One retains the original generation path. Larger values try that target
+  first, then vary only goal-local position/rotation streams, retaining the root
+  seed, task frame, object, grasp, start, offset, randomization amplitudes and
+  workspace-shell row radii. Each row freezes its first independently qualified
+  complete endpoint chain; manifests record attempted goals and selected indices.
+  Exhaustion is an error. This conditioning can change target angle/yaw marginals.
+
+Frozen manifests retain selected values and rejected searches; backend errors
+propagate. Selection rules do not certify path feasibility or physical success.
 
 ### Embodiments
 
@@ -422,10 +531,8 @@ defines evidence boundaries, stage progression and success semantics.
   Physical contact replay does not certify collision safety against non-target
   links or environment geometry. Dual-arm suites use TOPPRA; coordinated skills
   currently reject cuRobo.
-- General per-row geometry-sampled antipodal candidate selection remains
-  single-environment; the supplied single-arm pose-batch suites use Franka + PGI.
-- Collision-aware comparison, latency-budget sweeps, subprocess isolation and
-  recovery benchmarks remain future work; seed-cluster intervals are available.
+- Collision-aware comparison, latency-budget sweeps and recovery benchmarks
+  remain future work; process isolation and seed-cluster intervals are available.
 - Embodiment sensor acquisition and Task Program runtime services are outside
   this host. Other benchmark domains under `scripts/benchmark/` still require
   a source checkout.
@@ -444,11 +551,3 @@ Python environment:
 ```bash
 python -m pytest -q tests/benchmark/motion_generation
 ```
-
-Frozen `case_manifest` replay requires the host-written `resolved_embodiment`
-identity (`embodiment_id`, `config_hash`, and provider source). A changed robot
-configuration or embodiment override is rejected before simulation, even when
-its public name and DOF are unchanged. Declared performance subsets preserve
-that same identity. Constraint patterns that expand to identical modality
-sequences at a configured K are rejected to keep case identities and quality
-populations unique.

@@ -251,12 +251,19 @@ class PlannerAdapter(ABC):
             )
         return motion_generator
 
-    def atomic_plan_options(self) -> "PlanOptions | None":
+    def atomic_plan_options(
+        self, *, control_dt: float | None = None
+    ) -> "PlanOptions | None":
         """Return planner options for Atomic Skill calls that leave them unset.
 
         Atomic Skill providers stay planner-neutral and usually build motion
         policies without backend options.  A backend whose own defaults cannot
         plan such calls returns the options it uses for free-space cases.
+
+        Args:
+            control_dt: Host control period in seconds, when known. Backends may
+                sample a solved trajectory on this clock to avoid interpolation
+                that would invalidate its motion limits.
 
         Returns:
             Options applied to every motion policy without ``plan_opts``, or
