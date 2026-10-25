@@ -17,7 +17,7 @@ isolated environment inheriting `py311` if the main environment is shared.
 ```bash
 git clone https://github.com/lucidrains/rigidformer.git /tmp/rigidformer-reference
 git -C /tmp/rigidformer-reference checkout 4ab4edac7271b49484748d6bf8086a497f13272d
-python scripts/experiments/rigidformer/acceptance.py \
+embodichain run-example learning/rigidformer \
   --reference /tmp/rigidformer-reference \
   --output /tmp/rigidformer-acceptance --threads 4
 ```
@@ -56,7 +56,7 @@ solver qualification. The reference's collision limitations remain visible.
 the 32-window and full-panel final evaluations are outside that interval.
 
 For a user-supplied fixed geometry corpus, the generic training entry point uses
-`factory: embodichain.learning.sl.rigidformer:build_rigidformer_trainer`. Its
+`factory: embodichain_models.dynamics.rigidformer.sl_recipe:build_rigidformer_trainer`. Its
 tensor-only archive contains `positions[E,T,O,P,3]`, `properties[E,O,A]` (or
 `[E,O,P,A]`) and `step_dt`; optional valid lengths retain the source field
 names. This regular episode-uniform sampler is separate from the reference's
@@ -81,3 +81,14 @@ Full point lengths above 128 remain available with unchanged upstream math.
 The 48-point Box2D reference does not enter the restricted layout. Focused
 optional-model tests change finite padded geometry, attributes and targets and
 check objective loss/gradients and valid rollout points at 48 and 128 points.
+
+## Source-bound evidence
+
+The relocation preserves the pinned upstream model, recipe math, parameter keys,
+geometry schema, fixed seeds, budgets and acceptance gates above. New runs bind
+`candidate_sources_sha256` in `manifest.json` to the executing model, adapters,
+shared trainer and private runner. Existing reports are immutable historical
+evidence for their recorded source, data and runtime; they are not relabeled as
+results for a newer commit. A short paired run verifies relocation parity but
+continues to report pending full acceptance under the unchanged 5-seed/1,000-step
+threshold.

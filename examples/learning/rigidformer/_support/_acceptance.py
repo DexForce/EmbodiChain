@@ -37,13 +37,16 @@ import numpy as np
 import torch
 from torch.utils.data.dataloader import default_collate
 
-from embodichain.learning.models.rigidformer import (
+from embodichain_models.dynamics.rigidformer.model import (
     RIGIDFORMER_REVISION,
     RigidFormerCfg,
     RigidFormerModel,
 )
 from embodichain.learning.sl import SupervisedLearner
-from embodichain.learning.sl.rigidformer import RigidFormerObjective, rigidformer_batch
+from embodichain_models.dynamics.rigidformer.supervised import (
+    RigidFormerObjective,
+    rigidformer_batch,
+)
 
 __all__: list[str] = []
 
@@ -433,6 +436,32 @@ def _loss_curve_gate(
     }
 
 
+def _candidate_sources() -> dict[str, str]:
+    """Bind newly generated evidence to the executing model and training bytes."""
+    from importlib import import_module
+
+    modules = (
+        "embodichain_models.dynamics.rigidformer.model",
+        "embodichain_models.dynamics.rigidformer.data",
+        "embodichain_models.dynamics.rigidformer.supervised",
+        "embodichain_models.dynamics.rigidformer.sl_recipe",
+        "embodichain.learning.sl.learner",
+        "embodichain.learning.sl.trainer",
+        "embodichain.learning.sl._artifacts",
+        "embodichain.learning.sl.types",
+    )
+    sources = {
+        name: hashlib.sha256(
+            Path(import_module(name).__file__).read_bytes()
+        ).hexdigest()
+        for name in modules
+    }
+    sources["reference_runner"] = hashlib.sha256(
+        Path(__file__).read_bytes()
+    ).hexdigest()
+    return sources
+
+
 def _run(args: argparse.Namespace) -> None:
     torch.set_num_threads(args.threads)
     reference, verified = _load_reference(args.reference)
@@ -451,6 +480,7 @@ def _run(args: argparse.Namespace) -> None:
     }
     manifest = {
         "reference_revision": RIGIDFORMER_REVISION,
+        "candidate_sources_sha256": _candidate_sources(),
         "reference_dataset_sha256": verified["examples/box2d_dataset.py"]["sha256"],
         "verified_sources": verified,
         "device": args.device,

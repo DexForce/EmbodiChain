@@ -3342,13 +3342,13 @@
     },
     {
       "id": "neural-dynamics",
-      "label": "NeRD model extension",
+      "label": "Official dynamics models",
       "kind": "package",
       "topic_ids": [
         "neural-dynamics"
       ],
-      "summary": "Bundles the causal NeRD network, physical codec, trajectory windows and supervised recipe in the main wheel.",
-      "details": "embodichain_models.dynamics.nerd owns the concrete model, portable checkpoints, physical representations, HDF5 windows and installable SL recipe. Generic MLP/normalization and supervised orchestration stay in core. The model extension imports neither the showcase nor simulation; collection, historical training and reference research belong to the example.",
+      "summary": "Bundles NeRD and optional RigidFormer models, model-specific data adapters and shared-SL recipes in the main wheel.",
+      "details": "embodichain_models.dynamics.nerd owns portable neural dynamics and HDF5 windows; dynamics.rigidformer owns pinned geometry prediction, aligned point windows and the valid-object weighted objective. Both provide installable shared-SL factories. Generic MLP/normalization and supervised orchestration stay in core. The model extension imports neither the showcase nor simulation; collection, historical training and reference research belong to the example.",
       "boundaries": [
         "The core does not import concrete model implementations.",
         "Data/model/reference-asset payloads are external resources; numerical and physical identities remain explicit."

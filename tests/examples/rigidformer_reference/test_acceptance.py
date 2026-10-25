@@ -32,7 +32,7 @@ import pytest
 def acceptance():
     source = (
         Path(__file__).resolve().parents[3]
-        / "scripts/experiments/rigidformer/acceptance.py"
+        / "examples/learning/rigidformer/_support/_acceptance.py"
     )
     spec = importlib.util.spec_from_file_location("rigidformer_acceptance_test", source)
     module = importlib.util.module_from_spec(spec)

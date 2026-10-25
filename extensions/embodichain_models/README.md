@@ -1,7 +1,8 @@
 # Official models
 
 `embodichain_models` contains official model implementations grouped by model
-family, including `embodichain_models.dynamics.nerd`. It ships in the same
+family, including `embodichain_models.dynamics.nerd` and
+`embodichain_models.dynamics.rigidformer`. It ships in the same
 `embodichain` wheel and uses that distribution's version and dependencies. There
 is no separate model distribution, version file or model registry.
 
@@ -35,7 +36,7 @@ Use the following canonical packages for the four current model directions:
 | Ordinary state/visual BC | `embodichain_models.policy.bc` | Target for the BC follow-up; not created yet. |
 | NeRD | `embodichain_models.dynamics.nerd` | Implemented in this change. |
 | Robot world model (RWM) | `embodichain_models.dynamics.rwm` | Target for the RWM follow-up; not created yet. |
-| RigidFormer | `embodichain_models.dynamics.rigidformer` | Target for the RigidFormer follow-up; not created yet. |
+| RigidFormer | `embodichain_models.dynamics.rigidformer` | Implemented; optional pinned upstream dependency. |
 
 RWM predicts action-conditioned robot state transitions, so it belongs to
 `dynamics`. World models also describe future-state/observation prediction;
@@ -63,3 +64,10 @@ resources remain in the corresponding example. Shared MLPs and normalizers
 remain in core. All four directions use the same SL contracts regardless of
 their domain. Create a family only when its implementation lands, without empty
 placeholder directories, eager cross-family imports or a new registry.
+
+RigidFormer owns aligned point-cloud data windows, its explicit reference-geometry
+adapter, valid-object weighted objective and `sl_recipe:build_rigidformer_trainer`.
+The optional upstream import occurs at model construction. Its pinned Box2D
+reference experiment and configuration presets belong to
+`examples/learning/rigidformer/`; their frozen protocol and historical results
+retain their original source/data identities.

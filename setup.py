@@ -185,6 +185,7 @@ def main():
         package_data={
             "embodichain": ["VERSION"],
             "embodichain_models.dynamics.nerd": ["THIRD_PARTY_LICENSES"],
+            "embodichain_models.dynamics.rigidformer": ["THIRD_PARTY_LICENSES"],
             "embodichain.data": ["default_materials.json"],
             "embodichain_benchmarks.motion_generation": ["suites/*.yaml"],
             "embodichain.gen_sim.simready_pipeline.configs": ["*.json"],

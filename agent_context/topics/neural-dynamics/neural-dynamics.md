@@ -10,8 +10,8 @@ runtime registry. Shared MLPs and feature normalization stay in core
 
 The [model catalog contract](../../../extensions/embodichain_models/README.md)
 owns domain and public-import naming. Policy models predict actions; dynamics
-models predict future state or geometry. RWM and RigidFormer follow-ups use
-`dynamics.rwm` and `dynamics.rigidformer`; only `dynamics.nerd` is implemented here.
+models predict future state or geometry. NeRD and RigidFormer are implemented
+at `dynamics.nerd` and `dynamics.rigidformer`; the RWM follow-up uses `dynamics.rwm`.
 World-model naming does not introduce a parallel `world_models` domain.
 
 | Request | Owner |
@@ -38,7 +38,26 @@ Scene API. Native learned-solver deployment and functional Gym integration are
 separate consumers. There are no NeRD-specific core `compute/dynamics`,
 `data_pipeline/dynamics`, `learning/dynamics` modules or core `dynamics` command.
 
-## Resource and physical identity
+## RigidFormer geometry model
+
+`extensions/embodichain_models/embodichain_models/dynamics/rigidformer/` owns
+`model.py`, aligned CPU windows in `data.py`, objective/batch conversion in
+`supervised.py` and the installable
+`sl_recipe:build_rigidformer_trainer` factory. Package imports stay lazy; only
+model construction loads the pinned optional upstream dependency. Core SL and
+generic data-pipeline modules do not import this family. The model has no action
+input (`action_conditioned=False`) and does not qualify action gradients or APG.
+
+`embodichain run-example learning/rigidformer` runs the private Box2D comparison
+under the example's `_support/`. The [example guide](../../../examples/learning/rigidformer/README.md)
+owns source/data provenance, finite-padding and pairwise-memory boundaries; the
+[frozen protocol](../../../examples/learning/rigidformer/research/README.md) owns
+reference seeds, budgets and acceptance gates. Existing tests in
+`tests/learning/models/test_rigidformer*.py` cover the production geometry,
+weighted loss/gradient, masking, budget and exact recovery contracts. New runs
+bind executing source hashes; historical reports retain their original identity.
+
+## NeRD resource and physical identity
 
 `prepare --robot cartpole|ant --resource-root DIR` downloads the pinned dataset,
 portable model and raw reference assets. Revisions and SHA256 checks are owned by

@@ -10,10 +10,10 @@ returns TCP poses and geometric Jacobians from one FK pass, retaining dJ/dq.
 `learning/layers/` owns `KinematicsLayer` and `DifferentiableIKLayer` Torch
 module interfaces. `learning/models/` owns general MLPs, feature normalization
 and configuration-driven MLP construction. These shared components do not import
-RL, TensorDict or simulation. Concrete NeRD models, codecs and the shared-SL
-recipe live in the bundled `embodichain_models.dynamics.nerd` extension;
-teacher collection, historical training and research belong to
-`examples/learning/nerd/`. See
+RL, TensorDict or simulation. Concrete NeRD and RigidFormer models, model-specific codecs/data and shared-SL
+recipes live in the bundled `embodichain_models.dynamics` families;
+teacher collection, historical training and research belong to the corresponding
+`examples/learning/` showcase. See
 [neural dynamics](../neural-dynamics/neural-dynamics.md) for model, SL integration,
 dataset and checkpoint ownership. RL policy interfaces, actor-critic composition and
 policy registration/builders belong to `learning/rl/policies/`; RL code consumes

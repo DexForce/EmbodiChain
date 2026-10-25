@@ -25,11 +25,14 @@ import sys
 import pytest
 import torch
 
-from embodichain.learning.models.rigidformer import RigidFormerCfg, RigidFormerModel
+from embodichain_models.dynamics.rigidformer.model import (
+    RigidFormerCfg,
+    RigidFormerModel,
+)
+from embodichain_models.dynamics.rigidformer.sl_recipe import build_rigidformer_trainer
 from embodichain.learning.sl import SupervisedLearner
-from embodichain.learning.sl.rigidformer import (
+from embodichain_models.dynamics.rigidformer.supervised import (
     RigidFormerObjective,
-    build_rigidformer_trainer,
     rigidformer_batch,
 )
 
@@ -58,9 +61,11 @@ class BlockOptional(importlib.abc.MetaPathFinder):
         if fullname.split('.')[0] in {'rigidformer', 'dexsim', 'newton', 'warp'}:
             raise ImportError('blocked ' + fullname)
 sys.meta_path.insert(0, BlockOptional())
-from embodichain.learning.models.rigidformer import RigidFormerModel
-from embodichain.learning.sl.rigidformer import RigidFormerObjective
-from embodichain.data_pipeline.datasets.rigid_body import RigidBodySequenceSource
+from embodichain_models.dynamics.rigidformer import (
+    RigidFormerModel, RigidFormerObjective, RigidBodySequenceSource,
+    build_rigidformer_trainer,
+)
+assert "rigidformer" not in sys.modules
 try:
     RigidFormerModel()
 except ImportError as exc:

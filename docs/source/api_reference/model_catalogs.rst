@@ -252,3 +252,15 @@ working directory and example-runner bootstrap.
    :members: sample
 
 .. autofunction:: build_supervised_trainer
+
+RigidFormer geometry prediction
+-------------------------------
+
+The optional ``embodichain_models.dynamics.rigidformer`` family owns aligned
+geometry windows, its pinned upstream adapter, valid-object weighted objective
+and installable SL recipe. It predicts geometry without action inputs.
+
+.. toctree::
+   :maxdepth: 1
+
+   model_rigidformer

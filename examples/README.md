@@ -7,6 +7,7 @@ embodichain run-example --list
 embodichain run-example sim/motion/planners/curobo_planner --help
 embodichain run-example ods/simple_bc_demo/train --help
 embodichain run-example learning/nerd --help
+embodichain run-example learning/rigidformer --help
 embodichain run-example sim/atomic_action --skill place --variants 8
 embodichain run-example sim/atomic_action/coordinated_pickment --help
 ```
@@ -42,3 +43,7 @@ The [Atomic Skill example catalog](sim/atomic_action/README.md) owns all per-ski
 coordinated-manipulation and recovery demonstrations. The two source-checkout
 walkthroughs under `scripts/tutorials/atomic_action/` teach single-arm and dual-arm
 API composition; they reuse the canonical example setup.
+
+The [RigidFormer showcase](learning/rigidformer/README.md) owns the pinned Box2D
+reference comparison. Its installable `dynamics.rigidformer` model, geometry
+source and objective use the shared SL trainer for fixed-corpus training.

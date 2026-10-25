@@ -21,7 +21,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from embodichain.data_pipeline.datasets.rigid_body import RigidBodySequenceSource
+from embodichain_models.dynamics.rigidformer.data import RigidBodySequenceSource
 
 
 def test_geometry_windows_keep_point_identity_and_owned_storage():
