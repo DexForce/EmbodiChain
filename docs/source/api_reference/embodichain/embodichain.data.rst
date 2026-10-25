@@ -32,6 +32,21 @@ task configs.
    :undoc-members:
    :show-inheritance:
 
+Robot Asset Datasets
+--------------------
+
+Robot dataset classes register the prefixes used by ``get_data_path()`` and
+``embodichain data``. Most fetch their pinned archives on first construction.
+
+``SO101FollowerAssets`` resolves the official follower URDF, STLs and motor
+reference directly from a pinned The Robot Studio revision. File SHA256 checks
+and the shared dataset lock protect the complete dependency cache. The original
+license and source reference files are retained alongside the meshes.
+
+.. automodule:: embodichain.data.assets.so101_assets
+   :members:
+   :show-inheritance:
+
 Constants
 ---------
 

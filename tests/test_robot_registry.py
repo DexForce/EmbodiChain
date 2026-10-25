@@ -301,6 +301,7 @@ def local_robot_assets(monkeypatch, tmp_path):
         "embodichain_robots.tianji_marvin",
         "embodichain_robots.cobotmagic",
         "embodichain_robots.franka_panda",
+        "embodichain_robots.so101",
         "embodichain_robots.ur_robot",
         "embodichain_robots.dexforce_w1.utils",
     ):
@@ -318,6 +319,7 @@ def local_robot_assets(monkeypatch, tmp_path):
         "DexforceW1",
         "FrankaPanda",
         "FrankaPandaPgi",
+        "SO101Follower",
         "URRobot",
         "DualArmRobot",
         "ur3",
