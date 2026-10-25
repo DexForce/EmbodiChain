@@ -427,7 +427,6 @@ def generate_task_program_bundle(
         if (
             fit_grasp_assets
             or native_pick_exploration
-            or requested_runtime_profile != "default"
             or twist_mass_source
             or twist_grip_depth_m is not None
             or twist_support_lift_m != 0.001
@@ -521,7 +520,7 @@ def generate_task_program_bundle(
         if normalized_profile == "dual_franka_pgi":
             _apply_pgi_experiment_embodiment(embodiment_payload)
         _calibrate_task_gripper_opening(embodiment_payload)
-    if runtime_profile == CONTACT_PROFILE:
+    if runtime_profile == CONTACT_PROFILE and frozen is None:
         from .experiment_policy import apply_contact_embodiment
 
         apply_contact_embodiment(embodiment_payload)
@@ -981,7 +980,8 @@ def generate_task_program_bundle(
         scene,
         stability_presets=stability["presets"],
     )
-    if experiment or requested_runtime_profile == AUTO_PROFILE:
+    # Selecting fixed physics must not tighten the public auto placement policy.
+    if experiment or requested_runtime_profile == AUTO_PROFILE or frozen is not None:
         from .experiment_policy import apply_placement_tolerances
 
         apply_placement_tolerances(stability, program_payload)

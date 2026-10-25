@@ -251,6 +251,115 @@ def test_native_pick_exploration_rejects_other_robots(
         )
 
 
+@pytest.mark.parametrize(
+    "logical_profile",
+    ["default", "contact_experiment", "composition_experiment", "auto"],
+)
+def test_frozen_physical_model_keeps_public_placement_policy_and_physics(
+    tmp_path, logical_profile
+):
+    from dataclasses import replace
+    from embodichain.gen_sim.task_engine._task_program.physical_inputs import (
+        load_frozen_physical_input,
+    )
+    from embodichain.gen_sim.task_engine.config import TaskEnginePlanningCfg
+
+    TaskEnginePlanningCfg(
+        physical_reference="model",
+        runtime_profile=logical_profile,
+        fit_grasp_assets=False,
+    )
+
+    graph = _graph()
+    graph["nodes"][0]["call"] = {
+        "kind": "pick",
+        "object": "bottle",
+        "resources": {"primary": "left"},
+    }
+    graph["nodes"][1]["call"] = {
+        "kind": "registered",
+        "call_id": "simulation.place_relative",
+        "arguments": {"object": "bottle", "reference": "pad", "relation": "on"},
+        "resources": {"primary": "left"},
+    }
+    graph["task_groups"][1]["success"] = {"kind": "call_completed"}
+    scene = _prepared_axis_scene(tmp_path)
+    pad_path = tmp_path / "pad.glb"
+    trimesh.creation.box(extents=(0.15, 0.01, 0.15)).export(pad_path)
+    pad = {
+        "uid": "pad",
+        "shape": {"shape_type": "Mesh", "fpath": str(pad_path)},
+        "init_pos": [0.1, 0.2, 0.725],
+        "body_type": "kinematic",
+    }
+    scene = replace(
+        scene,
+        rigid_objects=(*scene.rigid_objects, pad),
+        planner_objects=(
+            *scene.planner_objects,
+            {**pad, "runtime_uid": "pad", "role": "rigid_object"},
+        ),
+        uid_map={**scene.uid_map, "pad": "pad"},
+    )
+    _, reference = generate_task_program_bundle(
+        graph,
+        scene,
+        tmp_path / "reference",
+        robot_profile="dual_ur10",
+        runtime_profile="auto",
+    )
+    frozen = load_frozen_physical_input(
+        scene, reference.root, robot_profile="dual_ur10"
+    )
+    digest = frozen.physical_digest
+    _, selected = generate_task_program_bundle(
+        graph,
+        frozen,
+        tmp_path / "selected",
+        robot_profile="dual_ur10",
+        runtime_profile=logical_profile,
+    )
+    frozen.assert_unchanged()
+    assert frozen.physical_digest == digest
+    options = load_config(selected.integration)["profile"]["action_options"]["pick"]
+    assert options["hand_interp_steps"] == (
+        24 if logical_profile == "contact_experiment" else 12
+    )
+    for field in ("scene", "embodiment", "execution_policy"):
+        assert load_config(getattr(selected, field)) == load_config(
+            getattr(reference, field)
+        )
+
+    def position_tolerances(paths):
+        program = load_config(paths.program)
+        return [
+            validator["position_tolerance"]
+            for item in program["program"]["items"]
+            for validator in item.get("validators", [])
+            if validator["kind"] == "object_near_relative_target"
+        ]
+
+    assert position_tolerances(reference) and set(position_tolerances(reference)) == {
+        0.1
+    }
+    assert position_tolerances(selected) == position_tolerances(reference)
+    selected_constraints = load_config(selected.root / "task_program/constraints.json")
+    placement = [
+        value["position_tolerance"]
+        for value in selected_constraints["presets"].values()
+        if value["kind"] in {"placement", "supported_placement"}
+    ]
+    assert placement and set(placement) == {0.1}
+    _, legacy = generate_task_program_bundle(
+        graph,
+        scene,
+        tmp_path / "legacy",
+        robot_profile="dual_ur10",
+        runtime_profile="default",
+    )
+    assert set(position_tolerances(legacy)) == {0.05}
+
+
 def _prepared_axis_scene(tmp_path: Path) -> PreparedScene:
     mesh_path = tmp_path / "bottle.glb"
     trimesh.creation.box(extents=(0.06, 0.24, 0.06)).export(mesh_path)

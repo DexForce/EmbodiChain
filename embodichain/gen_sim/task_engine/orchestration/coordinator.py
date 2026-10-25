@@ -155,10 +155,6 @@ class TaskEngineCoordinator:
                 raise ValueError(
                     "Selected physical input forbids native_pick_exploration."
                 )
-            if runtime_profile != "default":
-                raise ValueError(
-                    "Selected physical input requires runtime_profile=default."
-                )
             selected_physical.assert_unchanged()
             output = Path(output_dir).expanduser().resolve()
             inputs = [Path(name).resolve() for name in selected_physical.input_files]

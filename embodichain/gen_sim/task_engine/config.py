@@ -156,8 +156,6 @@ class TaskEnginePlanningCfg:
                 raise TypeError("physical_reference must be a bundle path or None.")
             if not self.physical_reference.strip():
                 raise ValueError("physical_reference must be a non-empty bundle path.")
-            if self.runtime_profile != "default":
-                raise ValueError("physical_reference requires runtime_profile=default.")
             if self.fit_grasp_assets or self.twist_mass_source:
                 raise ValueError(
                     "physical_reference cannot be combined with physical adaptation."

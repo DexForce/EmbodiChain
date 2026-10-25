@@ -1044,6 +1044,16 @@ disabled in this mode. `selected_physical_input.json` records source/model
 differences; selection never certifies original-scene equivalence or historical
 success. Without an explicit reference, legacy graph-dependent calibration is
 unchanged; this opt-in contract is not default-wide composition isolation.
+Selecting a frozen physical model retains the public Auto entry's 100 mm
+experimental program placement policy in both post-policies and validators;
+it does not silently restore the legacy 50 mm program gate. Physical component
+digests and strict TaskSpec evaluation are unchanged. An explicit non-frozen
+`runtime_profile=default` retains its legacy policy.
+An explicit logical runtime profile may retain its motion timing and acceptance
+policy with a frozen physical reference. Material overlays, mass conversion,
+asset fitting and robot calibration remain disabled for the pinned model;
+output physical components must remain identical. Native Pick exploration is
+still forbidden with a physical reference.
 Ordinary E1 placement on another object retains its position tolerance and uses
 `supported_placement`: scaled local mesh vertices are cached per environment,
 then transformed by observed poses for vertical gap and projected support-envelope
