@@ -97,6 +97,7 @@ from embodichain.lab.sim.objects.backends.base import ArticulationViewBase
 from embodichain.lab.sim.objects.backends.newton import (
     _configure_newton_mimic_compliance,
     _stabilize_newton_mimic_target_write,
+    _supports_newton_position_targets,
 )
 from embodichain.utils.math import (
     matrix_from_euler,
@@ -2798,6 +2799,11 @@ class Articulation(BatchEntity):
         num_instances = len(local_env_ids)
         self.cfg: ArticulationCfg
 
+        write_hold_targets = (
+            not self.body_data.is_newton_backend
+            or _supports_newton_position_targets(self._spawn_result)
+        )
+
         self.restore_visual_material(env_ids=local_env_ids)
         self._restore_default_physical_properties(local_env_ids)
 
@@ -2846,8 +2852,11 @@ class Articulation(BatchEntity):
             # impulse when initialized away from their equality manifold.
             qpos = self._project_mimic_qpos(qpos)
         self.set_qpos(qpos, target=False, env_ids=local_env_ids)
-        # Set drive target to hold position.
-        self.set_qpos(qpos, target=True, env_ids=local_env_ids)
+        # Initialization uses clear_dynamics=False with no subsequent clear.
+        # Keep hold targets and mimic propagation for position-capable solvers;
+        # effort-only solvers use native reset bookkeeping without a command.
+        if write_hold_targets:
+            self.set_qpos(qpos, target=True, env_ids=local_env_ids)
 
         if clear_dynamics:
             self.clear_dynamics(env_ids=local_env_ids)

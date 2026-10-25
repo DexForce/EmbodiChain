@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<robot name="spring_slider">
+  <link name="base">
+    <inertial><mass value="1"/><inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/></inertial>
+  </link>
+  <link name="slider">
+    <inertial><mass value="2"/><inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/></inertial>
+    <visual><geometry><box size="0.1 0.1 0.1"/></geometry></visual>
+  </link>
+  <joint name="slide" type="prismatic">
+    <parent link="base"/><child link="slider"/>
+    <origin xyz="0 0 0.2"/><axis xyz="1 0 0"/>
+    <limit lower="-1" upper="1" effort="100" velocity="10"/>
+    <dynamics damping="0" friction="0"/>
+  </joint>
+</robot>

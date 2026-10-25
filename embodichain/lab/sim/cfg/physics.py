@@ -311,8 +311,10 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     requires_grad: bool = False
     """Whether to finalize the Newton model with differentiable state enabled.
 
-    EmbodiChain currently requires the Semi-implicit solver for this mode and
-    disables CUDA graph capture when gradients are enabled.
+    Requires Semi-implicit or a direct/named provider supporting the requested
+    gradient mode. The provider validates native support during model creation;
+    Scene functional calls additionally require its functional dynamics service.
+    CUDA graph capture is disabled when gradients are enabled.
     """
 
     use_cuda_graph: bool = True
@@ -349,6 +351,17 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     parameters accepted by that DexSim solver config. If omitted, EmbodiChain
     preserves DexSim's scene-aware ``AutoSolverCfg`` default. A DexSim build
     exporting ``AutoSolverCfg`` is required; no concrete-solver fallback is used.
+
+    Installed ``dexsim.newton_solvers`` entry-point names are also accepted by
+    DexSim builds with the named-extension API. For example,
+    ``{"solver_type": "simple", "stiffness": 2.0}`` selects the spring-slider
+    demonstration. Extension names are exact; options pass to their provider.
+
+    Python callers can pass DexSim's ``ProviderNewtonSolverCfg`` with a
+    ``provider_factory`` class or zero-argument factory and provider ``options``.
+    That configuration passes through directly without package discovery. The
+    SDK creates a fresh provider for each model build; pass a factory rather
+    than a live provider or solver instance.
     """
 
     collision_cfg: NewtonCollisionPipelineCfg | Mapping[str, Any] | None = field(
@@ -407,13 +420,16 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
             solver_cfg_map=solver_cfg_map,
         )
 
-        if self.requires_grad and (
-            solver_cfg is None or solver_cfg.solver_type != "semi_implicit"
+        solver_name = "auto" if solver_cfg is None else str(solver_cfg.solver_type)
+        if (
+            self.requires_grad
+            and solver_name in solver_cfg_map
+            and solver_name != "semi_implicit"
         ):
             logger.log_error(
                 "Newton gradient mode requires an explicit "
-                "solver_type='semi_implicit'; AutoSolver does not select a "
-                "differentiable solver."
+                "solver_type='semi_implicit' or a named functional extension; "
+                "AutoSolver does not select a differentiable solver."
             )
 
         collision_pipeline_cfg = None
@@ -494,11 +510,13 @@ def _normalize_newton_solver_type(solver_type: str) -> str:
         "vbdsolvercfg": "vbd",
     }
     if key not in aliases:
-        logger.log_error(
-            f"Unsupported Newton solver type '{solver_type}'. "
-            "Expected one of 'auto', 'dexuni', 'mjwarp', 'xpbd', 'semi_implicit', "
-            "'featherstone', or 'vbd'."
-        )
+        try:
+            from dexsim.engine.newton_physics import normalize_newton_solver_name
+        except ImportError as exc:
+            raise ValueError(
+                f"Solver {solver_type!r} requires a DexSim build with named solver extensions"
+            ) from exc
+        return normalize_newton_solver_name(solver_type)
     return aliases[key]
 
 
@@ -525,6 +543,10 @@ def _newton_solver_cfg_to_dexsim(
         or "auto"
     )
     normalized_solver_type = _normalize_newton_solver_type(str(configured_solver_type))
+    if normalized_solver_type not in solver_cfg_map:
+        from dexsim.engine.newton_physics import RegisteredNewtonSolverCfg
+
+        return RegisteredNewtonSolverCfg(normalized_solver_type, solver_cfg_data)
     solver_cfg_type = solver_cfg_map[normalized_solver_type]
     if normalized_solver_type == "dexuni":
         try:

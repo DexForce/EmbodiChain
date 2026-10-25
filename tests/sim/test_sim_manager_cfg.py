@@ -42,6 +42,25 @@ def test_simulation_manager_cfg_uses_default_physics_cfg() -> None:
 
 
 @pytest.mark.no_sim
+def test_optional_solver_definition_is_inspectable_without_extension_sdk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import importlib.util
+    import inspect
+
+    from dexsim.engine import newton_physics as sdk
+
+    source = importlib.util.find_spec("embodichain.lab.sim.physics.solvers.simple")
+    monkeypatch.delattr(sdk, "FunctionalDynamics", raising=False)
+    spec = importlib.util.spec_from_file_location("_simple_sdk_probe", source.origin)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert inspect.isclass(module.SimpleSolverProvider)
+    with pytest.raises(ImportError, match="FunctionalDynamics"):
+        module.SimpleSolverProvider()
+
+
+@pytest.mark.no_sim
 def test_newton_physics_cfg_owns_backend_device_default() -> None:
     """The concrete Newton default shadows the generic backend default."""
     assert PhysicsBackendCfg().device == "cpu"

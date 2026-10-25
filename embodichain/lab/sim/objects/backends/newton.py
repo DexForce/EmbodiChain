@@ -34,6 +34,23 @@ def is_newton_scene(scene: object) -> bool:
     return isinstance(scene, Scene) and scene.backend == "newton"
 
 
+def _supports_newton_position_targets(scene: Scene) -> bool:
+    """Query the finalized solver contract while preserving legacy SDK support."""
+    query = getattr(scene, "dynamics_capabilities", None)
+    if query is None:
+        from dexsim.engine import newton_physics
+
+        if hasattr(newton_physics, "NewtonSolverExtension"):
+            raise RuntimeError(
+                "Newton solver extensions require a compatible DexSim SDK with "
+                "Scene.dynamics_capabilities() for articulation initialization."
+            )
+        # Released SDKs predating extensions accept the existing target channels.
+        return True
+    fields = query().supported_control_fields
+    return fields is None or "joint_target_q" in fields
+
+
 def _create_newton_standalone_state_sync(
     model: Any,
     body_ids: Sequence[int],
