@@ -37,6 +37,8 @@ class RigidFormerCfg:
 
     The defaults match the pinned upstream Box2D experiment. The byte budget
     bounds the dense nearest-neighbour distance tensor, not total GPU memory.
+    Each distance counts at least four bytes because autocast may promote
+    reduced-precision geometry to an FP32 ``cdist`` result.
 
     Args:
         dim: Object/anchor feature width.
@@ -158,7 +160,10 @@ class RigidFormerModel(nn.Module):
                 raise ValueError(
                     "anchor_indices must index valid points in every object"
                 )
-        distance_bytes = batch * (objects * points) ** 2 * current.element_size()
+        # cdist may run in FP32 under autocast, including for FP16/BF16 inputs.
+        distance_bytes = (
+            batch * (objects * points) ** 2 * max(current.element_size(), 4)
+        )
         if distance_bytes > self.cfg.max_pairwise_bytes:
             raise ValueError(
                 f"Pairwise distances require {distance_bytes} bytes, "

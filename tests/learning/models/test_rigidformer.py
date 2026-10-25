@@ -177,11 +177,33 @@ def test_rigidformer_split_scene_weighted_loss_and_gradients_match_upstream_batc
             )
 
 
-def test_rigidformer_reference_geometry_and_distance_budget_are_explicit(geometry):
+@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float32, torch.float64])
+def test_rigidformer_reference_geometry_and_distance_budget_are_explicit(
+    geometry, dtype
+):
     pytest.importorskip("rigidformer")
     model = RigidFormerModel(RigidFormerCfg(max_pairwise_bytes=16))
     with pytest.raises(ValueError, match="Pairwise distances"):
         model(**geometry)
+    # CPU autocast promotes BF16 cdist inputs to an FP32 distance matrix.
+    previous = geometry["object_pos_prev"][:1, :1, :4].to(dtype=dtype)
+    tiny_geometry = {
+        "object_pos": previous + 0.01,
+        "object_pos_prev": previous,
+        "object_first_frame_pos": previous.clone(),
+        "vertex_properties": torch.ones(1, 1, 3, dtype=dtype),
+        "delta_times": torch.tensor([0.1]),
+        "anchor_indices": torch.arange(4).reshape(1, 1, 4),
+    }
+    with torch.no_grad(), torch.autocast("cpu", dtype=torch.bfloat16):
+        flat = previous.flatten(1, 2)
+        distances = torch.cdist(flat, flat)
+        expected_dtype = torch.float64 if dtype == torch.float64 else torch.float32
+        assert distances.dtype == expected_dtype
+        required_bytes = distances.numel() * distances.element_size()
+        model.cfg.max_pairwise_bytes = required_bytes - 1
+        with pytest.raises(ValueError, match=f"require {required_bytes} bytes"):
+            model(**tiny_geometry)
     del geometry["object_first_frame_pos"]
     with pytest.raises(ValueError, match="Missing geometry"):
         rigidformer_batch(geometry)
