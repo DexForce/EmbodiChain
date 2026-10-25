@@ -17,7 +17,7 @@ combines that snapshot with the latest
 For the complete architecture and ownership model, see
 :doc:`/overview/sim/atomic_skills/index`. For the capability matrix and visual
 demonstrations of every built-in skill, see
-:doc:`/overview/sim/atomic_skills/builtin_actions`. Canonical scene identity and
+:doc:`/overview/sim/atomic_skills/builtin_skills`. Canonical scene identity and
 snapshot/provider setup are documented in
 :doc:`/overview/task_program/scene_registry`.
 
