@@ -30,7 +30,13 @@ __all__ = ["SupervisedSource", "TensorBatchSource"]
 
 
 class SupervisedSource(Protocol):
-    """Owned batches drawn with an explicit caller-owned CPU sampling RNG."""
+    """Owned batches drawn with an explicit caller-owned CPU sampling RNG.
+
+    Sources with additional recovery constraints may provide
+    ``validate_resume() -> None``. The trainer calls this optional preflight
+    collectively before changing learning, RNG, sampler or output state.
+    Raising rejects exact recovery; saving a training snapshot remains allowed.
+    """
 
     source_id: str
 

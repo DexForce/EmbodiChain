@@ -14,6 +14,12 @@ operations remain in `compute`; source storage belongs to data adapters.
   update. Its optional numerical context covers forward, backward and clipping.
 - `TensorBatchSource` snapshots fixed CPU tensor trees and returns owned samples
   under the caller's explicit CPU generator.
+- Optional `SequenceBatchSource` in `learning/sl/sequence.py` adapts a data-pipeline
+  `BatchSource` using an explicit versioned encoder. It preserves canonical masks
+  and provenance under reserved `metadata['sequence_source']`, excluding raw
+  observations/actions there. Encoders select causal inputs and supervision;
+  model families retain action/codec/objective semantics. Core SL imports do not
+  load this bridge, ODS or the SDK. See `examples/learning/sl_data_source/`.
 - `SupervisedTrainer` in `learning/sl/trainer.py` composes a source and learner,
   saving optimizer, RNG, sampling progress, source identity and recipe semantics.
 - `embodichain train-sl --config FILE [--resume FILE]` lazily resolves a
@@ -38,6 +44,16 @@ replacement, so samples may overlap. All ranks call fitting, saving and recovery
 only rank 0 writes artifacts or runs validation through the unwrapped model.
 Schema, action/frame/timestep and numerical-policy identifiers belong in each
 recipe's checkpoint signature. Tensor sources additionally bind content identity.
+The sequence bridge defaults to refusing exact resume. Explicitly immutable,
+unbudgeted resident sources bind actual CPU content, schema, window, encoder
+version and semantic metadata (including language); storage diagnostics do not.
+Sampling checks declarations, quota and tensor versions; resume rehashes content
+in bounded blocks. An optional source `validate_resume()` preflight runs inside
+the collective checkpoint validation before any trainer state or output admission
+changes. Live buffers and delivery credits are not restored: such sources may
+train/save snapshots, but exact continuation is rejected. Acquisition, waits,
+refill and delivery debits stay source/caller-owned; encoding failures do not
+refund a delivered context.
 Distributed checkpoints retain each rank's RNG, sampler and buffers and require
 the same world size for exact recovery. Inside rank 0's validation callback only,
 a save uses the previously gathered committed-update snapshot without a new
@@ -59,4 +75,5 @@ nonfinite update boundaries, owned samples, simulator-free imports and exact
 CPU recovery with dropout, optimizer and sampling state. Model-specific
 qualification belongs to each model's acceptance recipe. The distributed tests
 exercise weighted global updates and fixed-world-size recovery with CPU/Gloo;
-the example is validated by launch smoke runs rather than example-specific tests.
+sequence tests reuse real CPU source fixtures for masks, provenance, owned output,
+quota and recovery admission. Examples use launch smoke checks, not tutorial tests.
