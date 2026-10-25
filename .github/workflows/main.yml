@@ -598,7 +598,14 @@ jobs:
               member
               for member in members
               if not member.startswith(
-                  ("embodichain/", "embodichain_tasks/", "embodichain_robots/", dist_info)
+                  (
+                      "embodichain/",
+                      "embodichain_tasks/",
+                      "embodichain_robots/",
+                      "embodichain_benchmarks/",
+                      f"embodichain-{version}.data/data/share/embodichain/examples/",
+                      dist_info,
+                  )
               )
               or "__pycache__" in member
               or member.endswith((".pyc", ".pyo"))
