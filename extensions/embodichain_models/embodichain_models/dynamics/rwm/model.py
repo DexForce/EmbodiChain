@@ -31,7 +31,7 @@ from typing import Any
 import torch
 from torch import nn
 
-from embodichain.compute.dynamics.robot_state import (
+from .robot_state import (
     integrate_robot_state,
     robot_state_features,
     robot_state_increment,
@@ -75,7 +75,7 @@ class RobotWorldModel(nn.Module):
 
     Args:
         cfg: Model dimensions and physical/control identity. Canonical states
-            have width ``18 + 2*num_joints``; see ``compute.dynamics.robot_state``.
+            have width ``18 + 2*num_joints``; see ``embodichain_models.dynamics.rwm.robot_state``.
 
     Statistics update only through :meth:`update_normalization`, never during
     :meth:`forward`. The model starts as an identity transition because its

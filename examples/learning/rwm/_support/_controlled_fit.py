@@ -18,13 +18,14 @@
 
 This is a supervised interface/gradient acceptance experiment, not a physical
 robot benchmark or a SuperMimic policy reproduction. All artifacts remain in
-the caller's output directory. Run from the repository root with py311.
+the caller's output directory. Run through ``embodichain run-example learning/rwm``.
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
+from importlib import import_module, metadata
 import resource
 import subprocess
 import json
@@ -34,13 +35,11 @@ import time
 
 import torch
 
-if __package__ in {None, ""}:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-
-from embodichain.compute.dynamics.robot_state import integrate_robot_state
+from embodichain_models.dynamics.rwm.robot_state import integrate_robot_state
 from embodichain.learning.sl import SupervisedBatch, SupervisedLearner
-from embodichain.learning.sl.rwm import RobotWorldModelObjective, build_rwm_trainer
-from embodichain.learning.models.rwm import (
+from embodichain_models.dynamics.rwm import (
+    RobotWorldModelObjective,
+    build_rwm_trainer,
     RobotWorldModel,
     RobotWorldModelCfg,
     frozen_world_model,
@@ -99,7 +98,7 @@ def main() -> None:
             args.output / f"{split}.pt",
         )
     config = {
-        "factory": "embodichain.learning.sl.rwm:build_rwm_trainer",
+        "factory": "embodichain_models.dynamics.rwm.sl_recipe:build_rwm_trainer",
         "model": {
             "num_joints": 1,
             "action_dim": 1,
@@ -158,16 +157,25 @@ def main() -> None:
         and bool(torch.isfinite(gradient).all())
         and float(gradient[:, 0].norm()) > 0
     )
-    repository = Path(__file__).resolve().parents[3]
-    sources = [
-        "scripts/experiments/rwm/controlled_fit.py",
-        "embodichain/learning/models/rwm.py",
-        "embodichain/learning/sl/rwm.py",
-        "embodichain/compute/dynamics/robot_state.py",
-        "embodichain/learning/sl/learner.py",
-        "embodichain/learning/sl/trainer.py",
-        "embodichain/learning/sl/sources.py",
-    ]
+    repository = Path(__file__).resolve().parents[4]
+    sources = {"examples/learning/rwm/_support/_controlled_fit.py": Path(__file__)}
+    for name in (
+        "embodichain_models.dynamics.rwm.model",
+        "embodichain_models.dynamics.rwm.supervised",
+        "embodichain_models.dynamics.rwm.sl_recipe",
+        "embodichain_models.dynamics.rwm.robot_state",
+        "embodichain.learning.sl.learner",
+        "embodichain.learning.sl.trainer",
+        "embodichain.learning.sl.sources",
+    ):
+        prefix = (
+            "extensions/embodichain_models/"
+            if name.startswith("embodichain_models.")
+            else ""
+        )
+        sources[f"{prefix}{name.replace('.', '/')}.py"] = Path(
+            import_module(name).__file__
+        )
     device = torch.device(args.device)
     cuda_memory = None
     if device.type == "cuda":
@@ -189,14 +197,19 @@ def main() -> None:
         * (1 if sys.platform == "darwin" else 1024),
         "torch_cuda_memory": cuda_memory,
         "provenance": {
-            "git_commit": subprocess.check_output(
-                ["git", "-C", str(repository), "rev-parse", "HEAD"], text=True
-            ).strip(),
+            "git_commit": (
+                subprocess.check_output(
+                    ["git", "-C", str(repository), "rev-parse", "HEAD"], text=True
+                ).strip()
+                if (repository / ".git").exists()
+                else None
+            ),
+            "distribution_version": metadata.version("embodichain"),
             "python": sys.version,
             "torch": str(torch.__version__),
             "source_sha256": {
-                name: hashlib.sha256((repository / name).read_bytes()).hexdigest()
-                for name in sources
+                name: hashlib.sha256(path.read_bytes()).hexdigest()
+                for name, path in sources.items()
             },
             "data_sha256": {
                 name: hashlib.sha256((args.output / name).read_bytes()).hexdigest()

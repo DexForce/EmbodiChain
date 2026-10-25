@@ -1,9 +1,9 @@
 # Robot world model supervised acceptance
 
-Run with the `py311` environment from the repository root:
+Run with the `py311` environment from a source checkout or an installed wheel:
 
 ```bash
-OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m scripts.experiments.rwm.controlled_fit \
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 embodichain run-example learning/rwm \
   --output outputs/rwm-controlled-seed0 --seed 0
 ```
 
@@ -18,6 +18,9 @@ do not model G1 physics, reproduce SuperMimic, or establish policy performance.
 No ODS producer, native simulator or APG learner is constructed.
 
 The emitted `recipe.json` also works with `embodichain train-sl --config FILE`.
+Its installable factory is
+`embodichain_models.dynamics.rwm.sl_recipe:build_rwm_trainer`; the same symbol is
+exported from `embodichain_models.dynamics.rwm`.
 Use a fresh output directory for a new run. `--resume FILE` restores the saved
 learning boundary through the shared trainer; GPU replay snapshots are optional,
 and a workflow may explicitly rebuild/refill replay instead.
@@ -33,3 +36,10 @@ process peak RSS and optional Torch CUDA allocator peaks. The measured fit loop
 includes its periodic validation and checkpoint I/O; interpreter/import startup
 and final held-out validation are outside that interval. CUDA allocator peaks
 do not include driver/native allocations.
+
+The model package owns frame-local state math, the autoregressive objective,
+graph-connected predictor and bounded transition replay. The core SL package
+owns optimizer updates, run artifacts and recovery. This example owns controlled
+corpus generation and fitting qualification; its private helpers are not an
+installed model API. The model requires PyTorch and the shared core utilities;
+importing it does not load a simulator SDK.

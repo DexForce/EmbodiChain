@@ -552,5 +552,19 @@ topics:
   - embodichain/learning/sl/
   - embodichain/cli/main.py
   watch_paths: [embodichain/learning/sl/, tests/learning/sl/]
-  related_topics: [learning-layers, data-pipeline, rl-learning, neural-dynamics]
+  related_topics: [learning-layers, data-pipeline, rl-learning, neural-dynamics, robot-world-model]
+  status: active
+- id: robot-world-model
+  title: Robot World Model
+  aliases: [robot world model, RWM, 机器人世界模型]
+  keywords: [RobotWorldModel, RWMPredictor, TransitionReplay, build_rwm_trainer,
+    replay_supervised_batch, learning/rwm]
+  paths: [topics/robot-world-model/robot-world-model.md]
+  source_of_truth:
+  - extensions/embodichain_models/embodichain_models/dynamics/rwm/
+  - examples/learning/rwm/
+  watch_paths: [extensions/embodichain_models/embodichain_models/dynamics/rwm/,
+    examples/learning/rwm/, tests/models/dynamics/rwm/,
+    docs/source/api_reference/rwm.rst]
+  related_topics: [supervised-learning, learning-layers, neural-dynamics]
   status: active

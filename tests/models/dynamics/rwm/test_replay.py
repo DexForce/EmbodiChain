@@ -23,7 +23,7 @@ from copy import deepcopy
 import pytest
 import torch
 
-from embodichain.data_pipeline.datasets.transition_replay import TransitionReplay
+from embodichain_models.dynamics.rwm.replay import TransitionReplay
 
 
 def _append(replay: TransitionReplay, step: int) -> None:
