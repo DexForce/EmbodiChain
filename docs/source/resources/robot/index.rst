@@ -19,7 +19,7 @@ command reference and :doc:`/guides/robot_catalog` for variant selection.
      - Current coverage
    * - :doc:`ARX5 X5A <arx5>`
      - ``ARX5Cfg``
-     - Six-joint arm with two independent parallel fingers and numerical IK.
+     - Six-joint arm with two independent parallel fingers, numerical default IK and optional SSIK CPU reference.
    * - :doc:`Franka Panda <franka_panda>`
      - ``FrankaPandaCfg``, ``FrankaPandaPgiCfg``
      - Panda arm with the Panda hand or a DH PGI gripper, with numerical FK/IK.
@@ -28,7 +28,7 @@ command reference and :doc:`/guides/robot_catalog` for variant selection.
      - UR3, UR3e, UR5, UR5e, UR10, and UR10e with analytic IK.
    * - :doc:`Flexiv Rizon 4S <flexiv_rizon4s>`
      - ``FlexivRizon4SCfg``
-     - Seven-axis bare arm with numerical IK and published Flexiv simulation dynamics.
+     - Seven-axis bare arm with numerical default IK, optional SSIK CPU reference and published Flexiv simulation dynamics.
    * - :doc:`Dexforce W1 <dexforce_w1>`
      - ``DexforceW1Cfg``
      - Dual 7-DOF arms, versioned assets, and configurable hands/grippers.

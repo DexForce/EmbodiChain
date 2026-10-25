@@ -73,6 +73,23 @@ geometry without assuming Franka or spherical-wrist dimensions.
 The initial joint positions are the official ready pose, in source order:
 `[0, -0.69813, 0, 1.570796, 0, 0.69813, 0]` radians.
 
+## Optional SSIK CPU reference
+
+The preset retains its Pytorch default. An explicit `SSIKSolverCfg` reference
+configuration can use the prepared `flexiv_rizon4s.py` package resource. See
+[prepared SSIK models](../../overview/sim/motion/solvers/ssik_solver.md#prepared-arx5-and-rizon4s-models)
+for the complete selection and rebuild example.
+
+This source model is not strict SRS. The reference uses pinned SSIK's
+joint-lock and 6R algebraic path after verifying the source joint prefix,
+with an explicit correction for the 43 mm terminal offset relative to the
+upstream Rizon 4 artifact. Model, joint order, source and coefficient sidecar
+fingerprints are checked. Its fixed 16-sample cached RR grid never launches
+an unprepared HP secondary solve; a failed finite search is not proof of
+unreachability. Every accepted result is validated against the
+actual Rizon 4S PK chain and TCP. This does not enable a Warp path or a
+runtime numerical fallback.
+
 ## Published dynamics and simulation drives
 
 Link masses, centers of mass, complete inertia tensors, position limits and

@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 
 
 def _run_robotics_kinematic_solver_cli(args: argparse.Namespace) -> None:
@@ -41,8 +42,91 @@ def _run_robotics_kinematic_solver_cli(args: argparse.Namespace) -> None:
     from scripts.benchmark.robotics.kinematic_solver.run_benchmark import (
         run_all_benchmarks,
     )
+    from scripts.benchmark.robotics.kinematic_solver.ssik_benchmark import (
+        SSIKBenchmarkOptions,
+    )
 
-    run_all_benchmarks(selected_solvers=args.solvers)
+    options = {
+        name.removeprefix("ssik_"): tuple(value) if isinstance(value, list) else value
+        for name, value in vars(args).items()
+        if name.startswith("ssik_") and value is not None
+    }
+    run_all_benchmarks(
+        selected_solvers=args.solvers, ssik_options=SSIKBenchmarkOptions(**options)
+    )
+
+
+def _add_kinematic_solver_arguments(parser: argparse.ArgumentParser) -> None:
+    """Expose the unified runner's arguments without importing numeric modules."""
+    solvers = ("opw", "pytorch", "ur", "fep", "differentiable", "franka", "ssik", "all")
+    parser.add_argument(
+        "--solvers",
+        "-s",
+        nargs="+",
+        choices=solvers,
+        default=["all"],
+        help="Solvers to benchmark. Franka and SSIK comparisons require explicit selection.",
+    )
+    for name, description in (
+        ("smoke", "Use small SSIK workloads; does not certify acceptance gates."),
+        ("skip-reference", "Skip the optional SSIK CPU reference."),
+        ("skip-warp", "Measure baselines/reference without the Warp backend."),
+        ("skip-baseline", "Run diagnostics without comparison baselines."),
+        ("quality-only", "Validate SSIK fixtures without latency measurements."),
+        ("timing-only", "Measure SSIK latency without rerunning fixture correctness."),
+    ):
+        parser.add_argument(f"--ssik-{name}", action="store_true", help=description)
+    parser.add_argument(
+        "--ssik-models",
+        nargs="+",
+        default=None,
+        choices=(
+            "aloha_left",
+            "aloha_right",
+            "marvin_bare_left",
+            "marvin_bare_right",
+            "marvin_gripper_left",
+            "marvin_gripper_right",
+            "arx5",
+            "flexiv_rizon4s",
+        ),
+    )
+    parser.add_argument(
+        "--ssik-reference-artifacts",
+        nargs="+",
+        default=None,
+        metavar="MODEL=PATH",
+        help="Associate an SSIK reference artifact with each explicitly selected model.",
+    )
+    parser.add_argument(
+        "--ssik-devices", nargs="+", choices=("cpu", "cuda"), default=["cpu", "cuda"]
+    )
+    parser.add_argument(
+        "--ssik-batch-sizes",
+        nargs="+",
+        type=int,
+        choices=(1, 8, 100, 1000, 10000),
+        default=None,
+    )
+    parser.add_argument(
+        "--ssik-baseline-variants",
+        nargs="+",
+        choices=("original", "matched"),
+        default=["original", "matched"],
+    )
+    scenarios = ("wide", "boundary", "singular", "unreachable", "trajectory")
+    parser.add_argument(
+        "--ssik-scenarios", nargs="+", choices=scenarios, default=list(scenarios)
+    )
+    timing_scopes = ("resident", "transfer", "sustained")
+    parser.add_argument(
+        "--ssik-timing-scopes",
+        nargs="+",
+        choices=timing_scopes,
+        default=list(timing_scopes),
+    )
+    parser.add_argument("--ssik-cpu-threads", type=int, default=1)
+    parser.add_argument("--ssik-artifact-dir", type=Path, default=None)
 
 
 def _run_rl_cli(_: argparse.Namespace) -> None:
@@ -109,16 +193,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     # -- robotics-kinematic-solver -------------------------------------------
     robotics_ks_parser = subparsers.add_parser(
         "robotics-kinematic-solver",
-        help="Benchmark the OPW kinematic solver (FK/IK accuracy and speed).",
+        help="Benchmark analytical and numerical kinematic solvers, including SSIK.",
     )
-    robotics_ks_parser.add_argument(
-        "--solvers",
-        "-s",
-        nargs="+",
-        choices=("opw", "pytorch", "all"),
-        default=["all"],
-        help="Solvers to benchmark. Use one or more of: opw, pytorch, all.",
-    )
+    _add_kinematic_solver_arguments(robotics_ks_parser)
     robotics_ks_parser.set_defaults(func=_run_robotics_kinematic_solver_cli)
 
     # -- motion-generation ---------------------------------------------------

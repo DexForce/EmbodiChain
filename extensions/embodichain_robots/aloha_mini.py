@@ -31,7 +31,7 @@ from embodichain.lab.sim.cfg import (
     RigidBodyPhysicsCfg,
     RobotCfg,
 )
-from embodichain.lab.sim.motion.solvers import PytorchSolverCfg
+from embodichain.lab.sim.motion.solvers import PytorchSolverCfg, SSIKSolverCfg
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 from embodichain.utils import configclass
 
@@ -55,8 +55,10 @@ class AlohaMiniCfg(RobotCfg):
     """Configure Aloha Mini 2 Pro from its complete, source-named URDF.
 
     The arms have six joints each, the hands one gripper joint each, and the
-    torso one vertical prismatic joint. Arm solvers target the URDF TCP links;
-    the torso solver constrains position only. Hands use joint-space control.
+    torso one vertical prismatic joint. Model-derived SSIK Warp arm solvers
+    target the URDF TCP links; the torso uses position-only Pytorch IK.
+    Hands use joint-space control. Explicit ``solver_cfg`` overrides can select
+    PytorchSolver for custom geometry or numerical multi-start options.
 
     The source's planar base joints and wheels remain outside these five
     control parts and have position drives to hold their initial positions.
@@ -101,13 +103,17 @@ class AlohaMiniCfg(RobotCfg):
             torso=["vertical_move"],
         )
         self.solver_cfg = {
-            part: PytorchSolverCfg(
+            part: SSIKSolverCfg(
                 root_link_name=_PART_FRAMES[part][0],
                 end_link_name=_PART_FRAMES[part][1],
-                is_only_position_constraint=part == "torso",
             )
-            for part in ("left_arm", "right_arm", "torso")
+            for part in ("left_arm", "right_arm")
         }
+        self.solver_cfg["torso"] = PytorchSolverCfg(
+            root_link_name=_PART_FRAMES["torso"][0],
+            end_link_name=_PART_FRAMES["torso"][1],
+            is_only_position_constraint=True,
+        )
         # Match the CobotMagic simulation gains, with separate hand drives.
         self.joint_drive_props = JointDrivePropertiesCfg(
             drive_type="force",

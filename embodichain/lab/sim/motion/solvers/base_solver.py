@@ -82,14 +82,14 @@ class SolverCfg:
     It must be a finite SE(3) rigid transform; affine transforms are not supported.
     """
 
-    ik_nearest_weight: List[float] | None = None
+    ik_nearest_weight: list[float] | None = None
     """Weights for the inverse kinematics nearest calculation.
     
     The weights influence how the solver prioritizes closeness to the seed position
     when multiple solutions are available.
     """
 
-    user_qpos_limits: List[float] | None = None
+    user_qpos_limits: list[float] | None = None
     """
         User defined Joint position limits [2, DOF] for the solver. 
         If not provided (None), this value will replace by joint limits defined in urdf when solver init from robot.
@@ -538,6 +538,20 @@ class BaseSolver(metaclass=ABCMeta):
         They must also implement :meth:`_select_continuous_ik_path`.
         """
         return False
+
+    def _get_continuous_ik_candidates(
+        self, target_xpos: torch.Tensor, qpos_seed: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Generate path candidates before previous-frame constraints are applied.
+
+        Stateful step constraints belong to continuous selection, rather than
+        filtering every waypoint against the initial path seed.
+        """
+        return self.get_ik(
+            target_xpos=target_xpos,
+            qpos_seed=qpos_seed,
+            return_all_solutions=True,
+        )
 
     def _select_continuous_ik_path(
         self,

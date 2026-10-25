@@ -710,3 +710,137 @@ def test_benchmark_dispatch_loads_extension_only_for_motion_generation(
     monkeypatch.setattr(builtins, "__import__", reject_extension)
     benchmark.main(arguments)
     assert received == ([] if arguments == ["--help"] else ["pytorch"])
+
+
+def test_kinematic_solver_help_is_lightweight_and_exposes_ssik(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Discovering benchmark flags must not initialize numerical backends."""
+    import builtins
+
+    original_import = builtins.__import__
+
+    def reject_numeric_import(name: str, *args: object, **kwargs: object):
+        if name == "torch" or name.startswith(
+            "scripts.benchmark.robotics.kinematic_solver"
+        ):
+            raise AssertionError("Kinematic benchmark help imported a numeric backend")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", reject_numeric_import)
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main(["benchmark", "robotics-kinematic-solver", "--help"])
+    assert exit_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "ssik" in output and "differentiable" in output
+    for flag in (
+        "--ssik-smoke",
+        "--ssik-models",
+        "--ssik-reference-artifacts",
+        "--ssik-devices",
+        "--ssik-quality-only",
+        "--ssik-timing-only",
+        "--ssik-artifact-dir",
+    ):
+        assert flag in output
+    assert "arx5" in output and "flexiv_rizon4s" in output
+
+
+def test_kinematic_solver_model_and_reference_defaults_are_unspecified() -> None:
+    """The options object retains ownership of the default six-model workload."""
+    from embodichain.cli.benchmark import _add_kinematic_solver_arguments
+
+    parser = argparse.ArgumentParser()
+    _add_kinematic_solver_arguments(parser)
+    args = parser.parse_args(["--solvers", "ssik"])
+
+    assert args.ssik_models is None
+    assert args.ssik_reference_artifacts is None
+
+
+@pytest.mark.parametrize("mode", ["quality", "timing"])
+def test_kinematic_solver_dispatch_forwards_ssik_workload_options(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mode: str
+) -> None:
+    """The public CLI delivers typed scoped options to the unified runner."""
+    received: dict[str, object] = {}
+    runner = ModuleType("scripts.benchmark.robotics.kinematic_solver.run_benchmark")
+    options_module = ModuleType(
+        "scripts.benchmark.robotics.kinematic_solver.ssik_benchmark"
+    )
+
+    def run_benchmarks(**kwargs: object) -> None:
+        received.update(kwargs)
+        received["argv"] = list(sys.argv)
+
+    runner.run_all_benchmarks = run_benchmarks
+    options_module.SSIKBenchmarkOptions = lambda **kwargs: SimpleNamespace(**kwargs)
+    monkeypatch.setitem(sys.modules, runner.__name__, runner)
+    monkeypatch.setitem(sys.modules, options_module.__name__, options_module)
+    original_argv = ["caller", "--unrelated-option"]
+    monkeypatch.setattr(sys, "argv", original_argv)
+    artifact_dir = tmp_path / "SSIK benchmark"
+    reference_artifacts = (
+        f"arx5={tmp_path / 'ARX5 reference'}",
+        f"flexiv_rizon4s={tmp_path / 'Flexiv reference'}",
+    )
+    selected = ["ssik", "ur", "fep", "differentiable", "franka"]
+    forwarded = [
+        "-s",
+        *selected,
+        "--ssik-smoke",
+        "--ssik-skip-reference",
+        "--ssik-models",
+        "aloha_left",
+        "marvin_bare_right",
+        "arx5",
+        "flexiv_rizon4s",
+        "--ssik-reference-artifacts",
+        *reference_artifacts,
+        "--ssik-devices",
+        "cpu",
+        "--ssik-batch-sizes",
+        "1",
+        "1000",
+        "--ssik-baseline-variants",
+        "original",
+        "--ssik-scenarios",
+        "wide",
+        "boundary",
+        "--ssik-timing-scopes",
+        "resident",
+        "sustained",
+        "--ssik-cpu-threads",
+        "2",
+        "--ssik-artifact-dir",
+        str(artifact_dir),
+        f"--ssik-{mode}-only",
+        "--ssik-skip-baseline" if mode == "quality" else "--ssik-skip-warp",
+    ]
+
+    cli.main(["benchmark", "robotics-kinematic-solver", *forwarded])
+
+    assert received["selected_solvers"] == selected
+    assert vars(received["ssik_options"]) == {
+        "smoke": True,
+        "models": ("aloha_left", "marvin_bare_right", "arx5", "flexiv_rizon4s"),
+        "reference_artifacts": reference_artifacts,
+        "devices": ("cpu",),
+        "skip_reference": True,
+        "skip_baseline": mode == "quality",
+        "skip_warp": mode == "timing",
+        "quality_only": mode == "quality",
+        "timing_only": mode == "timing",
+        "batch_sizes": (1, 1000),
+        "baseline_variants": ("original",),
+        "scenarios": ("wide", "boundary"),
+        "timing_scopes": ("resident", "sustained"),
+        "cpu_threads": 2,
+        "artifact_dir": artifact_dir,
+    }
+    assert received["argv"] == [
+        "embodichain benchmark robotics-kinematic-solver",
+        *forwarded,
+    ]
+    assert sys.argv is original_argv

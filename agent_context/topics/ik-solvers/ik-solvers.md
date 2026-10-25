@@ -30,6 +30,7 @@ current options and dependencies. The main change sites are:
 | Need | Solver module under `motion/solvers/` |
 |---|---|
 | Analytical structure for SRS, OPW, UR or Franka (FEP) arms | `srs_solver.py`, `opw_solver.py`, `ur_solver.py`, `fep_solver.py` |
+| Model-derived three-parallel 6R / strict SRS 7R and optional pinned CPU reference | `ssik_solver.py` |
 | General iterative PK solve and multi-start seeds | `pytorch_solver.py` |
 | Reduced Pinocchio model or task-based QP | `pinocchio_solver.py`, `pink_solver.py` |
 | Jacobian differential commands | `differential_solver.py` |
@@ -90,7 +91,7 @@ path selection is independent of its ordinary per-target
 ## Computation and state ownership
 
 Stateful configuration, device buffers, seed policy, TCP and limit updates stay
-in `lab/sim/motion/solvers`. Pure OPW/SRS/UR/FEP kernels belong to
+in `lab/sim/motion/solvers`. Pure OPW/SRS/UR/FEP/SSIK kernels belong to
 `compute/kinematics/_warp/` and cannot import simulation modules.
 `utils/warp/kinematics/*_solver.py` retains compatibility aliases only.
 
@@ -115,6 +116,26 @@ scores use weighted seed distance to avoid mirror-branch jumps from roundoff.
 Franka defaults to FEP with `redundancy_search=True`; the
 `examples/sim/motion/solvers/fep_solver.py` circle demo uses that robot default
 and adds a per-step joint bound for its 50 Hz commands.
+
+SSIK derives normalized POE geometry from the actual PK chain. Warp accepts only
+three-parallel 6R or concurrent-shoulder/wrist SRS 7R and never invokes a numeric
+fallback. The optional pinned reference is CPU-only; general algebraic models
+require an explicitly built artifact and matching manifest before initialization.
+Its build/load boundary lives in `solvers/_ssik_reference.py`; Warp imports do not
+load that dependency. Explicit prepared ARX5/Rizon4S reference artifacts live in
+`embodichain_robots/_ssik_artifacts/`; the former contains actual-model RR
+coefficients, while the latter certifies the pinned prebuilt joint prefix and
+bakes its terminal-frame correction. The offline builder's `--prebuilt-model`
+option verifies joint order, normalized axes and pre-terminal offsets before
+reuse. Loads verify prebuilt source and coefficient sidecars against the
+manifest before executing the adapter. Prepared joint-lock queries use only
+the verified fixed cached-RR grid: seed changes reorder those samples, and an
+empty sweep cannot enter an unprepared HP/symbolic path. These do not expand
+Warp geometry.
+SRS all-candidate results enumerate sampled swivels only.
+Continuous generation uses `_get_continuous_ik_candidates` so the step bound is
+applied relative to the preceding selected posture, rather than the initial path
+seed. Failed waypoints preserve the preceding posture and a false validity mask.
 
 ## Focused validation
 

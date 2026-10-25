@@ -178,6 +178,12 @@ def main():
         package_data={
             "embodichain": ["VERSION"],
             "embodichain.data": ["default_materials.json"],
+            "embodichain.compute.kinematics._warp": ["ssik_LICENSE.txt"],
+            "embodichain_robots": [
+                "_ssik_artifacts/*.py",
+                "_ssik_artifacts/*.json",
+                "_ssik_artifacts/LICENSE.txt",
+            ],
             "embodichain_benchmarks.motion_generation": ["suites/*.yaml"],
             "embodichain.gen_sim.simready_pipeline.configs": ["*.json"],
             "embodichain_tasks.configs": [

@@ -56,6 +56,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+ssik-reference = [
+  "ssik @ git+https://github.com/personalrobotics/ssik.git@4109147f37a7ca3e2516c83853aca583612783f3",
+]
+
 policy-deploy = [
   # ORT 1.27+ defaults to CUDA 13; EmbodiChain's supported stack uses CUDA 12.
   "onnxruntime-gpu>=1.20,<1.27",

@@ -82,6 +82,29 @@ simulation defaults, not manufacturer-verified hardware parameters. Source
 arm limits are preserved; task-specific workspace and IK branch restrictions
 belong to the caller's scene configuration.
 
+## SSIK reference
+
+The default arm solver remains Pytorch. The source rounds a half turn to
+`3.1416`, producing a parallel-axis residual of about `7.24e-6`. It therefore
+does not satisfy the SSIK Warp backend's strict geometric classification.
+The optional CPU reference instead uses an offline-derived general 6R
+Raghavan–Roth artifact for this actual source model. Its final acceptance uses
+the original model and unchanged `1e-5` metre/radian pose gates.
+
+See [SSIK's prepared model example](../../overview/sim/motion/solvers/ssik_solver.md#prepared-arx5-and-rizon4s-models)
+for explicit selection, optional dependency installation and rebuilding an
+artifact after a model change. No optional SSIK dependency is needed to list
+or construct the default Pytorch configuration.
+
+## Asset fingerprints
+
+- Registry archive: `ARX5_2.zip`, MD5 `6fc1d6a5a35b7926ba6325c0d20f5bc3`.
+- Source URDF SHA256: `826b5392ef2d37526a73a95a2a379e6c23e2fec7f81923934d8d642ef8fa3116`.
+- SSIK source pin: `4109147f37a7ca3e2516c83853aca583612783f3`.
+
+The prepared artifact is tied to these source frames and joint order; it is
+not a replacement model for another ARX hardware revision.
+
 ## Preview and Atomic Skills tutorial
 
 Select the exact catalog ID with `--robot ARX5`:

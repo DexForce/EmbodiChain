@@ -96,6 +96,9 @@ def test_compute_batch_ik_continuous_reuses_all_solver_candidates() -> None:
     selected = torch.ones(2, 3, dtype=torch.bool)
     selected_qpos = torch.full((2, 3, 2), 0.25)
     solver.get_ik.return_value = (candidate_valid, candidate_qpos)
+    solver._get_continuous_ik_candidates.side_effect = (
+        lambda **kwargs: BaseSolver._get_continuous_ik_candidates(solver, **kwargs)
+    )
     solver._select_continuous_ik_path.return_value = (selected, selected_qpos)
     robot._solvers = {"arm": solver}
     robot.get_link_pose = Mock(return_value=torch.eye(4).repeat(2, 1, 1))

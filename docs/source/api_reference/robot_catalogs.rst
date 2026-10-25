@@ -53,6 +53,8 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
    opening and approach for parallel-jaw grasp generation.
    The default ready pose unfolds the elbow and wrist, and self-collision is
    enabled. Task-specific IK branch limits belong to the caller's scene.
+   An explicit SSIK CPU reference can use the prepared actual-model artifact;
+   see :doc:`/overview/sim/motion/solvers/ssik_solver`.
 
 .. py:class:: embodichain_robots.AlohaMiniCfg
    :no-index:

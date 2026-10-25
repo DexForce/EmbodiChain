@@ -1130,10 +1130,9 @@ class Robot(Articulation):
                 .expand(batch_size, n_batch, n_dof)
                 .reshape(-1, n_dof)
             )
-            candidate_valid, candidate_qpos = solver.get_ik(
+            candidate_valid, candidate_qpos = solver._get_continuous_ik_candidates(
                 target_xpos=pose_batch.reshape(-1, 4, 4),
                 qpos_seed=repeated_seed,
-                return_all_solutions=True,
             )
             return solver._select_continuous_ik_path(
                 candidate_qpos.reshape(batch_size, n_batch, -1, n_dof),

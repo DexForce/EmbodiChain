@@ -768,7 +768,7 @@ def test_aloha_mini_overrides_and_roundtrip():
     assert cfg.joint_drive_props.stiffness["torso"] == 2e4
     assert cfg.joint_drive_props.stiffness["left_arm"] == 7e4
     assert cfg.solver_cfg["left_arm"].num_samples == 8
-    assert cfg.solver_cfg["right_arm"].num_samples == 30
+    assert cfg.solver_cfg["right_arm"].num_samples == 128
     assert AlohaMiniCfg.from_dict(cfg.to_dict()).to_dict() == cfg.to_dict()
 
 
@@ -788,14 +788,18 @@ def test_aloha_mini_serial_chains_match_control_joint_order():
 
 
 def test_aloha_mini_solvers_use_local_frames_and_source_tcp():
-    from embodichain.lab.sim.motion.solvers import PytorchSolverCfg
+    from embodichain.lab.sim.motion.solvers import PytorchSolverCfg, SSIKSolverCfg
 
     cfg = AlohaMiniCfg.from_dict({})
     chains = cfg.build_pk_serial_chain()
     assert set(cfg.solver_cfg) == {"left_arm", "right_arm", "torso"}
     for part, solver_cfg in cfg.solver_cfg.items():
-        assert isinstance(solver_cfg, PytorchSolverCfg)
-        assert solver_cfg.is_only_position_constraint == (part == "torso")
+        if part == "torso":
+            assert isinstance(solver_cfg, PytorchSolverCfg)
+            assert solver_cfg.is_only_position_constraint
+        else:
+            assert isinstance(solver_cfg, SSIKSolverCfg)
+            assert solver_cfg.backend == "warp"
         if part.endswith("_arm"):
             side = part.removesuffix("_arm")
             assert solver_cfg.root_link_name == f"{side}_Base"
@@ -808,6 +812,37 @@ def test_aloha_mini_solvers_use_local_frames_and_source_tcp():
         torch.testing.assert_close(
             solver.get_fk(qpos), chains[part].forward_kinematics(qpos).get_matrix()
         )
+
+
+@pytest.mark.parametrize("typed", [False, True])
+def test_aloha_mini_explicit_pytorch_solver_override_roundtrips(typed):
+    """The analytic default does not replace an explicitly selected old solver."""
+    from embodichain.lab.sim.motion.solvers import PytorchSolverCfg, SSIKSolverCfg
+
+    explicit = PytorchSolverCfg(
+        num_samples=8,
+        root_link_name="left_Base",
+        end_link_name="left_tcp",
+        ik_nearest_weight=[1.0] * 6,
+    )
+    provided = explicit if typed else explicit.to_dict()
+    cfg = AlohaMiniCfg.from_dict({"solver_cfg": {"left_arm": provided}})
+    assert isinstance(cfg.solver_cfg["left_arm"], PytorchSolverCfg)
+    assert cfg.solver_cfg["left_arm"].num_samples == 8
+    assert cfg.solver_cfg["left_arm"].root_link_name == "left_Base"
+    assert cfg.solver_cfg["left_arm"].end_link_name == "left_tcp"
+    assert isinstance(cfg.solver_cfg["right_arm"], SSIKSolverCfg)
+    assert isinstance(cfg.solver_cfg["torso"], PytorchSolverCfg)
+    restored = AlohaMiniCfg.from_dict(cfg.to_dict())
+    assert restored.to_dict() == cfg.to_dict()
+    assert isinstance(restored.solver_cfg["left_arm"], PytorchSolverCfg)
+    assert cfg.solver_cfg["left_arm"] is not explicit
+    cfg.solver_cfg["left_arm"].num_samples = 12
+    cfg.solver_cfg["left_arm"].ik_nearest_weight[0] = 3.0
+    assert explicit.num_samples == 8 and explicit.ik_nearest_weight == [1.0] * 6
+    if not typed:
+        assert provided["num_samples"] == 8
+        assert provided["ik_nearest_weight"] == [1.0] * 6
 
 
 def test_aloha_mini_pk_chains_follow_overridden_asset(tmp_path):

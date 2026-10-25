@@ -1,0 +1,18 @@
+{
+  "ssik_commit": "4109147f37a7ca3e2516c83853aca583612783f3",
+  "model_fingerprint": "6fb7bc72811c6cc813cdaeac7e6dc71990bffb334401d76f0862010cf4dbdaef",
+  "joint_names": [
+    "joint1",
+    "joint2",
+    "joint3",
+    "joint4",
+    "joint5",
+    "joint6"
+  ],
+  "root_link_name": "base_link",
+  "end_link_name": "ee_link",
+  "source_sha256": "d3b44a0e4143a62547c46e139c3cf56ff21f251bc48f76412f1fb1ddd3f5948e",
+  "asset_sha256": "826b5392ef2d37526a73a95a2a379e6c23e2fec7f81923934d8d642ef8fa3116",
+  "solver_name": "ikgeo.general_6r",
+  "generation": "Actual registered X5A chain, explicit offline full RR coefficient construction"
+}
