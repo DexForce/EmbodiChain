@@ -241,14 +241,6 @@ Use the installable factory path
 ``embodichain train-sl`` configuration. It is available independently of the
 working directory and example-runner bootstrap.
 
-Other dynamics families
------------------------
-
-.. toctree::
-   :maxdepth: 2
-
-   rwm
-
 .. currentmodule:: embodichain_models.dynamics.nerd.sl_recipe
 
 .. autosummary::
@@ -260,3 +252,11 @@ Other dynamics families
    :members: sample
 
 .. autofunction:: build_supervised_trainer
+
+Other dynamics families
+-----------------------
+
+.. toctree::
+   :maxdepth: 2
+
+   rwm

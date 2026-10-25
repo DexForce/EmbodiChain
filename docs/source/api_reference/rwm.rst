@@ -132,7 +132,7 @@ state when beginning a new graph.
    :members:
 
 Owned transition replay
-----------------------
+-----------------------
 
 Append copies detached physical transitions before environment reset. Sampled
 windows and oldest-first histories retain episode boundaries and survive ring
