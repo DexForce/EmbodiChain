@@ -38,7 +38,7 @@ from embodichain.utils import configclass
 if TYPE_CHECKING:
     import pytorch_kinematics as pk
 
-__all__ = ["FrankaPandaCfg", "FrankaPandaPgiCfg"]
+__all__ = ["FrankaPandaCfg"]
 
 # ``robot_type`` -> URDF directory / file name.
 _FRANKA_URDF_DIR: Dict[str, str] = {
@@ -60,17 +60,6 @@ _FRANKA_DEFAULT_INIT_QPOS = [
 ]
 
 _FRANKA_ARM_JOINTS = [f"fr3_joint{i}" for i in range(1, 8)]
-
-# DH Robotics PGI-140-80 parallel gripper mounted on the arm-only Panda flange.
-_PGI_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
-_PGI_JOINT = "gripper_finger1_joint_1"
-_PGI_FINGER_LINKS = ["gripper_finger1_link_1", "gripper_finger2_link_1"]
-_PGI_TCP = [
-    [1.0, 0.0, 0.0, 0.0],
-    [0.0, 1.0, 0.0, 0.0],
-    [0.0, 0.0, 1.0, 0.17],
-    [0.0, 0.0, 0.0, 1.0],
-]
 
 
 def _newton_gripper_contacts(link_names_expr: list[str]) -> LinkPhysicsOverrideCfg:
@@ -228,135 +217,6 @@ class FrankaPandaCfg(RobotCfg):
             device=device,
             end_link_name="fr3_hand_tcp",
             root_link_name="base",
-        )
-        return {"arm": chain}
-
-
-@configclass
-class FrankaPandaPgiCfg(RobotCfg):
-    """Configuration for the Franka Emika Panda arm with a DH Robotics PGI gripper.
-
-    The arm-only Panda URDF is assembled with the ``DH_PGI_140_80`` parallel
-    gripper on the ``fr3_link8`` flange. The configuration owns the whole
-    assembly: the ``arm`` and ``eef`` control parts, the PGI finger drive and
-    open initial state, the PGI tool center point, and the Newton fingertip
-    contacts on the PGI finger links. The stock Panda hand settings of
-    :class:`FrankaPandaCfg` do not apply.
-
-    The arm solver and the FK/IK serial chain both end at ``fr3_link8`` on the
-    arm URDF used by the assembly. The solver's ``tcp`` gives the PGI tool
-    center point in that frame; :meth:`build_pk_serial_chain` returns the
-    flange pose without it.
-
-    Example:
-
-        cfg = FrankaPandaPgiCfg.from_dict({"init_pos": [0.5, 0.0, 0.0]})
-        robot = sim.add_robot(cfg=cfg)
-    """
-
-    robot_type: str = "panda"
-
-    @classmethod
-    def from_dict(cls, init_dict: dict[str, Any]) -> FrankaPandaPgiCfg:
-        """Initialize ``FrankaPandaPgiCfg`` from a dictionary.
-
-        Args:
-            init_dict: Dictionary of configuration parameters. ``robot_type``
-                selects the Franka arm variant (currently ``"panda"``). All
-                other keys are merged on top of the defaults via
-                :func:`merge_robot_cfg`.
-
-        Returns:
-            A ``FrankaPandaPgiCfg`` instance.
-        """
-        cfg = cls()
-        cfg._build_defaults(init_dict)
-        return merge_robot_cfg(cfg, init_dict)
-
-    def _build_defaults(self, init_dict: dict | None = None) -> None:
-        """Populate the arm-only Panda and PGI assembly defaults.
-
-        Args:
-            init_dict: The raw override dict passed to ``from_dict``.
-                ``robot_type`` is read from here (falling back to the class
-                default).
-        """
-        init_dict = init_dict or {}
-        self.robot_type = _resolve_robot_type(init_dict, self.robot_type)
-        self.uid = "FrankaPandaPgi"
-
-        self.urdf_cfg = URDFCfg(
-            components=[
-                {
-                    "component_type": "arm",
-                    "urdf_path": self._pk_urdf_path,
-                    "transform": np.eye(4),
-                },
-                {
-                    "component_type": "hand",
-                    "urdf_path": get_data_path(_PGI_URDF_PATH),
-                    "transform": np.eye(4),
-                },
-            ]
-        )
-
-        self.control_parts = {
-            "arm": list(_FRANKA_ARM_JOINTS),
-            "eef": [_PGI_JOINT],
-        }
-
-        self.solver_cfg = {
-            "arm": FEPSolverCfg(
-                end_link_name="fr3_link8",
-                root_link_name="base",
-                tcp=[list(row) for row in _PGI_TCP],
-                redundancy_search=True,
-            ),
-        }
-
-        self.joint_drive_props = JointDrivePropertiesCfg(
-            drive_type="force",
-            stiffness={"fr3_joint[1-7]": 1e4, _PGI_JOINT: 1e3},
-            damping={"fr3_joint[1-7]": 1e3, _PGI_JOINT: 1e2},
-            max_effort={"fr3_joint[1-7]": 1e5, _PGI_JOINT: 1e4},
-        )
-        self.link_attrs = {
-            "newton_gripper_contacts": _newton_gripper_contacts(_PGI_FINGER_LINKS)
-        }
-
-        # Arm in the stock ready pose; both PGI finger joints open.
-        self.init_qpos = [*_FRANKA_DEFAULT_INIT_QPOS[:7], 0.0, 0.0]
-
-    @property
-    def _pk_urdf_path(self) -> str:
-        """Arm-only URDF used by both the assembly and the FK/IK chain."""
-        urdf_dir = _FRANKA_URDF_DIR[self.robot_type]
-        return get_data_path(f"Franka/{urdf_dir}/{urdf_dir}.urdf")
-
-    def build_pk_serial_chain(
-        self, device: torch.device = torch.device("cpu"), **kwargs: Any
-    ) -> dict[str, pk.SerialChain]:
-        """Build the pytorch-kinematics serial chain for the arm.
-
-        The chain uses the arm solver's root and end links, so its end pose is
-        the ``fr3_link8`` flange; compose it with the solver ``tcp`` to obtain
-        the PGI tool center point.
-
-        Args:
-            device: The device to which the chain will be moved. Defaults to CPU.
-            **kwargs: Additional arguments for building the serial chain.
-
-        Returns:
-            A ``{"arm": pk.SerialChain}`` mapping.
-        """
-        from embodichain.lab.sim.utility.solver_utils import create_pk_serial_chain
-
-        solver = self.solver_cfg["arm"]
-        chain = create_pk_serial_chain(
-            urdf_path=self._pk_urdf_path,
-            device=device,
-            end_link_name=solver.end_link_name,
-            root_link_name=solver.root_link_name,
         )
         return {"arm": chain}
 

@@ -14,9 +14,43 @@ robot = sim.add_robot(cfg=cfg)
 The package owns concrete robot defaults, hardware revisions, calibrated
 transforms, and robot-specific kinematic-chain construction. Generic runtime
 objects, configuration types, solvers, URDF assembly, and dual-arm composition
-remain in `embodichain.lab.sim`. Assets continue to use the core download/cache
-registry. Task deployments, sensor suites, and Task Program skill profiles keep
+remain in `embodichain.lab.sim`. Model-owned asset definitions live with their presets; shared Franka and UR
+archives live at vendor level. The core owns the common download/cache registry. Task deployments, sensor suites, and Task Program skill profiles keep
 their existing owners.
+
+## Vendor/model ownership and migration
+
+Concrete configurations use vendor/model namespaces, such as
+`embodichain_robots.franka.panda` and `embodichain_robots.dexforce.w1`.
+Model-owned archives belong in `<vendor>/<model>/assets.py`, beside `cfg.py`.
+Franka's Panda/FR3 archive and the shared UR archive use vendor-level `assets.py`.
+Vendor/model initializers are lazy so importing an asset never loads robot code.
+
+Root configuration imports and catalog IDs remain stable, except that
+`FrankaPandaPgiCfg` and `FrankaPandaPgi` have been removed. Panda/PGI examples
+and benchmark providers assemble that combination locally. Flat configuration
+submodules such as `embodichain_robots.franka_panda` are retired.
+
+Robot catalogs declare optional `vendor`, `morphology`, and `arm_count` metadata.
+Morphology describes the authored body (for example `wheeled_humanoid`),
+independently of arm count or simulator anchoring. Missing variant fields inherit
+their family values; explicit `None` means unknown, while zero arms is a known
+absence. AlohaMini uses its community project's namespace with unknown vendor.
+
+The separate, metadata-only `_asset_catalog.py` registers resources through:
+
+```toml
+[project.entry-points."embodichain.assets"]
+official_robots = "embodichain_robots._asset_catalog:ROBOT_ASSETS"
+```
+
+Each asset ID maps to a `class_path` (`module:Class`) and a `category`. The core
+combines these with its remaining asset modules for both `get_data_path()` and
+`embodichain data`. Duplicate IDs fail, including case-only collisions. Legacy
+asset imports forward to the same class objects; IDs, URLs, checksums and cache
+prefixes are unchanged. Refresh the editable install and restart after changing
+entry-point metadata. Other robot datasets, EEFs and shared resources retain
+their current core ownership.
 
 ## Tianji Marvin defaults
 
@@ -148,6 +182,9 @@ acme = "acme_robots.catalog:ROBOTS"
 ROBOTS = {
     "acme.arm": {
         "class_path": "acme_robots.arm:ArmCfg",
+        "vendor": "acme",
+        "morphology": "fixed_manipulator",
+        "arm_count": 1,
         "defaults": {"variant": "standard"},
         "dof": 6,
         "control_parts": {"arm": 6},

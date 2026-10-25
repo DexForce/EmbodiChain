@@ -19,21 +19,21 @@ import xml.etree.ElementTree as ET
 
 import numpy as np
 
-from embodichain_robots.dexforce_w1.types import (
+from embodichain_robots.dexforce.w1.types import (
     DexforceW1Type,
     DexforceW1ArmSide,
     DexforceW1Version,
     DexforceW1HandBrand,
     DexforceW1HandVersion,
 )
-from embodichain_robots.dexforce_w1.hand_specs import (
+from embodichain_robots.dexforce.w1.hand_specs import (
     get_default_w1_hand_version,
     get_w1_hand_spec,
     normalize_w1_hand_mappings,
 )
 from embodichain.data import get_data_path
 from embodichain.lab.sim.cfg import URDFCfg
-from embodichain_robots.dexforce_w1.specs import (
+from embodichain_robots.dexforce.w1.specs import (
     get_w1_version_spec,
 )
 

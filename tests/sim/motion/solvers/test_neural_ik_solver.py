@@ -21,7 +21,7 @@ import torch
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot
-from embodichain_robots.franka_panda import FrankaPandaCfg
+from embodichain_robots.franka.panda import FrankaPandaCfg
 from embodichain.lab.sim.motion.solvers import NeuralIKSolverCfg
 from embodichain.lab.sim.motion.solvers.neural_ik_solver import _build_mlp
 from embodichain.utils.utility import reset_all_seeds

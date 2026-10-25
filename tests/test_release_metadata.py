@@ -79,7 +79,7 @@ def test_package_discovery_includes_only_runtime_trees() -> None:
     }
     assert runtime_roots | {
         "embodichain_tasks.configs",
-        "embodichain_robots.dexforce_w1",
+        "embodichain_robots.dexforce.w1",
     } <= set(packages)
     assert "embodichain_tasks.manipulation.tableware" in packages
     assert "embodichain_tasks.tableware" not in packages

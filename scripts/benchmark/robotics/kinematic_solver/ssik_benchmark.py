@@ -970,12 +970,15 @@ def _versions() -> dict[str, Any]:
         bool(status.stdout.strip()) if status.returncode == 0 else None
     )
     result["preset_modules"] = {}
-    for name in (
-        "embodichain_robots.aloha_mini",
-        "embodichain_robots.tianji_marvin",
-        "embodichain_robots.arx5",
-        "embodichain_robots.flexiv_rizon4s",
-    ):
+    from embodichain_robots import (
+        AlohaMiniCfg,
+        ARX5Cfg,
+        FlexivRizon4SCfg,
+        TianjiMarvinCfg,
+    )
+
+    for cfg_type in (AlohaMiniCfg, TianjiMarvinCfg, ARX5Cfg, FlexivRizon4SCfg):
+        name = cfg_type.__module__
         source = Path(import_module(name).__file__).resolve()
         result["preset_modules"][name] = {
             "file": str(source),
