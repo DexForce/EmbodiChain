@@ -64,7 +64,7 @@ def _matrix(value: Any) -> np.ndarray:
 def _native_table(table: Any) -> tuple[np.ndarray, float]:
     if table.num_instances != 1 or table.body_type not in {"static", "kinematic"}:
         raise ValueError("E8 table screen requires one static/kinematic support.")
-    entity = table.body_data.entities[0]
+    entity = table._entities[0]
     body = entity.native().get_physical_body()
     shapes = table.get_collision_shapes(env_id=0)
     if body is None or not shapes or len(shapes) != int(body.get_shape_count()):
