@@ -61,6 +61,14 @@ diagnostic, not certified; IK, robot command/velocity guards, tracking, physical
 effects and TaskSpec validators remain enabled. Constrained Pick, Pour, HandOver
 and other robots keep their existing paths. Default omission does not opt in.
 `native_pick_exploration.json` records the mode; per-call diagnostics record use.
+If an original ordinary Pick fails command qualification, its existing bounded
+continuous-path rebuild still owns legal opening commands and a continuous
+contact leg. Explicit Native exploration also applies to that rebuilt path
+after robot/command checks pass; it must not fall back to requiring a scene
+certificate merely because the original hand observation overshot a limit.
+Initial adaptive trajectories, candidate order, closed/lift suffixes and
+observed states remain unchanged. Default paths retain scene qualification.
+Regenerate Native bundles for exploration revision 2.
 Official components resolve through `resolve_config_path`; concrete robot
 presets import from `embodichain_robots`. Changes to endpoint names, motion
 limits or validator declarations require bundle regeneration and new identity;

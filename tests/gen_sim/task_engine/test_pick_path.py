@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import pytest
 import torch
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import SimpleNamespace
 from typing import Any
 
@@ -26,6 +26,170 @@ from embodichain.gen_sim.task_engine._task_program.pick_path import _compose_app
 from embodichain.gen_sim.task_engine._task_program import pick_path, motion
 from embodichain.lab.sim.atomic_actions.plans import PlannerDiagnostics
 from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
+
+
+@pytest.mark.parametrize(
+    "enabled,scene_clear,robot_safe,expected",
+    [
+        (True, False, True, True),
+        (False, False, True, False),
+        (False, True, True, True),
+        (True, False, False, False),
+    ],
+)
+def test_continuous_pick_rebuild_keeps_native_mode_and_robot_guards(
+    monkeypatch, enabled, scene_clear, robot_safe, expected
+):
+    @dataclass(frozen=True)
+    class Plan:
+        plan_success: Any
+        joint_trajectory: Any
+        segments: tuple
+        expected_effects: Any
+        diagnostics: Any
+        scene_dependency_monitor_until: dict
+        scene_dependency_end_segment: dict
+        effect_candidates: tuple = ()
+        effect_verification: Any = None
+        replannable: bool = True
+
+    full = torch.zeros(1, 7, 3)
+    full[0, :, 0] = torch.tensor([0, 0.1, 0.2, 0.2, 0.2, 0.2, 0.3])
+    full[0, :, 1] = torch.tensor([-0.002, -0.001, 0, 0, 0.7, 0.7, 0.7])
+    full[:, :, 2] = 0.37
+    grasp = torch.eye(4)[None]
+    grasp[:, 0, 3] = 0.2
+    held = SimpleNamespace(
+        semantics=SimpleNamespace(entity_id="object"), grasp_xpos=grasp
+    )
+    first = Plan(
+        torch.tensor([True]),
+        SimpleNamespace(positions=full),
+        tuple(
+            SimpleNamespace(name=n, start=a, stop=b)
+            for n, a, b in (("approach", 0, 3), ("close", 3, 5), ("lift", 5, 7))
+        ),
+        SimpleNamespace(held_object_updates={"left": held}),
+        PlannerDiagnostics("test"),
+        {},
+        {},
+    )
+    endpoints = {
+        name: SimpleNamespace(
+            task_state_key="left",
+            require_target=lambda _, name=name: JointPositionTarget(
+                name, (0,) if name == "motion" else (1,)
+            ),
+        )
+        for name in ("motion", "grasp")
+    }
+    request = SimpleNamespace(
+        binding=SimpleNamespace(endpoint=lambda _, name: endpoints[name]),
+        goal=SimpleNamespace(semantics=held.semantics),
+        skill_options=SimpleNamespace(
+            pre_grasp_distance=0.1, grasp_commit_fraction=0.8
+        ),
+        recovery_policy=SimpleNamespace(action_timeout=30),
+    )
+    context = SimpleNamespace(
+        robot=SimpleNamespace(qpos=full[:, 0].clone()),
+        env_ids=torch.tensor([0]),
+        require_control_dt=lambda: 0.04,
+    )
+
+    def fk(*, qpos, **_):
+        poses = torch.eye(4).expand(*qpos.shape[:2], 4, 4).clone()
+        poses[..., 0, 3] = qpos[..., 0]
+        return poses
+
+    robot = SimpleNamespace(
+        device="cpu",
+        get_qpos_limits=lambda **_: torch.tensor([[[0, 0.7]]]),
+        compute_batch_fk=fk,
+        get_solver=lambda _: object(),
+    )
+
+    def generate(states, *, options):
+        count = options.sample_count
+        q = (
+            torch.linspace(0.2, 0.1, count)
+            if options.is_linear
+            else torch.linspace(0, 0.1, count)
+        )
+        dt = torch.full((1, count), 0.04)
+        dt[:, 0] = 0
+        return SimpleNamespace(
+            success=torch.tensor([True]), positions=q[None, :, None], dt=dt
+        )
+
+    def build(*_, **kwargs):
+        cursor, segments = 0, []
+        for name, count in kwargs["segment_lengths"].items():
+            segments.append(
+                SimpleNamespace(name=name, start=cursor, stop=cursor + count)
+            )
+            cursor += count
+        return replace(
+            first,
+            joint_trajectory=kwargs["trajectory"],
+            segments=tuple(segments),
+            diagnostics=kwargs["diagnostics"],
+        )
+
+    action = SimpleNamespace(
+        native_pick_exploration=enabled,
+        robot=robot,
+        path_simulation=object(),
+        motion_generator=SimpleNamespace(_generate_checked=generate),
+        build_plan=build,
+        failed_plan=lambda *_a, **_k: replace(
+            first, plan_success=torch.tensor([False])
+        ),
+    )
+    monkeypatch.setattr(
+        pick_path,
+        "_pose_validation_parameters",
+        lambda _: {"pos_eps": 0.001, "rot_eps": 0.001},
+    )
+    monkeypatch.setattr(
+        pick_path, "_joint_velocity_limits", lambda *_: torch.ones(1, 1)
+    )
+    monkeypatch.setattr(
+        pick_path,
+        "_inspect_pick_plan",
+        lambda _r, _q, _c, plan: {"valid": robot_safe and plan is not first},
+    )
+    monkeypatch.setattr(
+        pick_path,
+        "check_free_motion",
+        lambda _r, _s, positions, _p: {"valid": scene_clear or len(positions) == 1},
+    )
+    monkeypatch.setattr(
+        pick_path,
+        "_curobo_joint_prefix",
+        lambda *_: SimpleNamespace(
+            success=torch.tensor([False]), positions=None, dt=None
+        ),
+    )
+    result = pick_path.rebuild(
+        action,
+        request,
+        context,
+        first,
+        SimpleNamespace(direction=torch.tensor([[1.0, 0, 0]])),
+    )
+    assert bool(result.plan_success[0]) is expected
+    if expected:
+        positions = result.joint_trajectory.positions
+        assert (positions[:, :-4, 1] >= 0).all()
+        assert torch.equal(positions[:, -4:], full[:, 3:])
+        assert torch.equal(
+            positions[:, :, 2], torch.full_like(positions[:, :, 2], 0.37)
+        )
+        assert ("gen_sim_native_pick_exploration" in result.diagnostics.metadata) is (
+            enabled and not scene_clear
+        )
+    assert full[0, 0, 1] == pytest.approx(-0.002)
 
 
 @pytest.mark.parametrize("initial_hand", [-0.002, 0.0, 0.7, 0.700128])

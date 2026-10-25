@@ -1421,7 +1421,7 @@ def load_deployment(
             "registration": bundle_registration_fingerprint(registration),
             "task_constraints": payload,
             **(
-                {"native_pick_exploration_revision": 1}
+                {"native_pick_exploration_revision": 2}
                 if native_pick_exploration
                 else {}
             ),

@@ -439,6 +439,10 @@ def rebuild(action: Any, request: Any, context: Any, first: Any, selection: Any)
                     arm.control_part,
                 )
                 note[provider] = {**certificate, "approach_scene": scene}
+                if not scene["valid"]:
+                    exploration = _native_scene_attempt(action, request, context, plan)
+                    if exploration is not None:
+                        return exploration
                 if scene["valid"]:
                     logger.log_info(
                         f"GenSim Pick path: {arm.control_part}, {provider}, {lengths['approach']} approach samples."
