@@ -297,6 +297,7 @@ def local_robot_assets(monkeypatch, tmp_path):
 
     for module_name in (
         "embodichain.data",
+        "embodichain_robots.arx5",
         "embodichain_robots.aloha_mini",
         "embodichain_robots.tianji_marvin",
         "embodichain_robots.cobotmagic",
@@ -315,6 +316,7 @@ def local_robot_assets(monkeypatch, tmp_path):
     "name",
     [
         "AlohaMini",
+        "ARX5",
         "TianjiMarvin",
         "CobotMagic",
         "DexforceW1",

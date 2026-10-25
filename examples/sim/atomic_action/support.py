@@ -185,6 +185,8 @@ def create_tutorial_argument_parser(
     default_device: str | None = None,
     default_renderer: str | None = None,
     default_planner: TutorialPlanner = "trapezoidal",
+    robot_choices: Collection[str] = TUTORIAL_ROBOTS,
+    default_robot: str | None = "ur5",
 ) -> argparse.ArgumentParser:
     """Create a launcher parser with the shared atomic-tutorial switches.
 
@@ -195,6 +197,8 @@ def create_tutorial_argument_parser(
         default_renderer: Optional renderer override for the launcher arguments.
         default_planner: Planner selected when ``--planner`` is omitted. The
             shared default is deterministic ``trapezoidal`` timing.
+        robot_choices: Robot selectors owned by the calling walkthrough.
+        default_robot: Default selector; ``None`` lets the caller select by task.
 
     Returns:
         The configured argument parser.
@@ -230,9 +234,9 @@ def create_tutorial_argument_parser(
     )
     parser.add_argument(
         "--robot",
-        choices=TUTORIAL_ROBOTS,
-        default="ur5",
-        help="Robot construction to use (default: ur5).",
+        choices=robot_choices,
+        default=default_robot,
+        help="Robot construction to use (default: %(default)s).",
     )
     parser.add_argument(
         "--planner",

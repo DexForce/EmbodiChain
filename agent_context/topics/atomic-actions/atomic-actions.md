@@ -133,11 +133,18 @@ The example lives in `examples/sim/atomic_action/` and is shipped as ordinary
 distribution data with the rest of that tree. Its `__main__.py` owns
 typed configuration and validated selection; `host.py` owns compilation,
 expansion and output. Scene modules own physical setup and local defaults.
-All runnable demonstrations and helpers live there. Specialized examples such
-as coordinated manipulation and observed recovery run by file path through
-`embodichain run-example`. The tutorial directory contains only `single_arm.py`
-(PickUp→Place) and `dual_arm.py` (HandOver), which reuse example setup while
-explaining typed application composition. Read the
+Runnable scene demonstrations and physical helpers live there. Specialized
+examples such as coordinated manipulation and observed recovery run by file path through
+`embodichain run-example`. The tutorial directory contains `single_arm.py`
+(PickUp→Place), `dual_arm.py` (HandOver), and `embodiment_switching.py`
+(robot/tool configuration reuse). They reuse example setup while explaining
+typed application composition. The switching walkthrough owns its CLI matrix;
+`examples/sim/atomic_action/embodiments.py` owns its fixtures and measured playback
+checks and recording cameras. Its task recipes remain hardware-independent;
+swapping embodiments requires compatible resources and a physically feasible scene. The
+[switching tutorial README](../../../scripts/tutorials/atomic_action/README.md)
+owns its eight-combination matrix and links the checked-in MP4 previews under
+`docs/source/_static/atomic_actions/embodiment_switching/`. Read the
 [example README](../../../examples/sim/atomic_action/README.md)
 for supported combinations, fixture calibration, playback and output artifacts.
 

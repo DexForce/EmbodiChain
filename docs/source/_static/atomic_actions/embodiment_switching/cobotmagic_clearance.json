@@ -1,0 +1,452 @@
+{
+  "robot": "CobotMagic V100",
+  "assets": "CobotMagicArm/CobotMagicWithGripperV100.urdf",
+  "method": "FCL triangle-mesh intersection and distance queries with URDF forward kinematics. Camera housings are part of each gripper_base mesh.",
+  "sampling": "Every compiled command and corresponding measured joint state; directly fixed/adjacent rigid link groups excluded from non-adjacent checks.",
+  "continuous_collision_certification": false,
+  "self_collision_enabled": true,
+  "native_joint_limits_preserved": true,
+  "planned_jaw_contact": "Opposing jaw pairs are omitted from the non-adjacent planned-arm summary: the grasp command closes empty reference jaws to zero; actual object-blocked jaws are checked.",
+  "cross_arm": {
+    "collision": {
+      "planned": {
+        "samples": 2139,
+        "minimum_clearance_m": 0.03498018931935959,
+        "intersection_pairs": [],
+        "pairs_within_100mm": [
+          {
+            "links": [
+              "left_gripper_base",
+              "right_gripper_base"
+            ],
+            "minimum_clearance_m": 0.03498018931935959,
+            "sample": 1183,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link5",
+              "right_gripper_base"
+            ],
+            "minimum_clearance_m": 0.03650168650735377,
+            "sample": 784,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link8",
+              "right_gripper_base"
+            ],
+            "minimum_clearance_m": 0.04340807594706405,
+            "sample": 1215,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link4",
+              "right_gripper_base"
+            ],
+            "minimum_clearance_m": 0.04657850994955019,
+            "sample": 756,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link6",
+              "right_gripper_base"
+            ],
+            "minimum_clearance_m": 0.050264030308232364,
+            "sample": 835,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link7",
+              "right_gripper_base"
+            ],
+            "minimum_clearance_m": 0.05108912721566754,
+            "sample": 1226,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link3",
+              "right_gripper_base"
+            ],
+            "minimum_clearance_m": 0.06657918126897348,
+            "sample": 756,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link5",
+              "right_link5"
+            ],
+            "minimum_clearance_m": 0.08973199328642475,
+            "sample": 855,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link5",
+              "right_link4"
+            ],
+            "minimum_clearance_m": 0.09282340377457293,
+            "sample": 854,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_gripper_base",
+              "right_link5"
+            ],
+            "minimum_clearance_m": 0.09816446450579301,
+            "sample": 1333,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link4",
+              "right_link5"
+            ],
+            "minimum_clearance_m": 0.09833539301700114,
+            "sample": 852,
+            "intersection_sample_count": 0
+          }
+        ]
+      },
+      "actual": {
+        "samples": 2139,
+        "minimum_clearance_m": 0.035002557168660166,
+        "intersection_pairs": [],
+        "pairs_within_100mm": [
+          {
+            "links": [
+              "left_gripper_base",
+              "right_gripper_base"
+            ],
+            "minimum_clearance_m": 0.035002557168660166,
+            "sample": 1184,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link5",
+              "right_gripper_base"
+            ],
+            "minimum_clearance_m": 0.03649132816708318,
+            "sample": 786,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link8",
+              "right_gripper_base"
+            ],
+            "minimum_clearance_m": 0.04352018356464462,
+            "sample": 1216,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link4",
+              "right_gripper_base"
+            ],
+            "minimum_clearance_m": 0.04657040806699355,
+            "sample": 759,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link6",
+              "right_gripper_base"
+            ],
+            "minimum_clearance_m": 0.05028646566243082,
+            "sample": 836,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link7",
+              "right_gripper_base"
+            ],
+            "minimum_clearance_m": 0.05095191387183569,
+            "sample": 1228,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link3",
+              "right_gripper_base"
+            ],
+            "minimum_clearance_m": 0.06657937117649247,
+            "sample": 757,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link5",
+              "right_link5"
+            ],
+            "minimum_clearance_m": 0.08969596312897436,
+            "sample": 857,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link5",
+              "right_link4"
+            ],
+            "minimum_clearance_m": 0.09278738566875397,
+            "sample": 856,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_gripper_base",
+              "right_link5"
+            ],
+            "minimum_clearance_m": 0.09804392297760782,
+            "sample": 1334,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link4",
+              "right_link5"
+            ],
+            "minimum_clearance_m": 0.09828869043529005,
+            "sample": 854,
+            "intersection_sample_count": 0
+          }
+        ]
+      }
+    },
+    "visual": {
+      "planned": {
+        "samples": 2139,
+        "minimum_clearance_m": 0.0374770538955878,
+        "intersection_pairs": [],
+        "pairs_within_100mm": [
+          {
+            "links": [
+              "left_gripper_base",
+              "right_gripper_base"
+            ],
+            "minimum_clearance_m": 0.0374770538955878,
+            "sample": 1190,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link5",
+              "right_gripper_base"
+            ],
+            "minimum_clearance_m": 0.03839901817337396,
+            "sample": 786,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link8",
+              "right_gripper_base"
+            ],
+            "minimum_clearance_m": 0.044441575659791635,
+            "sample": 1215,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link4",
+              "right_gripper_base"
+            ],
+            "minimum_clearance_m": 0.04838712996504155,
+            "sample": 756,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link6",
+              "right_gripper_base"
+            ],
+            "minimum_clearance_m": 0.051417737473205265,
+            "sample": 835,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link7",
+              "right_gripper_base"
+            ],
+            "minimum_clearance_m": 0.05188204010280181,
+            "sample": 1245,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link3",
+              "right_gripper_base"
+            ],
+            "minimum_clearance_m": 0.0696086423303814,
+            "sample": 756,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link5",
+              "right_link5"
+            ],
+            "minimum_clearance_m": 0.09151814121512444,
+            "sample": 858,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link5",
+              "right_link4"
+            ],
+            "minimum_clearance_m": 0.0942214888966167,
+            "sample": 857,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link4",
+              "right_link5"
+            ],
+            "minimum_clearance_m": 0.09967640674232726,
+            "sample": 854,
+            "intersection_sample_count": 0
+          }
+        ]
+      },
+      "actual": {
+        "samples": 2139,
+        "minimum_clearance_m": 0.03749667981840702,
+        "intersection_pairs": [],
+        "pairs_within_100mm": [
+          {
+            "links": [
+              "left_gripper_base",
+              "right_gripper_base"
+            ],
+            "minimum_clearance_m": 0.03749667981840702,
+            "sample": 1191,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link5",
+              "right_gripper_base"
+            ],
+            "minimum_clearance_m": 0.03838836693734543,
+            "sample": 788,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link8",
+              "right_gripper_base"
+            ],
+            "minimum_clearance_m": 0.04455501306215292,
+            "sample": 1216,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link4",
+              "right_gripper_base"
+            ],
+            "minimum_clearance_m": 0.04837975184985284,
+            "sample": 759,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link6",
+              "right_gripper_base"
+            ],
+            "minimum_clearance_m": 0.05144097326101169,
+            "sample": 837,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link7",
+              "right_gripper_base"
+            ],
+            "minimum_clearance_m": 0.05175552569585599,
+            "sample": 1250,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link3",
+              "right_gripper_base"
+            ],
+            "minimum_clearance_m": 0.06960976837127718,
+            "sample": 757,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link5",
+              "right_link5"
+            ],
+            "minimum_clearance_m": 0.09148173137537192,
+            "sample": 860,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link5",
+              "right_link4"
+            ],
+            "minimum_clearance_m": 0.09418722309516014,
+            "sample": 858,
+            "intersection_sample_count": 0
+          },
+          {
+            "links": [
+              "left_link4",
+              "right_link5"
+            ],
+            "minimum_clearance_m": 0.09962949395134651,
+            "sample": 856,
+            "intersection_sample_count": 0
+          }
+        ]
+      }
+    }
+  },
+  "all_non_adjacent": {
+    "collision": {
+      "planned": {
+        "samples": 2139,
+        "pair_count": 161,
+        "intersection_pairs": []
+      },
+      "actual": {
+        "samples": 2139,
+        "pair_count": 163,
+        "intersection_pairs": []
+      }
+    },
+    "visual": {
+      "planned": {
+        "samples": 2139,
+        "pair_count": 161,
+        "intersection_pairs": []
+      },
+      "actual": {
+        "samples": 2139,
+        "pair_count": 163,
+        "intersection_pairs": []
+      }
+    }
+  },
+  "before_camera_housing_intersection": {
+    "planned": true,
+    "actual": true
+  }
+}

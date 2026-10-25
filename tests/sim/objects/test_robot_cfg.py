@@ -56,6 +56,69 @@ from embodichain.utils import configclass
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 
 
+@pytest.mark.no_sim
+def test_arx5_source_chain_commands_and_ik_roundtrip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """X5A retains two independent fingers and a six-joint flange/TCP chain."""
+    from embodichain_robots import arx5
+
+    source = Path(__file__).parents[2] / "fixtures/kinematics/arx5_x5a.urdf"
+    monkeypatch.setattr(arx5, "get_data_path", lambda _: str(source))
+    cfg = arx5.ARX5Cfg.from_dict({})
+    restored = arx5.ARX5Cfg.from_dict(cfg.to_dict())
+    assert restored.control_parts == {
+        "arm": [f"joint{i}" for i in range(1, 7)],
+        "eef": ["joint7", "joint8"],
+    }
+    assert not ET.parse(source).findall(".//mimic")
+    assert restored.fpath == str(source)
+    assert restored.init_qpos == cfg.init_qpos
+    assert restored.root_props.self_collision_enabled is True
+    chain = restored.build_pk_serial_chain()["arm"]
+    assert chain.get_joint_parameter_names() == restored.control_parts["arm"]
+    solver_cfg = restored.solver_cfg["arm"]
+    solver_cfg.urdf_path = str(source)
+    solver_cfg.joint_names = restored.control_parts["arm"]
+    solver = solver_cfg.init_solver("cpu")
+    q = torch.tensor([restored.init_qpos[:6], [0.2, -0.5, 1.2, -0.7, 0.3, -0.2]])
+    reference = chain.forward_kinematics(q).get_matrix() @ torch.tensor(
+        solver_cfg.tcp, dtype=q.dtype
+    )
+    torch.testing.assert_close(solver.get_fk(q), reference)
+    success, solution = solver.get_ik(reference, q + 0.02)
+    assert bool(success.all())
+    actual = solver.get_fk(solution[:, 0])
+    torch.testing.assert_close(actual[:, :3, 3], reference[:, :3, 3], atol=5e-4, rtol=0)
+    torch.testing.assert_close(
+        actual[:, :3, :3], reference[:, :3, :3], atol=1e-3, rtol=0
+    )
+
+    # Local source and end-frame overrides must reach kinematics as well as
+    # simulation; a standalone local asset must not require a catalog download.
+    def unexpected_download(_: str) -> str:
+        raise AssertionError("A local fpath must not download the default asset")
+
+    monkeypatch.setattr(arx5, "get_data_path", unexpected_download)
+    custom = arx5.ARX5Cfg.from_dict(
+        {
+            "fpath": str(source),
+            "solver_cfg": {"arm": {"end_link_name": "link6"}},
+            "root_props": {"self_collision_enabled": False},
+        }
+    )
+    assert custom.root_props.self_collision_enabled is False
+    import pytorch_kinematics as pk
+
+    reference_chain = pk.build_serial_chain_from_urdf(
+        source.read_bytes(), "link6", "base_link"
+    )
+    torch.testing.assert_close(
+        custom.build_pk_serial_chain()["arm"].forward_kinematics(q).get_matrix(),
+        reference_chain.forward_kinematics(q).get_matrix(),
+    )
+
+
 def test_mounted_sensor_config_roundtrip_and_instance_isolation() -> None:
     from embodichain.lab.sim.sensors import CameraCfg, StereoCameraCfg
 

@@ -45,6 +45,15 @@ embodichain_robots
 
 Concrete robot configurations, exposed lazily from the bundled robot package.
 
+.. py:class:: embodichain_robots.ARX5Cfg
+
+   Configure the X5A arm and its two independently actuated parallel fingers.
+   Construct with ``from_dict()``; ``build_pk_serial_chain()`` returns the
+   six-joint flange chain. Its separate numerical-solver TCP aligns jaw
+   opening and approach for parallel-jaw grasp generation.
+   The default ready pose unfolds the elbow and wrist, and self-collision is
+   enabled. Task-specific IK branch limits belong to the caller's scene.
+
 .. py:class:: embodichain_robots.AlohaMiniCfg
    :no-index:
 
@@ -136,6 +145,16 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
    Construct with ``from_dict()``; ``build_pk_serial_chain()`` provides
    the robot-specific differentiable kinematic chains. Generic runtime
    fields and backend selection follow ``RobotCfg``.
+
+
+embodichain_robots.arx5
+-----------------------
+
+.. py:class:: embodichain_robots.arx5.ARX5Cfg
+   :no-index:
+
+   Implementation of :class:`embodichain_robots.ARX5Cfg`, using the bundled
+   X5A asset and a six-joint numerical kinematic chain.
 
 
 embodichain_robots.cobotmagic
