@@ -93,7 +93,9 @@ class RigidFormerModel(nn.Module):
         except ImportError as exc:
             raise ImportError(
                 "RigidFormer requires the optional rigidformer dependency; "
-                f"install the reference revision {RIGIDFORMER_REVISION}"
+                "install embodichain[rigidformer] (rigidformer==0.2.0). "
+                f"For frozen reference revision {RIGIDFORMER_REVISION}, use "
+                "examples/learning/rigidformer/requirements-reference.txt"
             ) from exc
         fields = self.cfg.to_dict()
         fields.pop("max_pairwise_bytes")

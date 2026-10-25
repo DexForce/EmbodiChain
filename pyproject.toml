@@ -59,7 +59,7 @@ dependencies = [
 # Model construction imports the separately installed upstream package lazily.
 # Box2D/fire support the example-owned frozen reference workflow.
 rigidformer = [
-  "rigidformer @ git+https://github.com/lucidrains/rigidformer.git@4ab4edac7271b49484748d6bf8086a497f13272d",
+  "rigidformer==0.2.0",
   "box2d-py",
   "fire",
 ]

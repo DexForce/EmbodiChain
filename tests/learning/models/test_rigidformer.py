@@ -70,6 +70,8 @@ try:
     RigidFormerModel()
 except ImportError as exc:
     assert 'optional rigidformer dependency' in str(exc)
+    assert 'embodichain[rigidformer]' in str(exc)
+    assert 'requirements-reference.txt' in str(exc)
 else:
     raise AssertionError('Missing optional dependency must be explicit')
 """

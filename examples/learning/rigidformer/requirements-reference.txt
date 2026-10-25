@@ -1,0 +1,4 @@
+# Install the ordinary optional dependencies first, inside an isolated py311 venv.
+# Then force this exact upstream source without replacing the inherited stack:
+# python -m pip install --force-reinstall --no-deps -r requirements-reference.txt
+rigidformer @ git+https://github.com/lucidrains/rigidformer.git@4ab4edac7271b49484748d6bf8086a497f13272d

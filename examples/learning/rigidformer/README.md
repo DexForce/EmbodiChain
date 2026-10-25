@@ -7,6 +7,21 @@ wraps `lucidrains/rigidformer` at the pinned revision
 using this model. The upstream model and Box2D reference recipe retain the
 complete MIT license in the model package's `THIRD_PARTY_LICENSES`.
 
+The ordinary optional extra uses the public-index pin `rigidformer==0.2.0`,
+without a Git dependency in EmbodiChain's published metadata:
+
+```bash
+python -m pip install 'embodichain[rigidformer]'
+```
+
+All four runtime Python files in the [PyPI 0.2.0 wheel](https://pypi.org/project/rigidformer/0.2.0/)
+were verified byte-for-byte against the frozen commit above. This establishes
+that distribution's runtime-source equivalence; the version number alone does
+not qualify a reference environment. For exact Git installation in an isolated
+`py311` environment, use [requirements-reference.txt](requirements-reference.txt)
+and the [reference setup](research/README.md). The acceptance runner still
+checks the checkout and installed Python bytes against the pinned Git blobs.
+
 For a fixed tensor-only PyTorch geometry archive, use the installable factory:
 
 ```bash

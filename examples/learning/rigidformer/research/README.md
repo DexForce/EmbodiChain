@@ -13,11 +13,22 @@ generated dataset/checkpoint is vendored here.
 Use the `py311` environment with the optional pinned RigidFormer dependency,
 `box2d-py` and its build prerequisite SWIG. Install optional dependencies in an
 isolated environment inheriting `py311` if the main environment is shared.
+The ordinary `embodichain[rigidformer]` extra resolves PyPI `rigidformer==0.2.0`;
+its four runtime Python files match the frozen commit. The exact Git-source
+requirement remains example-owned in `requirements-reference.txt`, outside
+published dependency metadata. From a source checkout, install the ordinary
+dependencies first, then replace only the optional upstream package at the
+exact commit. The force reinstall prevents a same-version index installation
+from standing in for this explicit Git-source installation:
 
 ```bash
+conda run -n py311 python -m venv --system-site-packages /tmp/rigidformer-reference-env
+/tmp/rigidformer-reference-env/bin/python -m pip install 'embodichain[rigidformer]'
+/tmp/rigidformer-reference-env/bin/python -m pip install --force-reinstall --no-deps \
+  -r examples/learning/rigidformer/requirements-reference.txt
 git clone https://github.com/lucidrains/rigidformer.git /tmp/rigidformer-reference
 git -C /tmp/rigidformer-reference checkout 4ab4edac7271b49484748d6bf8086a497f13272d
-embodichain run-example learning/rigidformer \
+/tmp/rigidformer-reference-env/bin/python -m embodichain run-example learning/rigidformer \
   --reference /tmp/rigidformer-reference \
   --output /tmp/rigidformer-acceptance --threads 4
 ```
