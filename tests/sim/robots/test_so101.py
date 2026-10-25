@@ -24,7 +24,7 @@ import pytest
 import torch
 
 from embodichain_robots import SO101FollowerCfg
-from embodichain_robots import so101
+from embodichain_robots.the_robot_studio.so101 import cfg as so101
 
 pytestmark = pytest.mark.no_sim
 

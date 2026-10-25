@@ -131,7 +131,7 @@ def test_marvin_deployments_preflight_and_register(
 ) -> None:
     """Each real task selects compatible contracts and registers EmbodiedEnv."""
     monkeypatch.setattr(
-        "embodichain_robots.tianji_marvin.get_data_path", lambda value: value
+        "embodichain_robots.tianji.marvin.cfg.get_data_path", lambda value: value
     )
     path, payload, physical, deployment = _deployment(task)
     registration = deployment.integration.registration
@@ -203,7 +203,7 @@ def test_marvin_grasp_tcp_aligns_with_physical_hand_axes(
 ) -> None:
     """The task-facing frame opens on hand X and approaches on hand Z."""
     monkeypatch.setattr(
-        "embodichain_robots.tianji_marvin.get_data_path", lambda value: value
+        "embodichain_robots.tianji.marvin.cfg.get_data_path", lambda value: value
     )
     path, payload, _, _ = _deployment("repeated_pick_place")
     cfg = config_to_cfg(payload, source_path=path)
@@ -329,7 +329,7 @@ def test_marvin_pour_lowers_scene_and_targets_without_changing_program_steps(
 ) -> None:
     """The 750 mm table variant shifts assets and targets together by 125 mm."""
     monkeypatch.setattr(
-        "embodichain_robots.tianji_marvin.get_data_path", lambda value: value
+        "embodichain_robots.tianji.marvin.cfg.get_data_path", lambda value: value
     )
     path, payload, _, deployment = _deployment("tableware/pour_water")
     reference = load_config(path.parent / "task.cobotmagic.yaml")
