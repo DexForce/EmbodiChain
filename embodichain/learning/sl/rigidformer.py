@@ -79,7 +79,8 @@ class RigidFormerObjective:
             batch: Explicit geometry inputs and next-frame targets.
 
         Returns:
-            Scalar loss and upstream position/acceleration diagnostic terms.
+            Scalar loss and upstream position/acceleration diagnostic terms,
+            weighted by the valid object count used by the upstream mean.
         """
         if batch.masks:
             raise ValueError(
@@ -87,10 +88,16 @@ class RigidFormerObjective:
                 "arbitrary temporal loss masks are unsupported"
             )
         loss, terms = model(**batch.inputs, object_pos_next=batch.targets)
+        object_lens = batch.inputs.get("object_lens")
+        weight = (
+            float(object_lens.sum())
+            if object_lens is not None
+            else float(batch.targets.shape[0] * batch.targets.shape[1])
+        )
         return LossResult(
             loss=loss,
             metrics={"acceleration": terms.acceleration, "position": terms.position},
-            weight=float(batch.targets.shape[0]),
+            weight=weight,
         )
 
 

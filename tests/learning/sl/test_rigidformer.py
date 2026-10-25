@@ -108,10 +108,68 @@ def test_rigidformer_objective_separates_targets_and_preserves_reference_update(
         candidate, RigidFormerObjective(), optimizer, max_grad_norm=1.0
     ).update(batch)
     assert metrics["loss"] == float(loss)
+    assert metrics["weight"] == 4.0  # Two scenes, each with two valid objects.
     for name, expected in reference.state_dict().items():
         torch.testing.assert_close(
             candidate.network.state_dict()[name], expected, atol=0, rtol=0
         )
+
+
+@pytest.mark.parametrize("object_lens", [None, (1, 2)])
+def test_rigidformer_split_scene_weighted_loss_and_gradients_match_upstream_batch(
+    geometry, object_lens
+):
+    pytest.importorskip("rigidformer")
+    torch.set_num_threads(2)
+    torch.manual_seed(31)
+    candidate = RigidFormerModel(
+        RigidFormerCfg(
+            dim=16,
+            dim_head=6,
+            heads=2,
+            num_register_tokens=2,
+            object_self_attn_depth=1,
+            anchor_cross_attn_depth=2,
+            object_hidden_layers=(0, 1),
+        )
+    ).eval()
+    # Fixed valid anchors remove FPS randomness; the scenes have different
+    # target accelerations so treating their local means equally is observable.
+    geometry["object_pos_next"][0] += torch.tensor([0.04, -0.03, 0.02])
+    geometry["object_pos_next"][1] += torch.tensor([-0.02, 0.04, -0.01])
+    if object_lens is not None:
+        geometry["object_lens"] = torch.tensor(object_lens)
+    reference = deepcopy(candidate.network)
+    expected_loss, _ = reference(**geometry)
+    expected_loss.backward()
+    expected_gradients = {
+        name: parameter.grad.clone()
+        for name, parameter in reference.named_parameters()
+        if parameter.grad is not None
+    }
+    objective = RigidFormerObjective()
+    results = [
+        objective.compute_loss(
+            candidate,
+            rigidformer_batch(
+                {key: value[row : row + 1] for key, value in geometry.items()}
+            ),
+        )
+        for row in range(2)
+    ]
+    assert [result.weight for result in results] == (
+        [2.0, 2.0] if object_lens is None else [1.0, 2.0]
+    )
+    actual_loss = sum(result.loss * result.weight for result in results) / sum(
+        result.weight for result in results
+    )
+    torch.testing.assert_close(actual_loss, expected_loss, atol=1e-5, rtol=1e-4)
+    actual_loss.backward()
+    for name, parameter in candidate.network.named_parameters():
+        if name in expected_gradients:
+            torch.testing.assert_close(
+                parameter.grad, expected_gradients[name], atol=1e-5, rtol=1e-4
+            )
 
 
 def test_rigidformer_reference_geometry_and_distance_budget_are_explicit(geometry):
@@ -209,6 +267,7 @@ def test_rigidformer_unequal_lengths_ignore_finite_padding_in_objective_and_roll
     rng = torch.get_rng_state()
     objective = RigidFormerObjective()
     expected = objective.compute_loss(model, rigidformer_batch(values))
+    assert expected.weight == 5.0  # Valid object counts are two and three.
     expected.loss.backward()
     gradients = {
         name: parameter.grad.clone()
@@ -218,6 +277,7 @@ def test_rigidformer_unequal_lengths_ignore_finite_padding_in_objective_and_roll
     model.zero_grad(set_to_none=True)
     torch.set_rng_state(rng)
     actual = objective.compute_loss(model, rigidformer_batch(changed))
+    assert actual.weight == expected.weight
     actual.loss.backward()
     torch.testing.assert_close(actual.loss, expected.loss, atol=0, rtol=0)
     for name, parameter in model.named_parameters():
