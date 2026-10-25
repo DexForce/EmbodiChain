@@ -248,8 +248,10 @@ def test_list_robot_wraps_long_catalog_metadata(
 def test_list_robot_prints_control_metadata_without_loading_robot(
     catalogs: list[Any],
     capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A provider's control summary is printed directly from its catalog."""
+    monkeypatch.setenv("COLUMNS", "120")
     spec = {
         "class_path": "absent_robots:RobotCfg",
         "dof": 7,
