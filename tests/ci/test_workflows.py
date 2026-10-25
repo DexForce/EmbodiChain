@@ -344,6 +344,7 @@ def test_test_job_restores_git_access_before_running_selected_tests(
         None,
         "missing_robots",
         "missing_entry_point",
+        "missing_asset_entry_point",
         "wrong_entry_point_group",
         "foreign_package",
         "bytecode",
@@ -368,19 +369,29 @@ def test_release_guard_validates_bundled_robot_catalog(
     source.write_text("physics: default\n")
     entry_points = (
         "[embodichain.tasks]\nembodichain_tasks = embodichain_tasks\n\n"
+        "[embodichain.assets]\nofficial_robots = embodichain_robots._asset_catalog:ROBOT_ASSETS\n\n"
         "[embodichain.robots]\nofficial = embodichain_robots._catalog:ROBOT_CONFIGS\n"
     )
     if invalid_contents == "missing_entry_point":
         entry_points = entry_points.split("[embodichain.robots]", 1)[0]
     elif invalid_contents == "wrong_entry_point_group":
         entry_points = entry_points.replace("[embodichain.robots]", "[other.robots]")
+    elif invalid_contents == "missing_asset_entry_point":
+        entry_points = entry_points.replace(
+            "[embodichain.assets]\nofficial_robots = embodichain_robots._asset_catalog:ROBOT_ASSETS\n\n",
+            "",
+        )
     members = {
         "embodichain/VERSION": version,
+        "embodichain/data/_asset_registry.py": "",
         "embodichain/gen_sim/simready_pipeline/configs/gen_config.json": "{}",
         "embodichain_tasks/__init__.py": "",
         task_config: source.read_text(),
         "embodichain_robots/__init__.py": "",
         "embodichain_robots/_catalog.py": "ROBOT_CONFIGS = {}\n",
+        "embodichain_robots/_asset_catalog.py": "ROBOT_ASSETS = {}\n",
+        "embodichain_robots/dexforce/w1/assets.py": "",
+        "embodichain_robots/franka/assets.py": "",
         "embodichain_benchmarks/__init__.py": "",
         f"embodichain-{version}.data/data/share/embodichain/examples/__init__.py": "",
         f"embodichain-{version}.dist-info/METADATA": f"Version: {version}\n",
