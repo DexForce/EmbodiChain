@@ -51,7 +51,7 @@ arm chains describe the grasp TCPs.
 Run a headless construction smoke check with:
 
 ```bash
-python -m embodichain_robots.aloha_mini --headless --device cpu
+python -m embodichain_robots.alohamini.aloha_mini.cfg --headless --device cpu
 ```
 
 Omit `--headless` for the interactive simulation window. Select the physics

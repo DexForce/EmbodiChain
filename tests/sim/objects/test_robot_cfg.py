@@ -33,21 +33,21 @@ from embodichain.lab.sim.cfg import (
     RobotCfg,
 )
 from embodichain.lab.sim.motion.workspace import RobotWorkspaceCfg
-from embodichain_robots.dexforce_w1 import DexforceW1Cfg
-from embodichain_robots.dexforce_w1.params import W1ArmKineParams
-from embodichain_robots.dexforce_w1.types import (
+from embodichain_robots.dexforce.w1 import DexforceW1Cfg
+from embodichain_robots.dexforce.w1.params import W1ArmKineParams
+from embodichain_robots.dexforce.w1.types import (
     DexforceW1ArmSide,
     DexforceW1HandBrand,
     DexforceW1HandVersion,
     DexforceW1Type,
     DexforceW1Version,
 )
-from embodichain_robots.dexforce_w1.hand_specs import (
+from embodichain_robots.dexforce.w1.hand_specs import (
     get_default_w1_hand_version,
     get_w1_hand_spec,
 )
-from embodichain_robots.dexforce_w1.specs import get_w1_version_spec
-from embodichain_robots.dexforce_w1.utils import (
+from embodichain_robots.dexforce.w1.specs import get_w1_version_spec
+from embodichain_robots.dexforce.w1.utils import (
     build_dexforce_w1_assembly_urdf_cfg,
     build_dexforce_w1_control_parts,
 )
@@ -61,7 +61,7 @@ def test_arx5_source_chain_commands_and_ik_roundtrip(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """X5A retains two independent fingers and a six-joint flange/TCP chain."""
-    from embodichain_robots import arx5
+    from embodichain_robots.arx.arx5 import cfg as arx5
 
     source = Path(__file__).parents[2] / "fixtures/kinematics/arx5_x5a.urdf"
     monkeypatch.setattr(arx5, "get_data_path", lambda _: str(source))
@@ -153,7 +153,7 @@ def test_cobotmagic_mounted_defaults_replace_and_clear(monkeypatch) -> None:
     from embodichain_robots import CobotMagicCfg
 
     monkeypatch.setattr(
-        "embodichain_robots.cobotmagic.get_data_path", lambda value: value
+        "embodichain_robots.agilex.cobotmagic.cfg.get_data_path", lambda value: value
     )
     cfg = CobotMagicCfg.from_dict({})
     assert cfg.enable_sensor is False
@@ -187,7 +187,7 @@ def test_cobotmagic_mounted_defaults_replace_and_clear(monkeypatch) -> None:
 
 def _mock_w1_asset_paths(monkeypatch, tmp_path):
     import embodichain.lab.sim.cfg as sim_cfg
-    from embodichain_robots.dexforce_w1 import utils as w1_utils
+    from embodichain_robots.dexforce.w1 import utils as w1_utils
 
     def resolve(path):
         resolved = tmp_path / path
@@ -361,7 +361,7 @@ def test_w1_v022_provisional_eef_baseline_is_composed_consistently():
 
 def test_w1_v022_cfg_uses_registered_asset_paths(tmp_path, monkeypatch):
     import embodichain.lab.sim.cfg as sim_cfg
-    from embodichain_robots.dexforce_w1 import utils as w1_utils
+    from embodichain_robots.dexforce.w1 import utils as w1_utils
 
     registered_paths = []
 
@@ -413,7 +413,7 @@ def test_w1_cfg_builds_complete_dual_arm_robot(monkeypatch, tmp_path):
 
 def test_w1_hand_version_is_independent_of_robot_version(monkeypatch, tmp_path):
     _mock_w1_asset_paths(monkeypatch, tmp_path)
-    from embodichain_robots.dexforce_w1 import utils as w1_utils
+    from embodichain_robots.dexforce.w1 import utils as w1_utils
 
     selected_versions = []
     original_get_urdf = w1_utils.hand_manager.get_urdf
@@ -661,10 +661,10 @@ def test_robotcfg_to_dict_roundtrip():
     assert cfg2.joint_drive_props.stiffness == {"J[1-2]": 1e4}
 
 
-from embodichain_robots.cobotmagic import CobotMagicCfg
+from embodichain_robots.agilex.cobotmagic.cfg import CobotMagicCfg
 from embodichain_robots import AlohaMiniCfg, TianjiMarvinCfg
-from embodichain_robots.franka_panda import FrankaPandaCfg, FrankaPandaPgiCfg
-from embodichain_robots.ur_robot import URRobotCfg
+from embodichain_robots.franka.panda import FrankaPandaCfg
+from embodichain_robots.universal_robots.ur_robot import URRobotCfg
 from embodichain.lab.sim.motion.solvers import OPWSolverCfg
 
 
@@ -684,9 +684,9 @@ def test_control_part_naming_convention_does_not_rewrite_user_names(
 @pytest.mark.parametrize(
     ("robot_class", "module_path", "expected_eef_parts"),
     [
-        (FrankaPandaCfg, "franka_panda", {"eef"}),
-        (AlohaMiniCfg, "aloha_mini", {"left_eef", "right_eef"}),
-        (TianjiMarvinCfg, "tianji_marvin", {"left_eef", "right_eef"}),
+        (FrankaPandaCfg, "franka.panda", {"eef"}),
+        (AlohaMiniCfg, "alohamini.aloha_mini.cfg", {"left_eef", "right_eef"}),
+        (TianjiMarvinCfg, "tianji.marvin.cfg", {"left_eef", "right_eef"}),
     ],
 )
 def test_specified_robot_defaults_use_eef_control_part_names(
@@ -837,7 +837,7 @@ def test_tianji_marvin_custom_asset_does_not_inherit_demo_inertials(
     monkeypatch, tmp_path
 ):
     monkeypatch.setattr(
-        "embodichain_robots.tianji_marvin.get_data_path", lambda value: value
+        "embodichain_robots.tianji.marvin.cfg.get_data_path", lambda value: value
     )
     asset = tmp_path / "custom.urdf"
     asset.write_text('<robot name="custom"/>')
@@ -1338,7 +1338,6 @@ def test_cobotmagic_control_part_speed_override_retains_direct_rule_priority() -
     [
         (CobotMagicCfg, {}),
         (FrankaPandaCfg, {}),
-        (FrankaPandaPgiCfg, {}),
         (URRobotCfg, {}),
         (DexforceW1Cfg, {}),
     ],
@@ -1355,14 +1354,10 @@ def test_specified_robots_use_portable_joint_drive_semantics(
     assert cfg.joint_drive_props._resolve_modes() == ("position_velocity", "force")
 
 
-_PGI_FINGER_LINKS = {"gripper_finger1_link_1", "gripper_finger2_link_1"}
-
-
 @pytest.mark.parametrize(
     ("cfg_type", "expected_links"),
     [
         (FrankaPandaCfg, {"fr3_leftfinger|fr3_rightfinger"}),
-        (FrankaPandaPgiCfg, _PGI_FINGER_LINKS),
     ],
 )
 def test_franka_variants_own_newton_gripper_contact_defaults(
@@ -1379,117 +1374,6 @@ def test_franka_variants_own_newton_gripper_contact_defaults(
     assert group.attrs.material_props.kd == pytest.approx(400.0)
     assert group.attrs.material_props.torsional_friction == pytest.approx(0.1)
     assert group.attrs.material_props.rolling_friction == pytest.approx(0.01)
-
-
-def _assembled_link_and_joint_names(cfg: RobotCfg) -> tuple[list[str], list[str]]:
-    tree = ET.parse(cfg.urdf_cfg.assemble_urdf())
-    links = [link.get("name") for link in tree.findall("link")]
-    joints = [
-        joint.get("name")
-        for joint in tree.findall("joint")
-        if joint.get("type") != "fixed"
-    ]
-    return links, joints
-
-
-def test_franka_panda_pgi_selectors_resolve_on_the_assembled_robot() -> None:
-    from embodichain.utils.string import resolve_matching_names
-
-    cfg = FrankaPandaPgiCfg.from_dict({})
-    links, joints = _assembled_link_and_joint_names(cfg)
-
-    # Spawn rejects any selector that matches nothing; every key must resolve.
-    for group in cfg.link_attrs.values():
-        resolve_matching_names(group.link_names_expr, links)
-    _, contact_links = resolve_matching_names(
-        cfg.link_attrs["newton_gripper_contacts"].link_names_expr, links
-    )
-    assert set(contact_links) == _PGI_FINGER_LINKS
-    assert resolve_matching_names(cfg.control_parts["arm"], joints)[1] == [
-        f"fr3_joint{i}" for i in range(1, 8)
-    ]
-    assert resolve_matching_names(cfg.control_parts["eef"], joints)[1] == [
-        "gripper_finger1_joint_1"
-    ]
-    drives = cfg.joint_drive_props
-    for rules in (drives.stiffness, drives.damping, drives.max_effort):
-        resolve_matching_names(list(rules), joints)
-    solver = cfg.solver_cfg["arm"]
-    assert {solver.root_link_name, solver.end_link_name} <= set(links)
-    assert len(cfg.init_qpos) == len(joints)
-    assert cfg.init_qpos[-2:] == [0.0, 0.0]
-
-
-def test_franka_panda_pgi_roundtrip_keeps_the_assembly_and_other_groups() -> None:
-    wrist = {
-        "link_names_expr": ["fr3_link7"],
-        "attrs": {"material_props": {"static_friction": 0.5}},
-    }
-    cfg = FrankaPandaPgiCfg.from_dict(
-        {
-            "uid": "franka_pgi",
-            "init_rot": [0.0, 0.0, 180.0],
-            "solver_cfg": {"arm": {"tcp": np.eye(4).tolist()}},
-            "link_attrs": {"wrist": wrist},
-        }
-    )
-
-    restored = FrankaPandaPgiCfg.from_dict(cfg.to_dict())
-
-    assert restored.to_dict() == cfg.to_dict()
-    assert set(restored.link_attrs) == {"newton_gripper_contacts", "wrist"}
-    assert restored.link_attrs["wrist"].link_names_expr == ["fr3_link7"]
-    assert list(restored.init_rot) == [0.0, 0.0, 180.0]
-    assert restored.solver_cfg["arm"].end_link_name == "fr3_link8"
-    assert [
-        Path(component["urdf_path"]).name
-        for component in restored.urdf_cfg.components.values()
-    ] == ["Panda.urdf", "DH_PGI_140_80.urdf"]
-
-    # The merge contract removes one group without touching the others.
-    without_contacts = FrankaPandaPgiCfg.from_dict(
-        {"link_attrs": {"wrist": wrist, "newton_gripper_contacts": None}}
-    )
-    assert set(without_contacts.link_attrs) == {"wrist"}
-
-
-def test_franka_panda_pgi_leaves_the_stock_panda_defaults_intact() -> None:
-    before = FrankaPandaCfg.from_dict({}).to_dict()
-
-    FrankaPandaPgiCfg.from_dict({})
-    stock = FrankaPandaCfg.from_dict({})
-
-    assert stock.to_dict() == before
-    assert stock.control_parts["eef"] == ["fr3_finger_joint1", "fr3_finger_joint2"]
-    assert stock.solver_cfg["arm"].end_link_name == "fr3_hand_tcp"
-    assert stock.link_attrs["newton_gripper_contacts"].link_names_expr == [
-        "fr3_leftfinger|fr3_rightfinger"
-    ]
-    assert stock._pk_urdf_path.endswith("PandaWithHand.urdf")
-
-
-def test_franka_panda_pgi_kinematic_chain_matches_the_assembled_solver() -> None:
-    pytest.importorskip("pytorch_kinematics")
-    cfg = FrankaPandaPgiCfg.from_dict({})
-    solver_cfg = cfg.solver_cfg["arm"]
-    assert cfg._pk_urdf_path == cfg.urdf_cfg.components["arm"]["urdf_path"]
-
-    chain = cfg.build_pk_serial_chain()["arm"]
-    assert chain.get_joint_parameter_names() == cfg.control_parts["arm"]
-
-    # The solver plans on the assembled robot; the chain must end at the same
-    # flange so that composing it with the solver TCP gives the same pose.
-    solver_cfg.urdf_path = cfg.urdf_cfg.assemble_urdf()
-    solver_cfg.joint_names = cfg.control_parts["arm"]
-    solver = solver_cfg.init_solver(device=torch.device("cpu"))
-    qpos = torch.tensor(
-        [cfg.init_qpos[:7], [0.3, -0.2, 0.1, -2.0, 0.2, 2.5, 0.4]],
-        dtype=torch.float32,
-    )
-    tcp = torch.tensor(solver_cfg.tcp, dtype=torch.float32)
-    torch.testing.assert_close(
-        solver.get_fk(qpos), chain.forward_kinematics(qpos).get_matrix() @ tcp
-    )
 
 
 def test_robotcfg_save_to_file(tmp_path):
