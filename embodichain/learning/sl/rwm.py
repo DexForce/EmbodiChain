@@ -72,7 +72,8 @@ class RobotWorldModelObjective:
         error_floor: Minimum physical increment scale for near-constant fields.
 
     Loss is the mean squared normalized error over valid transitions and state
-    increment features. Invalid suffixes are excluded. This supervised objective
+    increment features. Invalid suffixes are excluded before physical-error
+    arithmetic and may contain nonfinite padding. This supervised objective
     does not create rewards, continuation probabilities or policy gradients.
     The last-step diagnostic weights each window by its valid transition count.
     """
@@ -121,13 +122,22 @@ class RobotWorldModelObjective:
             raise ValueError("RWM context must align with every supervised transition")
         predictions = []
         for index in range(actions.shape[1]):
-            state = model(
-                state,
-                actions[:, index],
-                None if contexts is None else contexts[:, index],
+            active = valid[:, index, None]
+            # Padding must not enter nonlinear model arithmetic: masking only
+            # the final loss can still produce NaN gradients from invalid rows.
+            action = torch.where(active, actions[:, index], 0)
+            context = (
+                None if contexts is None else torch.where(active, contexts[:, index], 0)
             )
+            next_state = model(
+                state,
+                action,
+                context,
+            )
+            state = torch.where(active, next_state, state)
             predictions.append(state)
-        predicted = torch.stack(predictions, 1)
+        predicted = torch.stack(predictions, 1)[valid]
+        target = target[valid]
         # A learner's autocast covers the objective, so explicitly keep error
         # transport, logarithms and normalization in physical FP32 arithmetic.
         with torch.autocast(state.device.type, enabled=False):
@@ -136,16 +146,18 @@ class RobotWorldModelObjective:
                 self.error_floor
             )
             squared = (error / scale).square().mean(-1)
-            loss = squared[valid].mean()
-            final_index = valid.sum(1) - 1
-            final = squared[torch.arange(len(state), device=state.device), final_index]
-            final = (final * valid.sum(1)).sum() / valid.sum()
+            loss = squared.mean()
+            lengths = valid.sum(1)
+            # Boolean selection is row-major; each prefix ends at its cumulative
+            # valid count, so last-step diagnostics never inspect padded values.
+            final = squared[lengths.cumsum(0) - 1]
+            final = (final * lengths).sum() / lengths.sum()
             position_error = (predicted[..., :3] - target[..., :3]).norm(dim=-1)
         return LossResult(
             loss,
             metrics={
                 "last_step_mse": final.detach(),
-                "position_error_m": position_error[valid].mean().detach(),
+                "position_error_m": position_error.mean().detach(),
             },
             weight=float(valid.sum()),
         )

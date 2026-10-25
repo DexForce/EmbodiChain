@@ -25,7 +25,10 @@ import sys
 import pytest
 import torch
 
-from embodichain.compute.dynamics.robot_state import integrate_robot_state
+from embodichain.compute.dynamics.robot_state import (
+    integrate_robot_state,
+    robot_state_error,
+)
 from embodichain.learning.models.rwm import (
     RobotWorldModel,
     RobotWorldModelCfg,
@@ -198,6 +201,106 @@ def test_target_mask_excludes_invalid_suffix_and_rejects_episode_reentry():
                 {"valid": torch.tensor([[True, False, True], [True, True, True]])},
             ),
         )
+
+
+def test_nan_padding_preserves_masked_loss_diagnostics_and_backward():
+    torch.manual_seed(19)
+    corpus = _controlled_batch(3, 4)
+    contexts = torch.randn(3, 4, 2)
+    valid = torch.tensor(
+        [
+            [True, True, True, False],
+            [True, False, False, False],
+            [True, True, False, False],
+        ]
+    )
+    model = RobotWorldModel(RobotWorldModelCfg(context_dim=2, hidden_dims=(24, 24)))
+    with torch.no_grad():
+        torch.nn.init.normal_(model.net[-1].weight, std=0.03)
+        torch.nn.init.normal_(model.net[-1].bias, std=0.01)
+    objective = RobotWorldModelObjective()
+    results = []
+    gradients = []
+    for poison_padding in (False, True):
+        current = deepcopy(model)
+        state = corpus.inputs["initial_state"].clone().requires_grad_()
+        actions = corpus.inputs["actions"].clone()
+        context = contexts.clone()
+        targets = corpus.targets.clone()
+        if poison_padding:
+            actions[~valid] = float("nan")
+            context[~valid] = float("nan")
+            targets[~valid] = float("nan")
+        actions.requires_grad_()
+        context.requires_grad_()
+        targets.requires_grad_()
+        result = objective.compute_loss(
+            current,
+            SupervisedBatch(
+                {"initial_state": state, "actions": actions, "contexts": context},
+                targets,
+                {"valid": valid},
+            ),
+        )
+        result.loss.backward()
+        result_gradients = [
+            state.grad,
+            actions.grad,
+            context.grad,
+            targets.grad,
+            *(parameter.grad for parameter in current.parameters()),
+        ]
+        assert all(torch.isfinite(value).all() for value in result_gradients)
+        assert actions.grad[~valid].eq(0).all()
+        assert context.grad[~valid].eq(0).all()
+        assert targets.grad[~valid].eq(0).all()
+        assert torch.isfinite(result.loss)
+        assert all(torch.isfinite(value) for value in result.metrics.values())
+        results.append(result)
+        gradients.append(result_gradients)
+    assert results[0].weight == results[1].weight == 6
+    torch.testing.assert_close(results[0].loss, results[1].loss, atol=0, rtol=0)
+    for name in results[0].metrics:
+        torch.testing.assert_close(
+            results[0].metrics[name], results[1].metrics[name], atol=0, rtol=0
+        )
+    for clean, padded in zip(*gradients):
+        torch.testing.assert_close(clean, padded, atol=0, rtol=0)
+
+
+def test_all_valid_objective_preserves_direct_rollout_numerics_and_gradients():
+    torch.manual_seed(23)
+    corpus = _controlled_batch(3, 4)
+    model = _nontrivial_model()
+    objective = RobotWorldModelObjective()
+    reference = deepcopy(model)
+    state = corpus.inputs["initial_state"]
+    predictions = []
+    for index in range(corpus.inputs["actions"].shape[1]):
+        state = reference(state, corpus.inputs["actions"][:, index])
+        predictions.append(state)
+    predicted = torch.stack(predictions, 1)
+    error = robot_state_error(predicted, corpus.targets)
+    scale = reference.output_normalizer.standard_deviation.clamp_min(
+        objective.error_floor
+    )
+    squared = (error / scale).square().mean(-1)
+    expected_loss = squared.mean()
+    expected_loss.backward()
+    actual = objective.compute_loss(model, corpus)
+    actual.loss.backward()
+    torch.testing.assert_close(actual.loss, expected_loss, atol=0, rtol=0)
+    torch.testing.assert_close(
+        actual.metrics["last_step_mse"], squared[:, -1].mean(), atol=0, rtol=0
+    )
+    torch.testing.assert_close(
+        actual.metrics["position_error_m"],
+        (predicted[..., :3] - corpus.targets[..., :3]).norm(dim=-1).mean(),
+        atol=0,
+        rtol=0,
+    )
+    for current, expected in zip(model.parameters(), reference.parameters()):
+        torch.testing.assert_close(current.grad, expected.grad, atol=0, rtol=0)
 
 
 def test_robot_layout_context_checkpoint_and_fp32_under_autocast():
