@@ -439,9 +439,11 @@ def run_comparison(
             if plan["reference_dependencies"]:
                 pythonpaths.append(plan["reference_dependencies"])
             pythonpaths.append(plan["source"]["root"])
-        root = Path(__file__).resolve().parents[4]
-        if (root / "pyproject.toml").is_file():
-            pythonpaths.extend((str(root / "extensions/embodichain_models"), str(root)))
+        source_root = Path(__file__).resolve().parents[4]
+        if (source_root / "pyproject.toml").is_file():
+            pythonpaths.extend(
+                (str(source_root / "extensions/embodichain_models"), str(source_root))
+            )
         if environment.get("PYTHONPATH"):
             pythonpaths.append(environment["PYTHONPATH"])
         environment["PYTHONPATH"] = os.pathsep.join(pythonpaths)

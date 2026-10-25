@@ -121,6 +121,58 @@ def test_changed_common_artifact_fails_before_execution(tmp_path, monkeypatch):
         _read_plan(path)
 
 
+def test_comparison_keeps_execution_receipts_and_reuses_completed_cells(
+    tmp_path, monkeypatch
+):
+    import examples.learning.nerd._support._comparison as comparison
+
+    experiment_root = tmp_path / "experiment"
+    path = prepare_comparison(configuration(tmp_path, monkeypatch))
+    _, plan = _read_plan(path)
+    prepared = [cell for cell in plan["cells"] if cell["status"] == "prepared"]
+    assert len(prepared) == 2
+    source_root = tmp_path / "checkout"
+    source_root.mkdir()
+    (source_root / "pyproject.toml").write_text("")
+    monkeypatch.setattr(
+        comparison,
+        "__file__",
+        str(source_root / "examples/learning/nerd/_support/_comparison.py"),
+    )
+    commands = []
+
+    def worker(command, **kwargs):
+        commands.append(command)
+        spec = json.loads(Path(command[command.index("--spec") + 1]).read_text())
+        (Path(spec["output_dir"]) / "result.json").write_text(
+            json.dumps(
+                {
+                    "status": "completed",
+                    "completed_updates": spec["train"]["total_steps"],
+                }
+            )
+        )
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(comparison.subprocess, "run", worker)
+    result = run_comparison(path, trust_external_code=True)
+    assert result["executed"] == 2
+    assert {run["id"] for run in result["runs"] if run["status"] == "completed"} == {
+        cell["id"] for cell in prepared
+    }
+    assert {file.name for file in experiment_root.glob("*.receipt.json")} == {
+        cell["id"] + ".receipt.json" for cell in prepared
+    }
+    assert json.loads((experiment_root / "execution.json").read_text()) == {
+        "runs": result["runs"]
+    }
+    assert not list(source_root.glob("*.receipt.json"))
+    assert not (source_root / "execution.json").exists()
+    reused = run_comparison(path, trust_external_code=True)
+    assert reused == {"runs": result["runs"], "executed": 0}
+    assert len(commands) == 2
+
+
 def test_candidate_worker_uses_frozen_artifacts(tmp_path, monkeypatch):
     path = prepare_comparison(configuration(tmp_path, monkeypatch))
     _, plan = _read_plan(path)
