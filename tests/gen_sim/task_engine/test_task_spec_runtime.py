@@ -1170,3 +1170,136 @@ def test_supported_region_keeps_footprint_with_an_e5_contact_timeline(
     assert not _placement_measurement_matches(
         support_only, predicate, contract["coverage"]["roles"], 1, **kwargs
     )
+
+
+def test_e5_measured_acquisition_precedes_terminal_placement(monkeypatch) -> None:
+    """One E5 call may prove two milestones only at distinct measured times."""
+    from embodichain.gen_sim.task_engine.semantic_planner import SemanticTaskPlanner
+    from embodichain.gen_sim.task_engine._task_program import task_spec_runtime
+    from .test_task_spec_generation import candidate, selector, step
+
+    source = candidate(
+        step(
+            "E5",
+            "tray",
+            required_arm="none",
+            terminal_behavior="place",
+            direction="none",
+            relation="on",
+            target=selector("table"),
+        )
+    )
+    bindings = {
+        "schema_version": "action_engine_role_bindings_v1",
+        "task_id": source["draft"]["task_id"],
+        "candidate_id": source["candidate_id"],
+        "reference_bindings": {
+            "step_01.object": ["tray"],
+            "step_01.target": ["table"],
+        },
+        "role_bindings": {},
+    }
+    plan = SemanticTaskPlanner().plan_spec(
+        source,
+        bindings,
+        [
+            {"runtime_uid": uid, "init_pos": [0, 0, 0.7], "init_rot": [0, 0, 0]}
+            for uid in ("tray", "table")
+        ],
+    )
+    coverage = _coverage(plan)
+    program = {
+        "program": {
+            "items": [{"name": node["id"], "post": []} for node in plan.graph["nodes"]]
+        }
+    }
+    constraints = {"presets": {}}
+    contract = {
+        "task_spec_digest": canonical_hash(plan.task_spec.to_dict()),
+        "graph_digest": canonical_hash(plan.graph),
+        "program_digest": canonical_hash(program),
+        "constraints_digest": canonical_hash(constraints),
+        "coverage": coverage,
+    }
+    runtime = {
+        "segments": [
+            {
+                "name": node["id"],
+                "active": [True],
+                "successes": [True],
+                "end_steps": [end],
+                "metadata": {"runtime": {"env_ids": [0]}, "post_policies": []},
+            }
+            for node, end in zip(plan.graph["nodes"], (300, 620, 959), strict=True)
+        ]
+    }
+    group = plan.graph["task_groups"][0]["id"]
+    identity = {
+        "invocation_id": "program/segment:0",
+        "invocation_revision": 0,
+        "acquired_step": 87,
+        "release_step": 267,
+        "contact_timeline_digest": "native-timeline",
+        "release_receipt_digest": "terminal-effect",
+    }
+    acquisition = {
+        group: {
+            "group_id": group,
+            "uid": "tray",
+            "part_id": None,
+            "accepted": [True],
+            "measurements": {"scope": "measured_coordinated_transport/v1", **identity},
+        }
+    }
+    placement = {
+        group: {
+            "group_id": group,
+            "uid": "tray",
+            "part_id": None,
+            "accepted": [True],
+            "measurements": {
+                "scope": "native_stable_support",
+                **identity,
+                "start_step": 884,
+                "end_step": 959,
+                "boundary_frames": [959],
+            },
+        }
+    }
+    final = {
+        predicate.id: {"members": [placement[group]]}
+        for predicate in plan.task_spec.goal
+    }
+    # Native contact/release/support validators have independent tests; isolate
+    # the TaskSpec trajectory ordering after those checks return measured proof.
+    monkeypatch.setattr(task_spec_runtime, "_transport_hold_matches", lambda *_: True)
+    monkeypatch.setattr(
+        task_spec_runtime, "_placement_measurement_matches", lambda *_a, **_k: True
+    )
+
+    def evaluate() -> dict:
+        return evaluate_runtime_evidence(
+            plan.task_spec,
+            contract,
+            plan.graph,
+            runtime,
+            final,
+            num_envs=1,
+            run_id="ordered-e5-test",
+            program=program,
+            constraints=constraints,
+            placement_milestones=placement,
+            coordinated_milestones=acquisition,
+            contact_timeline={},
+        )["environments"][0]
+
+    ordered = evaluate()
+    assert ordered["status"] == "satisfied"
+    assert [row["status"] for row in ordered["milestones"]] == ["satisfied"] * 2
+    assert [row["observed"]["step"] for row in ordered["milestones"]] == [1, 0]
+
+    placement[group]["measurements"]["start_step"] = 266
+    out_of_order = evaluate()
+    assert out_of_order["goal"][0]["status"] == "satisfied"
+    assert out_of_order["milestones"][0]["status"] == "unavailable"
+    assert out_of_order["certificate_ready"] is False

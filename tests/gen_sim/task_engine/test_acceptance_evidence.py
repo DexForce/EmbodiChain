@@ -356,6 +356,64 @@ def test_coordinated_transport_requires_native_acquisition_and_dual_release():
     assert proof["release_step"] == 75
 
 
+def _ordered_e5_case():
+    transport = {
+        "invocation_id": "program/segment:0",
+        "invocation_revision": 0,
+        "acquired_step": 87,
+        "release_step": 267,
+        "contact_timeline_digest": "same-native-timeline",
+        "release_receipt_digest": "same-terminal-effect",
+    }
+    acquired = {
+        "measurements": {"scope": "measured_coordinated_transport/v1", **transport}
+    }
+    placed = {
+        "measurements": {
+            "scope": "native_stable_support",
+            **transport,
+            "start_step": 884,
+            "end_step": 959,
+            "boundary_frames": [959],
+        }
+    }
+    terminal = {"end_steps": [959]}
+    return acquired, placed, terminal
+
+
+def test_e5_ordered_snapshot_uses_measured_acquisition_before_support():
+    from embodichain.gen_sim.task_engine._task_program.task_spec_runtime import (
+        _ordered_coordinated_placement,
+    )
+
+    acquired, placed, terminal = _ordered_e5_case()
+
+    assert _ordered_coordinated_placement(acquired, placed, terminal, env_id=0)
+
+
+@pytest.mark.parametrize(
+    "damage",
+    ["foreign_invocation", "reversed_release", "early_support", "stale_boundary"],
+)
+def test_e5_ordered_snapshot_rejects_changed_event_identity_or_order(damage):
+    from embodichain.gen_sim.task_engine._task_program.task_spec_runtime import (
+        _ordered_coordinated_placement,
+    )
+
+    acquired, placed, terminal = _ordered_e5_case()
+    if damage == "foreign_invocation":
+        placed["measurements"]["invocation_id"] = "another/segment:0"
+    elif damage == "reversed_release":
+        placed["measurements"]["release_step"] = 86
+        acquired["measurements"]["release_step"] = 86
+    elif damage == "early_support":
+        placed["measurements"]["start_step"] = 266
+    else:
+        terminal["end_steps"] = [958]
+
+    assert not _ordered_coordinated_placement(acquired, placed, terminal, env_id=0)
+
+
 @pytest.mark.parametrize("mode", ["supported", "overhang", "table_support", "hovering"])
 def test_e5_on_requires_native_load_not_a_footprint_or_release_proxy(monkeypatch, mode):
     from embodichain.gen_sim.task_engine._task_program.task_spec_runtime import (

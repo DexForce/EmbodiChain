@@ -8,7 +8,10 @@ Missing evidence is unavailable, not an invented success or a measured failure.
 
 - Events, including action-only pouring, retain their exact historical window.
   Returning the vessel or moving the receiver afterwards does not erase the event.
-- Stage states are measured at the compiled group's seeded end-step slot.
+- Group terminal stage states use the compiled group's seeded end-step slot.
+  An explicit E5 coordinated `on` placement also records its separately
+  measured two-hand acquisition before terminal release/support; missing or
+  reordered native boundaries remain unavailable under TaskSpec's `after` rule.
 - Final states are observed before reset, not copied from an earlier milestone.
 - New E3 instruction interpretation requires explicit `pour_goal_mode`. `motion`
   verifies alignment, tilt, restoration and release, never liquid transfer.

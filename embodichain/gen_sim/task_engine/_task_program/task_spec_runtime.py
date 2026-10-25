@@ -2208,6 +2208,49 @@ def _transport_hold_matches(
     )
 
 
+def _ordered_coordinated_placement(
+    acquisition: Mapping[str, Any] | None,
+    placement: Mapping[str, Any] | None,
+    terminal: Mapping[str, Any],
+    *,
+    env_id: int,
+) -> bool:
+    """Place an E5 acquisition before its independently measured release/support."""
+    if not isinstance(acquisition, Mapping) or not isinstance(placement, Mapping):
+        return False
+    acquired = acquisition.get("measurements")
+    placed = placement.get("measurements")
+    if not isinstance(acquired, Mapping) or not isinstance(placed, Mapping):
+        return False
+    shared = (
+        "invocation_id",
+        "invocation_revision",
+        "acquired_step",
+        "release_step",
+        "contact_timeline_digest",
+        "release_receipt_digest",
+    )
+    steps = (
+        acquired.get("acquired_step"),
+        acquired.get("release_step"),
+        placed.get("start_step"),
+        placed.get("end_step"),
+    )
+    ends = terminal.get("end_steps")
+    return (
+        acquired.get("scope") == "measured_coordinated_transport/v1"
+        and placed.get("scope") == "native_stable_support"
+        and all(acquired.get(key) == placed.get(key) for key in shared)
+        and all(type(step) is int for step in steps)
+        and 0 <= steps[0] < steps[1] <= steps[2] <= steps[3]
+        and type(ends) is list
+        and env_id < len(ends)
+        and type(ends[env_id]) is int
+        and placed.get("boundary_frames") == ends
+        and steps[3] == ends[env_id]
+    )
+
+
 def evaluate_runtime_evidence(
     spec: TaskSpec,
     contract: Mapping[str, Any],
@@ -2252,6 +2295,34 @@ def evaluate_runtime_evidence(
         for v in entries
     }
     groups = {v["id"]: v for v in graph["task_groups"]}
+    milestone_by_id = {milestone.id: milestone for milestone in spec.milestones}
+    milestone_groups = {
+        record["id"]: tuple(record["groups"])
+        for record in contract["coverage"]["milestones"]
+    }
+    ordered_e5_acquisition: dict[tuple[str, str], tuple[str, ...]] = {}
+    for milestone in spec.milestones:
+        if len(milestone.after) != 1 or not any(
+            _placement_predicate(predicate)
+            and predicate.arguments.get("task_type") == "E5"
+            for predicate in milestone.achieve
+        ):
+            continue
+        predecessor = milestone_by_id.get(milestone.after[0])
+        group_ids = milestone_groups.get(milestone.id, ())
+        if (
+            predecessor is not None
+            and len(group_ids) == 1
+            and group_ids == milestone_groups.get(predecessor.id, ())
+            and any(
+                predicate.name == "held_by_both_grippers"
+                and predicate.arguments.get("task_type") == "E5"
+                for predicate in predecessor.achieve
+            )
+        ):
+            ordered_e5_acquisition[(group_ids[0], predecessor.id)] = tuple(
+                predicate.observation or predicate.id for predicate in milestone.achieve
+            )
     segments = {}
     e4_placement_milestones = {
         m.id
@@ -2513,6 +2584,8 @@ def evaluate_runtime_evidence(
                     else set()
                 )
             snapshot = {}
+            acquisition_snapshot = {}
+            ordered_main_keys: set[str] = set()
             for milestone in spec.milestones:
                 record = next(
                     (
@@ -2623,9 +2696,18 @@ def evaluate_runtime_evidence(
                                     record["groups"], observations, strict=True
                                 )
                             ):
-                                snapshot[predicate.observation or predicate.id] = all(
+                                observation = predicate.observation or predicate.id
+                                accepted = all(
                                     value["accepted"][env_id] for value in observations
                                 )
+                                ordered = ordered_e5_acquisition.get(
+                                    (group["id"], milestone.id)
+                                )
+                                if ordered is None:
+                                    snapshot[observation] = accepted
+                                else:
+                                    acquisition_snapshot[observation] = accepted
+                                    ordered_main_keys.update(ordered)
                             continue
                         if (
                             predicate.name == "articulation_joint_near"
@@ -2753,6 +2835,21 @@ def evaluate_runtime_evidence(
                             for id in record["groups"]
                         ):
                             snapshot[predicate.observation or predicate.id] = True
+            if acquisition_snapshot:
+                if (
+                    all(value is True for value in acquisition_snapshot.values())
+                    and ordered_main_keys
+                    and all(snapshot.get(key) is True for key in ordered_main_keys)
+                    and _ordered_coordinated_placement(
+                        (coordinated_milestones or {}).get(group["id"]),
+                        measured_placements.get(group["id"]),
+                        segment,
+                        env_id=env_id,
+                    )
+                ):
+                    trajectory.append(acquisition_snapshot)
+                else:
+                    snapshot.update(acquisition_snapshot)
             trajectory.append(snapshot)
         # Sparse segment observations prove order, not continuous invariant/time windows.
         for condition in spec.temporal:
