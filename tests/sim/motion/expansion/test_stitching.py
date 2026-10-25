@@ -67,6 +67,7 @@ def _template(
             TrajectoryPhase("reach", 0, 3, "free", ("joint_residual",)),
             TrajectoryPhase("retreat", 3, 6, "free", ("via_points",)),
         ),
+        allowed_operators=("joint_residual", "via_points"),
         controlled_joint_indices=(0,),
         validator_id="path_and_task",
     )
@@ -99,6 +100,24 @@ def test_segment_identity_includes_the_full_source_identity() -> None:
 
     assert first_segment.segment_id != second_segment.segment_id
     assert len(bank) == 2
+
+
+def test_extraction_and_stitching_preserve_withheld_template_permissions() -> None:
+    source = replace(_template("protected"), allowed_operators=("via_points",))
+    segments = extract_trajectory_segments(source)
+    assert segments[0].allowed_operators == ()
+    assert segments[1].allowed_operators == ("via_points",)
+    stitched = stitch_trajectory_segments(
+        segments, source_id="composite", source_revision="one", template_id="protected"
+    ).template
+    assert stitched.allowed_operators == ("via_points",)
+    with pytest.raises(ValueError, match="does not allow joint_residual"):
+        joint_residual(
+            stitched,
+            joint_limits=torch.tensor([[-10.0, 10.0]], dtype=torch.float64),
+            normalized_scale=0.01,
+            generator=torch.Generator().manual_seed(3),
+        )
 
 
 def test_stitch_exact_boundary_deduplicates_shared_sample_and_keeps_lineage() -> None:

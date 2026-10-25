@@ -176,6 +176,60 @@ def test_task_space_deformation_is_reproducible_without_global_rng() -> None:
     assert torch.equal(before, torch.random.get_rng_state())
 
 
+@pytest.mark.parametrize("operation", ("deform", "project"))
+def test_task_space_operations_respect_withheld_global_permission(
+    operation: str,
+) -> None:
+    source = _joint_template()
+    target = task_space_from_joint_template(
+        source,
+        frame_id="tool",
+        kinematics=_prismatic_kinematics,
+        editable_phase_ids=("move",),
+    )
+    target = replace(target, allowed_operators=())
+    with pytest.raises(ValueError, match="does not allow task_space_residual"):
+        if operation == "deform":
+            deform_task_space_trajectory(
+                target,
+                constraints={"move": _translation_constraint()},
+                generator=torch.Generator().manual_seed(3),
+            )
+        else:
+            project_task_space_trajectory(
+                target,
+                source,
+                kinematics=_prismatic_kinematics,
+                joint_limits=torch.tensor([[-1.0, 1.0]] * 3, dtype=torch.float64),
+            )
+
+
+def test_task_space_conversion_keeps_withheld_permission_without_explicit_grant() -> (
+    None
+):
+    source = replace(
+        _joint_template(),
+        allowed_operators=(),
+        phases=(
+            TrajectoryPhase(
+                "move", 0, _SAMPLE_COUNT, "free", (TASK_SPACE_RESIDUAL_OPERATOR,)
+            ),
+        ),
+    )
+    target = task_space_from_joint_template(
+        source,
+        frame_id="tool",
+        kinematics=_prismatic_kinematics,
+    )
+    assert target.allowed_operators == ()
+    with pytest.raises(ValueError, match="does not allow task_space_residual"):
+        deform_task_space_trajectory(
+            target,
+            constraints={"move": _translation_constraint()},
+            generator=torch.Generator().manual_seed(3),
+        )
+
+
 def test_batched_trajectory_ik_projects_only_editable_interior_samples() -> None:
     source = _joint_template()
     task_space = task_space_from_joint_template(

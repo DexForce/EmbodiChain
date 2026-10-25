@@ -310,7 +310,7 @@ def task_space_from_joint_template(
         dict.fromkeys(
             (
                 *template.allowed_operators,
-                *(operator for phase in phases for operator in phase.allowed_operators),
+                *((TASK_SPACE_RESIDUAL_OPERATOR,) if editable else ()),
             )
         )
     )
@@ -372,6 +372,8 @@ def deform_task_space_trajectory(
         raise TypeError("trajectory must be a TaskSpaceTrajectory")
     if not isinstance(generator, torch.Generator):
         raise TypeError("generator must be a torch.Generator")
+    if TASK_SPACE_RESIDUAL_OPERATOR not in trajectory.allowed_operators:
+        raise ValueError("trajectory does not allow task_space_residual")
     editable = tuple(
         phase
         for phase in trajectory.phases
@@ -506,6 +508,8 @@ def project_task_space_trajectory(
     )
     for phase in trajectory.phases:
         if TASK_SPACE_RESIDUAL_OPERATOR in phase.allowed_operators:
+            if TASK_SPACE_RESIDUAL_OPERATOR not in trajectory.allowed_operators:
+                raise ValueError("trajectory does not allow task_space_residual")
             editable[phase.start_index + 1 : phase.stop_index - 1] = True
     q = reference.positions.clone()
     controlled = q[:, indices]

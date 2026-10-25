@@ -219,7 +219,11 @@ def extract_trajectory_segments(
                 joint_names=template.joint_names,
                 positions=positions,
                 dt=dt,
-                allowed_operators=phase.allowed_operators,
+                allowed_operators=tuple(
+                    operator
+                    for operator in phase.allowed_operators
+                    if operator in template.allowed_operators
+                ),
                 controlled_joint_indices=template.controlled_joint_indices,
                 validator_id=template.validator_id,
             )
