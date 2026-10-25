@@ -88,7 +88,8 @@ class SequenceBatchSource:
     schema, sequence and ``context`` (canonical validity/loss masks and all
     provenance, excluding observations/actions). Optional ``storage`` is copied
     for diagnostics and excluded from identity. Encoder metadata cannot use
-    this reserved key. No model/action meaning is inferred from tensor widths.
+    this reserved key. Non-storage source metadata must be finite JSON data.
+    No model/action meaning is inferred from tensor widths.
 
     Construction hashes immutable CPU payloads once, without a corpus copy,
     using bounded staging. Sampling checks tensor versions/structure and
