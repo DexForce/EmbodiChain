@@ -54,6 +54,7 @@ EXPECTED_COMMANDS = {
     "scene-randomization",
     "simready",
     "train-rl",
+    "train-sl",
     "preview-scene",
     "workspace-cache",
 }
