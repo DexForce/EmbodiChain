@@ -283,8 +283,7 @@ topics:
   - examples/learning/nerd/_support/
   - examples/learning/nerd/configs/
   watch_paths: [extensions/embodichain_models/, examples/learning/nerd/,
-    tests/models/dynamics/nerd/, tests/examples/learning/nerd/,
-    tests/test_models_package.py, docs/source/features/neural_dynamics.md,
+    docs/source/features/neural_dynamics.md,
     docs/source/api_reference/model_catalogs.rst]
   related_topics: [supervised-learning, learning-layers, data-pipeline, data-assets]
   status: active

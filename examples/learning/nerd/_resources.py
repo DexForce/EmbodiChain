@@ -200,6 +200,8 @@ def prepare_reference_assets(
             "repo_id": _ASSET_REPO,
             "repo_type": "dataset",
             "revision": _ASSET_REVISION,
+            # Mirrors may lag this small bundle or omit required Hub metadata.
+            "endpoint": "https://huggingface.co",
             "cache_dir": base / "hub",
             "local_files_only": local_files_only,
         }
