@@ -44,6 +44,24 @@ command reference and :doc:`/guides/robot_catalog` for variant selection.
    * - :doc:`SO101 Follower <so101>`
      - ``SO101FollowerCfg``
      - Five-axis follower arm and actuated jaw with official simulation dynamics.
+   * - :doc:`Unitree Go1 <unitree_go1>`
+     - ``UnitreeGo1Cfg``
+     - Twelve-joint floating-base quadruped with simulation PD defaults.
+   * - :doc:`Unitree Go2 <unitree_go2>`
+     - ``UnitreeGo2Cfg``
+     - Twelve-joint floating-base quadruped with simulation PD defaults.
+   * - :doc:`Unitree G1 <unitree_g1>`
+     - ``UnitreeG1Cfg``
+     - Twenty-nine-joint humanoid with its standing pose and simulation PD defaults.
+   * - :doc:`Unitree H1_2 <unitree_h1_2>`
+     - ``UnitreeH12Cfg``
+     - Twenty-seven-joint humanoid with its standing pose and simulation PD defaults.
+   * - :doc:`ANYmal-C <anymal_c>`
+     - ``ANYmalCCfg``
+     - Twelve-joint floating-base quadruped with simulation PD defaults.
+   * - :doc:`MicroDuck <microduck>`
+     - ``MicroDuckCfg``
+     - Fourteen-joint floating-base biped with simulation PD defaults.
 
 .. toctree::
    :maxdepth: 1
@@ -68,3 +86,9 @@ this catalog and toctree.
    :caption: Locomotion robots
 
    locomotion
+   unitree_go1
+   unitree_go2
+   unitree_g1
+   unitree_h1_2
+   anymal_c
+   microduck

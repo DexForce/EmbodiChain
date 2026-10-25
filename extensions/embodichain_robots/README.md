@@ -27,7 +27,16 @@ the 27-joint model. Each preset owns its asset, floating base, standing pose,
 use the same model definition. These are the existing task simulation defaults,
 not manufacturer-verified hardware parameters or Isaac Lab actuator networks.
 
-![Six locomotion robot presets rendered with DexSim OfflineRT](../../docs/source/_static/robots/locomotion_offline_rt.png)
+| Unitree Go1 | Unitree Go2 | ANYmal-C |
+| --- | --- | --- |
+| ![Unitree Go1](../../docs/source/_static/robots/unitree_go1.png) | ![Unitree Go2](../../docs/source/_static/robots/unitree_go2.png) | ![ANYmal-C](../../docs/source/_static/robots/anymal_c.png) |
+
+| Unitree G1 | Unitree H1_2 | MicroDuck |
+| --- | --- | --- |
+| ![Unitree G1](../../docs/source/_static/robots/unitree_g1.png) | ![Unitree H1_2](../../docs/source/_static/robots/unitree_h1_2.png) | ![MicroDuck](../../docs/source/_static/robots/microduck.png) |
+
+Each model has its own [robot documentation page](../../docs/source/resources/robot/locomotion.md)
+with an individual image, usage example and configuration summary.
 
 DexSim OfflineRT (`rt`), 1 sample per pixel with DLSS denoising, shared preview
 lighting, tone mapping disabled and exposure 1. Models use their default joint
