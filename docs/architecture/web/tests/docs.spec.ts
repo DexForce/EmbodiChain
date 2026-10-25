@@ -62,9 +62,7 @@ test('embedded explorer follows document theme and opens the current view full-s
   expect(new URLSearchParams(url.hash.slice(1)).get('focus')).toBe('1');
   await fullScreen.click();
   await expect(page.locator('.app')).toHaveAttribute('data-theme', 'light');
-  await expect(
-    page.getByRole('heading', { name: 'AtomicSkillEngine', exact: true }),
-  ).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'AtomicSkillEngine', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Switch to dark theme' }).click();
   await page.reload();
   await expect(page.locator('.app')).toHaveAttribute('data-theme', 'dark');

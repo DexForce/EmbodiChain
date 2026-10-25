@@ -148,7 +148,12 @@ def prepare_pour_adaptation(
     program: dict[str, Any],
 ) -> _PreparedPour:
     """Validate selected evidence and remove only the calibration being replaced."""
+    from .configured import _normalize_skill_options_key
+
     cfg.validate()
+    integration["profile"] = _normalize_skill_options_key(
+        integration["profile"], path="task integration.profile"
+    )
     for value in (
         cfg.bottle_role,
         cfg.cup_role,

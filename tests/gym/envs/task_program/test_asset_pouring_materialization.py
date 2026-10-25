@@ -191,11 +191,26 @@ def _prepared(tmp_path, *, bottle_height=0.14, cup_height=0.1, change=None):
     return result
 
 
-@pytest.mark.parametrize("bottle_height,cup_height", [(0.14, 0.1), (0.18, 0.12)])
+@pytest.mark.parametrize(
+    "bottle_height,cup_height,options_key",
+    [
+        (0.14, 0.1, "skill_options"),
+        (0.18, 0.12, "skill_options"),
+        (0.14, 0.1, "action_options"),
+    ],
+)
 def test_pouring_rebinds_selected_bottle_and_cup_geometry(
-    pouring, tmp_path, bottle_height, cup_height
+    pouring, tmp_path, bottle_height, cup_height, options_key
 ):
     source, requirements = pouring
+    integration_path = source.parent / "integration.yaml"
+    if options_key == "action_options":
+        integration = yaml.safe_load(integration_path.read_text())
+        integration["profile"][options_key] = integration["profile"].pop(
+            "skill_options"
+        )
+        _dump(integration_path, integration)
+    source_integration = integration_path.read_bytes()
     selected = resolve_asset_set(
         requirements,
         _prepared(
@@ -217,6 +232,8 @@ def test_pouring_rebinds_selected_bottle_and_cup_geometry(
     program = yaml.safe_load(
         (result.deployment_path.parent / "program.yaml").read_text()
     )
+    assert integration_path.read_bytes() == source_integration
+    assert "action_options" not in integration["profile"]
     options = integration["profile"]["skill_options"]
     assert options["pick"]["fixed_object_to_eef"] == np.eye(4).reshape(-1).tolist()
     bottle = next(
@@ -410,4 +427,23 @@ def test_pouring_preserves_schema_default_position_tolerance(pouring, tmp_path):
                 / math.sqrt(3)
             ]
             * 3
+        )
+
+
+def test_pouring_rejects_mixed_skill_option_keys(pouring, tmp_path):
+    source, requirements = pouring
+    integration_path = source.parent / "integration.yaml"
+    integration = yaml.safe_load(integration_path.read_text())
+    integration["profile"]["action_options"] = deepcopy(
+        integration["profile"]["skill_options"]
+    )
+    _dump(integration_path, integration)
+    selected = resolve_asset_set(requirements, _prepared(tmp_path / "assets"))
+    with pytest.raises(ValueError, match="cannot specify both"):
+        materialize_asset_deployment(
+            source,
+            requirements,
+            selected,
+            output_dir=tmp_path / "out",
+            adaptations=AssetAdaptationCfg(pour=AssetPourAdaptationCfg()),
         )
