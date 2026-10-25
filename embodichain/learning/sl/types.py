@@ -84,8 +84,10 @@ class LossResult:
     Args:
         loss: Scalar connected to the parameters to optimize.
         metrics: Scalar diagnostics; they do not enter backward automatically.
-        weight: Effective observation count for evaluation aggregation. Loss
-            reduction and sequence weighting remain the objective's decision.
+        weight: Effective observation count. Under DDP, ``loss`` and metrics
+            must be local means over this positive count; the learner uses it
+            to produce a global weighted mean and the corresponding gradient.
+            Single-device loss reduction remains the objective's decision.
     """
 
     loss: torch.Tensor

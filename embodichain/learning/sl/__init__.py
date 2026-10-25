@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from .types import LossResult, SupervisedBatch, SupervisedObjective
+from .distributed import distributed_run
 from .learner import SupervisedLearner
 from .sources import SupervisedSource, TensorBatchSource
 from .trainer import SupervisedTrainer, SupervisedTrainerCfg
@@ -32,4 +33,5 @@ __all__ = [
     "TensorBatchSource",
     "SupervisedTrainer",
     "SupervisedTrainerCfg",
+    "distributed_run",
 ]

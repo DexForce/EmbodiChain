@@ -79,6 +79,86 @@ def test_resume_reproduces_dropout_optimizer_and_sampling(tmp_path):
     assert resumed.learner.num_updates == 20
 
 
+def test_validation_forward_checkpoint_preserves_training_boundary(tmp_path):
+    class BufferedRegressor(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.network = torch.nn.Sequential(
+                torch.nn.Linear(2, 8), torch.nn.Dropout(0.3), torch.nn.Linear(8, 1)
+            )
+            self.register_buffer("seen", torch.zeros((), dtype=torch.int64))
+
+        def forward(self, value: torch.Tensor) -> torch.Tensor:
+            self.seen.add_(1)
+            return self.network(value)
+
+    def make_trainer(path) -> SupervisedTrainer:
+        random.seed(71)
+        np.random.seed(71)
+        torch.manual_seed(42)
+        model = BufferedRegressor()
+        values = torch.arange(40, dtype=torch.float32).view(20, 2) / 40
+        source = TensorBatchSource(
+            SupervisedBatch(values, values.sum(-1, keepdim=True))
+        )
+        learner = SupervisedLearner(
+            model, Regression(), torch.optim.Adam(model.parameters(), lr=0.01)
+        )
+        return SupervisedTrainer(
+            learner,
+            source,
+            SupervisedTrainerCfg(
+                total_updates=6,
+                batch_size=4,
+                output_dir=str(path),
+                checkpoint_interval=0,
+                validation_interval=2,
+            ),
+        )
+
+    def attach_validation(trainer: SupervisedTrainer) -> None:
+        def evaluate(learner: SupervisedLearner) -> dict[str, float]:
+            assert not learner.model.training
+            learner.model(torch.ones(1, 2))
+            random.random()
+            np.random.rand(3)
+            torch.rand(7)
+            trainer.save(trainer.output / "selected.pt")
+            return {"probe": 0.0}
+
+        trainer.evaluate = evaluate
+
+    # An uninterrupted run without validation is the independent state oracle.
+    full = make_trainer(tmp_path / "full")
+    full.fit()
+    expected = copy.deepcopy(full.learner.state_dict())
+    expected_sampler = full.sampler.get_state().clone()
+    expected_rng = random.random(), np.random.rand(), torch.rand(3)
+    partial = make_trainer(tmp_path / "partial")
+    attach_validation(partial)
+    partial.fit(stop_after=2)
+    assert partial.learner.model.seen.item() == 2
+    resumed = make_trainer(tmp_path / "resumed")
+    resumed.resume(tmp_path / "partial/selected.pt")
+    assert resumed.learner.model.seen.item() == 2
+    attach_validation(resumed)
+    resumed.fit()
+    actual = resumed.learner.state_dict()
+    for key, value in expected["model"].items():
+        torch.testing.assert_close(actual["model"][key], value, rtol=0, atol=0)
+    assert actual["num_updates"] == expected["num_updates"] == 6
+    assert actual["optimizer"]["param_groups"] == expected["optimizer"]["param_groups"]
+    for parameter, state in expected["optimizer"]["state"].items():
+        for key, value in state.items():
+            torch.testing.assert_close(
+                actual["optimizer"]["state"][parameter][key], value, rtol=0, atol=0
+            )
+    torch.testing.assert_close(resumed.sampler.get_state(), expected_sampler)
+    assert random.random() == expected_rng[0]
+    assert np.random.rand() == expected_rng[1]
+    torch.testing.assert_close(torch.rand(3), expected_rng[2], rtol=0, atol=0)
+
+
 def test_dataset_change_rejected_before_state_mutation(tmp_path):
     original = build(tmp_path / "first")
     original.fit(stop_after=2)
