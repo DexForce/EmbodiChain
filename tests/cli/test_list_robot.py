@@ -51,8 +51,33 @@ def _column_text(output: str, column: int) -> str:
     return "".join(
         cells[column].strip()
         for cells in (line.split("│") for line in output.splitlines())
-        if len(cells) == 7
+        if len(cells) == 8
     )
+
+
+def test_variant_classification_inherits_and_keeps_explicit_unknown() -> None:
+    spec = {
+        "vendor": "acme",
+        "morphology": "wheeled_manipulator",
+        "arm_count": 2,
+        "variants": {
+            "standard": {},
+            "armless": {"morphology": None, "arm_count": 0},
+        },
+    }
+    original = deepcopy(spec)
+    profiles = dict(list_robot._variant_profiles(spec))
+    assert profiles["standard"]["vendor"] == "acme"
+    assert profiles["standard"]["morphology"] == "wheeled_manipulator"
+    assert profiles["standard"]["arm_count"] == 2
+    assert profiles["armless"]["vendor"] == "acme"
+    assert profiles["armless"]["morphology"] is None
+    assert profiles["armless"]["arm_count"] == 0
+    output = list_robot._format_robot_entries({"acme.robot": spec}, color=False)
+    classification = _column_text(output, 6)
+    assert "Arms: 0" in classification
+    assert "Shape: -" in classification
+    assert spec == original
 
 
 @pytest.mark.parametrize("terminal_width", [80, 120])
@@ -77,20 +102,21 @@ def test_list_robot_dispatch_reads_installed_catalogs(
     output = capsys.readouterr().out
     assert output.startswith("╭")
     assert output.rstrip().endswith("╯")
-    assert "EmbodiChain · Robot Catalog · 8 robots" in output
+    assert "EmbodiChain · Robot Catalog · 10 robots" in output
     assert "Robot ID" in output
     assert "Config Class" not in output
     assert "Variants" in output
-    assert "Mimic Joints" in output
-    assert "Control DOF" in output
-    assert "Control Parts" in output
+    assert "Mimic" in output and "Joints" in output
+    assert "Control" in output and "DOF" in output and "Parts" in output
     expected_ids = {
+        "ARX5",
         "AlohaMini",
         "TianjiMarvin",
         "DexforceW1",
         "CobotMagic",
         "FrankaPanda",
-        "FrankaPandaPgi",
+        "FlexivRizon4S",
+        "SO101Follower",
         "URRobot",
         "DualArmRobot",
         "ur3",
@@ -112,7 +138,7 @@ def test_list_robot_dispatch_reads_installed_catalogs(
         "franka_panda",
         "ur",
     ):
-        assert not re.search(rf"│\s*{re.escape(alias)}\s*│", output)
+        assert not re.search(rf"^│\s*{re.escape(alias)}\s*│", output, re.MULTILINE)
     assert output.count("│ URRobot") == 1
     for model in ("ur3", "ur3e", "ur5", "ur5e", "ur10", "ur10e"):
         assert model in output
@@ -187,7 +213,7 @@ main(["list-robot"])
         check=True,
     )
 
-    assert "8 robots" in result.stdout
+    assert "10 robots" in result.stdout
     assert result.stderr == ""
 
 

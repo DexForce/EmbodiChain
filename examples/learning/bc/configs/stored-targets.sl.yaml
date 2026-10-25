@@ -1,0 +1,33 @@
+# Model-family recipe for caller-prepared physical targets; no task imports.
+# This is separate from the frozen raw PickPlace geometry/actions corpus.
+factory: embodichain_models.policy.bc.sl_recipe:build_supervised_trainer
+model:
+  observation_dim: 27
+  target_dim: 10
+  history_length: 2
+  prediction_horizon: 32
+  hidden_dims: [512, 512]
+  cameras: [cam_high, cam_wrist]
+  target_semantics: arena_tcp_position_rotation6d_parallel_gripper@1
+data:
+  manifest: outputs/bc-stored-targets/manifest.json
+  normalization: outputs/bc-stored-targets/normalization.pt
+  prefetch_batches: 1
+  reader:
+    observation_key: observations
+    target_key: targets
+    max_open_files: 32
+objective:
+  type: masked_normalized_target_mse
+optimizer:
+  learning_rate: 0.0003
+  weight_decay: 0.000001
+  max_grad_norm: 1.0
+trainer:
+  total_updates: 100
+  batch_size: 4
+  device: cpu
+  seed: 20297025
+  output_dir: outputs/bc-stored-targets/smoke
+  checkpoint_interval: 50
+  validation_interval: 0

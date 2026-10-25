@@ -27,7 +27,7 @@ import torch
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Articulation, Robot
 from embodichain.lab.sim.objects.backends.newton import _default_mujoco_mimic_solref
-from embodichain_robots.dexforce_w1 import DexforceW1Cfg
+from embodichain_robots.dexforce.w1 import DexforceW1Cfg
 from embodichain.lab.sim.cfg import physics_cfg_for_backend
 from embodichain.lab.sim.motion.solvers.base_solver import BaseSolver
 from embodichain.data import get_data_path

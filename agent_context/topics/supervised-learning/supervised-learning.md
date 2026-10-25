@@ -1,8 +1,10 @@
 # Supervised learning (SL)
 
 `embodichain.learning.sl` owns common supervised optimizer updates and offline
-training orchestration. Models remain in `learning.models`; numerical state and
-geometry operations remain in `compute`; source storage belongs to data adapters.
+training orchestration. Shared MLPs and feature normalization remain in
+`learning.models`; concrete model families and their model-specific adapters live
+in the bundled `embodichain_models` extension. Generic numerical state and geometry
+operations remain in `compute`; source storage belongs to data adapters.
 
 ## Entry points
 
@@ -17,16 +19,23 @@ geometry operations remain in `compute`; source storage belongs to data adapters
 - `embodichain train-sl --config FILE [--resume FILE]` lazily resolves a
   `factory: module:function`. The factory receives the full model/data/objective/
   optimizer/trainer/evaluation configuration and returns a `SupervisedTrainer`.
+- The [NeRD recipe](../neural-dynamics/neural-dynamics.md) is an installable factory
+  at `embodichain_models.dynamics.nerd.sl_recipe:build_supervised_trainer`.
+  The core does not import the model extension or example helpers. The NeRD
+  showcase's default `train` command uses this same common recipe.
 
 Objectives own loss masks, normalization, integration and multi-step graph
 construction. The optimizer does not infer action semantics or detach histories.
 Schema, action/frame/timestep and numerical-policy identifiers belong in each
 recipe's checkpoint signature. Tensor sources additionally bind content identity.
-Fresh runs require artifact-free output directories. Restoring an older
-checkpoint into a directory with later metric history requires a fresh output
-directory so prior results are retained.
-Validation callbacks use frozen models and restored RNG; only development data
-may select checkpoints. Acquisition and producer lifecycles remain application-owned.
+`learning/sl/_artifacts.py` owns run identities and output-history admission for
+both SL and historical NeRD trainers. A fresh run claims `run.json`; resuming an
+occupied directory requires the checkpoint's matching run identity. Checkpoints
+without an identity require an artifact-free destination. Newer or incomplete
+metric history is retained and requires a fresh resume destination.
+Validation callbacks preserve RNG, sampling state and model buffers, including
+checkpoints saved inside a callback. Only development data may select checkpoints.
+Acquisition and producer lifecycles remain application-owned.
 
 ## Validation
 
@@ -35,23 +44,20 @@ nonfinite update boundaries, owned samples, simulator-free imports and exact
 CPU recovery with dropout, optimizer and sampling state. Model-specific
 qualification belongs to each model's acceptance recipe.
 
+
 ## Behavior cloning
 
-`learning/models/chunk_bc.py` owns configurable state/visual chunk prediction
-and per-environment causal history/target queues. `learning/sl/bc.py` owns the
-masked normalized-target objective and offline source adaptation. Optional
-vision imports are deferred until a visual policy is constructed.
+`embodichain_models.policy.bc` owns state/visual chunk models, their frozen
+normalization and encoder, the masked BC objective, bounded HDF5 reader,
+source/prefetch adapters and per-environment target queues. Its installable
+`sl_recipe:build_supervised_trainer` composes stored physical targets and frozen
+statistics with the common SL trainer. It does not import simulation or infer
+controller semantics. `tests/models/policy/bc/` covers this family boundary.
 
-`data_pipeline/datasets/bc_hdf5.py` reads fixed per-episode windows through bounded
-HDF5 handles. Its source identity binds the immutable manifest, selected fields,
-observation slices, H/F, camera order and declared target-transform version.
-Only history RGB frames enter policy inputs; future geometry may construct
-labels but never enters visual policy forward. Prefetch keeps one owned batch
-and a private RNG reservation; only delivered sampling progress is committed.
-
-`experiments/learning/sl/train_bc.py` owns the pinned offline PickPlace recipe,
-development checkpoint selection and sealed final test. Task-specific pose
-encoding/decoding and physical success remain in its task adapter. The collector
-prepares a fixed corpus directly, independently of the SL learner. Formal
-qualification requires a completed immutable corpus and unchanged physical,
-camera, target and optimizer contracts.
+`examples/learning/bc` lazily exposes collection, training, evaluation and
+reference parity through `run-example learning/bc`. Private `_support` modules
+own task target construction, controller decoding and the frozen PickPlace
+acceptance protocol. Historical source/data/checkpoint identities and negative
+results remain sealed research evidence; namespace parity does not qualify
+physical task success. The generic model recipe accepts already stored targets
+so standalone `train-sl` does not require example bootstrap.

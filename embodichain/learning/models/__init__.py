@@ -21,24 +21,12 @@ from __future__ import annotations
 from importlib import import_module
 from typing import Any
 
-__all__ = [
-    "MLP",
-    "EmpiricalNormalizer",
-    "build_mlp_from_cfg",
-    "ChunkBCModelCfg",
-    "ChunkBCModel",
-    "ChunkBCExecutor",
-    "ResNet10Encoder",
-]
+__all__ = ["MLP", "EmpiricalNormalizer", "build_mlp_from_cfg"]
 
 _EXPORT_MODULES = {
     "MLP": "mlp",
     "EmpiricalNormalizer": "normalizer",
     "build_mlp_from_cfg": "mlp",
-    "ChunkBCModelCfg": "chunk_bc",
-    "ChunkBCModel": "chunk_bc",
-    "ChunkBCExecutor": "chunk_bc",
-    "ResNet10Encoder": "resnet_encoder",
 }
 
 

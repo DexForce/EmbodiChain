@@ -1,8 +1,0 @@
-# Dynamics workflow configuration; not a runnable Gym deployment.
-mode: offline
-dataset: ../../../../../../outputs/dynamics/ant/smoke/data
-model: ../../../../../../outputs/dynamics/ant/smoke/export
-split: test
-batch_size: 64
-device: cpu
-output: ../../../../../../outputs/dynamics/ant/smoke/offline.json

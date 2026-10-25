@@ -18,6 +18,12 @@
 
 from __future__ import annotations
 
+import numpy as np
+import xml.etree.ElementTree as ET
+from embodichain.lab.sim.cfg import RobotCfg
+from embodichain_robots import FrankaPandaCfg
+from embodichain_benchmarks.motion_generation._atomic_fixtures import _FrankaPgiCfg
+
 import argparse
 import json
 import math
@@ -1109,12 +1115,10 @@ def test_randomization_manifest_records_contract_and_seed():
 
 
 def test_franka_pgi_robot_provider_exposes_arm_hand_and_tcp():
-    from embodichain_robots import FrankaPandaPgiCfg
-
     suite = load_suite("atomic_franka_pgi_smoke")
     cfg = create_robot_provider(suite.robot).build_cfg()
 
-    assert isinstance(cfg, FrankaPandaPgiCfg)
+    assert isinstance(cfg, RobotCfg)
     assert cfg.uid == "benchmark_franka_pgi"
     # The suites were authored with the tutorial scenes' rotated base.
     assert list(cfg.init_rot) == [0.0, 0.0, 180.0]
@@ -1130,6 +1134,16 @@ def test_franka_pgi_robot_provider_exposes_arm_hand_and_tcp():
         "fr3_leftfinger" not in str(override.link_names_expr)
         for override in cfg.link_attrs.values()
     )
+    contacts = cfg.link_attrs["newton_gripper_contacts"]
+    assert set(contacts.link_names_expr) == {
+        "gripper_finger1_link_1",
+        "gripper_finger2_link_1",
+    }
+    assert contacts.attrs.collision_props.condim == 4
+    assert contacts.attrs.material_props.ke == pytest.approx(40000.0)
+    assert contacts.attrs.material_props.kd == pytest.approx(400.0)
+    assert contacts.attrs.material_props.torsional_friction == pytest.approx(0.1)
+    assert contacts.attrs.material_props.rolling_friction == pytest.approx(0.01)
 
 
 def test_atomic_invocation_uses_motion_generator_policy():
@@ -2695,3 +2709,117 @@ def test_loaded_cases_bind_atomic_providers_without_regeneration(monkeypatch):
     provider.generate_case.assert_not_called()
     scenario.bind_cases([case])
     factory.assert_called_once()
+
+
+_PGI_FINGER_LINKS = {"gripper_finger1_link_1", "gripper_finger2_link_1"}
+
+
+def _assembled_link_and_joint_names(cfg: RobotCfg) -> tuple[list[str], list[str]]:
+    tree = ET.parse(cfg.urdf_cfg.assemble_urdf())
+    links = [link.get("name") for link in tree.findall("link")]
+    joints = [
+        joint.get("name")
+        for joint in tree.findall("joint")
+        if joint.get("type") != "fixed"
+    ]
+    return links, joints
+
+
+def test_franka_panda_pgi_selectors_resolve_on_the_assembled_robot() -> None:
+    from embodichain.utils.string import resolve_matching_names
+
+    cfg = _FrankaPgiCfg.from_dict({})
+    links, joints = _assembled_link_and_joint_names(cfg)
+
+    # Spawn rejects any selector that matches nothing; every key must resolve.
+    for group in cfg.link_attrs.values():
+        resolve_matching_names(group.link_names_expr, links)
+    _, contact_links = resolve_matching_names(
+        cfg.link_attrs["newton_gripper_contacts"].link_names_expr, links
+    )
+    assert set(contact_links) == _PGI_FINGER_LINKS
+    assert resolve_matching_names(cfg.control_parts["arm"], joints)[1] == [
+        f"fr3_joint{i}" for i in range(1, 8)
+    ]
+    assert resolve_matching_names(cfg.control_parts["eef"], joints)[1] == [
+        "gripper_finger1_joint_1"
+    ]
+    drives = cfg.joint_drive_props
+    for rules in (drives.stiffness, drives.damping, drives.max_effort):
+        resolve_matching_names(list(rules), joints)
+    solver = cfg.solver_cfg["arm"]
+    assert {solver.root_link_name, solver.end_link_name} <= set(links)
+    assert len(cfg.init_qpos) == len(joints)
+    assert cfg.init_qpos[-2:] == [0.0, 0.0]
+
+
+def test_franka_panda_pgi_roundtrip_keeps_the_assembly_and_other_groups() -> None:
+    wrist = {
+        "link_names_expr": ["fr3_link7"],
+        "attrs": {"material_props": {"static_friction": 0.5}},
+    }
+    cfg = _FrankaPgiCfg.from_dict(
+        {
+            "uid": "franka_pgi",
+            "init_rot": [0.0, 0.0, 180.0],
+            "solver_cfg": {"arm": {"tcp": np.eye(4).tolist()}},
+            "link_attrs": {"wrist": wrist},
+        }
+    )
+
+    restored = _FrankaPgiCfg.from_dict(cfg.to_dict())
+
+    assert restored.to_dict() == cfg.to_dict()
+    assert set(restored.link_attrs) == {"newton_gripper_contacts", "wrist"}
+    assert restored.link_attrs["wrist"].link_names_expr == ["fr3_link7"]
+    assert list(restored.init_rot) == [0.0, 0.0, 180.0]
+    assert restored.solver_cfg["arm"].end_link_name == "fr3_link8"
+    assert [
+        Path(component["urdf_path"]).name
+        for component in restored.urdf_cfg.components.values()
+    ] == ["Panda.urdf", "DH_PGI_140_80.urdf"]
+
+    # The merge contract removes one group without touching the others.
+    without_contacts = _FrankaPgiCfg.from_dict(
+        {"link_attrs": {"wrist": wrist, "newton_gripper_contacts": None}}
+    )
+    assert set(without_contacts.link_attrs) == {"wrist"}
+
+
+def test_franka_panda_pgi_leaves_the_stock_panda_defaults_intact() -> None:
+    before = FrankaPandaCfg.from_dict({}).to_dict()
+
+    _FrankaPgiCfg.from_dict({})
+    stock = FrankaPandaCfg.from_dict({})
+
+    assert stock.to_dict() == before
+    assert stock.control_parts["eef"] == ["fr3_finger_joint1", "fr3_finger_joint2"]
+    assert stock.solver_cfg["arm"].end_link_name == "fr3_hand_tcp"
+    assert stock.link_attrs["newton_gripper_contacts"].link_names_expr == [
+        "fr3_leftfinger|fr3_rightfinger"
+    ]
+    assert stock._pk_urdf_path.endswith("PandaWithHand.urdf")
+
+
+def test_franka_panda_pgi_kinematic_chain_matches_the_assembled_solver() -> None:
+    pytest.importorskip("pytorch_kinematics")
+    cfg = _FrankaPgiCfg.from_dict({})
+    solver_cfg = cfg.solver_cfg["arm"]
+    assert cfg._pk_urdf_path == cfg.urdf_cfg.components["arm"]["urdf_path"]
+
+    chain = cfg.build_pk_serial_chain()["arm"]
+    assert chain.get_joint_parameter_names() == cfg.control_parts["arm"]
+
+    # The solver plans on the assembled robot; the chain must end at the same
+    # flange so that composing it with the solver TCP gives the same pose.
+    solver_cfg.urdf_path = cfg.urdf_cfg.assemble_urdf()
+    solver_cfg.joint_names = cfg.control_parts["arm"]
+    solver = solver_cfg.init_solver(device=torch.device("cpu"))
+    qpos = torch.tensor(
+        [cfg.init_qpos[:7], [0.3, -0.2, 0.1, -2.0, 0.2, 2.5, 0.4]],
+        dtype=torch.float32,
+    )
+    tcp = torch.tensor(solver_cfg.tcp, dtype=torch.float32)
+    torch.testing.assert_close(
+        solver.get_fk(qpos), chain.forward_kinematics(qpos).get_matrix() @ tcp
+    )

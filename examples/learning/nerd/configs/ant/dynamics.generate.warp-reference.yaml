@@ -1,0 +1,19 @@
+# Bounded parameter-alignment collection; not full accuracy qualification.
+robot: ant
+output_dir: ../../../../../outputs/dynamics/ant/warp-reference/data
+device: cpu
+num_envs: 64
+trajectories: 512
+horizon: 100
+seed: 100
+physics_profile: warp_reference
+teacher_solver:
+  solver_type: featherstone
+  update_mass_matrix_interval: 16
+  friction_smoothing: 0.001
+num_substeps: 16
+trajectories_per_shard: 64
+motion_mode: random_effort
+initial_states: sample
+effort_scale: 1.0
+split_seed: 0

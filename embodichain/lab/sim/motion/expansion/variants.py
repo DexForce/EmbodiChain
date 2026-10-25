@@ -42,8 +42,8 @@ persistence remain host responsibilities.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field, replace
 import math
 
 import torch
@@ -59,13 +59,28 @@ from .contracts import (
     _digest,
 )
 from .coverage import CoverageIndex, describe_trajectory
+from .manipulability import (
+    ManipulabilityBands,
+    _select_guided_candidate,
+    describe_manipulability,
+)
 from .operators import (
     ProposalRejected,
+    allowed_phases,
     joint_residual,
     nullspace_residual,
     retime,
     validate_motion_limits,
     via_points,
+)
+from .task_space import (
+    TASK_SPACE_RESIDUAL_OPERATOR,
+    KinematicsFn,
+    TaskSpaceDeformationConstraint,
+    TaskSpaceTrajectory,
+    deform_task_space_trajectory,
+    project_task_space_trajectory,
+    task_space_from_joint_template,
 )
 
 __all__ = [
@@ -154,18 +169,28 @@ class TrajectoryVariant:
         spatial_operator: Applied joint-path operator, or ``"none"``.
         duration_scale: Free-phase duration factor passed to retiming.
         timing_profile: Within-phase time warp passed to retiming.
+        task_space: Whether to deform and project the tool path before retiming.
+        manipulability_band: Requested guidance band, or ``None`` for unguided draws.
     """
 
     ordinal: int
     spatial_operator: str
     duration_scale: float
     timing_profile: str
+    task_space: bool = False
+    manipulability_band: int | None = None
 
     def __post_init__(self) -> None:
         if type(self.ordinal) is not int or self.ordinal < 0:
             raise ValueError("ordinal must be a nonnegative integer")
         if not math.isfinite(self.duration_scale) or self.duration_scale <= 0:
             raise ValueError("duration_scale must be finite and positive")
+        if type(self.task_space) is not bool:
+            raise ValueError("task_space must be a boolean")
+        if self.manipulability_band is not None and (
+            type(self.manipulability_band) is not int or self.manipulability_band < 0
+        ):
+            raise ValueError("manipulability_band must be a nonnegative integer")
 
     @property
     def is_nominal(self) -> bool:
@@ -178,6 +203,8 @@ class TrajectoryVariant:
             self.spatial_operator == NOMINAL_OPERATOR
             and self.duration_scale == 1.0
             and self.timing_profile == "uniform"
+            and not self.task_space
+            and self.manipulability_band is None
         )
 
     @property
@@ -187,12 +214,17 @@ class TrajectoryVariant:
         Returns:
             Finite JSON-compatible factor values describing the variant.
         """
-        return {
+        result: dict[str, float | int | str] = {
             "variant_ordinal": self.ordinal,
             "spatial_operator": self.spatial_operator,
             "duration_scale": float(self.duration_scale),
             "timing_profile": self.timing_profile,
         }
+        if self.task_space:
+            result["task_space_operator"] = TASK_SPACE_RESIDUAL_OPERATOR
+        if self.manipulability_band is not None:
+            result["manipulability_target_band"] = self.manipulability_band
+        return result
 
 
 @dataclass(frozen=True)
@@ -285,6 +317,11 @@ def plan_trajectory_variants(
         operators.extend(factors.spatial.method)
     if factors.ik.enabled:
         operators.append(factors.ik.method)
+    guided = (
+        factors.manipulability.enabled and factors.manipulability.guided_proposals > 1
+    )
+    if not operators and guided and not factors.task_space.enabled:
+        operators.append("joint_residual")
     if not operators:
         operators.append(NOMINAL_OPERATOR)
     # Advance the duration scale before the within-phase warp: rescaling
@@ -299,7 +336,18 @@ def plan_trajectory_variants(
         step = ordinal - 1
         scale, profile = timings[(step // len(operators)) % len(timings)]
         variants.append(
-            TrajectoryVariant(ordinal, operators[step % len(operators)], scale, profile)
+            TrajectoryVariant(
+                ordinal,
+                operators[step % len(operators)],
+                scale,
+                profile,
+                task_space=factors.task_space.enabled,
+                manipulability_band=(
+                    step % (len(factors.manipulability.band_edges) + 1)
+                    if guided
+                    else None
+                ),
+            )
         )
     return tuple(variants)
 
@@ -364,55 +412,143 @@ def _variant_generator(
     )
 
 
-def apply_trajectory_variant(
+@dataclass
+class _ProposalBudget:
+    """Bound every numerical draw, including rejected guided proposals."""
+
+    limit: int
+    attempted: int = 0
+    rejected: dict[str, int] = field(default_factory=dict)
+
+    def reject(self, reason: str, count: int = 1) -> None:
+        self.rejected[reason] = self.rejected.get(reason, 0) + count
+
+
+def _kinematic_jacobians(
+    positions: torch.Tensor,
+    template: TrajectoryTemplate,
+    kinematics: KinematicsFn,
+) -> torch.Tensor:
+    """Evaluate controlled columns without assuming contiguous joint ordering."""
+    poses, jacobians = kinematics(positions[:, list(template.controlled_joint_indices)])
+    if not isinstance(poses, torch.Tensor) or poses.shape != (len(positions), 4, 4):
+        raise ValueError("kinematics poses must have shape (T, 4, 4)")
+    if not isinstance(jacobians, torch.Tensor) or jacobians.shape != (
+        len(positions),
+        6,
+        len(template.controlled_joint_indices),
+    ):
+        raise ValueError("kinematics Jacobians must have shape (T, 6, C)")
+    return jacobians
+
+
+def _prepare_generation(
+    template: TrajectoryTemplate,
+    cfg: TrajectoryAugmentationCfg,
+    kinematics: KinematicsFn | None,
+    task_jacobians: torch.Tensor | None,
+    manipulability_reference: float | None,
+) -> tuple[TaskSpaceTrajectory | None, ManipulabilityBands | None, torch.Tensor | None]:
+    """Resolve capabilities and cache reference work once per expansion call."""
+    cfg.validate_semantics()
+    _reject_cartesian_factors(cfg)
+    if kinematics is not None and not callable(kinematics):
+        raise TypeError("kinematics must be callable or None")
+    guided = (
+        cfg.factors.manipulability.enabled
+        and cfg.factors.manipulability.guided_proposals > 1
+    )
+    if (cfg.factors.task_space.enabled or guided) and kinematics is None:
+        raise ValueError(
+            "enabled task_space or manipulability guidance requires kinematics"
+        )
+    if cfg.factors.ik.enabled and task_jacobians is None:
+        if kinematics is None:
+            raise ValueError(
+                "the enabled ik factor requires task_jacobians or kinematics"
+            )
+        task_jacobians = _kinematic_jacobians(template.positions, template, kinematics)
+    task_reference = None
+    if cfg.factors.task_space.enabled:
+        allowed_phases(template, TASK_SPACE_RESIDUAL_OPERATOR)
+        assert kinematics is not None
+        task_reference = task_space_from_joint_template(
+            template,
+            frame_id=cfg.factors.task_space.frame_id,
+            kinematics=kinematics,
+        )
+    bands = None
+    if guided:
+        assert kinematics is not None
+        if manipulability_reference is None:
+            jacobians = _kinematic_jacobians(template.positions, template, kinematics)
+            manipulability_reference = describe_manipulability(
+                jacobians,
+                rows=cfg.factors.manipulability.jacobian_rows,
+            ).bottleneck
+        bands = ManipulabilityBands(
+            cfg.factors.manipulability.band_edges,
+            reference=manipulability_reference,
+        )
+    return task_reference, bands, task_jacobians
+
+
+def _project_target(
+    target: TaskSpaceTrajectory,
+    reference: TrajectoryTemplate,
+    cfg: TrajectoryAugmentationCfg,
+    joint_limits: torch.Tensor,
+    kinematics: KinematicsFn,
+) -> TrajectoryTemplate:
+    """Reject a numerical IK miss without swallowing malformed caller inputs."""
+    projected = project_task_space_trajectory(
+        target,
+        reference,
+        kinematics=kinematics,
+        joint_limits=joint_limits,
+        ik_cfg=cfg.factors.task_space.ik,
+    )
+    if not projected.accepted:
+        raise ProposalRejected("trajectory_ik")
+    return projected.template
+
+
+def _apply_variant_once(
     template: TrajectoryTemplate,
     variant: TrajectoryVariant,
     *,
-    cfg: TrajectoryAugmentationCfg | None = None,
+    cfg: TrajectoryAugmentationCfg,
     joint_limits: torch.Tensor,
     control_dt: float,
-    task_jacobians: torch.Tensor | None = None,
-    generator: torch.Generator | None = None,
+    task_jacobians: torch.Tensor | None,
+    generator: torch.Generator,
+    kinematics: KinematicsFn | None,
+    task_reference: TaskSpaceTrajectory | None,
 ) -> TrajectoryTemplate:
-    """Apply one joint-path operator and the variant's retiming, in that order.
-
-    At most one joint-path operator runs per variant. Null-space projection is
-    defined against the reference Jacobians, so stacking it on an already
-    displaced joint path would silently invalidate its task-row claim.
-
-    The default generator is seeded from the configuration seed, the template
-    identifier and the variant ordinal, so the same variant applied to two differently
-    identified references draws independently while remaining reproducible.
-
-    Args:
-        template: Annotated reference whose phase endpoints are already fixed.
-        variant: Factor combination to apply; a nominal variant returns the reference.
-        cfg: Augmentation settings supplying operator magnitudes and the seed.
-            Defaults to :func:`default_variant_factors`, with redundancy
-            enabled only when ``task_jacobians`` is supplied.
-        joint_limits: Finite lower/upper limits with shape ``(D, 2)``.
-        control_dt: Authoritative host control period used by retiming.
-        task_jacobians: Reference spatial Jacobians ``(N, R, C)`` for the
-            declared controlled joints, required only by the redundancy
-            operator. ``cfg.factors.ik.task_rows`` selects the constrained rows
-            from them, so supply every row the task could constrain.
-        generator: Optional explicit local generator replacing the derived one.
-
-    Returns:
-        A new template requiring path and physical validation.
-
-    Raises:
-        ValueError: If the variant names an unknown operator, if required inputs
-            are missing, or if an operator rejects its own proposal.
-    """
-    # Mirror the planner: without Jacobians a posture variant cannot run, so an
-    # unconfigured application resolves the same conservative policy.
-    if cfg is None:
-        cfg = default_variant_factors(redundancy=task_jacobians is not None)
-    _reject_cartesian_factors(cfg)
-    if generator is None:
-        _, generator = _variant_generator(cfg, template, variant)
+    """Generate one path, re-project combined joint edits, then retime it."""
     result = template
+    target = None
+    if variant.task_space:
+        if task_reference is None or kinematics is None:
+            raise ValueError(
+                "task-space variant requires an enabled task_space factor and kinematics"
+            )
+        task_cfg = cfg.factors.task_space
+        constraints = {
+            phase.phase_id: TaskSpaceDeformationConstraint(
+                phase.phase_id,
+                task_cfg.translation_axes,
+                task_cfg.rotation_axes,
+                task_cfg.max_translation_m,
+                task_cfg.max_rotation_rad,
+            )
+            for phase in task_reference.phases
+            if TASK_SPACE_RESIDUAL_OPERATOR in phase.allowed_operators
+        }
+        target = deform_task_space_trajectory(
+            task_reference, constraints=constraints, generator=generator
+        )
+        result = _project_target(target, result, cfg, joint_limits, kinematics)
     spatial = cfg.factors.spatial
     if variant.spatial_operator == "joint_residual":
         result = joint_residual(
@@ -430,6 +566,11 @@ def apply_trajectory_variant(
             generator=generator,
         )
     elif variant.spatial_operator == "nullspace_residual":
+        if target is not None:
+            assert kinematics is not None
+            task_jacobians = _kinematic_jacobians(
+                result.positions, template, kinematics
+            )
         if task_jacobians is None:
             raise ValueError(
                 "nullspace_residual requires task_jacobians for the reference samples"
@@ -445,6 +586,26 @@ def apply_trajectory_variant(
         )
     elif variant.spatial_operator != NOMINAL_OPERATOR:
         raise ValueError(f"unknown spatial operator: {variant.spatial_operator!r}")
+    if target is not None and variant.spatial_operator != NOMINAL_OPERATOR:
+        assert kinematics is not None
+        # A joint-only phase may move independently of the Cartesian phases.
+        # Preserve that legal edit rather than imposing an undeclared TCP lock.
+        joint_only = [
+            phase
+            for phase in allowed_phases(template, variant.spatial_operator)
+            if TASK_SPACE_RESIDUAL_OPERATOR not in phase.allowed_operators
+        ]
+        if joint_only:
+            poses, _ = kinematics(
+                result.positions[:, list(template.controlled_joint_indices)]
+            )
+            updated = target.poses.clone()
+            for phase in joint_only:
+                updated[phase.start_index : phase.stop_index] = poses[
+                    phase.start_index : phase.stop_index
+                ]
+            target = replace(target, poses=updated)
+        result = _project_target(target, result, cfg, joint_limits, kinematics)
     if variant.duration_scale != 1.0 or variant.timing_profile != "uniform":
         result = retime(
             result,
@@ -452,6 +613,185 @@ def apply_trajectory_variant(
             control_dt=control_dt,
             profile=variant.timing_profile,
         )
+    return result
+
+
+def _generate_variant(
+    template: TrajectoryTemplate,
+    variant: TrajectoryVariant,
+    *,
+    cfg: TrajectoryAugmentationCfg,
+    joint_limits: torch.Tensor,
+    control_dt: float,
+    task_jacobians: torch.Tensor | None,
+    generator: torch.Generator,
+    kinematics: KinematicsFn | None,
+    task_reference: TaskSpaceTrajectory | None,
+    bands: ManipulabilityBands | None,
+    budget: _ProposalBudget,
+    velocity_limits: torch.Tensor | None = None,
+    acceleration_limits: torch.Tensor | None = None,
+) -> tuple[TrajectoryTemplate, dict[str, float | int | str]]:
+    """Share a bounded stream of validated draws with the guidance selector."""
+    guided = variant.manipulability_band is not None
+    if guided and (bands is None or kinematics is None):
+        raise ValueError(
+            "guided variant requires enabled manipulability guidance and kinematics"
+        )
+    if (
+        variant.manipulability_band is not None
+        and bands is not None
+        and variant.manipulability_band >= bands.count
+    ):
+        raise ValueError("manipulability_band must index the configured bands")
+    draws = min(
+        cfg.factors.manipulability.guided_proposals if guided else 1,
+        budget.limit - budget.attempted,
+    )
+
+    def candidates() -> Iterable[TrajectoryTemplate]:
+        last = None
+        produced = False
+        for _ in range(draws):
+            budget.attempted += 1
+            try:
+                candidate = _apply_variant_once(
+                    template,
+                    variant,
+                    cfg=cfg,
+                    joint_limits=joint_limits,
+                    control_dt=control_dt,
+                    task_jacobians=task_jacobians,
+                    generator=generator,
+                    kinematics=kinematics,
+                    task_reference=task_reference,
+                )
+                if velocity_limits is not None and acceleration_limits is not None:
+                    validation = validate_motion_limits(
+                        candidate,
+                        velocity_limits=velocity_limits,
+                        acceleration_limits=acceleration_limits,
+                    )
+                    if not validation.accepted:
+                        raise ProposalRejected("motion_limits")
+            except ProposalRejected as error:
+                last = error
+                reason = str(error)
+                budget.reject(
+                    reason
+                    if reason in {"motion_limits", "trajectory_ik"}
+                    else _rejection_reason(error)
+                )
+                continue
+            produced = True
+            yield candidate
+        if not produced:
+            raise last if last is not None else ProposalRejected("proposal_budget")
+
+    proposals = candidates()
+    evidence = variant.factors
+    if variant.task_space:
+        evidence["task_space_frame_id"] = cfg.factors.task_space.frame_id
+    if not guided:
+        return next(proposals), evidence
+    assert bands is not None and kinematics is not None
+    assert variant.manipulability_band is not None
+    chosen = _select_guided_candidate(
+        proposals,
+        jacobian_fn=lambda q: _kinematic_jacobians(q, template, kinematics),
+        bands=bands,
+        target_band=variant.manipulability_band,
+        rows=cfg.factors.manipulability.jacobian_rows,
+    )
+    if chosen.proposals_scored > 1:
+        budget.reject("guidance_unselected", chosen.proposals_scored - 1)
+    evidence.update(
+        manipulability=chosen.profile.bottleneck,
+        manipulability_band=chosen.band,
+        manipulability_matched=int(chosen.matched),
+        manipulability_proposals_scored=chosen.proposals_scored,
+    )
+    return chosen.template, evidence
+
+
+def apply_trajectory_variant(
+    template: TrajectoryTemplate,
+    variant: TrajectoryVariant,
+    *,
+    cfg: TrajectoryAugmentationCfg | None = None,
+    joint_limits: torch.Tensor,
+    control_dt: float,
+    task_jacobians: torch.Tensor | None = None,
+    generator: torch.Generator | None = None,
+    kinematics: KinematicsFn | None = None,
+    manipulability_reference: float | None = None,
+) -> TrajectoryTemplate:
+    """Apply a joint/task-space proposal, optional guidance, then retiming.
+
+    At most one joint-path operator runs per proposal. A combined task-space
+    proposal projects before joint edits and re-projects afterward. Null-space
+    edits use fresh Jacobians when the task-space projection moved the path.
+    Guidance samples up to ``guided_proposals`` draws and selects the first
+    matching band, or the nearest reachable band with stable tie-breaking.
+
+    The default generator is seeded from the configuration seed, the template
+    identifier and the variant ordinal, so the same variant applied to two differently
+    identified references draws independently while remaining reproducible.
+
+    Args:
+        template: Annotated reference whose phase endpoints are already fixed.
+        variant: Factor combination to apply; a nominal variant returns the reference.
+        cfg: Augmentation settings supplying operator magnitudes and the seed.
+            Defaults to :func:`default_variant_factors`, with redundancy
+            enabled when ``task_jacobians`` or ``kinematics`` is supplied.
+        joint_limits: Finite lower/upper limits with shape ``(D, 2)``.
+        control_dt: Authoritative host control period used by retiming.
+        task_jacobians: Reference spatial Jacobians ``(N, R, C)`` for the
+            declared controlled joints, required only by the redundancy
+            operator. ``cfg.factors.ik.task_rows`` selects the constrained rows
+            from them, so supply every row the task could constrain.
+        generator: Optional explicit local generator replacing the derived one.
+        kinematics: Batched root-frame FK/Jacobian callable over controlled
+            columns; required by task-space deformation and guidance.
+        manipulability_reference: Positive reference score for guidance bands.
+            Omission measures the nominal trajectory; hosted callers use the
+            initial state's registered reference.
+
+    Returns:
+        A new template requiring path and physical validation.
+
+    Raises:
+        ValueError: If the variant names an unknown operator, if required inputs
+            are missing, or if an operator rejects its own proposal.
+    """
+    # Mirror the planner: without Jacobians a posture variant cannot run, so an
+    # unconfigured application resolves the same conservative policy.
+    if cfg is None:
+        cfg = default_variant_factors(
+            redundancy=task_jacobians is not None or kinematics is not None
+        )
+    if generator is None:
+        _, generator = _variant_generator(cfg, template, variant)
+    task_reference, bands, task_jacobians = _prepare_generation(
+        template,
+        cfg,
+        kinematics,
+        task_jacobians,
+        manipulability_reference,
+    )
+    result, _ = _generate_variant(
+        template,
+        variant,
+        cfg=cfg,
+        joint_limits=joint_limits,
+        control_dt=control_dt,
+        task_jacobians=task_jacobians,
+        generator=generator,
+        kinematics=kinematics,
+        task_reference=task_reference,
+        bands=bands,
+        budget=_ProposalBudget(cfg.factors.manipulability.guided_proposals),
+    )
     return result
 
 
@@ -511,12 +851,14 @@ def expand_trajectory_variants(
     task_jacobians: torch.Tensor | None = None,
     generator: torch.Generator | None = None,
     max_attempts: int | None = None,
+    kinematics: KinematicsFn | None = None,
+    manipulability_reference: float | None = None,
 ) -> TrajectoryVariantSet:
     """Generate up to ``count`` distinct execution variants for one fixed reference.
 
     Row zero is the unmodified reference, so a caller always retains the
-    trajectory it already trusts. Later rows apply one joint-path operator
-    and one timing choice each. A proposal is discarded when an operator
+    trajectory it already trusts. Later rows apply the configured joint,
+    task-space and guidance factors before the timing choice. A proposal is discarded when an operator
     rejects it, when sampled motion limits fail, or when its measured geometry
     and timing duplicate an already accepted row. Every rejection is counted
     and reported rather than silently dropped.
@@ -547,7 +889,12 @@ def expand_trajectory_variants(
             rather than pre-reducing them.
         generator: Optional private CPU generator shared by the sequential
             proposal draws. Omission preserves standalone digest-based streams.
-        max_attempts: Optional proposal budget; defaults to four per requested variant.
+        max_attempts: Total numerical-draw budget, including guidance's inner
+            proposals. Defaults to four per requested variant.
+        kinematics: Batched root-frame FK/Jacobian callable over controlled
+            columns, required by task-space deformation and guided selection.
+        manipulability_reference: Positive band normalizer. Omission measures
+            the nominal reference; coordinators use the registered initial state.
 
     Returns:
         The accepted candidate rows, their variants, and rejection accounting.
@@ -562,14 +909,18 @@ def expand_trajectory_variants(
     if generator is not None and not isinstance(generator, torch.Generator):
         raise TypeError("generator must be a torch.Generator or None")
     if cfg is None:
-        # Without Jacobians the redundancy factor could only propose variants
-        # that fail, so leave it out rather than spend attempts on them.
-        cfg = default_variant_factors(redundancy=task_jacobians is not None)
-    elif cfg.factors.ik.enabled and task_jacobians is None:
-        raise ValueError(
-            "the enabled ik factor requires task_jacobians for the reference "
-            "samples; supply them or disable the factor"
+        # Live kinematics can supply reference Jacobians on demand; absent both
+        # inputs, a redundancy proposal cannot run.
+        cfg = default_variant_factors(
+            redundancy=task_jacobians is not None or kinematics is not None
         )
+    task_reference, bands, task_jacobians = _prepare_generation(
+        template,
+        cfg,
+        kinematics,
+        task_jacobians,
+        manipulability_reference,
+    )
     if not isinstance(case, SceneCase):
         raise ValueError("case must be a SceneCase")
     if (velocity_limits is None) != (acceleration_limits is None):
@@ -585,18 +936,17 @@ def expand_trajectory_variants(
     )
     accepted: list[TrajectoryTemplate] = []
     accepted_variants: list[TrajectoryVariant] = []
+    accepted_factors: list[dict[str, float | int | str]] = []
     families: list[str] = []
-    rejected: dict[str, int] = {}
-    evaluated = 0
+    budget = _ProposalBudget(attempts)
 
     for variant in plan_trajectory_variants(attempts, cfg):
-        if len(accepted) >= count:
+        if len(accepted) >= count or budget.attempted >= budget.limit:
             break
-        evaluated += 1
         digest, derived_generator = _variant_generator(cfg, template, variant)
         proposal_generator = derived_generator if generator is None else generator
         try:
-            candidate = apply_trajectory_variant(
+            candidate, evidence = _generate_variant(
                 template,
                 variant,
                 cfg=cfg,
@@ -604,23 +954,18 @@ def expand_trajectory_variants(
                 control_dt=control_dt,
                 task_jacobians=task_jacobians,
                 generator=proposal_generator,
-            )
-        except ProposalRejected as error:
-            # Only a rejected draw is bookkeeping. A malformed argument or an
-            # impossible configuration keeps propagating, so it cannot hide in
-            # a rejection count behind an already successful nominal variant.
-            reason = _rejection_reason(error)
-            rejected[reason] = rejected.get(reason, 0) + 1
-            continue
-        if velocity_limits is not None and acceleration_limits is not None:
-            limits_result = validate_motion_limits(
-                candidate,
+                kinematics=kinematics,
+                task_reference=task_reference,
+                bands=bands,
+                budget=budget,
                 velocity_limits=velocity_limits,
                 acceleration_limits=acceleration_limits,
             )
-            if not limits_result.accepted:
-                rejected["motion_limits"] = rejected.get("motion_limits", 0) + 1
-                continue
+        except ProposalRejected:
+            # Only a rejected draw is bookkeeping. A malformed argument or an
+            # impossible configuration keeps propagating, so it cannot hide in
+            # a rejection count behind an already successful nominal variant.
+            continue
         descriptor = describe_trajectory(
             candidate.positions,
             candidate.dt.cumsum(0),
@@ -630,17 +975,18 @@ def expand_trajectory_variants(
         )
         commit_id = f"variant_{variant.ordinal}"
         if not coverage.reserve(commit_id, "geometry_" + digest, descriptor):
-            rejected["duplicate"] = rejected.get("duplicate", 0) + 1
+            budget.reject("duplicate")
             continue
         coverage.confirm(commit_id)
         accepted.append(candidate)
         accepted_variants.append(variant)
+        accepted_factors.append(evidence)
         families.append(coverage.family_of(commit_id))
 
     if not accepted:
         raise ValueError(
             "No trajectory variant survived operator, motion-limit and duplicate "
-            f"rejection after {evaluated} proposals: {rejected}."
+            f"rejection after {budget.attempted} proposals: {budget.rejected}."
         )
     positions, intervals, lengths = _pad_rows(accepted)
     identities = tuple(
@@ -663,10 +1009,10 @@ def expand_trajectory_variants(
             identities=identities,
             joint_names=template.joint_names,
             phases=tuple(row.phases for row in accepted),
-            factors=tuple(variant.factors for variant in accepted_variants),
+            factors=tuple(accepted_factors),
         ),
         variants=tuple(accepted_variants),
-        attempted=evaluated,
-        rejected=rejected,
+        attempted=budget.attempted,
+        rejected=budget.rejected,
         cfg=cfg,
     )

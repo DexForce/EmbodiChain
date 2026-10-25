@@ -1,0 +1,385 @@
+Official model library
+======================
+
+The main ``embodichain`` distribution bundles ``embodichain_models`` with the
+same release version and dependencies. This package owns concrete model
+families, their physical representations, model-specific data adapters and
+supervised recipes. General MLPs and feature normalization remain in
+:mod:`embodichain.learning.models`; shared optimizer updates, recovery and
+training orchestration remain in :doc:`embodichain/embodichain.learning.sl`.
+
+Import a selected family explicitly. Importing the model-library root does not
+load every model or initialize simulation. NeRD's raw teacher assets, data
+generation and original-repository comparison runners belong to the
+``learning/nerd`` showcase, outside the runtime model package.
+
+NeRD public entry points
+-------------------------
+
+``embodichain_models.dynamics.nerd`` lazily exposes the causal network, its
+physical codec, portable checkpoints and shared-SL integration. Inputs are named
+history tensors; predictions are physical state-increment targets. Model
+evaluation retains input gradients. Frozen training statistics travel with the
+network as buffers.
+
+.. currentmodule:: embodichain_models.dynamics.nerd
+
+.. autosummary::
+
+   NeRDModelCfg
+   NeRDModel
+   FeatureNormalizer
+   export_model
+   load_model
+   convert_legacy_checkpoint
+   NeRDStateCodec
+   NeRDObjective
+   make_nerd_batch
+   NeRDWindowSource
+   build_supervised_trainer
+
+.. autoclass:: NeRDModelCfg
+
+.. autoclass:: NeRDModel
+
+.. autoclass:: FeatureNormalizer
+
+.. autofunction:: export_model
+
+.. autofunction:: load_model
+
+.. autofunction:: convert_legacy_checkpoint
+
+.. autoclass:: NeRDStateCodec
+
+.. autoclass:: NeRDObjective
+
+.. autofunction:: make_nerd_batch
+
+.. autoclass:: NeRDWindowSource
+
+.. autofunction:: build_supervised_trainer
+
+Network and normalization
+--------------------------
+
+Ordered input widths and Transformer settings define the network schema.
+``forward`` predicts every history position; ``evaluate`` selects the last valid
+position for each row. Causal attention preserves valid prefix outputs under
+right padding; the objective owns the padded loss mask. Feature conversion
+follows the network's floating dtype without detaching input gradients.
+
+.. currentmodule:: embodichain_models.dynamics.nerd.model
+
+.. autosummary::
+
+   NeRDModelCfg
+   NeRDModel
+   FeatureNormalizer
+
+.. autoclass:: NeRDModelCfg
+
+.. autoclass:: NeRDModel
+   :members: forward, evaluate, set_normalization
+
+.. autoclass:: FeatureNormalizer
+   :members: forward
+
+Portable checkpoints
+---------------------
+
+Exports contain tensor weights and JSON deployment metadata, including a weight
+checksum, numerical profile and attention backend. Loading restores the saved
+floating precision and returns an evaluation-mode model. Legacy Python-object
+conversion requires explicit trust and accepts the supported official
+Transformer architecture.
+
+.. currentmodule:: embodichain_models.dynamics.nerd.checkpoint
+
+.. autosummary::
+
+   export_model
+   load_model
+   convert_legacy_checkpoint
+
+.. autofunction:: export_model
+
+.. autofunction:: load_model
+
+.. autofunction:: convert_legacy_checkpoint
+
+Physical state, contact and history encoding
+--------------------------------------------
+
+The Cartpole and Ant codec converts native Newton COM velocities to NeRD's
+angular-first spatial twist and expresses relative targets in the current body
+frame. Quaternion helpers use xyzw ordering. Contact features use fixed plane
+slots; history append and reset return new tensors while retaining gradients
+through unaffected values.
+
+.. currentmodule:: embodichain_models.dynamics.nerd.codec
+
+.. autosummary::
+
+   NeRDStateCodec
+   quat_multiply
+   quat_rotate
+   quat_inverse
+   plane_contact_features
+   append_history
+   reset_history
+
+.. autoclass:: NeRDStateCodec
+   :members: native_to_legacy, legacy_to_native, encode, targets, decode
+
+.. autofunction:: quat_multiply
+
+.. autofunction:: quat_rotate
+
+.. autofunction:: quat_inverse
+
+.. autofunction:: plane_contact_features
+
+.. autofunction:: append_history
+
+.. autofunction:: reset_history
+
+Committed trajectories and windows
+-----------------------------------
+
+The single-writer HDF5 format stores T+1 states and T transitions. Only
+manifest-committed shards are visible to readers. Windows respect trajectory
+and split boundaries; optional startup windows carry right-padding masks.
+Readers bound open shard handles and offer an explicitly budgeted resident
+cache. Operational generation progress is excluded from the data fingerprint.
+
+.. currentmodule:: embodichain_models.dynamics.nerd.data
+
+.. autosummary::
+
+   DynamicsShardWriter
+   DynamicsWindowDataset
+   trajectory_split
+   load_manifest
+   dataset_fingerprint
+
+.. autoclass:: DynamicsShardWriter
+   :members: committed_ids, add_trajectory, commit, close
+
+.. autoclass:: DynamicsWindowDataset
+   :members: get_batch, enable_device_cache, close
+
+.. autofunction:: trajectory_split
+
+.. autofunction:: load_manifest
+
+.. autofunction:: dataset_fingerprint
+
+Encoding, statistics and evaluation
+-----------------------------------
+
+Raw windows become named feature histories, physical increment targets and a
+valid-position mask. Statistics use only the training split and weight each
+valid overlapping-window occurrence; artifacts bind the dataset fingerprint.
+The normalized MSE uses frozen target variance. Offline evaluation reports
+valid-position prediction and decoded state errors without selecting on test.
+
+.. currentmodule:: embodichain_models.dynamics.nerd.integration
+
+.. autosummary::
+
+   encode_batch
+   normalized_mse
+   compute_statistics
+   save_statistics
+   load_statistics
+   evaluate_model
+
+.. autofunction:: encode_batch
+
+.. autofunction:: normalized_mse
+
+.. autofunction:: compute_statistics
+
+.. autofunction:: save_statistics
+
+.. autofunction:: load_statistics
+
+.. autofunction:: evaluate_model
+
+Shared supervised objective
+---------------------------
+
+The adapter preserves the raw reader's sampling contract when creating a
+``SupervisedBatch``. Its objective returns a graph-connected normalized
+state-increment loss and the number of valid positions used for aggregation.
+Computing the loss does not update normalization statistics.
+
+.. currentmodule:: embodichain_models.dynamics.nerd.supervised
+
+.. autosummary::
+
+   NeRDObjective
+   make_nerd_batch
+
+.. autoclass:: NeRDObjective
+   :members: compute_loss
+
+.. autofunction:: make_nerd_batch
+
+Offline SL recipe
+------------------
+
+``NeRDWindowSource`` uses the trainer's explicit CPU sampling generator and
+encodes copied windows on the requested device. The factory combines this
+source, the physical objective, Adam scheduling and held-out evaluation with
+the common SL trainer. Its checkpoints use the SL format; historical NeRD
+training checkpoints remain owned by the showcase's historical trainer.
+
+Use the installable factory path
+``embodichain_models.dynamics.nerd.sl_recipe:build_supervised_trainer`` in an
+``embodichain train-sl`` configuration. It is available independently of the
+working directory and example-runner bootstrap.
+
+.. currentmodule:: embodichain_models.dynamics.nerd.sl_recipe
+
+.. autosummary::
+
+   NeRDWindowSource
+   build_supervised_trainer
+
+.. autoclass:: NeRDWindowSource
+   :members: sample
+
+.. autofunction:: build_supervised_trainer
+
+Behavior cloning public entry points
+------------------------------------
+
+``embodichain_models.policy.bc`` owns both numeric and dual/multi-camera causal
+chunk predictors, frozen input/target normalization, masked normalized MSE,
+bounded HDF5 windows and one-batch prefetch. The executor maintains separate
+measured histories and target queues per environment. Targets retain their
+declared physical units; task geometry and controller decoding stay in the host.
+The package does not import simulation. RGB construction lazily imports
+``torchvision``; numeric inference does not need the vision stack.
+
+.. currentmodule:: embodichain_models.policy.bc
+
+.. autosummary::
+
+   ChunkBCModelCfg
+   ChunkBCModel
+   ChunkBCExecutor
+   ResNet10Encoder
+   ChunkBCObjective
+   BCWindowDataset
+   HDF5BCSource
+   PrefetchedBCSource
+   build_supervised_trainer
+
+.. autoclass:: ChunkBCModelCfg
+
+.. autoclass:: ChunkBCModel
+
+.. autoclass:: ChunkBCExecutor
+
+.. autoclass:: ResNet10Encoder
+
+.. autoclass:: ChunkBCObjective
+
+.. autoclass:: BCWindowDataset
+
+.. autoclass:: HDF5BCSource
+
+.. autoclass:: PrefetchedBCSource
+
+.. autofunction:: build_supervised_trainer
+
+BC prediction and causal execution
+----------------------------------
+
+Numeric observations are FP32 ``[B,H,D]``. Each configured RGB camera supplies
+FP32 ``[B,H,3,256,256]`` in ``[0,1]``. Camera order and target semantics are
+checkpoint-bound. The ResNet10 encoder uses trainable GroupNorm and spatial
+pooling. ``forward`` returns normalized chunks; ``predict_targets`` restores
+physical units. Queued execution keeps ingesting measurements between replans.
+
+.. currentmodule:: embodichain_models.policy.bc.model
+
+.. autosummary::
+
+   ChunkBCModelCfg
+   ChunkBCModel
+   ChunkBCExecutor
+
+.. autoclass:: ChunkBCModelCfg
+
+.. autoclass:: ChunkBCModel
+   :members: forward, predict_targets, set_normalization
+
+.. autoclass:: ChunkBCExecutor
+   :members: action, reset
+
+.. currentmodule:: embodichain_models.policy.bc.vision
+
+.. autosummary::
+
+   ResNet10Encoder
+
+.. autoclass:: ResNet10Encoder
+   :members: forward
+
+BC windows, objective and prefetch
+-----------------------------------
+
+Completed immutable manifests bind episode checksums, selected numeric fields,
+camera order and history/target lengths. Samples own their storage; only causal
+RGB histories enter the policy. Optional host-supplied pure transforms construct
+physical targets from numeric fields and require an explicit version identity.
+Prefetch reserves a private sampling cursor; only delivered batches advance the
+trainer's committed RNG, so unused batches reconstruct exactly after recovery.
+
+.. currentmodule:: embodichain_models.policy.bc.data
+
+.. autosummary::
+
+   BCWindowDataset
+
+.. autoclass:: BCWindowDataset
+   :members: sample, read_episode, close
+
+.. currentmodule:: embodichain_models.policy.bc.supervised
+
+.. autosummary::
+
+   ChunkBCObjective
+   HDF5BCSource
+   PrefetchedBCSource
+
+.. autoclass:: ChunkBCObjective
+   :members: compute_loss
+
+.. autoclass:: HDF5BCSource
+   :members: sample, close
+
+.. autoclass:: PrefetchedBCSource
+   :members: sample, close
+
+Stored-target BC SL recipe
+---------------------------
+
+Use ``embodichain_models.policy.bc.sl_recipe:build_supervised_trainer`` with
+``embodichain train-sl`` from any working directory. The factory combines
+precomputed physical HDF5 targets, caller-frozen normalization, AdamW and the
+shared SL trainer. Model, optimizer, target view and normalization identity bind
+checkpoint recovery. Collection, physical evaluation and learning acceptance
+belong to the ``learning/bc`` example's declared protocol.
+
+.. currentmodule:: embodichain_models.policy.bc.sl_recipe
+
+.. autosummary::
+
+   build_supervised_trainer
+
+.. autofunction:: build_supervised_trainer

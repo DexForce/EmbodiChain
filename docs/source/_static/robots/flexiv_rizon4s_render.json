@@ -1,0 +1,109 @@
+{
+  "robot": "FlexivRizon4S",
+  "configuration": "FlexivRizon4SCfg catalog defaults",
+  "source_asset": "FlexivRizon4S/rizon4s.urdf",
+  "source_commit": "7d5dd28c3bbf66115b3e098d5df25c01c953104b",
+  "render_cfg": {
+    "renderer": "rt",
+    "spp": 1,
+    "denoising": {
+      "window": "dlss",
+      "offscreen": "dlss"
+    },
+    "dlss": {
+      "dlss_quality": 2,
+      "upsample_ratio": null,
+      "render_width": 0,
+      "render_height": 0,
+      "target_width": 0,
+      "target_height": 0,
+      "tiled_enabled": true,
+      "exposure_compensation": 1.0
+    },
+    "nrd": {
+      "max_indirect_bounces": 1,
+      "denoising_range": 500000.0,
+      "disocclusion_threshold": 0.01,
+      "disocclusion_threshold_alternate": 0.05,
+      "disocclusion_threshold_mix_enabled": true,
+      "history_confidence_enabled": true,
+      "history_confidence_probe_stride": 5,
+      "history_confidence_sigma_scale": 2.0,
+      "history_confidence_sensitivity": 1.0,
+      "max_accumulated_frame_num": 30,
+      "max_fast_accumulated_frame_num": 6,
+      "history_fix_frame_num": 3,
+      "diffuse_prepass_blur_radius": 30.0,
+      "specular_prepass_blur_radius": 50.0,
+      "anti_firefly_enabled": false,
+      "sh_mode_enabled": false,
+      "validation_enabled": false,
+      "max_stabilized_frame_num": 63,
+      "min_blur_radius": 1.0,
+      "max_blur_radius": 30.0,
+      "antilag_luminance_sigma_scale": 2.0,
+      "antilag_luminance_sensitivity": 3.0,
+      "taa_min_current_weight": 0.0625,
+      "taa_sigma_scale": 2.0,
+      "taa_depth_rejection_enabled": true,
+      "taa_tone_mapping_enabled": false
+    },
+    "tone_mapping_enabled": false,
+    "tone_mapping_exposure": 1.0,
+    "min_bounces": 4,
+    "max_bounces": 8
+  },
+  "scene": {
+    "presentation": "SimulationManager defaults",
+    "direct_lights": [],
+    "emission_color": [
+      0.92,
+      0.95,
+      1.0
+    ],
+    "emission_intensity": 80.0
+  },
+  "camera": {
+    "width": 1200,
+    "height": 960,
+    "intrinsics": [
+      1720,
+      1720,
+      600,
+      480
+    ],
+    "eye": [
+      1.45,
+      -1.4,
+      1.05
+    ],
+    "target": [
+      0.34,
+      -0.04,
+      0.34
+    ],
+    "up": [
+      0,
+      0,
+      1
+    ],
+    "near": 0.02,
+    "far": 60.0
+  },
+  "joint_positions": {
+    "joint1": 0.0,
+    "joint2": -0.6981300115585327,
+    "joint3": 0.0,
+    "joint4": 1.570796012878418,
+    "joint5": 0.0,
+    "joint6": 0.6981300115585327,
+    "joint7": 0.0
+  },
+  "physics_stepped": false,
+  "warmup_frames": 48,
+  "image": "flexiv_rizon4s.png",
+  "asset_archive": "FlexivRizon4S_v1.zip",
+  "asset_url": "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/main/robot_assets/FlexivRizon4S_v1.zip",
+  "asset_sha256": "850c9531a19d103b15c9609f60a6d594dbde602032c8fbb34b73c83fc4ecabf3",
+  "source_urdf_sha256": "587e2f25b4e4b1994efb7863d50d4a02a32562ffd9b1dd0d33dfde5cba69f6e6"
+}

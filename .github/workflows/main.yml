@@ -569,6 +569,11 @@ jobs:
               "embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml",
               "embodichain_robots/__init__.py",
               "embodichain_robots/_catalog.py",
+              "embodichain_models/__init__.py",
+              "embodichain_robots/_asset_catalog.py",
+              "embodichain/data/_asset_registry.py",
+              "embodichain_robots/franka/assets.py",
+              "embodichain_robots/dexforce/w1/assets.py",
           }
           with ZipFile(wheels[0]) as wheel:
               members = set(wheel.namelist())
@@ -598,33 +603,60 @@ jobs:
               member
               for member in members
               if not member.startswith(
-                  ("embodichain/", "embodichain_tasks/", "embodichain_robots/", dist_info)
+                  (
+                      "embodichain/",
+                      "embodichain_tasks/",
+                      "embodichain_robots/",
+                      "embodichain_benchmarks/",
+                      "embodichain_models/",
+                      f"embodichain-{version}.data/data/share/embodichain/examples/",
+                      dist_info,
+                  )
               )
               or "__pycache__" in member
               or member.endswith((".pyc", ".pyo"))
           )
           missing = sorted(required - members)
+          retired_robot_modules = {
+              f"embodichain_robots/{name}.py"
+              for name in (
+                  "arx5", "aloha_mini", "cobotmagic", "franka_panda",
+                  "flexiv_rizon4s", "tianji_marvin", "ur_robot", "so101",
+              )
+          }
+          stale_robot_modules = sorted(
+              member for member in members
+              if member in retired_robot_modules
+              or member.startswith("embodichain_robots/dexforce_w1/")
+          )
           missing_task_configs = sorted(source_task_configs - wheel_task_configs)
           unexpected_task_configs = sorted(wheel_task_configs - source_task_configs)
           task_entry_point = "embodichain_tasks = embodichain_tasks"
           robot_entry_point = entry_point_config.get(
               "embodichain.robots", "official", fallback=None
           ) == "embodichain_robots._catalog:ROBOT_CONFIGS"
+          asset_entry_point = entry_point_config.get(
+              "embodichain.assets", "official_robots", fallback=None
+          ) == "embodichain_robots._asset_catalog:ROBOT_ASSETS"
           if (
               unexpected
               or missing
+              or stale_robot_modules
               or missing_task_configs
               or unexpected_task_configs
               or task_entry_point not in entry_points
               or not robot_entry_point
+              or not asset_entry_point
           ):
               raise SystemExit(
                   "Invalid wheel contents; "
                   f"unexpected={unexpected}, missing={missing}, "
+                  f"stale_robot_modules={stale_robot_modules}, "
                   f"missing_task_configs={missing_task_configs}, "
                   f"unexpected_task_configs={unexpected_task_configs}, "
                   f"task_entry_point={task_entry_point in entry_points}, "
-                  f"robot_entry_point={robot_entry_point}"
+                  f"robot_entry_point={robot_entry_point}, "
+                  f"asset_entry_point={asset_entry_point}"
               )
           PY
 

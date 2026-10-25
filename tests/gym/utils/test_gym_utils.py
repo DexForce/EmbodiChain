@@ -384,7 +384,8 @@ class TestInitRolloutBufferFromConfig:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
-            "embodichain_robots.cobotmagic.get_data_path", lambda value: value
+            "embodichain_robots.agilex.cobotmagic.cfg.get_data_path",
+            lambda value: value,
         )
         config = {
             "embodiment": {

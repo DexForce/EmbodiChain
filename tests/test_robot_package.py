@@ -59,7 +59,7 @@ class CoreProbe(importlib.abc.MetaPathFinder):
 
 sys.meta_path.insert(0, CoreProbe())
 try:
-    runpy.run_path(str(root / 'extensions/embodichain_robots/dexforce_w1/cfg.py'), run_name='__main__')
+    runpy.run_path(str(root / 'extensions/embodichain_robots/dexforce/w1/cfg.py'), run_name='__main__')
 except CoreDiscovered:
     pass
 else:
@@ -98,10 +98,17 @@ def test_main_distribution_stages_robot_package_without_legacy_modules(tmp_path)
     for relative in (
         "embodichain_robots/__init__.py",
         "embodichain_robots/_catalog.py",
-        "embodichain_robots/franka_panda.py",
-        "embodichain_robots/ur_robot.py",
-        "embodichain_robots/dexforce_w1/cfg.py",
-        "embodichain_robots/dexforce_w1/types.py",
+        "embodichain_robots/_asset_catalog.py",
+        "embodichain_robots/franka/assets.py",
+        "embodichain_robots/universal_robots/assets.py",
+        "embodichain_robots/dexforce/w1/assets.py",
+        "embodichain_robots/the_robot_studio/so101/assets.py",
+        "embodichain_robots/franka/panda.py",
+        "embodichain_robots/universal_robots/ur_robot.py",
+        "embodichain_robots/flexiv/rizon4s/cfg.py",
+        "embodichain_robots/the_robot_studio/so101/cfg.py",
+        "embodichain_robots/dexforce/w1/cfg.py",
+        "embodichain_robots/dexforce/w1/types.py",
         "embodichain/lab/sim/robots/dual_arm.py",
         "embodichain/robot_registry.py",
     ):
@@ -113,3 +120,5 @@ def test_main_distribution_stages_robot_package_without_legacy_modules(tmp_path)
         "dual_arm.py",
     }
     assert not (legacy / "dexforce_w1").exists()
+    for retired in ("franka_panda.py", "ur_robot.py", "so101.py", "dexforce_w1"):
+        assert not (output / "embodichain_robots" / retired).exists()

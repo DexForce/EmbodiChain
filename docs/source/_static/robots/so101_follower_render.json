@@ -1,0 +1,35 @@
+{
+  "robot": "SO101Follower",
+  "source": "https://github.com/TheRobotStudio/SO-ARM100",
+  "revision": "a758567c3978dfeefe282ede0500085a48fe8f78",
+  "source_urdf": "Simulation/SO101/so101_new_calib.urdf",
+  "renderer": "DexSim OfflineRT",
+  "dexsim_version": "0.5.1rc1",
+  "gpu": "NVIDIA GeForce RTX 5090",
+  "resolution": [
+    1280,
+    960
+  ],
+  "spp": 16,
+  "accumulation_frames": 8,
+  "denoising": "optix",
+  "tone_mapping_exposure": 1.0,
+  "arm_qpos": [
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "gripper_qpos": 0.6,
+  "camera_eye": [
+    0.73,
+    -0.64,
+    0.48
+  ],
+  "camera_target": [
+    0.19,
+    0,
+    0.14
+  ]
+}

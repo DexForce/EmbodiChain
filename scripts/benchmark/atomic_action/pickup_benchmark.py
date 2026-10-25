@@ -133,7 +133,7 @@ def _run_case(
         MotionPolicy,
         SceneSnapshot,
     )
-    from scripts.tutorials.atomic_action.pickup import (
+    from examples.sim.atomic_action.pickup import (
         get_hand_open_close_qpos,
         initialize_pre_pick_robot_pose,
         compute_pick_close_end_step,
@@ -475,7 +475,7 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
         MotionGenCfg,
     )
     from embodichain.lab.sim.motion.planners import ToppraPlannerCfg
-    from scripts.tutorials.atomic_action.pickup import (
+    from examples.sim.atomic_action.pickup import (
         create_robot,
         initialize_simulation,
     )
@@ -595,7 +595,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    from scripts.tutorials.atomic_action.tutorial_utils import run_tutorial
+    from examples.sim.atomic_action.support import run_tutorial
 
     run_tutorial(main)
 
