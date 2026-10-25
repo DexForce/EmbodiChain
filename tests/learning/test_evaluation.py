@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from collections import deque
+import math
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call
@@ -23,6 +25,7 @@ from unittest.mock import MagicMock, call
 import gymnasium as gym
 import pytest
 import torch
+from tensordict import TensorDict
 
 from embodichain.learning.rl.evaluation import (
     convert_policy_action_for_env,
@@ -97,6 +100,102 @@ class _MixedDeviceEnv:
     def __init__(self) -> None:
         self.device = torch.device("meta")
         self.action_manager = _DeviceCheckingActionManager(self.device)
+
+
+def test_trainer_metric_means_transfer_only_one_scalar_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Logging preserves mixed metric means without per-value host copies."""
+    original_cpu = torch.Tensor.cpu
+    transferred_shapes = []
+
+    def counted_cpu(value: torch.Tensor, *args, **kwargs):
+        transferred_shapes.append(tuple(value.shape))
+        return original_cpu(value, *args, **kwargs)
+
+    monkeypatch.setattr(torch.Tensor, "cpu", counted_cpu)
+    trainer = Trainer.__new__(Trainer)
+    values = trainer._pack_log_dicts(
+        {
+            "rewards": {
+                "progress": torch.tensor([1.0, 3.0], requires_grad=True),
+                "other": [1, 5],
+            },
+            "metrics": {
+                "grasped": torch.tensor([True, False]),
+                "length": torch.tensor([1, 3], dtype=torch.int64),
+                "noncontiguous": torch.arange(8.0).reshape(2, 4)[:, ::2],
+                "empty": torch.empty(0),
+                "unsupported": "not a numeric metric",
+            },
+        }
+    )
+    assert list(values) == [
+        "rewards/progress",
+        "rewards/other",
+        "metrics/grasped",
+        "metrics/length",
+        "metrics/noncontiguous",
+        "metrics/empty",
+    ]
+    assert list(values.values())[:-1] == [2.0, 3.0, 0.5, 2.0, 3.0]
+    assert math.isnan(values["metrics/empty"])
+    assert transferred_shapes == [(5,)]
+
+
+@pytest.mark.parametrize("logging_enabled", [True, False])
+def test_trainer_rollout_logging_reuses_means_for_both_sinks(
+    monkeypatch: pytest.MonkeyPatch, logging_enabled: bool
+) -> None:
+    """Each control step retains its tags/global step and shares scalar means."""
+    trainer = Trainer.__new__(Trainer)
+    trainer.curr_ret = torch.zeros(2)
+    trainer.curr_len = torch.zeros(2, dtype=torch.int32)
+    trainer.ret_window, trainer.len_window = deque(), deque()
+    trainer.global_step = 10
+    trainer.distributed, trainer.rank = False, 0
+    trainer.writer = MagicMock() if logging_enabled else None
+    trainer.use_wandb = logging_enabled
+    trainer.buffer_size = 2
+    rollout = object()
+    trainer.buffer = SimpleNamespace(start_rollout=lambda: rollout, add=MagicMock())
+    scalar_means = MagicMock(wraps=trainer._pack_log_dicts)
+    monkeypatch.setattr(trainer, "_pack_log_dicts", scalar_means)
+    wandb_log = MagicMock()
+    monkeypatch.setattr("embodichain.learning.rl.utils.trainer.wandb.log", wandb_log)
+
+    def collect(*, num_steps, rollout, on_step_callback):
+        for _ in range(num_steps):
+            on_step_callback(
+                TensorDict(
+                    {"reward": torch.tensor([1.0, 3.0]), "done": torch.zeros(2).bool()},
+                    batch_size=[2],
+                ),
+                {
+                    "rewards": {"progress": torch.tensor([1.0, 3.0])},
+                    "metrics": {"grasped": torch.tensor([True, False])},
+                },
+            )
+        return rollout
+
+    trainer.collector = SimpleNamespace(collect=collect)
+    trainer._collect_rollout()
+    assert trainer.global_step == 14
+    if logging_enabled:
+        assert scalar_means.call_count == 2
+        assert trainer.writer.add_scalar.call_args_list == [
+            call("rewards/progress", 2.0, 12),
+            call("metrics/grasped", 0.5, 12),
+            call("rewards/progress", 2.0, 14),
+            call("metrics/grasped", 0.5, 14),
+        ]
+        assert wandb_log.call_args_list == [
+            call({"rewards/progress": 2.0, "metrics/grasped": 0.5}, step=12),
+            call({"rewards/progress": 2.0, "metrics/grasped": 0.5}, step=14),
+        ]
+    else:
+        scalar_means.assert_not_called()
+        wandb_log.assert_not_called()
 
 
 @pytest.mark.parametrize("rank", [0, 1])

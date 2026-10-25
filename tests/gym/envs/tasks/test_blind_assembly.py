@@ -96,6 +96,50 @@ def test_task_assets_keep_real_mating_constraints(
         assert outline[:, 0].max() - outline[:, 0].min() > 0.05
 
 
+def test_official_proprioception_uses_world_linear_and_tcp_angular_velocity() -> None:
+    """A rotated base distinguishes the two public-reference velocity frames."""
+    env = BlindAssemblyEnv.__new__(BlindAssemblyEnv)
+    env._num_envs = 1
+    env.assembly_kind = "peg"
+    env._assembly_revision = 0
+    env._assembly_observation_convention = "official_v1"
+    q = torch.arange(1.0, 8.0).unsqueeze(0)
+    env.robot = SimpleNamespace(
+        get_qpos=lambda **kwargs: q, get_qvel=lambda **kwargs: q
+    )
+    env._assembly_q_center = q[0]
+    env._assembly_q_half_range = torch.full((7,), 2.0)
+    env._assembly_velocity_scale = q[0]
+    transform = torch.eye(4).unsqueeze(0)
+    transform[0, :3, 3] = torch.tensor([0.1, 0.2, 0.3])
+    jacobian = torch.cat([torch.eye(6), torch.zeros(6, 1)], dim=1).unsqueeze(0)
+    env._assembly_chain = SimpleNamespace(
+        jacobian=lambda q, ret_eef_pose: (jacobian, transform)
+    )
+    env._assembly_robot_base = torch.tensor(
+        [
+            [0.0, -1.0, 0.0, 1.0],
+            [1.0, 0.0, 0.0, 2.0],
+            [0.0, 0.0, 1.0, 3.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
+    env.action_manager = SimpleNamespace(
+        get_term=lambda name: SimpleNamespace(raw_actions=torch.full((1, 7), 0.7))
+    )
+    actual = env.proprioceptive_frame()
+    expected = torch.tensor(
+        [
+            [0.0] * 7
+            + [1.0] * 7
+            + [0.8, 2.1, 3.3, 0.0, 0.0, torch.pi / 2]
+            + [-2.0, 1.0, 3.0, 4.0, 5.0, 6.0]
+            + [0.7] * 7
+        ]
+    )
+    torch.testing.assert_close(actual, expected)
+
+
 def test_bilateral_grasp_requires_the_part_on_both_pads() -> None:
     env = BlindAssemblyEnv.__new__(BlindAssemblyEnv)
     env.robot = SimpleNamespace(uid="robot")
@@ -125,6 +169,77 @@ def test_formal_geometry_gate_precedes_world_creation() -> None:
         env._setup_scene()
 
 
+@pytest.mark.parametrize("capacities", [None, (256, 64)])
+def test_assembly_sensor_capacity_defaults_and_development_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capacities: tuple[int, int] | None
+) -> None:
+    from embodichain.gen_sim.assembly import (
+        AssemblyAsset,
+        AssemblyBody,
+        AssemblyGeometry,
+        AssemblyJoint,
+    )
+    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+
+    asset = AssemblyAsset(
+        bodies=[
+            AssemblyBody(
+                name=name,
+                mass=1.0,
+                inertia=np.eye(3).tolist(),
+                joint=AssemblyJoint(kind=kind),
+                geometries=[AssemblyGeometry(kind="box", size=[0.02, 0.02, 0.01])],
+            )
+            for name, kind in (("peg", "free"), ("plate", "fixed"))
+        ]
+    )
+    monkeypatch.setattr(EmbodiedEnv, "_prepare_scene", lambda self, **kwargs: None)
+    monkeypatch.setattr(AssemblyAsset, "load", lambda manifest: asset)
+    env = BlindAssemblyEnv.__new__(BlindAssemblyEnv)
+    env.assembly_kind = "peg"
+    env.assembly_manifest = str(tmp_path / "asset.json")
+    env.cfg = SimpleNamespace(
+        seed=0,
+        extensions={},
+        sensor=[],
+        robot=SimpleNamespace(_pk_urdf_path="robot.urdf", gripper_model="parallel_jaw"),
+    )
+    env.robot = SimpleNamespace(uid="robot")
+    env.sim = SimpleNamespace(
+        is_newton_backend=True, add_rigid_object=Mock(), add_articulation=Mock()
+    )
+    if capacities is not None:
+        env.assembly_contact_capacity, env.grasp_contact_capacity = capacities
+    try:
+        env._prepare_scene()
+        expected = (2048, 128) if capacities is None else capacities
+        assert (
+            tuple(sensor.max_contacts_per_env for sensor in env.cfg.sensor) == expected
+        )
+    finally:
+        if hasattr(env, "_assembly_directory"):
+            env._assembly_directory.cleanup()
+
+
+@pytest.mark.parametrize(
+    "name,capacity",
+    [
+        ("assembly_contact_capacity", 0),
+        ("grasp_contact_capacity", 0),
+        ("assembly_contact_capacity", True),
+        ("assembly_contact_capacity", 2.5),
+    ],
+)
+def test_invalid_assembly_sensor_capacity_precedes_preparation(
+    name: str,
+    capacity: object,
+) -> None:
+    env = BlindAssemblyEnv.__new__(BlindAssemblyEnv)
+    setattr(env, name, capacity)
+    with pytest.raises(ValueError, match=name):
+        env._prepare_scene()
+
+
 def _analytic_mating_state(
     kind: str = "peg", grasped: bool = True, penetration: float = 0.0
 ) -> tuple[BlindAssemblyEnv, torch.Tensor]:
@@ -133,7 +248,7 @@ def _analytic_mating_state(
     env._num_envs = 1
     env._moving_uid, env._fixture_uid = "peg", "plate"
     part = torch.eye(4).unsqueeze(0)
-    part[:, 2, 3] = -0.02
+    part[:, 2, 3] = -0.01
     fixture = torch.eye(4).unsqueeze(0)
     objects = {
         "peg": SimpleNamespace(get_local_pose=lambda **kwargs: part),
@@ -200,12 +315,74 @@ def test_seated_peg_requires_grasp_and_penetration_guard(
         env._assembly_physics_revision = revision
         success, _, metrics = env.compute_task_state()
     assert success.item() is expected
-    assert metrics["depth"].item() == pytest.approx(0.02)
+    assert metrics["depth"].item() == pytest.approx(0.01)
     assert env._assembly_labels.tolist() == [[2, 2, 2, 2]]
     previous = env._assembly_success_hold.clone()
     env._assembly_revision += 1
     env.compute_task_state()
     assert torch.equal(env._assembly_success_hold, previous)
+
+
+def test_peg_contact_labels_follow_signed_rim_and_surface_bands() -> None:
+    env, part = _analytic_mating_state()
+    part[:, 2, 3] = 0
+    # A square aperture has half-width 5 mm. The public task uses a 1 mm
+    # Euclidean rim band and a separate 1 mm band about the fixture top.
+    env._assembly_edge_points = torch.tensor(
+        [
+            [0.0, 0.0, 0.0011],  # Above the plane band: free.
+            [0.0, 0.0, 0.0005],  # Deep inside the aperture: inside.
+            [0.0045, 0.0, 0.0005],  # Inner side of rim near plane: contact.
+            [0.0055, 0.0, -0.0005],  # Outer side of rim near plane: contact.
+            [0.0045, 0.0, -0.002],  # Rim band below plane: inside.
+            [0.0055, 0.0, -0.002],  # Same label on outer half of rim band.
+            [0.007, 0.0, -0.002],  # Far outside below plane: free.
+            [0.007, 0.0, 0.0005],  # On the plate top: contact.
+            # Corner is 0.8 * sqrt(2) mm from the rim, outside its 1 mm
+            # Euclidean band even though each infinite edge is closer.
+            [0.0058, 0.0058, -0.002],
+        ]
+    )
+    env.compute_task_state()
+    assert env._assembly_labels.tolist() == [[0, 2, 1, 1, 2, 2, 0, 1, 0]]
+
+
+@pytest.mark.parametrize(
+    "plane_error,expected",
+    [(-0.0011, False), (-0.0005, True), (0.0005, True), (0.0011, False)],
+)
+def test_peg_seating_has_a_bounded_bottom_plane_interval(
+    plane_error: float, expected: bool
+) -> None:
+    env, part = _analytic_mating_state()
+    # Fixture top is z=0 and its thickness is 10 mm, so the seated bottom
+    # plane is z=-10 mm. Falling farther through the hole is not seating.
+    part[:, 2, 3] = -0.01 + plane_error
+    for revision in range(3):
+        env._assembly_revision = env._assembly_physics_revision = revision
+        success, _, _ = env.compute_task_state()
+    assert success.item() is expected
+
+
+def test_peg_seating_checks_each_bottom_vertex_height() -> None:
+    env, part = _analytic_mating_state()
+    angle = 0.3
+    part[0, :3, :3] = torch.tensor(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, np.cos(angle), -np.sin(angle)],
+            [0.0, np.sin(angle), np.cos(angle)],
+        ]
+    )
+    part[:, 2, 3] = -0.0103
+    for revision in range(3):
+        env._assembly_revision = env._assembly_physics_revision = revision
+        success, _, metrics = env.compute_task_state()
+    # Even the highest corner passes the old one-sided 9 mm depth threshold;
+    # the opposite corner is over 1 mm below the target and must reject it.
+    assert metrics["captured"].item()
+    assert metrics["depth"].item() > 0.009
+    assert not success.item()
 
 
 def test_nut_rotation_at_fixed_capture_depth_is_not_threading() -> None:

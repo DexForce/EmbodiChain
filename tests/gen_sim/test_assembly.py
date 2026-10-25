@@ -110,6 +110,82 @@ def test_hinge_cannot_silently_become_free_body() -> None:
         asset.to_rigid_configs()
 
 
+def test_peg_task_floor_is_plate_attached_and_preserves_free_part() -> None:
+    pytest.importorskip("mjfit")
+    from embodichain.gen_sim.assembly.task_assets import build_task_assembly
+
+    closed = build_task_assembly("peg")
+    opened = build_task_assembly("peg", {"bottom_thickness": 0})
+    bodies = {body.name: body for body in closed.bodies}
+    original = {body.name: body for body in opened.bodies}
+    assert set(bodies) == set(original) == {"plate", "peg"}
+    plate, peg = bodies["plate"], bodies["peg"]
+    assert plate.joint.kind == "fixed" and peg.joint.kind == "free"
+    assert len(plate.geometries) == len(original["plate"].geometries) + 1
+    floor = next(geometry for geometry in plate.geometries if geometry.name == "bottom")
+    assert floor.collision and floor.visible
+    vertices = (
+        np.asarray(floor.vertices) @ Rotation.from_quat(floor.quaternion).as_matrix().T
+        + floor.position
+    )
+    # The nominal plate is 18 mm deep. Its local underside is -9 mm, and
+    # the public generator's 2 mm floor must terminate exactly there.
+    np.testing.assert_allclose(vertices[:, 2].max(), -0.009, atol=2e-8)
+    np.testing.assert_allclose(np.ptp(vertices[:, 2]), 0.002, atol=2e-8)
+    np.testing.assert_allclose(vertices[:, :2].min(axis=0), [-0.07, -0.07], atol=2e-8)
+    np.testing.assert_allclose(vertices[:, :2].max(axis=0), [0.07, 0.07], atol=2e-8)
+    opening = np.asarray(closed.config["mating_outline"])
+    assert np.all(opening >= vertices[:, :2].min(axis=0))
+    assert np.all(opening <= vertices[:, :2].max(axis=0))
+    assert peg.mass == original["peg"].mass == 0.5
+    np.testing.assert_array_equal(peg.inertia, original["peg"].inertia)
+    np.testing.assert_array_equal(peg.com, original["peg"].com)
+    assert len(peg.geometries) == len(original["peg"].geometries) == 1
+    np.testing.assert_array_equal(
+        peg.geometries[0].vertices, original["peg"].geometries[0].vertices
+    )
+    assert not any(
+        geometry.name == "bottom" for geometry in original["plate"].geometries
+    )
+
+
+def test_elevated_peg_task_seats_on_local_floor_not_global_ground() -> None:
+    mujoco = pytest.importorskip("mujoco")
+    pytest.importorskip("mjfit")
+    import xml.etree.ElementTree as ET
+    from embodichain.gen_sim.assembly.task_assets import build_task_assembly
+
+    asset = build_task_assembly("peg")
+    model_xml = ET.fromstring(asset.source_mjcf)
+    # Move the whole assembly 25 cm above the unrelated global ground.
+    # This is scene preparation, before constructing or stepping the model.
+    for name in ("plate", "peg"):
+        body = model_xml.find(f"./worldbody/body[@name='{name}']")
+        position = np.fromstring(body.attrib["pos"], sep=" ")
+        position[2] += 0.25
+        body.set("pos", " ".join(map(str, position)))
+    model = mujoco.MjModel.from_xml_string(ET.tostring(model_xml, encoding="unicode"))
+    data = mujoco.MjData(model)
+    for _ in range(500):
+        mujoco.mj_step(model, data)
+    mujoco.mj_forward(model, data)
+    peg_id, plate_id = model.body("peg").id, model.body("plate").id
+    expected_floor_height = model.body_pos[plate_id, 2] - 0.009
+    peg = next(body for body in asset.bodies if body.name == "peg")
+    geometry = peg.geometries[0]
+    vertices = (
+        np.asarray(geometry.vertices)
+        @ Rotation.from_quat(geometry.quaternion).as_matrix().T
+        + geometry.position
+    )
+    bottom = vertices[np.isclose(vertices[:, 2], vertices[:, 2].min(), atol=1e-8)]
+    world_bottom = bottom @ data.xmat[peg_id].reshape(3, 3).T + data.xpos[peg_id]
+    assert np.isfinite(data.qpos).all()
+    np.testing.assert_allclose(world_bottom[:, 2], expected_floor_height, atol=5e-5)
+    floor_id = model.geom("bottom").id
+    assert any(floor_id in contact.geom for contact in data.contact[: data.ncon])
+
+
 def test_hinge_visual_export_keeps_body_local_appearance_and_source_physics(
     tmp_path,
 ) -> None:

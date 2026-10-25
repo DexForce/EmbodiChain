@@ -105,6 +105,21 @@ class BlindAssemblyEnv(EmbodiedEnv):
         super()._setup_scene(**kwargs)
 
     def _prepare_scene(self, **kwargs: Any) -> None:
+        contact_capacities = {}
+        for name, default in (
+            ("assembly_contact_capacity", 2048),
+            ("grasp_contact_capacity", 128),
+        ):
+            capacity = getattr(self, name, default)
+            if (
+                isinstance(capacity, bool)
+                or not isinstance(capacity, int)
+                or capacity < 1
+            ):
+                raise ValueError(
+                    f"{name} must be a positive integer, got {capacity!r}."
+                )
+            contact_capacities[name] = capacity
         super()._prepare_scene(**kwargs)
         manifest = getattr(self, "assembly_manifest", None)
         selected_seed = getattr(self, "assembly_seed", None)
@@ -224,7 +239,9 @@ class BlindAssemblyEnv(EmbodiedEnv):
                     rigid_uid_list=[self._moving_uid, self._fixture_uid],
                     articulation_cfg_list=filters,
                     filter_need_both_actor=True,
-                    max_contacts_per_env=2048,
+                    max_contacts_per_env=contact_capacities[
+                        "assembly_contact_capacity"
+                    ],
                 ),
                 ContactSensorCfg(
                     uid="grasp_contacts",
@@ -236,7 +253,7 @@ class BlindAssemblyEnv(EmbodiedEnv):
                         )
                     ],
                     filter_need_both_actor=True,
-                    max_contacts_per_env=128,
+                    max_contacts_per_env=contact_capacities["grasp_contact_capacity"],
                 ),
             ]
         )
@@ -246,11 +263,20 @@ class BlindAssemblyEnv(EmbodiedEnv):
             "asset_sha256": self.assembly_asset.content_hash,
             "robot_source_urdf": self.cfg.robot._pk_urdf_path,
             "source_contacts_preserved": source_contact,
+            "contact_capacities": contact_capacities,
             "paper_robot_dynamics_identified": False,
             "gripper_model": getattr(self.cfg.robot, "gripper_model", "custom"),
             "source_gripper_dynamics_preserved": False,
             "reset_distribution": "local contact, fixed ready pose; workspace-wide IK reset not qualified",
-            "contact_labels": "analytic mating-feature labels; recorded engineering thresholds",
+            "contact_labels": (
+                "public assembly_task.js peg signed-distance labels and seated interval; "
+                "additional bilateral grasp, penetration and 3-control-step hold guards"
+                if self.assembly_kind == "peg"
+                else "analytic mating-feature labels; recorded engineering thresholds"
+            ),
+            "proprioception_convention": getattr(
+                self, "proprioception_convention", "legacy_v1"
+            ),
         }
 
     def _init_sim_state(self, **kwargs: Any) -> None:
@@ -264,6 +290,36 @@ class BlindAssemblyEnv(EmbodiedEnv):
         self._assembly_chain = self.cfg.robot.build_pk_serial_chain(device=self.device)[
             "arm"
         ]
+        self._assembly_observation_convention = getattr(
+            self, "proprioception_convention", "legacy_v1"
+        )
+        if self._assembly_observation_convention not in {"legacy_v1", "official_v1"}:
+            raise ValueError("Unknown assembly proprioception_convention.")
+        if self._assembly_observation_convention == "official_v1":
+            limits = torch.as_tensor(
+                self.proprioceptive_joint_limits,
+                dtype=torch.float32,
+                device=self.device,
+            )
+            velocity = torch.as_tensor(
+                self.proprioceptive_velocity_scale,
+                dtype=torch.float32,
+                device=self.device,
+            )
+            if (
+                limits.shape != (7, 2)
+                or velocity.shape != (7,)
+                or not torch.isfinite(limits).all()
+                or not torch.isfinite(velocity).all()
+                or not (limits[:, 0] < limits[:, 1]).all()
+                or not (velocity > 0).all()
+            ):
+                raise ValueError(
+                    "Assembly proprioception requires 7 finite joint scales."
+                )
+            self._assembly_q_center = limits.mean(-1)
+            self._assembly_q_half_range = (limits[:, 1] - limits[:, 0]) * 0.5
+            self._assembly_velocity_scale = velocity
         self._assembly_success_hold = torch.zeros(
             self.num_envs, dtype=torch.long, device=self.device
         )
@@ -333,7 +389,10 @@ class BlindAssemblyEnv(EmbodiedEnv):
             return cached[1]
         q = self.robot.get_qpos(name="arm")
         qvel = self.robot.get_qvel(name="arm")
-        transform = self._assembly_chain.forward_kinematics(q).get_matrix()
+        jacobian, transform = self._assembly_chain.jacobian(q, ret_eef_pose=True)
+        official = self._assembly_observation_convention == "official_v1"
+        if official:
+            transform = self._assembly_robot_base @ transform
         position = transform[:, :3, 3]
         rotation = transform[:, :3, :3]
         orientation = (
@@ -341,7 +400,17 @@ class BlindAssemblyEnv(EmbodiedEnv):
             if self.assembly_kind == "nut"
             else torch.stack(euler_xyz_from_quat(quat_from_matrix(rotation)), dim=-1)
         )
-        twist = (self._assembly_chain.jacobian(q) @ qvel.unsqueeze(-1)).squeeze(-1)
+        twist = (jacobian @ qvel.unsqueeze(-1)).squeeze(-1)
+        if official:
+            base_rotation = self._assembly_robot_base[:3, :3]
+            linear = twist[:, :3] @ base_rotation.T
+            angular_world = twist[:, 3:] @ base_rotation.T
+            angular_local = (
+                rotation.transpose(1, 2) @ angular_world.unsqueeze(-1)
+            ).squeeze(-1)
+            twist = torch.cat([linear, angular_local], dim=-1)
+            q = (q - self._assembly_q_center) / self._assembly_q_half_range
+            qvel = qvel / self._assembly_velocity_scale
         previous = (
             self.action_manager.get_term("arm_delta").raw_actions
             if self.action_manager is not None
@@ -618,7 +687,15 @@ class BlindAssemblyEnv(EmbodiedEnv):
         fixture = self.sim.get_rigid_object(self._fixture_uid).get_local_pose(
             to_matrix=True
         )
-        relative = torch.linalg.solve(fixture, part)
+        # Rigid inverse avoids a general LU solve and its CUDA error-check
+        # synchronization on every control observation.
+        inverse_rotation = fixture[:, :3, :3].transpose(1, 2)
+        relative = torch.zeros_like(part)
+        relative[:, :3, :3] = inverse_rotation @ part[:, :3, :3]
+        relative[:, :3, 3] = (
+            inverse_rotation @ (part[:, :3, 3] - fixture[:, :3, 3]).unsqueeze(-1)
+        ).squeeze(-1)
+        relative[:, 3, 3] = 1
         points = self._assembly_edge_points.expand(self.num_envs, -1, -1)
         points = points @ relative[:, :3, :3].transpose(1, 2) + relative[:, None, :3, 3]
         radial = torch.linalg.vector_norm(relative[:, :2, 3], dim=-1)
@@ -660,17 +737,6 @@ class BlindAssemblyEnv(EmbodiedEnv):
                 self._hole_polygon = torch.tensor(
                     outline, dtype=torch.float32, device=self.device
                 )
-            edges = self._hole_polygon.roll(-1, 0) - self._hole_polygon
-            vectors = points[:, :, :2, None] - self._hole_polygon.T[None, None]
-            edge_lengths = torch.linalg.vector_norm(edges, dim=-1)
-            inside = (
-                (
-                    edges[:, 0][None, None] * vectors[:, :, 1]
-                    - edges[:, 1][None, None] * vectors[:, :, 0]
-                )
-                / edge_lengths[None, None]
-                >= -1e-6
-            ).all(dim=-1)
             # Supervision samples 64 points; success checks every actual
             # convex bottom vertex, so corners between samples cannot escape.
             bottom = getattr(
@@ -680,37 +746,70 @@ class BlindAssemblyEnv(EmbodiedEnv):
                 bottom[None] @ relative[:, :3, :3].transpose(1, 2)
                 + relative[:, None, :3, 3]
             )
-            bottom_vectors = (
-                bottom_points[:, :, :2, None] - self._hole_polygon.T[None, None]
-            )
-            all_inside = (
-                (
+            # Match signedDistance/labelEdge in the authors' public
+            # static/js/assembly_task.js: segment distance, even-odd interior,
+            # and a 1 mm band around both the opening rim and top plane.
+            # Bound point-edge temporaries independently of arena count.
+            polygon = self._hole_polygon
+            endpoint = polygon.roll(-1, 0)
+            edges = endpoint - polygon
+            length_squared = edges.square().sum(dim=-1).clamp_min(1e-12)
+            samples = torch.cat([points[:, :, :2], bottom_points[:, :, :2]], dim=1)
+            distances = []
+            for chunk in samples.reshape(-1, 2).split(16384):
+                rx = chunk[:, 0, None] - polygon[None, :, 0]
+                ry = chunk[:, 1, None] - polygon[None, :, 1]
+                projection = (
+                    (rx * edges[None, :, 0] + ry * edges[None, :, 1])
+                    / length_squared[None]
+                ).clamp(0, 1)
+                distance = (
                     (
-                        edges[:, 0][None, None] * bottom_vectors[:, :, 1]
-                        - edges[:, 1][None, None] * bottom_vectors[:, :, 0]
+                        (rx - projection * edges[None, :, 0]).square()
+                        + (ry - projection * edges[None, :, 1]).square()
                     )
-                    / edge_lengths[None, None]
-                    >= -1e-6
+                    .amin(dim=-1)
+                    .sqrt()
                 )
-                .all(dim=-1)
-                .all(dim=-1)
-            )
+                crossings = (
+                    (
+                        (polygon[None, :, 1] > chunk[:, 1, None])
+                        != (endpoint[None, :, 1] > chunk[:, 1, None])
+                    )
+                    & (
+                        chunk[:, 0, None]
+                        < edges[None, :, 0]
+                        * (chunk[:, 1, None] - polygon[None, :, 1])
+                        / (edges[None, :, 1] + 1e-12)
+                        + polygon[None, :, 0]
+                    )
+                ).sum(dim=-1)
+                distances.append(torch.where(crossings % 2 == 1, -distance, distance))
+            signed_distance = torch.cat(distances).reshape(samples.shape[:2])
+            edge_distance = signed_distance[:, : points.shape[1]]
+            all_inside = (signed_distance[:, points.shape[1] :] <= 0).all(dim=-1)
             depth = self._fixture_zmax - bottom_points[:, :, 2].amax(dim=1)
-            free = points[:, :, 2] > self._fixture_zmax + 0.001
+            band = 0.001
+            height = points[:, :, 2] - self._fixture_zmax
+            near_surface = height.abs() <= band
+            near_edge = edge_distance.abs() <= band
+            inside = ((height <= band) & (edge_distance < -band)) | (
+                (height <= 0) & near_edge
+            )
+            contact = near_surface & ((edge_distance > band) | near_edge)
             self._assembly_labels = torch.where(
-                free, 0, torch.where(inside, 2, 1)
+                contact, 1, torch.where(inside, 2, 0)
             ).long()
             capture = all_inside & (depth > 0)
-            success = capture & (
-                depth
-                >= float(
-                    getattr(
-                        self,
-                        "seating_depth",
-                        self.assembly_asset.config["plate_thickness"] - 0.001,
-                    )
-                )
+            target_bottom_z = self._fixture_zmax - float(
+                self.assembly_asset.config["plate_thickness"]
             )
+            # The public task accepts every bottom point within 1 mm of the
+            # seated plane. Grasp, penetration and the three-step hold below
+            # remain additional project guards, separate from that geometry.
+            success = all_inside & (
+                (bottom_points[:, :, 2] - target_bottom_z).abs() <= band
+            ).all(dim=-1)
         elif self.assembly_kind == "gear":
             cfg = self.assembly_asset.config
             bore = float(cfg["shaft_radius"]) + float(cfg["bore_clearance"])

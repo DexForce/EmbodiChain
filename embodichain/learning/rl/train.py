@@ -21,7 +21,7 @@ import json
 import os
 import random
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from copy import deepcopy
 from pathlib import Path
 
@@ -370,6 +370,7 @@ def train_from_config(
     resume: str | Path | None = None,
     run: str | Path | None = None,
     resume_scheduler: str = "restore",
+    on_trainer_ready: Callable[[Trainer], None] | None = None,
 ) -> dict[str, object] | None:
     """Run training from a config file path.
 
@@ -383,6 +384,10 @@ def train_from_config(
         run: Source run directory when resume selects latest/best.
         resume_scheduler: Restore the saved LR curve or restart the configured
             curve with optimizer momentum retained.
+        on_trainer_ready: Optional simulator instrumentation callback, called
+            after checkpoint restoration and before collection. The callback
+            receives the native Trainer and can observe its train/evaluation
+            environments. Callback failures use the normal runtime cleanup.
 
     Returns:
         The lightweight trainer summary, or ``None`` for simulator training.
@@ -400,6 +405,8 @@ def train_from_config(
 
     trainer_cfg = cfg_data["trainer"]
     if "learning_env" in trainer_cfg:
+        if on_trainer_ready is not None:
+            raise ValueError("on_trainer_ready requires a simulator gym_config.")
         return _train_learning_env(
             cfg_data,
             config_path=config_path,
@@ -698,6 +705,14 @@ def train_from_config(
             gym_data=gym_config_data,
         )
         _resume_training(trainer, resume, run, resume_scheduler)
+        observer_error = None
+        if on_trainer_ready is not None:
+            try:
+                on_trainer_ready(trainer)
+            except Exception as exc:
+                observer_error = exc
+        # Every rank participates even when instrumentation is rank-local.
+        _sync_errors(observer_error, distributed)
         trainer.train(total_steps)
         _save_final_checkpoint(trainer)
     except KeyboardInterrupt:

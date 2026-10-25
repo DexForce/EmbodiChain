@@ -195,7 +195,7 @@ def main():
                 [
                     path.relative_to(THIS_DIR).as_posix()
                     for path in sorted((THIS_DIR / "scripts" / "patches").iterdir())
-                    if path.suffix in {".patch", ".md"}
+                    if path.suffix in {".patch", ".md", ".py"}
                 ],
             ),
         ],

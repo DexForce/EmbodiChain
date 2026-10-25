@@ -21,6 +21,7 @@ from __future__ import annotations
 import random
 import json
 from unittest.mock import Mock
+from types import SimpleNamespace
 import importlib
 
 import numpy as np
@@ -85,6 +86,101 @@ def test_learning_env_rejects_profile(tmp_path):
 
     with pytest.raises(ValueError, match="--profile_output requires --profile"):
         train_from_config(str(config_path), profile_output="prof.json")
+    with pytest.raises(ValueError, match="on_trainer_ready requires"):
+        train_from_config(str(config_path), on_trainer_ready=lambda trainer: None)
+
+
+@pytest.mark.parametrize(
+    "observer_present,observer_fails", [(True, False), (True, True), (False, False)]
+)
+def test_native_instrumentation_runs_after_resume_with_normal_cleanup(
+    tmp_path, monkeypatch, observer_present: bool, observer_fails: bool
+) -> None:
+    from embodichain.learning.rl.algo import RolloutKind
+
+    module = importlib.import_module("embodichain.learning.rl.train")
+    config = tmp_path / "train.json"
+    config.write_text(
+        json.dumps(
+            {
+                "trainer": {
+                    "gym_config": "task.yaml",
+                    "device": "cpu",
+                    "iterations": 1,
+                    "buffer_size": 2,
+                    "use_wandb": False,
+                },
+                "policy": {"name": "proprioceptive_actor_critic"},
+                "algorithm": {"name": "ppo", "cfg": {}},
+            }
+        )
+    )
+    monkeypatch.chdir(tmp_path)
+    writer = Mock()
+    monkeypatch.setattr(module, "SummaryWriter", Mock(return_value=writer))
+    env = SimpleNamespace(num_envs=2)
+    runtime = SimpleNamespace(
+        env=env,
+        policy=Mock(),
+        gym_config_path="task.yaml",
+        gym_config={"id": "TestRL"},
+        env_cfg=SimpleNamespace(
+            num_envs=2,
+            sim_cfg=SimpleNamespace(
+                headless=True,
+                device="cpu",
+                render_cfg=SimpleNamespace(renderer="no-render"),
+            ),
+        ),
+        close=Mock(),
+    )
+    monkeypatch.setattr(module, "build_gym_policy_runtime", Mock(return_value=runtime))
+    monkeypatch.setattr(
+        module,
+        "build_algo",
+        Mock(
+            return_value=SimpleNamespace(
+                rollout_kind=RolloutKind.STANDARD, cfg=SimpleNamespace(batch_size=4)
+            )
+        ),
+    )
+    order = []
+    trainer = Mock(env=env)
+    trainer.train.side_effect = lambda total: order.append("collect")
+    monkeypatch.setattr(module, "Trainer", Mock(return_value=trainer))
+    monkeypatch.setattr(module, "_configure_checkpoints", Mock())
+    monkeypatch.setattr(
+        module, "_resume_training", lambda *args: order.append("restore")
+    )
+    monkeypatch.setattr(module, "_save_final_checkpoint", Mock())
+    synchronize_errors = Mock(wraps=module._sync_errors)
+    monkeypatch.setattr(module, "_sync_errors", synchronize_errors)
+
+    def observe(actual) -> None:
+        assert actual is trainer
+        order.append("observe")
+        if observer_fails:
+            raise RuntimeError("diagnostic capacity unavailable")
+
+    if observer_fails:
+        with pytest.raises(RuntimeError, match="diagnostic capacity unavailable"):
+            train_from_config(str(config), on_trainer_ready=observe)
+        assert order == ["restore", "observe"]
+        trainer.train.assert_not_called()
+    else:
+        train_from_config(
+            str(config), on_trainer_ready=observe if observer_present else None
+        )
+        assert order == (
+            ["restore", "observe", "collect"]
+            if observer_present
+            else ["restore", "collect"]
+        )
+        trainer.train.assert_called_once_with(4)
+    # Ranks without a callback must still join the same error collective.
+    synchronize_errors.assert_called_once()
+    runtime.close.assert_called_once()
+    writer.close.assert_called_once()
 
 
 @pytest.mark.parametrize("renderer", [None, "no-render", "hybrid"])

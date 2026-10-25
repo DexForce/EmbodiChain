@@ -1,15 +1,86 @@
 # Native proprioceptive assembly
 
 The three registered tasks use native Gym managers, the temporal actor-critic,
-the native collector/rollout/PPO, and checkpoint evaluation. Actor input is
-30 previous frames plus the current frame; contact labels and privileged state
-are separate training inputs. The paper's unavailable temporal architecture
-details use the documented engineering defaults.
+the native collector/rollout/PPO, and checkpoint evaluation. Contact labels and
+privileged state are separate training inputs; neither enters the actor.
+
+The peg study nominal configuration and its development variant explicitly
+select `architecture_version: official_v1`, using the author's now-public
+[policy layout](https://younghyopark.me/blind-proprioceptive-assembly/static/policies/peg.json)
+and [inference reference](https://younghyopark.me/blind-proprioceptive-assembly/static/js/policy_net.js).
+Their input is the current frame followed by 30 history frames including the
+current frame. Per-frame projection precedes the temporal convolutions, and
+the actor applies the exported variance/epsilon/clipping normalization formula.
+The environment's `history_layout: current_history` and
+`proprioception_convention: official_v1` must match that policy selection.
+
+Configurations without a version retain `legacy_v1`: the original migration's
+encoder with 30 previous frames followed by the current frame. Other formal,
+full-range and gear/nut configurations currently retain that legacy version;
+the public reference alignment does not qualify those deployments. Existing
+legacy checkpoint module layouts remain compatible. The native population-moment
+statistics update and privileged critic remain engineering choices because the
+public actor export does not specify their training implementation.
 
 Install the optional assembly generator and the SDK capabilities described in
 `scripts/patches/README.md` in a source checkout. Wheels include the patch files
 under the installation prefix's `share/embodichain/assembly_patches/`.
 The public robot sources and both licenses are pinned by Git blob hashes.
+
+For a training attempt from random initialization, the peg study development
+configuration uses 4,096 environments, 32-step rollouts and at most 2,000 PPO
+updates (262,144,000 transitions). It retains 1 kHz physics, a 50 Hz policy, sparse capture/success rewards,
+and training-only contact supervision. This is a fixed-geometry nominal task,
+with separate evaluation episodes; it does not establish the paper's geometry,
+workspace or contact randomization coverage.
+
+```bash
+python scripts/patches/apply_mujoco_warp_epa_horizon.py --output /tmp/embodichain-mjw-epa128
+PYTHONPATH=/tmp/embodichain-mjw-epa128:$PYTHONPATH python -m scripts.benchmark.assembly.train_peg \
+  --config extensions/embodichain_tasks/configs/tasks/manipulation/assembly/peg_insertion/agents/ppo.study.nominal.dev.yaml \
+  --output outputs/peg_training_health.json --raw-log outputs/peg_training.log > outputs/peg_training.log 2>&1
+```
+
+Retain the SDK overlay or qualified SDK installation required by the ordinary
+assembly examples. The wrapper calls the native training entry point and adds
+read-only solver diagnostics through `on_trainer_ready`; it does not implement
+another trainer. Both train and validation check native capacity flags before
+auto-reset. The EPA allocation overlay is version/hash guarded and leaves the
+shared installation unchanged. Uninstrumented runs still use `embodichain
+train-rl`, but contact-query overflow checks alone cannot qualify native
+collision-buffer health.
+
+Fresh processes using the current strict observer also check complete native
+`qpos`, `qvel` and `qacc` arrays before auto-reset. Reports identify the sampled
+scope and first nonfinite worlds; missing native fields fail strict assessment.
+The V4 training process loaded the earlier observer before these checks were
+added. Its capacity guards and finite PPO loss logs do not establish raw native
+state finiteness. Existing V4 training snapshots retain that limitation; use a
+fresh, independently instrumented held-out evaluation to establish this check.
+
+The profile explicitly selects an elliptic friction cone and `impratio: 10`,
+and a plate-attached 2 mm support floor through mjfit's public `bottom_thickness`,
+matching those features of the public author's model export. The raw mjfit
+generator and passive examples retain their independent defaults. The nominal robot, contact material,
+100/50 solver iteration budgets and 50 Hz encoder gravity feedforward remain
+distinct from that exported model. These settings do not establish full
+physical equivalence.
+
+The [reference record](../../sim/assembly/validation/rl_attempt/policy_reference.json)
+reports fixed-input numerical alignment only. Public author weights are used
+for that independent comparison and do not initialize this training attempt.
+Learning outcomes require completed training and checkpoint evaluation.
+
+Reproduce the CPU comparison with Node.js and the ordinary RL dependencies:
+
+```bash
+python -m scripts.benchmark.assembly.policy_reference --cache-dir outputs/policy_reference_cache --output outputs/policy_reference
+```
+
+The runner verifies every downloaded and cached source file against its pinned
+SHA-256 and reconstructs eight fixed inputs from the small checked-in frame
+fixture. It writes JSON and a Markdown report; it does not run a simulator or
+change the installed MuJoCo version.
 
 ```bash
 embodichain run-example learning/blind_assembly/run_suite --phase prepare --suite-dir outputs/assembly_suite --nominal

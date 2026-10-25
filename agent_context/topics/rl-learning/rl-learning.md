@@ -227,14 +227,33 @@ lightweight APG component must not eagerly load the simulator-backed Trainer.
 
 ## Invariants
 
+Simulator `train_from_config(..., on_trainer_ready=...)` invokes optional
+instrumentation after checkpoint restoration and before collection, under the
+normal runtime cleanup boundary. The callback receives the native Trainer,
+including train/evaluation environments; lightweight environment routing rejects
+it. `scripts/benchmark/assembly/train_peg.py` uses this hook for read-only native
+capacity checks before auto-reset, while preserving the native PPO path.
+
 Blind assembly uses the registered `proprioceptive_actor_critic` policy with
-explicit actor/critic groups. Actor input contains flattened history plus the
-current frame; contact labels travel as state-aligned training-only rollout
-fields. PPO's optional auxiliary decoder loss recomputes the latent during
-minibatch updates so gradients reach the encoder. Actor export excludes the
-critic and decoder. See `examples/learning/blind_assembly/` for suite generation
-and measured policy capacity; those tensor measurements do not qualify task
-learning or simulator throughput.
+explicit actor/critic groups. Its `architecture_version` preserves checkpoint
+semantics: omitted versions retain `legacy_v1` with previous history followed by
+current; `official_v1` matches the author's public actor export with current
+followed by history including current. Deployments must pair the policy version
+with the manager's `history_layout` and environment's
+`proprioception_convention`; equal tensor dimensions do not imply equal feature
+semantics. The peg study nominal and development configurations opt into the
+official version; other assembly profiles retain their declared legacy version.
+The official inference normalizer follows the exported formula, while its
+training-statistics updates and privileged critic remain native conventions.
+
+Contact labels travel as state-aligned training-only rollout fields. PPO's
+optional auxiliary decoder loss recomputes the latent during minibatch updates
+so gradients reach the encoder. Normalization statistics stay fixed through
+collection and every PPO epoch, then update for the next rollout. Actor export
+excludes the critic and decoder. See `examples/learning/blind_assembly/` for the
+public-reference record, nominal development recipe, suite generation and policy
+capacity. Inference alignment and tensor capacity do not qualify task learning
+or simulator throughput.
 
 Auto-reset timeouts retain completed-row terminal observations and row IDs.
 The collector evaluates the terminal state before using its value for timeout

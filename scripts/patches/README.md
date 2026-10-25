@@ -72,3 +72,37 @@ corresponding production path raises an actionable capability error.
 See [newton_cpu_pgs.md](newton_cpu_pgs.md) for the exact Newton 1.6.0 source
 checksum, isolated application instructions, staging and CPU midphase fixes,
 and qualified smoke scope. This does not add PGS support to MuJoCo Warp.
+
+## Optional MuJoCo Warp EPA horizon capacity
+
+`mujoco_warp_epa_horizon.patch` increases the MuJoCo Warp **3.12.0**
+`MJ_MAX_EPAHORIZON` allocation from 24 to 128 integers per CCD candidate.
+The convex and flex collision allocators read this Python constant; EPA's
+algorithm, iteration limits, geometry, contact properties and overflow flags
+are unchanged. Exhausting the original horizon emits `EPA_HORIZON` (bit 8)
+and can discard collision work, so a run that emitted this warning cannot
+qualify as an overflow-free training run.
+
+Create a new isolated overlay using the same Python environment as training:
+
+```bash
+python scripts/patches/apply_mujoco_warp_epa_horizon.py --output /tmp/embodichain-mjw-epa128
+```
+
+The helper checks the installed distribution version and exact SHA-256 values
+of `types.py`, `collision_convex.py`, `collision_flex.py` and `collision_gjk.py`
+before copying anything. It applies the included patch to the copy and verifies
+that only the constant changed. It writes `provenance.json`, refuses existing
+outputs, and never edits the installed dependency. The original third-party
+license headers remain in the copied sources. Prepend the printed overlay root
+to the existing `PYTHONPATH`, retaining any DexSim overlay, then start a fresh
+process. A process that already imported MuJoCo Warp retains its old constant.
+
+The additional convex scratch allocation is
+`naccdmax × (128 - 24) × sizeof(int32) = naccdmax × 416 bytes`.
+At `naccdmax=4096×256`, that is **416 MiB**; at `12288×256`, **1248 MiB**.
+Flex allocation adds its corresponding `capacity × 416 bytes` when used.
+This is an explicit memory tradeoff, not a solver accuracy or throughput claim.
+Re-run strict native overflow checks, the triggering contact scene, grip/reset
+checks and policy evaluation before qualifying a new training profile. The
+patch is optional; ordinary installation never applies it automatically.

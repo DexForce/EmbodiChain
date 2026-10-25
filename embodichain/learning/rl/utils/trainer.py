@@ -163,24 +163,54 @@ class Trainer:
     def _log_scalar_dict(self, prefix: str, data: dict):
         if not self.writer or not isinstance(data, dict):
             return
-        for k, v in data.items():
+        for tag, value in self._pack_log_dict(prefix, data).items():
             try:
-                self.writer.add_scalar(
-                    f"{prefix}/{k}", self._mean_scalar(v), self.global_step
-                )
+                self.writer.add_scalar(tag, value, self.global_step)
             except Exception:
                 continue
 
     def _pack_log_dict(self, prefix: str, data: dict) -> dict:
-        if not isinstance(data, dict):
-            return {}
-        out = {}
-        for k, v in data.items():
+        return self._pack_log_dicts({prefix: data})
+
+    def _pack_log_dicts(self, groups: dict[str, dict | None]) -> dict[str, float]:
+        """Reduce on the source device and copy one scalar batch per device.
+
+        Both logging sinks consume the same means. This preserves per-step
+        logging without transferring every environment value, or synchronizing
+        separately for each metric and sink.
+        """
+        out: dict[str, float] = {}
+        tag_order: list[str] = []
+        pending: dict[torch.device, list[tuple[str, torch.Tensor]]] = {}
+        for prefix, data in groups.items():
+            if not isinstance(data, dict):
+                continue
+            for key, value in data.items():
+                tag = f"{prefix}/{key}"
+                try:
+                    if isinstance(value, torch.Tensor):
+                        value = value.detach()
+                        if value.is_complex():
+                            out[tag] = self._mean_scalar(value)
+                        else:
+                            mean = (
+                                value.mean()
+                                if value.is_floating_point()
+                                else value.mean(dtype=torch.float64)
+                            )
+                            pending.setdefault(value.device, []).append((tag, mean))
+                    else:
+                        out[tag] = self._mean_scalar(value)
+                    tag_order.append(tag)
+                except Exception:
+                    continue
+        for values in pending.values():
             try:
-                out[f"{prefix}/{k}"] = self._mean_scalar(v)
+                means = torch.stack([mean for _, mean in values]).cpu().tolist()
             except Exception:
                 continue
-        return out
+            out.update((tag, float(mean)) for (tag, _), mean in zip(values, means))
+        return {tag: out[tag] for tag in tag_order if tag in out}
 
     def train(self, total_timesteps: int) -> dict[str, Any]:
         self._training_start_step = self.global_step
@@ -265,17 +295,22 @@ class Trainer:
             if not self.distributed:
                 self.global_step += tensordict.batch_size[0]
 
-            if self.rank == 0 and isinstance(info, dict):
-                rewards_dict = info.get("rewards")
-                metrics_dict = info.get("metrics")
-                self._log_scalar_dict("rewards", rewards_dict)
-                self._log_scalar_dict("metrics", metrics_dict)
-                if self.use_wandb:
-                    log_dict = {}
-                    log_dict.update(self._pack_log_dict("rewards", rewards_dict))
-                    log_dict.update(self._pack_log_dict("metrics", metrics_dict))
-                    if log_dict:
-                        wandb.log(log_dict, step=self.global_step)
+            if (
+                self.rank == 0
+                and isinstance(info, dict)
+                and (self.writer or self.use_wandb)
+            ):
+                log_dict = self._pack_log_dicts(
+                    {"rewards": info.get("rewards"), "metrics": info.get("metrics")}
+                )
+                if self.writer:
+                    for tag, value in log_dict.items():
+                        try:
+                            self.writer.add_scalar(tag, value, self.global_step)
+                        except Exception:
+                            continue
+                if self.use_wandb and log_dict:
+                    wandb.log(log_dict, step=self.global_step)
 
         rollout = self.buffer.start_rollout()
         rollout = self.collector.collect(

@@ -31,7 +31,10 @@ cannot reuse a stale imported mesh.
 
 `task_assets.py` composes robot-held task geometry using public generators,
 including perforated gear cores and bosses. It records the changed topology
-separately from the passive generator output. Task registration, manager
+separately from the passive generator output. Peg tasks request a local support
+floor through public `bottom_thickness`; passive/raw generator defaults remain
+unchanged. Existing manifests pin their geometry, including an open bottom,
+and do not acquire later task defaults. Task registration, manager
 semantics and training deployment belong to the environment/RL owners.
 
 `precision.py` checks geometry/USD ownership and runs passive source/native

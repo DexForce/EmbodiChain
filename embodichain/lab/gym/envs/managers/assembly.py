@@ -50,6 +50,7 @@ class AssemblyProprioception(Functor):
             history_length=int(cfg.params.get("history_length", 30)),
             device=env.device,
             action_slice=(dimension - 7, dimension),
+            layout=cfg.params.get("history_layout", "previous_current"),
         )
         self._revision = -1
         self._needs_reset = True
@@ -63,7 +64,11 @@ class AssemblyProprioception(Functor):
         self._needs_reset = True
 
     def __call__(
-        self, env: BlindAssemblyEnv, obs: Any, history_length: int = 30
+        self,
+        env: BlindAssemblyEnv,
+        obs: Any,
+        history_length: int = 30,
+        history_layout: str = "previous_current",
     ) -> torch.Tensor:
         env.refresh_assembly_state()
         changed = self._revision != env._assembly_physics_revision

@@ -1,0 +1,113 @@
+{
+  "architecture_version": "official_v1",
+  "batch_size": 8,
+  "observation_dimension": 1023,
+  "precision": "float32",
+  "comparison": "independent public JavaScript PolicyNet scalar accumulation versus native PyTorch",
+  "atol": 1e-05,
+  "rtol": 0.0001,
+  "fields": {
+    "action": {
+      "max_abs_error": 4.887580871582031e-06,
+      "mean_abs_error": 8.480357109874603e-07,
+      "status": "passed"
+    },
+    "latent": {
+      "max_abs_error": 1.1920928955078125e-06,
+      "mean_abs_error": 3.100285539403558e-07,
+      "status": "passed"
+    },
+    "contact_logits": {
+      "max_abs_error": 2.0265579223632812e-06,
+      "mean_abs_error": 5.044039994572813e-07,
+      "status": "passed"
+    }
+  },
+  "sha256": {
+    "official-policies-peg.bin": "015ab5aa9e53505b2f5d2edc8234c2d79e78cbaa750bb7b70bae392084f3d900",
+    "official-policies-peg.json": "62d3201d7362a904c50f7e2ba42c0439cead30c0a4fa40f0afade7875ff1b164",
+    "policy_net.js": "730ff1cba9f8e7a1dc024230830650ce0ce9802c03fcbaec3560a3f5ad519f05",
+    "assembly_task.js": "9ecc8d1a49690a7e63e82451295d5bc1302a5559d5c1b00df53d47237452152f",
+    "official-peg-policy-inputs.json": "8b99c010bb3d1cbe5da1070a8e8cdfde0b3200deb12e9173553a04c11d42cc81"
+  },
+  "retrieved_date": "2026-10-26",
+  "sources": {
+    "paper": "https://arxiv.org/html/2610.23849v1#A1",
+    "policy_layout": "https://younghyopark.me/blind-proprioceptive-assembly/static/policies/peg.json",
+    "policy_weights": "https://younghyopark.me/blind-proprioceptive-assembly/static/policies/peg.bin",
+    "inference_reference": "https://younghyopark.me/blind-proprioceptive-assembly/static/js/policy_net.js",
+    "task_reference": "https://younghyopark.me/blind-proprioceptive-assembly/static/js/assembly_task.js",
+    "model_metadata": "https://younghyopark.me/blind-proprioceptive-assembly/static/models/peg/meta.json",
+    "model_binary": "https://younghyopark.me/blind-proprioceptive-assembly/static/models/peg/scene.mjb.gz"
+  },
+  "checkpoint_provenance": {
+    "task": "universal_insertion_v3",
+    "wandb_run": "younghyopark/flexiv-insertion-extreme/xw33tdl5",
+    "iteration": 5000,
+    "profile": "deployed/full-range, not the study checkpoint",
+    "used_for": "fixed-input numerical reference only; native training starts from random initialization"
+  },
+  "reference_runtime": {
+    "node": "22.22.3",
+    "torch": "2.7.1+cu128, CPU tensors only",
+    "mujoco": "3.13.0 for binary model FK only"
+  },
+  "input_construction": {
+    "starts": "first 8 exported reset states",
+    "frame": "soft-limit centered joint position; zero joint velocities; exported TCP world pose; zero twist and previous actions",
+    "history": "for input i: current frame i, followed by frames (i+j)%8 for j=0..28 and frame i last",
+    "purpose": "fixed numerical minibatch; histories intentionally mix reset frames and are not physical rollouts"
+  },
+  "weight_mapping": {
+    "normalizer": "first D float32 values are mean, next D variance; remaining tensor offsets from policy JSON",
+    "history_encoder.": "actor.encoder.",
+    "actor_mean.": "actor.head.",
+    "contact_decoder.": "contact_decoder."
+  },
+  "training_conventions": {
+    "normalizer_updates": "native population-moment accumulation; author update rule not public in inference export",
+    "critic": "native privileged critic; no exported critic weights or exact critic feature list available",
+    "legacy_compatibility": "architecture_version defaults legacy_v1; new study nominal config explicitly selects official_v1",
+    "official_history": "current_history layout: current first, then 30 history frames including current",
+    "normalization": "replace non-finite raw features by zero, (x-mean)/sqrt(var+1e-8), clip [-10,10]"
+  },
+  "regression_tests": {
+    "command": "python -m pytest tests/learning/test_proprioceptive_policy.py -q",
+    "passed": 18,
+    "controlled_golden": "independent public JavaScript network using deterministic periodic tensors; no external weights needed during unit tests"
+  },
+  "limitations": [
+    "This is inference and auxiliary-logit numerical parity, not a PPO minibatch or learning-effect equivalence claim.",
+    "Author weights are not committed and do not initialize the native RL reproduction.",
+    "The public checkpoint uses a deployed gripper/geometry distribution; this task attempts a nominal study peg first."
+  ],
+  "reproduction": {
+    "command": "python -m scripts.benchmark.assembly.policy_reference --cache-dir outputs/policy_reference_cache --output outputs/policy_reference",
+    "requirements": "Node.js and ordinary native RL Python dependencies; CPU only, no MuJoCo version change needed",
+    "source_integrity": "Every downloaded or cached source asset must match its hard-coded SHA-256; changed bytes fail with a nonzero exit code. Author weights remain in the cache.",
+    "inputs_fixture": "examples/sim/assembly/validation/rl_attempt/policy_reference_inputs.json",
+    "inputs_fixture_sha256": "8e919e4b42479b1691e56d301747fb73248a981a0474acce7b7ee31afa3b24cb",
+    "outputs": "JSON raw data, public JavaScript outputs, native outputs, fixed observations, and one Markdown report with three tables",
+    "rerun_cpu_threads": 1,
+    "rerun_fields": {
+      "action": {
+        "status": "passed",
+        "success_rate": 1.0,
+        "max_abs_error": 4.887580871582031e-06,
+        "mean_abs_error": 8.480357109874603e-07
+      },
+      "latent": {
+        "status": "passed",
+        "success_rate": 1.0,
+        "max_abs_error": 1.1920928955078125e-06,
+        "mean_abs_error": 3.100285539403558e-07
+      },
+      "contact_logits": {
+        "status": "passed",
+        "success_rate": 1.0,
+        "max_abs_error": 2.0265579223632812e-06,
+        "mean_abs_error": 5.044039994572813e-07
+      }
+    }
+  }
+}

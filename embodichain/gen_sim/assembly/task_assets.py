@@ -165,7 +165,9 @@ def build_task_assembly(
     The gear scene adds a perforated hub, grip boss, shaft and collar to the
     public gear-pair example. Its neighbor keeps a passive hinge. The nut scene
     reverses the public example's attachment: the robot holds a free nut while
-    the bolt stays fixed. These topology changes are recorded in the manifest.
+    the bolt stays fixed. Peg fixtures use mjfit's public 2 mm support floor;
+    set ``bottom_thickness=0`` for an open bottom. These task changes
+    are recorded in the manifest and leave raw :func:`build_assembly` unchanged.
     """
     parameters = dict(config or {})
     if kind == "gear":
@@ -177,6 +179,7 @@ def build_task_assembly(
             "clearance": 0.00125,
             "plate_size": 0.14,
             "plate_thickness": 0.018,
+            "bottom_thickness": 0.002,
             "peg_length": 0.09,
             "peg_mass": 0.5,
             **parameters,

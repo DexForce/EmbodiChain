@@ -11,9 +11,10 @@ trainer:
   enable_eval: true
   num_eval_envs: 32
   num_eval_episodes: 256
-  eval_freq: 100
-  save_freq: 100
+  eval_freq: 39321600
+  save_freq: 39321600
   use_wandb: false
+  best_eval_metric: eval/success_rate
 policy:
   name: proprioceptive_actor_critic
   obs_groups:
@@ -22,9 +23,10 @@ policy:
     critic:
     - privileged
   initial_action_std: 0.5
-  actor_obs_normalization: false
+  actor_obs_normalization: true
   critic_obs_normalization: false
   cfg:
+    architecture_version: official_v1
     frame_dim: 33
     history_length: 30
     latent_dim: 32
@@ -56,6 +58,7 @@ algorithm:
     gamma: 0.98
     gae_lambda: 0.95
     clip_coef: 0.2
+    use_clipped_value_loss: true
     ent_coef: 0.003
     vf_coef: 1.0
     max_grad_norm: 1.0

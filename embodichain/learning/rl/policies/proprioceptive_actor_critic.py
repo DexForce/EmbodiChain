@@ -25,6 +25,7 @@ from torch.distributions import Normal
 from tensordict import TensorDict
 
 from embodichain.utils import configclass
+from embodichain.learning.models import EmpiricalNormalizer
 from .actor_critic import ActorCritic
 
 __all__ = [
@@ -37,8 +38,11 @@ __all__ = [
 class ObservationHistory:
     """Per-environment chronological history with owned observation snapshots.
 
-    The output contains ``history_length`` previous frames followed by the
-    current frame. Call :meth:`append` exactly once per control observation;
+    The default output contains ``history_length`` previous frames followed by
+    the current frame. ``layout="current_history"`` instead emits the current
+    frame followed by ``history_length`` frames including that current frame,
+    matching the author's public browser-policy export. Call :meth:`append`
+    exactly once per control observation;
     repeated reads of :attr:`observation` never advance the history. Reset
     repeats the first observed state and zeros its previous-action features.
     Storage is FP32 and linear in environments, history length and frame size.
@@ -51,6 +55,7 @@ class ObservationHistory:
         history_length: int = 30,
         device: torch.device | str = "cpu",
         action_slice: tuple[int, int] | None = None,
+        layout: str = "previous_current",
     ) -> None:
         if num_envs <= 0 or frame_dim <= 0 or history_length < 0:
             raise ValueError(
@@ -64,6 +69,9 @@ class ObservationHistory:
         self.frame_dim = frame_dim
         self.history_length = history_length
         self.action_slice = action_slice
+        if layout not in {"previous_current", "current_history"}:
+            raise ValueError("Unknown proprioceptive history layout.")
+        self.layout = layout
         self._frames = torch.zeros(
             num_envs, history_length + 1, frame_dim, device=device, dtype=torch.float32
         )
@@ -108,13 +116,23 @@ class ObservationHistory:
 
     @property
     def observation(self) -> torch.Tensor:
-        """Return an owned flattened snapshot, oldest frame first."""
+        """Return an owned flattened snapshot in the selected layout."""
+        if self.layout == "current_history" and self.history_length:
+            return torch.cat(
+                (self._frames[:, -1:], self._frames[:, -self.history_length :]),
+                dim=1,
+            ).flatten(start_dim=1)
         return self._frames.flatten(start_dim=1).clone()
 
 
 @configclass
 class ProprioceptiveActorCriticCfg:
-    """Temporal policy settings; unpublished architecture choices are explicit.
+    """Versioned temporal policy settings with explicit checkpoint compatibility.
+
+    ``legacy_v1`` retains the original migration's encoder and observation
+    layout. ``official_v1`` uses the author's public browser-export architecture
+    and requires ``[current, history]``, with current also at the history's end.
+    Existing configurations without a version keep their legacy semantics.
 
     ``use_history=False`` disables the encoder while preserving the input
     layout; ``history_length=0`` also removes historical input frames.
@@ -134,6 +152,9 @@ class ProprioceptiveActorCriticCfg:
     contact_classes: int = 2
     contact_class_weights: tuple[float, ...] | None = None
     contact_observation_group: str = "contact_labels"
+    # Append fields to preserve the public configuration's positional arguments.
+    # New reproductions explicitly select the now-public author architecture.
+    architecture_version: str = "legacy_v1"
 
 
 def _mlp(input_dim: int, hidden: Sequence[int], output_dim: int) -> nn.Sequential:
@@ -145,13 +166,69 @@ def _mlp(input_dim: int, hidden: Sequence[int], output_dim: int) -> nn.Sequentia
     return nn.Sequential(*modules)
 
 
+class _ExportNormalizer(EmpiricalNormalizer):
+    """Author-export inference transform with native running-stat updates.
+
+    The public export specifies clipping and epsilon placement, but does not
+    publish its training-time statistics update. Native population-moment
+    accumulation remains the explicit training convention.
+    """
+
+    def __init__(self, feature_dim: int) -> None:
+        super().__init__(feature_dim, epsilon=1e-8)
+
+    def forward(self, value: torch.Tensor) -> torch.Tensor:
+        value = torch.nan_to_num(value, nan=0.0, posinf=0.0, neginf=0.0)
+        return ((value - self.mean) / (self.variance + self.epsilon).sqrt()).clamp(
+            -10.0, 10.0
+        )
+
+
+class _ExportHistoryEncoder(nn.Module):
+    """Temporal encoder described by the author's public policy JSON.
+
+    Each frame is projected before convolution. The oldest history frame is
+    dropped; a 30-frame history therefore reaches the convolutions as 29 frames.
+    """
+
+    def __init__(self, frame_dim: int, history_length: int, latent_dim: int) -> None:
+        super().__init__()
+        channels = 32
+        self.frame_transform = nn.Sequential(
+            nn.Linear(frame_dim, channels),
+            nn.ReLU(),
+            nn.Linear(channels, channels),
+            nn.ReLU(),
+        )
+        length = history_length - 1
+        layers: list[nn.Module] = []
+        for kernel, stride in ((9, 2), (5, 1), (5, 1)):
+            length = (length - kernel) // stride + 1
+            if length <= 0:
+                raise ValueError("history_length is too short for the export encoder.")
+            layers.extend((nn.Conv1d(channels, channels, kernel, stride), nn.ReLU()))
+        self.temporal_convolution = nn.Sequential(*layers)
+        self.pool = nn.AdaptiveAvgPool1d(3)
+        self.projection = nn.Linear(channels * 3, latent_dim)
+
+    def forward(self, frames: torch.Tensor) -> torch.Tensor:
+        transformed = self.frame_transform(frames.transpose(1, 2)[:, 1:])
+        temporal = self.temporal_convolution(transformed.transpose(1, 2))
+        return self.projection(self.pool(temporal).flatten(start_dim=1))
+
+
 class _TemporalActor(nn.Module):
     def __init__(self, cfg: ProprioceptiveActorCriticCfg, action_dim: int) -> None:
         super().__init__()
         self.frame_dim = cfg.frame_dim
         self.history_length = cfg.history_length
+        self.current_first = cfg.architecture_version == "official_v1"
         self.encoder: nn.Module | None = None
-        if self.history_length and cfg.use_history:
+        if self.history_length and cfg.use_history and self.current_first:
+            self.encoder = _ExportHistoryEncoder(
+                cfg.frame_dim, self.history_length, cfg.latent_dim
+            )
+        elif self.history_length and cfg.use_history:
             layers: list[nn.Module] = []
             channels = self.frame_dim
             length = self.history_length
@@ -172,10 +249,11 @@ class _TemporalActor(nn.Module):
 
     def features(self, obs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         frames = obs.reshape(-1, self.history_length + 1, self.frame_dim)
-        current = frames[:, -1]
+        current = frames[:, 0] if self.current_first else frames[:, -1]
         if self.encoder is None:
             return current, current
-        latent = self.encoder(frames[:, :-1].transpose(1, 2))
+        history = frames[:, 1:] if self.current_first else frames[:, :-1]
+        latent = self.encoder(history.transpose(1, 2))
         return torch.cat((current, latent), dim=-1), latent
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
@@ -186,8 +264,9 @@ class _TemporalActor(nn.Module):
 class ProprioceptiveActorCritic(ActorCritic):
     """Native Gaussian actor-critic with temporal proprioceptive encoding.
 
-    Actor input is flattened ``[history, current]``; the critic and optional
-    contact labels live in explicitly separate observation groups. Labels never
+    The version selects ``[history, current]`` (legacy) or ``[current, history]``
+    (official) actor input; the critic and optional contact labels live in
+    explicitly separate observation groups. Labels never
     enter the actor. The encoder is recomputed from stored raw observations in
     every training mini-batch, preserving auxiliary and policy gradients.
     """
@@ -208,6 +287,8 @@ class ProprioceptiveActorCritic(ActorCritic):
     ) -> None:
         cfg = ProprioceptiveActorCriticCfg(**cfg) if isinstance(cfg, dict) else cfg
         cfg = cfg or ProprioceptiveActorCriticCfg()
+        if cfg.architecture_version not in {"legacy_v1", "official_v1"}:
+            raise ValueError("Unknown proprioceptive policy architecture_version.")
         expected_dim = cfg.frame_dim * (cfg.history_length + 1)
         if cfg.frame_dim <= 0 or cfg.history_length < 0 or obs_dim != expected_dim:
             raise ValueError(
@@ -256,6 +337,13 @@ class ProprioceptiveActorCritic(ActorCritic):
             action_std_range=action_std_range,
         )
         self.cfg = cfg
+        if cfg.architecture_version == "official_v1":
+            if actor_obs_normalization:
+                self.actor_obs_normalizer = _ExportNormalizer(obs_dim).to(device)
+            if critic_obs_normalization:
+                self.critic_obs_normalizer = _ExportNormalizer(critic_obs_dim).to(
+                    device
+                )
         self.contact_decoder: nn.Module | None = None
         self.training_observation_groups: dict[str, tuple[str, ...]] = {}
         self.training_field_specs: dict[str, tuple[tuple[int, ...], torch.dtype]] = {}
