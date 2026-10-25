@@ -244,9 +244,14 @@ def test_training_checkpoint_cli_export_preserves_dtype_statistics_and_predictio
     torch.testing.assert_close(model(inputs), loaded(inputs), atol=0, rtol=0)
 
 
-def test_fp64_fine_tune_resume_export_preserves_updates_and_input_order(tmp_path):
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("normalize_input", [False, True])
+@pytest.mark.parametrize("normalize_output", [False, True])
+def test_fine_tune_resume_export_preserves_dtype_updates_and_input_order(
+    tmp_path, dtype, normalize_input, normalize_output
+):
     from embodichain.data_pipeline.dynamics.shards import DynamicsShardWriter
-    from embodichain.learning.dynamics.workflow import run_export, run_train
+    from embodichain.learning.dynamics.workflow import run_train
     from embodichain.learning.models.nerd import (
         NeRDModel,
         NeRDModelCfg,
@@ -278,8 +283,10 @@ def test_fp64_fine_tune_resume_export_preserves_updates_and_input_order(tmp_path
             block_size=3,
             history_length=3,
             head_hidden_dims=(12,),
+            normalize_input=normalize_input,
+            normalize_output=normalize_output,
         )
-    ).double()
+    ).to(dtype=dtype)
     model.input_rms["states_embedding"].mean.fill_(1 / 7)
     export_model(tmp_path / "pretrained", model, metadata)
     # Use the same JSON-shaped config as the CLI, including list-valued fields.
@@ -301,10 +308,34 @@ def test_fp64_fine_tune_resume_export_preserves_updates_and_input_order(tmp_path
             }
         )
     )
-    run_train(config)
+
+    def train_cli(value, label):
+        path = tmp_path / f"{label}.json"
+        path.write_text(json.dumps(value))
+        main(["train", "--config", str(path)])
+
+    def evaluate_cli(model_path, label):
+        path = tmp_path / f"{label}.json"
+        output = tmp_path / f"{label}-result.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "mode": "offline",
+                    "dataset": str(tmp_path / "data"),
+                    "model": str(model_path),
+                    "device": "cpu",
+                    "output": str(output),
+                }
+            )
+        )
+        main(["eval", "--config", str(path)])
+        assert json.loads(output.read_text())["windows"] == 3
+
+    evaluate_cli(tmp_path / "pretrained", "pretrained-eval")
+    train_cli(config, "fine-tune")
     checkpoint = tmp_path / "interrupted/last.pt"
     saved = torch.load(checkpoint, weights_only=True)
-    assert all(value.dtype == torch.float64 for value in saved["model"].values())
+    assert all(value.dtype == dtype for value in saved["model"].values())
     resumed_config = deepcopy(config)
     resumed_config.pop("fine_tune")
     resumed_config.update(
@@ -318,27 +349,38 @@ def test_fp64_fine_tune_resume_export_preserves_updates_and_input_order(tmp_path
     with pytest.raises(ValueError, match="input_dims order"):
         run_train(reordered)
     assert list((tmp_path / "reordered").iterdir()) == []
-    assert run_train(resumed_config)["global_step"] == 2
+    train_cli(resumed_config, "resume")
     uninterrupted = deepcopy(config)
     uninterrupted.update(output_dir=str(tmp_path / "full"), stop_after=2)
-    run_train(uninterrupted)
+    train_cli(uninterrupted, "uninterrupted")
     expected = torch.load(tmp_path / "full/last.pt", weights_only=True)
     actual = torch.load(tmp_path / "resumed/last.pt", weights_only=True)
+    assert actual["global_step"] == 2
     for name, value in expected["model"].items():
         torch.testing.assert_close(actual["model"][name], value, atol=0, rtol=0)
     assert actual["best_step"] == expected["best_step"]
-    run_export(tmp_path / "resumed/best.pt", tmp_path / "export")
+    main(
+        [
+            "export",
+            "--checkpoint",
+            str(tmp_path / "resumed/best.pt"),
+            "--output",
+            str(tmp_path / "export"),
+        ]
+    )
     loaded, _ = load_model(tmp_path / "export")
-    assert all(value.dtype == torch.float64 for value in loaded.state_dict().values())
+    assert all(value.dtype == dtype for value in loaded.state_dict().values())
+    assert loaded.cfg.normalize_input is normalize_input
+    assert loaded.cfg.normalize_output is normalize_output
     for name, value in actual["best_model"].items():
         torch.testing.assert_close(loaded.state_dict()[name], value, atol=0, rtol=0)
     inputs = {
-        name: torch.randn(2, 3, width, dtype=torch.float64)
-        for name, width in model.cfg.input_dims.items()
+        name: torch.randn(2, 3, width) for name, width in model.cfg.input_dims.items()
     }
     prediction = loaded(inputs)
-    assert prediction.dtype == torch.float64
+    assert prediction.dtype == dtype
     assert torch.isfinite(prediction).all()
+    evaluate_cli(tmp_path / "export", "resumed-eval")
 
 
 def test_packaged_workflow_configs_decode_through_cli(tmp_path, monkeypatch):

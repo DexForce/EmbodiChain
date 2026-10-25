@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import math
 import random
+from copy import deepcopy
 import subprocess
 import sys
 
@@ -41,7 +42,9 @@ from embodichain.learning.dynamics.trainer import (
     compute_statistics,
     encode_batch,
     evaluate_model,
+    load_statistics,
     normalized_mse,
+    save_statistics,
 )
 from embodichain.learning.dynamics.workflow import run_train, run_export, run_eval
 from embodichain.learning.dynamics.qualification import (
@@ -147,6 +150,130 @@ def test_statistics_only_training_windows(tmp_path):
         compute_statistics(
             DynamicsWindowDataset(tmp_path / "a", "validation", 3), codec
         )
+
+
+@pytest.fixture
+def statistics_sources(tmp_path):
+    """Provide distinct immutable datasets with the same numeric field schema."""
+    metadata = make_data(tmp_path / "own")
+    with DynamicsShardWriter(tmp_path / "foreign", metadata) as writer:
+        writer.add_trajectory(
+            "foreign",
+            {
+                "q": np.full((6, 2), 17.0, np.float32),
+                "qd": np.full((6, 2), 3.0, np.float32),
+            },
+            {"joint_f": np.zeros((5, 2), np.float32)},
+            split="train",
+        )
+    train = DynamicsWindowDataset(tmp_path / "own", "train", 3)
+    validation = DynamicsWindowDataset(tmp_path / "own", "validation", 3)
+    foreign = DynamicsWindowDataset(tmp_path / "foreign", "train", 3)
+    assert train.manifest["fields"] == foreign.manifest["fields"]
+    assert train.fingerprint != foreign.fingerprint
+    try:
+        yield train, validation, foreign, NeRDStateCodec("cartpole")
+    finally:
+        for reader in (train, validation, foreign):
+            reader.close()
+
+
+@pytest.mark.parametrize("origin", ["foreign", "missing"])
+@pytest.mark.parametrize("initialize_normalization", [True, False])
+def test_supplied_statistics_identity_rejected_before_mutation(
+    tmp_path, statistics_sources, origin, initialize_normalization
+):
+    train, validation, foreign, codec = statistics_sources
+    statistics = compute_statistics(foreign if origin == "foreign" else train, codec)
+    if origin == "missing":
+        statistics.pop("dataset_fingerprint")
+    path = tmp_path / "statistics.pt"
+    save_statistics(path, statistics)
+    original_file = path.read_bytes()
+    loaded = load_statistics(path)
+    original_statistics = deepcopy(loaded)
+    model = NeRDModel(architecture())
+    original_model = {key: value.clone() for key, value in model.state_dict().items()}
+    original_config = deepcopy(model.cfg.to_dict())
+    # A rejected constructor must not switch the attention policy or reset any
+    # global RNG while admitting an unrelated normalization artifact.
+    cfg = DynamicsTrainCfg(
+        total_steps=2, batch_size=4, numerical_profile="reference", seed=97
+    )
+    random.seed(101)
+    np.random.seed(102)
+    torch.manual_seed(103)
+    rng = (random.getstate(), np.random.get_state(), torch.get_rng_state().clone())
+    output = tmp_path / "run"
+    with pytest.raises(ValueError, match="statistics/dataset fingerprint mismatch"):
+        DynamicsTrainer(
+            model,
+            codec,
+            train,
+            validation,
+            cfg,
+            output,
+            manifest=train.manifest["metadata"],
+            statistics=loaded,
+            initialize_normalization=initialize_normalization,
+        )
+    assert not output.exists()
+    assert model.cfg.to_dict() == original_config
+    for key, value in original_model.items():
+        torch.testing.assert_close(model.state_dict()[key], value, atol=0, rtol=0)
+    assert random.getstate() == rng[0]
+    numpy_rng = np.random.get_state()
+    assert numpy_rng[0] == rng[1][0] and numpy_rng[2:] == rng[1][2:]
+    np.testing.assert_array_equal(numpy_rng[1], rng[1][1])
+    torch.testing.assert_close(torch.get_rng_state(), rng[2], atol=0, rtol=0)
+    assert loaded.keys() == original_statistics.keys()
+    for group in ("inputs", "output"):
+        values = loaded[group] if group == "inputs" else {"output": loaded[group]}
+        expected = (
+            original_statistics[group]
+            if group == "inputs"
+            else {"output": original_statistics[group]}
+        )
+        for field in values:
+            for moment in ("mean", "var"):
+                torch.testing.assert_close(
+                    values[field][moment], expected[field][moment], atol=0, rtol=0
+                )
+    assert path.read_bytes() == original_file
+
+
+@pytest.mark.parametrize("initialize_normalization", [True, False])
+def test_matching_supplied_statistics_preserve_normalization_and_update(
+    tmp_path, statistics_sources, initialize_normalization
+):
+    train, validation, _, codec = statistics_sources
+    baseline = build(tmp_path / "own", tmp_path / "baseline", steps=2)
+    path = tmp_path / "matching-statistics.pt"
+    save_statistics(path, baseline.statistics)
+    loaded = load_statistics(path)
+    if not initialize_normalization:
+        # Explicitly skipping initialization must retain existing model buffers,
+        # even if matching-corpus statistics were supplied for its record.
+        baseline.model.input_rms["states_embedding"].mean[0] = 0.5
+    model = deepcopy(baseline.model)
+    candidate = DynamicsTrainer(
+        model,
+        codec,
+        train,
+        validation,
+        baseline.cfg.copy(),
+        tmp_path / "matching",
+        manifest=train.manifest["metadata"],
+        statistics=loaded,
+        initialize_normalization=initialize_normalization,
+    )
+    for key, value in baseline.model.state_dict().items():
+        torch.testing.assert_close(model.state_dict()[key], value, atol=0, rtol=0)
+    assert candidate.step() == baseline.step()
+    for key, value in baseline.model.state_dict().items():
+        torch.testing.assert_close(model.state_dict()[key], value, atol=0, rtol=0)
+    baseline.train_dataset.close()
+    baseline.validation_dataset.close()
 
 
 @pytest.mark.parametrize("numerical_profile", ["default", "reference"])
@@ -640,6 +767,48 @@ def test_official_loss_order_and_mask():
     torch.testing.assert_close(actual, expected)
     actual.backward()
     assert torch.count_nonzero(prediction.grad[:, 1]) == 0
+
+
+@pytest.mark.parametrize("masked", [False, True])
+def test_unnormalized_fp64_loss_backward_matches_analytic_oracle(masked):
+    prediction = torch.tensor(
+        [[[0.25, -0.5], [1.25, 0.125]]], dtype=torch.float64, requires_grad=True
+    )
+    target = torch.tensor([[[0.125, -0.25], [0.5, 0.75]]], dtype=torch.float32)
+    mask = torch.tensor([[True, False]]) if masked else None
+    actual = normalized_mse(prediction, target, None, mask)
+    # Binary fractions yield exact independent values and derivatives:
+    # residuals=(1/8,-1/4,3/4,-5/8), gradient=2*residual/valid scalar count.
+    expected_loss = 5 / 128 if masked else 33 / 128
+    expected_gradient = torch.tensor(
+        (
+            [[[0.125, -0.25], [0.0, 0.0]]]
+            if masked
+            else [[[0.0625, -0.125], [0.375, -0.3125]]]
+        ),
+        dtype=torch.float64,
+    )
+    assert actual.dtype == torch.float64
+    assert actual.item() == expected_loss
+    actual.backward()
+    torch.testing.assert_close(prediction.grad, expected_gradient, atol=0, rtol=0)
+    assert target.dtype == torch.float32
+
+
+def test_bfloat16_predictions_do_not_quantize_float32_targets():
+    prediction = torch.tensor([[1.0, 2.0]], dtype=torch.bfloat16, requires_grad=True)
+    # Both differences disappear if labels are incorrectly converted to BF16.
+    target = torch.tensor([[1.0 + 2**-12, 2.0 + 2**-10]], dtype=torch.float32)
+    oracle = prediction.detach().float().requires_grad_()
+    expected = (oracle - target).square().mean()
+    expected.backward()
+    with torch.autocast("cpu", dtype=torch.bfloat16):
+        actual = normalized_mse(prediction, target, None)
+    assert actual.dtype == torch.float32
+    assert actual.item() > 0
+    torch.testing.assert_close(actual, expected, atol=0, rtol=0)
+    actual.backward()
+    torch.testing.assert_close(prediction.grad, oracle.grad.bfloat16(), atol=0, rtol=0)
 
 
 @pytest.mark.parametrize(

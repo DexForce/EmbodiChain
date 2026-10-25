@@ -63,6 +63,65 @@ def test_normalizers_and_parameters_follow_dtype() -> None:
     )
 
 
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("normalize_input", [False, True])
+@pytest.mark.parametrize("normalize_output", [False, True])
+def test_float32_features_follow_model_dtype_without_changing_math_or_gradients(
+    dtype: torch.dtype, normalize_input: bool, normalize_output: bool
+) -> None:
+    torch.set_num_threads(2)
+    model = tiny().to(dtype=dtype).eval()
+    model.cfg.normalize_input = normalize_input
+    model.cfg.normalize_output = normalize_output
+    model.set_normalization(
+        {
+            name: (
+                torch.full((width,), 1 / 7, dtype=dtype),
+                torch.full((width,), 1 / 3, dtype=dtype),
+            )
+            for name, width in model.cfg.input_dims.items()
+        },
+        torch.full((4,), 1 / 11, dtype=dtype),
+        torch.full((4,), 1 / 13, dtype=dtype),
+    )
+    inputs = {
+        name: torch.randn(2, 3, width, requires_grad=True)
+        for name, width in model.cfg.input_dims.items()
+    }
+    references = {
+        name: value.detach().clone().requires_grad_() for name, value in inputs.items()
+    }
+    original = {name: value.detach().clone() for name, value in inputs.items()}
+    buffers = {name: value.clone() for name, value in model.named_buffers()}
+    # Independent old network/normalizer math with an explicit boundary cast.
+    values = []
+    for name in model.cfg.input_dims:
+        value = references[name].to(dtype=dtype)
+        if normalize_input:
+            normalizer = model.input_rms[name]
+            value = (value - normalizer.mean) / torch.sqrt(normalizer.var + 1e-5)
+        values.append(value)
+    expected = model.model(model.transformer_model(torch.cat(values, -1)))
+    if model.cfg.normalize_output:
+        expected = (
+            expected * torch.sqrt(model.output_rms.var + 1e-5) + model.output_rms.mean
+        )
+    actual = model(inputs)
+    assert actual.dtype == dtype
+    torch.testing.assert_close(actual, expected, atol=0, rtol=0)
+    actual.square().mean().backward()
+    gradients = {name: value.grad.clone() for name, value in model.named_parameters()}
+    model.zero_grad(set_to_none=True)
+    expected.square().mean().backward()
+    for name, value in model.named_parameters():
+        torch.testing.assert_close(value.grad, gradients[name], atol=0, rtol=0)
+    for name, value in inputs.items():
+        torch.testing.assert_close(value.grad, references[name].grad, atol=0, rtol=0)
+        torch.testing.assert_close(value, original[name], atol=0, rtol=0)
+    for name, value in model.named_buffers():
+        torch.testing.assert_close(value, buffers[name], atol=0, rtol=0)
+
+
 def test_variable_prefix_matches_individual_unpadded_calls() -> None:
     model = tiny().eval()
     inputs = {k: torch.randn(3, 10, d) for k, d in model.cfg.input_dims.items()}

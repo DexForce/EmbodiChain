@@ -206,6 +206,8 @@ class NeRDModel(nn.Module):
 
     All inputs have shape (batch, time, width). Right-padding is permitted:
     causal attention preserves prefix outputs, and the caller masks padded loss.
+    Features follow the network's floating dtype on their existing device;
+    dtype conversion preserves input gradients independently of normalization.
     ``evaluate`` gathers the final valid prefix token independently per row.
     Neither training nor evaluation implicitly detaches gradients.
     """
@@ -275,6 +277,7 @@ class NeRDModel(nn.Module):
         """Predict every sequence token in physical target units."""
         values = []
         shape = None
+        dtype = self.transformer_model.transformer.wte.weight.dtype
         for name, width in self.cfg.input_dims.items():
             value = inputs[name]
             if value.ndim != 3 or value.shape[-1] != width:
@@ -282,6 +285,7 @@ class NeRDModel(nn.Module):
             if shape is not None and value.shape[:2] != shape:
                 raise ValueError("All model features must share batch/time axes")
             shape = value.shape[:2]
+            value = value.to(dtype=dtype)
             values.append(
                 self.input_rms[name](value) if self.cfg.normalize_input else value
             )

@@ -138,6 +138,9 @@ def normalized_mse(
     mask: Tensor | None = None,
 ) -> Tensor:
     """Official MSE over normalized physical targets, excluding padded steps."""
+    dtype = torch.promote_types(prediction.dtype, target.dtype)
+    prediction = prediction.to(dtype=dtype)
+    target = target.to(dtype=dtype)
     if variance is None:
         scaled_prediction, scaled_target = prediction, target
     else:
@@ -389,6 +392,10 @@ class DynamicsTrainer:
     completed optimizer step advances its durable state. External worker prefetch
     therefore cannot silently skip examples on resume. ``sample_order`` supplies
     a shared explicit index matrix for official-reference comparisons.
+
+    Explicit statistics must identify the training dataset even when
+    ``initialize_normalization=False``. That flag leaves existing model
+    normalizers untouched; it does not waive statistics provenance.
     """
 
     def __init__(
@@ -436,6 +443,10 @@ class DynamicsTrainer:
             raise ValueError("Training and validation must share an immutable dataset")
         if not len(train_dataset) or not len(validation_dataset):
             raise ValueError("Training and validation need eligible windows")
+        if statistics is not None and (
+            statistics.get("dataset_fingerprint") != train_dataset.fingerprint
+        ):
+            raise ValueError("NeRD statistics/dataset fingerprint mismatch")
         self.cfg, self.codec = cfg, codec
         self.model = model.to(cfg.device)
         if cfg.numerical_profile == "reference":
