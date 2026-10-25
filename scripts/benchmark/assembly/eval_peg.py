@@ -32,6 +32,7 @@ import argparse
 from copy import deepcopy
 from datetime import datetime, timezone
 import inspect
+import json
 import math
 from pathlib import Path
 import platform
@@ -80,6 +81,7 @@ def _write_markdown(path: Path, document: dict[str, Any]) -> None:
         "Capacity/collision loss, unknown overflow bits or nonfinite complete native qpos/qvel/qacc matrices fail before auto-reset. States between control boundaries are not sampled. Sticky capacity flags cover all physical substeps. Prepared solver options are distinguished from the first effective timestep and first two observed control-clock intervals.",
         "",
         "Only exact production-evaluator episode accounting is scored. The runtime factory's shape-probe reset and post-build health snapshot do not count as episodes. This fresh evaluation evidence does not retroactively qualify training. End-effector path length, action norms, actual joint torque and memory were not measured.",
+        "Scored episode records, per-arena counts and the JSONL path/SHA-256 are retained in health.json. The persisted rows are reread to verify the exact fixed quotas before success is reported.",
         "Balanced allocation fixes each arena's scored episode quota before stepping; extra fast completions after a row's quota are unscored. Quotas and the finite control-step budget are retained in JSON. Training validation retains its original allocation protocol.",
         "",
     ]
@@ -111,6 +113,7 @@ def run(args: argparse.Namespace) -> Path:
     directory = parent / f"{stamp}-strict-peg-health"
     directory.mkdir(parents=True)
     health_path = directory / "health.json"
+    episode_path = directory / "episodes.jsonl"
     native_args = parse_native_args(
         [
             str(args.run),
@@ -161,6 +164,9 @@ def run(args: argparse.Namespace) -> Path:
     }
     native = resolved = observer = env = None
     metrics = None
+    episode_records = 0
+    recorded_counts: list[int] = []
+    expected_counts: list[int] = []
     failure: BaseException | None = None
     started = time.perf_counter()
     _write(health_path, document)
@@ -229,6 +235,10 @@ def run(args: argparse.Namespace) -> Path:
             }
         document["postbuild_health_unscored"] = deepcopy(observer.values)
         base_quota, remainder = divmod(args.episodes, int(env.num_envs))
+        expected_counts = [
+            base_quota + int(row < remainder) for row in range(int(env.num_envs))
+        ]
+        recorded_counts = [0] * int(env.num_envs)
         document["episode_quotas"] = {
             "num_envs": int(env.num_envs),
             "minimum": base_quota,
@@ -255,15 +265,58 @@ def run(args: argparse.Namespace) -> Path:
 
         document["status"] = "evaluating"
         _write(health_path, _json_value(document))
-        metrics = evaluate_episodes(
-            policy=native.runtime.policy,
-            env=native.runtime.env,
-            num_episodes=args.episodes,
-            device=native.device,
-            seed=native.seed,
-            episode_allocation="balanced",
-            on_step=observe_budget,
-        )
+        with episode_path.open("x", encoding="utf-8") as episode_stream:
+
+            def record_episode(record: dict[str, Any]) -> None:
+                nonlocal episode_records
+                env_id = record["env_id"]
+                if (
+                    record["global_episode_index"] != episode_records
+                    or not 0 <= env_id < len(recorded_counts)
+                    or recorded_counts[env_id] >= expected_counts[env_id]
+                ):
+                    raise RuntimeError(
+                        "Scored episode callback violated the fixed quotas."
+                    )
+                episode_stream.write(json.dumps(record, allow_nan=False) + "\n")
+                recorded_counts[env_id] += 1
+                episode_records += 1
+
+            metrics = evaluate_episodes(
+                policy=native.runtime.policy,
+                env=native.runtime.env,
+                num_episodes=args.episodes,
+                device=native.device,
+                seed=native.seed,
+                episode_allocation="balanced",
+                on_step=observe_budget,
+                on_episode=record_episode,
+            )
+        # Verify the persisted file independently of the callback counters.
+        file_counts = [0] * int(env.num_envs)
+        file_records = 0
+        with episode_path.open(encoding="utf-8") as episode_stream:
+            for line in episode_stream:
+                record = json.loads(line)
+                if record["global_episode_index"] != file_records:
+                    raise RuntimeError("Persisted episode indexes are not contiguous.")
+                env_id = record["env_id"]
+                if not 0 <= env_id < len(file_counts):
+                    raise RuntimeError(
+                        "Persisted episode has an invalid environment ID."
+                    )
+                file_counts[env_id] += 1
+                file_records += 1
+        if (
+            file_records != args.episodes
+            or file_records != episode_records
+            or file_counts != expected_counts
+            or file_counts != recorded_counts
+        ):
+            raise RuntimeError(
+                "Persisted scored episodes do not match the fixed quotas."
+            )
+        document["episode_file_verified"] = True
         if not all(math.isfinite(float(value)) for value in metrics.values()):
             raise RuntimeError("Nonfinite production evaluation metrics.")
         if (
@@ -321,6 +374,23 @@ def run(args: argparse.Namespace) -> Path:
                 failure = RuntimeError(
                     "Native runtime cleanup failed; see health.json."
                 )
+        try:
+            episode_metadata = _file_metadata(episode_path, digest=True)
+        except OSError:
+            episode_metadata = None
+            document["episode_file_metadata_error"] = traceback.format_exc()
+            document["status"] = "failed"
+            if failure is None:
+                failure = RuntimeError(
+                    "Scored episode JSONL metadata could not be read."
+                )
+        document["raw_episodes"] = {
+            "file": episode_metadata,
+            "records": episode_records,
+            "scored_counts_per_env": recorded_counts,
+            "expected_counts_per_env": expected_counts,
+            "scope": "Only production-evaluator scored episodes; unscored fast completions and vector/matrix metrics are excluded. The success path rereads the JSONL to verify contiguous zero-based indexes and every fixed per-arena quota.",
+        }
         document["elapsed_wall_seconds"] = time.perf_counter() - started
         document["raw_log"]["file"] = _file_metadata(args.raw_log)
         document["raw_log"][

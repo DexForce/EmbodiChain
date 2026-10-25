@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from collections import deque
+import json
 import math
 from pathlib import Path
 from types import SimpleNamespace
@@ -256,6 +257,7 @@ def test_evaluate_episodes_counts_actual_completions_and_restores_mode(
     policy = _DeterministicPolicy()
     policy.train()
     env = _AsyncAutoResetEnv()
+    episodes = []
 
     result = evaluate_episodes(
         policy=policy,
@@ -263,6 +265,7 @@ def test_evaluate_episodes_counts_actual_completions_and_restores_mode(
         num_episodes=4,
         device="cpu",
         seed=123,
+        on_episode=episodes.append,
         **({"episode_allocation": "first_completed"} if explicit_legacy else {}),
     )
 
@@ -277,6 +280,13 @@ def test_evaluate_episodes_counts_actual_completions_and_restores_mode(
     assert result["eval/success_ci95_high"] == pytest.approx(1.0)
     assert result["eval/metrics/terminal_step"] == 1.25
     assert "eval/metrics/final_position" not in result
+    assert [record["global_episode_index"] for record in episodes] == list(range(4))
+    assert [record["env_id"] for record in episodes] == [0, 0, 1, 0]
+    assert [record["length"] for record in episodes] == [1, 1, 2, 1]
+    assert [record["return"] for record in episodes] == [1.0, 1.0, 2.0, 1.0]
+    assert all(record["success"] == 1.0 for record in episodes)
+    assert all("final_position" not in record["metrics"] for record in episodes)
+    json.dumps(episodes, allow_nan=False)
 
 
 @pytest.mark.parametrize(
@@ -312,12 +322,14 @@ def test_balanced_evaluation_scores_fixed_quotas_despite_unequal_episode_lengths
             return observation, reward, done, truncated, info
 
     env = TimedOutcomeEnv()
+    records = []
     result = evaluate_episodes(
         policy=_DeterministicPolicy(),
         env=env,
         num_episodes=episodes,
         device="cpu",
         episode_allocation="balanced",
+        on_episode=records.append,
     )
     assert result["eval/completed_episodes"] == episodes
     assert result["eval/success_samples"] == episodes
@@ -333,6 +345,50 @@ def test_balanced_evaluation_scores_fixed_quotas_despite_unequal_episode_lengths
         env.physical_completions, torch.tensor([controls // 3, controls, controls])
     )
     assert result["eval/metrics/terminal_step"] == pytest.approx(expected_length)
+    assert len(records) == episodes
+    assert [record["global_episode_index"] for record in records] == list(
+        range(episodes)
+    )
+    quota, remainder = divmod(episodes, env.num_envs)
+    assert [sum(record["env_id"] == row for record in records) for row in range(3)] == [
+        quota + int(row < remainder) for row in range(3)
+    ]
+    for record in records:
+        expected_steps = 3 if record["env_id"] == 0 else 1
+        assert record["length"] == expected_steps
+        assert record["return"] == float(expected_steps)
+        assert record["success"] == float(record["env_id"] != 0)
+        assert record["metrics"] == {"terminal_step": float(expected_steps)}
+    json.dumps(records, allow_nan=False)
+
+
+def test_episode_callback_omits_absent_success_and_restores_mode_on_failure() -> None:
+    class UnlabelledEnv(_AsyncAutoResetEnv):
+        def step(self, action):
+            observation, reward, done, truncated, info = super().step(action)
+            del info["success"]
+            return observation, reward, done, truncated, info
+
+    policy = _DeterministicPolicy()
+    policy.train()
+    records = []
+
+    def reject(record: dict) -> None:
+        records.append(record)
+        raise OSError("episode sink unavailable")
+
+    with pytest.raises(OSError, match="episode sink unavailable"):
+        evaluate_episodes(
+            policy=policy,
+            env=UnlabelledEnv(),
+            num_episodes=4,
+            device="cpu",
+            on_episode=reject,
+        )
+    assert policy.training
+    assert len(records) == 1
+    assert records[0]["global_episode_index"] == 0
+    assert "success" not in records[0]
 
 
 def test_evaluation_rejects_unknown_episode_allocation_before_reset() -> None:

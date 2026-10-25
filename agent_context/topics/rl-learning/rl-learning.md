@@ -194,6 +194,7 @@ default. Optional `balanced` allocation fixes per-arena quotas before stepping,
 preventing completion-time censoring when episode durations differ. Strict peg
 final assessment opts into balanced quotas; historical training validation keeps
 the default loaded by its running process.
+Optional `on_episode` receives CPU records only for scored completions; strict peg evaluation persists and verifies these records as a hashed JSONL file.
 
 Read [training and extension](training.md) for evaluation, checkpoints,
 distributed ownership, official examples and adding algorithms/policies/envs.
