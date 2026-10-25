@@ -275,6 +275,18 @@ def _state_equal(first: Any, second: Any) -> bool:
     return first == second
 
 
+def _parse_seeds(value: str) -> list[int]:
+    try:
+        seeds = [int(item) for item in value.split(",")]
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            "seeds must be comma-separated integers"
+        ) from error
+    if len(set(seeds)) != len(seeds):
+        raise argparse.ArgumentTypeError("seeds must be distinct")
+    return seeds
+
+
 def main() -> None:
     """Run the full offline and five-seed matched-update acceptance matrix."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -289,7 +301,7 @@ def main() -> None:
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--steps", type=int, default=1000)
-    parser.add_argument("--seeds", default="0,1,2,3,4")
+    parser.add_argument("--seeds", type=_parse_seeds, default="0,1,2,3,4")
     parser.add_argument("--robots", nargs="+", default=["cartpole", "ant"])
     parser.add_argument("--threads", type=int, default=4)
     parser.add_argument("--resident-cache-bytes", type=int, default=4 * 1024**3)
@@ -317,7 +329,7 @@ def main() -> None:
         paired_noninferiority,
     )
 
-    seeds = [int(value) for value in args.seeds.split(",")]
+    seeds = args.seeds
     sources = {
         "reference": str(args.reference_source.resolve()),
         "candidate": str(args.candidate_source.resolve()),

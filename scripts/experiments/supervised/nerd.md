@@ -55,7 +55,9 @@ The default matrix performs:
   compared with uninterrupted weights, optimizer, sampler, counters and RNG.
 
 `summary.json` is the machine-readable gate; the command exits nonzero if a gate
-fails or fewer than five paired seeds are supplied. `report.md` contains time,
+fails or fewer than five paired seeds are supplied. Seed lists must contain
+distinct integers; duplicate or malformed lists are rejected before output
+creation or worker startup. `report.md` contains time,
 memory, quality and trainer-ranking tables. Per-process requests, logs,
 checkpoints, curves and first-update captures remain under the supplied output
 directory. Use a fresh directory for every matrix.
