@@ -24,16 +24,17 @@ axes and transforms rather than robot names. Approximate SRS, Franka-specific
 geometry, and unprepared RR/HP algebraic models remain unsupported.
 Unsupported geometry raises `ValueError` during initialization.
 
-Aloha Mini and Tianji Marvin retain Pytorch as their default arm solvers;
-Aloha's torso keeps its position-only Pytorch solver. Select SSIK explicitly
-and use `srs_search="seed_local"` for Marvin continuous control. All finite
-searches can miss solutions.
+Aloha Mini's two arm defaults use strict Warp SSIK. Both Tianji Marvin
+variants use Warp SSIK with `srs_search="seed_local"`. CPU and CUDA use the
+same configured geometry and acceptance thresholds, without the optional SSIK
+reference dependency. Aloha's torso retains its position-only Pytorch solver.
+Explicit `solver_cfg` replacements remain authoritative. All finite searches
+can miss solutions; inspect the validity mask before executing a result.
 
-Default switching is held behind the full acceptance gates, including changing
-target single/dual-arm latency and fresh-process CUDA memory. Driver allocations
-are included alongside Torch/Warp counters. Precision and continuity results
-alone do not certify those gates; the benchmark reports record each measured
-configuration separately.
+The benchmark reports record the measured models, control paths and hardware
+windows separately. CUDA resource measurements include driver allocations
+alongside Torch/Warp counters. A preset's default does not establish a latency
+guarantee for arbitrary workloads or concurrent rendering.
 
 ## Configuration
 
@@ -182,25 +183,42 @@ converts arena-frame poses into the solver root frame. See
 
 ## Selecting the numerical solver
 
-Explicit solver configurations remain authoritative. To select Aloha Mini's
-numerical arm setup while retaining its source frames and TCP:
+Explicit solver configurations remain authoritative. Restore Aloha Mini's
+original numerical arm settings while preserving its source frames, TCP, limits
+and weights with the following replacement. The same code applies to either
+Marvin variant:
 
 ```python
+from copy import deepcopy
+
 from embodichain.lab.sim.motion.solvers import PytorchSolverCfg
 
 for part in ("left_arm", "right_arm"):
     current = robot_cfg.solver_cfg[part]
     robot_cfg.solver_cfg[part] = PytorchSolverCfg(
+        urdf_path=robot_cfg.fpath,
+        joint_names=robot_cfg.control_parts[part],
         root_link_name=current.root_link_name,
         end_link_name=current.end_link_name,
-        tcp=current.tcp,
+        tcp=deepcopy(current.tcp),
+        user_qpos_limits=deepcopy(current.user_qpos_limits),
+        ik_nearest_weight=deepcopy(current.ik_nearest_weight),
+        num_samples=30,
+        max_iterations=500,
+        pos_eps=5e-4,
+        rot_eps=5e-4,
     )
 ```
 
-In serialized configuration, specify `class_type: PytorchSolver` together with
-the root and end links (and a nonidentity TCP when present). An override with a
-`class_type` replaces that part's solver configuration; an override without it
-updates attributes of the current default solver.
+For a serialized replacement, use the new `PytorchSolverCfg.to_dict()` values
+above, including `class_type: PytorchSolver`, the root/end links and the TCP.
+A dictionary containing `class_type` replaces the part independently; it does
+not inherit those integration fields. A class-type-only override therefore
+loses the preset frames and can reset Marvin's TCP. Construct a fresh numerical
+config rather than changing the class label on an SSIK dictionary: copying its
+`num_samples=128` would retain that value instead of restoring the original
+numerical setting of 30. A partial dictionary without `class_type` only changes
+attributes of the selected default solver.
 
 ## Optional CPU reference and offline artifacts
 

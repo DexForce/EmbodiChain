@@ -121,8 +121,12 @@ against part names (including patterns); it need not configure every part.
 and synchronizes effective robot limits. Check the resolved part and joint
 order before diagnosing an IK algorithm.
 
-Aloha Mini and Marvin retain Pytorch arm defaults; Aloha's torso uses its
-position-only Pytorch solver. SSIK is explicitly selectable. ARX5 uses the
+Aloha Mini and Marvin use strict Warp SSIK arm defaults on CPU/CUDA; Marvin
+selects seed-local SRS search in both gripper variants. Aloha's torso retains
+its position-only Pytorch solver. Numerical restoration requires a complete
+replacement with the existing root/end/TCP and original Pytorch settings; see
+the [solver guide](../../../docs/source/overview/sim/motion/solvers/ssik_solver.md#selecting-the-numerical-solver).
+ARX5 uses the
 source X5A six-joint `arm` and two
 independent prismatic fingers in `eef`; its simulation and PK share the selected
 URDF. ARX5 and Flexiv Rizon4S retain Pytorch defaults and can explicitly select

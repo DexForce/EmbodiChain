@@ -35,8 +35,10 @@ robot = sim.add_robot(cfg=cfg)
 | `right_eef` | 1 | `right_gripper` |
 | `torso` | 1 | `vertical_move` |
 
-The arms use `PytorchSolverCfg` with the TCP frames authored in the asset.
-The torso uses a position-only solver; the hands use joint-space commands.
+The arms use `SSIKSolverCfg(backend="warp")` on CPU or CUDA with the TCP
+frames authored in the asset. The torso retains its position-only
+`PytorchSolverCfg`; the hands use joint-space commands. Explicit solver
+replacements remain supported; see the [original numerical solver settings](../../overview/sim/motion/solvers/ssik_solver.md#selecting-the-numerical-solver).
 The source's three planar base joints and three wheel joints remain outside
 these control parts, with position drives that hold their initial positions.
 Drive gains follow the CobotMagic simulation preset and can be overridden
