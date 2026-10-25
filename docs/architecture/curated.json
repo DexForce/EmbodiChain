@@ -3342,20 +3342,20 @@
     },
     {
       "id": "neural-dynamics",
-      "label": "NeRD offline workflow",
+      "label": "NeRD model extension",
       "kind": "package",
       "topic_ids": [
         "neural-dynamics"
       ],
-      "summary": "Generates analytical trajectories and trains, evaluates and exports causal neural dynamics models.",
-      "details": "State/contact codecs live in compute/dynamics, bounded trajectory collection and HDF5 storage in data_pipeline/dynamics, NeRD networks in learning/models/nerd, and offline learning in learning/dynamics. The independent workflow uses built-in Newton teachers without initializing DexSim; live Scene solver integration is a separate consumer.",
+      "summary": "Bundles the causal NeRD network, physical codec, trajectory windows and supervised recipe in the main wheel.",
+      "details": "embodichain_models.dynamics.nerd owns the concrete model, portable checkpoints, physical representations, HDF5 windows and installable SL recipe. Generic MLP/normalization and supervised orchestration stay in core. The model extension imports neither the showcase nor simulation; collection, historical training and reference research belong to the example.",
       "boundaries": [
-        "Model training and offline evaluation do not own a simulation World.",
-        "A collector profile records its physical domain; exported weights do not establish equivalence across teachers."
+        "The core does not import concrete model implementations.",
+        "Data/model/reference-asset payloads are external resources; numerical and physical identities remain explicit."
       ],
       "evidence": [
         {
-          "path": "embodichain/learning/models/nerd/model.py",
+          "path": "extensions/embodichain_models/embodichain_models/dynamics/nerd/model.py",
           "symbol": "NeRDModel",
           "start_line": 201,
           "end_line": 201,
@@ -3364,8 +3364,70 @@
       ],
       "documentation": [
         {
+          "docname": "api_reference/model_catalogs",
+          "label": "Official model library"
+        },
+        {
           "docname": "features/neural_dynamics",
           "label": "NeRD data and training workflow"
+        }
+      ]
+    },
+    {
+      "id": "nerd-showcase",
+      "label": "NeRD showcase",
+      "kind": "module",
+      "topic_ids": [
+        "neural-dynamics"
+      ],
+      "summary": "Prepares pinned external resources and routes default NeRD training through shared SL.",
+      "details": "run-example learning/nerd owns preparation, train/export/eval/generate commands and private teacher, historical-trainer and reference-research workflows. The default train preset resolves the installable model SL factory; explicit historical configurations retain their checkpoint protocol. Downloads are verified outside Git and the wheel.",
+      "boundaries": [
+        "Historical reports remain bound to the source and runtime that produced them.",
+        "Reference assets and teacher/domain metadata are not production model registrations."
+      ],
+      "evidence": [
+        {
+          "path": "examples/learning/nerd/__main__.py",
+          "symbol": "main",
+          "start_line": 81,
+          "end_line": 81,
+          "excerpt": "def main(argv: Sequence[str] | None = None) -> None:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/neural_dynamics",
+          "label": "NeRD showcase commands"
+        }
+      ]
+    },
+    {
+      "id": "supervised-learning",
+      "label": "Supervised learning (SL)",
+      "kind": "package",
+      "topic_ids": [
+        "supervised-learning"
+      ],
+      "summary": "Shares structured batches, objective-owned losses, optimizer updates and offline recovery across policy and dynamics fitting.",
+      "details": "The SL learner commits finite single-device optimizer updates; the offline trainer owns sampling, validation, logging and checkpoint recovery. Concrete model packages supply codecs, normalization, objectives and installable recipe factories. The core does not import those implementations. Training does not create a simulation World or data producer.",
+      "boundaries": [
+        "Source identity and recipe signatures bind feature/action semantics before recovery.",
+        "Policy execution, physics collection and APG rollout scheduling remain separate consumers."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/learning/sl/learner.py",
+          "symbol": "SupervisedLearner",
+          "start_line": 34,
+          "end_line": 34,
+          "excerpt": "class SupervisedLearner:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.learning.sl",
+          "label": "SL batches, updates and recovery"
         }
       ]
     }
@@ -5710,6 +5772,42 @@
           "excerpt": "        sim = SimulationManager(\n            SimulationManagerCfg(\n                headless=self.headless,\n                sim_device=str(self.device),\n                num_envs=batch_size,\n                arena_space=2.0,\n            )\n        )"
         }
       ]
+    },
+    {
+      "id": "nerd-recipe-constructs-sl-learner",
+      "source": "neural-dynamics",
+      "target": "supervised-learning",
+      "relation": "constructs",
+      "description": "The NeRD recipe constructs the shared learner with its physical objective and numerical policy.",
+      "provenance": "source-reviewed",
+      "scope": "The installable NeRD supervised recipe only; the core does not resolve or import model families eagerly.",
+      "evidence": [
+        {
+          "path": "extensions/embodichain_models/embodichain_models/dynamics/nerd/sl_recipe.py",
+          "symbol": "build_supervised_trainer",
+          "start_line": 167,
+          "end_line": 167,
+          "excerpt": "    learner = SupervisedLearner("
+        }
+      ]
+    },
+    {
+      "id": "nerd-showcase-calls-sl-workflow",
+      "source": "nerd-showcase",
+      "target": "supervised-learning",
+      "relation": "calls",
+      "description": "The showcase delegates a factory-based training configuration to the common offline workflow.",
+      "provenance": "source-reviewed",
+      "scope": "The train command when its selected configuration declares a factory; explicit historical configurations take the historical trainer path.",
+      "evidence": [
+        {
+          "path": "examples/learning/nerd/__main__.py",
+          "symbol": "main",
+          "start_line": 273,
+          "end_line": 273,
+          "excerpt": "                result = train_from_config("
+        }
+      ]
     }
   ],
   "views": [
@@ -5804,7 +5902,9 @@
         "urdf-assembly",
         "convex-decomposition",
         "scene-services",
-        "neural-dynamics"
+        "neural-dynamics",
+        "supervised-learning",
+        "nerd-showcase"
       ],
       "edge_ids": [
         "adapter-calls-compiler",
@@ -5890,7 +5990,9 @@
         "scene-services-references-manager",
         "scene-recipes-import-expansion-contracts",
         "cli-calls-motion-benchmarks",
-        "motion-benchmarks-constructs-simulation"
+        "motion-benchmarks-constructs-simulation",
+        "nerd-recipe-constructs-sl-learner",
+        "nerd-showcase-calls-sl-workflow"
       ],
       "groups": [
         {
@@ -6020,7 +6122,9 @@
             "differentiable-collector",
             "observation-normalizer",
             "policy-evaluation",
-            "neural-dynamics"
+            "neural-dynamics",
+            "supervised-learning",
+            "nerd-showcase"
           ]
         },
         {
@@ -6330,7 +6434,7 @@
     {
       "id": "data-learning",
       "label": "Data & Learning",
-      "description": "Demonstration recording, online sampling, and separate standard and differentiable training routes.",
+      "description": "Demonstration recording, online sampling, shared supervised training and concrete model recipes, alongside standard and differentiable RL routes.",
       "node_ids": [
         "embodied-env",
         "managers",
@@ -6360,7 +6464,10 @@
         "rollout-buffer",
         "differentiable-trainer",
         "differentiable-collector",
-        "observation-normalizer"
+        "observation-normalizer",
+        "supervised-learning",
+        "neural-dynamics",
+        "nerd-showcase"
       ],
       "edge_ids": [
         "cli-calls-training-assembly",
@@ -6387,7 +6494,9 @@
         "differentiable-trainer-constructs-observation-normalizer",
         "rl-algorithms-holds-ppo",
         "rl-algorithms-holds-grpo",
-        "rl-algorithms-holds-apg"
+        "rl-algorithms-holds-apg",
+        "nerd-recipe-constructs-sl-learner",
+        "nerd-showcase-calls-sl-workflow"
       ],
       "groups": [
         {
@@ -6427,7 +6536,10 @@
             "cli",
             "rl-routing",
             "learning-env",
-            "policy-evaluation"
+            "policy-evaluation",
+            "supervised-learning",
+            "neural-dynamics",
+            "nerd-showcase"
           ]
         },
         {

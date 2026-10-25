@@ -27,6 +27,7 @@ from typing import Any
 import numpy as np
 import torch
 from embodichain.utils import configclass
+from ._artifacts import _RunArtifacts
 from .learner import SupervisedLearner
 from .sources import SupervisedSource
 
@@ -101,14 +102,9 @@ class SupervisedTrainer:
         self.sampler = torch.Generator(device="cpu").manual_seed(self.cfg.seed)
         self.output = Path(self.cfg.output_dir)
         self.output.mkdir(parents=True, exist_ok=True)
+        self._artifacts = _RunArtifacts(self.output)
         self.learner.model.to(self.cfg.device)
-        self._output_was_used = (
-            (self.output / "metrics.jsonl").exists()
-            or (self.output / "last.pt").exists()
-            or next(self.output.glob("step_*.pt"), None) is not None
-        )
-        self._fit_started = False
-        self._restored = False
+        self._validation_boundary: dict[str, Any] | None = None
 
     def fit(self, *, stop_after: int | None = None) -> dict[str, Any]:
         """Train up to the configured or an earlier committed update boundary.
@@ -126,11 +122,8 @@ class SupervisedTrainer:
         )
         if end < self.learner.num_updates:
             raise ValueError("stop_after precedes the restored update cursor")
-        if not self._fit_started and not self._restored and self._output_was_used:
-            raise FileExistsError(
-                "SL output contains a run; restore a checkpoint or use a fresh output directory"
-            )
-        self._fit_started = True
+        self._artifacts.claim()
+        self._artifacts.validate_history(self.learner.num_updates, key="num_updates")
         metrics = {}
         while self.learner.num_updates < end:
             candidate = torch.Generator(device="cpu")
@@ -148,20 +141,7 @@ class SupervisedTrainer:
                 and self.cfg.validation_interval
                 and step % self.cfg.validation_interval == 0
             ):
-                rng = self._rng_state()
-                was_training = self.learner.model.training
-                try:
-                    self.learner.model.eval()
-                    with torch.no_grad():
-                        metrics.update(
-                            {
-                                f"validation/{key}": float(value)
-                                for key, value in self.evaluate(self.learner).items()
-                            }
-                        )
-                finally:
-                    self._restore_rng(rng)
-                    self.learner.model.train(was_training)
+                metrics.update(self._evaluate_step())
             with (self.output / "metrics.jsonl").open("a") as handle:
                 handle.write(json.dumps(metrics, allow_nan=False) + "\n")
             if (
@@ -176,6 +156,34 @@ class SupervisedTrainer:
             "metrics": metrics,
             "checkpoint": str(path),
         }
+
+    def _evaluate_step(self) -> dict[str, float]:
+        boundary = {
+            "rng": self._rng_state(),
+            "sampler": self.sampler.get_state(),
+            "buffers": {
+                name: value.detach().clone()
+                for name, value in self.learner.model.named_buffers()
+            },
+        }
+        was_training = self.learner.model.training
+        self._validation_boundary = boundary
+        try:
+            self.learner.model.eval()
+            assert self.evaluate is not None
+            with torch.no_grad():
+                return {
+                    f"validation/{key}": float(value)
+                    for key, value in self.evaluate(self.learner).items()
+                }
+        finally:
+            with torch.no_grad():
+                for name, value in self.learner.model.named_buffers():
+                    value.copy_(boundary["buffers"][name])
+            self.sampler.set_state(boundary["sampler"])
+            self._restore_rng(boundary["rng"])
+            self.learner.model.train(was_training)
+            self._validation_boundary = None
 
     def _rng_state(self) -> dict[str, Any]:
         device = torch.device(self.cfg.device)
@@ -200,9 +208,11 @@ class SupervisedTrainer:
             path: Local checkpoint destination, replaced atomically.
         """
         path = Path(path)
+        self._artifacts.claim()
         path.parent.mkdir(parents=True, exist_ok=True)
         state = {
             "version": 1,
+            "run_id": self._artifacts.run_id,
             "learner": self.learner.state_dict(),
             "sampler": self.sampler.get_state(),
             "rng": self._rng_state(),
@@ -218,6 +228,13 @@ class SupervisedTrainer:
                 None if self.scheduler is None else self.scheduler.state_dict()
             ),
         }
+        if self._validation_boundary is not None:
+            boundary = self._validation_boundary
+            state["sampler"] = boundary["sampler"]
+            state["rng"] = boundary["rng"]
+            for name, value in boundary["buffers"].items():
+                if name in state["learner"]["model"]:
+                    state["learner"]["model"][name] = value
         temporary = path.with_suffix(path.suffix + ".tmp")
         torch.save(state, temporary)
         temporary.replace(path)
@@ -248,24 +265,13 @@ class SupervisedTrainer:
         )
         if state.get("scheduler_type") != scheduler_type:
             raise ValueError("Supervised checkpoint scheduler type differs")
-        metrics_path = self.output / "metrics.jsonl"
-        if metrics_path.exists():
-            last_line = ""
-            with metrics_path.open() as handle:
-                for line in handle:
-                    if line.strip():
-                        last_line = line
-            if (
-                last_line
-                and json.loads(last_line)["num_updates"]
-                > state["learner"]["num_updates"]
-            ):
-                raise ValueError(
-                    "SL output history is ahead of this checkpoint; use a fresh output directory"
-                )
+        run_id = self._artifacts.validate_resume(state.get("run_id"))
+        self._artifacts.validate_history(
+            state["learner"]["num_updates"], key="num_updates"
+        )
         self.learner.load_state_dict(state["learner"])
         if self.scheduler is not None:
             self.scheduler.load_state_dict(state["scheduler"])
         self.sampler.set_state(state["sampler"])
         self._restore_rng(state["rng"])
-        self._restored = True
+        self._artifacts.adopt_resume(run_id)

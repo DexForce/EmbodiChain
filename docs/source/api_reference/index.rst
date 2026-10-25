@@ -41,9 +41,10 @@ The core ``embodichain`` framework includes these top-level packages:
     independently of the simulation loop.
 
 ``learning``
-    Learning systems, currently the ``rl`` subpackage: on-policy RL algorithms
-    (PPO/GRPO), rollout buffers, collectors, policy/model builders, and the
-    training entry point.
+    Shared trainable components, supervised updates and offline orchestration,
+    plus on-policy RL algorithms (PPO/GRPO), rollout buffers, collectors and
+    RL policy builders. Concrete model families live in the bundled
+    ``embodichain_models`` library.
 
 ``utils``
     Shared utilities: the ``@configclass`` decorator, logging, math/tensor
@@ -92,3 +93,4 @@ documentation. CI runs this same checker after style checks and before tests.
    :maxdepth: 2
 
    robot_catalogs
+   model_catalogs

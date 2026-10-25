@@ -2,63 +2,94 @@
 
 ## Entry points and ownership
 
-| Request | Owner (relative to `embodichain/`) |
+The main wheel bundles `embodichain_models` with the same version and dependencies.
+It is an import package under `extensions/`, not a separate distribution or a
+runtime registry. Shared MLPs and feature normalization stay in core
+`embodichain.learning.models`; generic supervised orchestration stays in
+[SL](../supervised-learning/supervised-learning.md).
+
+The [model catalog contract](../../../extensions/embodichain_models/README.md)
+owns domain and public-import naming. Policy models predict actions; dynamics
+models predict future state or geometry. RWM and RigidFormer follow-ups use
+`dynamics.rwm` and `dynamics.rigidformer`; only `dynamics.nerd` is implemented here.
+World-model naming does not introduce a parallel `world_models` domain.
+
+| Request | Owner |
 |---|---|
-| Tensor state, contact and history codecs | `compute/dynamics/codec.py` |
-| Model and portable checkpoints | `learning/models/nerd/` |
-| Analytical teacher generation | `data_pipeline/dynamics/generation.py`; private `_newton.py` owns its Newton model |
-| Reference assets and physical profiles | `data_pipeline/dynamics/_reference_assets.py`; packaged files in `data/nerd/` |
-| Committed shards and sequence windows | `data_pipeline/dynamics/shards.py` |
-| Training, resume, evaluation and export | `learning/dynamics/trainer.py`, `workflow.py` |
-| Original-repository comparisons | `learning/dynamics/reference.py`, `comparison.py`, `report.py` |
-| Command dispatch | `cli/dynamics.py`: `embodichain dynamics` |
+| NeRD network, portable checkpoint, physical codec | `extensions/embodichain_models/embodichain_models/dynamics/nerd/{model,checkpoint,codec}.py` |
+| Committed HDF5 shards and bounded windows | Model package `data.py`, private `_resident.py` |
+| Encoding, frozen moments and offline errors | Model package `integration.py` |
+| Objective and common trainer factory | Model package `supervised.py`, `sl_recipe.py` |
+| Prepare/train/export/eval/generate commands | `examples/learning/nerd/__main__.py`; `embodichain run-example learning/nerd` |
+| Pinned datasets, exports and reference assets | Example `_resources.py`; explicit `prepare` command |
+| Analytical teacher and physical profile | Example `_support/{_generation,_newton,_reference_assets}.py` |
+| Historical trainer and checkpoint workflow | Example `_support/{_trainer,_workflow}.py` |
+| Original-repository comparison and acceptance | Example `_support/` runners; protocol in `research/` |
 
-Model, codec, training and offline evaluation do not import simulation. Generation
-uses Newton's built-in Featherstone/MuJoCo solver directly without DexSim, its
-custom provider registry or Scene APIs. Native learned-solver deployment and
-functional Gym integration are separate consumers, not dependencies of training.
+The showcase defaults to `sl.train.yaml` and the installable
+`embodichain_models.dynamics.nerd.sl_recipe:build_supervised_trainer` factory.
+Direct `embodichain train-sl --config FILE` works independently of example
+bootstrap. An explicitly selected `dynamics.train.*.yaml` uses the historical
+trainer for controlled comparisons and its legacy checkpoint contract.
 
-## Data and physical identity
+The extension imports neither examples nor simulation. Generation uses Newton's
+built-in Featherstone/MuJoCo solvers directly without a DexSim custom solver or
+Scene API. Native learned-solver deployment and functional Gym integration are
+separate consumers. There are no NeRD-specific core `compute/dynamics`,
+`data_pipeline/dynamics`, `learning/dynamics` modules or core `dynamics` command.
 
-A trajectory contains T+1 states and T controls/contact inputs. Splits belong to
-whole trajectories and windows cannot cross episodes or splits. Writers publish
-only committed shards; resume advances candidate seeds past accepted and rejected
-candidates. File handles and bounded caches belong to their reader/worker.
+## Resource and physical identity
 
-The direct teacher stores its importer profile, asset/physical-array hashes,
-solver settings and actual Newton/Warp versions. Its
-`nerd-direct-newton-builder-v1` signature is distinct from Scene-built datasets.
-Existing published Scene-generated data remains readable without simulation.
-`warp_reference` reconstructs measured legacy asset parameters and the coupled
-Ant Featherstone friction mapping; current Newton still owns integration.
-Matching a profile name alone does not establish matching physics across
-model-building paths, versions or solvers.
+`prepare --robot cartpole|ant --resource-root DIR` downloads the pinned dataset,
+portable model and raw reference assets. Revisions and SHA256 checks are owned by
+`_resources.py`; `--assets-only` skips data/model downloads and
+`--local-files-only` forbids network access. The default resource root is
+`EMBODICHAIN_NERD_RESOURCE_ROOT`, otherwise the showcase cache under
+`XDG_CACHE_HOME` or `~/.cache`. Downloads do not live in Git or the wheel; model
+third-party licensing remains in the model package.
 
-Newton COM velocities and NeRD twists differ in ordering and reference point.
-The codec owns transport, relative targets use the frame at t, and frozen train
-normalizers are reused for evaluation. Ant uses 25 ordered plane-contact slots;
-Cartpole is contact-free. Controls are generalized efforts with zero free-base
-force. Physical records cannot be relabeled through training manifest overrides.
+A trajectory has T+1 states and T effort/contact inputs. Splits belong to whole
+trajectories; windows never cross episodes or splits. Only manifest-committed
+shards are visible. Generation commits its cursor and rejection evidence with
+shards; rejection-only progress preserves data fingerprints. Legacy progress
+sidecars remain readable, while collector source and physical identity still
+must match to continue collection. A path move does not authorize cross-version
+resume or reconstruct missing historical rejection evidence.
 
-The collector keeps one bounded batch of history on the model device, then writes
-owned CPU arrays. CUDA teachers use graph capture by default where supported;
-CPU MuJoCo execution does not capture. Snapshots retain independent ownership.
-Mass-matrix update intervals divide the macro substep count so resets can replay.
+The direct teacher records importer profile, asset/physical-array hashes, solver
+settings and actual Newton/Warp versions. Its `nerd-direct-newton-builder-v1`
+signature differs from published Scene-generated data, which remains readable
+without simulation. `warp_reference` reconstructs historical asset parameters
+and Ant friction mapping; matching that name does not prove identical physics
+across model-building paths, versions or solvers.
+
+The codec owns COM-to-spatial-twist transport and relative targets in the frame
+at t. Ant uses 25 ordered plane-contact slots; Cartpole is contact-free. Controls
+are generalized efforts with zero free-base force. Frozen train-only moments
+are reused for evaluation, and supplied statistics must bind the training data
+fingerprint. Do not relabel physical records or replace their normalizers.
 
 ## Training and validation
 
-Training checkpoints preserve optimizer, scheduler, RNG and committed sample
-progress. Portable exports contain tensors and JSON, including normalizers and
-attention policy. Resume restores the same run; fine-tuning starts a new one.
-Only explicitly trusted legacy conversion may deserialize Python model objects.
+SL checkpoints use the common trainer format and resume through the same
+recipe/signature. The historical trainer keeps `embodichain.nerd.training.v1`:
+`last.pt` retains optimizer, scheduler, RNG, committed sampling state and one
+owned CPU snapshot of the selected best model; automatic `best.pt` is export-only.
+Both trainers use shared run-directory/history admission from SL. Common `train`
+does not turn its final `last.pt` into a validation-selected model.
 
-Optional shared sample-order/statistics artifacts support controlled original
-trainer comparisons; equal seeds alone do not prove identical batches or physics.
-Original Warp references run in isolated supported environments. Keep virtualenv
-executable paths intact instead of resolving their interpreter symlinks.
+The showcase `export` accepts common SL and historical NeRD checkpoints and
+writes the same portable tensor/JSON model format. Precision, ordered feature
+layout, normalization and attention policy are part of recovery/export identity.
+Historical fine-tuning and shared sample-order options require a historical
+configuration. Only explicitly trusted legacy conversion unpickles model objects.
 
-Tests cover codecs, model conversion, bounded shards, reset/replay and partial
-collection batches, training/resume and the actual offline CLI. Public usage is
-in [Neural Dynamics Models](../../../docs/source/features/neural_dynamics.md).
-Fixed-set transition error, live rollout error and paper protocol accuracy are
-separate claims; this workflow does not establish their equivalence.
+Frozen source revisions, budgets and gates live in the
+[acceptance protocol](../../../examples/learning/nerd/research/acceptance.md).
+Historical evidence remains bound to its recorded source, data and runtime;
+relocating code does not rerun it. NeRD validation uses the runnable showcase
+and its reference/acceptance workflows; `tests/learning/sl/` covers the common
+training contracts. The [feature guide](../../../docs/source/features/neural_dynamics.md)
+owns user commands; the [model API](../../../docs/source/api_reference/model_catalogs.rst)
+owns exported definitions. Transition error, accumulated rollout error and
+paper-scale accuracy remain separate claims.

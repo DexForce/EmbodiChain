@@ -43,13 +43,16 @@ _LEGACY_MODULES = (
     "dexforce_w1.utils",
 )
 _CONFIG_CLASSES = (
+    "ARX5Cfg",
     "AlohaMiniCfg",
     "TianjiMarvinCfg",
     "CobotMagicCfg",
     "FrankaPandaCfg",
     "FrankaPandaPgiCfg",
+    "FlexivRizon4SCfg",
     "URRobotCfg",
     "DexforceW1Cfg",
+    "SO101FollowerCfg",
 )
 
 
@@ -98,7 +101,7 @@ module = sys.argv[1]
 importlib.import_module(module)
 for name in (
     "aloha_mini", "tianji_marvin", "cobotmagic", "franka_panda", "ur_robot",
-    "dexforce_w1.cfg",
+    "dexforce_w1.cfg", "arx5", "so101", "flexiv_rizon4s",
 ):
     assert "embodichain_robots." + name not in sys.modules, name
 if module.startswith("embodichain_robots") or module == "embodichain.robot_registry":
@@ -107,7 +110,7 @@ if module.startswith("embodichain_robots") or module == "embodichain.robot_regis
 """
     root = Path(__file__).resolve().parents[3]
     env = os.environ.copy()
-    env["PYTHONPATH"] = str(root)
+    env["PYTHONPATH"] = os.pathsep.join((str(root), str(root / "extensions")))
     result = subprocess.run(
         [sys.executable, "-c", script, first_module],
         cwd=root,

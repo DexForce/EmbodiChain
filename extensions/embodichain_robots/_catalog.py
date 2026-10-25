@@ -21,16 +21,20 @@ from __future__ import annotations
 from itertools import product
 
 _CONFIG_CLASSES = {
+    "ARX5": "embodichain_robots.arx5:ARX5Cfg",
     "AlohaMini": "embodichain_robots.aloha_mini:AlohaMiniCfg",
     "TianjiMarvin": "embodichain_robots.tianji_marvin:TianjiMarvinCfg",
     "DexforceW1": "embodichain_robots.dexforce_w1.cfg:DexforceW1Cfg",
     "CobotMagic": "embodichain_robots.cobotmagic:CobotMagicCfg",
     "FrankaPanda": "embodichain_robots.franka_panda:FrankaPandaCfg",
     "FrankaPandaPgi": "embodichain_robots.franka_panda:FrankaPandaPgiCfg",
+    "FlexivRizon4S": "embodichain_robots.flexiv_rizon4s:FlexivRizon4SCfg",
     "URRobot": "embodichain_robots.ur_robot:URRobotCfg",
+    "SO101Follower": "embodichain_robots.so101:SO101FollowerCfg",
 }
 
 _DEFAULT_CONTROL_INFO = {
+    "ARX5": {"dof": 8, "control_parts": {"arm": 6, "eef": 2}},
     "AlohaMini": {
         "dof": 15,
         "control_parts": {
@@ -81,6 +85,8 @@ _DEFAULT_CONTROL_INFO = {
         "control_parts": {"arm": 7, "eef": 1},
     },
     "URRobot": {"dof": 6, "control_parts": {"arm": 6}},
+    "SO101Follower": {"dof": 6, "control_parts": {"arm": 5, "eef": 1}},
+    "FlexivRizon4S": {"dof": 7, "control_parts": {"arm": 7}},
 }
 
 _MIMIC_JOINTS = {
