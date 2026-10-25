@@ -81,7 +81,10 @@ from .tcp_presets import (
 )
 
 if TYPE_CHECKING:
-    from embodichain.lab.sim.motion.expansion import TrajectoryVariantSet
+    from embodichain.lab.sim.motion.expansion import (
+        TrajectoryVariant,
+        TrajectoryVariantSet,
+    )
     from embodichain.lab.sim.atomic_actions import (
         AtomicActionEngine,
         ActionInvocation,
@@ -146,7 +149,7 @@ DEFAULT_TUTORIAL_SUN_DIRECTION = (0.0, 0.0, -1.0)
 DEFAULT_TUTORIAL_SUN_INTENSITY = 5.0
 _FRANKA_TUTORIAL_BASE_ROTATION = (0.0, 0.0, 180.0)
 _GRIPPER_CONTACT_LINK_PATTERN = (
-    r"(?:.*_)?(?:gripper_finger[12]_link_1|"
+    r"(?:.*_)?(?:gripper_finger[12]_link_1|finger[12]_link|"
     r"(?:left|right)_(?:outer|inner)_(?:finger(?:_pad)?|knuckle))"
 )
 TOP_DOWN_EEF_ROTATION = (
@@ -185,6 +188,8 @@ def create_tutorial_argument_parser(
     default_device: str | None = None,
     default_renderer: str | None = None,
     default_planner: TutorialPlanner = "trapezoidal",
+    robot_choices: Collection[str] = TUTORIAL_ROBOTS,
+    default_robot: str | None = "ur5",
 ) -> argparse.ArgumentParser:
     """Create a launcher parser with the shared atomic-tutorial switches.
 
@@ -195,6 +200,8 @@ def create_tutorial_argument_parser(
         default_renderer: Optional renderer override for the launcher arguments.
         default_planner: Planner selected when ``--planner`` is omitted. The
             shared default is deterministic ``trapezoidal`` timing.
+        robot_choices: Robot selectors owned by the calling walkthrough.
+        default_robot: Default selector; ``None`` lets the caller select by task.
 
     Returns:
         The configured argument parser.
@@ -230,9 +237,9 @@ def create_tutorial_argument_parser(
     )
     parser.add_argument(
         "--robot",
-        choices=TUTORIAL_ROBOTS,
-        default="ur5",
-        help="Robot construction to use (default: ur5).",
+        choices=robot_choices,
+        default=default_robot,
+        help="Robot construction to use (default: %(default)s).",
     )
     parser.add_argument(
         "--planner",
@@ -288,6 +295,15 @@ def create_tutorial_argument_parser(
                 "exceed --num_envs, in which case only the first ones replay."
             ),
         )
+        parser.add_argument(
+            "--trajectory_variant_mode",
+            choices=("joint_space", "task_space"),
+            default="joint_space",
+            help=(
+                "Generate the established joint-space variants or project "
+                "endpoint-preserving task-space deformations through trajectory IK."
+            ),
+        )
         variants = parser.add_argument_group(
             "advanced variant options",
             "Override the default augmentation policy. Omit them all and the "
@@ -305,6 +321,18 @@ def create_tutorial_argument_parser(
         variants.add_argument("--duration_scales", type=float, nargs="+", default=None)
         variants.add_argument("--dedup_tolerance", type=float, default=None)
         variants.add_argument("--no_redundancy", action="store_true")
+        variants.add_argument(
+            "--task_space_translation_m",
+            type=float,
+            default=0.04,
+            help="Maximum horizontal task-space path offset in metres.",
+        )
+        variants.add_argument(
+            "--task_space_rotation_rad",
+            type=float,
+            default=0.0,
+            help="Maximum root-frame task-space rotation-vector norm in radians.",
+        )
         variants.add_argument(
             "--variant_plot_dir",
             type=str,
@@ -479,6 +507,18 @@ def parse_trajectory_variant_arguments(
         parser.error("--joint_offset_scale must lie in (0, 1].")
     if args.dedup_tolerance is not None and not 0 < args.dedup_tolerance <= 1:
         parser.error("--dedup_tolerance must lie in (0, 1].")
+    for name in ("task_space_translation_m", "task_space_rotation_rad"):
+        value = getattr(args, name)
+        if not math.isfinite(value) or value < 0:
+            parser.error(f"--{name} must be finite and non-negative.")
+    if (
+        args.trajectory_variant_mode == "task_space"
+        and args.task_space_translation_m == 0
+        and args.task_space_rotation_rad == 0
+    ):
+        parser.error(
+            "task-space variants require a positive translation or rotation bound."
+        )
     # Variants are generated from one reference, so their count is independent
     # of how many of them a run replays in parallel. Only default the two to
     # each other; an explicit --trajectory_variants may exceed --num_envs, and
@@ -551,6 +591,62 @@ def _variant_arm_columns(robot: Robot, control_part: str) -> tuple[int, ...]:
     return tuple(robot_names.index(name) for name in solver_names)
 
 
+def _tutorial_trajectory_template(
+    compiled: CompiledTrajectory,
+    robot: Robot,
+    *,
+    phase_kinds: Sequence[Mapping[str, str]],
+    path_operators: tuple[str, ...],
+    retimable: Sequence[Collection[str]] = (),
+    include_retime: bool = False,
+    control_part: str = "arm",
+) -> tuple["TrajectoryTemplate", float]:
+    """Convert a compiled tutorial plan to the shared expansion contract."""
+    from embodichain.lab.sim.motion.expansion import TrajectoryPhase, TrajectoryTemplate
+
+    arm_columns = _variant_arm_columns(robot, control_part)
+    positions = compiled.trajectory.positions[0]
+    intervals = compiled.trajectory.dt[0].clone()
+    intervals[0] = 0
+    positions, intervals, remap = _drop_action_junctions(positions, intervals)
+    spacing = intervals[1:]
+    control_dt = float(spacing[0]) if spacing.numel() else 0.0
+    if control_dt <= 0 or bool((spacing - control_dt).abs().max() > 1e-6):
+        raise ValueError(
+            "Trajectory expansion needs a reference on a fixed command clock; "
+            "this action produced non-uniform arrival intervals."
+        )
+    phases = []
+    for index, kinds in enumerate(phase_kinds):
+        allowed = set(retimable[index]) if index < len(retimable) else set()
+        for name, kind in kinds.items():
+            segment = compiled.segment(index, name)
+            start, stop = int(remap[segment.start]), int(remap[segment.stop])
+            operators: tuple[str, ...] = ()
+            if kind == "free":
+                operators = path_operators + (
+                    ("retime",) if include_retime and name in allowed else ()
+                )
+            phases.append(
+                TrajectoryPhase(f"{index}_{name}", start, stop, kind, operators)
+            )
+    allowed_operators = path_operators + (("retime",) if include_retime else ())
+    return (
+        TrajectoryTemplate(
+            source_id="atomic_action_tutorial",
+            source_revision=f"waypoints{positions.shape[0]}",
+            template_id="tutorial_reference",
+            joint_names=tuple(robot.joint_names),
+            positions=positions,
+            dt=intervals,
+            phases=tuple(phases),
+            allowed_operators=allowed_operators,
+            controlled_joint_indices=arm_columns,
+        ),
+        control_dt,
+    )
+
+
 def expand_tutorial_trajectory_variants(
     compiled: CompiledTrajectory,
     robot: Robot,
@@ -584,47 +680,21 @@ def expand_tutorial_trajectory_variants(
     """
     from embodichain.lab.sim.motion.expansion import (
         SceneCase,
-        TrajectoryPhase,
-        TrajectoryTemplate,
         expand_trajectory_variants,
     )
 
     path_operators = ("joint_residual", "via_points", "nullspace_residual")
-    arm_columns = _variant_arm_columns(robot, control_part)
-    positions = compiled.trajectory.positions[0]
-    intervals = compiled.trajectory.dt[0].clone()
-    intervals[0] = 0
-    positions, intervals, remap = _drop_action_junctions(positions, intervals)
-    spacing = intervals[1:]
-    control_dt = float(spacing[0]) if spacing.numel() else 0.0
-    if control_dt <= 0 or bool((spacing - control_dt).abs().max() > 1e-6):
-        raise ValueError(
-            "Variant retiming needs a reference on a fixed command clock; this "
-            "action produced non-uniform arrival intervals."
-        )
-    phases = []
-    for index, kinds in enumerate(phase_kinds):
-        allowed = set(retimable[index]) if index < len(retimable) else set()
-        for name, kind in kinds.items():
-            segment = compiled.segment(index, name)
-            start, stop = int(remap[segment.start]), int(remap[segment.stop])
-            operators: tuple[str, ...] = ()
-            if kind == "free":
-                operators = path_operators + (("retime",) if name in allowed else ())
-            phases.append(
-                TrajectoryPhase(f"{index}_{name}", start, stop, kind, operators)
-            )
-    template = TrajectoryTemplate(
-        source_id="atomic_action_tutorial",
-        source_revision=f"waypoints{positions.shape[0]}",
-        template_id="tutorial_reference",
-        joint_names=tuple(robot.joint_names),
-        positions=positions,
-        dt=intervals,
-        phases=tuple(phases),
-        allowed_operators=path_operators + ("retime",),
-        controlled_joint_indices=arm_columns,
+    template, control_dt = _tutorial_trajectory_template(
+        compiled,
+        robot,
+        phase_kinds=phase_kinds,
+        path_operators=path_operators,
+        retimable=retimable,
+        include_retime=True,
+        control_part=control_part,
     )
+    arm_columns = template.controlled_joint_indices
+    positions = template.positions
     cfg = create_trajectory_variant_cfg(args)
     jacobians = None
     if cfg is None or cfg.factors.ik.enabled:
@@ -650,6 +720,141 @@ def expand_tutorial_trajectory_variants(
     )
 
 
+def expand_tutorial_task_space_variants(
+    compiled: CompiledTrajectory,
+    robot: Robot,
+    args: argparse.Namespace,
+    *,
+    phase_kinds: Sequence[Mapping[str, str]],
+    editable: Sequence[Collection[str]],
+    control_part: str = "arm",
+) -> "TrajectoryVariantSet":
+    """Generate distinct endpoint-preserving task-space variants for replay.
+
+    The nominal reference is row zero. Every later row samples horizontal TCP
+    deformation in the selected free phases and projects all editable samples
+    together through the production trajectory-IK API. Unlike the general
+    row-assignment helper, this showcase route refuses to reuse rows: requesting
+    nine variants either produces nine distinct trajectories or raises.
+
+    Args:
+        compiled: Compiled PickUp -> Place trajectory.
+        robot: Tutorial robot supplying FK, Jacobians, and joint limits.
+        args: Parsed tutorial arguments and task-space bounds.
+        phase_kinds: Semantic phase kinds for each compiled action.
+        editable: Free segment names that may receive task-space deformation.
+        control_part: Kinematic control part to project.
+
+    Returns:
+        Exactly ``args.trajectory_variants`` distinct replay rows.
+    """
+    from dataclasses import replace
+    from embodichain.lab.sim.motion.expansion import (
+        TASK_SPACE_RESIDUAL_OPERATOR,
+        SceneCase,
+        TrajectoryAugmentationCfg,
+        expand_trajectory_variants,
+    )
+
+    template, control_dt = _tutorial_trajectory_template(
+        compiled,
+        robot,
+        phase_kinds=phase_kinds,
+        path_operators=(),
+        control_part=control_part,
+    )
+    selected_names = {
+        f"{index}_{name}" for index, names in enumerate(editable) for name in names
+    }
+    known_free = {phase.phase_id for phase in template.phases if phase.kind == "free"}
+    if not selected_names or not selected_names <= known_free:
+        raise ValueError("editable task-space segments must name known free phases")
+    template = replace(
+        template,
+        phases=tuple(
+            (
+                replace(phase, allowed_operators=(TASK_SPACE_RESIDUAL_OPERATOR,))
+                if phase.phase_id in selected_names
+                else phase
+            )
+            for phase in template.phases
+        ),
+        allowed_operators=(TASK_SPACE_RESIDUAL_OPERATOR,),
+    )
+    solver = robot.get_solver(control_part)
+    if solver is None:
+        raise RuntimeError(f"No kinematic solver is available for {control_part!r}.")
+
+    def kinematics(qpos: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        poses = solver.get_fk(qpos).to(qpos)
+        tcp = torch.as_tensor(solver.get_tcp(), device=qpos.device, dtype=qpos.dtype)
+        return poses, solver.get_jacobian(
+            qpos,
+            locations=tcp[:3, 3],
+            jac_type="full",
+        ).to(qpos)
+
+    # Controller columns belong to the host and may use an authored command
+    # range wider than raw simulated state limits. They are copied exactly.
+    limits = robot.get_qpos_limits()[0].to(template.positions).clone()
+    uncontrolled = sorted(
+        set(range(template.positions.shape[1])) - set(template.controlled_joint_indices)
+    )
+    if uncontrolled:
+        copied = template.positions[:, uncontrolled]
+        margin = torch.finfo(copied.dtype).eps
+        limits[uncontrolled, 0] = torch.minimum(
+            limits[uncontrolled, 0], copied.min(0).values - margin
+        )
+        limits[uncontrolled, 1] = torch.maximum(
+            limits[uncontrolled, 1], copied.max(0).values + margin
+        )
+    cfg = TrajectoryAugmentationCfg.from_mapping(
+        {
+            "seed": args.variant_seed or 0,
+            "factors": {
+                "task_space": {
+                    "enabled": True,
+                    "frame_id": f"{control_part}_tcp",
+                    "translation_axes": [True, True, False],
+                    "max_translation_m": args.task_space_translation_m,
+                    "max_rotation_rad": args.task_space_rotation_rad,
+                    "ik": {
+                        "max_iterations": 32,
+                        "damping": 0.05,
+                        "step_size": 0.5,
+                        "pos_eps": 1e-3,
+                        "rot_eps": 1e-3,
+                    },
+                }
+            },
+            "coverage": {"joint_dedup_normalized_tol": args.dedup_tolerance or 1e-4},
+        }
+    )
+    result = expand_trajectory_variants(
+        template,
+        case=SceneCase(
+            "atomic_action_tutorial",
+            "tutorial_initial_state",
+            str(robot.uid),
+            "place",
+            getattr(args, "robot", "ur5"),
+        ),
+        count=args.trajectory_variants,
+        cfg=cfg,
+        joint_limits=limits,
+        control_dt=control_dt,
+        kinematics=kinematics,
+        max_attempts=max(16 * args.trajectory_variants, args.trajectory_variants),
+    )
+    if len(result.variants) != args.trajectory_variants:
+        raise RuntimeError(
+            f"Only {len(result.variants)} of {args.trajectory_variants} distinct task-space variants "
+            f"survived {result.attempted} attempts: {result.rejected}."
+        )
+    return result
+
+
 def log_trajectory_variant_diagnostics(
     result: TrajectoryVariantSet, requested: int
 ) -> None:
@@ -662,7 +867,7 @@ def log_trajectory_variant_diagnostics(
     batch = result.candidates
     for row, variant in enumerate(result.variants):
         logger.log_info(
-            f"Trajectory variant {row}: operator={variant.spatial_operator}, "
+            f"Trajectory variant {row}: operator={_variant_operator_name(variant)}, "
             f"duration_scale={variant.duration_scale}, "
             f"profile={variant.timing_profile}, "
             f"samples={int(batch.valid_length[row])}, "
@@ -740,6 +945,26 @@ def _contact_phase_drift(result) -> float:
     return worst
 
 
+def _free_phase_deviation(result) -> float:
+    """Return the largest free-phase deviation from the reference trajectory."""
+    batch = result.candidates
+    reference = {phase.phase_id: phase for phase in batch.phases[0]}
+    worst = 0.0
+    for row in range(1, len(result.variants)):
+        for phase in batch.phases[row]:
+            source = reference.get(phase.phase_id)
+            if source is None or phase.kind != "free":
+                continue
+            variant_window = batch.positions[row, phase.start_index : phase.stop_index]
+            reference_window = batch.positions[
+                0, source.start_index : source.stop_index
+            ]
+            if variant_window.shape != reference_window.shape:
+                continue
+            worst = max(worst, float((variant_window - reference_window).abs().max()))
+    return worst
+
+
 def save_variant_joint_plot(
     result: TrajectoryVariantSet, robot: Robot, path: str | pathlib.Path
 ) -> None:
@@ -766,6 +991,7 @@ def save_variant_joint_plot(
     figure, axes = plt.subplots(rows, 3, figsize=(13, 3.1 * rows), sharex=True)
     flat = axes.flatten()
     drift = _contact_phase_drift(result)
+    free_deviation = _free_phase_deviation(result)
     styles, groups = _variant_styles(result)
     for position, joint in enumerate(arm):
         axis = flat[position]
@@ -827,8 +1053,8 @@ def save_variant_joint_plot(
                 title_fontsize=9,
             )
     figure.suptitle(
-        "Trajectory variants: curves separate between waypoints and rejoin inside "
-        f"the shaded contact phases (max contact deviation {drift:.2e} rad)",
+        f"Trajectory variants: max free-phase joint deviation {free_deviation:.2f} "
+        f"rad; max shaded contact-phase deviation {drift:.2e} rad",
         fontsize=11,
     )
     figure.tight_layout(rect=(0, 0.1, 1, 0.97))
@@ -897,6 +1123,18 @@ def _timing_key(variant) -> str:
     return f"{variant.timing_profile} x{variant.duration_scale:g}"
 
 
+def _variant_operator_name(variant: TrajectoryVariant) -> str:
+    """Keep tool-path and combined factors visible in plot/log provenance."""
+    operator = variant.spatial_operator
+    if variant.task_space:
+        return (
+            "task_space_residual"
+            if operator == "none"
+            else f"task_space_residual+{operator}"
+        )
+    return operator
+
+
 def _variant_styles(result) -> tuple[list, dict | None]:
     """Return per-variant plot keywords, grouping the legend when crowded.
 
@@ -925,7 +1163,7 @@ def _variant_styles(result) -> tuple[list, dict | None]:
                 "label": (
                     "reference"
                     if variant.is_nominal
-                    else f"{variant.spatial_operator} {_timing_key(variant)}"
+                    else f"{_variant_operator_name(variant)} {_timing_key(variant)}"
                 ),
             }
             for variant in result.variants
@@ -934,13 +1172,13 @@ def _variant_styles(result) -> tuple[list, dict | None]:
 
     timings = sorted({_timing_key(variant) for variant in result.variants})
     dashes = dict(zip(timings, _timing_linestyles(len(timings))))
-    operators = sorted({variant.spatial_operator for variant in result.variants})
+    operators = sorted({_variant_operator_name(variant) for variant in result.variants})
     styles = []
     for variant in result.variants:
         nominal = variant.is_nominal
         styles.append(
             {
-                "color": OPERATOR_COLOURS.get(variant.spatial_operator),
+                "color": OPERATOR_COLOURS.get(_variant_operator_name(variant)),
                 "linewidth": 2.6 if nominal else 0.9,
                 "linestyle": "-" if nominal else dashes[_timing_key(variant)],
                 "alpha": 1.0 if nominal else 0.35,
@@ -1606,7 +1844,7 @@ def get_hand_open_close_qpos(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Return open and closed positions for a tutorial parallel gripper.
 
-    PGI hands use their lower position limit as the open command. A Robotiq
+    PGI and PGC hands use their lower position limit as the open command. A Robotiq
     2F-140 hand is recognized from its six expanded finger/knuckle joint names;
     its open command is zero and a scalar close magnitude is negated for the
     three knuckle joints according to the URDF mimic directions. Supplying a
@@ -2204,7 +2442,7 @@ def start_auto_play_recording(
         return False
 
     # Frame all requested variants rather than recording only reference row 0.
-    if getattr(args, "run", None) is not None and args.num_envs > 1:
+    if args.num_envs > 1:
         offsets = sim.arena_offsets.detach().cpu()
         center = (offsets.max(dim=0).values + offsets.min(dim=0).values) * 0.5
         eye, target, up = (
@@ -2577,6 +2815,7 @@ __all__ = [
     "save_variant_joint_plot",
     "trajectory_variant_rows",
     "log_trajectory_variant_diagnostics",
+    "expand_tutorial_task_space_variants",
     "expand_tutorial_trajectory_variants",
     "create_trajectory_variant_cfg",
     "parse_trajectory_variant_arguments",

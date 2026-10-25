@@ -5,7 +5,7 @@
 ```{currentmodule} embodichain.lab.sim.atomic_actions
 ```
 
-EmbodiChain ships thirteen built-in action implementations with stable skill IDs;
+EmbodiChain ships built-in action implementations with stable skill IDs;
 `AtomicActionEngine` creates and registers a fresh instance of every built-in by
 default. Applications select them by stable skill ID rather than registering
 routine instances themselves.
@@ -36,8 +36,9 @@ multi-stage in-hand manipulation require additional command types and segments.
 
 ## Visual catalog
 
-The animations below are the focused simulator demos under
-`scripts/tutorials/atomic_action/`.
+The animations below are the runnable simulator demonstrations under
+`examples/sim/atomic_action/`. The teaching walkthroughs are described in
+{doc}`/tutorial/atomic_actions`.
 
 ::::{grid} 1 2 2 2
 :gutter: 2
@@ -366,7 +367,7 @@ Use an explicit pose for a fixed target, `SceneEntityPose` for a tracked target,
 or `(B, N, 4, 4)` for intermediate waypoints. The action does not command an end
 effector/hand resource.
 
-**Example:** `scripts/tutorials/atomic_action/move_end_effector.py`
+**Example:** `examples/sim/atomic_action/move_end_effector.py`
 
 (builtin-move-joints)=
 
@@ -403,7 +404,7 @@ explicit_goal = JointPositionGoal(target=home_qpos)
 named_goal = JointPositionGoal(target="home")
 ```
 
-**Example:** `scripts/tutorials/atomic_action/move_joints.py`
+**Example:** `examples/sim/atomic_action/move_joint.py`
 
 (builtin-pick-up)=
 
@@ -473,10 +474,10 @@ generation or trajectory determinism. Explicit goal grasps and
 `ObjectSemantics.entity` without an ID is a deprecated compatibility path. Its
 live pose does not create an automatic scene dependency.
 
-**Example:** `scripts/tutorials/atomic_action/pickup.py` currently exercises the
+**Example:** `examples/sim/atomic_action/pickup.py` currently exercises the
 deprecated entity-only fallback. For canonical snapshot grounding and moving
 target recovery, see
-`scripts/tutorials/atomic_action/moving_target_recovery.py`.
+`examples/sim/atomic_action/moving_target_recovery.py`.
 
 ### Picking articulated targets
 
@@ -531,7 +532,7 @@ Set `root_props=ArticulationRootPropertiesCfg(fixed_base=False)`. Left at the
 default, `plan_success` still reports success and the whole trajectory replays
 while the object never moves, so verify the target pose rather than the plan.
 
-`scripts/tutorials/atomic_action/pickup_rubiks_cube.py` demonstrates both on a
+`examples/sim/atomic_action/pickup_rubiks_cube.py` demonstrates both on a
 Rubik's cube whose `top_turn` joint is locked with a stiff position drive so the
 two layers grasp as one body. Grasps are sampled from the `lower_two_layers`
 link, the joint's parent.
@@ -579,7 +580,7 @@ and `(B, 3)` respectively. Zero or non-finite axes are
 rejected, and exactly opposite axes use a deterministic 180-degree rotation
 rather than an unstable cross-product direction.
 
-**Example:** `scripts/tutorials/atomic_action/axis_align.py` provides
+**Example:** `examples/sim/atomic_action/axis_align.py` provides
 `--alignment upright` (align object-local X to world Z) and
 `--alignment horizontal_align` (align object-local X to world Y).
 
@@ -618,7 +619,9 @@ sampling remains in `MotionPolicy`. In a vectorized batch, rows
 where another manipulator holds the same semantic object or live entity are
 marked unsuccessful and held in place.
 
-**Example:** `scripts/tutorials/atomic_action/move_held_object.py`
+**Examples:** `examples/sim/atomic_action/move_held_object.py` provides the fixed
+cube scene (`--skill move_held_object`);
+`examples/sim/atomic_action/move_held_object_cup.py` preserves the paper-cup sequence.
 
 (builtin-pour)=
 
@@ -649,7 +652,7 @@ planner can chain the outbound and return legs.
 | Motion | rotate by `rotate_angle`, then reverse by the same angle, with the hand held at `grasp` |
 | Effect | none; the existing attachment is preserved |
 
-**Example:** `scripts/tutorials/atomic_action/pour.py` compiles a horizontal
+**Example:** `examples/sim/atomic_action/pour.py` compiles a horizontal
 `PickUp` followed by `Pour`.
 
 (builtin-push-object)=
@@ -724,7 +727,7 @@ The bound `primary.grasp` endpoint must provide `open` and `grasp`. Important
 | `cartesian_waypoint_count` | Fixed-orientation translation keyframes per segment |
 | `preserve_current_object_orientation` | Keep the observed object orientation while using the target translation |
 
-**Example:** `scripts/tutorials/atomic_action/place.py`
+**Example:** `examples/sim/atomic_action/place.py`
 
 (builtin-assemble)=
 
@@ -748,7 +751,7 @@ temporarily falls back to the affordance's `base_object_entity` with a
 deprecation warning; that fallback is not a scene dependency. Planning declares
 the same detach effect as a normal place.
 
-**Example:** `scripts/tutorials/atomic_action/assemble.py` currently exercises
+**Example:** `examples/sim/atomic_action/assemble.py` currently exercises
 the legacy `base_object_entity` fallback and is not the canonical `base_pose`
 form. It remains a compatibility example until the registry-backed tutorial
 migration.
@@ -794,7 +797,7 @@ generic `ActionBinding`, and the action keeps the gripper closed for all arm
 motion segments. Applications that require force/contact confirmation must
 verify it externally.
 
-**Example:** `scripts/tutorials/atomic_action/press.py` loads
+**Example:** `examples/sim/atomic_action/press.py` loads
 `Microwave/microwave.urdf` and targets `button_link`, whose parent prismatic
 joint is `button_joint`. It requests `MotionPolicy.sample_count=256` with
 `PressOptions.hand_interp_steps=12`, then holds the final pose for 256
@@ -862,7 +865,7 @@ translation axis belongs to `SlideAffordance`; the bound `primary.grasp`
 endpoint must provide `open` and `grasp`. Reach, pull/push, and push-return use
 axis-aligned Cartesian samples rather than sparse joint-space endpoints.
 
-**Example:** `scripts/tutorials/atomic_action/slide.py`
+**Example:** `examples/sim/atomic_action/slide.py`
 plans and replays a pull first, then replans a push from the drawer's measured
 post-pull link pose.
 
@@ -918,7 +921,7 @@ segment start plus one for every configured door-arc keyframe; the full motion
 policy therefore needs
 `sample_count >= 2 * hand_interp_steps + door_waypoint_count + 7`.
 
-**Example:** `scripts/tutorials/atomic_action/open_door.py` configures only the
+**Example:** `examples/sim/atomic_action/open_door.py` configures only the
 `handle_link` target in `Microwave/microwave.urdf`. Automatic traversal resolves
 `door_hinge` through `door_handle_fixed_joint`. Its absolute `--open_angle`
 value is normalized against the resolved hinge limits and passed as the goal's
@@ -981,7 +984,7 @@ completion therefore means commanded motion completion only. Applications that
 need semantic success must observe button/contact or articulation state and
 verify it outside the side-effect-free planner.
 
-**Example:** `scripts/tutorials/atomic_action/twist.py` loads
+**Example:** `examples/sim/atomic_action/twist.py` loads
 `Microwave/microwave.urdf` and targets `knob_link`, whose parent revolute joint
 is `knob_joint`. It requests `MotionPolicy.sample_count=256` with
 `TwistOptions.hand_interp_steps=20`, then holds the final pose for 256
@@ -1040,7 +1043,7 @@ corresponding participant slots. Coordinated dual-arm planning with
 supported by the cuRobo backend; use the supported IK/interpolation path for
 this primitive.
 
-**Example:** `scripts/tutorials/atomic_action/coordinated_pickment.py`
+**Example:** `examples/sim/atomic_action/coordinated_pickment.py`
 
 (builtin-coordinated-placement)=
 
@@ -1074,7 +1077,7 @@ The placing/support motion and grasp endpoints come exclusively from the
 corresponding participant slots. The same cuRobo restriction as coordinated
 pickment applies to dual-arm `strategy="motion_gen"` planning.
 
-**Example:** `scripts/tutorials/atomic_action/coordinated_placement.py`
+**Example:** `examples/sim/atomic_action/coordinated_placement.py`
 
 (builtin-hand-over)=
 
@@ -1137,7 +1140,7 @@ interval between them as a likely path- or collision-planning failure.
 As with the other coordinated primitive, cuRobo does not currently support its
 dual-arm `strategy="motion_gen"` path.
 
-**Example:** `scripts/tutorials/atomic_action/hand_over.py`
+**Example:** `examples/sim/atomic_action/handover.py`
 
 ## Running the demos
 
@@ -1146,9 +1149,9 @@ keyboard prompts and combine it with `--headless --device cpu` for a headless
 run that records video under `outputs/videos`:
 
 ```bash
-python scripts/tutorials/atomic_action/move_end_effector.py --headless --auto_play --device cpu
-python scripts/tutorials/atomic_action/pickup.py --headless --auto_play --device cpu
-python scripts/tutorials/atomic_action/hand_over.py --headless --auto_play --device cpu
+embodichain run-example sim/atomic_action/move_end_effector --headless --auto_play --device cpu
+embodichain run-example sim/atomic_action/pickup --headless --auto_play --device cpu
+embodichain run-example sim/atomic_action/handover --headless --auto_play --device cpu
 ```
 
 The scripts share a `--planner` selector for the non-neural backends

@@ -1,5 +1,5 @@
 embodichain.learning
-=============
+====================
 .. automodule:: embodichain.learning
 
    .. rubric:: Submodules
@@ -10,7 +10,6 @@ embodichain.learning
       models
       rl
       sl
-      dynamics
 
 Reinforcement Learning
 ----------------------
@@ -60,6 +59,8 @@ Shared trainable models
 builders. RL-specific ``Policy``, ``ActorCritic``, ``ActorOnly`` and policy
 registration/builders remain in ``learning.rl.policies``. Shared components and
 standalone IK layers do not import RL, simulation or TensorDict.
+Concrete model families and their adapters are documented in the
+:doc:`official model library </api_reference/model_catalogs>`.
 
 .. toctree::
    :maxdepth: 1

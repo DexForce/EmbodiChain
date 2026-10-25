@@ -255,6 +255,23 @@ class ExpansionSession:
                 factor.band_edges, reference=manipulability_reference
             )
 
+    def manipulability_reference(self, case: SceneCase) -> float | None:
+        """Return the fixed guidance normalizer for a registered initial state.
+
+        Args:
+            case: Exact scene and initial-state identity registered by the host.
+
+        Returns:
+            The positive reference score, or ``None`` when banded coverage is off.
+
+        Raises:
+            ValueError: If the case has not been registered with these conditions.
+        """
+        registered = self._cases.get((case.scene_case_id, case.initial_state_id))
+        if registered is None or registered[0] != case:
+            raise ValueError("manipulability reference requires a registered case")
+        return registered[3]
+
     def expansion_generator(
         self,
         case_id: str,
