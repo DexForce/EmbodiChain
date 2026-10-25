@@ -93,8 +93,8 @@ def test_repository_manifest_selectors_resolve() -> None:
             "tests/lab/scripts/test_run_task.py",
         ),
         (
-            "scripts/tutorials/atomic_action/pickup.py",
-            "tests/sim/atomic_actions/test_core.py",
+            "scripts/tutorials/atomic_action/single_arm.py",
+            "tests/visualization/test_example_tutorial_coverage.py",
         ),
         (
             "scripts/tutorials/visualization/viser_scene.py",

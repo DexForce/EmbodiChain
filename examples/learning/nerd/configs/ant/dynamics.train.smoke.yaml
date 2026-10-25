@@ -1,0 +1,36 @@
+# Dynamics workflow configuration; not a runnable Gym deployment.
+dataset: ../../../../../outputs/dynamics/ant/smoke/data
+output_dir: ../../../../../outputs/dynamics/ant/smoke/train
+model:
+  input_dims:
+    states_embedding: 29
+    contact_normals: 75
+    contact_points_1: 75
+    contact_depths: 25
+    joint_f: 8
+    gravity_dir: 3
+  output_dim: 29
+  n_embd: 24
+  n_layer: 1
+  n_head: 3
+  block_size: 32
+  history_length: 10
+  head_hidden_dims:
+  - 16
+  bias: false
+  dropout: 0.0
+  normalize_input: true
+  normalize_output: true
+train:
+  total_steps: 100
+  batch_size: 16
+  learning_rate: 0.001
+  final_learning_rate: 0.0001
+  max_grad_norm: 1.0
+  seed: 0
+  device: cpu
+  validation_interval: 25
+  validation_batches: null
+  checkpoint_interval: 25
+  lr_update_interval: 1
+  lr_offset: 0

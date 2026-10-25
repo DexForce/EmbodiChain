@@ -108,14 +108,16 @@ def describe_trajectory(
     ranges: list[tuple[str, str, int, int]] = []
     cursor = 0
     for phase in phases:
-        if phase.start_index < cursor or phase.stop_index > q.shape[0]:
+        if (
+            phase.start_index < cursor - int(cursor > 0)
+            or phase.stop_index > q.shape[0]
+        ):
             raise ValueError("Actual phase ranges must be ordered and in bounds.")
-        if phase.start_index > cursor:
-            ranges.append(
-                (f"gap_{len(ranges)}", "unlabelled", cursor, phase.start_index)
-            )
-        ranges.append((phase.phase_id, phase.kind, phase.start_index, phase.stop_index))
-        cursor = phase.stop_index
+        start = max(cursor, phase.start_index)
+        if start > cursor:
+            ranges.append((f"gap_{len(ranges)}", "unlabelled", cursor, start))
+        ranges.append((phase.phase_id, phase.kind, start, phase.stop_index))
+        cursor = max(cursor, phase.stop_index)
     if cursor < q.shape[0]:
         ranges.append((f"gap_{len(ranges)}", "unlabelled", cursor, q.shape[0]))
 

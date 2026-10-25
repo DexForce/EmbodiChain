@@ -1,0 +1,8 @@
+# Dynamics workflow configuration; not a runnable Gym deployment.
+mode: offline
+dataset: ../../../../../outputs/dynamics/cartpole/full/data
+model: ../../../../../outputs/dynamics/cartpole/full/export
+split: test
+batch_size: 512
+device: cuda:0
+output: ../../../../../outputs/dynamics/cartpole/full/offline.json

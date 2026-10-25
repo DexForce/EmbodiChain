@@ -14,8 +14,10 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
 
 import os
+from typing import ClassVar
 import open3d as o3d
 from embodichain.data.dataset import EmbodiChainDataset
 from embodichain.data.constants import (
@@ -24,6 +26,29 @@ from embodichain.data.constants import (
 )
 
 robot_assets = "robot_assets"
+
+__all__ = [
+    "CobotMagicArm",
+    "RidgeBack",
+    "UnitreeH1",
+    "UnitreeH1Usd",
+    "ABB",
+    "Motoman",
+    "KUKA",
+    "Fanuc",
+    "UniversalRobots",
+    "Rokae",
+    "Franka",
+    "Agile",
+    "Hans",
+    "Aubo",
+    "RainbowY1",
+    "CartPole",
+    "ARX5",
+    "AlohaMini",
+    "TianjiMarvin",
+    "FlexivRizon4S",
+]
 
 
 class CobotMagicArm(EmbodiChainDataset):
@@ -622,3 +647,30 @@ class TianjiMarvin(EmbodiChainDataset):
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
+
+
+class FlexivRizon4S(EmbodiChainDataset):
+    """Download the Apache-2.0 Flexiv Rizon 4S description from Hugging Face.
+
+    The pinned official URDF, meshes, original parameter files, license and
+    provenance share the standard locked download and extraction cache.
+    The normal data registry resolves ``FlexivRizon4S/rizon4s.urdf``.
+
+    Args:
+        data_root: Optional root for the standard locked asset cache.
+    """
+
+    cache_prefix: ClassVar[str] = "FlexivRizon4S_v1"
+    """Revision-specific extraction identity used by the data CLI."""
+
+    def __init__(self, data_root: str | None = None) -> None:
+        filename = f"{robot_assets}/FlexivRizon4S_v1.zip"
+        hub_prefix = (
+            "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/main/"
+        )
+        urls = [f"{EMBODICHAIN_DOWNLOAD_PREFIX}{filename}"]
+        if EMBODICHAIN_DOWNLOAD_PREFIX != hub_prefix:
+            urls.append(f"{hub_prefix}{filename}")
+        descriptor = o3d.data.DataDescriptor(urls, "5464472433d57328e7711e2a94b46279")
+        root = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+        super().__init__(self.cache_prefix, descriptor, root)

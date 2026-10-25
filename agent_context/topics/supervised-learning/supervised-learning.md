@@ -1,8 +1,10 @@
 # Supervised learning (SL)
 
 `embodichain.learning.sl` owns common supervised optimizer updates and offline
-training orchestration. Models remain in `learning.models`; numerical state and
-geometry operations remain in `compute`; source storage belongs to data adapters.
+training orchestration. Shared MLPs and feature normalization remain in
+`learning.models`; concrete model families and their model-specific adapters live
+in the bundled `embodichain_models` extension. Generic numerical state and geometry
+operations remain in `compute`; source storage belongs to data adapters.
 
 ## Entry points
 
@@ -22,6 +24,10 @@ geometry operations remain in `compute`; source storage belongs to data adapters
   `distributed_run(device)` provides the same scoped setup for programmatic
   callers; it cleans up only groups it creates. Launch commands and a complete
   masked-regression factory live in `examples/learning/sl_ddp/`.
+- The [NeRD recipe](../neural-dynamics/neural-dynamics.md) is an installable factory
+  at `embodichain_models.dynamics.nerd.sl_recipe:build_supervised_trainer`.
+  The core does not import the model extension or example helpers. The NeRD
+  showcase's default `train` command uses this same common recipe.
 
 Objectives own loss masks, normalization, integration and multi-step graph
 construction. The optimizer does not infer action semantics or detach histories.
@@ -32,15 +38,18 @@ replacement, so samples may overlap. All ranks call fitting, saving and recovery
 only rank 0 writes artifacts or runs validation through the unwrapped model.
 Schema, action/frame/timestep and numerical-policy identifiers belong in each
 recipe's checkpoint signature. Tensor sources additionally bind content identity.
-Fresh runs require artifact-free output directories. Restoring an older
-checkpoint into a directory with later metric history requires a fresh output
-directory so prior results are retained.
 Distributed checkpoints retain each rank's RNG, sampler and buffers and require
 the same world size for exact recovery. Inside rank 0's validation callback only,
 a save uses the previously gathered committed-update snapshot without a new
 collective; ordinary save calls require every rank to participate.
-Validation callbacks use frozen models and restored RNG; only development data
-may select checkpoints. Acquisition and producer lifecycles remain application-owned.
+`learning/sl/_artifacts.py` owns run identities and output-history admission for
+both SL and historical NeRD trainers. A fresh run claims `run.json`; resuming an
+occupied directory requires the checkpoint's matching run identity. Checkpoints
+without an identity require an artifact-free destination. Newer or incomplete
+metric history is retained and requires a fresh resume destination.
+Validation callbacks preserve RNG, sampling state and model buffers, including
+checkpoints saved inside a callback. Only development data may select checkpoints.
+Acquisition and producer lifecycles remain application-owned.
 
 ## Validation
 

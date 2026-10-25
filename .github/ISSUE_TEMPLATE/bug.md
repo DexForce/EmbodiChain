@@ -2,6 +2,7 @@
 name: Bug Report
 about: Submit a bug report
 title: "[Bug Report] Bug title"
+labels: bug
 
 ---
 

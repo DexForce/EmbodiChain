@@ -100,6 +100,8 @@ def test_main_distribution_stages_robot_package_without_legacy_modules(tmp_path)
         "embodichain_robots/_catalog.py",
         "embodichain_robots/franka_panda.py",
         "embodichain_robots/ur_robot.py",
+        "embodichain_robots/flexiv_rizon4s.py",
+        "embodichain_robots/so101.py",
         "embodichain_robots/dexforce_w1/cfg.py",
         "embodichain_robots/dexforce_w1/types.py",
         "embodichain/lab/sim/robots/dual_arm.py",

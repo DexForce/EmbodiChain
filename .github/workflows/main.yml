@@ -569,6 +569,7 @@ jobs:
               "embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml",
               "embodichain_robots/__init__.py",
               "embodichain_robots/_catalog.py",
+              "embodichain_models/__init__.py",
           }
           with ZipFile(wheels[0]) as wheel:
               members = set(wheel.namelist())
@@ -598,7 +599,15 @@ jobs:
               member
               for member in members
               if not member.startswith(
-                  ("embodichain/", "embodichain_tasks/", "embodichain_robots/", dist_info)
+                  (
+                      "embodichain/",
+                      "embodichain_tasks/",
+                      "embodichain_robots/",
+                      "embodichain_benchmarks/",
+                      "embodichain_models/",
+                      f"embodichain-{version}.data/data/share/embodichain/examples/",
+                      dist_info,
+                  )
               )
               or "__pycache__" in member
               or member.endswith((".pyc", ".pyo"))

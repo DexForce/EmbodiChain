@@ -27,6 +27,7 @@ from typing import Any
 import numpy as np
 import torch
 from embodichain.utils import configclass
+from ._artifacts import _RunArtifacts
 from .distributed import _DistributedContext
 from .learner import SupervisedLearner
 from .sources import SupervisedSource
@@ -105,11 +106,8 @@ class SupervisedTrainer:
             self.cfg.seed + self._context.rank
         )
         self.output = Path(self.cfg.output_dir)
-        self.output.mkdir(parents=True, exist_ok=True)
+        self._artifacts = _RunArtifacts(self.output)
         self.learner.model.to(self.cfg.device)
-        self._owned_artifacts: dict[Path, tuple[int, int, int, int]] = {}
-        self._fit_started = False
-        self._restored = False
         self._distributed_prepared = False
         self._evaluation_snapshot: list[Any] | None = None
 
@@ -180,23 +178,12 @@ class SupervisedTrainer:
         def admit_output() -> None:
             if end < self.learner.num_updates:
                 raise ValueError("stop_after precedes the restored update cursor")
-            if self._fit_started or self._restored:
-                return
-            artifacts = [
-                self.output / "metrics.jsonl",
-                self.output / "last.pt",
-                *self.output.glob("step_*.pt"),
-            ]
-            for path in artifacts:
-                if path.exists() and self._owned_artifacts.get(
-                    path.resolve()
-                ) != self._artifact_stamp(path):
-                    raise FileExistsError(
-                        "SL output contains another run; restore a checkpoint or use a fresh output directory"
-                    )
+            self._artifacts.claim()
+            self._artifacts.validate_history(
+                self.learner.num_updates, key="num_updates"
+            )
 
         self._context.root(admit_output, "output admission")
-        self._fit_started = True
         metrics = {}
         while self.learner.num_updates < end:
             candidate = torch.Generator(device="cpu")
@@ -280,6 +267,7 @@ class SupervisedTrainer:
                 with torch.no_grad():
                     for name, value in self.learner.model.named_buffers():
                         value.copy_(buffers[name])
+                self.sampler.set_state(snapshot[0]["sampler"])
                 self._restore_rng(rng)
                 self.learner.model.train(was_training)
 
@@ -300,11 +288,6 @@ class SupervisedTrainer:
         torch.set_rng_state(state["torch"])
         if state["cuda"] is not None:
             torch.cuda.set_rng_state(state["cuda"], self.cfg.device)
-
-    @staticmethod
-    def _artifact_stamp(path: Path) -> tuple[int, int, int, int]:
-        stat = path.stat()
-        return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns
 
     def save(self, path: str | Path) -> None:
         """Atomically save a complete committed learning and sampling boundary.
@@ -329,9 +312,11 @@ class SupervisedTrainer:
         self, path: str | Path, rank_states: list[Any] | None
     ) -> None:
         path = Path(path)
+        self._artifacts.claim()
         path.parent.mkdir(parents=True, exist_ok=True)
         state = {
             "version": 2 if self._context.enabled else 1,
+            "run_id": self._artifacts.run_id,
             "learner": self.learner.state_dict(),
             "sampler": self.sampler.get_state(),
             "rng": self._rng_state(),
@@ -364,7 +349,6 @@ class SupervisedTrainer:
         temporary = path.with_suffix(path.suffix + ".tmp")
         torch.save(state, temporary)
         temporary.replace(path)
-        self._owned_artifacts[path.resolve()] = self._artifact_stamp(path)
 
     def resume(self, path: str | Path) -> None:
         """Restore the same run after validating data, recipe and configuration.
@@ -382,6 +366,15 @@ class SupervisedTrainer:
         self._context.run(
             lambda: self._validate_checkpoint(state), "checkpoint compatibility"
         )
+
+        def admit_resume() -> str:
+            run_id = self._artifacts.validate_resume(state.get("run_id"))
+            self._artifacts.validate_history(
+                state["learner"]["num_updates"], key="num_updates"
+            )
+            return run_id
+
+        run_id = self._context.root(admit_resume, "resume output admission")
         # Initial DDP broadcasts must happen before restoring rank-local buffers.
         self._prepare_distributed()
 
@@ -400,7 +393,7 @@ class SupervisedTrainer:
             self._restore_rng(local["rng"])
 
         self._context.run(restore, "checkpoint restore")
-        self._restored = True
+        self._artifacts.adopt_resume(run_id)
 
     def _validate_checkpoint(self, state: Mapping[str, Any]) -> None:
         distributed = state.get("distributed", {})
@@ -430,21 +423,6 @@ class SupervisedTrainer:
         )
         if state.get("scheduler_type") != scheduler_type:
             raise ValueError("Supervised checkpoint scheduler type differs")
-        metrics_path = self.output / "metrics.jsonl"
-        if metrics_path.exists():
-            last_line = ""
-            with metrics_path.open() as handle:
-                for line in handle:
-                    if line.strip():
-                        last_line = line
-            if (
-                last_line
-                and json.loads(last_line)["num_updates"]
-                > state["learner"]["num_updates"]
-            ):
-                raise ValueError(
-                    "SL output history is ahead of this checkpoint; use a fresh output directory"
-                )
         self.learner._validate_state_dict(state["learner"])
         if self._context.enabled:
             rank_states = distributed["rank_states"]

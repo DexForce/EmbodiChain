@@ -53,6 +53,7 @@ def installed_benchmark(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path,
         "extensions/embodichain_robots",
         "extensions/embodichain_tasks",
         "extensions/embodichain_benchmarks",
+        "extensions/embodichain_models",
     ):
         shutil.copytree(root / name, source / name, ignore=ignore)
     built = subprocess.run(

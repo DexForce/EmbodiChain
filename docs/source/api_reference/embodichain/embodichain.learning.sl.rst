@@ -220,3 +220,11 @@ embodichain.learning.sl.workflow
 .. autofunction:: train_from_config
 
 .. autofunction:: cli
+
+Model-specific recipes
+----------------------
+
+Concrete models own their physical codecs, objectives and source adapters in
+the :doc:`official model library </api_reference/model_catalogs>`. The NeRD
+recipe connects committed trajectory windows to this common trainer without
+loading simulation or requiring the example runner.
