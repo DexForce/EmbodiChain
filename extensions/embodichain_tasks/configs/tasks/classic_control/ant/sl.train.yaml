@@ -1,0 +1,45 @@
+# Standalone SL recipe; run from the repository root after downloading data.
+factory: embodichain.learning.dynamics.sl_recipe:build_supervised_trainer
+model:
+  input_dims:
+    states_embedding: 29
+    contact_normals: 75
+    contact_points_1: 75
+    contact_depths: 25
+    joint_f: 8
+    gravity_dir: 3
+  output_dim: 29
+  n_embd: 384
+  n_layer: 6
+  n_head: 12
+  block_size: 32
+  history_length: 10
+  head_hidden_dims:
+  - 64
+  bias: false
+  dropout: 0.0
+  normalize_input: true
+  normalize_output: true
+  attention_backend: math
+data:
+  path: outputs/datasets/neural_dynamics/nerd/ant/v1
+  resident_cache_bytes: 4294967296
+objective:
+  include_prefix: false
+  numerical_profile: reference
+optimizer:
+  learning_rate: 0.001
+  final_learning_rate: 0.0001
+  lr_update_interval: 500
+  lr_offset: 1
+  max_grad_norm: 1.0
+trainer:
+  total_updates: 1000
+  batch_size: 512
+  device: cuda:0
+  seed: 0
+  output_dir: outputs/sl/nerd/ant
+  checkpoint_interval: 500
+  validation_interval: 500
+evaluation:
+  max_batches: 100
