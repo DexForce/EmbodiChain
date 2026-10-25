@@ -1,5 +1,5 @@
 embodichain.learning
-=============
+====================
 .. automodule:: embodichain.learning
 
    .. rubric:: Submodules
