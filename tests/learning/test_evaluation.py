@@ -249,7 +249,10 @@ def test_trainer_with_eval_env_creates_eval_event_manager(tmp_path: Path) -> Non
     assert trainer.eval_event_manager._env is eval_env
 
 
-def test_evaluate_episodes_counts_actual_completions_and_restores_mode() -> None:
+@pytest.mark.parametrize("explicit_legacy", [False, True])
+def test_evaluate_episodes_counts_actual_completions_and_restores_mode(
+    explicit_legacy: bool,
+) -> None:
     policy = _DeterministicPolicy()
     policy.train()
     env = _AsyncAutoResetEnv()
@@ -260,6 +263,7 @@ def test_evaluate_episodes_counts_actual_completions_and_restores_mode() -> None
         num_episodes=4,
         device="cpu",
         seed=123,
+        **({"episode_allocation": "first_completed"} if explicit_legacy else {}),
     )
 
     assert policy.training
@@ -273,6 +277,75 @@ def test_evaluate_episodes_counts_actual_completions_and_restores_mode() -> None
     assert result["eval/success_ci95_high"] == pytest.approx(1.0)
     assert result["eval/metrics/terminal_step"] == 1.25
     assert "eval/metrics/final_position" not in result
+
+
+@pytest.mark.parametrize(
+    "episodes,expected_success,expected_length,expected_min,expected_max,controls",
+    [
+        (6, 2 / 3, 5 / 3, 2, 2, 6),
+        (4, 0.5, 2.0, 1, 2, 6),
+        (2, 0.5, 2.0, 0, 1, 3),
+    ],
+)
+def test_balanced_evaluation_scores_fixed_quotas_despite_unequal_episode_lengths(
+    episodes: int,
+    expected_success: float,
+    expected_length: float,
+    expected_min: int,
+    expected_max: int,
+    controls: int,
+) -> None:
+    """Slow failures keep their assigned trials after fast rows exhaust quotas."""
+
+    class TimedOutcomeEnv(_AsyncAutoResetEnv):
+        def __init__(self) -> None:
+            super().__init__()
+            self.horizons = torch.tensor([3, 1, 1])
+            self.physical_completions = torch.zeros(3, dtype=torch.long)
+            self.control_steps = 0
+
+        def step(self, action):
+            observation, reward, done, truncated, info = super().step(action)
+            self.physical_completions += done
+            self.control_steps += 1
+            info["success"] = torch.tensor([False, True, True])
+            return observation, reward, done, truncated, info
+
+    env = TimedOutcomeEnv()
+    result = evaluate_episodes(
+        policy=_DeterministicPolicy(),
+        env=env,
+        num_episodes=episodes,
+        device="cpu",
+        episode_allocation="balanced",
+    )
+    assert result["eval/completed_episodes"] == episodes
+    assert result["eval/success_samples"] == episodes
+    assert result["eval/success_rate"] == pytest.approx(expected_success)
+    assert result["eval/avg_length"] == pytest.approx(expected_length)
+    assert result["eval/avg_reward"] == pytest.approx(expected_length)
+    assert result["eval/episodes_per_env_min"] == expected_min
+    assert result["eval/episodes_per_env_max"] == expected_max
+    assert env.control_steps == controls
+    # Finished-quota rows still step/reset naturally; their additional fast
+    # successes must not enter any scored reward, length, success or metric.
+    torch.testing.assert_close(
+        env.physical_completions, torch.tensor([controls // 3, controls, controls])
+    )
+    assert result["eval/metrics/terminal_step"] == pytest.approx(expected_length)
+
+
+def test_evaluation_rejects_unknown_episode_allocation_before_reset() -> None:
+    env = _AsyncAutoResetEnv()
+    with pytest.raises(ValueError, match="episode_allocation"):
+        evaluate_episodes(
+            policy=_DeterministicPolicy(),
+            env=env,
+            num_episodes=1,
+            device="cpu",
+            episode_allocation="automatic",
+        )
+    assert env.last_seed is None
 
 
 def test_policy_action_moves_to_environment_device_before_preprocessing() -> None:

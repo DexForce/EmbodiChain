@@ -100,6 +100,184 @@ def _epa_preflight() -> dict[str, Any]:
     }
 
 
+def _failure_tensor_stats(value: Any) -> dict[str, Any]:
+    """Summarize captured CPU tensors without hiding nonfinite elements."""
+    import torch
+
+    value = value.detach()
+    finite = torch.isfinite(value)
+    selected = value[finite].double()
+    return {
+        "shape": list(value.shape),
+        "dtype": str(value.dtype),
+        "nonfinite_elements": int((~finite).sum()),
+        "finite_minimum": float(selected.min()) if selected.numel() else None,
+        "finite_maximum": float(selected.max()) if selected.numel() else None,
+        "finite_abs_maximum": float(selected.abs().max()) if selected.numel() else None,
+        "finite_l2_norm_float64": float(torch.linalg.vector_norm(selected)),
+    }
+
+
+class _PPOFailureDump:
+    """Retain one minibatch and dump it only when the native gradient guard fails."""
+
+    def __init__(self, trainer: Any, path: Path, source_config: dict[str, Any]) -> None:
+        self.trainer = trainer
+        self.path = path.resolve()
+        if self.path.exists():
+            raise FileExistsError(f"Preserve the existing failure dump: {self.path}")
+        self.source_config = deepcopy(source_config)
+        self.policy = getattr(trainer.policy, "module", trainer.policy)
+        self.algorithm = trainer.algorithm
+        self._evaluate = self.policy.evaluate_actions
+        self._clip = self.algorithm._clip_gradients
+        self.last_batch = self.last_evaluated = None
+        self.minibatches_seen = 0
+        self.saved = False
+
+        def evaluate(batch: Any) -> Any:
+            result = self._evaluate(batch)
+            # One device-resident reference; no rollout copy, host transfer,
+            # inference replay or random-number consumption on the regular path.
+            self.last_batch = batch
+            self.last_evaluated = result.detach()
+            self.minibatches_seen += 1
+            return result
+
+        def clip() -> None:
+            try:
+                self._clip()
+            except FloatingPointError as error:
+                try:
+                    self.dump(error)
+                except Exception as dump_error:
+                    error.add_note(f"Failure dump could not be written: {dump_error}")
+                raise
+
+        self.policy.evaluate_actions = evaluate
+        self.algorithm._clip_gradients = clip
+
+    def dump(self, error: FloatingPointError) -> None:
+        """Save owned CPU loss inputs/current parameters, then leave failure intact."""
+        import torch
+        from tensordict import TensorDictBase
+
+        from embodichain.learning.rl.checkpoint import _atomic_write, _plain
+
+        if self.saved:
+            return
+        if self.last_batch is None or self.last_evaluated is None:
+            raise RuntimeError(
+                "No evaluated minibatch is available for the failure dump."
+            )
+        if self.path.exists():
+            raise FileExistsError(f"Preserve the existing failure dump: {self.path}")
+
+        def cpu(value: Any) -> Any:
+            if isinstance(value, torch.Tensor):
+                return value.detach().to("cpu", copy=True)
+            if isinstance(value, (dict, TensorDictBase)):
+                return {key: cpu(item) for key, item in value.items()}
+            if isinstance(value, (tuple, list)):
+                return [cpu(item) for item in value]
+            return value
+
+        batch = cpu(self.last_batch)
+        evaluated = cpu(self.last_evaluated)
+        gradients = {
+            name: cpu(parameter.grad)
+            for name, parameter in self.policy.named_parameters()
+            if parameter.grad is not None
+        }
+        gradient_stats = {
+            name: _failure_tensor_stats(gradient)
+            for name, gradient in gradients.items()
+        }
+        log_ratio = evaluated["sample_log_prob"] - batch["sample_log_prob"]
+        loss_inputs = {
+            "log_ratio": log_ratio,
+            "ratio_reconstructed_on_cpu": log_ratio.exp(),
+        }
+        config = self.algorithm.cfg
+        algorithm_config = (
+            config.to_dict() if hasattr(config, "to_dict") else vars(config)
+        )
+        policy_config = getattr(self.policy, "cfg", None)
+        if hasattr(policy_config, "to_dict"):
+            policy_config = policy_config.to_dict()
+        payload = {
+            "schema": "embodichain-peg-ppo-gradient-failure/v1",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "error": str(error),
+            "stage": "after native loss.backward/gradient synchronization, at the native finite-gradient guard; optimizer.step for this minibatch was not called",
+            "gradient_scope": "captured at guard rejection; earlier parameter groups may already have been norm-clipped. Recompute backward from the saved current parameters and minibatch for unclipped gradients",
+            "global_step": int(self.trainer.global_step),
+            "completed_updates": int(self.trainer.num_updates),
+            "evaluated_minibatches_since_hook": self.minibatches_seen,
+            "source_config": _plain(self.source_config),
+            "algorithm_config": _plain(algorithm_config),
+            "policy_config": _plain(policy_config),
+            "policy_class": f"{type(self.policy).__module__}.{type(self.policy).__qualname__}",
+            "policy_training": bool(self.policy.training),
+            "policy": cpu(self.policy.state_dict()),
+            "batch_size": list(self.last_batch.batch_size),
+            "batch": batch,
+            "evaluated": evaluated,
+            "loss_inputs": loss_inputs,
+            "batch_stats": {
+                name: _failure_tensor_stats(value)
+                for name, value in batch.items()
+                if isinstance(value, torch.Tensor)
+            },
+            "evaluated_stats": {
+                name: _failure_tensor_stats(value)
+                for name, value in evaluated.items()
+                if isinstance(value, torch.Tensor)
+            },
+            "gradient_stats": gradient_stats,
+            "gradients": gradients,
+            "bad_gradient_names": [
+                name
+                for name, stats in gradient_stats.items()
+                if stats["nonfinite_elements"]
+            ],
+            "all_gradient_elements_finite": all(
+                stats["nonfinite_elements"] == 0 for stats in gradient_stats.values()
+            ),
+            "current_learning_rates": [
+                group["lr"] for group in self.algorithm.optimizer.param_groups
+            ],
+            "torch_rng_state": torch.get_rng_state(),
+            "torch_version": str(torch.__version__),
+            "torch_cuda_version": torch.version.cuda,
+            "backend_options": {
+                "cudnn_benchmark": torch.backends.cudnn.benchmark,
+                "cudnn_deterministic": torch.backends.cudnn.deterministic,
+                "cudnn_allow_tf32": torch.backends.cudnn.allow_tf32,
+                "matmul_allow_tf32": torch.backends.cuda.matmul.allow_tf32,
+            },
+            "algorithm_source": _file_metadata(
+                inspect.getfile(type(self.algorithm)), digest=True
+            ),
+            "policy_source": _file_metadata(
+                inspect.getfile(type(self.policy)), digest=True
+            ),
+            "replay_scope": "Current policy/normalizer buffers plus the final evaluated minibatch, not the full rollout. For per-minibatch advantage normalization, recompute it with algorithm_config before reproducing the PPO loss. CPU-derived ratio and GPU-derived evaluated outputs are distinguished; CPU/GPU backward need not be bitwise equal.",
+        }
+        if getattr(self.trainer.device, "type", None) == "cuda":
+            payload["torch_cuda_rng_state"] = torch.cuda.get_rng_state(
+                self.trainer.device
+            )
+        _atomic_write(self.path, lambda stream: torch.save(payload, stream))
+        self.saved = True
+
+    def restore(self) -> None:
+        """Remove benchmark hooks without changing policy or optimizer state."""
+        self.policy.evaluate_actions = self._evaluate
+        self.algorithm._clip_gradients = self._clip
+        self.last_batch = self.last_evaluated = None
+
+
 def _write_markdown(path: Path, document: dict[str, Any]) -> None:
     """Present final validation and health in exactly three benchmark tables."""
     training = document.get("training", {})
@@ -212,6 +390,7 @@ def run_training(args: argparse.Namespace) -> dict[str, Any]:
         document["working_tree_patch"] = None
     observers: dict[str, tuple[Any, _PhysicsHealth]] = {}
     trainer_ref: Any = None
+    failure_dump: _PPOFailureDump | None = None
     started = time.perf_counter()
 
     def snapshot(reason: str, checkpoint: str | Path | None = None) -> None:
@@ -245,8 +424,10 @@ def run_training(args: argparse.Namespace) -> dict[str, Any]:
 
     def ready(trainer: Any) -> None:
         """Attach train/evaluation guards without changing the native trainer."""
-        nonlocal trainer_ref
+        nonlocal trainer_ref, failure_dump
         trainer_ref = trainer
+        if getattr(args, "failure_dump", None) is not None:
+            failure_dump = _PPOFailureDump(trainer, args.failure_dump, source)
         environments = {}
         for name, selected in (("train", trainer.env), ("eval", trainer.eval_env)):
             if selected is None:
@@ -327,6 +508,11 @@ def run_training(args: argparse.Namespace) -> dict[str, Any]:
         # These Python-only restorations do not inspect destroyed native state.
         for env, observer in observers.values():
             observer.restore(env)
+        if failure_dump is not None:
+            failure_dump.restore()
+            document["gradient_failure_dump"] = _file_metadata(
+                failure_dump.path, digest=True
+            )
         snapshot("final")
         if trainer_ref is not None:
             root = Path(trainer_ref.checkpoint_dir).resolve().parent
@@ -353,6 +539,11 @@ def main() -> None:
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--raw-log", type=Path)
+    parser.add_argument(
+        "--failure-dump",
+        type=Path,
+        help="Opt in to saving only the failing PPO minibatch/current policy at native gradient-guard rejection; the exception is re-raised.",
+    )
     parser.add_argument("--resume")
     parser.add_argument("--run", type=Path)
     parser.add_argument(
@@ -362,6 +553,10 @@ def main() -> None:
     if args.output.exists():
         parser.error(
             "--output already exists; preserve previous experiment evidence with a new path."
+        )
+    if args.failure_dump is not None and args.failure_dump.exists():
+        parser.error(
+            "--failure-dump already exists; use a new path to preserve evidence."
         )
     if args.resume in {"latest", "best"} and args.run is None:
         parser.error("--resume latest/best requires --run.")

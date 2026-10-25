@@ -250,6 +250,57 @@ def test_clipped_value_loss_uses_larger_error() -> None:
     assert float(loss) == pytest.approx(0.64)
 
 
+@pytest.mark.parametrize("clip", [-0.2, 0.0, 0.2, 1.0, 2.0])
+def test_clipped_actor_loss_matches_ratio_objective_and_gradients(clip: float) -> None:
+    algorithm = _algorithm(_policy(), clip_coef=clip)
+    generator = torch.Generator().manual_seed(20261026)
+    log_ratio = (torch.randn(4096, generator=generator) * 2).requires_grad_()
+    reference_log_ratio = log_ratio.detach().clone().requires_grad_()
+    advantages = torch.randn(4096, generator=generator)
+    # Independent reference is the original probability-ratio definition.
+    # Include the existing zero/wide clip settings and negative-clip behavior.
+    ratio = reference_log_ratio.exp()
+    reference = -torch.minimum(
+        ratio * advantages, ratio.clamp(1 - clip, 1 + clip) * advantages
+    ).mean()
+    actual = algorithm._actor_loss(log_ratio, advantages)
+    actual.backward()
+    reference.backward()
+    torch.testing.assert_close(actual, reference, atol=1e-5, rtol=1e-4)
+    torch.testing.assert_close(
+        log_ratio.grad, reference_log_ratio.grad, atol=1e-5, rtol=1e-4
+    )
+
+
+@pytest.mark.parametrize("advantage,expected", [(1.0, -1.2), (0.0, 0.0)])
+def test_clipped_actor_loss_does_not_backpropagate_inactive_exp_overflow(
+    advantage: float, expected: float
+) -> None:
+    algorithm = _algorithm(_policy(), clip_coef=0.2)
+    # exp(100) overflows FP32, although a positive advantage already clips
+    # this branch to ratio 1.2. Computing exp first produced a NaN gradient.
+    log_ratio = torch.tensor([100.0], requires_grad=True)
+    loss = algorithm._actor_loss(log_ratio, torch.tensor([advantage]))
+    loss.backward()
+    assert float(loss) == pytest.approx(expected)
+    torch.testing.assert_close(log_ratio.grad, torch.zeros_like(log_ratio))
+
+
+def test_unbounded_negative_advantage_still_fails_nonfinite_gradient_guard() -> None:
+    policy = _policy()
+    algorithm = _algorithm(policy, clip_coef=0.2)
+    parameter = next(policy.actor.parameters())
+    with torch.no_grad():
+        parameter.fill_(100.0 / parameter.numel())
+    loss = algorithm._actor_loss(parameter.sum().reshape(1), torch.tensor([-1.0]))
+    # Negative advantages retain the genuinely unbounded upper-ratio branch;
+    # a global log-ratio clamp would incorrectly make this objective finite.
+    assert torch.isinf(loss)
+    loss.backward()
+    with pytest.raises(FloatingPointError, match="optimizer step skipped"):
+        algorithm._clip_gradients()
+
+
 def test_action_bound_loss_penalizes_policy_means_outside_unit_range() -> None:
     action_mean = torch.tensor([[-2.0], [-0.5], [0.5], [2.0]])
 

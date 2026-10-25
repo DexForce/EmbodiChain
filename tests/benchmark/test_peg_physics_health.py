@@ -17,7 +17,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import numpy as np
 import pytest
@@ -134,3 +136,130 @@ def test_strict_health_counts_complete_finite_control_samples() -> None:
         2,
         2,
     ]
+
+
+def _failure_dump_trainer() -> tuple[SimpleNamespace, Any]:
+    """Create a scalar PPO-loss fixture with no environment or simulator."""
+    import torch
+    from tensordict import TensorDict
+
+    class Policy(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.tensor(100.0))
+
+        def evaluate_actions(self, batch: Any) -> Any:
+            return TensorDict(
+                {
+                    "sample_log_prob": self.weight.expand(batch.batch_size[0]),
+                    "value": torch.zeros(batch.batch_size[0]),
+                    "entropy": torch.zeros(batch.batch_size[0]),
+                },
+                batch_size=batch.batch_size,
+            )
+
+    class Algorithm:
+        def __init__(self, policy: Any) -> None:
+            self.policy = policy
+            self.cfg = SimpleNamespace(
+                clip_coef=0.2, normalize_advantage_per_mini_batch=False
+            )
+            self.optimizer = torch.optim.SGD(policy.parameters(), lr=0.01)
+
+        def _clip_gradients(self) -> None:
+            try:
+                torch.nn.utils.clip_grad_norm_(
+                    self.policy.parameters(), 1.0, error_if_nonfinite=True
+                )
+            except RuntimeError as error:
+                raise FloatingPointError("native gradient guard") from error
+
+    policy = Policy()
+    trainer = SimpleNamespace(
+        policy=policy,
+        algorithm=Algorithm(policy),
+        global_step=128,
+        num_updates=3,
+        device=torch.device("cpu"),
+    )
+    batch = TensorDict(
+        {
+            "obs": torch.zeros(4, 2),
+            "sample_log_prob": torch.zeros(4),
+            "advantage": torch.ones(4),
+        },
+        batch_size=[4],
+    )
+    return trainer, batch
+
+
+def test_failure_dump_preserves_gradient_failure_and_replay_inputs(
+    tmp_path: Path,
+) -> None:
+    import torch
+    from scripts.benchmark.assembly.train_peg import _PPOFailureDump
+
+    trainer, batch = _failure_dump_trainer()
+    output = tmp_path / "failure.pt"
+    hook = _PPOFailureDump(trainer, output, {"algorithm": {"name": "ppo"}})
+    evaluated = trainer.policy.evaluate_actions(batch)
+    ratio = (evaluated["sample_log_prob"] - batch["sample_log_prob"]).exp()
+    loss = -torch.minimum(ratio, ratio.clamp(0.8, 1.2)).mean()
+    assert torch.isfinite(loss)
+    loss.backward()
+    with pytest.raises(FloatingPointError, match="native gradient guard"):
+        trainer.algorithm._clip_gradients()
+    captured = torch.load(output, weights_only=True)
+    assert captured["bad_gradient_names"] == ["weight"]
+    assert captured["all_gradient_elements_finite"] is False
+    assert captured["policy"]["weight"] == 100.0
+    assert captured["batch_size"] == [4]
+    assert torch.isinf(captured["loss_inputs"]["ratio_reconstructed_on_cpu"]).all()
+    assert torch.isnan(trainer.policy.weight.grad)
+    assert trainer.algorithm.optimizer.state == {}
+    batch["obs"].fill_(42)
+    assert torch.count_nonzero(captured["batch"]["obs"]) == 0
+    hook.restore()
+
+
+def test_failure_dump_normal_path_keeps_only_current_device_minibatch(
+    tmp_path: Path,
+) -> None:
+    import torch
+    from scripts.benchmark.assembly.train_peg import _PPOFailureDump
+
+    trainer, batch = _failure_dump_trainer()
+    with torch.no_grad():
+        trainer.policy.weight.zero_()
+    output = tmp_path / "failure.pt"
+    hook = _PPOFailureDump(trainer, output, {})
+    evaluated = trainer.policy.evaluate_actions(batch)
+    assert evaluated["sample_log_prob"].requires_grad
+    assert not hook.last_evaluated["sample_log_prob"].requires_grad
+    assert hook.last_batch is batch
+    evaluated["sample_log_prob"].mean().backward()
+    trainer.algorithm._clip_gradients()
+    assert not output.exists()
+    hook.restore()
+
+
+def test_failure_dump_write_error_does_not_replace_native_exception(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.benchmark.assembly.train_peg import _PPOFailureDump
+
+    trainer, _ = _failure_dump_trainer()
+    hook = _PPOFailureDump(trainer, tmp_path / "failure.pt", {})
+
+    def reject() -> None:
+        raise FloatingPointError("original gradient failure")
+
+    def broken_dump(error: FloatingPointError) -> None:
+        raise OSError("diagnostic disk unavailable")
+
+    hook._clip = reject
+    monkeypatch.setattr(hook, "dump", broken_dump)
+    with pytest.raises(FloatingPointError, match="original gradient failure") as caught:
+        trainer.algorithm._clip_gradients()
+    assert any("diagnostic disk unavailable" in note for note in caught.value.__notes__)
+    hook.restore()

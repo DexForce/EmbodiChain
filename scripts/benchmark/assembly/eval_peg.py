@@ -80,6 +80,7 @@ def _write_markdown(path: Path, document: dict[str, Any]) -> None:
         "Capacity/collision loss, unknown overflow bits or nonfinite complete native qpos/qvel/qacc matrices fail before auto-reset. States between control boundaries are not sampled. Sticky capacity flags cover all physical substeps. Prepared solver options are distinguished from the first effective timestep and first two observed control-clock intervals.",
         "",
         "Only exact production-evaluator episode accounting is scored. The runtime factory's shape-probe reset and post-build health snapshot do not count as episodes. This fresh evaluation evidence does not retroactively qualify training. End-effector path length, action norms, actual joint torque and memory were not measured.",
+        "Balanced allocation fixes each arena's scored episode quota before stepping; extra fast completions after a row's quota are unscored. Quotas and the finite control-step budget are retained in JSON. Training validation retains its original allocation protocol.",
         "",
     ]
     path.with_suffix(".md").write_text("\n".join(lines))
@@ -149,7 +150,8 @@ def run(args: argparse.Namespace) -> Path:
             "capture": "caller-owned stdout/stderr; pass --raw-log when redirecting native and Python logs",
             "file": _file_metadata(args.raw_log),
         },
-        "episode_accounting": "runtime construction resets to infer policy shape before guard attachment; that reset and the build snapshot are unscored. evaluate_episodes resets with evaluation_reset_seed and scores exactly the requested completed episodes.",
+        "episode_accounting": "runtime construction resets to infer policy shape before guard attachment; that reset and the build snapshot are unscored. evaluate_episodes resets with evaluation_reset_seed and scores fixed per-environment quotas summing exactly to the requested episode count. Rows that finish their quota keep stepping/resetting, but their extra episodes are unscored.",
+        "episode_allocation": "balanced",
         "not_measured": [
             "end_effector_path_length",
             "raw_action_norm",
@@ -226,6 +228,31 @@ def run(args: argparse.Namespace) -> Path:
                 "torch_cuda_version": torch.version.cuda,
             }
         document["postbuild_health_unscored"] = deepcopy(observer.values)
+        base_quota, remainder = divmod(args.episodes, int(env.num_envs))
+        document["episode_quotas"] = {
+            "num_envs": int(env.num_envs),
+            "minimum": base_quota,
+            "maximum": base_quota + int(remainder > 0),
+            "extra_quota_first_rows": remainder,
+        }
+        max_episode_steps = int(env.max_episode_steps)
+        if max_episode_steps < 1:
+            raise ValueError(
+                "Strict evaluation requires a positive episode-step limit."
+            )
+        control_budget = document["episode_quotas"]["maximum"] * max_episode_steps
+        document["scored_control_budget"] = control_budget
+        scored_controls = 0
+
+        def observe_budget(_: dict[str, Any]) -> None:
+            nonlocal scored_controls
+            scored_controls += 1
+            document["scored_control_steps"] = scored_controls
+            if scored_controls > control_budget:
+                raise RuntimeError(
+                    "Balanced evaluation exceeded its episode-step budget."
+                )
+
         document["status"] = "evaluating"
         _write(health_path, _json_value(document))
         metrics = evaluate_episodes(
@@ -234,12 +261,17 @@ def run(args: argparse.Namespace) -> Path:
             num_episodes=args.episodes,
             device=native.device,
             seed=native.seed,
+            episode_allocation="balanced",
+            on_step=observe_budget,
         )
         if not all(math.isfinite(float(value)) for value in metrics.values()):
             raise RuntimeError("Nonfinite production evaluation metrics.")
         if (
             metrics.get("eval/completed_episodes") != args.episodes
             or metrics.get("eval/success_samples") != args.episodes
+            or metrics.get("eval/episodes_per_env_min") != base_quota
+            or metrics.get("eval/episodes_per_env_max")
+            != document["episode_quotas"]["maximum"]
         ):
             raise RuntimeError(
                 "Production evaluation did not score exactly the requested peg episodes with success labels."

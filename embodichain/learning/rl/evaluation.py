@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import torch
@@ -139,6 +139,7 @@ def evaluate_episodes(
     seed: int | None = None,
     on_step: Callable[[dict[str, Any]], None] | None = None,
     observation_transform: Callable[[torch.Tensor], torch.Tensor] | None = None,
+    episode_allocation: Literal["first_completed", "balanced"] = "first_completed",
 ) -> dict[str, float]:
     """Evaluate exactly ``num_episodes`` completed asynchronous episodes.
 
@@ -151,10 +152,33 @@ def evaluate_episodes(
         on_step: Optional callback for raw step info.
         observation_transform: Optional frozen preprocessing transform, such as
             a running observation normalizer.
+        episode_allocation: ``first_completed`` preserves the legacy completion
+            order. ``balanced`` scores a fixed quota for every environment:
+            ``num_episodes // num_envs``, plus one for the first remainder rows.
+            Finished-quota rows keep stepping and resetting naturally, but their
+            additional episodes are unscored. Equal quotas avoid censoring slow
+            episodes when parallel successes and failures have different lengths.
+
+    Returns:
+        Completed-episode metrics and recorded-success confidence intervals.
+        Balanced allocation also reports the minimum and maximum scored
+        episode counts per environment.
     """
     if num_episodes <= 0:
         raise ValueError("num_episodes must be positive.")
+    if episode_allocation not in {"first_completed", "balanced"}:
+        raise ValueError("episode_allocation must be 'first_completed' or 'balanced'.")
     device = torch.device(device)
+    num_envs = int(env.num_envs)
+    if num_envs <= 0:
+        raise ValueError("Environment num_envs must be positive.")
+    targets = completed_per_env = None
+    if episode_allocation == "balanced":
+        targets = torch.full(
+            (num_envs,), num_episodes // num_envs, dtype=torch.long, device=device
+        )
+        targets[: num_episodes % num_envs] += 1
+        completed_per_env = torch.zeros_like(targets)
     previous_training = policy.training
     policy.eval()
 
@@ -162,7 +186,6 @@ def evaluate_episodes(
     lengths: list[float] = []
     successes: list[float] = []
     metric_values: dict[str, list[float]] = {}
-    num_envs = int(env.num_envs)
     current_return = torch.zeros(num_envs, dtype=torch.float32, device=device)
     current_length = torch.zeros(num_envs, dtype=torch.long, device=device)
 
@@ -193,8 +216,14 @@ def evaluate_episodes(
             done_indices = torch.nonzero(done, as_tuple=False).squeeze(-1)
             if done_indices.numel() == 0:
                 continue
-            remaining = num_episodes - len(returns)
-            selected = done_indices[:remaining]
+            if completed_per_env is not None:
+                selected = done_indices[
+                    completed_per_env[done_indices] < targets[done_indices]
+                ]
+                completed_per_env[selected] += 1
+            else:
+                remaining = num_episodes - len(returns)
+                selected = done_indices[:remaining]
             returns.extend(_selected_values(current_return, selected))
             lengths.extend(_selected_values(current_length, selected))
 
@@ -223,6 +252,9 @@ def evaluate_episodes(
         "eval/completed_episodes": float(len(returns)),
         "eval/success_samples": float(len(successes)),
     }
+    if completed_per_env is not None:
+        result["eval/episodes_per_env_min"] = float(completed_per_env.min())
+        result["eval/episodes_per_env_max"] = float(completed_per_env.max())
     if successes and all(value in (0.0, 1.0) for value in successes):
         # Wilson's 95% score interval remains informative at 0% and 100%.
         # The denominator is completed episodes carrying a success label.

@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Dict
 
 import torch
@@ -130,15 +131,7 @@ class PPO(BaseAlgorithm[TensorDict]):
                 entropy = eval_batch["entropy"]
                 values = eval_batch["value"]
                 kl = self._update_adaptive_learning_rate(batch, eval_batch)
-                ratio = (logprobs - old_logprobs).exp()
-                surr1 = ratio * batch_advantages
-                surr2 = (
-                    torch.clamp(
-                        ratio, 1.0 - self.cfg.clip_coef, 1.0 + self.cfg.clip_coef
-                    )
-                    * batch_advantages
-                )
-                actor_loss = -torch.min(surr1, surr2).mean()
+                actor_loss = self._actor_loss(logprobs - old_logprobs, batch_advantages)
                 value_loss = self._value_loss(values, returns, batch["value"])
                 action_bound_loss = self._action_bound_loss(eval_batch["action_mean"])
                 entropy_loss = -entropy.mean()
@@ -199,6 +192,33 @@ class PPO(BaseAlgorithm[TensorDict]):
             permutation[start : start + self.cfg.batch_size]
             for start in range(0, total, self.cfg.batch_size)
         )
+
+    def _actor_loss(
+        self, log_ratio: torch.Tensor, advantages: torch.Tensor
+    ) -> torch.Tensor:
+        """Evaluate the clipped surrogate without an inactive exponential overflow.
+
+        Positive advantages cap the ratio above; negative advantages cap it
+        below. Select the bounded log ratio before the single exponential so
+        the inactive branch cannot create ``0 * inf`` during backward. An
+        unbounded negative-advantage objective remains unbounded and is still
+        rejected by the non-finite gradient guard.
+        """
+        clip = self.cfg.clip_coef
+        if clip < 0:
+            # Preserve the previously accepted negative-bound torch.clamp
+            # semantics without adding a new configuration restriction.
+            ratio = log_ratio.exp()
+            return -torch.minimum(
+                ratio * advantages, ratio.clamp(1 - clip, 1 + clip) * advantages
+            ).mean()
+        lower = math.log1p(-clip) if clip < 1 else -math.inf
+        bounded_log_ratio = torch.where(
+            advantages >= 0,
+            log_ratio.clamp_max(math.log1p(clip)),
+            log_ratio.clamp_min(lower),
+        )
+        return -(bounded_log_ratio.exp() * advantages).mean()
 
     def _value_loss(
         self,

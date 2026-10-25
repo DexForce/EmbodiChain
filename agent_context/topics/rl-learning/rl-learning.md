@@ -189,6 +189,12 @@ observation groups. The collector and standard buffer preserve separate
 collector also records the old Gaussian mean and standard deviation for KL
 measurement. These rollout fields have explicit dimensions in the buffer.
 
+`evaluate_episodes` retains `first_completed` allocation as its compatibility
+default. Optional `balanced` allocation fixes per-arena quotas before stepping,
+preventing completion-time censoring when episode durations differ. Strict peg
+final assessment opts into balanced quotas; historical training validation keeps
+the default loaded by its running process.
+
 Read [training and extension](training.md) for evaluation, checkpoints,
 distributed ownership, official examples and adding algorithms/policies/envs.
 
