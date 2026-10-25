@@ -56,6 +56,19 @@ def _arguments(value: dict[str, Any], allowed: set[str]) -> None:
         raise ValueError(f"Unknown dynamics workflow fields: {sorted(unknown)}")
 
 
+def _load_training_checkpoint(path: str | Path) -> dict[str, Any]:
+    """Read a tensor-only training payload without constructing a default model."""
+    import torch
+
+    state = torch.load(path, map_location="cpu", weights_only=True)
+    if (
+        not isinstance(state, dict)
+        or state.get("format") != "embodichain.nerd.training.v1"
+    ):
+        raise ValueError("Expected a dynamics training checkpoint")
+    return state
+
+
 def run_train(config: dict[str, Any]) -> dict[str, Any]:
     """Train from scratch, resume a committed run, or fine-tune an export.
 
@@ -117,6 +130,15 @@ def run_train(config: dict[str, Any]) -> dict[str, Any]:
             "dt"
         ) != manifest.get("dt"):
             raise ValueError("Fine-tuning requires compatible codec and timestep")
+    elif config.get("resume"):
+        from embodichain.learning.models.nerd.checkpoint import _model_from_state
+
+        saved = _load_training_checkpoint(config["resume"])
+        # Keep the requested architecture/feature order for resume preflight,
+        # while restoring precision before trainer construction. Release the
+        # full optimizer payload before resume reads its committed state again.
+        model = _model_from_state(NeRDModelCfg(**config["model"]), saved["model"])
+        del saved
     else:
         model = NeRDModel(NeRDModelCfg(**config["model"]))
     train = DynamicsWindowDataset(
@@ -225,16 +247,23 @@ def run_eval(config: dict[str, Any]) -> dict[str, Any]:
 
 def run_export(checkpoint: str | Path, output: str | Path) -> dict[str, Any]:
     """Export a training checkpoint using the production model artifact writer."""
-    import torch
-    from embodichain.learning.models.nerd import NeRDModel, NeRDModelCfg, export_model
+    from embodichain.learning.models.nerd import NeRDModelCfg, export_model
+    from embodichain.learning.models.nerd.checkpoint import _model_from_state
     from ._numerics import _checkpoint_numerical_profile
 
-    state = torch.load(checkpoint, map_location="cpu", weights_only=True)
-    if state.get("format") != "embodichain.nerd.training.v1":
-        raise ValueError("Expected a dynamics training checkpoint")
-    profile = _checkpoint_numerical_profile(state)
-    model = NeRDModel(NeRDModelCfg(**state["model_cfg"]))
-    model.load_state_dict(state["model"])
+    state = _load_training_checkpoint(checkpoint)
+    profile_state = state
+    if state.get("resumable") is False and "train_cfg" not in state:
+        # A selected-model snapshot has no optimizer/training state. Retain the
+        # same execution-label validation without inventing resumable state.
+        profile_state = {
+            **state,
+            "train_cfg": {
+                "numerical_profile": state.get("numerical_profile", "default")
+            },
+        }
+    profile = _checkpoint_numerical_profile(profile_state)
+    model = _model_from_state(NeRDModelCfg(**state["model_cfg"]), state["model"])
     manifest = {
         **state["manifest"],
         "numerical_profile": profile,

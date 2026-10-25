@@ -23,7 +23,8 @@ model:
   attention_backend: math
 data:
   path: outputs/datasets/neural_dynamics/nerd/ant/v1
-  resident_cache_bytes: 4294967296
+  # Keep full-corpus training on bounded reads unless a fitting budget is set.
+  resident_cache_bytes: 0
 objective:
   include_prefix: false
   numerical_profile: reference

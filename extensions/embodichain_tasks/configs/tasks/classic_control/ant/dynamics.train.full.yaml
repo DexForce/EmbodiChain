@@ -35,4 +35,5 @@ train:
   lr_update_interval: 5000
   lr_offset: 1
   log_interval: 500
-  resident_cache_bytes: 4294967296
+  # Full Ant data exceed the former 4 GiB hard cache budget; use bounded reads.
+  resident_cache_bytes: 0

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import math
+import random
 import subprocess
 import sys
 
@@ -162,6 +163,8 @@ def test_shared_recipe_matches_legacy_updates_and_restores_sampler(
         steps=4,
         numerical_profile=numerical_profile,
     )
+    legacy.cfg.lr_update_interval = 3
+    legacy.cfg.lr_offset = 1
     config = {
         "model": architecture().to_dict(),
         "data": {"path": str(tmp_path / "data")},
@@ -170,6 +173,8 @@ def test_shared_recipe_matches_legacy_updates_and_restores_sampler(
             "learning_rate": 0.005,
             "final_learning_rate": 0.002,
             "max_grad_norm": 1.0,
+            "lr_update_interval": 3,
+            "lr_offset": 1,
         },
         "trainer": {
             "total_updates": 4,
@@ -180,12 +185,48 @@ def test_shared_recipe_matches_legacy_updates_and_restores_sampler(
     }
     shared = build_supervised_trainer(config)
     shared.learner.model.load_state_dict(legacy.model.state_dict())
-    for _ in range(4):
-        legacy.step()
+    legacy_rates = [legacy.step()["learning_rate"] for _ in range(4)]
+    shared_rates = []
+    shared.learner.optimizer.register_step_pre_hook(
+        lambda optimizer, args, kwargs: shared_rates.append(
+            optimizer.param_groups[0]["lr"]
+        )
+    )
     shared.fit(stop_after=2)
+    reordered = build_supervised_trainer(
+        {
+            **config,
+            "model": {
+                **config["model"],
+                "input_dims": dict(
+                    reversed(list(config["model"]["input_dims"].items()))
+                ),
+            },
+            "trainer": {**config["trainer"], "output_dir": str(tmp_path / "reordered")},
+        }
+    )
+    before = {
+        key: value.clone()
+        for key, value in reordered.learner.model.state_dict().items()
+    }
+    with pytest.raises(ValueError, match="identity"):
+        reordered.resume(tmp_path / "shared/last.pt")
+    assert reordered.learner.num_updates == 0
+    for key, value in before.items():
+        torch.testing.assert_close(
+            reordered.learner.model.state_dict()[key], value, rtol=0, atol=0
+        )
     restored = build_supervised_trainer(config)
     restored.resume(tmp_path / "shared/last.pt")
+    restored.learner.optimizer.register_step_pre_hook(
+        lambda optimizer, args, kwargs: shared_rates.append(
+            optimizer.param_groups[0]["lr"]
+        )
+    )
     restored.fit()
+    assert shared_rates == pytest.approx(legacy_rates, rel=1e-15, abs=0)
+    assert shared_rates[0] == shared_rates[1] == shared_rates[2]
+    assert shared_rates[3] < shared_rates[2]
     for name, value in legacy.model.state_dict().items():
         torch.testing.assert_close(
             restored.learner.model.state_dict()[name], value, atol=0, rtol=0
@@ -269,13 +310,16 @@ def test_training_improves_validation_and_export_matches(tmp_path):
     assert report["qualification"] == "offline_only"
 
 
-def test_workflow_fine_tune_and_resume_contract(tmp_path):
+@pytest.mark.parametrize("head_dims", [(12,), [12]])
+def test_workflow_fine_tune_and_resume_contract(tmp_path, head_dims):
     metadata = make_data(tmp_path / "data")
+    model_config = architecture().to_dict()
+    model_config["head_hidden_dims"] = head_dims
     cfg = {
         "dataset": str(tmp_path / "data"),
         "output_dir": str(tmp_path / "first"),
         "manifest": metadata,
-        "model": architecture().to_dict(),
+        "model": model_config,
         "train": {
             "total_steps": 2,
             "batch_size": 4,
@@ -285,12 +329,35 @@ def test_workflow_fine_tune_and_resume_contract(tmp_path):
     }
     run_train(cfg)
     run_export(tmp_path / "first" / "last.pt", tmp_path / "export")
+    existing = {
+        path.name: path.read_bytes()
+        for path in (tmp_path / "first").iterdir()
+        if path.is_file()
+    }
+    for options in ({}, {"fine_tune": str(tmp_path / "export")}):
+        with pytest.raises(FileExistsError, match="another run"):
+            run_train({**cfg, **options})
+        assert existing == {
+            path.name: path.read_bytes()
+            for path in (tmp_path / "first").iterdir()
+            if path.is_file()
+        }
     fine = {
         **cfg,
         "output_dir": str(tmp_path / "fine"),
         "fine_tune": str(tmp_path / "export"),
     }
     assert run_train(fine)["global_step"] == 2
+    assert (
+        run_train(
+            {
+                **cfg,
+                "output_dir": str(tmp_path / "fine-resume"),
+                "resume": str(tmp_path / "fine/last.pt"),
+            }
+        )["global_step"]
+        == 2
+    )
     mismatch = {
         **cfg,
         "output_dir": str(tmp_path / "bad"),
@@ -299,6 +366,252 @@ def test_workflow_fine_tune_and_resume_contract(tmp_path):
     }
     with pytest.raises(ValueError, match="train_cfg mismatch"):
         run_train(mismatch)
+
+
+@pytest.mark.parametrize("operation", ["step", "train", "save"])
+def test_fresh_trainer_rejects_owned_output_before_update(tmp_path, operation):
+    make_data(tmp_path / "data")
+    original = build(tmp_path / "data", tmp_path / "run", steps=2)
+    original.train(stop_after=1)
+    before = {
+        path.name: path.read_bytes()
+        for path in (tmp_path / "run").iterdir()
+        if path.is_file()
+    }
+    candidate = build(tmp_path / "data", tmp_path / "run", steps=2)
+    parameters = {
+        key: value.clone() for key, value in candidate.model.state_dict().items()
+    }
+    sampler = candidate.sampler.get_state().clone()
+    with pytest.raises(FileExistsError, match="another run"):
+        if operation == "save":
+            candidate.save(tmp_path / "run/new.pt")
+        else:
+            getattr(candidate, operation)()
+    assert candidate.global_step == candidate.learner.num_updates == 0
+    assert not candidate.optimizer.state
+    torch.testing.assert_close(candidate.sampler.get_state(), sampler, rtol=0, atol=0)
+    for key, value in parameters.items():
+        torch.testing.assert_close(
+            candidate.model.state_dict()[key], value, rtol=0, atol=0
+        )
+    assert before == {
+        path.name: path.read_bytes()
+        for path in (tmp_path / "run").iterdir()
+        if path.is_file()
+    }
+
+
+def test_resume_new_directory_preserves_best_export_without_new_improvement(
+    tmp_path, monkeypatch
+):
+    make_data(tmp_path / "data")
+    scores = iter([1.0, 2.0, 3.0])
+    monkeypatch.setattr(
+        "embodichain.learning.dynamics.trainer.evaluate_model",
+        lambda *args, **kwargs: {"normalized_mse": next(scores)},
+    )
+    original = build(tmp_path / "data", tmp_path / "original", steps=4)
+    original.cfg.validation_interval = 1
+    original.train(stop_after=2)
+    saved_best = torch.load(tmp_path / "original/best.pt", weights_only=True)
+    assert saved_best["global_step"] == 1
+    assert saved_best["resumable"] is False
+    assert any(
+        not torch.equal(value, original.model.state_dict()[key])
+        for key, value in saved_best["model"].items()
+    )
+    before = {
+        path.name: path.read_bytes()
+        for path in (tmp_path / "original").iterdir()
+        if path.is_file()
+    }
+    run_export(tmp_path / "original/best.pt", tmp_path / "original-export")
+    restored = build(tmp_path / "data", tmp_path / "resumed", steps=4)
+    restored.cfg.validation_interval = 1
+    restored.resume(tmp_path / "original/last.pt")
+    assert list((tmp_path / "resumed").iterdir()) == []
+    restored.train(stop_after=3)
+    restored_best = torch.load(tmp_path / "resumed/best.pt", weights_only=True)
+    assert restored_best["global_step"] == 1
+    for key, value in saved_best["model"].items():
+        torch.testing.assert_close(restored_best["model"][key], value, rtol=0, atol=0)
+    assert before == {
+        path.name: path.read_bytes()
+        for path in (tmp_path / "original").iterdir()
+        if path.is_file()
+    }
+    run_export(tmp_path / "resumed/best.pt", tmp_path / "resumed-export")
+    expected, _ = load_model(tmp_path / "original-export")
+    actual, _ = load_model(tmp_path / "resumed-export")
+    inputs, _, _ = encode_batch(
+        restored.validation_dataset.get_batch([0]), restored.codec, "cpu"
+    )
+    torch.testing.assert_close(actual(inputs), expected(inputs), rtol=0, atol=0)
+    with pytest.raises(ValueError, match="export only"):
+        restored.resume(tmp_path / "resumed/best.pt")
+
+
+def test_resume_preserves_future_best_after_interrupted_publication(
+    tmp_path, monkeypatch
+):
+    make_data(tmp_path / "data")
+    scores = iter([1.0, 0.5])
+    monkeypatch.setattr(
+        "embodichain.learning.dynamics.trainer.evaluate_model",
+        lambda *args, **kwargs: {"normalized_mse": next(scores)},
+    )
+    original = build(tmp_path / "data", tmp_path / "original", steps=4)
+    original.cfg.validation_interval = 1
+    original.train(stop_after=1)
+    first_best = torch.load(tmp_path / "original/best.pt", weights_only=True)
+    publish = original._write_best_snapshot
+
+    def interrupt_after_best() -> None:
+        publish()
+        raise RuntimeError("interrupted after publishing best")
+
+    monkeypatch.setattr(original, "_write_best_snapshot", interrupt_after_best)
+    with pytest.raises(RuntimeError, match="publishing best"):
+        original.train(stop_after=2)
+    assert (
+        torch.load(tmp_path / "original/best.pt", weights_only=True)["global_step"] == 2
+    )
+    assert (
+        torch.load(tmp_path / "original/last.pt", weights_only=True)["global_step"] == 1
+    )
+    before = {
+        path.name: path.read_bytes()
+        for path in (tmp_path / "original").iterdir()
+        if path.is_file()
+    }
+    candidate = build(tmp_path / "data", tmp_path / "original", steps=4)
+    candidate.cfg.validation_interval = 1
+    parameters = {
+        key: value.clone() for key, value in candidate.model.state_dict().items()
+    }
+    sampler, rng = candidate.sampler.get_state().clone(), torch.get_rng_state().clone()
+    python_rng, numpy_rng = random.getstate(), np.random.get_state()
+    with pytest.raises(ValueError, match="best.pt.*fresh output"):
+        candidate.resume(tmp_path / "original/last.pt")
+    assert candidate.global_step == 0 and not candidate.optimizer.state
+    torch.testing.assert_close(candidate.sampler.get_state(), sampler, rtol=0, atol=0)
+    torch.testing.assert_close(torch.get_rng_state(), rng, rtol=0, atol=0)
+    assert random.getstate() == python_rng
+    actual_numpy = np.random.get_state()
+    assert actual_numpy[0] == numpy_rng[0] and actual_numpy[2:] == numpy_rng[2:]
+    np.testing.assert_array_equal(actual_numpy[1], numpy_rng[1])
+    for key, value in parameters.items():
+        torch.testing.assert_close(
+            candidate.model.state_dict()[key], value, rtol=0, atol=0
+        )
+    restored = build(tmp_path / "data", tmp_path / "fresh", steps=4)
+    restored.cfg.validation_interval = 1
+    restored.resume(tmp_path / "original/last.pt")
+    restored.train(stop_after=1)
+    restored_best = torch.load(tmp_path / "fresh/best.pt", weights_only=True)
+    assert restored_best["global_step"] == 1
+    for key, value in first_best["model"].items():
+        torch.testing.assert_close(restored_best["model"][key], value, rtol=0, atol=0)
+    assert before == {
+        path.name: path.read_bytes()
+        for path in (tmp_path / "original").iterdir()
+        if path.is_file()
+    }
+
+
+def test_resume_input_order_rejection_preserves_runtime_state(tmp_path):
+    make_data(tmp_path / "data")
+    original = build(tmp_path / "data", tmp_path / "original", steps=4)
+    original.train(stop_after=1)
+    candidate = build(tmp_path / "data", tmp_path / "candidate", steps=4)
+    candidate.model.cfg.input_dims = dict(
+        reversed(list(candidate.model.cfg.input_dims.items()))
+    )
+    parameters = {
+        key: value.clone() for key, value in candidate.model.state_dict().items()
+    }
+    sampler, rng = candidate.sampler.get_state().clone(), torch.get_rng_state().clone()
+    with pytest.raises(ValueError, match="input_dims order"):
+        candidate.resume(tmp_path / "original/last.pt")
+    assert candidate.global_step == 0
+    assert not candidate.optimizer.state
+    assert list((tmp_path / "candidate").iterdir()) == []
+    torch.testing.assert_close(candidate.sampler.get_state(), sampler, rtol=0, atol=0)
+    torch.testing.assert_close(torch.get_rng_state(), rng, rtol=0, atol=0)
+    for key, value in parameters.items():
+        torch.testing.assert_close(
+            candidate.model.state_dict()[key], value, rtol=0, atol=0
+        )
+
+
+def test_legacy_best_fallback_requires_matching_source_weights(tmp_path):
+    make_data(tmp_path / "data")
+    original = build(tmp_path / "data", tmp_path / "legacy", steps=4)
+    original.step()
+    original.best_validation = 1.0
+    original.save(tmp_path / "legacy/best.pt")
+    original.step()
+    original.save(tmp_path / "legacy/last.pt")
+    # Construct the historical v1 layout from actual step-one and step-two
+    # checkpoints, retaining each original optimizer/RNG boundary.
+    for filename in ("best.pt", "last.pt"):
+        path = tmp_path / "legacy" / filename
+        state = torch.load(path, weights_only=True)
+        for key in ("run_id", "best_model", "best_step"):
+            state.pop(key)
+        torch.save(state, path)
+    expected = torch.load(tmp_path / "legacy/best.pt", weights_only=True)
+    restored = build(tmp_path / "data", tmp_path / "restored", steps=4)
+    restored.resume(tmp_path / "legacy/last.pt")
+    restored.train(stop_after=2)
+    best = torch.load(tmp_path / "restored/best.pt", weights_only=True)
+    assert best["global_step"] == 1
+    assert best["resumable"] is False
+    for key, value in expected["model"].items():
+        torch.testing.assert_close(best["model"][key], value, rtol=0, atol=0)
+    (tmp_path / "legacy/best.pt").unlink()
+    missing = build(tmp_path / "data", tmp_path / "missing", steps=4)
+    with pytest.raises(ValueError, match="matching best.pt"):
+        missing.resume(tmp_path / "legacy/last.pt")
+    assert missing.global_step == 0 and not missing.optimizer.state
+    assert list((tmp_path / "missing").iterdir()) == []
+
+
+def test_resume_foreign_directory_or_newer_history_preserves_artifacts(tmp_path):
+    make_data(tmp_path / "data")
+    source = build(tmp_path / "data", tmp_path / "source", steps=4)
+    source.step()
+    source.save(tmp_path / "source/step_1.pt")
+    source.train(stop_after=3)
+    foreign = build(tmp_path / "data", tmp_path / "foreign", steps=4)
+    foreign.train(stop_after=1)
+    for output, checkpoint, error, message in (
+        ("foreign", "source/last.pt", FileExistsError, "another run"),
+        ("source", "source/step_1.pt", ValueError, "history is ahead"),
+    ):
+        before = {
+            path.name: path.read_bytes()
+            for path in (tmp_path / output).iterdir()
+            if path.is_file()
+        }
+        candidate = build(tmp_path / "data", tmp_path / output, steps=4)
+        parameters = {
+            key: value.clone() for key, value in candidate.model.state_dict().items()
+        }
+        with pytest.raises(error, match=message):
+            candidate.resume(tmp_path / checkpoint)
+        assert candidate.global_step == 0
+        assert not candidate.optimizer.state
+        for key, value in parameters.items():
+            torch.testing.assert_close(
+                candidate.model.state_dict()[key], value, rtol=0, atol=0
+            )
+        assert before == {
+            path.name: path.read_bytes()
+            for path in (tmp_path / output).iterdir()
+            if path.is_file()
+        }
 
 
 def test_resume_rejects_unknown_preprocessing_execution(tmp_path):
@@ -457,8 +770,12 @@ def test_memory_mapped_order_resume_and_integrity(tmp_path):
     order[0, 0] = 1
     np.save(path, order)
     invalid = build(tmp_path / "data", tmp_path / "invalid", steps=10)
+    sampler, rng = invalid.sampler.get_state().clone(), torch.get_rng_state().clone()
     with pytest.raises(ValueError, match="checksum"):
         invalid.resume(tmp_path / "run" / "last.pt")
+    assert invalid.sample_order is None and invalid._sample_order_identity is None
+    torch.testing.assert_close(invalid.sampler.get_state(), sampler, rtol=0, atol=0)
+    torch.testing.assert_close(torch.get_rng_state(), rng, rtol=0, atol=0)
 
 
 def test_checkpointed_order_resume_is_identical_to_uninterrupted_training(tmp_path):

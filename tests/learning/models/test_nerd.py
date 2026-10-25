@@ -105,15 +105,16 @@ def test_multistep_history_control_and_parameter_gradients() -> None:
     )
 
 
-def test_export_roundtrip_and_checksum(tmp_path: Path) -> None:
-    model = tiny().double().eval()
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+def test_export_roundtrip_and_checksum(tmp_path: Path, dtype: torch.dtype) -> None:
+    model = tiny().to(dtype=dtype).eval()
     inputs = {
-        k: torch.randn(2, 3, d, dtype=torch.double)
-        for k, d in model.cfg.input_dims.items()
+        k: torch.randn(2, 3, d, dtype=dtype) for k, d in model.cfg.input_dims.items()
     }
     export_model(tmp_path, model, {"codec": {"robot": "cartpole"}, "dt": 1 / 60})
     loaded, manifest = load_model(tmp_path)
     assert manifest["codec"]["robot"] == "cartpole"
+    assert all(value.dtype == dtype for value in loaded.state_dict().values())
     torch.testing.assert_close(model(inputs), loaded(inputs), atol=0, rtol=0)
     with pytest.raises(FileExistsError):
         export_model(tmp_path, model, {})

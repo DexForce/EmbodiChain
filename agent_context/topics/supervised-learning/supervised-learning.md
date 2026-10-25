@@ -22,11 +22,14 @@ Objectives own loss masks, normalization, integration and multi-step graph
 construction. The optimizer does not infer action semantics or detach histories.
 Schema, action/frame/timestep and numerical-policy identifiers belong in each
 recipe's checkpoint signature. Tensor sources additionally bind content identity.
-Fresh runs require artifact-free output directories. Restoring an older
-checkpoint into a directory with later metric history requires a fresh output
-directory so prior results are retained.
-Validation callbacks use frozen models and restored RNG; only development data
-may select checkpoints. Acquisition and producer lifecycles remain application-owned.
+`learning/sl/_artifacts.py` owns run identities and output-history admission for
+both SL and historical NeRD trainers. A fresh run claims `run.json`; resuming an
+occupied directory requires the checkpoint's matching run identity. Checkpoints
+without an identity require an artifact-free destination. Newer or incomplete
+metric history is retained and requires a fresh resume destination.
+Validation callbacks preserve RNG, sampling state and model buffers, including
+checkpoints saved inside a callback. Only development data may select checkpoints.
+Acquisition and producer lifecycles remain application-owned.
 
 ## Validation
 

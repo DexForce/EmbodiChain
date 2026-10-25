@@ -33,6 +33,7 @@ from torch import Tensor
 from embodichain.utils import configclass
 from embodichain.data_pipeline.dynamics.shards import DynamicsWindowDataset
 from embodichain.learning.sl import SupervisedLearner
+from embodichain.learning.sl._artifacts import _RunArtifacts
 from .supervised import NeRDObjective, make_nerd_batch
 from ._sample_order import _CheckpointedOrder, _OfficialShuffleOrder, _open_order
 from ._numerics import (
@@ -373,6 +374,14 @@ def evaluate_model(
     }
 
 
+def _model_cfg_identity(cfg: dict[str, Any]) -> dict[str, Any]:
+    """Compare legal head-width sequences without changing feature order."""
+    identity = dict(cfg)
+    if isinstance(identity.get("head_hidden_dims"), (tuple, list)):
+        identity["head_hidden_dims"] = list(identity["head_hidden_dims"])
+    return identity
+
+
 class DynamicsTrainer:
     """Train from immutable windows using an explicit committed sample cursor.
 
@@ -434,9 +443,12 @@ class DynamicsTrainer:
         self.train_dataset, self.validation_dataset = train_dataset, validation_dataset
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self._artifacts = _RunArtifacts(self.output_dir)
         self.manifest = manifest
         self.global_step = 0
         self.best_validation = float("inf")
+        self._best_model: dict[str, Tensor] | None = None
+        self._best_step: int | None = None
         self.sampler = torch.Generator(device="cpu").manual_seed(cfg.seed)
         self._sample_order_identity: dict[str, Any] | None = None
         self.sample_order = self._prepare_order(sample_order)
@@ -499,8 +511,17 @@ class DynamicsTrainer:
     def _prepare_order(
         self, source: Tensor | str | Path | None
     ) -> Tensor | np.ndarray | _CheckpointedOrder | _OfficialShuffleOrder | None:
+        order, identity = self._load_order(source)
+        self._sample_order_identity = identity
+        return order
+
+    def _load_order(self, source: Tensor | str | Path | None) -> tuple[
+        Tensor | np.ndarray | _CheckpointedOrder | _OfficialShuffleOrder | None,
+        dict[str, Any] | None,
+    ]:
         if source is None:
-            return None
+            return None, None
+        identity = None
         if isinstance(source, (str, Path)):
             path = Path(source).resolve()
             digest = hashlib.sha256()
@@ -512,7 +533,7 @@ class DynamicsTrainer:
                 order, (_CheckpointedOrder, _OfficialShuffleOrder)
             ) and order.dataset_size != len(self.train_dataset):
                 raise ValueError("Sample-order dataset size mismatch")
-            self._sample_order_identity = {
+            identity = {
                 "path": str(path),
                 "sha256": digest.hexdigest(),
             }
@@ -520,7 +541,7 @@ class DynamicsTrainer:
             order = source.to(device="cpu", dtype=torch.long)
         if tuple(order.shape) != (self.cfg.total_steps, self.cfg.batch_size):
             raise ValueError("sample_order must have total_steps x batch_size indices")
-        return order
+        return order, identity
 
     def _order_snapshot(self) -> Any:
         return (
@@ -542,6 +563,7 @@ class DynamicsTrainer:
         """Commit one Adam update, returning loss, rate and unclipped norm."""
         if self.global_step >= self.cfg.total_steps:
             raise RuntimeError("Configured training budget exhausted")
+        self._artifacts.claim()
         candidate_sampler = torch.Generator(device="cpu")
         candidate_sampler.set_state(self.sampler.get_state())
         indices = (
@@ -572,8 +594,11 @@ class DynamicsTrainer:
 
     def save(self, path: str | Path) -> None:
         """Atomically save weights and exact committed training/RNG progress."""
+        self._artifacts.claim()
+        self._ensure_best_snapshot()
         state = {
             "format": "embodichain.nerd.training.v1",
+            "run_id": self._artifacts.run_id,
             "preprocessing_execution": _PREPROCESSING_EXECUTION,
             "model_cfg": self.model.cfg.to_dict(),
             "model": self.model.state_dict(),
@@ -585,6 +610,8 @@ class DynamicsTrainer:
             "global_step": self.global_step,
             "scheduler": {"next_step": self.global_step},
             "best_validation": self.best_validation,
+            "best_model": self._best_model,
+            "best_step": self._best_step,
             "sampler_state": self.sampler.get_state(),
             "sample_order": self._order_snapshot(),
             "dataset_fingerprint": self.train_dataset.fingerprint,
@@ -599,9 +626,14 @@ class DynamicsTrainer:
 
     def resume(self, path: str | Path) -> None:
         """Restore an identical run; changing its budget or data requires fine-tune."""
+        path = Path(path)
         state = torch.load(path, map_location="cpu", weights_only=True)
         if state.get("format") != "embodichain.nerd.training.v1":
             raise ValueError("Unsupported dynamics training checkpoint")
+        if state.get("resumable") is False:
+            raise ValueError(
+                "Best-model snapshots support export only; resume from last.pt"
+            )
         if state.get("preprocessing_execution") != _PREPROCESSING_EXECUTION:
             raise ValueError(
                 "Resume preprocessing execution mismatch; use matching code or fine-tuning"
@@ -614,7 +646,7 @@ class DynamicsTrainer:
         for key, expected in (
             ("dataset_fingerprint", self.train_dataset.fingerprint),
             ("train_cfg", self.cfg.to_dict()),
-            ("model_cfg", self.model.cfg.to_dict()),
+            ("model_cfg", _model_cfg_identity(self.model.cfg.to_dict())),
             ("manifest", self.manifest),
             (
                 "window_contract",
@@ -627,12 +659,20 @@ class DynamicsTrainer:
             actual = (
                 saved_train_cfg
                 if key == "train_cfg"
-                else saved_model_cfg if key == "model_cfg" else state[key]
+                else (
+                    _model_cfg_identity(saved_model_cfg)
+                    if key == "model_cfg"
+                    else state[key]
+                )
             )
             if actual != expected:
                 raise ValueError(
                     f"Resume {key} mismatch; use fine-tuning for a new run"
                 )
+        if list(saved_model_cfg["input_dims"].items()) != list(
+            self.model.cfg.input_dims.items()
+        ):
+            raise ValueError("Resume model_cfg input_dims order mismatch")
         saved_order = state["sample_order"]
         if self.sample_order is not None:
             same = (
@@ -645,11 +685,33 @@ class DynamicsTrainer:
             if not same:
                 raise ValueError("Resume sample order mismatch")
         if isinstance(saved_order, dict):
-            self.sample_order = self._prepare_order(saved_order["path"])
-            if self._sample_order_identity != saved_order:
+            order, order_identity = self._load_order(saved_order["path"])
+            if order_identity != saved_order:
                 raise ValueError("Resume sample order checksum mismatch")
         else:
-            self.sample_order = saved_order
+            order, order_identity = self._load_order(saved_order)
+        step = state["global_step"]
+        if (
+            type(step) is not int
+            or not 0 <= step <= self.cfg.total_steps
+            or state["scheduler"] != {"next_step": step}
+        ):
+            raise ValueError("Resume committed step or scheduler mismatch")
+        self._validate_model_state(state["model"], "model")
+        groups = state["optimizer"].get("param_groups", [])
+        if len(groups) != len(self.optimizer.param_groups) or any(
+            len(saved.get("params", [])) != len(current["params"])
+            for saved, current in zip(groups, self.optimizer.param_groups)
+        ):
+            raise ValueError("Resume optimizer parameter groups mismatch")
+        sampler = torch.Generator(device="cpu")
+        sampler.set_state(state["sampler_state"])
+        best_model, best_step = self._checkpoint_best(state, path)
+        run_id = self._artifacts.validate_resume(state.get("run_id"))
+        self._artifacts.validate_history(step, key="step")
+        self._validate_destination_best(state, best_model, best_step, run_id)
+        # Directory identity, order checksums and every semantic contract are
+        # admitted before changing model, optimizer, sampling or global RNG.
         self.model.load_state_dict(state["model"])
         self.optimizer.load_state_dict(state["optimizer"])
         self.global_step, self.best_validation = (
@@ -657,9 +719,125 @@ class DynamicsTrainer:
             state["best_validation"],
         )
         self.statistics = state["statistics"]
+        self.sample_order, self._sample_order_identity = order, order_identity
+        self._best_model, self._best_step = best_model, best_step
         self.learner.num_updates = self.global_step
         self.sampler.set_state(state["sampler_state"])
         _restore_rng_state(state["rng"])
+        self._artifacts.adopt_resume(run_id)
+
+    def _validate_model_state(self, saved: dict[str, Tensor], label: str) -> None:
+        current = self.model.state_dict()
+        if current.keys() != saved.keys() or any(
+            not isinstance(saved[key], Tensor)
+            or saved[key].shape != value.shape
+            or saved[key].dtype != value.dtype
+            for key, value in current.items()
+        ):
+            raise ValueError(f"Resume {label} tensor layout mismatch")
+
+    def _checkpoint_best(
+        self, state: dict[str, Any], path: Path
+    ) -> tuple[dict[str, Tensor] | None, int | None]:
+        best_model, best_step = state.get("best_model"), state.get("best_step")
+        score = state["best_validation"]
+        if not math.isfinite(score):
+            if score != float("inf") or best_model is not None or best_step is not None:
+                raise ValueError("Resume best-model metadata mismatch")
+            return None, None
+        if best_model is None:
+            # Legacy checkpoints stored the score but kept best weights only in
+            # the sibling file. Read and validate that source without touching
+            # the destination; an absent best model cannot be invented.
+            best_path = path.with_name("best.pt")
+            if not best_path.is_file():
+                raise ValueError(
+                    "Resume needs matching best.pt for legacy best weights"
+                )
+            best = torch.load(best_path, map_location="cpu", weights_only=True)
+            best_cfg = {"attention_backend": "default", **best["model_cfg"]}
+            if (
+                best.get("format") != "embodichain.nerd.training.v1"
+                or _model_cfg_identity(best_cfg)
+                != _model_cfg_identity(self.model.cfg.to_dict())
+                or list(best_cfg["input_dims"].items())
+                != list(self.model.cfg.input_dims.items())
+                or best["manifest"] != state["manifest"]
+                or best["dataset_fingerprint"] != state["dataset_fingerprint"]
+                or best["best_validation"] != score
+                or best.get("run_id") != state.get("run_id")
+            ):
+                raise ValueError("Resume legacy best.pt identity mismatch")
+            best_model, best_step = best["model"], best["global_step"]
+        if type(best_step) is not int or not 0 <= best_step <= state["global_step"]:
+            raise ValueError("Resume best-model step mismatch")
+        self._validate_model_state(best_model, "best model")
+        return {
+            key: value.detach().to(device="cpu", copy=True)
+            for key, value in best_model.items()
+        }, best_step
+
+    def _write_best_snapshot(self) -> None:
+        assert self._best_model is not None and self._best_step is not None
+        _atomic_save(
+            self.output_dir / "best.pt",
+            {
+                "format": "embodichain.nerd.training.v1",
+                "resumable": False,
+                "run_id": self._artifacts.run_id,
+                "model_cfg": self.model.cfg.to_dict(),
+                "model": self._best_model,
+                "manifest": self.manifest,
+                "global_step": self._best_step,
+                "dataset_fingerprint": self.train_dataset.fingerprint,
+                "numerical_profile": self.cfg.numerical_profile,
+                "attention_backend": self.model.cfg.attention_backend,
+                "best_validation": self.best_validation,
+            },
+        )
+
+    def _validate_destination_best(
+        self,
+        state: dict[str, Any],
+        best_model: dict[str, Tensor] | None,
+        best_step: int | None,
+        run_id: str,
+    ) -> None:
+        path = self.output_dir / "best.pt"
+        if not path.exists():
+            return
+        try:
+            best = torch.load(path, map_location="cpu", weights_only=True)
+            best_cfg = {"attention_backend": "default", **best["model_cfg"]}
+            if (
+                best_model is None
+                or best.get("format") != "embodichain.nerd.training.v1"
+                or best.get("run_id") != run_id
+                or best["global_step"] != best_step
+                or best["best_validation"] != state["best_validation"]
+                or _model_cfg_identity(best_cfg)
+                != _model_cfg_identity(self.model.cfg.to_dict())
+                or list(best_cfg["input_dims"].items())
+                != list(self.model.cfg.input_dims.items())
+                or best["manifest"] != state["manifest"]
+                or best["dataset_fingerprint"] != state["dataset_fingerprint"]
+            ):
+                raise ValueError("Best selection boundary differs")
+            self._validate_model_state(best["model"], "destination best model")
+            if any(
+                not torch.equal(best["model"][key], value)
+                for key, value in best_model.items()
+            ):
+                raise ValueError("Best selection weights differ")
+        except (OSError, RuntimeError, KeyError, TypeError, ValueError) as error:
+            raise ValueError(
+                "Resume destination best.pt differs from this checkpoint; "
+                "use a fresh output directory to preserve existing best weights"
+            ) from error
+
+    def _ensure_best_snapshot(self) -> None:
+        if self._best_model is not None and not (self.output_dir / "best.pt").exists():
+            self._write_best_snapshot()
 
     def train(self, *, stop_after: int | None = None) -> dict[str, Any]:
         """Run to the configured budget or an explicit interruption checkpoint."""
@@ -670,20 +848,11 @@ class DynamicsTrainer:
         )
         if end < self.global_step:
             raise ValueError("stop_after precedes the committed cursor")
+        self._artifacts.claim()
+        self._artifacts.validate_history(self.global_step, key="step")
+        self._ensure_best_snapshot()
         last: dict[str, Any] = {}
         log_path = self.output_dir / "metrics.jsonl"
-        # Drop records newer than a restored checkpoint before appending.
-        if log_path.exists():
-            temporary_log = log_path.with_suffix(".jsonl.pending")
-            with log_path.open() as source, temporary_log.open("w") as target:
-                for line in source:
-                    try:
-                        record = json.loads(line)
-                    except json.JSONDecodeError:
-                        break  # Interrupted trailing write is not a committed record.
-                    if record["step"] <= self.global_step:
-                        target.write(line)
-            os.replace(temporary_log, log_path)
         with log_path.open("a") as log:
             while self.global_step < end:
                 last = self.step()
@@ -703,7 +872,12 @@ class DynamicsTrainer:
                     score = float(validation["normalized_mse"])
                     if score < self.best_validation:
                         self.best_validation = score
-                        self.save(self.output_dir / "best.pt")
+                        self._best_model = {
+                            key: value.detach().to(device="cpu", copy=True)
+                            for key, value in self.model.state_dict().items()
+                        }
+                        self._best_step = self.global_step
+                        self._write_best_snapshot()
                 if (
                     self.global_step % self.cfg.log_interval == 0
                     or self.global_step == end

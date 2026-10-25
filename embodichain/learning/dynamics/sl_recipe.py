@@ -204,6 +204,7 @@ def build_supervised_trainer(config: dict[str, Any]) -> SupervisedTrainer:
         cfg,
         signature={
             "model": model.cfg.to_dict(),
+            "model_input_layout": list(model.cfg.input_dims.items()),
             "objective": {
                 "include_prefix": include_prefix,
                 "numerical_profile": profile,

@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -34,6 +35,133 @@ from embodichain.data_pipeline.dynamics.generation import (
 )
 from embodichain.data_pipeline.dynamics._newton import _NewtonTeacher
 from embodichain.data_pipeline.dynamics.shards import load_manifest, trajectory_split
+
+
+@pytest.fixture
+def deterministic_generation(monkeypatch):
+    """Exercise persistence with reproducible accepted and rejected candidates."""
+    from embodichain.data_pipeline.dynamics import generation
+
+    class Teacher:
+        def __init__(self, robot, *, device, num_envs, **kwargs):
+            self.device = torch.device("cpu")
+            self.gravity_dir = torch.tensor([0.0, 0.0, -1.0]).expand(num_envs, -1)
+            self.manifest = {
+                "physics_signature": "fake-physical-v1",
+                "teacher_origin": {"collector": "fake"},
+            }
+
+        def reset(self, q, qd):
+            self.q, self.qd = q.clone(), qd.clone()
+            self.rejected = torch.tensor([int(seed) in {11, 13} for seed in q[:, 0]])
+            self.index = 0
+
+        def snapshot(self):
+            q = self.q + self.index * 0.01
+            q[self.rejected] = float("nan")
+            return {"q": q, "qd": self.qd.clone()}, {}
+
+        def step(self, force):
+            self.index += 1
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    def sample(robot, seed, horizon, *args):
+        return torch.tensor([float(seed), 0.0]), torch.zeros(2), torch.zeros(horizon, 2)
+
+    monkeypatch.setattr(generation, "_NewtonTeacher", Teacher)
+    monkeypatch.setattr(generation, "_sample", sample)
+
+
+def test_resume_retains_rejections_when_interrupted_after_shard_manifest(
+    tmp_path, monkeypatch, deterministic_generation
+):
+    from embodichain.data_pipeline.dynamics import shards
+
+    config = {
+        "output_dir": str(tmp_path),
+        "seed": 11,
+        "trajectories": 2,
+        "num_envs": 2,
+        "horizon": 2,
+        "trajectories_per_shard": 1,
+    }
+    atomic_json = shards._atomic_json
+
+    def interrupt_after_publish(path, value):
+        atomic_json(path, value)
+        if path.name == "manifest.json" and value["shards"]:
+            raise RuntimeError("interrupted-after-manifest-publication")
+
+    monkeypatch.setattr(shards, "_atomic_json", interrupt_after_publish)
+    with pytest.raises(RuntimeError, match="interrupted-after-manifest-publication"):
+        generate_dataset(config)
+    committed = load_manifest(tmp_path, verify=True)
+    assert [
+        row["id"] for shard in committed["shards"] for row in shard["trajectories"]
+    ] == ["11:1"]
+    # This legacy report can lag behind the committed shard; it cannot be the
+    # recovery authority once progress is included in the shard manifest.
+    (tmp_path / "generation-progress.json").write_text(
+        json.dumps({"next_candidate": 0, "rejected": 0, "rejections": []})
+    )
+    monkeypatch.setattr(shards, "_atomic_json", atomic_json)
+    result = generate_dataset({**config, "resume": True})
+    assert result["trajectories"] == 2
+    assert result["rejected"] == 2
+    evidence = json.loads(Path(result["rejection_evidence"]).read_text())
+    assert evidence["next_candidate"] == 4
+    assert [record["id"] for record in evidence["rejections"]] == ["11:0", "11:2"]
+    final = load_manifest(tmp_path, verify=True)
+    assert final["metadata"] == committed["metadata"]
+    assert final["shards"][0] == committed["shards"][0]
+    baseline = tmp_path / "uninterrupted"
+    generate_dataset({**config, "output_dir": str(baseline)})
+    expected = load_manifest(baseline, verify=True)
+    assert final["metadata"] == expected["metadata"]
+    for actual_shard, expected_shard in zip(final["shards"], expected["shards"]):
+        assert actual_shard["trajectories"] == expected_shard["trajectories"]
+        with (
+            h5py.File(tmp_path / actual_shard["file"]) as actual_file,
+            h5py.File(baseline / expected_shard["file"]) as expected_file,
+        ):
+            for group in ("states", "transitions"):
+                for field in actual_file[f"0/{group}"]:
+                    assert torch.equal(
+                        torch.from_numpy(actual_file[f"0/{group}/{field}"][()]),
+                        torch.from_numpy(expected_file[f"0/{group}/{field}"][()]),
+                    )
+
+
+def test_resume_reads_legacy_generation_progress(tmp_path, deterministic_generation):
+    config = {
+        "output_dir": str(tmp_path),
+        "seed": 11,
+        "trajectories": 1,
+        "num_envs": 1,
+        "horizon": 2,
+        "trajectories_per_shard": 1,
+        "max_attempts": 1,
+    }
+    with pytest.raises(RuntimeError, match="Generation attempt limit"):
+        generate_dataset(config)
+    # Even a batch with no accepted trajectories advances a recoverable cursor.
+    manifest = load_manifest(tmp_path)
+    assert not manifest["shards"]
+    assert manifest["generation_progress"]["next_candidate"] == 1
+    assert manifest["generation_progress"]["rejected"] == 1
+    # Older collectors store progress only in the separate JSON report.
+    progress = manifest.pop("generation_progress")
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest))
+    (tmp_path / "generation-progress.json").write_text(json.dumps(progress))
+    result = generate_dataset({**config, "resume": True, "max_attempts": 2})
+    assert result["trajectories"] == result["rejected"] == 1
+    evidence = json.loads(Path(result["rejection_evidence"]).read_text())
+    assert [record["id"] for record in evidence["rejections"]] == ["11:0"]
 
 
 @pytest.mark.parametrize(

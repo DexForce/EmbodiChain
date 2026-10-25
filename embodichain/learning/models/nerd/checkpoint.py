@@ -17,6 +17,7 @@
 """Versioned portable NeRD exports and explicitly trusted legacy conversion."""
 
 from __future__ import annotations
+from collections.abc import Mapping
 import hashlib
 import json
 import pickle
@@ -61,6 +62,18 @@ def _digest(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _model_from_state(
+    cfg: NeRDModelCfg,
+    state: Mapping[str, torch.Tensor],
+    device: str | torch.device = "cpu",
+) -> NeRDModel:
+    """Restore saved floating precision before copying parameters and statistics."""
+    dtype = next(value.dtype for value in state.values() if value.is_floating_point())
+    model = NeRDModel(cfg).to(dtype=dtype)
+    model.load_state_dict(state, strict=True)
+    return model.to(device)
+
+
 def export_model(path: str | Path, model: NeRDModel, manifest: dict[str, Any]) -> None:
     """Write tensor weights and JSON schema without executable Python objects.
 
@@ -102,13 +115,8 @@ def load_model(
         raise ValueError("NeRD weights checksum mismatch")
     cfg = NeRDModelCfg(**manifest["model_config"])
     _execution_metadata(manifest, cfg)
-    model = NeRDModel(cfg)
     state = torch.load(path / "weights.pt", map_location="cpu", weights_only=True)
-    # Preserve exported floating dtype instead of silently downcasting to FP32.
-    dtype = next(v.dtype for v in state.values() if v.is_floating_point())
-    model.to(dtype=dtype)
-    model.load_state_dict(state, strict=True)
-    return model.to(device).eval(), manifest
+    return _model_from_state(cfg, state, device).eval(), manifest
 
 
 class _LegacyModule(nn.Module):

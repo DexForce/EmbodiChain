@@ -20,6 +20,34 @@ The existing `embodichain dynamics` CLI retains its historical training/export
 formats. New common-format checkpoints resume through `train-sl` with the same
 recipe and data identity.
 
+Each new training run claims its output with `run.json`. Starting fresh or
+fine-tuning requires a new destination; neither may replace another run's
+metrics or checkpoints. Resume preserves the checkpoint's run identity and
+rejects a different run's directory or metric history newer than that checkpoint.
+Metric history is append-only. An invalid or incomplete log record requires a
+fresh resume destination so the original evidence is retained.
+If a crash published a later best model before its checkpoint/log boundary,
+same-directory recovery also requires a fresh destination rather than replacing
+that best file with an older selection.
+Historical checkpoints without a run identity can resume into an artifact-free
+destination. Input feature order is part of the resume contract for both CLIs.
+
+`last.pt` is the complete resumable checkpoint. Automatically selected `best.pt`
+files are model-only snapshots marked `resumable=False`, suitable for
+`embodichain dynamics export`. They retain the best model's own step and frozen
+normalizers; resume from `last.pt`. The full checkpoint retains one owned CPU
+copy of the best model and its step, so a new destination can recreate `best.pt`
+even when subsequent validation does not improve. This adds one model's parameter
+and buffer storage on CPU after the first selected best, plus that payload in
+`last.pt`; it does not retain historical optimizers or change update arithmetic.
+For the frozen published Cartpole/Ant models below, those tensor payloads are
+10.35/41.55 MiB respectively; this is storage accounting, not a transient peak
+measurement. Resume into an occupied owned directory may read one best snapshot
+to validate its selection boundary, outside the optimizer-update path.
+Legacy complete best checkpoints remain readable. If a historical checkpoint
+has a finite best score but no embedded best weights, its matching source-side
+`best.pt` must be present rather than silently substituting the latest weights.
+
 ## Frozen comparison
 
 Use PR #855 revision `a58de92a82b4e1c1c260083b5b1930173322aceb` as the
@@ -53,6 +81,13 @@ The default matrix performs:
   reference metrics use the established absolute-tolerance mode.
 - A process-restarted 500+500 update candidate run for seed zero of each robot,
   compared with uninterrupted weights, optimizer, sampler, counters and RNG.
+
+`final_gradients.pt` is an additional diagnostic artifact, separate from these
+26 frozen gates. After training it copies the existing clipped parameter
+gradients to CPU and records the reported final pre-clipping norm. It performs
+no extra forward/backward/update and adds no training hooks or changes to the
+acceptance thresholds or budget. The common-trainer orchestration comparison
+can reuse it alongside the original first-update capture and final checkpoint.
 
 `summary.json` is the machine-readable gate; the command exits nonzero if a gate
 fails or fewer than five paired seeds are supplied. Seed lists must contain

@@ -24,8 +24,11 @@ functional Gym integration are separate consumers, not dependencies of training.
 
 A trajectory contains T+1 states and T controls/contact inputs. Splits belong to
 whole trajectories and windows cannot cross episodes or splits. Writers publish
-only committed shards; resume advances candidate seeds past accepted and rejected
-candidates. File handles and bounded caches belong to their reader/worker.
+only committed shards. The manifest commits generation cursor and rejection
+evidence with the shard; rejection-only commits preserve data fingerprints.
+Legacy progress sidecars remain readable, while collector source/physical
+identity checks still apply. File handles and bounded caches belong to their
+reader/worker.
 
 The direct teacher stores its importer profile, asset/physical-array hashes,
 solver settings and actual Newton/Warp versions. Its
@@ -49,9 +52,13 @@ Mass-matrix update intervals divide the macro substep count so resets can replay
 
 ## Training and validation
 
-Training checkpoints preserve optimizer, scheduler, RNG and committed sample
-progress. Portable exports contain tensors and JSON, including normalizers and
-attention policy. Resume restores the same run; fine-tuning starts a new one.
+`last.pt` preserves optimizer, scheduler, RNG, committed sample progress and one
+owned CPU snapshot of the selected best model. New `best.pt` files are model-only
+export snapshots; exact training recovery uses `last.pt`. Ordered input features
+are part of recovery identity. Both trainers share run-directory/history admission
+with [SL](../supervised-learning/supervised-learning.md).
+Portable exports preserve saved floating precision, normalizers and attention
+policy. Resume restores the same run; fine-tuning starts a new one.
 Only explicitly trusted legacy conversion may deserialize Python model objects.
 
 `DynamicsTrainer` delegates optimizer updates to `learning.sl.SupervisedLearner`

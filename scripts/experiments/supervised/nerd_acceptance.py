@@ -173,6 +173,7 @@ def _worker(request_path: Path) -> None:
             )
             if request.get("resume"):
                 trainer.resume(output / "last.pt")
+            last_update: dict[str, Any] = {}
             if trainer.global_step == 0:
                 captured: dict[str, Any] = {"raw_gradients": {}}
                 handles = [
@@ -191,6 +192,7 @@ def _worker(request_path: Path) -> None:
                     )
                 )
                 first = trainer.step()
+                last_update = first
                 for handle in handles:
                     handle.remove()
                 captured.update(
@@ -208,6 +210,21 @@ def _worker(request_path: Path) -> None:
                 )
                 torch.save(captured, output / "first_update.pt")
             result["training"] = trainer.train(stop_after=request["stop_after"])
+            last_update = result["training"]["last"] or last_update
+            # Diagnostic only: read already clipped gradients after the final
+            # update, without another forward, backward, hook or optimizer call.
+            torch.save(
+                {
+                    "num_updates": trainer.global_step,
+                    "pre_clip_grad_norm": last_update.get("grad_norm"),
+                    "clipped_gradients": {
+                        name: parameter.grad.detach().cpu().clone()
+                        for name, parameter in model.named_parameters()
+                        if parameter.grad is not None
+                    },
+                },
+                output / "final_gradients.pt",
+            )
             result["metrics"] = evaluate_model(
                 model, codec, validation, request["batch_size"], device
             )

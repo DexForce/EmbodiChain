@@ -198,20 +198,34 @@ def test_validation_restores_rng_and_mode_even_on_failure(tmp_path, callback_fai
         random.seed(17)
         np.random.seed(17)
 
+    def count_forwards(trainer):
+        trainer.learner.model.register_buffer(
+            "seen", torch.zeros((), dtype=torch.int64)
+        )
+
+        def record_forward(model, inputs):
+            model.seen.add_(1)
+
+        trainer.learner.model.register_forward_pre_hook(record_forward)
+
     reset_rng()
     baseline = build(tmp_path / "baseline")
+    count_forwards(baseline)
     count = 1 if callback_fails else 3
     baseline.fit(stop_after=count)
     expected = copy.deepcopy(baseline.learner.model.state_dict())
     expected_random = (random.random(), np.random.rand(), torch.rand(4))
     reset_rng()
     candidate = build(tmp_path / "candidate")
+    count_forwards(candidate)
     candidate.cfg.validation_interval = 1
 
     def evaluate(learner):
+        learner.model(torch.ones(1, 2))
         random.random()
         np.random.rand(5)
         torch.rand(9)
+        candidate.save(candidate.output / "selected.pt")
         if callback_fails:
             raise RuntimeError("validation failed")
         return {"probe": 0.0}
@@ -226,6 +240,17 @@ def test_validation_restores_rng_and_mode_even_on_failure(tmp_path, callback_fai
     for key, value in expected.items():
         torch.testing.assert_close(
             candidate.learner.model.state_dict()[key], value, rtol=0, atol=0
+        )
+    assert random.random() == expected_random[0]
+    assert np.random.rand() == expected_random[1]
+    torch.testing.assert_close(torch.rand(4), expected_random[2], rtol=0, atol=0)
+    resumed = build(tmp_path / "resumed")
+    count_forwards(resumed)
+    resumed.cfg.validation_interval = 1
+    resumed.resume(candidate.output / "selected.pt")
+    for key, value in expected.items():
+        torch.testing.assert_close(
+            resumed.learner.model.state_dict()[key], value, rtol=0, atol=0
         )
     assert random.random() == expected_random[0]
     assert np.random.rand() == expected_random[1]
@@ -247,15 +272,22 @@ def test_fresh_run_cannot_overwrite_existing_artifacts(tmp_path):
     assert resumed.learner.num_updates == 3
 
 
-def test_older_checkpoint_cannot_append_to_a_later_run_history(tmp_path):
+@pytest.mark.parametrize("history", ["newer", "incomplete"])
+def test_checkpoint_recovery_preserves_incompatible_output_history(tmp_path, history):
     first = build(tmp_path / "run")
     first.fit(stop_after=2)
     first.save(tmp_path / "step2.pt")
-    first.fit(stop_after=3)
+    if history == "newer":
+        first.fit(stop_after=3)
+    else:
+        with (first.output / "metrics.jsonl").open("a") as stream:
+            stream.write('{"num_updates":')
+    original_log = (first.output / "metrics.jsonl").read_bytes()
     candidate = build(tmp_path / "run")
     before = copy.deepcopy(candidate.learner.model.state_dict())
-    with pytest.raises(ValueError, match="history is ahead"):
+    with pytest.raises(ValueError, match="history"):
         candidate.resume(tmp_path / "step2.pt")
+    assert (first.output / "metrics.jsonl").read_bytes() == original_log
     for key, value in before.items():
         torch.testing.assert_close(
             candidate.learner.model.state_dict()[key], value, rtol=0, atol=0
@@ -282,11 +314,60 @@ def test_preconstructed_trainer_rechecks_output_ownership_at_fit(tmp_path):
     assert second.learner.num_updates == 0
 
 
-def test_foreign_replacement_of_owned_initial_snapshot_is_rejected(tmp_path):
+def test_foreign_writer_cannot_replace_an_owned_initial_snapshot(tmp_path):
     first = build(tmp_path / "shared")
     second = build(tmp_path / "shared")
     path = first.output / "step_000000.pt"
     first.save(path)
-    second.save(path)
+    original = path.read_bytes()
     with pytest.raises(FileExistsError, match="another run"):
-        first.fit(stop_after=1)
+        second.save(path)
+    assert path.read_bytes() == original
+    assert first.fit(stop_after=1)["num_updates"] == 1
+
+
+@pytest.mark.parametrize("destination_step", [1, 3])
+def test_resume_rejects_another_run_even_with_older_or_equal_history(
+    tmp_path, destination_step
+):
+    source = build(tmp_path / "source")
+    source.fit(stop_after=3)
+    destination = build(tmp_path / "destination")
+    destination.fit(stop_after=destination_step)
+    original = {
+        name: (destination.output / name).read_bytes()
+        for name in ("metrics.jsonl", "last.pt", "run.json")
+    }
+    candidate = build(destination.output)
+    before = copy.deepcopy(candidate.learner.state_dict())
+    sampler = candidate.sampler.get_state().clone()
+    rng = torch.get_rng_state().clone()
+    with pytest.raises(FileExistsError, match="another run"):
+        candidate.resume(source.output / "last.pt")
+    for key, value in before["model"].items():
+        torch.testing.assert_close(
+            candidate.learner.model.state_dict()[key], value, rtol=0, atol=0
+        )
+    assert candidate.learner.optimizer.state_dict() == before["optimizer"]
+    assert candidate.learner.num_updates == before["num_updates"]
+    torch.testing.assert_close(candidate.sampler.get_state(), sampler, rtol=0, atol=0)
+    torch.testing.assert_close(torch.get_rng_state(), rng, rtol=0, atol=0)
+    for name, content in original.items():
+        assert (destination.output / name).read_bytes() == content
+
+
+def test_checkpoint_without_run_identity_requires_a_fresh_destination(tmp_path):
+    source = build(tmp_path / "source")
+    source.fit(stop_after=2)
+    state = torch.load(source.output / "last.pt", weights_only=False)
+    state.pop("run_id")
+    legacy_path = tmp_path / "legacy.pt"
+    torch.save(state, legacy_path)
+    occupied = build(source.output)
+    with pytest.raises(FileExistsError, match="fresh output"):
+        occupied.resume(legacy_path)
+    fresh = build(tmp_path / "fresh")
+    fresh.resume(legacy_path)
+    assert fresh.fit(stop_after=3)["num_updates"] == 3
+    saved = torch.load(fresh.output / "last.pt", weights_only=False)
+    assert saved["run_id"]

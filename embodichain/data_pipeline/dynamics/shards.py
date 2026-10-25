@@ -97,8 +97,15 @@ def load_manifest(root: str | Path, *, verify: bool = False) -> dict[str, Any]:
 
 
 def dataset_fingerprint(manifest: dict[str, Any]) -> str:
-    """Hash metadata, schema, immutable shard hashes and split assignments."""
-    return hashlib.sha256(_json_bytes(manifest)).hexdigest()
+    """Hash immutable data identity, excluding operational generation progress.
+
+    Manifests written before generation progress was included retain their
+    original fingerprint. Rejection-only commits do not change model inputs.
+    """
+    identity = {
+        key: value for key, value in manifest.items() if key != "generation_progress"
+    }
+    return hashlib.sha256(_json_bytes(identity)).hexdigest()
 
 
 class DynamicsShardWriter:
@@ -239,8 +246,15 @@ class DynamicsShardWriter:
             self.commit()
 
     def commit(self) -> None:
-        """Publish the current shard atomically, including a content checksum."""
+        """Publish pending data and optional generation progress atomically.
+
+        A caller may maintain ``manifest["generation_progress"]`` alongside
+        pending trajectories. It is published with each automatic shard commit;
+        a rejection-only update also publishes when no shard is pending.
+        """
         if self._file is None:
+            if "generation_progress" in self.manifest:
+                _atomic_json(self.root / "manifest.json", self.manifest)
             return
         self._file.flush()
         self._file.close()

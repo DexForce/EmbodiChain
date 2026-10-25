@@ -130,6 +130,11 @@ Smoke presets use a small network and short budget to exercise the workflow.
 Full presets use the reference network scale and a substantially longer budget.
 Neither preset name is an accuracy qualification.
 
+Collection commits its candidate cursor and rejection records in the same
+manifest update as the shard. Rejection-only progress does not change training
+data identity. Historical progress-file layouts remain readable; continuing a
+collection still requires the recorded collector source and physical identity.
+
 To train on a downloaded dataset, copy `dynamics.train.full.yaml`, then set
 `dataset` to the downloaded robot's `v1` directory and `output_dir` to a new
 training directory. Preserve its model feature dimensions and history length.
@@ -139,9 +144,32 @@ then export its validation-selected `best.pt` with the `export` command.
 Training checkpoints retain model, optimizer, normalization, RNG and committed
 sampling progress. Continue the same run with `train --resume PATH/last.pt`.
 Initialize a new run from an inference export with `train --fine-tune PATH`.
+Each run records its identity in `run.json`; fresh training and fine-tuning require
+an artifact-free destination. Resuming into an occupied directory requires the
+same run identity. If a destination has a different selected best model or newer
+or incomplete metric history, use a fresh directory to preserve that evidence.
+Historical checkpoints without a
+run identity can also recover into a fresh directory.
+
+New `best.pt` files contain the validation-selected model and its own step, and
+support export rather than exact optimizer recovery. `last.pt` retains the best
+weights so recovery into another directory can recreate `best.pt` even without
+later validation improvement. Export and reload preserve the saved floating
+dtype and normalization. Input feature order must remain unchanged when resuming.
 Export destinations must be new directories. Paths written in configuration
 files resolve relative to the file; explicit CLI path overrides resolve relative
 to the working directory.
+
+The same NeRD model/objective also uses the shared supervised trainer:
+
+```bash
+embodichain train-sl --config extensions/embodichain_tasks/configs/tasks/classic_control/cartpole/sl.train.yaml
+embodichain train-sl --config extensions/embodichain_tasks/configs/tasks/classic_control/ant/sl.train.yaml
+```
+
+These bounded recipes use the common SL checkpoint format and resume through
+`train-sl --resume PATH`. The historical `dynamics` CLI keeps its own checkpoint
+format; both use the same supervised optimizer update and physical-target loss.
 
 ## Use the exported model in PyTorch
 

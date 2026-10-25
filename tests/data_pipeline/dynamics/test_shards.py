@@ -108,6 +108,32 @@ def test_validation_and_integrity(tmp_path):
         load_manifest(tmp_path, verify=True)
 
 
+def test_progress_only_publication_preserves_data_identity_and_pending_rows(tmp_path):
+    from embodichain.data_pipeline.dynamics.shards import dataset_fingerprint
+
+    with DynamicsShardWriter(tmp_path, {}, trajectories_per_shard=4) as writer:
+        writer.add_trajectory("accepted", *trajectory(), split="train")
+        progress = {"next_candidate": 1, "accepted": 1, "rejected": 0, "rejections": []}
+        writer.manifest["generation_progress"] = progress
+        writer.commit()
+        first = load_manifest(tmp_path, verify=True)
+        assert first["shards"][0]["trajectories"][0]["id"] == "accepted"
+        legacy = {
+            key: value for key, value in first.items() if key != "generation_progress"
+        }
+        assert dataset_fingerprint(first) == dataset_fingerprint(legacy)
+        progress.update(
+            next_candidate=3,
+            rejected=2,
+            rejections=[{"id": "rejected-1"}, {"id": "rejected-2"}],
+        )
+        writer.commit()
+        final = load_manifest(tmp_path, verify=True)
+        assert final["generation_progress"] == progress
+        assert final["shards"] == first["shards"]
+        assert dataset_fingerprint(final) == dataset_fingerprint(first)
+
+
 def test_stable_split_not_ingestion_order():
     forward = {str(i): trajectory_split(str(i), 7) for i in range(100)}
     backward = {str(i): trajectory_split(str(i), 7) for i in reversed(range(100))}

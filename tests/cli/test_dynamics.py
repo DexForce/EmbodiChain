@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 import os
 from pathlib import Path
 import subprocess
@@ -28,6 +29,7 @@ from unittest.mock import Mock
 
 import numpy as np
 import pytest
+import torch
 import yaml
 
 from embodichain.cli.dynamics import main
@@ -170,6 +172,173 @@ assert not any(k == 'dexsim' or k.startswith('embodichain.lab.sim') for k in sys
     assert result.returncode == 0, result.stdout + result.stderr
     report = json.loads((tmp_path / "reports/evaluation/result.json").read_text())
     assert report["split"] == "test" and report["windows"] == 3
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("model_snapshot", [False, True])
+def test_training_checkpoint_cli_export_preserves_dtype_statistics_and_predictions(
+    tmp_path, dtype, model_snapshot
+):
+    from embodichain.learning.models.nerd import NeRDModel, NeRDModelCfg, load_model
+
+    torch.set_num_threads(2)
+    model = (
+        NeRDModel(
+            NeRDModelCfg(
+                input_dims={"states_embedding": 4, "joint_f": 2},
+                output_dim=4,
+                n_embd=12,
+                n_head=3,
+                n_layer=1,
+                block_size=3,
+                history_length=3,
+                head_hidden_dims=(12,),
+            )
+        )
+        .to(dtype=dtype)
+        .eval()
+    )
+    # Values beyond FP32 precision expose a downcast even if tensors were later
+    # converted back to FP64. Frozen normalizers must retain their precision too.
+    with torch.no_grad():
+        for parameter in model.parameters():
+            parameter.add_(1e-10)
+    model.set_normalization(
+        {
+            key: (
+                torch.full((width,), 1 / 7, dtype=dtype),
+                torch.full((width,), 1 / 3, dtype=dtype),
+            )
+            for key, width in model.cfg.input_dims.items()
+        },
+        torch.full((4,), 1 / 11, dtype=dtype),
+        torch.full((4,), 1 / 13, dtype=dtype),
+    )
+    checkpoint = tmp_path / "training.pt"
+    state = {
+        "format": "embodichain.nerd.training.v1",
+        "model_cfg": model.cfg.to_dict(),
+        "model": model.state_dict(),
+        "train_cfg": {"numerical_profile": "default"},
+        "manifest": {"codec": {"robot": "cartpole"}, "dt": 1 / 60},
+        "global_step": 7,
+        "dataset_fingerprint": "fixed-training-corpus",
+    }
+    if model_snapshot:
+        state.pop("train_cfg")
+        state.update(
+            resumable=False, numerical_profile="default", attention_backend="default"
+        )
+    torch.save(state, checkpoint)
+    destination = tmp_path / "export"
+    main(["export", "--checkpoint", str(checkpoint), "--output", str(destination)])
+    loaded, metadata = load_model(destination)
+    assert metadata["training"]["global_step"] == 7
+    assert all(value.dtype == dtype for value in loaded.state_dict().values())
+    for name, expected in model.state_dict().items():
+        torch.testing.assert_close(loaded.state_dict()[name], expected, atol=0, rtol=0)
+    inputs = {
+        name: torch.randn(2, 3, width, dtype=dtype)
+        for name, width in model.cfg.input_dims.items()
+    }
+    torch.testing.assert_close(model(inputs), loaded(inputs), atol=0, rtol=0)
+
+
+def test_fp64_fine_tune_resume_export_preserves_updates_and_input_order(tmp_path):
+    from embodichain.data_pipeline.dynamics.shards import DynamicsShardWriter
+    from embodichain.learning.dynamics.workflow import run_export, run_train
+    from embodichain.learning.models.nerd import (
+        NeRDModel,
+        NeRDModelCfg,
+        export_model,
+        load_model,
+    )
+
+    torch.set_num_threads(2)
+    metadata = {"codec": {"robot": "cartpole"}, "dt": 1 / 60}
+    with DynamicsShardWriter(tmp_path / "data", metadata) as writer:
+        for split in ("train", "validation", "test"):
+            q = np.zeros((6, 2), np.float32)
+            q[:, 0] = np.arange(6) * 0.01
+            qd = np.zeros_like(q)
+            qd[:, 0] = 0.6
+            writer.add_trajectory(
+                split,
+                {"q": q, "qd": qd},
+                {"joint_f": np.zeros((5, 2), np.float32)},
+                split=split,
+            )
+    model = NeRDModel(
+        NeRDModelCfg(
+            input_dims={"states_embedding": 4, "joint_f": 2},
+            output_dim=4,
+            n_embd=12,
+            n_head=3,
+            n_layer=1,
+            block_size=3,
+            history_length=3,
+            head_hidden_dims=(12,),
+        )
+    ).double()
+    model.input_rms["states_embedding"].mean.fill_(1 / 7)
+    export_model(tmp_path / "pretrained", model, metadata)
+    # Use the same JSON-shaped config as the CLI, including list-valued fields.
+    config = json.loads(
+        json.dumps(
+            {
+                "dataset": str(tmp_path / "data"),
+                "output_dir": str(tmp_path / "interrupted"),
+                "fine_tune": str(tmp_path / "pretrained"),
+                "model": model.cfg.to_dict(),
+                "train": {
+                    "total_steps": 2,
+                    "batch_size": 2,
+                    "device": "cpu",
+                    "validation_interval": 1,
+                    "checkpoint_interval": 1,
+                },
+                "stop_after": 1,
+            }
+        )
+    )
+    run_train(config)
+    checkpoint = tmp_path / "interrupted/last.pt"
+    saved = torch.load(checkpoint, weights_only=True)
+    assert all(value.dtype == torch.float64 for value in saved["model"].values())
+    resumed_config = deepcopy(config)
+    resumed_config.pop("fine_tune")
+    resumed_config.update(
+        resume=str(checkpoint), output_dir=str(tmp_path / "resumed"), stop_after=2
+    )
+    reordered = deepcopy(resumed_config)
+    reordered["output_dir"] = str(tmp_path / "reordered")
+    reordered["model"]["input_dims"] = dict(
+        reversed(list(reordered["model"]["input_dims"].items()))
+    )
+    with pytest.raises(ValueError, match="input_dims order"):
+        run_train(reordered)
+    assert list((tmp_path / "reordered").iterdir()) == []
+    assert run_train(resumed_config)["global_step"] == 2
+    uninterrupted = deepcopy(config)
+    uninterrupted.update(output_dir=str(tmp_path / "full"), stop_after=2)
+    run_train(uninterrupted)
+    expected = torch.load(tmp_path / "full/last.pt", weights_only=True)
+    actual = torch.load(tmp_path / "resumed/last.pt", weights_only=True)
+    for name, value in expected["model"].items():
+        torch.testing.assert_close(actual["model"][name], value, atol=0, rtol=0)
+    assert actual["best_step"] == expected["best_step"]
+    run_export(tmp_path / "resumed/best.pt", tmp_path / "export")
+    loaded, _ = load_model(tmp_path / "export")
+    assert all(value.dtype == torch.float64 for value in loaded.state_dict().values())
+    for name, value in actual["best_model"].items():
+        torch.testing.assert_close(loaded.state_dict()[name], value, atol=0, rtol=0)
+    inputs = {
+        name: torch.randn(2, 3, width, dtype=torch.float64)
+        for name, width in model.cfg.input_dims.items()
+    }
+    prediction = loaded(inputs)
+    assert prediction.dtype == torch.float64
+    assert torch.isfinite(prediction).all()
 
 
 def test_packaged_workflow_configs_decode_through_cli(tmp_path, monkeypatch):

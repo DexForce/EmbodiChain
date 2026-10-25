@@ -193,12 +193,6 @@ def generate_dataset(config: Mapping[str, Any]) -> dict[str, Any]:
     cfg.validate()
     output = Path(cfg.output_dir)
     progress_path = output / "generation-progress.json"
-    progress = (
-        json.loads(progress_path.read_text())
-        if cfg.resume and progress_path.exists()
-        else {"next_candidate": 0, "rejected": 0, "rejections": []}
-    )
-    progress.setdefault("rejections", [])
     started = time.perf_counter()
     with _NewtonTeacher(
         cfg.robot,
@@ -225,6 +219,17 @@ def generate_dataset(config: Mapping[str, Any]) -> dict[str, Any]:
             resume=cfg.resume,
             split_seed=cfg.split_seed,
         ) as writer:
+            progress = writer.manifest.get("generation_progress")
+            if progress is None:
+                # Older datasets used a separate progress file. New collections
+                # recover from the manifest even if that compatibility report
+                # was not written, or still describes an earlier boundary.
+                progress = (
+                    json.loads(progress_path.read_text())
+                    if cfg.resume and progress_path.exists()
+                    else {"next_candidate": 0, "rejected": 0, "rejections": []}
+                )
+            progress.setdefault("rejections", [])
             accepted = len(writer.committed_ids)
             if accepted > cfg.trajectories:
                 raise ValueError(
@@ -235,6 +240,12 @@ def generate_dataset(config: Mapping[str, Any]) -> dict[str, Any]:
                 or [0]
             )
             cursor = max(first, int(progress["next_candidate"]))
+            progress.update(next_candidate=cursor, accepted=accepted)
+            # Keep the current candidate boundary beside pending shard state.
+            # add_trajectory may commit automatically, so update this same
+            # mapping before adding each accepted trajectory.
+            writer.manifest["generation_progress"] = progress
+            writer.commit()
             maximum = (
                 cfg.max_attempts
                 if cfg.max_attempts is not None
@@ -292,6 +303,7 @@ def generate_dataset(config: Mapping[str, Any]) -> dict[str, Any]:
                     if accepted >= cfg.trajectories:
                         break
                     cursor = candidate + 1
+                    progress["next_candidate"] = cursor
                     finite = all(
                         np.isfinite(v[row]).all()
                         for v in (*states.values(), *transitions.values())
@@ -315,6 +327,7 @@ def generate_dataset(config: Mapping[str, Any]) -> dict[str, Any]:
                             }
                         )
                         continue
+                    progress["accepted"] = accepted + 1
                     writer.add_trajectory(
                         f"{cfg.seed}:{candidate}",
                         {k: v[row] for k, v in states.items()},
@@ -323,8 +336,9 @@ def generate_dataset(config: Mapping[str, Any]) -> dict[str, Any]:
                     )
                     accepted += 1
                 writer.commit()
-                progress.update(next_candidate=cursor, accepted=accepted)
-                _write_json(progress_path, progress)
+    # Preserve the historical evidence-file layout as a derived completion
+    # report. It is no longer a second recovery transaction.
+    _write_json(progress_path, progress)
     result = {
         "status": "completed",
         "dataset": str(output.resolve()),
