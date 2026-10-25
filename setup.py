@@ -178,7 +178,11 @@ def main():
         package_data={
             "embodichain": ["VERSION"],
             "embodichain.data": ["default_materials.json"],
-            "embodichain.compute.kinematics._warp": ["ssik_LICENSE.txt"],
+            "embodichain.compute.kinematics._warp": [
+                "ssik_LICENSE.txt",
+                "data/*.npz",
+                "data/*.json",
+            ],
             "embodichain_robots": [
                 "_ssik_artifacts/*.py",
                 "_ssik_artifacts/*.json",

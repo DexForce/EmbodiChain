@@ -32,6 +32,9 @@ from scripts.benchmark.robotics.kinematic_solver.ssik_benchmark import (
     MODEL_NAMES,
     _gate_notes,
     _measure_streaming_control,
+    _memory,
+    _evaluate_trajectories,
+    _make_solver,
     _parse_reference_artifacts,
     benchmark_ssik_solver,
     evaluate_quality,
@@ -196,7 +199,9 @@ def test_unsupported_geometry_and_missing_artifacts_are_unmeasured(
     monkeypatch.setattr(
         _ssik_model,
         "_extract_model",
-        lambda chain: SimpleNamespace(family="unsupported", fingerprint="actual"),
+        lambda chain, **kwargs: SimpleNamespace(
+            family="unsupported", fingerprint="actual"
+        ),
     )
 
     def make_solver(*args: object) -> None:
@@ -224,3 +229,103 @@ def test_unsupported_geometry_and_missing_artifacts_are_unmeasured(
     assert any("--ssik-reference-artifacts arx5=" in note for note in notes)
     assert not any("PASS" in note for note in notes)
     assert (tmp_path / "measurements.json").is_file()
+
+
+@pytest.mark.parametrize("backend", ["warp", "reference", "cuda_rr"])
+def test_explicit_algorithm_options_reach_only_the_geometric_backend(
+    monkeypatch: pytest.MonkeyPatch, backend: str
+) -> None:
+    received: dict[str, object] = {}
+
+    def cfg(**kwargs: object) -> SimpleNamespace:
+        received.update(kwargs)
+        return SimpleNamespace(init_solver=lambda **kwargs: kwargs)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "embodichain.lab.sim.motion.solvers",
+        SimpleNamespace(PytorchSolverCfg=cfg, SSIKSolverCfg=cfg),
+    )
+    model = SimpleNamespace(
+        cfg=SimpleNamespace(fpath="actual.urdf"),
+        joint_names=["joint"],
+        manifest={"root": "root", "end": "end"},
+        tcp=torch.eye(4),
+        limits=torch.tensor([[-1.0], [1.0]]),
+    )
+    options = SSIKBenchmarkOptions(
+        geometry_mode="near_parallel",
+        axis_alignment_tolerance=9e-6,
+        srs_search="seed_local",
+    )
+    _make_solver(model, backend, torch.device("cpu"), options=options)
+    assert received["backend"] == backend
+    if backend == "warp":
+        assert received["geometry_mode"] == "near_parallel"
+        assert received["axis_alignment_tolerance"] == 9e-6
+        assert received["srs_search"] == "seed_local"
+    else:
+        assert "geometry_mode" not in received and "srs_search" not in received
+
+
+@pytest.mark.parametrize(
+    "models,devices", [(("arx5",), ("cuda",)), (("flexiv_rizon4s",), ("cpu",))]
+)
+def test_explicit_cuda_rr_cannot_silently_skip_an_unsupported_workload(
+    models: tuple[str, ...], devices: tuple[str, ...]
+) -> None:
+    with pytest.raises(ValueError, match="requires --ssik-models flexiv_rizon4s"):
+        benchmark_ssik_solver(
+            SSIKBenchmarkOptions(models=models, devices=devices, cuda_rr=True)
+        )
+
+
+def test_seed_local_continuity_uses_the_public_path_hook() -> None:
+    joints = torch.tensor([[0.01, 0.0], [0.02, 0.0], [0.03, 0.0]])
+    targets = _planar_fk(joints)
+    called = []
+
+    def path_hook(target: torch.Tensor, seed: torch.Tensor):
+        assert target.shape == (1, 3, 4, 4) and seed.shape == (1, 2)
+        called.append(True)
+        return torch.ones((1, 3), dtype=torch.bool), joints[None]
+
+    def no_fixed_seed_candidates(*args: object):
+        raise AssertionError("seed-local paths must use the target-aware hook")
+
+    solver = SimpleNamespace(
+        cfg=SimpleNamespace(
+            max_joint_step=None, backend="warp", srs_search="seed_local"
+        ),
+        family="srs",
+        _get_continuous_ik_path=path_hook,
+        _get_continuous_ik_candidates=no_fixed_seed_candidates,
+    )
+    model = SimpleNamespace(
+        fk=_planar_fk, limits=torch.tensor([[-1.0, -1.0], [1.0, 1.0]])
+    )
+    result = _evaluate_trajectories(
+        solver, model, targets[None], torch.zeros((1, 2)), torch.device("cpu")
+    )
+    assert called == [True] and result["success_rate"] == 1.0
+    assert result["max_accepted_joint_step_rad"] <= 0.05
+    assert solver.cfg.max_joint_step is None
+
+
+def test_memory_attribution_includes_borrowed_numerical_workspace_once() -> None:
+    normal = torch.empty(64, dtype=torch.float64)
+    flags = torch.empty(32, dtype=torch.int32)
+    solver = SimpleNamespace(
+        cfg=SimpleNamespace(class_type="SSIKSolver", backend="warp"),
+        dof=6,
+        _ik_buffers=SimpleNamespace(arrays={"flags": flags}),
+        _near=SimpleNamespace(_workspace={"normal": normal, "alias": normal}),
+    )
+    result = _memory(
+        lambda: (torch.ones(1, dtype=torch.bool), torch.zeros(1, 6)),
+        torch.device("cpu"),
+        solver,
+    )
+    # One 64-double numerical workspace plus32 flags, regardless of aliasing.
+    assert result["solver_buffer_mb"] == (512 + 128) / 2**20
+    assert result["tensor_scratch_gate"] == "PASS"

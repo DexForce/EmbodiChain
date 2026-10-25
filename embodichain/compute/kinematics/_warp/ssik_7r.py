@@ -162,7 +162,25 @@ def _decompose_3axis(
         # original-model FK validation remains authoritative for acceptance.
         valid = wp.abs(c) <= amplitude + wp.float64(5e-7)
         center = wp.atan2(b, a)
-        offset = wp.acos(wp.clamp(c / amplitude, wp.float64(-1), wp.float64(1)))
+        # Evaluate rho²-C² from cross products rather than 1-cos² near an
+        # Euler pole. This identity applies to arbitrary unit axis triples.
+        target_last = rotation * last
+        target_norm = wp.length(target_last)
+        direction = target_last
+        if target_norm > wp.float64(1e-12):
+            direction = target_last / target_norm
+        projection = wp.dot(first, direction)
+        cross = wp.cross(first, direction)
+        discriminant = (
+            wp.dot(cross, cross)
+            - first_middle * first_middle
+            - middle_last * middle_last
+            + wp.float64(2) * first_middle * middle_last * projection
+        )
+        offset = wp.atan2(
+            wp.sqrt(wp.max(discriminant, wp.float64(0))),
+            projection - first_middle * middle_last,
+        )
         for branch in range(2):
             angle_middle = center + offset
             if branch == 1:
@@ -176,7 +194,6 @@ def _decompose_3axis(
             # acos loses relative precision at a double root. Inspect the
             # target projection as well, so exact gimbals do not become a
             # spurious 1e-8-radian middle angle with inconsistent outer angles.
-            target_last = rotation * last
             mapped_perp = wp.length(mapped_last - first * wp.dot(first, mapped_last))
             target_perp = wp.length(target_last - first * wp.dot(first, target_last))
             if mapped_perp < wp.float64(1e-6) or target_perp < wp.float64(1e-6):
@@ -236,6 +253,7 @@ def solve_srs(
     target: wp.mat44d,
     swivel: wp.float64,
     seed: vec7d,
+    free_roll: wp.float64 = wp.float64(0),
 ) -> tuple[mat87d, vec8i]:
     """Return eight conditional branches for a strict SRS chain and swivel.
 
@@ -291,6 +309,18 @@ def solve_srs(
         radius = wp.sqrt(
             wp.max(upper_length * upper_length - x_circle * x_circle, wp.float64(0))
         )
+        # Do not create a fictitious swivel circle from positive float64
+        # roundoff at an exact radial boundary (at most 1e-13 m affected).
+        if wp.abs(distance - upper_length - forearm_length) <= wp.float64(1e-13):
+            x_circle = upper_length
+            radius = wp.float64(0)
+        elif wp.abs(distance - wp.abs(upper_length - forearm_length)) <= wp.float64(
+            1e-13
+        ):
+            x_circle = upper_length
+            if upper_length < forearm_length:
+                x_circle = -upper_length
+            radius = wp.float64(0)
         basis_first, basis_second = _swivel_basis(direction)
         upper_target = x_circle * direction + radius * (
             wp.cos(swivel) * basis_first + wp.sin(swivel) * basis_second
@@ -311,6 +341,11 @@ def solve_srs(
         if elbow_valid:
             center = wp.atan2(b, a)
             offset = wp.acos(wp.clamp(c / amplitude, wp.float64(-1), wp.float64(1)))
+            if radius == wp.float64(0):
+                if wp.abs(c / amplitude - wp.float64(1)) <= wp.float64(1e-13):
+                    offset = wp.float64(0)
+                elif wp.abs(c / amplitude + wp.float64(1)) <= wp.float64(1e-13):
+                    offset = wp.float64(3.141592653589793)
             seed_rotation = (
                 _rotation(axes[0], seed[0])
                 * _rotation(axes[1], seed[1])
@@ -323,11 +358,15 @@ def solve_srs(
                 r_elbow = _rotation(axes[3], angle_elbow)
                 forearm = r0 * r_elbow * forearm_home
                 phi = _angle_about(d, forearm, wrist_vector)
-                if wp.length(forearm - d * wp.dot(d, forearm)) < wp.float64(1e-9):
+                if radius == wp.float64(0) or wp.length(
+                    forearm - d * wp.dot(d, forearm)
+                ) < wp.float64(1e-9):
                     perpendicular = _unit_perp(upper_home / upper_length)
                     phi = _angle_about(
                         d, r0 * perpendicular, seed_rotation * perpendicular
                     )
+                    if radius == wp.float64(0):
+                        phi += free_roll
                 r_shoulder = _rotation(d, phi) * r0
                 residual = (
                     wp.transpose(r_shoulder * r_elbow)

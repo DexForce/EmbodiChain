@@ -73,7 +73,16 @@ geometry without assuming Franka or spherical-wrist dimensions.
 The initial joint positions are the official ready pose, in source order:
 `[0, -0.69813, 0, 1.570796, 0, 0.69813, 0]` radians.
 
-## Optional SSIK CPU reference
+## Optional SSIK CUDA and CPU reference
+
+Explicit `SSIKSolverCfg(backend="cuda_rr", ...)` runs the prepared
+Raghavan–Roth matrix-pencil solve entirely on CUDA, without installing SSIK.
+It enumerates all 384 slots on the verified 16-sample joint-lock grid, bridges
+the source terminal frame, and checks actual PK/TCP pose error after float32
+conversion. The coefficient bundle includes a corrected zero-lock DH chart
+and an offline build/consistency manifest. Finite-grid continuous coverage and
+single-call p99 have not passed the default-switch gates; Pytorch remains the
+default. Preserve the preset's root, flange and TCP when opting in.
 
 The preset retains its Pytorch default. An explicit `SSIKSolverCfg` reference
 configuration can use the prepared `flexiv_rizon4s.py` package resource. See
@@ -87,8 +96,8 @@ upstream Rizon 4 artifact. Model, joint order, source and coefficient sidecar
 fingerprints are checked. Its fixed 16-sample cached RR grid never launches
 an unprepared HP secondary solve; a failed finite search is not proof of
 unreachability. Every accepted result is validated against the
-actual Rizon 4S PK chain and TCP. This does not enable a Warp path or a
-runtime numerical fallback.
+actual Rizon 4S PK chain and TCP. CPU reference and CUDA RR are separate,
+explicitly selected paths; failure does not invoke another solver.
 
 ## Published dynamics and simulation drives
 

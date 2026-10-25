@@ -30,7 +30,7 @@ current options and dependencies. The main change sites are:
 | Need | Solver module under `motion/solvers/` |
 |---|---|
 | Analytical structure for SRS, OPW, UR or Franka (FEP) arms | `srs_solver.py`, `opw_solver.py`, `ur_solver.py`, `fep_solver.py` |
-| Model-derived three-parallel 6R / strict SRS 7R and optional pinned CPU reference | `ssik_solver.py` |
+| Model-derived 6R / SRS 7R, opt-in near-parallel correction, prepared CUDA RR and optional pinned CPU reference | `ssik_solver.py` |
 | General iterative PK solve and multi-start seeds | `pytorch_solver.py` |
 | Reduced Pinocchio model or task-based QP | `pinocchio_solver.py`, `pink_solver.py` |
 | Jacobian differential commands | `differential_solver.py` |
@@ -80,6 +80,9 @@ generation. Unsupported solvers raise `ValueError`; independent per-target IK
 remains available without that capability.
 
 A supporting solver supplies all-candidate IK and `_select_continuous_ik_path`.
+Robot calls `_get_continuous_ik_path` after coordinate conversion; its default
+implementation generates candidates and invokes that selector. A solver may
+override this target-aware hook when generation depends on each previous result.
 The hook consumes candidates `(B, N, K, dof)`, validity `(B, N, K)` and initial
 seeds `(B, dof)`, returning validity `(B, N)` and a path `(B, N, dof)`.
 Candidate count `K` belongs to the solver; OPW implements this capability.
@@ -117,9 +120,14 @@ Franka defaults to FEP with `redundancy_search=True`; the
 `examples/sim/motion/solvers/fep_solver.py` circle demo uses that robot default
 and adds a per-step joint bound for its 50 Hz commands.
 
-SSIK derives normalized POE geometry from the actual PK chain. Warp accepts only
-three-parallel 6R or concurrent-shoulder/wrist SRS 7R and never invokes a numeric
-fallback. The optional pinned reference is CPU-only; general algebraic models
+SSIK derives normalized POE geometry from the actual PK chain. Strict Warp accepts
+three-parallel 6R or concurrent-shoulder/wrist SRS 7R. Explicit near-parallel 6R
+mode generates geometric branches and applies bounded original-model numerical
+polishing; it must not be described as pure geometric IK. Prepared `cuda_rr`
+uses verified offline coefficients and device-resident matrix-pencil solving;
+it rejects unrelated joint prefixes and CPU devices. The runtime cannot derive
+coefficients or switch to another solver. The optional pinned reference is
+CPU-only; general algebraic models
 require an explicitly built artifact and matching manifest before initialization.
 Its build/load boundary lives in `solvers/_ssik_reference.py`; Warp imports do not
 load that dependency. Explicit prepared ARX5/Rizon4S reference artifacts live in
@@ -131,11 +139,19 @@ reuse. Loads verify prebuilt source and coefficient sidecars against the
 manifest before executing the adapter. Prepared joint-lock queries use only
 the verified fixed cached-RR grid: seed changes reorder those samples, and an
 empty sweep cannot enter an unprepared HP/symbolic path. These do not expand
-Warp geometry.
-SRS all-candidate results enumerate sampled swivels only.
-Continuous generation uses `_get_continuous_ik_candidates` so the step bound is
-applied relative to the preceding selected posture, rather than the initial path
-seed. Failed waypoints preserve the preceding posture and a false validity mask.
+strict Warp geometry. The CUDA coefficient bundle and chart consistency
+certificate live under compute `_warp/data/`; its reproducible builder is under
+`scripts/benchmark/robotics/kinematic_solver/`. Preserve that manifest and
+third-party provenance when rebuilding. CUDA scratch validation includes driver
+local-stack allocation, not only Torch/Warp counters.
+SRS all-candidate results enumerate sampled swivels only. Opt-in seed-local
+search adds one geometric redundancy optimum to the unchanged global/seed pool.
+Its target-aware path hook uses the preceding result for both generation and
+selection. Near-parallel mode also regenerates its corrected candidates and
+periodic representatives from each preceding result on CPU/CUDA. Other modes
+use `_get_continuous_ik_candidates` and the shared
+selector. Hard step bounds apply relative to the preceding selected posture;
+failed waypoints retain that posture and a false validity mask.
 
 ## Focused validation
 

@@ -172,6 +172,18 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--ssik-cpu-threads", type=int, default=1)
     parser.add_argument("--ssik-artifact-dir", type=Path, default=None)
+    parser.add_argument(
+        "--ssik-geometry-mode", choices=("strict", "near_parallel"), default="strict"
+    )
+    parser.add_argument("--ssik-axis-alignment-tolerance", type=float, default=1e-5)
+    parser.add_argument(
+        "--ssik-srs-search", choices=("uniform", "seed_local"), default="uniform"
+    )
+    parser.add_argument(
+        "--ssik-cuda-rr",
+        action="store_true",
+        help="Add the prepared Rizon4S CUDA RR backend to the selected CUDA workload.",
+    )
     return parser.parse_args()
 
 
@@ -1658,5 +1670,9 @@ if __name__ == "__main__":
             cpu_threads=args.ssik_cpu_threads,
             artifact_dir=args.ssik_artifact_dir,
             reference_artifacts=tuple(args.ssik_reference_artifacts or ()),
+            geometry_mode=args.ssik_geometry_mode,
+            axis_alignment_tolerance=args.ssik_axis_alignment_tolerance,
+            srs_search=args.ssik_srs_search,
+            cuda_rr=args.ssik_cuda_rr,
         ),
     )

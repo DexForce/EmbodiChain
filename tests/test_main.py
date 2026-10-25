@@ -742,6 +742,10 @@ def test_kinematic_solver_help_is_lightweight_and_exposes_ssik(
         "--ssik-quality-only",
         "--ssik-timing-only",
         "--ssik-artifact-dir",
+        "--ssik-geometry-mode",
+        "--ssik-axis-alignment-tolerance",
+        "--ssik-srs-search",
+        "--ssik-cuda-rr",
     ):
         assert flag in output
     assert "arx5" in output and "flexiv_rizon4s" in output
@@ -757,6 +761,10 @@ def test_kinematic_solver_model_and_reference_defaults_are_unspecified() -> None
 
     assert args.ssik_models is None
     assert args.ssik_reference_artifacts is None
+    assert args.ssik_geometry_mode == "strict"
+    assert args.ssik_axis_alignment_tolerance == 1e-5
+    assert args.ssik_srs_search == "uniform"
+    assert args.ssik_cuda_rr is False
 
 
 @pytest.mark.parametrize("mode", ["quality", "timing"])
@@ -813,6 +821,13 @@ def test_kinematic_solver_dispatch_forwards_ssik_workload_options(
         "sustained",
         "--ssik-cpu-threads",
         "2",
+        "--ssik-geometry-mode",
+        "near_parallel",
+        "--ssik-axis-alignment-tolerance",
+        "9e-6",
+        "--ssik-srs-search",
+        "seed_local",
+        "--ssik-cuda-rr",
         "--ssik-artifact-dir",
         str(artifact_dir),
         f"--ssik-{mode}-only",
@@ -838,6 +853,10 @@ def test_kinematic_solver_dispatch_forwards_ssik_workload_options(
         "timing_scopes": ("resident", "sustained"),
         "cpu_threads": 2,
         "artifact_dir": artifact_dir,
+        "geometry_mode": "near_parallel",
+        "axis_alignment_tolerance": 9e-6,
+        "srs_search": "seed_local",
+        "cuda_rr": True,
     }
     assert received["argv"] == [
         "embodichain benchmark robotics-kinematic-solver",

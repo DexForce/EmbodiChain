@@ -1125,19 +1125,9 @@ class Robot(Articulation):
             pose_batch.reshape(len(local_env_ids), n_batch, 4, 4),
         )
         if continuous:
-            repeated_seed = (
-                joint_seed_tensor[:, None]
-                .expand(batch_size, n_batch, n_dof)
-                .reshape(-1, n_dof)
-            )
-            candidate_valid, candidate_qpos = solver._get_continuous_ik_candidates(
-                target_xpos=pose_batch.reshape(-1, 4, 4),
-                qpos_seed=repeated_seed,
-            )
-            return solver._select_continuous_ik_path(
-                candidate_qpos.reshape(batch_size, n_batch, -1, n_dof),
-                candidate_valid.reshape(batch_size, n_batch, -1),
-                joint_seed_tensor,
+            return solver._get_continuous_ik_path(
+                target_xpos=pose_batch,
+                qpos_seed=joint_seed_tensor,
             )
 
         joint_seed_batch = joint_seed.reshape(-1, n_dof)

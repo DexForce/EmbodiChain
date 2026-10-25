@@ -553,6 +553,31 @@ class BaseSolver(metaclass=ABCMeta):
             return_all_solutions=True,
         )
 
+    def _get_continuous_ik_path(
+        self, target_xpos: torch.Tensor, qpos_seed: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Solve paths while permitting target-aware solver overrides.
+
+        Args:
+            target_xpos: Root-relative TCP goals shaped ``(B, N, 4, 4)``.
+            qpos_seed: Initial joints shaped ``(B, dof)``.
+
+        Returns:
+            Validity ``(B, N)`` and joints ``(B, N, dof)``. The default
+            preserves candidate generation followed by path selection.
+        """
+        b, n = target_xpos.shape[:2]
+        seed = qpos_seed[:, None].expand(b, n, self.dof).reshape(-1, self.dof)
+        valid, candidates = self._get_continuous_ik_candidates(
+            target_xpos=target_xpos.reshape(-1, 4, 4), qpos_seed=seed
+        )
+        k = valid.shape[-1]
+        return self._select_continuous_ik_path(
+            candidates.reshape(b, n, k, self.dof),
+            valid.reshape(b, n, k),
+            qpos_seed,
+        )
+
     def _select_continuous_ik_path(
         self,
         candidate_qpos: torch.Tensor,

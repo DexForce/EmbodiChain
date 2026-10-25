@@ -82,11 +82,20 @@ simulation defaults, not manufacturer-verified hardware parameters. Source
 arm limits are preserved; task-specific workspace and IK branch restrictions
 belong to the caller's scene configuration.
 
-## SSIK reference
+## Optional SSIK
 
 The default arm solver remains Pytorch. The source rounds a half turn to
 `3.1416`, producing a parallel-axis residual of about `7.24e-6`. It therefore
 does not satisfy the SSIK Warp backend's strict geometric classification.
+Explicit `SSIKSolverCfg(geometry_mode="near_parallel", ...)` supports CPU
+and CUDA using eight geometric initializations and one seed initialization,
+with bounded numerical correction on the actual source model. It preserves
+the 85 mm, quarter-turn TCP and validates returned float32 joints at the
+unchanged `1e-5` metre/radian gates. This mode is a geometric/numerical hybrid;
+it does not require SSIK installed. Continuous paths regenerate candidates
+from each preceding result, including its current winding; the complete
+continuation gate remains under qualification, so the default is unchanged.
+
 The optional CPU reference instead uses an offline-derived general 6R
 Raghavan–Roth artifact for this actual source model. Its final acceptance uses
 the original model and unchanged `1e-5` metre/radian pose gates.

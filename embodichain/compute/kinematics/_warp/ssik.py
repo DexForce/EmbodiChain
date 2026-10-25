@@ -22,8 +22,13 @@ import warp as wp
 
 wp.set_module_options({"enable_backward": False})
 
-from .ssik_6r import ssik_three_parallel_limited, mat73d, mat83d
+from .ssik_6r import (
+    ssik_three_parallel_limited,
+    mat73d,
+    mat83d,
+)
 from .ssik_7r import solve_srs, seed_swivel, vec7d, mat87d, vec8i, _rotation, _identity
+from .ssik_srs_search import _srs_search_candidates
 
 __all__: list[str] = []
 
@@ -39,8 +44,8 @@ class _Model:
     shoulder: wp.vec3d
     wrist: wp.vec3d
     dof: wp.int32
-    frames: _mat812d
-    local_axes: mat73d
+    frames: wp.array2d(dtype=wp.float64)
+    local_axes: wp.array2d(dtype=wp.float64)
 
 
 @wp.func
@@ -90,6 +95,105 @@ def _pose_ok(
     return wp.length(displacement) <= ptol and angle <= rtol
 
 
+@wp.func
+def _validate_candidate(
+    model: _Model,
+    raw: vec7d,
+    target: wp.mat44d,
+    tcp: wp.mat44d,
+    seed: vec7d,
+    lower: vec7d,
+    upper: vec7d,
+    ptol: wp.float64,
+    rtol: wp.float64,
+    max_step: wp.float64,
+):
+    """Validate one returned-precision branch against the original model."""
+    q, fallback = vec7d(), vec7d()
+    valid = bool(True)
+    rotation = wp.mat33d()
+    for row in range(4):
+        for column in range(4):
+            valid = valid and wp.isfinite(target[row, column])
+            if row < 3 and column < 3:
+                rotation[row, column] = target[row, column]
+    gram = wp.transpose(rotation) @ rotation
+    for row in range(3):
+        for column in range(3):
+            expected = wp.float64(0.0)
+            if row == column:
+                expected = wp.float64(1.0)
+            valid = valid and wp.abs(gram[row, column] - expected) <= wp.float64(1e-5)
+        valid = valid and wp.abs(target[3, row]) <= wp.float64(1e-6)
+    valid = valid and wp.abs(target[3, 3] - wp.float64(1.0)) <= wp.float64(1e-6)
+    valid = valid and wp.determinant(rotation) > wp.float64(0.0)
+    for j in range(model.dof):
+        origin = seed[j]
+        valid = valid and wp.isfinite(origin)
+        if not wp.isfinite(origin):
+            origin = (lower[j] + upper[j]) * wp.float64(0.5)
+        origin = wp.clamp(origin, lower[j], upper[j])
+        fallback[j] = origin
+        value = raw[j]
+        valid = valid and wp.isfinite(value)
+        first = wp.ceil((lower[j] - wp.float64(1e-6) - value) / wp.float64(2.0 * wp.pi))
+        last = wp.floor((upper[j] + wp.float64(1e-6) - value) / wp.float64(2.0 * wp.pi))
+        turns = wp.clamp(
+            wp.floor((origin - value) / wp.float64(2.0 * wp.pi) + wp.float64(0.5)),
+            first,
+            last,
+        )
+        q[j] = wp.float64(
+            wp.float32(
+                wp.clamp(value + wp.float64(2.0 * wp.pi) * turns, lower[j], upper[j])
+            )
+        )
+        valid = valid and first <= last and q[j] >= lower[j] and q[j] <= upper[j]
+        valid = valid and wp.isfinite(q[j]) and wp.abs(q[j] - origin) <= max_step
+    valid = valid and _pose_ok(_fk(model, q) @ tcp, target, ptol, rtol)
+    if not valid:
+        q = fallback
+    return q, valid
+
+
+@wp.kernel
+def accept_raw(
+    model: _Model,
+    raw: wp.array3d(dtype=wp.float64),
+    raw_valid: wp.array2d(dtype=wp.int32),
+    target: wp.array(dtype=wp.mat44d),
+    tcp: wp.mat44d,
+    seed: wp.array2d(dtype=wp.float64),
+    lower: wp.array(dtype=wp.float64),
+    upper: wp.array(dtype=wp.float64),
+    ptol: wp.float64,
+    rtol: wp.float64,
+    max_step: wp.float64,
+    validity: wp.array2d(dtype=wp.int32),
+    candidates: wp.array3d(dtype=wp.float32),
+):
+    i, branch = wp.tid()
+    initial, origin, lo, hi = vec7d(), vec7d(), vec7d(), vec7d()
+    for j in range(model.dof):
+        initial[j] = raw[i, branch, j]
+        origin[j] = seed[i, j]
+        lo[j] = lower[j]
+        hi[j] = upper[j]
+    q, accepted = _validate_candidate(
+        model, initial, target[i], tcp, origin, lo, hi, ptol, rtol, max_step
+    )
+    accepted = accepted and raw_valid[i, branch] != 0
+    validity[i, branch] = wp.int32(accepted)
+    for j in range(model.dof):
+        value = q[j]
+        if not accepted:
+            value = origin[j]
+            if not wp.isfinite(value):
+                value = (lo[j] + hi[j]) * wp.float64(0.5)
+            value = wp.clamp(value, lo[j], hi[j])
+        candidates[i, branch, j] = wp.float32(value)
+
+
 @wp.kernel
 def generate(
     model: _Model,
@@ -101,7 +205,9 @@ def generate(
     seed: wp.array2d(dtype=wp.float64),
     lower: wp.array(dtype=wp.float64),
     upper: wp.array(dtype=wp.float64),
+    weights: wp.array(dtype=wp.float32),
     samples: int,
+    seed_local_search: int,
     position_tolerance: wp.float64,
     rotation_tolerance: wp.float64,
     max_joint_step: wp.float64,
@@ -154,17 +260,33 @@ def generate(
             high,
         )
     else:
-        phi = -wp.float64(wp.pi) + wp.float64(2.0 * wp.pi) * wp.float64(
-            sample - 1
-        ) / wp.float64(samples)
-        if sample == 0:
-            phi, defined = seed_swivel(
-                axes, offsets, model.home, model.shoulder, model.wrist, qseed
+        if seed_local_search != 0 and sample == samples + 1:
+            weight = vec7d()
+            for j in range(model.dof):
+                weight[j] = wp.float64(weights[j])
+            branches, flags = _srs_search_candidates(
+                axes,
+                offsets,
+                model.home,
+                model.shoulder,
+                model.wrist,
+                goal,
+                position_tolerance,
+                qseed,
+                weight,
             )
-            finite = finite and defined
-        branches, flags = solve_srs(
-            axes, offsets, model.home, model.shoulder, model.wrist, goal, phi, qseed
-        )
+        else:
+            phi = -wp.float64(wp.pi) + wp.float64(2.0 * wp.pi) * wp.float64(
+                sample - 1
+            ) / wp.float64(samples)
+            if sample == 0:
+                phi, defined = seed_swivel(
+                    axes, offsets, model.home, model.shoulder, model.wrist, qseed
+                )
+                finite = finite and defined
+            branches, flags = solve_srs(
+                axes, offsets, model.home, model.shoulder, model.wrist, goal, phi, qseed
+            )
     for branch in range(8):
         slot = sample * 8 + branch
         q = vec7d()

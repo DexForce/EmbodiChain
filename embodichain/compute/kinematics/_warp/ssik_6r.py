@@ -67,6 +67,7 @@ __all__ = [
     "vec8i",
     "ssik_three_parallel",
     "ssik_three_parallel_limited",
+    "ssik_three_parallel_near",
 ]
 
 mat73d = wp.types.matrix(shape=(7, 3), dtype=wp.float64)
@@ -150,7 +151,13 @@ def _trig_roots(a: wp.float64, b: wp.float64, d: wp.float64):
 
 
 @wp.func
-def _elbows(k: wp.vec3d, p2: wp.vec3d, p3: wp.vec3d, inner: wp.vec3d):
+def _elbows(
+    k: wp.vec3d,
+    p2: wp.vec3d,
+    p3: wp.vec3d,
+    inner: wp.vec3d,
+    geometric_band: wp.float64 = wp.float64(0.0),
+):
     # Coordinate rounding perturbs a squared distance by |inner|*delta_inner.
     # Collapse either side of a numerically unresolved tangent; a fixed
     # absolute squared-distance allowance is unsafe for nearly folded arms.
@@ -160,7 +167,7 @@ def _elbows(k: wp.vec3d, p2: wp.vec3d, p3: wp.vec3d, inner: wp.vec3d):
     rhs = (wp.dot(p2, p2) + wp.dot(p3, p3) - wp.dot(inner, inner)) * wp.float64(
         0.5
     ) - axial
-    band = wp.float64(1e-7) * wp.length(inner) + wp.float64(1e-14)
+    band = (wp.float64(1e-7) + geometric_band) * wp.length(inner) + wp.float64(1e-14)
     return _trig_roots_with_band(a, b, rhs, band)
 
 
@@ -242,7 +249,7 @@ def _poly4(c: _vec5d, t: wp.float64) -> wp.float64:
 
 
 @wp.func
-def _quartic_real(c: _vec5d):
+def _quartic_real(c: _vec5d, candidate_band: wp.float64 = wp.float64(0.0)):
     roots = _vec4d(wp.float64(0.0))
     n = int(0)
     if wp.abs(c[4]) < wp.float64(1e-15):
@@ -302,7 +309,8 @@ def _quartic_real(c: _vec5d):
                     mag = mag * wp.abs(x)
                 if (
                     wp.abs(_poly4(c, x))
-                    <= wp.float64(2e-13) * wp.max(scale, wp.float64(1.0))
+                    <= (wp.float64(2e-13) + candidate_band)
+                    * wp.max(scale, wp.float64(1.0))
                     and n < 4
                 ):
                     roots[n] = x
@@ -321,6 +329,7 @@ def _sp6(
     h5: wp.vec3d,
     d1: wp.float64,
     seed0: wp.float64,
+    geometric_band: wp.float64 = wp.float64(0.0),
 ):
     """Coupled shoulder/wrist roots, with an algebraic rank-one fast path."""
     a0 = wp.dot(h, p16) - wp.dot(h, k0) * wp.dot(k0, p16)
@@ -347,7 +356,9 @@ def _sp6(
         # Target matrices may have been rounded to float32 before promotion.
         # At a tangent, treating opposite signs of that coordinate roundoff
         # differently creates both false infeasibility and split fake roots.
-        shoulder_band = wp.float64(5e-8) * (wp.float64(1.0) + wp.length(p16))
+        shoulder_band = (wp.float64(5e-8) + geometric_band) * (
+            wp.float64(1.0) + wp.length(p16)
+        )
         theta0, valid0 = _trig_roots_with_band(
             v * a0 - u * a2, v * a1 - u * a3, v * d0 - u * d2, shoulder_band
         )
@@ -359,9 +370,9 @@ def _sp6(
                 t0 = theta0[i]
                 e0 = d0 - a0 * wp.cos(t0) - a1 * wp.sin(t0)
                 e2 = d2 - a2 * wp.cos(t0) - a3 * wp.sin(t0)
-                t4, valid4 = _trig_roots(b0, b1, e0)
+                t4, valid4 = _trig_roots_with_band(b0, b1, e0, geometric_band)
                 if b2 * b2 + b3 * b3 > b0 * b0 + b1 * b1:
-                    t4, valid4 = _trig_roots(b2, b3, e2)
+                    t4, valid4 = _trig_roots_with_band(b2, b3, e2, geometric_band)
                 if valid4 == 1:
                     for j in range(2):
                         pairs[count, 0] = _wrap(t0)
@@ -399,12 +410,14 @@ def _sp6(
             coeff_scale = wp.max(coeff_scale, wp.abs(coeff[i]))
         if coeff_scale > wp.float64(1e-15):
             coeff = coeff / coeff_scale
-            roots, nroots = _quartic_real(coeff)
+            roots, nroots = _quartic_real(coeff, geometric_band)
             for i in range(4):
                 if i < nroots:
                     root0 = _wrap(wp.float64(2.0) * wp.atan(roots[i]) + shift)
                     cs = uvec * wp.cos(root0) + vvec * wp.sin(root0) + wvec
-                    if wp.abs(wp.dot(cs, cs) - wp.float64(1.0)) < wp.float64(1e-7):
+                    if wp.abs(wp.dot(cs, cs) - wp.float64(1.0)) < (
+                        wp.float64(1e-7) + geometric_band * wp.float64(4.0)
+                    ):
                         pairs[count, 0] = root0
                         pairs[count, 1] = wp.atan2(cs[1], cs[0])
                         count = count + 1
@@ -412,12 +425,13 @@ def _sp6(
 
 
 @wp.func
-def ssik_three_parallel(
+def _three_parallel_candidates(
     h: mat73d,
     p: mat83d,
     target_position: wp.vec3d,
     target_rotation: wp.mat33d,
     seed: vec7d,
+    geometric_band: wp.float64,
 ):
     """Return eight padded 7-joint candidates and geometric validity flags.
 
@@ -438,7 +452,9 @@ def ssik_three_parallel(
     p5 = _row_p(p, 5)
     p16 = target_position - _row_p(p, 0) - target_rotation * _row_p(p, 6)
     d1 = wp.dot(hh, p1 + p2 + p3 + p4)
-    pairs, count = _sp6(hh, h0, h4, p16, p5, target_rotation * h5, h5, d1, seed[0])
+    pairs, count = _sp6(
+        hh, h0, h4, p16, p5, target_rotation * h5, h5, d1, seed[0], geometric_band
+    )
     sign2 = wp.float64(1.0)
     sign3 = wp.float64(1.0)
     if wp.dot(_row_h(h, 2), hh) < wp.float64(0.0):
@@ -530,7 +546,7 @@ def ssik_three_parallel(
                         q5 = _sp1(h5, h4, residual_rotation * h4)
             r14 = _rot(hh, theta)
             inner = wp.transpose(r01) * p16 - p1 - r14 * r45 * p5 - r14 * p4
-            elbows, feasible = _elbows(hh, p2, p3, inner)
+            elbows, feasible = _elbows(hh, p2, p3, inner, geometric_band)
             if feasible == 1:
                 for j in range(2):
                     q2 = elbows[j]
@@ -544,6 +560,212 @@ def ssik_three_parallel(
                     out[row, 5] = _wrap(q5)
                     valid[row] = 1
     return out, valid
+
+
+@wp.func
+def ssik_three_parallel(
+    h: mat73d,
+    p: mat83d,
+    target_position: wp.vec3d,
+    target_rotation: wp.mat33d,
+    seed: vec7d,
+):
+    """Return the strict three-parallel solver's eight geometric slots."""
+    return _three_parallel_candidates(
+        h, p, target_position, target_rotation, seed, wp.float64(0.0)
+    )
+
+
+@wp.func
+def _three_parallel_single(
+    h: mat73d,
+    p: mat83d,
+    target_position: wp.vec3d,
+    target_rotation: wp.mat33d,
+    seed: vec7d,
+    branch: int,
+    geometric_band: wp.float64,
+):
+    """Construct one of the eight slots without materializing all branches."""
+    out = vec7d()
+    valid = bool(False)
+    h0 = _row_h(h, 0)
+    hh = _row_h(h, 1)
+    h4 = _row_h(h, 4)
+    h5 = _row_h(h, 5)
+    p1 = _row_p(p, 1)
+    p2 = _row_p(p, 2)
+    p3 = _row_p(p, 3)
+    p4 = _row_p(p, 4)
+    p5 = _row_p(p, 5)
+    p16 = target_position - _row_p(p, 0) - target_rotation * _row_p(p, 6)
+    d1 = wp.dot(hh, p1 + p2 + p3 + p4)
+    pairs, count = _sp6(
+        hh, h0, h4, p16, p5, target_rotation * h5, h5, d1, seed[0], geometric_band
+    )
+    sign2 = wp.float64(1.0)
+    sign3 = wp.float64(1.0)
+    if wp.dot(_row_h(h, 2), hh) < wp.float64(0.0):
+        sign2 = wp.float64(-1.0)
+    if wp.dot(_row_h(h, 3), hh) < wp.float64(0.0):
+        sign3 = wp.float64(-1.0)
+    i = branch // 2
+    if i < count:
+        q0 = pairs[i, 0]
+        q4 = pairs[i, 1]
+        r01 = _rot(h0, q0)
+        r45 = _rot(h4, q4)
+        wrist_axis = r45 * h5
+        theta = _sp1(hh, wrist_axis, wp.transpose(r01) * target_rotation * h5)
+        q5 = _sp1(-h5, wp.transpose(r45) * hh, wp.transpose(target_rotation) * r01 * hh)
+        # At a wrist lock the two SP1 angles are individually undefined.
+        # Construct seed-near finite representatives of that continuum.
+        if wp.length(wp.cross(hh, wrist_axis)) < wp.float64(1e-7):
+            axis_sign = wp.float64(1.0)
+            if wp.dot(hh, wrist_axis) < wp.float64(0.0):
+                axis_sign = wp.float64(-1.0)
+            q4 = _wrap(q4 + _sp1(h4, wrist_axis, axis_sign * hh))
+            r45 = _rot(h4, q4)
+            pan_roots, pan_valid = _sp4(hh, -h0, p16, d1 + wp.dot(hh, r45 * p5))
+            if pan_valid == 1:
+                q0_new = pan_roots[0]
+                if wp.abs(_wrap(pan_roots[1] - q0)) < wp.abs(_wrap(q0_new - q0)):
+                    q0_new = pan_roots[1]
+                q0 = q0_new
+                r01 = _rot(h0, q0)
+            # A duplicate tangent root supplies the other wrist side.
+            q5 = seed[5] + wp.float64(i % 2) * wp.float64(3.141592653589793)
+            m = (
+                wp.transpose(r01)
+                * target_rotation
+                * wp.transpose(_rot(h5, q5))
+                * wp.transpose(r45)
+            )
+            theta = _sp1(hh, h4, m * h4)
+            arm_target = wp.transpose(r01) * p16 - p1
+            wrist_offset = r45 * p5 + p4
+            inner = arm_target - _rot(hh, theta) * wrist_offset
+            distance_sq = wp.dot(inner, inner)
+            # The planar two-link arm reaches a closed distance interval.
+            # Project an infeasible seed wrist onto its analytical boundary,
+            # rather than sampling and missing arbitrarily narrow intervals.
+            arm_center = (
+                wp.dot(p2, p2)
+                + wp.dot(p3, p3)
+                + wp.float64(2.0) * wp.dot(hh, p2) * wp.dot(hh, p3)
+            )
+            arm_radius = (
+                wp.float64(2.0)
+                * wp.length(wp.cross(hh, p2))
+                * wp.length(wp.cross(hh, p3))
+            )
+            near_distance = wp.clamp(
+                distance_sq,
+                wp.max(wp.float64(0.0), arm_center - arm_radius),
+                arm_center + arm_radius,
+            )
+            if wp.abs(near_distance - distance_sq) > wp.float64(1e-14):
+                bound_angles, bound_valid = _sp4(
+                    arm_target,
+                    hh,
+                    wrist_offset,
+                    (
+                        wp.dot(arm_target, arm_target)
+                        + wp.dot(wrist_offset, wrist_offset)
+                        - near_distance
+                    )
+                    * wp.float64(0.5),
+                )
+                if bound_valid == 1:
+                    closest = bound_angles[0]
+                    if wp.abs(_wrap(bound_angles[1] - theta)) < wp.abs(
+                        _wrap(closest - theta)
+                    ):
+                        closest = bound_angles[1]
+                    theta = closest
+                    residual_rotation = (
+                        wp.transpose(r45)
+                        * wp.transpose(_rot(hh, theta))
+                        * wp.transpose(r01)
+                        * target_rotation
+                    )
+                    q5 = _sp1(h5, h4, residual_rotation * h4)
+        r14 = _rot(hh, theta)
+        inner = wp.transpose(r01) * p16 - p1 - r14 * r45 * p5 - r14 * p4
+        elbows, feasible = _elbows(hh, p2, p3, inner, geometric_band)
+        if feasible == 1:
+            j = branch % 2
+            q2 = elbows[j]
+            q1 = _sp1(hh, p2 + _rot(hh, q2) * p3, inner)
+            out[0] = _wrap(q0)
+            out[1] = _wrap(q1)
+            out[2] = _wrap(sign2 * q2)
+            out[3] = _wrap(sign3 * (theta - q1 - q2))
+            out[4] = _wrap(q4)
+            out[5] = _wrap(q5)
+            valid = True
+    return out, valid
+
+
+@wp.func
+def ssik_three_parallel_near_branch(
+    h: mat73d,
+    p: mat83d,
+    target_position: wp.vec3d,
+    target_rotation: wp.mat33d,
+    seed: vec7d,
+    branch: int,
+    axis_tolerance: wp.float64,
+):
+    """Return one strict or tangent-projected slot for bounded correction."""
+    q, valid = _three_parallel_single(
+        h, p, target_position, target_rotation, seed, branch, wp.float64(0.0)
+    )
+    if not valid:
+        q, valid = _three_parallel_single(
+            h,
+            p,
+            target_position,
+            target_rotation,
+            seed,
+            branch,
+            axis_tolerance * wp.float64(8.0),
+        )
+    return q, valid
+
+
+@wp.func
+def ssik_three_parallel_near(
+    h: mat73d,
+    p: mat83d,
+    target_position: wp.vec3d,
+    target_rotation: wp.mat33d,
+    seed: vec7d,
+    axis_tolerance: wp.float64,
+):
+    """Generate eight surrogate slots including unresolved tangent branches.
+
+    These are starting points for bounded original-model correction, not
+    accepted IK solutions or the complete roots of a general six-axis arm.
+    Tangency projection applies only to this explicitly selected algorithm.
+    """
+    ordinary, ordinary_flags = _three_parallel_candidates(
+        h, p, target_position, target_rotation, seed, wp.float64(0.0)
+    )
+    projected, projected_flags = _three_parallel_candidates(
+        h,
+        p,
+        target_position,
+        target_rotation,
+        seed,
+        axis_tolerance * wp.float64(8.0),
+    )
+    for row in range(8):
+        if ordinary_flags[row] == 0:
+            ordinary_flags[row] = projected_flags[row]
+            for j in range(7):
+                ordinary[row, j] = projected[row, j]
+    return ordinary, ordinary_flags
 
 
 @wp.func

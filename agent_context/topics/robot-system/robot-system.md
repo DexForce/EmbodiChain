@@ -116,14 +116,16 @@ against part names (including patterns); it need not configure every part.
 and synchronizes effective robot limits. Check the resolved part and joint
 order before diagnosing an IK algorithm.
 
-Aloha Mini defaults to SSIK Warp IK for both six-joint arms and retains
-position-only Pytorch IK for its torso. Marvin retains Pytorch arm defaults;
-SSIK is explicitly selectable. ARX5 uses the source X5A six-joint `arm` and two
+Aloha Mini and Marvin retain Pytorch arm defaults; Aloha's torso uses its
+position-only Pytorch solver. SSIK is explicitly selectable. ARX5 uses the
+source X5A six-joint `arm` and two
 independent prismatic fingers in `eef`; its simulation and PK share the selected
 URDF. ARX5 and Flexiv Rizon4S retain Pytorch defaults and can explicitly select
 the prepared SSIK CPU reference artifacts under
-`embodichain_robots/_ssik_artifacts/`. These models are outside strict Warp
-geometry. Typed `SolverCfg` overrides and dictionaries with `class_type` replace
+`embodichain_robots/_ssik_artifacts/`, near-parallel Warp for ARX5 or prepared
+CUDA RR for Rizon4S. These models remain outside strict Warp geometry; see
+[IK mode boundaries](../ik-solvers/ik-solvers.md) before selecting one.
+Typed `SolverCfg` overrides and dictionaries with `class_type` replace
 the selected part's solver; typed inputs are copied.
 Provide complete root/end/TCP configuration for replacements. Partial
 dictionaries without `class_type` update the selected default's attributes.

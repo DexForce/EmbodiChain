@@ -127,6 +127,18 @@ def _add_kinematic_solver_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--ssik-cpu-threads", type=int, default=1)
     parser.add_argument("--ssik-artifact-dir", type=Path, default=None)
+    parser.add_argument(
+        "--ssik-geometry-mode", choices=("strict", "near_parallel"), default="strict"
+    )
+    parser.add_argument("--ssik-axis-alignment-tolerance", type=float, default=1e-5)
+    parser.add_argument(
+        "--ssik-srs-search", choices=("uniform", "seed_local"), default="uniform"
+    )
+    parser.add_argument(
+        "--ssik-cuda-rr",
+        action="store_true",
+        help="Add the prepared Rizon4S CUDA RR backend to the selected CUDA workload.",
+    )
 
 
 def _run_rl_cli(_: argparse.Namespace) -> None:

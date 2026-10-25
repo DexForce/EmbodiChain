@@ -32,6 +32,7 @@ from importlib import import_module
 from importlib.metadata import PackageNotFoundError, version
 import json
 import logging
+import math
 import os
 from pathlib import Path
 import platform
@@ -84,6 +85,10 @@ class SSIKBenchmarkOptions:
     cpu_threads: int = 1
     artifact_dir: Path | None = None
     reference_artifacts: tuple[str, ...] = ()
+    geometry_mode: str = "strict"
+    axis_alignment_tolerance: float = 1e-5
+    srs_search: str = "uniform"
+    cuda_rr: bool = False
 
 
 @dataclass
@@ -539,9 +544,16 @@ def _memory(
     # solver scratch tensors are counted separately, including warmed reuse.
     buffers = getattr(solver, "_ik_buffers", getattr(solver, "_buffers", None))
     tensors = getattr(buffers, "arrays", {}) if buffers is not None else {}
+    numerical_workspaces = [
+        getattr(getattr(solver, name, None), "_workspace", {})
+        for name in ("_near", "_rr")
+    ]
     seen: set[int] = set()
     scratch = 0
-    for value in tensors.values():
+    for value in [
+        *tensors.values(),
+        *(value for workspace in numerical_workspaces for value in workspace.values()),
+    ]:
         if isinstance(value, torch.Tensor) and value.data_ptr() not in seen:
             seen.add(value.data_ptr())
             scratch += value.untyped_storage().nbytes()
@@ -549,13 +561,12 @@ def _memory(
     scratch_status = (
         "UNVALIDATED: allocation ownership not established for this backend"
     )
-    if (
-        getattr(solver.cfg, "class_type", None) == "SSIKSolver"
-        and solver.cfg.backend == "warp"
-    ):
-        # SSIK creates candidate storage only through Torch-owned IK buffers;
-        # Warp receives zero-copy views. Exclude caller inputs, final outputs,
-        # model constants and persistent JIT code, as required by the gate.
+    tensor_scratch_status = scratch_status
+    if getattr(
+        solver.cfg, "class_type", None
+    ) == "SSIKSolver" and solver.cfg.backend in ("warp", "cuda_rr"):
+        # Candidate and numerical workspaces use Torch-owned zero-copy views.
+        # Driver local-stack reservation is not captured by these counters.
         output_tensors = [value for value in output if isinstance(value, torch.Tensor)]
         output_bytes = sum(
             value.numel() * value.element_size() for value in output_tensors
@@ -567,7 +578,12 @@ def _memory(
             # Float64 target and seed conversions plus effective limits/weights.
             transient = count * (16 + solver.dof) * 8 + solver.dof * 20
         attributed_scratch = (scratch + transient) / 2**20
-        scratch_status = "PASS" if attributed_scratch <= 128 else "FAIL"
+        tensor_scratch_status = "PASS" if attributed_scratch <= 128 else "FAIL"
+        scratch_status = (
+            "UNVALIDATED: fresh-process CUDA local-stack attribution required"
+            if device.type == "cuda" and tensor_scratch_status == "PASS"
+            else tensor_scratch_status
+        )
     result = {
         "cpu_rss_delta_mb": (process.memory_info().rss - cpu_before) / 2**20,
         "torch_peak_increment_mb": torch_peak / 2**20,
@@ -577,8 +593,11 @@ def _memory(
         "warp_pool_peak_mb": (
             wp.get_mempool_used_mem_high(str(device)) / 2**20 if pool else "unavailable"
         ),
-        "solver_buffer_mb": scratch / 2**20 if tensors else "unavailable",
+        "solver_buffer_mb": (
+            scratch / 2**20 if tensors or any(numerical_workspaces) else "unavailable"
+        ),
         "attributed_scratch_mb": attributed_scratch,
+        "tensor_scratch_gate": tensor_scratch_status,
         "scratch_gate": scratch_status,
     }
     del output
@@ -604,6 +623,7 @@ def _make_solver(
     backend: str,
     device: torch.device,
     reference_artifact: Path | None = None,
+    options: SSIKBenchmarkOptions | None = None,
 ) -> Any:
     from embodichain.lab.sim.motion.solvers import PytorchSolverCfg, SSIKSolverCfg
 
@@ -621,8 +641,19 @@ def _make_solver(
         )
         cfg = PytorchSolverCfg(**common, **matched)
     else:
+        selected = options or SSIKBenchmarkOptions()
+        geometry = (
+            {
+                "geometry_mode": selected.geometry_mode,
+                "axis_alignment_tolerance": selected.axis_alignment_tolerance,
+                "srs_search": selected.srs_search,
+            }
+            if backend == "warp"
+            else {}
+        )
         cfg = SSIKSolverCfg(
             **common,
+            **geometry,
             backend=backend,
             num_samples=128,
             chunk_size=512,
@@ -697,15 +728,30 @@ def _evaluate_trajectories(
                 )
                 seeds = previous.expand(len(block), -1)
                 torch.manual_seed(2531 + offset)
-                valid, candidates = solver._get_continuous_ik_candidates(block, seeds)
-                candidates = candidates.reshape(1, len(block), -1, len(initial))
-                valid = valid.reshape(1, len(block), -1)
-                if has_step_config:
+                target_aware = getattr(solver.cfg, "backend", None) == "warp" and (
+                    getattr(solver, "family", None) == "near_parallel"
+                    or (
+                        getattr(solver.cfg, "srs_search", "uniform") == "seed_local"
+                        and getattr(solver, "family", None) == "srs"
+                    )
+                )
+                if target_aware:
+                    valid, chosen = solver._get_continuous_ik_path(
+                        block[None], previous
+                    )
+                    chosen, valid = chosen[0], valid[0]
+                else:
+                    valid, candidates = solver._get_continuous_ik_candidates(
+                        block, seeds
+                    )
+                    candidates = candidates.reshape(1, len(block), -1, len(initial))
+                    valid = valid.reshape(1, len(block), -1)
+                if has_step_config and not target_aware:
                     valid, chosen = solver._select_continuous_ik_path(
                         candidates, valid, previous
                     )
                     chosen, valid = chosen[0], valid[0]
-                else:
+                elif not has_step_config:
                     # Apply the requested hard-step constraint before baseline
                     # selection and hold failed postures. Filtering afterwards
                     # would advance from an invalid jump and bias later frames.
@@ -792,13 +838,23 @@ def _versions() -> dict[str, Any]:
     repository = Path(__file__).resolve().parents[4]
     sources = (
         "embodichain/compute/kinematics/_ssik_model.py",
+        "embodichain/compute/kinematics/_ssik_near.py",
+        "embodichain/compute/kinematics/_ssik_rr.py",
         "embodichain/compute/kinematics/_warp/ssik.py",
         "embodichain/compute/kinematics/_warp/ssik_6r.py",
         "embodichain/compute/kinematics/_warp/ssik_7r.py",
+        "embodichain/compute/kinematics/_warp/ssik_near.py",
+        "embodichain/compute/kinematics/_warp/ssik_rr.py",
+        "embodichain/compute/kinematics/_warp/ssik_rr_cuda.py",
+        "embodichain/compute/kinematics/_warp/ssik_srs_path.py",
+        "embodichain/compute/kinematics/_warp/ssik_srs_search.py",
+        "embodichain/compute/kinematics/_warp/data/ssik_rr_rizon4.npz",
+        "embodichain/compute/kinematics/_warp/data/ssik_rr_rizon4.json",
         "embodichain/lab/sim/motion/solvers/ssik_solver.py",
         "embodichain/lab/sim/motion/solvers/_ssik_reference.py",
         "scripts/benchmark/robotics/kinematic_solver/ssik_benchmark.py",
         "scripts/benchmark/robotics/kinematic_solver/run_benchmark.py",
+        "scripts/benchmark/robotics/kinematic_solver/prepare_ssik_rr_rizon4.py",
     )
     result["source_sha256"] = {
         name: (
@@ -1066,6 +1122,21 @@ def _benchmark_ssik_solver(
     import warp as wp
 
     options = options or SSIKBenchmarkOptions()
+    if options.geometry_mode not in ("strict", "near_parallel"):
+        raise ValueError("SSIK geometry mode must be strict or near_parallel")
+    if not math.isfinite(options.axis_alignment_tolerance) or not (
+        0 < options.axis_alignment_tolerance <= 1e-3
+    ):
+        raise ValueError("SSIK axis alignment tolerance must be in (0, 1e-3]")
+    if options.srs_search not in ("uniform", "seed_local"):
+        raise ValueError("SSIK SRS search must be uniform or seed_local")
+    if options.cuda_rr and (
+        "flexiv_rizon4s" not in options.models or "cuda" not in options.devices
+    ):
+        raise ValueError(
+            "--ssik-cuda-rr requires --ssik-models flexiv_rizon4s and --ssik-devices cuda; "
+            "only that prepared actual model is supported"
+        )
     reference_artifacts = _parse_reference_artifacts(options.reference_artifacts)
     if options.cpu_threads < 1 or any(
         name not in MODEL_NAMES for name in options.models
@@ -1106,6 +1177,12 @@ def _benchmark_ssik_solver(
     )
     directory.mkdir(parents=True, exist_ok=True)
     versions = _versions()
+    versions["ssik_algorithm_options"] = {
+        "geometry_mode": options.geometry_mode,
+        "axis_alignment_tolerance": options.axis_alignment_tolerance,
+        "srs_search": options.srs_search,
+        "cuda_rr": options.cuda_rr,
+    }
     versions["reference_artifacts"] = {
         name: {
             "path": str(path),
@@ -1133,12 +1210,13 @@ def _benchmark_ssik_solver(
         "SSIK inputs are generated once on CPU using raw float64 URDF/PK FK; timed solver inputs/outputs are float32. Every reported success is independently rechecked at 1e-5 m/rad and against joint limits. Errors describe accepted rows only; no-success rows have zero mean errors and success_rate=0.",
         "Pytorch_original is explicitly reconstructed with original defaults (30 samples, 500 iterations, 5e-4 internal convergence tolerances), independent of robot default changes; acceptance is still rechecked at 1e-5, which can reduce its measured success rate. Pytorch_matched changes only internal convergence tolerances to 1e-5 for a quality-matched comparison. Default-switch throughput gates compare the original baseline.",
         "Resident fixed-workload, transfer-inclusive and initialization timings have distinct scopes. Warp N=1 also measures a streaming_control certificate: changing trajectory frames, preceding result as the next seed, path-boundary resets only, twenty excluded warmups and a 0.05 rad hard step bound. The 5 ms/8 ms control gates require these streaming scopes; repeated fixed targets are diagnostics. Public batch trajectory quality uses each complete 1,000-frame path with its fixed initial seed. Robot-interface end-to-end latency and branch equivalence are validated separately.",
-        "Torch peak increments and Warp pool counters are distinct. SSIK candidate arrays are Torch-owned zero-copy Warp views. Attributed scratch includes retained candidate storage and peak transient Torch allocations minus final outputs (CPU uses explicit target/seed/limit conversion sizes); caller inputs, model constants and persistent JIT/module memory are excluded. Warp pool high-water is process-global, not an attributable peak. Other backends retain an unvalidated scratch status.",
+        "Torch peak increments and Warp pool counters are distinct. SSIK candidate/numerical workspaces are Torch-owned zero-copy Warp views. Attributed tensor scratch includes retained workspace and peak transient Torch allocations minus final outputs (CPU uses explicit target/seed/limit conversion sizes); caller inputs and model constants are excluded. These warmed counters cannot capture CUDA driver local-stack reservation: a small attributed tensor workspace does not certify the complete 128 MiB GPU scratch gate, which requires fresh-process driver/NVML attribution. Warp pool high-water is process-global, not an attributable peak. Other backends retain an unvalidated scratch status.",
         "Saved W1 V030 counterexamples are 14 historically reachable failures from pinned SSIK with allow_rescue=False (seed2531). Their provenance and URDF hash are preserved; this run does not claim to revalidate them.",
         "Cartesian lines/circles are small local paths; unlike joint-space trajectories their global reachability is not asserted. Seven-axis finite sampling cannot establish complete reachability.",
         "SSIK leaderboard entries retain model identity, weight standard reachable/trajectory success by attempted count, and exclude deliberately unreachable controls and the separate streaming-control certificate. Timing-only algorithms remain listed as UNMEASURED rather than receiving fabricated success scores. Rankings across different robot models do not establish unconditional algorithm superiority.",
         "Reference adapter uses its documented rescue policy; upstream default-rescue comparison is not measured by this harness and remains unvalidated.",
         "The upstream ssik logger is temporarily set to WARNING during this benchmark and restored afterward; candidate trace logging is excluded from the measured reference scope.",
+        "Explicit near_parallel mode always evaluates eight analytical surrogate slots and one original-seed initialization, with bounded original-model polishing on the selected device. These nine candidates are not a pure closed-form solution or complete enumeration of general 6R roots. CUDA RR evaluates only its prepared finite locked-joint grid, without a CPU or numerical fallback.",
     ]
     raw_timings: dict[str, list[float]] = {}
     solvers_for_pairs: dict[
@@ -1148,7 +1226,11 @@ def _benchmark_ssik_solver(
         model = _load_model(model_name)
         from embodichain.compute.kinematics._ssik_model import _extract_model
 
-        geometry = _extract_model(model.chain)
+        geometry = _extract_model(
+            model.chain,
+            geometry_mode=options.geometry_mode,
+            axis_alignment_tolerance=options.axis_alignment_tolerance,
+        )
         notes.append(
             f"Geometry {model_name}: {geometry.family}; actual-chain fingerprint {geometry.fingerprint}."
         )
@@ -1163,6 +1245,12 @@ def _benchmark_ssik_solver(
                 if options.skip_baseline
                 else [f"pytorch_{variant}" for variant in options.baseline_variants]
             )
+            if (
+                options.cuda_rr
+                and model_name == "flexiv_rizon4s"
+                and device.type == "cuda"
+            ):
+                backends.append("cuda_rr")
             if not options.skip_reference and device.type == "cpu":
                 backends.append("reference")
             for backend in backends:
@@ -1191,7 +1279,7 @@ def _benchmark_ssik_solver(
                 )
                 started = time.perf_counter()
                 try:
-                    solver = _make_solver(model, backend, device, artifact)
+                    solver = _make_solver(model, backend, device, artifact, options)
                 except (ImportError, ModuleNotFoundError) as error:
                     if backend != "reference":
                         raise
@@ -1303,7 +1391,7 @@ def _benchmark_ssik_solver(
                             ),
                         }
                     )
-                    if count == 1 and backend == "warp":
+                    if count == 1 and backend in ("warp", "cuda_rr"):
                         path_targets, path_starts = workloads["trajectory"]
                         control = _measure_streaming_control(
                             (solver,),

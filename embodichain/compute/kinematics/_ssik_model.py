@@ -63,7 +63,12 @@ def _concurrence(points: np.ndarray, axes: np.ndarray) -> np.ndarray | None:
     return pivot if residual.max() <= _STRUCTURE_ATOL else None
 
 
-def _extract_model(chain: pk.SerialChain) -> _SSIKModel:
+def _extract_model(
+    chain: pk.SerialChain,
+    *,
+    geometry_mode: str = "strict",
+    axis_alignment_tolerance: float = 1e-5,
+) -> _SSIKModel:
     """Flatten fixed frames without changing model coordinates or joint order."""
     names = tuple(chain.get_joint_parameter_names())
     if len(names) not in (6, 7):
@@ -108,8 +113,11 @@ def _extract_model(chain: pk.SerialChain) -> _SSIKModel:
     shoulder, wrist = np.zeros(3), np.zeros(3)
     family = "unsupported"
     if len(names) == 6:
-        if max(np.linalg.norm(np.cross(h[1], h[j])) for j in (2, 3)) <= _STRUCTURE_ATOL:
+        residual = max(np.linalg.norm(np.cross(h[1], h[j])) for j in (2, 3))
+        if residual <= _STRUCTURE_ATOL:
             family = "three_parallel"
+        elif geometry_mode == "near_parallel" and residual <= axis_alignment_tolerance:
+            family = "near_parallel"
     else:
         s = _concurrence(points[:3], h[:3])
         w = _concurrence(points[4:7], h[4:7])

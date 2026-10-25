@@ -47,7 +47,7 @@ def _require_ssik() -> Any:
         import ssik
     except ImportError as error:
         raise ImportError(
-            "Install EmbodiChain's [ssik-reference] extra for the SSIK CPU reference"
+            "Install requirements/ssik-reference.txt for the optional pinned SSIK CPU reference"
         ) from error
     commit = None
     try:
@@ -65,7 +65,7 @@ def _require_ssik() -> Any:
                 break
     if commit != _PIN:
         raise ImportError(
-            f"SSIK reference requires pinned revision {_PIN}; install the [ssik-reference] extra"
+            f"SSIK reference requires pinned revision {_PIN}; install requirements/ssik-reference.txt"
         )
     return ssik
 
